@@ -1678,8 +1678,8 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   // slipping past a two-form regex, which is how this gate was defeated twice.
   return qmlSites(/\bselectedText\b|Color\.menu\[/)
 }, [
-  "property color selectedText: Color.menu.selectedText",
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
+  "property color selectedText: Commons.Color.menu.selectedText",
+  "readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)",
   // The host dialog's selected button. It is an ACTIVE state, so it takes the
   // calibrated ink, not the raw accent -- and the host spends that colour on
   // three things, the button's text, the button's border and the dialog
@@ -3508,15 +3508,15 @@ checkCall("D-RUNG-14: every captionAlpha call site in the shipped QML, with its 
     return t.replace(/^readonly property real /, "").replace(/\s+/g, " ")
   })
 }, [
-  "captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)",
+  "captionAlphaOnCard: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background)",
   // qmlFill is load-bearing on both tinted surfaces: selectedBackground and the
   // hover fill are BOTH Util.alpha(menu.text, 0.08), so uncomposited each
   // measures the text against itself, contrast 1.0 at every rung.
-  "captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))",
-  "captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))",
+  "captionAlphaOnCursor: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Commons.Color.menu.selectedBackground, Commons.Color.menu.background))",
+  "captionAlphaOnHover: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Style.hoverFillFor(Commons.Color.menu.text, Commons.Color.accent), Commons.Color.menu.background))",
   // The third argument is the whole regular-weight correction; losing it puts
   // the prose back on the bold floor, which renders under AA.
-  "captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)",
+  "captionAlphaProse: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULAR)",
 ])
 checkCall("D-RUNG-14: the caption floor and the section-header floor are the same number, and now agree on tokyo-night", function () {
   // They were one file apart and disagreed: SECTION_HEADER_FLOOR is 4.65 while
@@ -3662,7 +3662,7 @@ checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirecti
   // extension, and pretending otherwise is how the last two were defeated.
   return qmlSites(/cursorInk|primaryColor/)
 }, [
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
+  "readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)",
   "selectedText: root.cursorInk",
   "color: groupRow.selected ? root.cursorInk : root.foreground",
   "readonly property color primaryColor: root.foreground",
@@ -18154,25 +18154,86 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   }, [true, [], true])
 
   // D-SRC-33: the merge's "theirs was kept" told on screen, not only in the journal.
-  checkCall("D-SRC-33: Model.mergeConflictNotice -- one sentence per conflict (a source by key and field names; a field by its name; the fallen-back pointer by why), the lead's title, no URL or value; null for no conflicts; the replace id is reserved beside the others", () => {
+  // D-SINK-69 (2026-11-01): the body is on omarchy-notification-send's argv,
+  // which /proc shows every account, and a source's key -- the unkeyed URL
+  // hash for a source added before 0.16.0, the value D-SINK-48 took off the
+  // helper's argv -- was in it. A source is now "A source"; the journal line
+  // (mergeConflictLine, not argv) keeps the key. The lead's words (P23).
+  checkCall("D-SRC-33 / D-SINK-69: Model.mergeConflictNotice -- one sentence per conflict (a source by its field names and never its key; a field by its name; the fallen-back pointer by why), the lead's title, no URL, value or key; null for no conflicts; the replace id is reserved beside the others", () => {
     const told = M.mergeConflictNotice([{ field: "sources", key: KA, fields: ["label", "url"] }, { field: "recents", key: "" }, { field: "activeKey", key: KB, fields: ["removed"] }])
     const ids = Object.keys(M.NOTIFY_IDS).map(k => M.NOTIFY_IDS[k])
-    return [told.title, told.body, /http|lenspass|example/.test(told.body), M.mergeConflictNotice([]), M.mergeConflictNotice(null), M.mergeConflictNotice([{ field: "activeKey", key: "" }]).body,
-            M.NOTIFY_IDS.mergeConflict, ids.length === new Set(ids).size, ids.indexOf(74019)]
-  }, ["Settings merged", "The source " + KA + " (label, url) kept the other program's version. The recent list kept the other program's version. The active source (the source " + KB + " it named is gone, so no source is active) kept the other program's version.",
-      false, null, null, "The active source kept the other program's version.", 74020, true, -1])
+    return [told.title, told.body, /http|lenspass|example/.test(told.body), told.body.indexOf(KA) + told.body.indexOf(KB),
+            M.mergeConflictNotice([{ field: "sources", key: KA, fields: [] }]).body, M.mergeConflictNotice([]), M.mergeConflictNotice(null),
+            M.mergeConflictNotice([{ field: "activeKey", key: "" }]).body, M.NOTIFY_IDS.mergeConflict, ids.length === new Set(ids).size, ids.indexOf(74019)]
+  }, ["Settings merged", "A source (label, url) kept the other program's version. The recent list kept the other program's version. The active source (the one it named is gone, so no source is active) kept the other program's version.",
+      false, -2, "A source kept the other program's version.", null, null, "The active source kept the other program's version.", 74020, true, -1])
   // Rule 13: the event name, the id 74020 and the notifyArgv branch are joined
   // by a CALL here. On the lane's first tip Service raised the event and the
   // id was reserved while notifyArgv had no branch for it, so the sink got
   // null and the user nothing -- the state the row was filed against; this
   // check was red there (P23 recheck, 2026-10-24).
-  checkCall("D-SRC-33: Model.notifyArgv joins the mergeConflict event to the notice -- the 74020 argv at normal urgency, the lead's title, Model.mergeConflictNotice's body (a key and a field name, no value or URL); null for no conflicts and for no params", () => {
+  checkCall("D-SRC-33: Model.notifyArgv joins the mergeConflict event to the notice -- the 74020 argv at normal urgency, the lead's title, Model.mergeConflictNotice's body (a field name, no key, value or URL); null for no conflicts and for no params", () => {
     const a = M.notifyArgv("mergeConflict", { conflicts: [{ field: "sources", key: KA, fields: ["label"] }] })
     return [a === null ? null : a[0], a === null ? null : a[a.indexOf("-r") + 1], a === null ? null : a[a.indexOf("-u") + 1],
             a === null ? null : a[a.length - 2], a === null ? null : a[a.length - 1], /http|lenspass|example/.test(JSON.stringify(a)),
             M.notifyArgv("mergeConflict", { conflicts: [] }), M.notifyArgv("mergeConflict", {})]
-  }, ["omarchy-notification-send", "74020", "normal", "Settings merged", "The source " + KA + " (label) kept the other program's version.", false, null, null])
-  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE notification reaches the sink (Quickshell.execDetached: the 74020 argv, `Settings merged`, the source's key and the field name, no value or URL), raised through root.notify with the conflicts; a merge without conflicts sends none", () => {
+  }, ["omarchy-notification-send", "74020", "normal", "Settings merged", "A source (label) kept the other program's version.", false, null, null])
+  // D-SINK-69, called at the sink (rule 14): the whole argv the shell would
+  // run, for a source conflict, a field-less one, the fallen-back pointer and
+  // a plain field together, holds no key anywhere -- while the journal's line
+  // for the same conflicts still names each. Red on rel-0160 (968d097),
+  // whose body read "The source <key> (label, url) ...".
+  checkCall("D-SINK-69: Model.notifyArgv(\"mergeConflict\") puts no source key on omarchy-notification-send's argv (world-readable in /proc while it runs); Model.mergeConflictLine, the journal's, still names it", () => {
+    const conflicts = [{ field: "sources", key: KA, fields: ["label", "url"] }, { field: "sources", key: KB, fields: [] },
+                       { field: "activeKey", key: KA, fields: ["removed"] }, { field: "lastPlayed", key: "" }]
+    const a = M.notifyArgv("mergeConflict", { conflicts: conflicts })
+    const lines = conflicts.map(M.mergeConflictLine)
+    return [a === null ? null : a.filter(x => x.indexOf(KA) !== -1 || x.indexOf(KB) !== -1), a === null ? null : a[a.length - 1],
+            lines.map(l => [l.indexOf(KA) !== -1, l.indexOf(KB) !== -1])]
+  }, [[], "A source (label, url) kept the other program's version. A source kept the other program's version. The active source (the one it named is gone, so no source is active) kept the other program's version. The last played channel kept the other program's version.",
+      [[true, false], [false, true], [true, false], [false, false]]])
+  // D-SINK-69's rule-15 sweep, by CALLING the sink: every event notifyArgv
+  // composes -- the list is NOTIFY_IDS', so an event added later without an
+  // entry here is a failure, not a gap -- with every parameter it reads
+  // carrying a private value of the kind that parameter could hold: source
+  // keys in a conflict and in a cap's drop list, a credentialed URL whose
+  // path holds a `u:` id and whose query and fragment hold a token in a name
+  // and in a reason. None may reach the argv. What was cleared, read in the
+  // composers: titles are literals or composed from constants; mergeDropped
+  // counts and caps (its keys go to the journal only); stateUnreadable's
+  // path is the state file's, which names no source; entryInputRefused takes
+  // a setting NAME and a reason word; the name and the reason are reduced to
+  // a URL's host (sinkText, scrubUrls). A reason a helper composes from
+  // mpv's launch output is not judged here and needs no judging today: mpv
+  // 0.41.0 prints an option it refused, value and all ("setting option
+  // volume='...' failed."), on STDOUT, which the helper sends to /dev/null
+  // (measured by lane-fix160; D-PLY-48), so no mpvArgs token reaches a
+  // reason. A fix for D-PLY-48 that reads stdout must scrub the value first.
+  checkCall("D-SINK-69 (rule 15): no event notifyArgv composes puts a source key, a `u:` id, a URL's credentials, path, query or fragment on the argv, whatever its parameters carry", () => {
+    const url = "http://user:s3cr3tpw@cdn.example.test/live/u:0badc0de/x.ts?token=t0kenval#fragval"
+    const name = "News " + url
+    const reason = "could not reach " + url
+    const params = {
+      // rc-fix160: EVERY string parameter carries the private value, not only
+      // the name and the reason -- the first sweep gave `cachedAt` "12:00" and
+      // `path` the state file, and both reached the argv unscrubbed (red here
+      // until notifyArgv scrubbed them).
+      streamFailed: { name, reason }, localPlayFailure: { name, reason }, playerStopped: { name, reason }, outputFailed: { name, output: url },
+      playlistRefreshed: { channelCount: url, groupCount: url }, playlistError: { reason, cachedAt: url }, epgError: { reason }, mpvMissing: { name, reason },
+      entryInputRefused: { setting: url, reason: url },
+      stateUnreadable: { reason: url, path: "/home/u/.local/state/omarchy-iptv/" + url, midSession: true },
+      mergeDropped: { dropped: { sources: [KA, KB], savedSearches: 1, hiddenGroups: 2 } },
+      mergeConflict: { conflicts: [{ field: "sources", key: KA, fields: ["url"] }, { field: "activeKey", key: KB, fields: ["removed"] }] }
+    }
+    const secret = [KA, KB, "s3cr3tpw", "user:", "0badc0de", "t0kenval", "fragval", "/live/"]
+    return Object.keys(M.NOTIFY_IDS).sort().map(event => {
+      if (!(event in params)) return [event, "no entry in this sweep: add one"]
+      const a = M.notifyArgv(event, params[event])
+      return [event, a === null ? "no card" : secret.filter(s => a.some(x => x.indexOf(s) !== -1))]
+    })
+  }, ["entryInputRefused", "epgError", "localPlayFailure", "mergeConflict", "mergeDropped", "mpvMissing", "outputFailed", "playerStopped",
+      "playlistError", "playlistRefreshed", "stateUnreadable", "streamFailed"].map(event => [event, []]))
+  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE notification reaches the sink (Quickshell.execDetached: the 74020 argv, `Settings merged`, the field name, no key (D-SINK-69), value or URL), raised through root.notify with the conflicts; a merge without conflicts sends none", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     const notified = []
     const notify = h.root.notify
@@ -18188,8 +18249,8 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const card = sent().map(a => [a[a.indexOf("-u") + 1], a[a.length - 2], a[a.length - 1]])
     const conflict = notified.slice()
     h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA, { favorites: ["t:x.uk"] }) })
-    return [card.length, card.length === 1 ? card[0].slice(0, 2) : card, card.length === 1 && /^The source [0-9a-f]{8} \(label(, labelCustom)?\) kept the other program's version\.$/.test(card[0][2]),
-            /Theirs|Mine|http|lenspass/.test(JSON.stringify(h.detached)),
+    return [card.length, card.length === 1 ? card[0].slice(0, 2) : card, card.length === 1 && /^A source \(label(, labelCustom)?\) kept the other program's version\.$/.test(card[0][2]),
+            /Theirs|Mine|http|lenspass/.test(JSON.stringify(h.detached)) || JSON.stringify(sent()).indexOf(KA) !== -1,
             conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
             sent().length, notified.length, h.compileErrors]
   }, [1, ["normal", "Settings merged"], true, false, ["mergeConflict"], true, false, 1, 1, []])

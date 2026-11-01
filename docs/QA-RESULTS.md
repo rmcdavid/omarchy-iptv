@@ -13315,6 +13315,329 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.16.0 pre-cut record (2026-11-01): the gate and the release recipe's live run on the final tree
+
+**Tree.** rel-0160 bd65725: dev b4059da plus the version bump (bcce3f8), the checked notes (rc-notes-0160 36e14f9), D-HOST-9's measurement and pin (rc-host9 4a63e12), F-HARNESS-86's repair (rc-keyfix c632cdc), D-HOST-9's and D-SINK-69's fixes (rc-fix160 677c8db), and the lead's board, comment and doc commits (a6fcb61, f62e35e, bd65725). Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1, omarchy 4.0.6-1, mpv 0.41.0.
+
+**Gate.** `scripts/check.sh` under the shared heavy lock, twice on the integrated tree:
+- First run, on 0dd0408 plus the lead's then-uncommitted text: red on exactly two timing tests, `test_playlist.CapTest.test_channel_count_is_capped_with_a_warning` (50,005 entries in 6.0 s against 5.0) and `test_playlist.PerformanceTest.test_10k_entries_parse_and_write_under_one_second` (cost 1152, 1173 and 1193 ms against 1.0 s), at load 5.68 3.52 1.90 while two read-only review agents ran beside it. The helper's parse code is unchanged since dev b4059da. Re-run alone under the lock at load 1.74: 5 tests OK. Every other step green.
+- Second run, on the tree committed as f62e35e and bd65725, quiet (load 1.28 at the start): **all green**, rc 0. node 3240 checks (both echo modes), python 1918 tests, qml spec 82, theme name guard 279 uses, release allowlist 42 files, helper split 11 parts. Crash journal 81 before and after.
+
+**key-scenario live** (the release recipe's step; `scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, under the heavy lock), on bd65725: **139 passed, 0 failed** (138 lettered checks and the floor line) in 532.4 s, 17:03:31 to 17:12:24 CST, load 1.26 at the start and 2.16 at the end. Crash journal 81 before and after. Transcript `/run/user/1000/omarchy-iptv-c160-h/transcripts/key-20261101-170331-1908731.out` (0600). The README's "(139 checks, 2026-11-01)" rests on this run.
+
+**Release preconditions**, read by a release-readiness critic (read-only) on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.16.0; the CHANGELOG's top heading `## 0.16.0 (2026-11-01)` passes `changelog_problems` for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.16.0 tag locally or on the remote; local and remote `main` both e710341, so the cut is a fast-forward; none of this round's new files is a runtime import.
+
+**#12636** (`[Verify]: IPTV 0.15.0`, e710341): OPEN, `validated` and `plugin-update`, unchanged since 2026-10-22T18:34:40Z. Moving `main` makes it stale; it stays open (F-M3-4), and 0.16.0's request is filed on the owner's word.
+
+### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
+
+Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy build carrying omarchy-pkgs load_qtquick_611.patch; .BUILDINFO pkgbuild_sha256sum e871efd5... = omarchy-pkgs 2be7cd9839), omarchy 4.0.6-1. Tree: rel-0160 bcce3f8.
+
+Rig: the installed quickshell in a nested headless cage (WLR_BACKENDS=headless, pixman), started through scripts/dev-harness/private-bus.sh under `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY`, with a private HOME holding a synthetic theme (accent #12ab34, foreground #a1b2c3, red #cd3456) and a scratch XDG_RUNTIME_DIR. There are two roots that differ only by the line `//@ pragma OmarchyLoadPatch`, each with the host's Commons and Ui copied byte for byte. The plugin's files sit outside the root and are loaded with `Qt.createComponent(Commons.Util.fileUrl(path))`, once as shipped and once with qs.Commons swapped above QtQuick.
+
+| Root | Order | Guide accent / urgent | BarWidget barFg | Warnings (Guide + Bar) | `Color` in header-copy probes |
+|---|---|---|---|---|---|
+| pragma | shipped | #12ab34 / #cd3456 | #a1b2c3 | 0 + 0 | Commons.Color |
+| pragma | swapped | #12ab34 / #cd3456 | #a1b2c3 | 0 + 0 | Commons.Color |
+| none | shipped | #000000 / #000000 | #000000 | 14 + 1 | QQuickColor |
+| none | swapped | #000000 / #000000 | #000000 | 14 + 1 | QQuickColor |
+
+The interceptor's debug lines show Guide.qml, BarWidget.qml and Service.qml served with `import QtQuick 6.11` under the pragma. Plain /usr/lib/qt6/bin/qml offscreen, with Quickshell modules stubbed and a stand-in qs.Commons, also gives QQuickColor in both orders. Style, Util and Border are the theme's everywhere. Cause: qtdeclarative v6.12.0 QQmlTypeNameCache::doQuery searches C++ module types before qmldir composite singletons (QTBUG-151278). Verdict: REFUTED for the live guide. The protection is the host's patch, not the import order.
+
+Gate check: tests/test_host_load_patch.py, 8 cases, green on the tree. Red with the host root's pragma removed (1), with Arch's unpatched quickshell 0.3.2-1 (4), with Guide.qml importing QtQuick 6.12 (1), and, for the premise, with the files qualified as Commons.Color (1). Green with the order swapped, as the cage measured. The python floor goes 1886 -> 1894. Rig, logs and mutants are in the session scratchpad under host9/.
+
+A side effect, recorded: lane-host9's first three manual plain-`qml` runs (08:03:59-08:05:20), made with the real HOME, wrote 50 Qt bytecode-cache files into the owner's `~/.cache/QtProject/Qml Runtime/qmlcache/` (created 08:03-08:05, listed by the lane). The lead removed exactly those 50 on the owner's word (1,823 files before, 1,773 after); the later rigs (rc-host9, lane-fix160, rc-fix160) ran under private-bus.sh, which sets HOME and XDG_CACHE_HOME inside its own directory, and lane-fix160's and rc-fix160's also set `QML_DISK_CACHE_PATH` there.
+
+### D-HOST-9 recheck (rc-host9, 2026-11-01): the theme's Color holds on the host, and why
+
+Verdict: lane-host9's verdict HOLDS. The theme's `Color` wins at runtime on this host in both import orders, held by `//@ pragma OmarchyLoadPatch` (Omarchy's quickshell rewrites a plugin's `import QtQuick` to 6.11 and serves it over qs:). Without the pragma, Qt's QQuickColor wins in both orders.
+
+**Rig.** Built independently of lane-host9's; it lives in scratchpad/rch9.
+- Run as `flock heavy.lock env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY scripts/dev-harness/private-bus.sh ... cage (headless, pixman) -> quickshell`.
+- Root A: the host shell.qml's lines 1-13 byte for byte over a full copy of /usr/share/omarchy/shell. Root B: the same minus the pragma.
+- The plugin sits at $HOME/.config/omarchy/plugins/io.github.rmcdavid.iptv in the private HOME. A swapped-order copy and a bare-path copy sit beside it.
+- Entry points are loaded the host's ways: overlay via `Loader { asynchronous: true }`, bar widget via createComponent Asynchronous, probes via PreferSynchronous.
+- Color is classified by API: theme = loadColors and menu; Qt = rgba.
+- Theme: accent #3c5a78, foreground #9e8d7c, red #b01c2d, menu #445566/#e1d2c3.
+
+**Results**, three runs, identical in every shared job:
+
+| Arm | Guide accent/urgent/bg/fg | barFg | Color in probes | plugin warnings |
+|---|---|---|---|---|
+| pragma, shipped order | #3c5a78/#b01c2d/#445566/#e1d2c3 | #9e8d7c | theme (Service header: not defined) | 0 |
+| pragma, qs imports first | same | same | theme | 0 |
+| pragma, Guide header + `import QtQuick.Window` | - | - | QQuickColor | - |
+| pragma, entry handed over as a bare path | #000000 x4 | - | QQuickColor (interceptor: passed through unrewritten) | 14 |
+| no pragma, both orders | #000000 x4 | #000000 | QQuickColor | 14 per Guide load, 1 per BarWidget load |
+
+**Reload, round B.** This is the host's reloadPlugins shape: `typeof Qt.clearComponentCache` is "undefined", and the files were replaced git-style.
+- Same URLs: the old components in both roots.
+- A `?bypass` load: without the pragma, the new QML beside the cached old .mjs; with it, the first-scan OLD text.
+- An added QML file: 'File name case mismatch' in both roots.
+
+**Live shell**, read only: quickshell -n -p /usr/share/omarchy/shell, started 2026-10-31 16:54. Its log.log (16:54:03-01:59:59) holds the scanner's line for this plugin's directory and zero Guide.qml/BarWidget.qml/QColor lines. The installed 0.15.0 Guide.qml reads Color.menu.* at lines 356-413.
+
+**Plain qml.** `Item { mutabilityGroup: 0 }` under `import QtQuick 6.11` does not load ('"Item.mutabilityGroup" is not available in QtQuick 6.11.').
+
+**Test** (tests/test_host_load_patch.py, 10 cases):
+- Lane cases reproduced: pragma-less host copy, 1 FAIL; Arch quickshell 0.3.2-1 binary (read, never run), 4 FAIL.
+- My mutant, Guide.qml plus `import QtQuick.Window`: 1 FAIL.
+- New join-4 case: 1 FAIL on each of three host mutants (Util.fileUrl returning the path; entryPointUrl returning the path; entryPointUrl returning Qt.resolvedUrl of it).
+
+**Gate.** scripts/check.sh under the heavy lock, 09:36:48-09:46:00: all green.
+- Python 1896, node 3238, qml spec 82, qmllint 5.
+- Ran on rc-host9 a032572 plus README 'Status: v0.16.0.'. The branch alone carries rel-0160's README mismatch.
+- No coredumps.
+
+### 0.16.0 release notes: claims check (rc-notes, 2026-11-01)
+
+Branch rc-notes-0160, commit 36e14f9 (on lane-notes 447b6b5, which sits on rel-0160 bcce3f8). I read every sentence of the CHANGELOG 0.16.0 section and the README changes against the code, the board rows and this file. 36 sentences were wrong or overstated and are corrected: 22 in the CHANGELOG section, 4 among the notes lane's README changes, and 10 README sentences from the round or earlier that this round made false. About 115 checked out unchanged.
+
+Found by calling the shipping code:
+- **D-LOGO-17 is inverted.** `cache prune` on a scratch cache (active A; logo folders marked 60 s, 2 days and 3 days ago for B, C and D) aged out C and D. The two most recent folders get the one-day limit; every other goes whatever its age. The board row and R34 say the reverse; the README always described the code.
+- **Accessibility mask.** `fieldAccessibleValue` masks an Xtream server with a scheme as a URL (`http://****@host:port`) and stars only a server without one.
+- **Guide hint.** `epgHintRowState` refuses a hint written as a local address (`192.168.1.5`, `localhost`) and adopts one given by host name (`nas.lan`), which is then refused at connection time.
+- **Warned options.** 0.15.0's `splitMpvArgs` kept `--http-proxy`, `--rtsp-transport=udp` and `--demuxer-lavf-o=http_proxy=...` with no warning, so the release warns about them where it said nothing; it did not refuse them before.
+- **Listening keys.** Today's splitter refuses `--demuxer-lavf-o=listen_timeout=5` and `external_sock=1`.
+- **Settings merged.** `notifyArgv('mergeConflict', ...)` puts a source key on the notification program's argv, proposed D-SINK-69 (fixed the same day by lane-fix160, the next record, and rechecked by rc-fix160, the one after it).
+
+Read in the code:
+- A channel change refused with `local_address` takes the shell's "failed" path: a journal line and `lastError`, no card (D-PLY-42).
+- `--watch-later-dir` has been reserved since 0.15.0 and is in today's pin block.
+
+Gate on the corrected tree, under the shared heavy-run lock:
+- node 3238 checks, 0 failures
+- python 1886 tests OK
+- qml spec 82 passed
+- README notice join: 0 problems
+- `release.py check` exits 0
+- check.sh: all green.
+
+### D-HOST-9 fixed, D-SINK-69 fixed (lane-fix160, 2026-11-01)
+
+**Platform and tree.** qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy's build, carrying load_qtquick_611.patch), omarchy 4.0.6-1, mpv 0.41.0. Tree: lane-fix160 on rel-0160 968d097.
+
+**D-HOST-9: the change.** Guide.qml and BarWidget.qml name the theme's Color the host's way: `import qs.Commons as Commons` beside the unqualified import, then `Commons.Color.*`. That is 24 uses on 14 lines in Guide.qml and 1 in BarWidget.qml.
+
+What omarchy 4.0.6 does, read on the host: 54 files carry the alias, 52 of them beside the unqualified import. `Commons.Color` occurs 259 times, and no other name is qualified.
+
+**Sink (rule 14): the rig.** rc-host9's rig shape, re-run from scratchpad/fix160/rig:
+- The host shell.qml's whole header over a full copy of /usr/share/omarchy/shell, once with the pragma and once without.
+- The installed quickshell in a nested headless cage (pixman), on a private bus via scripts/dev-harness/private-bus.sh, under `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY`.
+- The plugin at $HOME/.config/omarchy/plugins/<id> in the private HOME.
+- Entry points handed over as Commons.Util.fileUrl(...): the guide through an asynchronous Loader, the bar through Component.Asynchronous.
+- QML_DISK_CACHE_PATH and XDG_CACHE_HOME inside the private HOME.
+- rel-0160's files loaded beside the fixed ones as the control.
+- Theme: accent #3c5a78, foreground #9e8d7c, red #b01c2d, menu #445566 / #e1d2c3.
+
+**Sink: the results.**
+
+| Root | Tree | Guide accent / urgent / bg / fg | barFg | plugin warnings |
+|---|---|---|---|---|
+| pragma | fixed | #3c5a78 / #b01c2d / #445566 / #e1d2c3 | #9e8d7c | 0 |
+| pragma | rel-0160 | same | #9e8d7c | 0 |
+| none | fixed | #3c5a78 / #b01c2d / #445566 / #e1d2c3 | #9e8d7c | 0 |
+| none | rel-0160 | #000000 x4 | #000000 | 15 (14 + 1) |
+
+- Header probes without the pragma: the unqualified `Color` is QQuickColor; `Commons.Color` is the theme's.
+- Exits: quickshell 0 twice, cage 0.
+- Side effects: coredump journal 81 before and after. ~/.cache/QtProject held 1824 files and ~/.cache/quickshell 122, before and after.
+
+**D-HOST-9: the gate.**
+- scripts/check-theme-names.py ("theme name guard", floor 279 uses): red on rel-0160 with 25 problems (Guide.qml 24, BarWidget.qml 1), green after.
+- tests/test_theme_names.py, 17 cases. Input mutants red: an unqualified Color reintroduced in each shipped file; nested and template collisions; added exports in copies of the QtQuick and Quickshell type files; versioned imports; and the blind spots. Guard mutants red: 6 of 7, and the surviving one was closed with a qmldir test.
+- tests/test_host_load_patch.py, 10 -> 11. Its premise case became "without the rewrite every theme name in the shipped QML is the theme's" (1 FAIL on rel-0160), and a synthetic premise was added. The joins are kept.
+- qmllint categories are unchanged on both files.
+- A raw-literal mutant turns D-RUNG-4 and D-RUNG-14 red.
+
+**D-SINK-69: the change.** `mergeConflictSentence` now composes, in the lead's words:
+- "A source (<fields>) kept the other program's version." or "A source kept ...";
+- "The active source (the one it named is gone, so no source is active) kept ...".
+
+`mergeConflictLine`, the journal's, is unchanged.
+
+**D-SINK-69: red and green.** Node 3238 -> 3240.
+- On rel-0160's model: 5 red. After the fix: 0.
+- Composer mutants:
+  - the pointer naming its key: 3 red;
+  - a field-less source named by key: 2;
+  - mergeDropNotice listing keys: 2;
+  - the reason unscrubbed: 5.
+
+**D-SINK-69: the sweep.** Cleared:
+- every NOTIFY_IDS event;
+- helper spawns through helperSpawn;
+- the player stop and orphan check;
+- hyprctl, mkdir and which;
+- the helper's mpv and wl-paste argv.
+
+mpv 0.41.0 prints a refused option with its value on stdout, 0 lines on stderr. The helper sends stdout to /dev/null, so no mpvArgs token reaches a failure reason (D-PLY-48).
+
+**Whole gate.** scripts/check.sh under the heavy lock, 10:45:07-10:54:08, all green, rc 0. It ran on b14b02d plus the proposed D-HOST-9 and D-SINK-69 board cells:
+- node 3240 in both echo modes;
+- python 1914;
+- qml spec 82;
+- qmllint 5;
+- theme name guard 279.
+
+The tip, 4261eb7, re-wraps two CHANGELOG paragraphs; its doc steps re-ran ok.
+
+### D-HOST-9 and D-SINK-69 rechecked (rc-fix160, 2026-11-01)
+
+**Platform and tree.** qt6-base 6.12.0-3, quickshell 0.3.2.r7.g2b4501a-1, omarchy 4.0.6-1, mpv 0.41.0. Tree: rc-fix160 677c8db, on lane-fix160 4261eb7.
+
+**The cage rig.** scratchpad/rcfix160/rig:
+- The host shell.qml's whole header over a full copy of /usr/share/omarchy/shell, once with the pragma and once without.
+- `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY scripts/dev-harness/private-bus.sh`, then cage (headless, pixman), then the installed quickshell. The heavy lock was taken 11:12:46.
+- QML_DISK_CACHE_PATH and XDG_CACHE_HOME inside the private HOME: 46 cache files written there and removed with it.
+- Theme: accent #3c5a78, foreground #9e8d7c, red #b01c2d, menu #445566 / #e1d2c3, and `[bar] text #a1b2c3`.
+- Exits: quickshell 0 for both roots, cage 0.
+- Counts before and after: coredumps 81 / 81, ~/.cache/QtProject 1824 / 1824, ~/.cache/quickshell 122 / 122.
+
+**The guide.** I read all 15 properties fed by a qualified Color.
+- With the pragma, rel-0160 and the fix differ in 0 of 15.
+- The fix without the pragma differs from those values in 0 of 15.
+- rel-0160 without the pragma differs in 15 of 15: #000000 (invalid), alphas 0, and 15 warnings (14 from Guide.qml, 1 from BarWidget.qml).
+
+**The bar.** The host's PluginBarApi was injected one callLater after creation, as Bar.qml's injectProps does.
+- rel-0160 without the pragma: #000000 before the hand-over, #a1b2c3 after it.
+- The fix: #9e8d7c before, #a1b2c3 after.
+
+So the bar keeps the bar's colour; the guide was the surface at risk.
+
+**Runtime name probe.** For each shipped file, its own Qt and Quickshell imports, with `typeof` of all 37 host-kit names:
+- Without the pragma: `Color` is defined in all three files, and the only other defined name is the plugin directory's own `BarWidget`.
+- With the pragma: none.
+
+**The harness root's header (F-HARNESS-89).** Without the pragma: `Color` is QQuickColor, `Color.foreground` is undefined, and `Color.bar.text` throws.
+
+**Independent collision recompute.** From every qmltypes export and qmldir entry, with all imports followed: `Color` alone, in all three files.
+
+**Guard input mutants.** These are copies of the installed type files.
+- Red: QtQml.Models (229), QML builtins (23), _WlrLayerShell (3), a new imported module (1), a second typeinfo (229), _Window (21), a WorkerScript composite (229), a 7.0 export (1).
+- Green on the lane's guard: `Style Style.qml`, `singleton Style Style.qml`, a host Commons `singleton Color Color.qml` with a bare Color, and `...Color`.
+
+Qt 6.12 accepts both version-less forms. Measured with a module of two entries in plain qml: `plain=plain single=single`.
+
+After 7cc240c those are red at 229, 229 and 1, and the spread at 1. `internal Style Style.qml` and `...Commons.Color` stay green.
+
+**Tests.**
+- test_theme_names, 17 -> 20: the 3 new tests are red on the lane's guard. One mutant per test turns all 20 red.
+- test_host_load_patch, 11 -> 12: the stub reader saw no qmldir singleton and no version-less type ({"Util"} of 4).
+- The plugin half is red when BarWidget's alias import is removed and `Commons.Color` kept.
+- The premise test is red when the rewrite is applied in the shipped regime.
+
+**D-SINK-69.** I called notifyArgv, notifyPost and notifyAnswered for all 12 events, with keys, a `u:` id, a scope, a credentialed URL, an mpvArgs token and a key path in every parameter.
+- mergeConflict is clean.
+- playlistError's `cachedAt` and stateUnreadable's `path` reached the argv raw. Callers pass only formatClock output and stateFilePath, so nothing leaked. Both are scrubbed since 9aa3f86.
+- The widened sweep is red on lane-fix160's model for exactly those two events.
+- The journal line keeps the key: a mutant that drops it turns 6 checks red (D-SINK-69 and five R24a).
+
+**Notes.**
+- CHANGELOG's Fixed entry: the claim that the bar's label would have drawn black is withdrawn.
+- README ps sentence: no longer "One thing"; it now names the channel's name and the reason it did not play.
+
+**Gate.** check.sh under the heavy lock, 11:29:06-11:38:02, all green, run on 677c8db plus the proposed cells:
+- node 3240 in both echo modes
+- python 1918
+- spec 82
+- theme name guard 279
+- ledger 622
+- coredumps 81 / 81
+
+**New ids from these five records, filed on the board the same day (D-SINK-69, rc-notes' finding, has its own row and is fixed above):**
+- **D-HOST-10** (P3, open): the host serves the plugin's QML at QtQuick 6.11 behind the load patch while the gate, the dev harness and the a11y trees load it at 6.12, so a QtQuick member revisioned at 6.12 would pass the gate and fail to load on the host (rc-host9 measured `Item.mutabilityGroup` refused under `import QtQuick 6.11`); none is used today.
+- **F-GATE-17** (P4, open): constraint 1's literal half has no check; Guide.qml carries 7 `"transparent"` literals without a `CONVENTION-EXCEPTION` (lane-fix160).
+- **F-HARNESS-89** (P3, open): the dev harness root names `Color` bare in 8 places, so under the harness the plugin's bar reads black (rc-fix160; the contract's "What the fix does not reach").
+- **D-PLY-48** gains a note: mpv 0.41.0 prints a refused option's value on a line without the options-file prefix, so its fix must scrub those lines too (lane-fix160, measured).
+
+### F-HARNESS-86: key-scenario learns a new source's key, rechecked (2026-11-01)
+
+The 0.16.0 pre-cut run of `scripts/dev-harness/key-scenario.sh live` on
+rel-0160 bcce3f8 read 111 passed, 28 failed in 962.8 s
+(key-20261101-075159-972967). None of the 28 is a product regression.
+25 named a key the scenario PREDICTED as fnv1a32 of the URL. Since
+D-SINK-48 (f9c47da) a new source's key is random. B10, B17 and B18 read
+the helper's path at argv[1]. Since D-SINK-50 (e8fdcae) argv[1] is `-I`.
+
+lane-keyfix (d3bd33f, 24158fe) repaired the harness:
+- Keys are learned from the record that holds the URL, in memory
+  (`ipc keyOfUrl`) and in state.json, through
+  HarnessLib.sourceKeysByUrl.
+- Records are counted by URL.
+- `key:random` is checked where a check is about the new key.
+- One argv reader skips the interpreter's flags.
+That forward run read 139 / 0.
+
+rc-keyfix rechecked the repair and found four things that could not go red:
+- `key:random` only said "not the URL's fnv1a32". A key derived from the
+  URL any other way read random, and so did a key an existing record
+  already held.
+- The lookup could not see a record that kept a wrapped URL.
+- B41's `record` read two sentinels as the same key.
+Repaired: `reused`, plus `redrawn` on O5, F6 and A2 (two draws for one URL
+must differ), the wider lookup, and the sentinel refused.
+
+Every run below was in its own nested headless cage on a private bus
+(`scripts/dev-harness/private-bus.sh`, `env -u DISPLAY -u
+HYPRLAND_INSTANCE_SIGNATURE`), under the shared heavy lock. The crash
+journal read 81 entries before and after every run.
+
+| Run | Tree | Result | Time | Load | Transcript |
+|---|---|---|---|---|---|
+| forward (release count) | rc-keyfix 74d2419 (rel-0160 968d097 merged under it) | 139 passed, 0 failed (138 lettered and the floor) | 537.7 s | 1.13 -> 2.91 | key-20261101-110348-1587875 |
+| lane-keyfix's h1, i1, i2, i3 | --tree mk-hashinit | 128 passed, 11 failed | 580.6 s | 2.06 -> 4.07 | key-20261101-102430-1434716 |
+| own-A, own-B, own-C and lane-keyfix's d1 | --tree rck/own | 118 passed, 21 failed | 655.9 s | 3.98 -> 1.87 | key-20261101-103411-1481055 |
+
+What the reds were:
+- **h1, i1, i2, i3.** lane-keyfix's eight came back with the same
+  tokens: N1, C2, O1 and A1 `key:hash`; B10 and B17
+  `helper:no(<pid>) left:<pid>`; B14 `left:<pid>`; B18
+  `after-deadline:alive(<pid>)`. O5, F6 and A2 were also red,
+  `redrawn:no`, because fnv1a32 is a function of the URL too.
+- **own-A** keyed D by fnv1a32 of a salted URL. O5 was red (`held D as
+  fc89922d; the recovery's record is fc89922d`) and so was A2
+  (`redrawn:no`). O1, A1's key, B41, B36 and B39 stayed green. On the
+  harness before the recheck, own-A has no red at all.
+- **own-B** handed B the first record's key, which is the mirror's. C2
+  read `key:reused`; on lane-keyfix's harness it read `key:random` and
+  passed. C5 and F6 were red on `true 20`, A's channels.
+- **own-C** deleted the KILL of a TERM-ignoring init. B17 read
+  `helper:no(<pid>) left:<pid> ... killed:1`.
+- **d1** reproduced Z1..Z3, X1..X6, Y2, Y3, Q1, Q2, V1 and A1
+  (`reports:epgUrl:no-source`), as lane-keyfix read them. Z1 read
+  `records:1`, counted by URL, under a record that carried the
+  mirror's key; a count by key_of(B) reads 0.
+
+The node suite catches a key derived from the URL by itself: 94 of 3238 node
+checks fail on a tree whose allocateSourceKey uses a salted fnv1a32. So
+the gate guarded the product. What was weaker than its name was the live
+arm's `key:random`.
+
+`scripts/check.sh` on the same content: green except `defect ledger`,
+because F-HARNESS-86 has no board row yet. With the proposed row added,
+on a scratch worktree, `check-defect-ledger.py` exits 0. Highlights:
+- node 3238 (twice) and python 1896
+- qml spec 82 and harness predicates 609
+- key preflight 12 and release allowlist 42 files
+
+Siblings searched (rule 15), by shape: key_of, sourceKey(, fnv1a32,
+normalizeSourceUrl, and /proc cmdline readers of the helper.
+- **Stale since D-SINK-50 (F-HARNESS-87).** `argv-scenario.sh`'s sweeper and
+  `fixtures/rewind-sweep.py` match a helper by realpath(argv[1]). Both
+  read, not run; their positive controls (S1/S2, R13/R14) go red.
+- **Stale since D-SINK-48 (F-HARNESS-88).** `scripts/qa-sources-scenarios.sh` predicts
+  fnv1a32 keys for sources it adds in the app (SRC-H08, SRC-H14, the
+  extra.m3u remove, the fresh-install activeCache expectation), and so
+  does docs/QA-SOURCES.md's `key` example. [The lead's claims check: also
+  SRC-H01's migrated record and QA-SOURCES' SRC-MIG-01 row, on the board.]
+- **Cleared.** logo-scenario (seeded records under legacy keys),
+  id-rotate and chno-entry (the key read from addSource's reply),
+  sources-scenario (by label from state.json), tls, player, rewind's
+  players and qa-player-scenarios (mpv's argv), and run.sh.
+
+Merged into rel-0160 for the 0.16.0 cut on 2026-11-01 (37a6ee7); the release count on the final tree is in the 0.16.0 pre-cut record.
+
 ### D-A11Y-1 merged (2026-11-01): the fix checked, the probe re-run on the merged tree, the exception removed and the premise re-measured
 
 **What merged.** `fix-a11y-mask` (75cc827: one commit from the owner's separate session, based on dev cc63a49) onto dev ad176d3. One conflict: D-A11Y-1's board row, resolved by hand. The row now leads with the fix and keeps the 2026-10-31 bracket and the earlier history beneath it. The lead's first resolution took the branch's whole board file, which would have dropped ten rows ad176d3 filed (seven defect rows and three decisions-log rows) and reverted its edits to three others (D-A11Y-1, D-GS-3, D-SINK-47). Comparing row counts against dev caught it, and the file was re-merged three ways, conflicting only on that row.

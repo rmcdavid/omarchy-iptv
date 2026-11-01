@@ -15,8 +15,8 @@ HOW IT IS USED. rewind-scenario.sh's R16 copies the tree under test into a
 scratch directory, renames `bin/omarchy-iptv` to `bin/omarchy-iptv.real`,
 drops this file in its place, and points the harness at that tree with
 OMARCHY_IPTV_PLUGIN_ROOT. The service spawns its helper as
-`python3 <root>/bin/omarchy-iptv ...` (Service.qml runControl), so the
-stand-in has to be python; a shell wrapper would never be read.
+`python3 -I <root>/bin/omarchy-iptv ...` (Model.helperArgv, D-SINK-50), so
+the stand-in has to be python; a shell wrapper would never be read.
 
 It is NOT a stub: after the sleep it execs the real helper with the same
 argv, so every reply the service parses is the real helper's. The only
@@ -83,6 +83,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REAL = os.path.join(HERE, "omarchy-iptv.real")
 
 
+def isolation():
+    """The interpreter's isolation flag as this process was started with it
+    (`-I`, D-SINK-50), for a re-exec that must run the real helper the way
+    the service runs it; [] when it was not."""
+    return ["-I"] if sys.flags.isolated else []
+
+
 def verb_of(argv):
     """The verb this invocation names, or "" when it names none.
 
@@ -131,9 +138,12 @@ def main():
         return run_inside(argv, ms)
     if held:
         time.sleep(ms / 1000.0)
-    # Same interpreter, same argv, no shell: the reply the service reads is
-    # the real helper's own.
-    os.execv(sys.executable, [sys.executable, REAL] + argv)
+    # Same interpreter, same flags, same argv, no shell: the reply the service
+    # reads is the real helper's own. F-HARNESS-86: since D-SINK-50 the
+    # service starts the helper as `python3 -I`, and this wrapper used to
+    # exec the real one WITHOUT it -- a slow tree's helper then ran with the
+    # user site, PYTHONPATH and a sitecustomize the shipping path refuses.
+    os.execv(sys.executable, [sys.executable] + isolation() + [REAL] + argv)
     return 0   # unreachable unless execv fails, which raises
 
 

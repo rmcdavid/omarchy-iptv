@@ -4667,7 +4667,10 @@ QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
   `moduleName`, `settings`), readonly derived properties, state properties,
   functions (public API first), signal handlers, then children (models,
   files, timers, processes, IPC, windows).
-- Colors and metrics only from `Color.*`, `Style.*`, `Border.*`. A literal
+- Colors and metrics only from `Commons.Color.*` (through `import qs.Commons as
+  Commons`: a bare `Color` is QtQuick's C++ singleton in any
+  import order wherever QtQuick is imported at 6.12, D-HOST-9; `scripts/check-theme-names.py` refuses it),
+  `Style.*`, `Border.*`. A literal
   color requires a `// CONVENTION-EXCEPTION: <reason>` comment on the line
   above; the scaffold has none.
 - Fonts: `Style.font.menuFamily` on the overlay, `bar.fontFamily` in the bar.

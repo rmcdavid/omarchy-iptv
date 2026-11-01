@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.15.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.16.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -22,6 +22,12 @@ GIF logos and guide-data files, 0.14.3 bounds every playlist field a
 channel keeps and splits the background helper into several files, and
 0.15.0 holds far less guide data in the shell, parks a playlist that
 cannot move into Sources in `state.json`, and bounds every download by a deadline and the playlist and guide parses by a memory limit.
+0.16.0 keeps the downloads a playlist chooses, and the channel addresses
+it writes, off this computer and your local network, sets the player's
+safety options after your own, takes your `mpvArgs` and your sources' keys
+off every command line, masks the Sources form on the desktop accessibility
+bus, and tells a failure on your own computer apart from a channel that does
+not work.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -119,7 +125,8 @@ stream addresses — each created mode 0600 inside a directory only you can
 enter (one exception, two narrow windows -- one of a few milliseconds, one
 where a save's read of the file does not answer within its 2 s bound -- in
 which a save can create `state.json` at your umask's mode, usually 0644,
-until the next shell start corrects it, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
+until the plugin makes it 0600 moments after that save lands, is under
+Troubleshooting). They are never shown or logged beyond their host name. The shell's
 `shell.json` is **no longer one of them**. Up to and including 0.13.6 the
 active source was identified by its URL on that entry, so the count was three
 and the third was a file the plugin does not own; now the entry carries a short
@@ -254,7 +261,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (138 checks, 2026-10-20).
+  branch (139 checks, 2026-11-01).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -277,11 +284,14 @@ obvious when it happens to you:
   provider URLs, with your username and password inside them. Treat the copy
   the way you would treat the password.
 
-The code on the entry is made from the URL by a one-way hash. It cannot be
-turned back into the URL; what it can do is confirm a guess — someone who can
-read the file and already holds a candidate URL can hash it and compare. That
-is far less than the URL itself and it is not nothing, which is why the
-permission change in the next paragraph stays.
+The code on the entry is the source's key, the name of its cache folder.
+A source added in 0.16.0 or later gets a random one, which says nothing
+about the URL. A source added earlier keeps the key it had, made from the
+URL by a one-way hash. It cannot be turned back into the URL; what it can do
+is confirm a guess — someone who can read the file and already holds a
+candidate URL can hash it and compare. That is far less than the URL itself
+and it is not nothing, which is why the permission change in the next
+paragraph stays. (Since 0.16.0 no key is on a command line any more.)
 
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
@@ -375,7 +385,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a token that sets one of the on-screen controller's click or wheel commands (a `*_command`, `*_mbtn_*` or `*_wheel_*` key) or contains `${` is refused, because a command can draw your stream address or start a program and `${...}` puts a value such as the address into text on screen; every other key is kept. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller stays, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read; so is its console, because it shows the player's recent error messages, and those can carry your whole stream address; and so are its statistics (`i`, `I`, and the controller's title click), because their file line shows the stream's file name, which for some addresses is the whole address with its password. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries, the `Ctrl+V` key and drag-and-drop (neither adds an address to the player any more), the on-screen controller's title middle-click (it showed your whole stream address), the console, opening the next playlist entry early (it went out with your provider's headers), the statistics, the list of network protocols the media library may open beneath a stream and the list of stream formats it may read, and the certificate checks below; `--drag-and-drop`, `--prefetch-playlist`, `--load-console`, `--load-stats-overlay`, and a `--demuxer-lavf-o` protocol or format list or `seg_format_options` (settings for each HLS segment, which can carry those lists past this check) are refused for that reason. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers, and so is a `--demuxer-lavf-o` token that names `http_proxy`, for the same reason; `--rtsp-transport=udp` (or `udp_multicast` or `lavf`) is accepted with a warning that it opens ports on this computer that anyone can send to, because an `rtsp` channel then receives its stream on ports the player opens, and so is a `--demuxer-lavf-o` token that sets `rtsp_transport` to anything but `tcp`, `http` or `https`. None of your tokens is on a command line: the player reads them from a private file it is given once (below). The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a virtual machine or any other compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a token that sets one of the on-screen controller's click or wheel commands (a `*_command`, `*_mbtn_*` or `*_wheel_*` key) or contains `${` is refused, because a command can draw your stream address or start a program and `${...}` puts a value such as the address into text on screen; every other key is kept. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller stays, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read; so is its console, because it shows the player's recent error messages, and those can carry your whole stream address; and so are its statistics (`i`, `I`, and the controller's title click), because their file line shows the stream's file name, which for some addresses is the whole address with its password. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries, the `Ctrl+V` key and drag-and-drop (neither adds an address to the player any more), the on-screen controller's title middle-click (it showed your whole stream address), the console, opening the next playlist entry early (it went out with your provider's headers), the statistics, the list of network protocols the media library may open beneath a stream and the list of stream formats it may read, and the certificate checks below; `--drag-and-drop`, `--prefetch-playlist`, `--load-console`, `--load-stats-overlay`, and a `--demuxer-lavf-o` protocol or format list or `seg_format_options` (settings for each HLS segment, which can carry those lists past this check) are refused for that reason. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers, and so is a `--demuxer-lavf-o` token that names `http_proxy`, for the same reason; `--rtsp-transport=udp` (or `udp_multicast` or `lavf`) is accepted with a warning that it opens ports on this computer that anyone can send to, because an `rtsp` channel then receives its stream on ports the player opens, and so is a `--demuxer-lavf-o` token that sets `rtsp_transport` to anything but `tcp`, `http` or `https`. None of your tokens is on a command line: the player reads them from a private file it is given once (below). The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting or a setting that makes the player listen (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts: measured on a software-only compositor, and a virtual machine, not tried, is expected to behave the same); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -387,7 +397,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
-**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress -- but the pictures it already downloaded stay on disk, because a cache you might want again in a minute should not be thrown away by a toggle. The logos of a source you are not using are not kept forever: when the shell starts, and again every time you switch source, the logo folders of all saved sources other than the active one and the two you most recently had logos on for are deleted, and those two are deleted once a day has passed since a fetch last ran for them (a fetch marks its folder when it starts and when it ends, so one the shell stopped early still counts; a folder a running fetch holds is left for the next time). Switching back to a source whose folder was deleted fetches its logos again, which contacts its logo hosts again. When you do want the space back, `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>` deletes one source's logos and nothing else: its channel list, its guide data and the source itself are untouched. `ls ~/.cache/omarchy-iptv/sources/` names the keys. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. Each logo file is capped at 256 KiB: the download stops there, and the body of a redirect on the way is never read at all. A logo has 30 seconds in all, from the lookup of its host's name to its last byte, redirects included, and one fetch starts no new download after an hour; what it leaves is fetched the next time, because a logo already on disk is never fetched again. The cap bounds the download and nothing about what drawing the picture costs: an image decoder works from the size the file's header declares, the bytes do not have to honour it, and a logo of a few hundred bytes can claim to be 20,000 pixels square and cost the shell hundreds of megabytes to draw (a marketplace reviewer reported that against 0.13.3; the measurements are on the `dev` branch at https://github.com/rmcdavid/omarchy-iptv/tree/dev). So a logo is also refused when its header declares a side over 4096 pixels or more than 4,194,304 pixels in all, and a header that cannot be read is refused too. For a GIF the size that counts is the whole area its frames reach, because the decoder places each frame at the position the file gives it: a one-pixel frame placed thousands of pixels from the corner counts as that whole area, and a GIF that declares an empty picture area or an empty frame is refused (a marketplace reviewer reported that against 0.14.1). Those two numbers are not arbitrary: at the bound, the costliest JPEG layout allowed holds about 24 MiB of decoder coefficients, which is the order of memory a logo could already cost before any of this, and a 1920x1080 provider banner passes with room to spare. A PNG can also carry text, colour profiles and other data beside its picture, some of it compressed, and the decoder expands that whatever the file's size suggests (a marketplace reviewer reported that against 0.13.6). So a PNG logo is stored with only what drawing it needs -- its image data and its small colour and transparency settings, copied unchanged, so the picture is the same -- and the rest is dropped; a PNG whose structure cannot be read from start to end is not stored at all. JPEG, GIF and WEBP logos carry nothing the decoder expands beside their pictures and are stored as they arrive. Logos cached by an earlier version were never checked this way, so each one is checked on the next fetch and removed when it fails the same check a new download gets: its header declares a size over the bound, its header cannot be read, its bytes are not one of the four image types the plugin accepts (JPEG, PNG, GIF, WEBP), it is a PNG whose structure cannot be read or that is larger than the 256 KiB cap, or it is larger than the cap with its header past the first 128 KiB the check reads (a file no download of the plugin's own could have left there). A cached PNG that passes is rewritten in place with only what drawing it needs, under the same name. You may see a logo disappear, and it comes back only if the provider's file passes when it is fetched again. The check is a read of each cached file in the helper process (its header, and the whole file for a PNG), never a decode, and it covers every cached file for a logo named in the current playlist on every fetch (a file whose address has left the playlist is neither checked nor announced, so it is never drawn; `cache logos-clear` removes it). One source keeps at most 5,000 logo files, so at most about 1.3 GB at the 256 KiB cap: a fetch counts what is already there, and at that ceiling it first deletes the logo files no channel of your current playlist names any more (they are fetched again if a channel names them later). If the folder is still full it stops and fetches the rest only after `cache logos-clear` makes room. Only one fetch runs for a source at a time; a second one started meanwhile (from a terminal, say, or by a shell that restarted while the first was still running) downloads nothing and changes nothing on disk, but it does report the logos already there that pass the check, so a restarted shell draws them rather than blank rows until the first fetch ends. A logo address that failed -- a timeout, a refusal, an error from its host -- is not tried again for a day: the plugin keeps a small note beside each source's logo folder (the address's hash and the reason, never the address) so a dead host costs one try a day rather than one per fetch, and the live logos behind a run of dead addresses are reached by the next fetch instead of waiting behind them every time; `cache logos-clear` removes the note with the folder, so after it every address is tried again. A fetch that stopped at the ceiling or at its one-hour limit, or that found another fetch running, writes one line in the shell's journal saying so and how many logos it left, with no address in it. A folder an earlier version filled past 5,000 is not added to. The ceiling is per source, and every source you keep in the Sources list has its own; together the folders hold, at any moment, at most three of them -- the active source's and the two you most recently had logos on for, about 3.9 GB at the ceiling -- because the shell deletes the rest when it starts and whenever you switch source (above). A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. The same helper's `logos` subcommand prints that survey from the command line and makes no request. Names, groups, guide titles and every other string the plugin itself draws from a playlist or a guide feed are drawn as plain text (the strings it hands to the shell are drawn by the shell as plain text too, except the body of a failure toast, which the shell's notification card draws behind its own image-tag stripper), so a playlist cannot route around that switch by hiding a picture tag inside a channel name. One caption on the channel wall did let it through: a marketplace reviewer reported that against 0.9.2, and 0.9.3 closes it.
+**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress -- but the pictures it already downloaded stay on disk, because a cache you might want again in a minute should not be thrown away by a toggle. The logos of a source you are not using are not kept forever: when the shell starts, and again every time you switch source, the logo folders of all saved sources other than the active one and the two you most recently had logos on for are deleted, and those two are deleted once a day has passed since a fetch last ran for them (a fetch marks its folder when it starts and when it ends, so one the shell stopped early still counts; a folder a running fetch holds is left for the next time). Switching back to a source whose folder was deleted fetches its logos again, which contacts its logo hosts again. When you do want the space back, `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>` deletes one source's logos and nothing else: its channel list, its guide data and the source itself are untouched. `ls ~/.cache/omarchy-iptv/sources/` names the keys. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. Each logo file is capped at 256 KiB: the download stops there, and the body of a redirect on the way is never read at all. A logo has 30 seconds in all, from the lookup of its host's name to its last byte, redirects included, and one fetch starts no new download after an hour; what it leaves is fetched the next time, because a logo already on disk is never fetched again. The cap bounds the download and nothing about what drawing the picture costs: an image decoder works from the size the file's header declares, the bytes do not have to honour it, and a logo of a few hundred bytes can claim to be 20,000 pixels square and cost the shell hundreds of megabytes to draw (a marketplace reviewer reported that against 0.13.3; the measurements are on the `dev` branch at https://github.com/rmcdavid/omarchy-iptv/tree/dev). So a logo is also refused when its header declares a side over 4096 pixels or more than 4,194,304 pixels in all, and a header that cannot be read is refused too. For a GIF the size that counts is the whole area its frames reach, because the decoder places each frame at the position the file gives it: a one-pixel frame placed thousands of pixels from the corner counts as that whole area, and a GIF that declares an empty picture area or an empty frame is refused (a marketplace reviewer reported that against 0.14.1). Those two numbers are not arbitrary: at the bound, the costliest JPEG layout allowed holds about 24 MiB of decoder coefficients, which is the order of memory a logo could already cost before any of this, and a 1920x1080 provider banner passes with room to spare. A PNG can also carry text, colour profiles and other data beside its picture, some of it compressed, and the decoder expands that whatever the file's size suggests (a marketplace reviewer reported that against 0.13.6). So a PNG logo is stored with only what drawing it needs -- its image data and its small colour and transparency settings, copied unchanged, so the picture is the same -- and the rest is dropped; a PNG whose structure cannot be read from start to end is not stored at all. JPEG, GIF and WEBP logos carry nothing the decoder expands beside their pictures and are stored as they arrive, except that a progressive JPEG built from far more passes than any image encoder writes is refused, because the decoder spends time on every pass on the thread every picture in the shell waits behind (since 0.16.0). Logos cached by an earlier version were never checked this way, so each one is checked on the next fetch and removed when it fails the same check a new download gets: its header declares a size over the bound, its header cannot be read, its bytes are not one of the four image types the plugin accepts (JPEG, PNG, GIF, WEBP), it is a JPEG with too many passes, it is a PNG whose structure cannot be read or that is larger than the 256 KiB cap, or it is larger than the cap with its header past the first 128 KiB the check reads (a file no download of the plugin's own could have left there). A cached PNG that passes is rewritten in place with only what drawing it needs, under the same name. You may see a logo disappear, and it comes back only if the provider's file passes when it is fetched again. The check is a read of each cached file in the helper process (its header, and the whole file for a PNG), never a decode, and it covers every cached file for a logo named in the current playlist on every fetch (a file whose address has left the playlist is neither checked nor announced, so it is never drawn; `cache logos-clear` removes it). One source keeps at most 5,000 logo files, so at most about 1.3 GB at the 256 KiB cap: a fetch counts what is already there, and at that ceiling it first deletes the logo files no channel of your current playlist names any more (they are fetched again if a channel names them later). If the folder is still full it stops and fetches the rest only after `cache logos-clear` makes room. Only one fetch runs for a source at a time; a second one started meanwhile (from a terminal, say, or by a shell that restarted while the first was still running) downloads nothing and changes nothing on disk, but it does report the logos already there that pass the check, so a restarted shell draws them rather than blank rows until the first fetch ends. A logo address that failed -- a timeout, a refusal, an error from its host -- is not tried again for a day: the plugin keeps a small note beside each source's logo folder (the address's hash and the reason, never the address) so a dead host costs one try a day rather than one per fetch, and the live logos behind a run of dead addresses are reached by the next fetch instead of waiting behind them every time; `cache logos-clear` removes the note with the folder, so after it every address is tried again. A fetch that stopped at the ceiling or at its one-hour limit, or that found another fetch running, writes one line in the shell's journal saying so and how many logos it left, with no address in it. A folder an earlier version filled past 5,000 is not added to. The ceiling is per source, and every source you keep in the Sources list has its own; together the folders hold, at any moment, at most three of them -- the active source's and the two you most recently had logos on for, about 3.9 GB at the ceiling -- because the shell deletes the rest when it starts and whenever you switch source (above). A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. The same helper's `logos` subcommand prints that survey from the command line and makes no request. Names, groups, guide titles and every other string the plugin itself draws from a playlist or a guide feed are drawn as plain text (the strings it hands to the shell are drawn by the shell as plain text too, except the body of a notification, which the shell's notification card draws as styled text behind its own image-tag stripper; since 0.16.0 the plugin escapes that body, so markup in a channel name shows as the characters it is written with), so a playlist cannot route around that switch by hiding a picture tag inside a channel name. One caption on the channel wall did let it through: a marketplace reviewer reported that against 0.9.2, and 0.9.3 closes it.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -425,10 +435,11 @@ restarted (stop and play again). Two things behave differently in that file:
 an option mpv cannot understand is skipped instead of stopping the player from
 starting (mpv says so only on its own output, which the plugin discards, so a
 typo now fails quietly), and `--no-config` no longer stops mpv
-reading your own mpv config (remove the line from your config instead).
-The same goes for the keys that name your sources and the ids of channels:
-neither is on a command line any more, and a source you add from now on gets a
-random key rather than one worked out from its address.
+reading your own mpv config (to keep a setting of that config out of this
+player, take it out of the config). The keys that name your sources and the
+ids of channels reach the helper the same private way: neither is on a
+command line any more, and a source you add from now on gets a random key
+rather than one worked out from its address.
 
 **The player checks your provider's certificate.** Up to and including 0.12.1
 it did not. mpv leaves its own `--tls-verify` off unless something turns it
@@ -467,9 +478,14 @@ once, and nothing for you to do. If that player will not accept the change it
 is stopped instead of being handed your stream address again: press Enter on
 the channel and a fresh, verified player starts. The same happens to a player
 started by 0.15.0 or earlier whose mpv config holds a per-protocol or
-per-extension profile that touches the certificate settings, because nothing
-can stop that profile applying to a player that was not started with the
-new settings; every other player from before the update rebuffers once.
+per-extension profile that sets any of the options the plugin now sets after
+yours (the certificate settings among them), or a `reset-on-next-file` list,
+because nothing can stop either undoing those settings at the next channel
+in a player that was not started with them; every other player from before
+the update rebuffers once, and is also given every other protection a
+running player can take (the select menu, the console and the statistics
+off, `Ctrl+V` and drag-and-drop off, no core dump). It keeps its old command
+line, though, until it is stopped and played again (above).
 
 The cost, because it is not free for everyone: a provider whose certificate is
 self-signed, or signed by a CA your system does not already trust, stops
@@ -666,8 +682,15 @@ own cache, so switching back is instant.
 In a form: `Tab` moves between fields, `Ctrl+V` or `Shift+Insert` pastes,
 `Ctrl+U` clears the field, `Enter` saves, `Esc` cancels. Saved URLs are shown
 masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
-while editing. Only `http://`, `https://`, and absolute paths are accepted,
-and no prefix is guessed. One thing to know before you choose: `http://`
+while editing. Revealing is for the screen only: what a field publishes on
+the desktop accessibility bus, which screen readers and every program
+running as you can read (Quickshell 0.3.2 carries the upstream change
+that lets a shell window publish there), is always masked, since 0.16.0: a
+URL, the Xtream server's included, with its user name, password and query
+values hidden; a local path and the label as typed; and the username, the
+password and a server typed without `http://` as one `*` per character.
+Only `http://`, `https://`, and absolute paths are accepted, and no prefix
+is guessed. One thing to know before you choose: `http://`
 sends the address and any password in it unencrypted, to anyone on the path
 between you and the provider, and `https://` does not. An Xtream username and
 password travel inside that address. The form says so on its own line while
@@ -713,12 +736,15 @@ ignored` notification and changes nothing here (Settings above has the
 detail). A guide-data URL belongs to its source: set it in the add form, or
 later with `e`, and clear it there. If your playlist names its own guide and
 the source has none, that one is used and the Sources screen says so --
-unless that address is on this computer or your local network and not on
-the playlist's own server, or carries a user name or password: then it is
-not used, nothing is fetched from it, and the Sources row says `EPG from
-playlist not used` with the reason. Type it into the source's EPG field to
-use it anyway. A guide the playlist names over plain `http://` while the
-playlist itself is `https://` reads `EPG from playlist over plain http`.
+unless that address is written as one on this computer or your local
+network and is not the playlist's own server, or carries a user name or
+password: then it is not used, nothing is fetched from it, and the Sources
+row says `EPG from playlist not used: ...` with the reason. (One given by a
+host name that leads there is used, and its download stops at the
+connection with `Refused a local address`, as under Limits.) Type it into
+the source's EPG field to use it anyway. A guide the playlist names over
+plain `http://` while the playlist itself is `https://` reads
+`EPG from playlist over plain http`.
 Channels are matched to the guide by id and, when the ids do not agree, by
 name -- which is usually what happens, because playlists and guides rarely
 come from the same place. Up to 50 sources are kept, and this list is the
@@ -750,20 +776,38 @@ carry channel ids — most do — are not affected at all.
   *language* is a different feature and is not here yet.
 - Playback survives `omarchy restart shell`. The player runs on its own and
   the guide reattaches to it, so a restart, a theme change or installing
-  another plugin all leave what you are watching alone.
+  another plugin all leave what you are watching alone. (Not yet measured
+  again on Omarchy 4.0.6, whose `omarchy-restart-shell` can take longer to
+  end the old shell than the plugin's check for an orphaned player allows;
+  if the player stops when you restart the shell, press `Enter` on the
+  channel.)
 - A stream that fails shows a desktop notification naming the channel, and
-  the guide marks it until the channel plays again. A channel that simply
-  ends is silent: the window closes and nothing is reported, because nothing
-  went wrong.
+  the guide marks it until the channel plays again. A failure on this
+  computer's side marks no channel and is told under its own title:
+  `Could not start playback` when the player cannot be started here (its
+  runtime folder, mpv itself, the player's socket path, a busy player),
+  `Playback stopped` when the player stops without the stream reporting a
+  problem (a crash, a kill, running out of memory), and
+  `Audio output failed` when this computer's sound output cannot be
+  opened. A notice of
+  the same kind updates the card already on screen rather than stacking
+  another. A channel that simply ends is silent: the window closes and
+  nothing is reported, because nothing went wrong.
 - Stop clears the bar and guide immediately. If mpv ignores the quit request
   it is terminated, and if it ignores that too it is killed, within about
   four seconds. Playing a channel while the old player is still shutting
   down starts a fresh player once it has exited.
 - No stream address, credential or header value ever reaches **the player's**
   command line. The player starts empty and receives all of it over a private
-  socket only you can read. Two things are briefly visible to other local
-  accounts in `ps`: the channel's internal identifier while a change is being
-  issued, and the channel's name while a failure notification is being sent.
+  socket only you can read. What a notification says is briefly visible to
+  other local accounts in `ps`, because its text is on its command line
+  while it is being sent: from your playlist, that is a channel's name and
+  the reason it did not play, a web address in either shown as its host.
+  The channel's
+  internal identifier, visible there while a change was being issued up to
+  and including 0.15.0, now reaches the helper privately with its other
+  private arguments, as your `mpvArgs` tokens and your sources' keys do
+  (Settings above).
   Your playlist URL and your guide-data URL, each of which on an Xtream
   provider carries your username and password, no longer appear anywhere on
   a command line the plugin starts: they reach the helper in its
@@ -780,8 +824,14 @@ carry channel ids — most do — are not affected at all.
   moments before the stop can run. See Uninstall for how to reap a stray
   player, or simply log out, which always reaps it. And a stream that fails while the shell is down
   cannot raise a notification, because the notification service is the shell
-  itself; the channel is marked as failed in the guide instead, the next time
-  you open it.
+  itself. Nor is the channel marked any more when the shell comes back: by
+  then nothing can tell a dead stream from a crash, a kill or a logout, so
+  the plugin marks nothing (up to and including 0.15.0 it marked the
+  channel the next time you opened the guide).
+- A player that crashes leaves no core dump, because a core would hold your
+  stream address and your provider's headers. The crash is still recorded
+  in the system journal and Omarchy's crash notification still appears,
+  but there is no core behind it -- for your own diagnosis either.
 - Channel names are shown as written, except that leading dashes are
   stripped, a web address written into a name or a group (one written
   with its scheme, such as `http://`) is shown as its host wherever the
@@ -802,11 +852,16 @@ carry channel ids — most do — are not affected at all.
   them somewhere else, add `--screenshot-dir=/path` to `mpvArgs`. mpv's own
   arrow keys seek inside the same buffer the guide's `b` and `w` use; the
   bar's behind-live number catches up with them on its next ten-second
-  status read rather than at once. Three of mpv's own do nothing in this
+  status read rather than at once. Some of mpv's own do nothing in this
   player: `Ctrl+V` (it added the clipboard's address to the playlist, where
   it was sent your provider's headers), dropping a link on the window (the
-  same), and a middle click on the on-screen controller's title (it showed
-  your whole stream address).
+  same), a middle click on the on-screen controller's title (it showed
+  your whole stream address), the select menus (`g` followed by a letter,
+  and `Ctrl+P`; one of them handed your stream address to another program
+  on a command line other accounts can read), the console (the backtick
+  key; it shows the player's recent errors, which can carry the whole
+  address) and the statistics pages (`i` and `I`; their file line can show
+  the address with its password).
 
 ## Limits
 
@@ -858,8 +913,9 @@ carry channel ids — most do — are not affected at all.
   credentials are dropped when a redirect changes host. An address you
   type may be on this computer or your local network (a TVHeadend, a NAS);
   what the provider chooses -- a redirect to another host, the playlist's
-  guide address, a logo -- may not, and shows `Refused a local address`
-  (a redirect that stays on the host you typed is fine; on this computer
+  guide address, a logo -- may not: a playlist or guide download sent there
+  shows `Refused a local address`, and a logo there is not fetched (a
+  redirect that stays on the host you typed is fine; on this computer
   -- `127.0.0.1`, `localhost` -- the host is the address AND the port, so a
   local relay such as Threadfin may redirect within its own port but not
   to another program's). When the server's
@@ -869,8 +925,10 @@ carry channel ids — most do — are not affected at all.
   day old is deleted the next time the plugin writes in that folder.
 - A guide-data file that carries declarations of its own (anything inside
   `[...]` in its `<!DOCTYPE ...>`, such as an `<!ENTITY ...>` or
-  `<!ATTLIST ...>`) is refused with `refused the EPG: it carries a DTD
-  internal subset, which XMLTV feeds never do`. A size limit on the
+  `<!ATTLIST ...>`) is refused: the guide-data banner says
+  `Not a valid XMLTV guide`, and the helper's own message, in the source's
+  `epg-status.json`, says `refused the EPG: it carries a DTD internal
+  subset, which XMLTV feeds never do`. A size limit on the
   download cannot bound what such declarations expand to, and XMLTV files
   never contain them; the usual `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
   line is fine (a marketplace reviewer reported this against 0.14.1).
@@ -881,8 +939,10 @@ carry channel ids — most do — are not affected at all.
   to send to -- a unicast or `0.0.0.0` address, `srt://` in listener or
   rendezvous mode, or a `localport`, `localaddr`, `reuse` or `listen`
   setting in the address -- is skipped. A playlist from the internet may not
-  point channels at addresses on this computer or your local network (a
-  playlist from your own network or a file may), and a sign-in header it
+  point channels at addresses on this computer or your local network
+  written out as such (a playlist from your own network or a file may; the
+  player looks up a channel's host name itself, so a name that leads there
+  is not caught), and a sign-in header it
   sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
   only for channels on the playlist's own server -- on this computer, its
   own port. A playlist served from this computer (a relay such as Threadfin
@@ -892,8 +952,11 @@ carry channel ids — most do — are not affected at all.
   footer's `Playlist warning: ...`.
   A channel list saved by an earlier version is checked the same way when
   you play a channel from it, so a list whose first refresh after the
-  update failed cannot reach these addresses either; such a channel says
-  `Refused a local address`.
+  update failed cannot reach these addresses either. When such a channel
+  is the one that starts the player, its failure card says
+  `Refused a local address`; as a change of channel while another plays,
+  the player simply stays where it was, with a line in the shell's journal
+  and no card.
 - A channel whose server answers with a playlist instead of a stream -- a
   plain `.m3u` or `.pls` "redirector" -- is not played: its entries were
   never checked by any of the above, and could make the player listen on
@@ -945,8 +1008,10 @@ itself unavailable rather than half working.
   their URLs, and -- while a playlist from the bar waits for a free place in
   Sources (Settings above) -- that playlist and its guide-data URL (mode
   0600; a file you put there yourself -- a `mv` of an
-  edited copy, or `rm` and `cp` -- keeps the mode it came with, 0644 say,
-  through the plugin's saves until the next shell start makes it 0600).
+  edited copy, or `rm` and `cp` -- at another mode, 0644 say, is made 0600
+  again moments after the plugin's next save lands, with one line in the
+  shell's journal; up to and including 0.15.0 it kept that mode until the
+  next shell start).
   **This is the only copy of your source list and of
   your provider URLs**: lose it and you add your sources again by hand, and a
   copy you keep carries your provider username and password inside the URLs
@@ -994,15 +1059,21 @@ itself unavailable rather than half working.
   player's own `s` key (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket (`mpv.sock`)
   while it is running, a small lock file (`player.lock`, one line, no
-  address) used to guarantee only one player exists, and
+  address) used to guarantee only one player exists, `mpv-args.conf` (your
+  `mpvArgs` tokens, mode 0600, there only while a player starts: it is
+  deleted as soon as the player answers, and not written when you set no
+  `mpvArgs`), and
   two directories that exist only until you log out -- `shader-cache` for
   mpv's compiled shaders and ICC profiles, and `watch-later` for its resume
   records. Both would otherwise land in `~/.cache/mpv/` and
   `~/.local/state/mpv/`, outside this list; the player is pointed at the
   runtime directory instead so nothing durable accumulates in your home.
   A shader cache is content-free and is not keyed to what you watched.
-  This is a default rather than a guarantee: neither path is reserved, so
-  an `mpvArgs` token of your own can still send them elsewhere.
+  For the shader cache this is a default rather than a guarantee: its
+  path is not reserved, so an `mpvArgs` token of your own can still send it
+  elsewhere. The resume folder is held: `--watch-later-dir` is refused in
+  `mpvArgs`, and since 0.16.0 the plugin sets it after your tokens and your
+  mpv config as well.
 
 One file in this list is not the plugin's:
 
@@ -1200,8 +1271,11 @@ Nothing inside the plugin directory is written at runtime.
   a replacement is written over as before, and a link re-pointed at a file
   that does not exist, or a folder link at a folder with no `state.json`,
   gets a new one created there, holding your sources and provider URLs, at
-  0644 under the usual umask 022 -- so after re-pointing a link, check the
-  new place with `ls -l` and `chmod 600` a `state.json` you did not expect.
+  0644 under the usual umask 022 -- for the moments until that save lands,
+  when the plugin makes it 0600 and its folder 0700 and says so in the
+  shell's journal (`state.json's mode was repaired after a save`; up to and
+  including 0.15.0 it stayed 0644 until the next shell start). After
+  re-pointing a link, check the new place with `ls -l` all the same.
   Up to and including 0.14.3 there was a third such window: a save asked
   for while the plugin's previous save was still being written did not
   read the file first. Now it waits for that write to land and then reads
@@ -1259,8 +1333,9 @@ Nothing inside the plugin directory is written at runtime.
   `state.json` the link now leads to. If there is one, it is kept (outside
   the two windows above), the change that made the save is added to it, and that is what the guide
   shows and saves to from then on; the folder the link used to lead to is
-  left as it was. The file keeps the permissions it has until the next
-  shell start makes the folder 0700 and the file 0600. If the new folder
+  left as it was. The file keeps the permissions it has only until that
+  save lands: then the plugin makes the folder 0700 and the file 0600 (up
+  to and including 0.15.0, the next shell start did). If the new folder
   holds no `state.json` (an empty folder, say), nothing is created there,
   outside the two windows the bullet above names: the plugin stops saving, and
   says so once (**Saving has stopped**, `... could not be found, or its
@@ -1313,7 +1388,11 @@ Nothing inside the plugin directory is written at runtime.
   `state.json was changed by another program while a change made here was
   not yet saved; kept the other program's version of ...`, naming the
   setting, or the source's short code and the fields that differed --
-  never a URL or a value. If keeping both would go past a limit (50
+  never a URL or a value -- and, since 0.16.0, one notification titled
+  **Settings merged** says the same in a sentence for each, naming a source
+  by the fields that differed and never by its short code. When the other
+  program removed the source that was active, no source is active
+  afterwards, and the notification says so. If keeping both would go past a limit (50
   sources, 20 saved searches, 200 hidden groups), the other program's
   version keeps its place and what was added in the guide past the limit
   is not kept: a notification titled **Not every change was kept** says how
@@ -1330,9 +1409,12 @@ Nothing inside the plugin directory is written at runtime.
   back has no effect: while a save of the plugin's has failed or is still
   under way, a backup identical to the file as the plugin last knew it is
   taken for nothing having happened, and the change made in the guide is
-  then saved over it. Usually that is exactly what the file already held;
-  after a rare burst of saves whose first was written and a later one
-  failed, it can be the file from one save earlier. If the new contents are NOT a state -- a broken hand edit, a
+  then saved over it. That is what the file already held: since 0.16.0 the
+  plugin's record of the file follows every save that was written, so after
+  a rare burst of saves whose first was written and a later one failed, a
+  backup of the file from before the burst is merged as another program's
+  change (up to and including 0.15.0 it was taken for nothing having
+  happened and written over). If the new contents are NOT a state -- a broken hand edit, a
   truncated copy -- the plugin keeps the channels and sources it is
   showing, writes nothing, and behaves as above until the file is fixed, so
   your broken edit is still in the file for you to repair. For a regular

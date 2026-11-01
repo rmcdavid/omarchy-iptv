@@ -1434,6 +1434,20 @@ ShellRoot {
       return s ? JSON.stringify(s.buildXtreamSource({ server: server, username: username, password: password })) : "{}"
     }
     function sources(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.sources) : "[]" }
+    // F-HARNESS-86 (2026-11-01): the key the shell ALLOCATED for a URL, read
+    // back -- since D-SINK-48 a new source's key is random and no scenario
+    // can predict it. `keys` are the in-memory records whose URL is `url`
+    // (HarnessLib.sourceKeysByUrl, the function node runs over state.json
+    // too), beside the service's active key and the in-memory state's, so
+    // one round trip answers "is the source for this URL the active one".
+    // Keys only: the URL goes in on the argv and never comes back out.
+    function keyOfUrl(url: string): string {
+      var s = serviceLoader.item
+      if (!s) return JSON.stringify({ keys: [], active: "", memory: "" })
+      var st = s.userState
+      return JSON.stringify({ keys: HarnessLib.sourceKeysByUrl(Model, st ? st.sources : [], url),
+                              active: String(s.activeSourceKey || ""), memory: st && st.activeKey !== undefined ? String(st.activeKey) : "" })
+    }
     // M2-04. Drives the REAL Sources key path (handleSourcesLetter) rather
     // than calling the toggle directly, so a scenario exercises the same
     // dispatch a keystroke would: `g` must reach toggleLogos through the
