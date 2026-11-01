@@ -1505,6 +1505,15 @@ found `Color` defined by those imports in all three files without the
 pragma and none with it; the only other name defined was `BarWidget`, the
 plugin directory's own file, which the guard does not judge.
 
+What the fix does not reach (F-HARNESS-87): the dev harness's own root,
+`scripts/dev-harness/shell.qml`, carries no pragma and names `Color` bare in
+eight places, its fake `PluginBarApi` among them. Probed in the same run
+with that root's header, `Color` is `QQuickColor`, `Color.foreground` is
+undefined and `Color.bar.text` throws, so under the harness the plugin's bar
+reads the fake's default black from `bar.barForeground`, where the host's
+own bar hands it the theme's. The guard judges shipped files only and
+names each of the eight when pointed at that file.
+
 What holds it now, and what the patch's pins still say:
 
 - `scripts/check-theme-names.py` (the gate's "theme name guard") reads every
