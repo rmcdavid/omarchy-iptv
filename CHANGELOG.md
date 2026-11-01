@@ -3,6 +3,406 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.16.0 (2026-11-01)
+
+**Security, and failures told for what they are.** This release carries
+the fixes from the plugin's own review of its whole codebase (2026-10-29 to
+2026-10-31) and a sweep of the open P2 and P3 rows on its board: where a
+playlist may make this computer connect or listen, the player's safety
+settings set after your own `mpvArgs` and mpv config, your `mpvArgs` and
+your sources' keys taken off the helper's and the player's command lines,
+and a failure on your own computer told as yours instead of marking the
+channel. It also masks the Sources form on the desktop accessibility bus,
+which Quickshell 0.3.2, installed by recent system updates, lets a shell
+window publish to. What to do: **restart the shell**
+(`omarchy-restart-shell`); expect each source's playlist to be downloaded
+once more, whatever its age, the first time it is the active source after
+the update; and if a channel was playing when you updated, expect one short
+rebuffer when the new shell picks the player up -- or, when your own mpv
+config keeps that player from taking the new settings, a stop: press
+`Enter` on the channel and a fresh player starts. If you set `mpvArgs`,
+look at the guide's footer after the restart: an option this release
+refuses is named there.
+
+### Changed
+
+- **What a playlist chooses may no longer reach this computer or your
+  local network.** An address you type may be anywhere, a TVHeadend or a
+  NAS included. What the provider chooses -- a redirect, the guide address
+  a playlist names, a channel logo -- may be on this computer or your
+  network only when it stays on the playlist's own server (on this
+  computer, its own port as well), and a logo never; a playlist or guide
+  download sent there stops with `Refused a local address`. The check is
+  made on the address each connection actually reaches, so a host name
+  that leads there is caught too. A guide address a playlist names that
+  carries a user name or password, or that is written as a local address
+  and is not the playlist's own server, is not used at all: the Sources row
+  says `EPG from playlist not used` with the reason, and typing it into the
+  source's EPG field uses it. Logos on this computer or your network no
+  longer load. (D-SINK-40, D-SINK-57)
+- **Channels are held to the same rule, and none may make the player
+  listen.** A playlist from the internet may not point a channel at an
+  address on this computer or your local network written out as one (the
+  player looks up a channel's host name itself, so a name that leads there
+  is not caught); one from your own network or a file may, and a relay on
+  this computer (Threadfin, xTeVe) may name channels on your network but,
+  on this computer, only on its own port. A `udp://` or `rtp://` channel
+  must be a multicast group, as ISP television uses. A channel address
+  that would have the player listen for anyone on your network to send to,
+  or that carries a control character, is skipped; each skip is counted in
+  the footer's `Playlist warning: ...`. A sign-in header a playlist sets
+  (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is sent only
+  to channels on the playlist's own server (on this computer, its own
+  port), and none at all for a playlist read from a file; your provider's
+  headers go only with the channel the plugin loads, never with an entry
+  the player was handed some other way. (D-SINK-41, D-SINK-42, D-SINK-54,
+  D-SINK-56, D-SINK-57, D-PLY-44)
+- **The player opens only the stream formats IPTV uses.** A channel whose
+  server answers with a playlist file (a `.m3u` or `.pls` redirector) or a
+  web page fails with `The address sent a playlist file or a web page,
+  which the player does not open`; use the stream address inside it. HLS,
+  DASH, MPEG-TS, MP4, Matroska, FLV, MP3, AAC, AC-3 and E-AC-3, Ogg, FLAC,
+  ASF, RTSP and WebVTT subtitles play as before; a channel in another
+  format -- a raw H.264 or HEVC stream, a camera's MJPEG, AVI, MPEG-PS, WAV,
+  RealMedia over RTSP -- now fails with the same sentence. With
+  `--ytdl=yes`, a page that yt-dlp splits into separate video and audio
+  streams fails the same way; one it resolves to a single stream still
+  plays. (D-PLY-44, D-SINK-55, D-SINK-62, D-PLY-47)
+- **The player's safety settings come after yours.** The plugin now sets,
+  after your `mpvArgs` and after anything your mpv config says, every
+  option its protections depend on -- the certificate checks, the script
+  list, startup commands, conditional auto-profiles, watch history, the log
+  file, the resume folder, unsafe nested playlist entries, the list of
+  network protocols and the list of stream formats the media library may
+  open -- and reads the certificate settings and those two lists back
+  before every channel. A `--demuxer-lavf-o` setting can no longer turn
+  certificate checking off for the pieces of an HLS stream, as it could up
+  to 0.15.0. Your mpv
+  config still applies inside this player except for conditional
+  auto-profiles (`profile-cond`), a `[pseudo-gui]` profile, and any line for
+  an option the plugin sets after yours. (D-SINK-43, D-SINK-44, D-SINK-51,
+  D-SINK-55, D-SINK-62, D-SINK-64, D-SINK-66)
+- **Some of mpv's own features are off in this player**, because each
+  could show your stream address, hand it to another program, or send your
+  provider's headers to an address nothing checked: the select menus (`g`
+  followed by a letter, `Ctrl+P`), the console, the statistics pages (`i`,
+  `I`), `Ctrl+V`, dropping a link on the window, the on-screen
+  controller's title middle-click, and opening the next playlist entry
+  early. The controller itself stays. (D-SINK-46, D-SINK-52, D-SINK-61,
+  D-SINK-63, D-SINK-67, D-PLY-46)
+- **More `mpvArgs` options are refused, and a few more are warned about.**
+  Every option of the installed mpv 0.41.0 is now classified. Newly
+  refused: `--input-commands`, `--input-conf`, `--load-auto-profiles`,
+  `--load-select`, `--load-console`, `--load-stats-overlay`,
+  `--load-unsafe-playlists`, `--save-watch-history`,
+  `--watch-history-path`, `--watch-later-directory`,
+  `--reset-on-next-file`, `--prefetch-playlist`, `--drag-and-drop`,
+  `--player-operation-mode`, `--playlist`, `--stream-dump`, `--o`,
+  `--ao-pcm-file`, `--vo-image-outdir`, `--osd-playing-msg`,
+  `--osd-status-msg`, `--osd-playlist-entry`, `--term-playing-msg`,
+  `--term-title`, `--demuxer-lavf-propagate-opts`, and the external audio,
+  subtitle, chapters and cover-art file options; a `--demuxer-lavf-o`
+  token naming a TLS setting, a setting that makes the player listen, a
+  protocol or format list, or `seg_format_options`; and a `--script-opts`
+  token that sets one of the on-screen controller's click or wheel
+  commands or contains `${`. Still accepted, and now warned about in the
+  footer where 0.15.0 said nothing: `--http-proxy`, and a
+  `--demuxer-lavf-o` token naming `http_proxy`, because a proxy receives
+  the whole address of a plain-`http` stream and your provider's headers;
+  and `--rtsp-transport=udp` (or `udp_multicast`, `lavf`), and a
+  `--demuxer-lavf-o` token setting `rtsp_transport` to anything but `tcp`,
+  `http` or `https`, because the player then opens ports on this computer
+  that anyone can send to. The footer's one warning line names a refused
+  option first, by name only, and counts the rest (`+1 more`), where
+  0.15.0 wrote a refusal only to the shell's journal. (D-SINK-45,
+  D-SINK-51, D-SINK-52, D-SINK-53, D-SINK-59, D-SINK-64, D-SINK-65,
+  F-UX-7)
+- **Your `mpvArgs` tokens, your sources' keys and channel ids are off the
+  helper's and the player's command lines.** A program's command line can
+  be read by every account on the computer, and a token is where a proxy
+  password or a header value goes. The shell now hands these to its helper
+  privately, and the helper gives your tokens to the player in a file only
+  your account can read, deleted as soon as the player has read it. A
+  source you add from now on gets a random key instead of one worked out
+  from its address. Two things behave differently: an option mpv cannot
+  understand is skipped instead of stopping the player from starting, and
+  `--no-config` in `mpvArgs` no longer stops mpv reading your own mpv
+  config (to keep a setting of that config out of this player, take it out
+  of the config). A token that cannot be written as one line of that file
+  is refused by name. (D-SINK-47, D-SINK-48)
+- **The helper ignores your Python environment.** It starts as
+  `python3 -I`, so what `PYTHONPATH` and your user site-packages hold (a
+  `sitecustomize` there, say) no longer runs inside it before it hides your
+  provider address from other programs. That moment stays at about 25 ms:
+  medians of 23 and 25 ms, and 21 to 40 ms in all, over 24 runs at a load
+  average of 2 to 3. (D-SINK-50)
+- **The player accepts a software renderer.** `--gpu-sw=yes` is among its
+  own options, so on a compositor with no hardware GL or Vulkan to give it
+  the player comes up, slower, instead of aborting on every channel change
+  (measured on a software-only compositor; a virtual machine is expected to
+  behave the same and was not tried). The cost: on a machine whose GL is
+  hardware but whose only Vulkan device is a software one, mpv now takes
+  that software Vulkan path (read from mpv's order, not measured).
+  `--gpu-sw=no` in `mpvArgs` turns it off. (D-PLY-27)
+- **A player that crashes leaves no core dump.** A core held your stream
+  address and your provider's headers, readable by programs running as you
+  for two weeks by default, and Omarchy's crash notification offers to
+  point an AI agent at it. The crash is still recorded in the system
+  journal and the notification still appears, but there is no core behind
+  it -- for your own diagnosis either, and no `mpvArgs` option brings it
+  back. A player the shell picks up after the update is given the same
+  limit. (D-SINK-39)
+- **A repeated notice updates its own card.** Each kind of notice keeps
+  the id Omarchy's notification server hands back and sends it with the
+  next one, so a repeat refreshes the card already on screen instead of
+  stacking another; the fixed numbers earlier versions sent never replaced
+  a card on Omarchy's notification server, so every repeat stacked. A card
+  that has already closed is posted fresh. (D-HOST-5)
+- **A failure on your own computer is told as one, and marks no channel.**
+  When the player cannot start because of something here -- its runtime
+  folder or lock cannot be made, mpv cannot be run, the computer has run
+  out of processes or open files, something else sits where the player's
+  socket goes, the player is busy, the helper ran out of memory -- you get
+  `Could not start playback` with the channel and the reason (`Could not
+  write the player's runtime folder`, `Could not start mpv`, `Something
+  else is at the player's socket path`, `The player is busy`, `Helper ran
+  out of memory`), on every try, as one card each try updates. 0.15.0
+  titled it `Stream failed`, at times over an internal message, and marked
+  the channel, so every channel you tried turned red; a channel marked that
+  way clears when it plays, or after a fortnight. A player that stops
+  without the stream reporting a problem -- a crash, a kill, running out of
+  memory, in the
+  first seconds of a channel or an hour in -- is told as `Playback stopped`,
+  the channel having stopped unexpectedly, and marks nothing; the card no
+  longer quotes an unrelated graphics-driver line. When this computer's
+  sound output cannot be opened (no sound device, the sound server not
+  running), `Audio output failed` says so and the channel is not marked. A
+  channel whose player stopped while the shell was not running (when you
+  logged out, say) is no longer marked at the next start. Pressing play
+  right after a stop, when the player then cannot start, now says why
+  instead of nothing. (D-PLY-30, D-PLY-31, D-PLY-32, D-PLY-33, D-PLY-34,
+  D-PLY-36, D-PLY-37, D-PLY-41)
+- **The guide's failures read a sentence and blame no provider for this
+  computer's faults.** A cache write that fails -- the channel list, guide
+  data, a logo, a dead-channel mark -- reads `Could not write the cache`; a
+  folder of the plugin's that is a
+  broken link or not a folder reads `A folder the plugin uses is a broken
+  link or not a folder`, never its path; an error the helper did not
+  foresee reads `Helper failed unexpectedly` instead of its raw exception
+  text (the journal keeps the detail, redacted). None of these, nor
+  `Helper timed out`, is followed by `from <your provider's host>` any
+  more. A guide address that does not serve a valid XMLTV guide reads `Not
+  a valid XMLTV guide`, and one whose guide lists no programmes `Guide has
+  no programmes`, instead of the parser's own words. A logo run stops
+  contacting logo hosts once their logos cannot be saved. (D-SRC-69,
+  D-SRC-71, D-SRC-72, D-SRC-73, D-EPG-13)
+- **`Settings merged`.** When another program changes `state.json` while
+  a change made in the guide is still being saved, and both touched the
+  same thing, a notification now names what kept the other program's
+  version -- a source by its short code and the fields, the active source,
+  the recent list, the last played channel -- never a value or an address;
+  before, only the journal said so. When the other program removed the
+  source that was active, no source is active, and the notification says
+  that too. (D-SRC-33, D-SRC-37)
+- **`state.json` is made private again after every save.** A `state.json`
+  you put in place at another mode (0644 after a `mv` or `cp`), or one a
+  save creates where a re-pointed link now leads, is made 0600, and its
+  folder 0700, moments after the plugin's next save lands, with one journal
+  line saying so; 0.15.0 left it until the next shell start. (D-SRC-49,
+  D-SINK-22)
+- **The form states what `http://` costs.** While a Playlist, EPG or
+  Xtream server field holds an `http://` address, the form's advice line
+  says `http:// sends the address and any password in it unencrypted;
+  https:// does not`. Nothing is refused: many providers offer nothing
+  else. (D-SINK-14)
+- **At most three sources' logo folders are kept.** When it starts and at
+  every switch, the shell keeps the logo folder of the active source and
+  those of the two you most recently had logos on for -- each of those two
+  until a day has passed since a fetch last ran for it -- and deletes every
+  other, whatever its age: about 3.9 GB at most at the 5,000-logo ceiling,
+  where 0.15.0 could keep one for every source switched to within a day.
+  (D-LOGO-17)
+- **The Sources form's fields reach the accessibility bus masked.**
+  Quickshell 0.3.2, which recent system updates install, carries the
+  upstream change that lets a shell window publish to the desktop
+  accessibility bus, which screen readers read and which every program
+  running as you can read too, so the guide's form fields are treated as
+  published there. Each field there now carries a masked value, whether or
+  not you have revealed the field on screen: a URL, the Xtream server's
+  included, with its user name, password and query values hidden; a local
+  path and the label as typed; and the username, the password and a server
+  typed without `http://` as one `*` per character. Before, measured with
+  the guide in a test window on that platform, the Xtream server and
+  username went out as typed; a revealed URL went out in full, read in the
+  code. (D-A11Y-1)
+
+### Fixed
+
+- **Adding a source in the first moment after the shell starts** no longer
+  goes wrong: the start-up cleanup of old caches could delete the new
+  source's channel list, so the add failed with a raw error message, or
+  the new source showed 0 channels until the next restart. (D-SRC-69)
+- **Cancelling a re-check of the active source** -- adding its address
+  again before it had ever loaded, then pressing `Esc` -- no longer deletes
+  that source's saved channel list. (D-SRC-70)
+- **A player start that takes long is no longer cut off.** Each player
+  command is now given its own worst case: 0.15.0 stopped a start after 12
+  seconds while a held player lock, a slow mpv and a slow first answer can
+  take longer, and reported `Helper produced no output` while the player
+  went on playing with nothing watching it. A start that is stopped all the
+  same is looked for, and its player picked up. (D-PLY-35)
+- **The host-name lookup is held to a download's 60 seconds**; through
+  0.15.0 it could overrun them by the system resolver's own timeout.
+  (D-SRC-62)
+- **A logo address that failed is not tried again for a day**, where
+  0.15.0's notes said the next fetch would try it: a small note beside each
+  source's logo folder keeps the address's hash and the reason, never the
+  address, and `cache logos-clear` removes it with the folder. (D-LOGO-22)
+- **A cached logo the shell cannot draw is tried once a session**, with
+  one journal line, instead of four lines on every load. (D-LOGO-19)
+- **One bad logo costs only that logo.** An address or a server the
+  download library cannot handle no longer ends the whole logo run before
+  the rest are fetched, and the address's path no longer reaches the
+  helper's reply. (D-LOGO-24)
+- **A JPEG logo built from far more progressive passes than any image
+  encoder writes is refused**, and removed from the cache at the next
+  fetch: the shell's image decoder spends time on every pass, on the thread
+  every picture in the shell waits behind. Logos are off by default.
+  (D-LOGO-25)
+- **One odd channel id in a playlist no longer blanks the guide data of
+  every channel of its source**, or stops every guide refresh; a cached
+  guide line that cannot be read is skipped and counted in a warning.
+  (D-EPG-14)
+- **A guide-data file whose `<!DOCTYPE ...>` carries declarations of its
+  own is refused**, not only one that defines XML entities, because what
+  such declarations expand to is not bounded by the download's size; the
+  banner reads `Not a valid XMLTV guide`. XMLTV files never carry them, and
+  the usual `<!DOCTYPE tv SYSTEM "xmltv.dtd">` line passes. (D-EPG-15)
+- **One programme with an unusual episode number** no longer stops every
+  refresh of its guide. (D-EPG-16)
+- **A web address written into a channel name or a group shows as its host
+  wherever the shell shows the name**: the bar, its tooltip, the guide's
+  footer while playing, the group column, the headings, notifications, the
+  IPC `status` and `channel` replies and the player's window title, where
+  0.15.0 did so only on the guide's rows (an address written with its
+  scheme, such as `http://`; one without stays as written, as on the rows
+  before). Control characters are left out of the window title and
+  notifications and escaped in the IPC replies, and
+  a notification's body is escaped, so markup in a channel name shows as
+  text instead of restyling the card. Hidden groups and saved searches keep
+  working. (F-SINK-14, F-SINK-15, F-SINK-16, D-SINK-49)
+- **A host is printed up to its first `;`, `=` or `&`** on the Sources
+  row, in its default label and in the dialog that asks before logos are
+  turned on, where 0.15.0 printed what followed as part of the host.
+  (D-SINK-30)
+- **After a seek, the number the player draws is where the picture
+  landed**, not where the seek was asked to go: the helper now waits, for
+  a moment at most, for the decoder to report the landing, which on the
+  one channel measured was about 5 seconds past the target. Pinned in the
+  helper's tests; not yet watched on a playing channel. (F-RWD-8)
+- **A backup of `state.json` put back after a rare burst of saves**, whose
+  first was written and a later one failed, is now merged as another
+  program's change instead of being written over. (D-SRC-39)
+- **A shell that starts in the moment an update rewrites the helper**
+  checks `state.json` once more a second later, instead of coming up not
+  saving its settings until it was restarted (0.14.3's notes describe that
+  moment). (D-REL-8)
+- **A source in a hand-edited `state.json` whose address the plugin does
+  not accept** (a bare host, `ftp://`, a relative path) is dropped by the
+  shell at load with one journal line, as the helper already dropped it at
+  its next write; a guide-data address that fails the same check is
+  cleared. (D-SINK-23)
+- Two small ones: editing the active source's address no longer shows the
+  guide unconfigured for a moment (D-SRC-14), and `status` no longer keeps
+  a `Plugin files damaged` sentence once the playlist has loaded again
+  (D-SRC-52).
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration): nearly
+  everything here is in the shell's own files or reaches the player through
+  them.
+- **Each source's playlist is downloaded once more.** A channel list saved
+  by an earlier version was never checked against the rules above, so the
+  first time each source is active after the update -- the active one at
+  the first shell start, the others when you switch to them -- its playlist
+  is fetched again, whatever its age. Until that fetch succeeds, a channel
+  from the old list is checked when you play it, and one that points where
+  the rules forbid is not played: when it is the channel that starts the
+  player, its `Stream failed` card says `Refused a local address`; as a
+  change of channel while another plays, the player stays on the channel
+  you had, with only a journal line (D-PLY-42, below). Providers rate-limit
+  playlist downloads; this is one per source. (D-SINK-41, D-SINK-58)
+- **A player running when you update is brought up to the new settings, or
+  stopped.** The first time the new shell picks it up, the plugin sets over
+  its socket every protection a running player can take -- the certificate
+  checks, the protocol and format lists, the select menu, the console and
+  the statistics off, `Ctrl+V` and drag-and-drop off, no early opening of
+  the next entry, no core dump -- and tunes your channel again: one short
+  rebuffer, once. A player whose own mpv config holds a per-protocol or
+  per-extension profile that sets one of the options the plugin now sets,
+  or a `reset-on-next-file` list, is stopped instead, because either would
+  undo them at the next channel; press `Enter` on the channel and a fresh
+  player starts. (D-SINK-39, D-SINK-44, D-SINK-60, D-SINK-66, D-SINK-67)
+- **Reading a playlist costs a little more**, because every channel's
+  address is checked: about 0.76 s for 10,000 channels in the background
+  helper against about 0.67 s before these checks, measured idle on the
+  test laptop, and over a second with every core busy. (F-HARNESS-73)
+- For anyone scripting the plugin or running the helper by hand: the
+  plugin's IPC replies print DEL, the C1 controls, U+2028 and U+2029
+  escaped. The helper's ordinary options work as before; `--args-from-env`
+  takes the private ones from `OMARCHY_IPTV_ARGS` instead, which is how the
+  shell calls it. `player start`'s first-load reply gains `ended` (and
+  `fileError`), the seek reply `settled`, and the `logos --fetch` summary
+  `skippedFailed`; a logo refused for its passes is counted under
+  `logo_scans`, and one on a local address under `local_address`.
+
+### Known limitations
+
+- **A player started by 0.15.0 or earlier keeps its old command line**,
+  your `mpvArgs` tokens on it, until you stop it and play again; restarting
+  such a player by itself is decided and not built yet. Sources added
+  before this release keep keys worked out from their addresses, now off
+  the helper's command line. (D-SINK-47, D-SINK-48)
+- **The accessibility fix was observed for the Xtream form's fields**, on
+  a test session with the guide in a plain test window, so whether the
+  shell's own window publishes them was not itself observed; the playlist
+  and guide URL fields and a revealed field are held by tests, the
+  text-change events were read in Qt's sources and not observed, and no
+  real screen reader was tried. Four checks of the guide's channel list
+  that passed at the last run before the system update fail since it -- a
+  row's name is not heard as designed, and two list items carry it -- and
+  whether the new platform or a change to the guide is the cause is not yet
+  examined. (D-A11Y-1, D-A11Y-10)
+- **A failed start never quotes mpv's own reason**, because mpv writes it
+  to an output the plugin discards; since your tokens moved into a file,
+  that includes an option mpv could not understand, which is now skipped
+  without a word. (D-PLY-48)
+- **A channel change the running player refuses** writes a journal line
+  and shows no card. (D-PLY-42)
+- **A `Stream failed` card can name a trailing warning** instead of the
+  failure, such as a graphics-driver line under software rendering.
+  (D-PLY-29)
+- **A logo the shell could not draw stays blank for the session**, even
+  when a later fetch replaces it with a good file; a shell restart shows
+  it. (D-LOGO-19)
+- **Every notice relies on Omarchy's `omarchy-notification-send -p`.**
+  Measured on Omarchy 4.0.4 and read unchanged on 4.0.6; on a host whose
+  wrapper lacked it, every IPTV notice would be lost silently, and whether
+  any Omarchy 4 release shipped one is not known. (D-HOST-7)
+- **Not yet measured on Omarchy 4.0.6 with Qt 6.12**: whether a playing
+  channel survives `omarchy-restart-shell`, whose old shell can now take
+  longer to leave than the plugin's check that stops an orphaned player
+  allows (D-HOST-8), and whether the guide draws its theme's colours,
+  since Qt 6.12 brings a `Color` of its own (D-HOST-9). If the player stops
+  when you restart the shell, press `Enter` on the channel.
+- Still as 0.15.0's notes say: the narrow windows in which a save can
+  create `state.json` at 0644 (now made 0600 moments later), a change
+  another program writes in the same instant as one of the plugin's saves,
+  the first guide open of a session, and an update writing the shell's
+  files before the helper's (D-SINK-22, D-SRC-48, D-PERF-2, D-REL-9).
+
 ## 0.15.0 (2026-10-22)
 
 **Bounds and privacy.** 0.14.3 is the marketplace's verified snapshot.
