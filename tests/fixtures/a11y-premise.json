@@ -10,5 +10,20 @@
     "quickshell": "0.3.1-1",
     "qt6-base": "6.11.2-3",
     "at-spi2-core": "2.60.6-1"
+  },
+  "exception": {
+    "authorisedBy": "the product owner",
+    "date": "2026-10-31",
+    "boardRow": "D-A11Y-1",
+    "platform": {
+      "quickshell": "0.3.2.r7.g2b4501a-1",
+      "qt6-base": "6.12.0-3",
+      "at-spi2-core": "2.62.1-1"
+    },
+    "evidence": {
+      "upstreamFix": "Checked per onRed on 2026-10-31, after the system update installed the three versions above: the installed quickshell, 0.3.2.r7.g2b4501a-1 (a build seven commits past v0.3.2), contains 916a0dd. So the premise is assumed broken and D-A11Y-1 is treated as LIVE until measured otherwise.",
+      "probe": "scripts/a11y-probe.sh re-run on 2026-10-31 on this platform, under the nested headless cage on a private D-Bus: 84 checks, 7 failures, OFF BASELINE. The three recorded baseline failures stand -- L2-XT-05 and L2-XT-06 (the Xtream server and username published on text/text, which is D-A11Y-1 at the sink) and L2-XT-11 -- and four are new: L2-Q-04-LIT, L2-Q-06, L2-SC-03-LIT and L2-SC-06. The probe hosts the guide in a plain Window rather than a PanelWindow, so it shows what the guide publishes once its window publishes, not whether a Quickshell PanelWindow now does."
+    },
+    "why": "The product owner decided on 2026-10-31 that D-A11Y-1 stays open and is fixed separately, and that meanwhile this narrow, dated exception lets work unrelated to it land on dev. NOTHING SHIPS while it stands: scripts/release.py build refuses to cut. It covers exactly the platform above and only while D-A11Y-1's board row reads open; when the fix lands the exception is removed and the premise re-measured per onRed."
   }
 }
