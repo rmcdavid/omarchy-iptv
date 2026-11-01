@@ -725,7 +725,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3233}
 # test_epg_dtd_subset, test_epg_episode_digits, test_logo_escapes,
 # test_logo_scans and the args-from-env, options-file and title cases, red
 # first in their lanes or on a mutant; the suite runs 1841.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1841}
+# 2026-10-31, after the system update (rc-repair, rc-exc on sec-int5): 1841 ->
+# 1886 -- test_model_members (the guard that reads the QML itself),
+# test_a11y_premise (the dated exception) and test_release (no cut while it
+# stands), each red first or on a mutant; the suite runs 1886, one of them
+# the excused premise test, reported as a skip.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1886}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

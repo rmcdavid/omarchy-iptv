@@ -97,7 +97,12 @@ Consequences you must respect:
   in; `check.sh` runs just its 11-check preflight, and a README that
   promises the live run is only true while this step is run), then
   `scripts/release.py build --gate-already-green`, then push
-  `dev`, `main` and the tag. `build` refuses a heading that names another
+  `dev`, `main` and the tag, then create the GitHub Release for that tag
+  (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
+  X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
+  GitHub's latest Release object, not the newest tag, and it read v0.7.0 for
+  six weeks because the Releases stopped there (backfilled 2026-10-31).
+  `build` refuses a heading that names another
   version or carries another day's date, which is how 0.8.0 came to ship
   release notes dated the day before it existed (D-REL-4).
 - **A pending marketplace verification request does not hold `main`.** This
@@ -151,6 +156,19 @@ Consequences you must respect:
   2026-10-22. `dev` moves freely -- the P2/P3 sweep (51 rows, 3421d57) waits
   on it, unreleased, as the next release's contents. A finding on #12636 is
   fixed and released at once, carrying what `dev` holds.
+- **No release while the D-A11Y-1 exception stands (product owner,
+  2026-10-31).** The system update of that day fired the accessibility
+  premise tripwire, and the installed Quickshell carries 916a0dd, so D-A11Y-1
+  is treated as LIVE. The owner let unrelated work land on `dev` under a
+  dated `exception` in `tests/fixtures/a11y-premise.json`, which the premise
+  test honours only on quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3 and
+  at-spi2-core 2.62.1-1 and only while D-A11Y-1's row reads open, and
+  `scripts/release.py build` refuses to cut while it is present -- so the
+  next release waits for the D-A11Y-1 fix, the exception's removal and a
+  re-measure per `onRed`, whatever else `dev` holds. This conflicts with the
+  paragraph above, which ships a fix for a finding on #12636 at once; until
+  the owner decides that case, it is an open decision request, and
+  `release.py build` refuses either way.
 
 ## Where the truth lives
 
@@ -980,8 +998,11 @@ objects and on `Style` and `Color` children, `uncreatable-type` for
 Since D-REL-5 it also carries `missing-property` for every member of
 `Model`: qmllint reads no ES module exports, so each `Model.X` in QML warns.
 That lost the warning a MISTYPED member used to draw, so the gate runs
-`scripts/check-model-members.py` over those lines and goes red on any member
-`Model.mjs` does not export. Anything outside that baseline is a real finding.
+`scripts/check-model-members.py`, which goes red on any member `Model.mjs`
+does not export. Since 2026-10-31 it reads the QML source itself rather than
+qmllint's lines: qmllint 6.12.0's text output prints only a trailing run of
+its warnings, which blinded the old reading (F-GATE-15). Anything outside
+that baseline is a real finding.
 
 Pure logic belongs in the model so it is unit-testable from node, not only
 visible on screen. Since D-REL-5 (2026-10-12) the model is ES modules:
@@ -1074,7 +1095,11 @@ This project is built by role lanes running in separate git worktrees.
    source record and save its in-memory state over the copy you just wrote.
    Seen on 2026-09-21; the restore script was corrected mid-pass.
 6. Check `pgrep -x hyprlock` before any keystroke. Typing into a lock prompt
-   registers as failed unlock attempts. The harness checks this for you now:
+   registers as failed unlock attempts. **[2026-10-31, F-HARNESS-85: on
+   Omarchy 4 this check can never fire -- hyprlock is removed and the shell
+   locks the screen itself, with an editable field and a two-minute lockout
+   after ten failures -- so no harness keystroke reaches the real desktop
+   until the guard asks the host's own `omarchy-hyprland-session-locked`.]** The harness checks this for you now:
    `run.sh key` and `run.sh type` refuse with exit 3 if hyprlock is running,
    and that refusal has no escape hatch. They also refuse unless the GUIDE
    holds the keyboard, which it answers itself over `ipc focusState` -- the
