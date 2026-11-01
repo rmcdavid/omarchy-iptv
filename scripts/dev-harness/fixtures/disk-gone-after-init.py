@@ -37,12 +37,16 @@ REAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omarchy-iptv.re
 
 def main() -> int:
     args = sys.argv[1:]
+    # F-HARNESS-86: the real helper runs with the interpreter flag the
+    # service started this one with (`python3 -I`, D-SINK-50), as
+    # slow-helper.py re-execs it.
+    flags = ["-I"] if sys.flags.isolated else []
     if args[:1] == ["state"] and "init" in args and "--state-dir" in args:
-        rc = subprocess.call([sys.executable, REAL] + args)
+        rc = subprocess.call([sys.executable] + flags + [REAL] + args)
         directory = args[args.index("--state-dir") + 1]
         os.chmod(directory, 0o500)
         return rc
-    os.execv(sys.executable, [sys.executable, REAL] + args)
+    os.execv(sys.executable, [sys.executable] + flags + [REAL] + args)
     return 127
 
 
