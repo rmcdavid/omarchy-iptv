@@ -73,13 +73,20 @@
 #                                tests/fixtures/mpv-options.json -- a new one
 #                                is red, and so is no mpv at all unless
 #                                MPV_OPTIONS_SKIP_OK=1; D-SINK-43..46)
+#  19. theme name guard          (scripts/check-theme-names.py: no shipped .qml
+#                                names, unqualified, a qs.Commons / qs.Ui name
+#                                that a Qt or Quickshell module it imports also
+#                                exports, read from the installed type files --
+#                                Qt 6.12's QtQuick `Color` beat the theme's in
+#                                any import order; D-HOST-9)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
 #
 # The known qmllint warning baseline (CLAUDE.md, "Verify before you claim"):
 # missing-property and unqualified access on host-injected objects and on
-# Style / Color children, uncreatable-type for PanelWindow, and
+# Style / Color children (Color reached as `Commons.Color` since D-HOST-9,
+# 2026-11-01, the host's own form), uncreatable-type for PanelWindow, and
 # signal-handler-parameters on Process.onExited. Plus, since the harness
 # floating-window round, two more [unqualified] in Guide.qml on the two
 # `visible: root.opened` bindings, one inside each inline Component
@@ -748,7 +755,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3238}
 # file:// URL, the only kind the patch rewrites) and its judge's control; red
 # on three host mutants (fileUrl returning the path, entryPointUrl returning
 # the path, and returning Qt.resolvedUrl of it), 1 each.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1896}
+# 2026-11-01, lane-fix160 (D-HOST-9 fixed): 1896 -> 1914 -- test_theme_names
+# (17: the guard on the tree and on its mutants, a Qt and a Quickshell module
+# copied with one colliding export added among them) and test_host_load_patch
+# 10 -> 11 (the premise that Qt's Color wins in the shipped files is replaced
+# by the fix's statement, without the rewrite every theme name is the
+# theme's, red on rel-0160; and a synthetic premise that the guard's rule
+# still holds on the installed Qt); the suite runs 1914.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1914}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -773,6 +787,11 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # form's terminal caption) are gone with the route; every remaining one still
 # declares its format.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
+# The theme name guard (D-HOST-9, 2026-11-01, lane-fix160): 279 unqualified
+# host-kit uses (Style, Util, Border and the qs.Ui types) judged across the
+# three shipped .qml files when it landed. A floor for the text format
+# guard's reason: a scanner that stopped seeing names would judge nothing.
+THEME_NAME_USES_MIN=${THEME_NAME_USES_MIN:-279}
 # The helper regex guard: 34 regex calls across the eleven helper parts when
 # it landed (2026-10-21, lane-bounds-h, R30g). A floor for the text format
 # guard's reason -- a scan that finds nothing has reviewed nothing. 36 once
@@ -1624,6 +1643,30 @@ if python3 "$ROOT/scripts/check-text-format.py" >"$textfmt_log" 2>&1; then
   fi
 else
   cat "$textfmt_log"; bad "text format guard"
+fi
+
+step "theme name guard (no shipped QML names a host-kit name a Qt module shadows)"
+# D-HOST-9 (2026-11-01): Qt 6.12's QtQuick exports a C++ singleton `Color`,
+# and the engine searches imported C++ types before the host's composite
+# singletons whatever the import order (QTBUG-151278), so the guide drew the
+# theme only because Omarchy's quickshell rewrites a plugin's `import QtQuick`
+# to 6.11 behind a pragma its packager calls temporary. qmllint resolves the
+# name the other way and never said so. This reads every shipped .qml as
+# source and refuses an unqualified qs.Commons / qs.Ui name that any module
+# the file imports also exports, from the installed qmltypes and qmldir
+# files, so a Qt or Quickshell update that adds one is red at once.
+themenames_log=$CHECK_TMP/theme-names.log
+if python3 "$ROOT/scripts/check-theme-names.py" --root "$ROOT" --host "$SHELL_DIR" --qml-dir "$QML_IMPORTS" >"$themenames_log" 2>&1; then
+  themenames_n=$(grep -oE '^theme name guard: [0-9]+ unqualified' "$themenames_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $themenames_n ]]; then
+    cat "$themenames_log"; bad "theme name guard printed no use count at all"
+  elif (( themenames_n < THEME_NAME_USES_MIN )); then
+    cat "$themenames_log"; bad "theme name guard judged $themenames_n use(s), expected at least $THEME_NAME_USES_MIN"
+  else
+    ok "theme name guard ($themenames_n unqualified host-kit uses, none shadowed)"
+  fi
+else
+  cat "$themenames_log"; bad "theme name guard"
 fi
 
 step "helper regex guard (every helper regex has a reviewed cost)"

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.mjs" as Model
 
@@ -87,7 +88,7 @@ BarWidget {
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
   readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
-  readonly property color barFg: bar ? bar.barForeground : Color.foreground
+  readonly property color barFg: bar ? bar.barForeground : Commons.Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   // Idle dims like tailscale's inactive icon; playing and error are full.
   // D-RUNG-3 / D-RUNG-5: dim toward the BACKGROUND, not toward black.

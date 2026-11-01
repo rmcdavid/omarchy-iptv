@@ -1678,8 +1678,8 @@ checkCall("D-RUNG-4: every site that inks with the RAW accent token, by inventor
   // slipping past a two-form regex, which is how this gate was defeated twice.
   return qmlSites(/\bselectedText\b|Color\.menu\[/)
 }, [
-  "property color selectedText: Color.menu.selectedText",
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
+  "property color selectedText: Commons.Color.menu.selectedText",
+  "readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)",
   // The host dialog's selected button. It is an ACTIVE state, so it takes the
   // calibrated ink, not the raw accent -- and the host spends that colour on
   // three things, the button's text, the button's border and the dialog
@@ -3508,15 +3508,15 @@ checkCall("D-RUNG-14: every captionAlpha call site in the shipped QML, with its 
     return t.replace(/^readonly property real /, "").replace(/\s+/g, " ")
   })
 }, [
-  "captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)",
+  "captionAlphaOnCard: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background)",
   // qmlFill is load-bearing on both tinted surfaces: selectedBackground and the
   // hover fill are BOTH Util.alpha(menu.text, 0.08), so uncomposited each
   // measures the text against itself, contrast 1.0 at every rung.
-  "captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))",
-  "captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))",
+  "captionAlphaOnCursor: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Commons.Color.menu.selectedBackground, Commons.Color.menu.background))",
+  "captionAlphaOnHover: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Style.hoverFillFor(Commons.Color.menu.text, Commons.Color.accent), Commons.Color.menu.background))",
   // The third argument is the whole regular-weight correction; losing it puts
   // the prose back on the bold floor, which renders under AA.
-  "captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)",
+  "captionAlphaProse: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULAR)",
 ])
 checkCall("D-RUNG-14: the caption floor and the section-header floor are the same number, and now agree on tokyo-night", function () {
   // They were one file apart and disagreed: SECTION_HEADER_FLOOR is 4.65 while
@@ -3662,7 +3662,7 @@ checkCall("D-RUNG-13: every site the cursor ink reaches, by inventory, indirecti
   // extension, and pretending otherwise is how the last two were defeated.
   return qmlSites(/cursorInk|primaryColor/)
 }, [
-  "readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)",
+  "readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)",
   "selectedText: root.cursorInk",
   "color: groupRow.selected ? root.cursorInk : root.foreground",
   "readonly property color primaryColor: root.foreground",

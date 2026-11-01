@@ -1,51 +1,59 @@
-"""D-HOST-9: what keeps the THEME's Color in the plugin's QML on Qt 6.12.
+"""D-HOST-9: which Color the plugin's QML gets on Qt 6.12, and what the
+host's load patch still does to it.
 
 Qt 6.12 exports a C++ singleton named Color from QtQuick (QQuickColor,
 `exports: ["QtQuick/Color 6.12"]`). The engine's name lookup for a JS
 identifier searches the C++ types of every unqualified import BEFORE any
 qmldir composite singleton (QQmlTypeNameCache::doQuery in 6.12.0:
 m_anonymousImports, then m_anonymousCompositeSingletons), so an unqualified
-`Color` in Guide.qml or BarWidget.qml is Qt's whichever import comes last.
-qmllint models the opposite (the last import wins), which is why the board
-row first read the import order as the protection. It is not: upstream has it
-as QTBUG-151278 (open, P1, a regression from 6.11.2), and lane-host9 measured
-it on 2026-11-01 with the real quickshell in a headless cage on a private bus:
-with the host's pragma absent, the shipped Guide's `accent` and `urgent` read
-#000000 and BarWidget's `barFg` #000000, beside 15 TypeError and
-undefined-assignment warnings, in BOTH import orders; with it, the theme's
-values (#12ab34, #cd3456, #a1b2c3) and no warning, in both orders.
+`Color` is Qt's whichever import comes last; a NAMED import is searched
+before both. qmllint models the opposite (the last import wins), which is why
+the board row first read the import order as the protection. It is not:
+upstream has it as QTBUG-151278 (open, P1, a regression from 6.11.2), and
+lane-host9 and rc-host9 measured it on 2026-11-01 with the real quickshell in
+a headless cage on a private bus: with the host's pragma absent, the guide of
+rel-0160 drew #000000 with 15 warnings in BOTH import orders; with it, the
+theme's values.
 
-What holds it on the host is Omarchy's own Quickshell patch (omarchy-pkgs,
-pkgbuilds/quickshell/load_qtquick_611.patch, "temporarily", pending Qt's
-answer): a ROOT file whose header carries `//@ pragma OmarchyLoadPatch`
-turns on a rewrite of every unversioned `import QtQuick` line into
-`import QtQuick 6.11`, in every local QML file the engine loads -- the URL
-interceptor scans the directory of each one, so a plugin outside the shell's
-own folder is rewritten too -- and QtQuick 6.11 has no Color. A plugin's own
-copy of the pragma does nothing (the scanner honours it on the root only).
+Until lane-fix160 (2026-11-01) the plugin's colours rested on Omarchy's own
+Quickshell patch (omarchy-pkgs, pkgbuilds/quickshell/load_qtquick_611.patch,
+"temporarily", pending Qt's answer): a ROOT file whose header carries
+`//@ pragma OmarchyLoadPatch` turns on a rewrite of every unversioned
+`import QtQuick` line into `import QtQuick 6.11`, in every local QML file
+the engine loads, and QtQuick 6.11 has no Color. The plugin now writes the
+theme's Color as the host writes its own 54 files -- `import qs.Commons as
+Commons` and `Commons.Color.*` -- and scripts/check-theme-names.py holds
+every shipped file to that, from the installed type files. So these tests
+say two things:
 
-So the protection is four joins, none of them the plugin's, and these tests
-pin each one on this machine:
+  The plugin's half, which must stay green whatever the host does:
+  a. with AND without the rewrite, every theme singleton a shipped file
+     names -- unqualified or through its qs.Commons alias -- is the theme's
+     object, on the installed Qt, observed in a plain `qml` run, offscreen,
+     no display (test_without_the_rewrite_..., test_with_the_rewrite_...);
+  b. the lookup the guard's rule rests on still holds on the installed Qt:
+     an unqualified Color under an unversioned QtQuick is Qt's, a qualified
+     one is the theme's, in synthetic files that do not move when the
+     shipped ones do (test_qt_still_resolves_...).
+
+  The host's half, which records how the host loads the plugin and is a
+  re-measurement request when it goes red, not a plugin defect: the patch is
+  still on, so every shipped file is still served to the engine as
+  `import QtQuick 6.11`, which hides QtQuick's 6.12 members (rc-host9: an
+  `Item { mutabilityGroup: 0 }` does not load at all) while qmllint, the dev
+  harness and the a11y trees see 6.12 -- the hazard the day the patch goes,
+  or the day the plugin uses a 6.12 member, changes:
   1. the host root turns the patch on;
   2. the installed quickshell carries the rewrite: its pattern and its
      replacement are READ OUT OF THE BINARY and used below, not copied, so a
      changed rewrite is judged as it now is;
-  3. every shipped QML file, with that rewrite applied to its own header,
-     resolves every theme singleton it names unqualified to the theme, on the
-     installed Qt -- observed in a plain `qml` run, offscreen, no display;
+  3. the rewrite reaches every shipped file (the rewritten regime of (a));
   4. the host hands each entry point to the engine as a LOCAL file URL, the
      only kind the patched interceptor rewrites: the host's own
      PluginRegistry.entryPointUrl and Util.fileUrl, run (rc-host9).
-And one premise: without the rewrite, Qt's Color wins in the shipped files.
-Join 3 also catches an import that brings QtQuick back at its latest version
-behind the rewrite's back: QtQuick.Window's qmldir says `import QtQuick auto`,
-so a shipped `import QtQuick.Window` makes Color Qt's again under the patch
-(measured by rc-host9 in the cage, and red here on that mutant).
-When the premise goes red, Qt changed the lookup (QTBUG-151278) or the files
-stopped naming Color unqualified; re-measure the row. A red anywhere here
-after an Omarchy or Qt update is a re-measurement request, not by itself a
-plugin defect -- except that the plugin breaks when 1 or 2 goes and nothing
-else in the gate would say so.
+An unversioned `import QtQuick.Window` would bring QtQuick back at its
+newest version behind the rewrite's back (its qmldir says `import QtQuick
+auto`), so (a) and the guard both still see it.
 
 The probe stands in for two things and says so. Quickshell's modules are
 registered by the quickshell binary and cannot load in plain qml, so each one
@@ -143,6 +151,23 @@ def unqualified_uses(body, names):
     return [n for n in names if re.search(r"(?<![\w.$])" + n + r"\s*\.", body)]
 
 
+def commons_aliases(header):
+    """The names a header gives qs.Commons: `import qs.Commons as Commons`."""
+    return re.findall(r"^\s*import\s+qs\.Commons(?:\s+\d+\.\d+)?\s+as\s+([A-Za-z_]\w*)\s*;?\s*$", header, re.M)
+
+
+def theme_expressions(header, body, names):
+    """[(expression, theme name)] for every theme singleton the file names,
+    unqualified (`Color`) and through each qs.Commons alias (`Commons.Color`),
+    each once: what the probe evaluates in the file's own import scope."""
+    out = [(n, n) for n in unqualified_uses(body, names)]
+    code = strip_comments_and_strings(body)
+    for alias in commons_aliases(header):
+        out += [("%s.%s" % (alias, n), n) for n in names
+                if re.search(r"(?<![\w.$])" + re.escape(alias) + r"\s*\.\s*" + n + r"\b", code)]
+    return out
+
+
 def module_imports(header):
     out = []
     for line in header.split("\n"):
@@ -194,8 +219,8 @@ Item {
 }
 """
 
-CHECK = """    try { out["%(n)s"] = { theme: %(n)s === theme["%(n)s"], is: String(%(n)s) } }
-    catch (e) { out["%(n)s"] = { theme: false, is: "throws " + String(e) } }"""
+CHECK = """    try { out["%(e)s"] = { theme: %(e)s === theme["%(n)s"], is: String(%(e)s) } }
+    catch (e) { out["%(e)s"] = { theme: false, is: "throws " + String(e) } }"""
 
 MAIN = """import QtQuick
 import qs.Commons as Commons
@@ -223,10 +248,13 @@ QtObject {
 
 def observe(texts, rewrite):
     """Run every file in `texts` ({name: source}) twice under plain Qt,
-    offscreen: once as it is and once with `rewrite` applied to its header.
-    Returns {(name, "shipped"|"rewritten"): {theme name: {theme, is}}} for each
-    theme name the file names unqualified."""
-    pattern, replacement = rewrite
+    offscreen: once as it is and once with `rewrite` applied to its header
+    (only once, as it is, when `rewrite` is None: a quickshell without the
+    patch has no second regime to observe).
+    Returns {(name, "shipped"|"rewritten"): {expression: {theme, is}}} for each
+    theme singleton the file names, unqualified or through its qs.Commons
+    alias (theme_expressions)."""
+    pattern, replacement = rewrite if rewrite is not None else (None, None)
     names = theme_names()
     work = tempfile.mkdtemp(prefix="omarchy-iptv-hostpatch-")
     try:
@@ -248,7 +276,7 @@ def observe(texts, rewrite):
         jobs, expect = [], {}
         for name, text in sorted(texts.items()):
             header, body = split_header(text)
-            uses = unqualified_uses(body, names)
+            uses = theme_expressions(header, body, names)
             if not uses:
                 continue
             for mod in module_imports(header):
@@ -260,8 +288,8 @@ def observe(texts, rewrite):
                         fh.write("module %s\n%s 1.0 %s.qml\n" % (mod, stub, stub))
                     with open(os.path.join(d, stub + ".qml"), "w") as fh:
                         fh.write("import QtQml\nQtObject {}\n")
-            checks = "\n".join(CHECK % {"n": n} for n in uses)
-            for regime in ("shipped", "rewritten"):
+            checks = "\n".join(CHECK % {"e": e, "n": n} for e, n in uses)
+            for regime in ("shipped", "rewritten") if rewrite is not None else ("shipped",):
                 h = header
                 if regime == "rewritten":
                     h = "\n".join(pattern.sub(replacement, line) for line in header.split("\n"))
@@ -421,22 +449,47 @@ class HostLoadPatchCase(unittest.TestCase):
         if not os.path.isfile(QUICKSHELL):
             self.skipTest("no quickshell at %s" % QUICKSHELL)
         rw = rewrite_from_binary(QUICKSHELL)
-        self.assertIsNotNone(rw, "%s carries no OmarchyLoadPatch QtQuick import rewrite; the plugin's unqualified "
-                                 "Color is Qt's on Qt 6.12 without it (D-HOST-9). Re-measure." % QUICKSHELL)
+        self.assertIsNotNone(rw, "%s carries no OmarchyLoadPatch QtQuick import rewrite: the host now loads the "
+                                 "plugin's QML at QtQuick 6.12, as the gate does. The plugin's colours no longer "
+                                 "depend on it (D-HOST-9, lane-fix160); re-measure what else the host's load path "
+                                 "changed." % QUICKSHELL)
         return rw
 
     def observed(self):
         if not os.path.isfile(QML):
             self.skipTest("no Qt qml runtime at %s" % QML)
         if HostLoadPatchCase.seen is None:
-            HostLoadPatchCase.seen = observe(self.texts, self.rewrite())
+            rw = rewrite_from_binary(QUICKSHELL) if os.path.isfile(QUICKSHELL) else None
+            HostLoadPatchCase.seen = observe(self.texts, rw)
         return HostLoadPatchCase.seen
+
+    # Synthetic files, so the controls do not move when the shipped ones do.
+    SYNTHETIC_BODY = "Item {\n  property color c: %s.accent\n}\n"
+    SYNTHETIC = {
+        # the form the rewrite reaches, unqualified
+        "Reached.qml": "import QtQuick\nimport qs.Commons\n\n" + SYNTHETIC_BODY % "Color",
+        # versioned at 6.12, which the rewrite's lookahead refuses
+        "Unreached.qml": "import QtQuick 6.12\nimport qs.Commons\n\n" + SYNTHETIC_BODY % "Color",
+        # the host's own form, which the plugin now uses
+        "Qualified.qml": "import QtQuick\nimport qs.Commons\nimport qs.Commons as Commons\n\n"
+                         + SYNTHETIC_BODY % "Commons.Color",
+    }
+    synthetic_seen = None
+
+    def synthetic(self):
+        if not os.path.isfile(QML):
+            self.skipTest("no Qt qml runtime at %s" % QML)
+        if HostLoadPatchCase.synthetic_seen is None:
+            rw = rewrite_from_binary(QUICKSHELL) if os.path.isfile(QUICKSHELL) else None
+            HostLoadPatchCase.synthetic_seen = observe(self.SYNTHETIC, rw)
+        return HostLoadPatchCase.synthetic_seen
 
     def test_the_host_root_turns_the_load_patch_on(self):
         self.assertTrue(root_turns_patch_on(os.path.join(HOST, "shell.qml")),
                         "%s/shell.qml no longer carries %r in its header: the host stopped rewriting plugins' "
-                        "`import QtQuick`, and the guide's unqualified Color is Qt's (D-HOST-9). Re-measure."
-                        % (HOST, PRAGMA))
+                        "`import QtQuick`, so it loads the plugin's QML at QtQuick 6.12, as the gate does. The "
+                        "plugin's colours no longer depend on it (D-HOST-9, lane-fix160); re-measure what else "
+                        "the host's load path changed." % (HOST, PRAGMA))
 
     def test_a_host_root_without_the_pragma_is_caught(self):
         text = read(os.path.join(HOST, "shell.qml"))
@@ -482,33 +535,51 @@ class HostLoadPatchCase(unittest.TestCase):
         ui_names = {l.split()[0] for l in read(ui).split("\n") if re.match(r"^[A-Z]\w* \d", l)}
         self.assertEqual(set(), ui_names & names)
 
+    def test_without_the_rewrite_every_theme_name_in_the_shipped_qml_is_the_theme(self):
+        # D-HOST-9's fix, observed: the plugin's QML no longer depends on the
+        # host's load patch. Red on rel-0160 (968d097), whose Guide.qml and
+        # BarWidget.qml named Color unqualified: each read QQuickColor here.
+        seen = self.observed()
+        shipped = {name: out for (name, reg), out in seen.items() if reg == "shipped"}
+        self.assertTrue(shipped, "no shipped file names a theme singleton")
+        self.assertEqual([], not_the_theme(seen, "shipped"),
+                         "a theme singleton in the shipped QML is not the theme's without the host's load patch "
+                         "(D-HOST-9): qualify it as the host does, `import qs.Commons as Commons`, `Commons.Color`; "
+                         "scripts/check-theme-names.py names the line")
+        qualified = sorted(name for name, out in shipped.items() if "Commons.Color" in out)
+        self.assertEqual(["BarWidget.qml", "Guide.qml"], qualified,
+                         "the two files that use the theme's Color reach it through the qs.Commons alias")
+
     def test_with_the_rewrite_every_theme_name_in_the_shipped_qml_is_the_theme(self):
+        # Join 3: the host's regime, the rewrite applied to each shipped header.
+        self.rewrite()
         seen = self.observed()
         self.assertTrue(any(reg == "rewritten" for _, reg in seen), "no shipped file names a theme singleton")
         self.assertEqual([], not_the_theme(seen, "rewritten"))
 
-    def test_premise_without_the_rewrite_qt_takes_color_in_the_shipped_qml(self):
-        seen = self.observed()
-        users = [(name, out["Color"]) for (name, reg), out in sorted(seen.items())
-                 if reg == "shipped" and "Color" in out]
-        self.assertTrue(users, "no shipped file names Color unqualified any more; D-HOST-9 may be closed. Re-measure.")
-        theme = [name for name, r in users if r["theme"]]
-        self.assertEqual([], theme, "Qt no longer puts its Color ahead of the theme's in %s (QTBUG-151278?); the "
-                                    "plugin may not depend on the host's load patch any more. Re-measure D-HOST-9."
-                         % theme)
+    def test_qt_still_resolves_an_unqualified_color_to_its_own_and_a_qualified_one_to_the_theme(self):
+        # The premise scripts/check-theme-names.py's rule rests on, on the
+        # installed Qt: without the rewrite an unqualified Color is QtQuick's
+        # in either form of import, and the named import is the theme's. If
+        # the first half goes green -- Qt fixed QTBUG-151278 -- the guard is
+        # stricter than the engine needs and still right; re-measure the row.
+        seen = self.synthetic()
+        shipped = {name: out for (name, reg), out in seen.items() if reg == "shipped"}
+        self.assertEqual(["Qualified.qml", "Reached.qml", "Unreached.qml"], sorted(shipped))
+        for name in ("Reached.qml", "Unreached.qml"):
+            self.assertTrue(shipped[name]["Color"]["is"].startswith("QQuickColor("),
+                            "%s: an unqualified Color is no longer Qt's without the rewrite (%s); QTBUG-151278 may "
+                            "be fixed. Re-measure D-HOST-9." % (name, shipped[name]))
+        self.assertTrue(shipped["Qualified.qml"]["Commons.Color"]["theme"],
+                        "the named import no longer reaches the theme's Color: %s" % shipped["Qualified.qml"])
 
     def test_a_file_the_rewrite_cannot_reach_is_caught(self):
-        # Synthetic, so the control does not move when the shipped files do:
-        # the same two-line import block, once in the form the rewrite reaches
-        # and once versioned at 6.12, which its lookahead refuses.
-        self.observed()
-        body = "Item {\n  property color c: Color.accent\n}\n"
-        seen = observe({"Reached.qml": "import QtQuick\nimport qs.Commons\n\n" + body,
-                        "Unreached.qml": "import QtQuick 6.12\nimport qs.Commons\n\n" + body}, self.rewrite())
-        bad = not_the_theme(seen, "rewritten")
+        # Join 3's control: with the rewrite, the unversioned import is
+        # reached and the versioned one is not; the qualified one needs none.
+        self.rewrite()
+        bad = not_the_theme(self.synthetic(), "rewritten")
         self.assertEqual(1, len(bad), bad)
         self.assertTrue(bad[0].startswith("Unreached.qml: Color is QQuickColor("), bad)
-        self.assertEqual(2, len(not_the_theme(seen, "shipped")), "without the rewrite both are Qt's")
 
     def test_the_host_hands_every_entry_point_over_as_a_local_file_url(self):
         # Join 4 (rc-host9): the patched interceptor rewrites a load only when
