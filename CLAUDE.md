@@ -4,8 +4,9 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.15.0 (2026-10-22: the P3 sweep, the bounds sweep's eight
-rounds, D-EPG-11 and the #14748 work; `main` e710341). Four of the last releases were cut for a finding
+Quickshell process. Released through v0.16.0 (2026-11-01: the whole-codebase security
+review's two phases, the P2/P3 sweep, D-A11Y-1's fix, D-HOST-9's qualification and
+D-SINK-69; `main` 103fa68, the GitHub Release marked Latest). Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; until
@@ -47,6 +48,10 @@ cites are no longer in the catalog's shape, so re-read it before quoting
 either name. The live install was already on 0.14.3. 0.15.0 (`main`
 e710341) followed the same day, filed as its own request; 0.14.3 stays the
 verified snapshot until a maintainer actions it.
+0.16.0 (`main` 103fa68) was cut on 2026-11-01 on the owner's word with
+#12636 still pending, which makes #12636 stale; it stays open (F-M3-4), and
+0.16.0's own request is filed only on the owner's word. 0.14.3 is still the
+verified snapshot.
 
 ## Branches: `dev` is the tree, `main` is the artifact
 
