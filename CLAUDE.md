@@ -156,6 +156,9 @@ Consequences you must respect:
   2026-10-22. `dev` moves freely -- the P2/P3 sweep (51 rows, 3421d57) waits
   on it, unreleased, as the next release's contents. A finding on #12636 is
   fixed and released at once, carrying what `dev` holds.
+  **This hold ended on 2026-11-01**, when the owner lifted it to cut 0.16.0
+  with #12636 still pending: moving `main` makes #12636 stale, we do not
+  close it (F-M3-4), and 0.16.0 files its own request on the owner's word.
 - **No release while the D-A11Y-1 exception stands (product owner,
   2026-10-31).** The system update of that day fired the accessibility
   premise tripwire, and the installed Quickshell carries 916a0dd, so D-A11Y-1
@@ -172,8 +175,8 @@ Consequences you must respect:
   **This ended on 2026-11-01.** D-A11Y-1's fix (75cc827) merged, the
   exception was removed and the premise re-measured per `onRed`, so
   `release.py build` no longer refuses on it (`premise_exception_problems`
-  returns []) and the decision request above is moot. A release still waits for the owner's word, and the #12636 hold
-  above still stands.
+  returns []) and the decision request above is moot. A release still waits for the owner's word; the #12636 hold
+  above stood until the owner lifted it later the same day.
 
 ## Where the truth lives
 
@@ -201,8 +204,16 @@ requests and raise the batch.
 
 ## Engineering constraints, non-negotiable
 
-1. Theme tokens only. Every color and metric comes from `Color.*` and
-   `Style.*`. A literal needs a `CONVENTION-EXCEPTION` comment saying why.
+1. Theme tokens only. Every color comes from the theme's `Commons.Color.*`,
+   reached through `import qs.Commons as Commons` beside `import qs.Commons`,
+   which is the host's own form. Never write a bare `Color`: Qt 6.12's
+   QtQuick exports a C++ `Color` that wins in any import order (D-HOST-9).
+   Every metric comes from `Style.*`. `scripts/check-theme-names.py` refuses,
+   in every shipped QML file, any unqualified host-kit name that a Qt or Quickshell module the file
+   imports also exports, read from the installed qmltypes and qmldir files:
+   versioned or not, and as a type, a member or a spread.
+   A literal needs a `CONVENTION-EXCEPTION` comment saying why (no check
+   enforces this half yet: F-GATE-17).
 2. argv-only process launching. Never `bash -c`, never string interpolation
    into a command, never `shell=True`. Playlist-derived data reaches mpv or
    curl as argv items, never as shell text.
@@ -310,7 +321,14 @@ requests and raise the batch.
      six kinds that bypass it carry nothing private, held by a node check.
      mpvArgs tokens, source keys, `u:` ids and scopes are on no argv of a
      process this release starts (an older player adopted after the
-     upgrade keeps its own), and new sources get random keys.]** In QML, assign
+     upgrade keeps its own), and new sources get random keys.]**
+     **[2026-11-01, D-SINK-69: one argv the shell starts still carried a key --
+     the Settings merged notice put a source's key on
+     `omarchy-notification-send`'s command line -- on `dev` from 2026-10-24
+     (D-SRC-33, after 0.15.0) until 0.16.0's cut, so no release carried it;
+     `Model.notifyArgv` now names no key and scrubs every string it puts on
+     that argv, held by a node sweep that calls it for every event with a
+     private value in every parameter.]** In QML, assign
      `<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
      every `running = true`, `{}` included on a run that carries no URL:
      re-assignment REPLACES the previous value, and that is what keeps a
