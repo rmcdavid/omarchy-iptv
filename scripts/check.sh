@@ -743,7 +743,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3238}
 # them; red on a pragma-less host copy (1), on Arch's unpatched quickshell
 # 0.3.2-1 (4), on a Guide.qml importing QtQuick 6.12 (1) and, for the
 # premise, on a copy qualified as Commons.Color (1); the suite runs 1894.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1894}
+# 2026-11-01, rc-host9: 1894 -> 1896 -- the fourth join (the host's own
+# entryPointUrl and Util.fileUrl hand every entry point over as a local
+# file:// URL, the only kind the patch rewrites) and its judge's control; red
+# on three host mutants (fileUrl returning the path, entryPointUrl returning
+# the path, and returning Qt.resolvedUrl of it), 1 each.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1896}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

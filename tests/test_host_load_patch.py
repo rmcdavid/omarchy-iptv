@@ -24,7 +24,7 @@ interceptor scans the directory of each one, so a plugin outside the shell's
 own folder is rewritten too -- and QtQuick 6.11 has no Color. A plugin's own
 copy of the pragma does nothing (the scanner honours it on the root only).
 
-So the protection is three joins, none of them the plugin's, and these tests
+So the protection is four joins, none of them the plugin's, and these tests
 pin each one on this machine:
   1. the host root turns the patch on;
   2. the installed quickshell carries the rewrite: its pattern and its
@@ -32,8 +32,15 @@ pin each one on this machine:
      changed rewrite is judged as it now is;
   3. every shipped QML file, with that rewrite applied to its own header,
      resolves every theme singleton it names unqualified to the theme, on the
-     installed Qt -- observed in a plain `qml` run, offscreen, no display.
+     installed Qt -- observed in a plain `qml` run, offscreen, no display;
+  4. the host hands each entry point to the engine as a LOCAL file URL, the
+     only kind the patched interceptor rewrites: the host's own
+     PluginRegistry.entryPointUrl and Util.fileUrl, run (rc-host9).
 And one premise: without the rewrite, Qt's Color wins in the shipped files.
+Join 3 also catches an import that brings QtQuick back at its latest version
+behind the rewrite's back: QtQuick.Window's qmldir says `import QtQuick auto`,
+so a shipped `import QtQuick.Window` makes Color Qt's again under the patch
+(measured by rc-host9 in the cage, and red here on that mutant).
 When the premise goes red, Qt changed the lookup (QTBUG-151278) or the files
 stopped naming Color unqualified; re-measure the row. A red anywhere here
 after an Omarchy or Qt update is a re-measurement request, not by itself a
@@ -58,6 +65,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = os.environ.get("OMARCHY_SHELL_DIR", "/usr/share/omarchy/shell")
@@ -297,6 +305,109 @@ def not_the_theme(seen, regime):
             for n, r in sorted(out.items()) if not r["theme"]]
 
 
+def host_function(path, name):
+    """The text of `function <name>(...) { ... }` in a host QML file, by brace
+    count, or None. Good enough for the host's entryPointUrl, which has no
+    brace inside a string, a regex or a comment; a function this cannot cut
+    out is a host change to read by hand, so the caller treats None as red."""
+    text = read(path)
+    m = re.search(r"^[ \t]*function[ \t]+%s[ \t]*\(" % re.escape(name), text, re.M)
+    if not m:
+        return None
+    start = text.find("{", m.end())
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[m.start():i + 1].strip()
+    return None
+
+
+def local_file_url_naming(url, path):
+    """True when `url` is what QUrl::isLocalFile() accepts (scheme file, no
+    host) and its decoded path is exactly `path`: the only URL shape whose
+    loads the patched interceptor rewrites. A query is allowed, because the
+    interceptor keys on toLocalFile(), which drops it (rc-host9 measured a
+    `?x` load served the rewritten text)."""
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme == "file" and parts.netloc == "" and urllib.parse.unquote(parts.path) == path
+
+
+ENTRY_MAIN = """import QtQuick
+import qs.Commons
+
+QtObject {
+%(fn)s
+  Component.onCompleted: {
+    var jobs = %(jobs)s
+    var out = []
+    for (var i = 0; i < jobs.length; i++) {
+      try { out.push({ kind: jobs[i].kind, url: String(entryPointUrl(jobs[i].manifest, jobs[i].kind)) }) }
+      catch (e) { out.push({ kind: jobs[i].kind, error: String(e) }) }
+    }
+    console.log("HOSTURL " + JSON.stringify(out))
+    Qt.exit(0)
+  }
+}
+"""
+
+
+def host_entry_point_urls(host, manifest, source_dir):
+    """{kind: url} from the HOST's own PluginRegistry.entryPointUrl, run in plain
+    qml over the host's own Commons/Util.qml (its Quickshell import stubbed: Util
+    names Quickshell only inside functions this does not call), for each of the
+    plugin's entry points as the host passes them (shell.qml asks for "overlay",
+    "barWidget" and "service", the manifest's own entryPoints keys)."""
+    fn = host_function(os.path.join(host, "services", "PluginRegistry.qml"), "entryPointUrl")
+    if fn is None:
+        raise AssertionError("%s/services/PluginRegistry.qml has no entryPointUrl this test can cut out; read how "
+                             "the host hands a plugin's entry points to the engine now (D-HOST-9)" % host)
+    # The probe's own URL is file:, the host file's is qs:@/qs/..., so a
+    # function that resolved against its own URL would read local here and not
+    # there. That shape is the one this probe cannot judge; refuse it.
+    if "resolvedUrl" in fn or "baseUrl" in fn:
+        raise AssertionError("the host's entryPointUrl now resolves against its own (qs:) URL, which a plain-qml "
+                             "probe cannot reproduce; re-measure D-HOST-9 in a cage:\n" + fn)
+    work = tempfile.mkdtemp(prefix="omarchy-iptv-hostpatch-")
+    try:
+        home = os.path.join(work, "home")
+        os.makedirs(home, mode=0o700)
+        commons = os.path.join(work, "imports", "qs", "Commons")
+        os.makedirs(commons)
+        shutil.copy(os.path.join(host, "Commons", "Util.qml"), commons)
+        with open(os.path.join(commons, "qmldir"), "w") as fh:
+            fh.write("module qs.Commons\nsingleton Util 1.0 Util.qml\n")
+        stub = os.path.join(work, "imports", "Quickshell")
+        os.makedirs(stub)
+        with open(os.path.join(stub, "qmldir"), "w") as fh:
+            fh.write("module Quickshell\nHostPatchStubQuickshell 1.0 HostPatchStubQuickshell.qml\n")
+        with open(os.path.join(stub, "HostPatchStubQuickshell.qml"), "w") as fh:
+            fh.write("import QtQml\nQtObject {}\n")
+        m = dict(manifest)
+        m["__sourceDir"] = source_dir
+        jobs = [{"kind": k, "manifest": m} for k in sorted(manifest["entryPoints"])]
+        main = os.path.join(work, "main.qml")
+        with open(main, "w", encoding="utf-8") as fh:
+            fh.write(ENTRY_MAIN % {"fn": fn, "jobs": json.dumps(jobs)})
+        env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": home, "XDG_CONFIG_HOME": home + "/.config",
+               "XDG_CACHE_HOME": home + "/.cache", "XDG_DATA_HOME": home + "/.local/share",
+               "XDG_STATE_HOME": home + "/.local/state", "XDG_RUNTIME_DIR": home,
+               "QT_QPA_PLATFORM": "offscreen", "QT_FORCE_STDERR_LOGGING": "1"}
+        run = subprocess.run(["prlimit", "--core=0", "--as=4294967296", "--", QML, "-I",
+                              os.path.join(work, "imports"), main],
+                             cwd=work, env=env, capture_output=True, text=True, timeout=60)
+        log = run.stdout + run.stderr
+        rec = [l.split("HOSTURL ", 1)[1] for l in log.splitlines() if "HOSTURL [" in l]
+        if len(rec) != 1:
+            raise AssertionError("the entry point probe did not report: " + log[-1200:])
+        return {r["kind"]: r.get("url", "throws " + r.get("error", "")) for r in json.loads(rec[0])}
+    finally:
+        shutil.rmtree(work, True)
+
+
 class HostLoadPatchCase(unittest.TestCase):
     seen = None
 
@@ -398,6 +509,36 @@ class HostLoadPatchCase(unittest.TestCase):
         self.assertEqual(1, len(bad), bad)
         self.assertTrue(bad[0].startswith("Unreached.qml: Color is QQuickColor("), bad)
         self.assertEqual(2, len(not_the_theme(seen, "shipped")), "without the rewrite both are Qt's")
+
+    def test_the_host_hands_every_entry_point_over_as_a_local_file_url(self):
+        # Join 4 (rc-host9): the patched interceptor rewrites a load only when
+        # its URL isLocalFile(). A host that handed the engine a bare path
+        # would have it resolved against shell.qml's qs: URL, skip the rewrite
+        # and serve the file as written, so the guide's Color would be Qt's
+        # with the pragma still in place. This runs the host's own
+        # entryPointUrl and Util.fileUrl, not a copy of what they say today.
+        if not os.path.isfile(QML):
+            self.skipTest("no Qt qml runtime at %s" % QML)
+        with open(os.path.join(ROOT, "manifest.json"), encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        # a space and the real id in the path, as Util.fileUrl encodes them
+        source_dir = "/home/omarchy user/.config/omarchy/plugins/" + manifest["id"]
+        urls = host_entry_point_urls(HOST, manifest, source_dir)
+        self.assertEqual(sorted(manifest["entryPoints"]), sorted(urls))
+        bad = ["%s: %r" % (k, u) for k, u in sorted(urls.items())
+               if not local_file_url_naming(u, source_dir + "/" + manifest["entryPoints"][k])]
+        self.assertEqual([], bad, "the host no longer hands these entry points over as local file:// URLs, so "
+                                  "the load patch does not rewrite them and the plugin's Color is Qt's (D-HOST-9). "
+                                  "Re-measure.")
+
+    def test_a_url_the_patch_would_not_rewrite_is_caught(self):
+        path = "/home/omarchy user/.config/omarchy/plugins/x/Guide.qml"
+        good = "file://" + urllib.parse.quote(path)
+        self.assertTrue(local_file_url_naming(good, path))
+        self.assertTrue(local_file_url_naming(good + "?v=1", path), "a query does not stop the rewrite")
+        for url in (path, "qs:" + path, "qs:@/qs/Guide.qml", "file://host" + urllib.parse.quote(path),
+                    "file://" + urllib.parse.quote(path + ".bak"), "file://" + path.replace(" ", "%2")):
+            self.assertFalse(local_file_url_naming(url, path), url)
 
 
 if __name__ == "__main__":
