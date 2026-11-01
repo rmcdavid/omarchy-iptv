@@ -1328,11 +1328,109 @@ are the theme's in every case (QtQuick exports none of them).
 So the plugin's theme colours on Qt 6.12 rest on this patch alone, and the
 import order holds nothing. `tests/test_host_load_patch.py` pins the joins on
 this machine (the root's pragma, the binary's rewrite read out of the binary,
-the rewrite reaching every shipped file, and the premise that Qt's `Color`
-wins without it); a red there after an update is a re-measurement request.
-Rigs that load the plugin without this root carry no pragma:
-`scripts/dev-harness/shell.qml` and `tests/a11y/host_*.qml` are the "without
-it" rows' configuration (the same quickshell, a root with no pragma), and the
-plain-`qml` tree `tests/a11y/make_tree.py` builds has no scanner at all, the
-case the test's offscreen probe observes. Read, not run against each rig: by
-that lookup every one of them draws the guide with Qt's `Color`.
+the rewrite reaching every shipped file, the host handing each entry point
+over as a local `file://` URL, and the premise that Qt's `Color` wins without
+it); a red there after an update is a re-measurement request.
+Rigs that load the plugin without this root carry no pragma, and draw the
+guide with Qt's `Color` (read from the lookup, not run against each rig):
+`scripts/dev-harness/shell.qml` is a quickshell root without it, loading the
+plugin by `file://` URL from outside its config folder exactly as the host
+does, so it is the "without it" rows' configuration and the pragma on its
+first line would make it the "with" rows'; `tests/a11y/host_*.qml` and the
+tree `tests/a11y/make_tree.py` builds run under plain `/usr/lib/qt6/bin/qml`
+(`tests/a11y/walk.py`, `tests/a11y/run_private_bus.py`), which has no scanner
+at all, the case the test's offscreen probe observes.
+
+### Rechecked by rc-host9 (2026-11-01)
+
+The verdict above holds. Re-measured with a rig of its own in the same kind
+of cage (installed quickshell, nested headless cage on a private bus, rule
+6b), built closer to the host than the first one: the root is the host
+`shell.qml`'s whole header, byte for byte (`import "plugins/bar"`,
+`import "services"` and the AuthServiceStore import included), over a full
+copy of `/usr/share/omarchy/shell`, the second root the same minus the pragma
+line; the plugin sits at `$HOME/.config/omarchy/plugins/io.github.rmcdavid.iptv`
+in the private HOME, a dotted directory as a real install is; and each entry
+point is loaded the way the host loads THAT entry point -- the overlay through
+a `Loader { asynchronous: true }` on the `file://` URL (`panelLoader`), the bar
+widget through `Qt.createComponent(url, Component.Asynchronous)`
+(`loadPluginWidget`), the service probe through
+`Component.PreferSynchronous` (`_syncServices`). `Color` was classified by its
+own API rather than by identity (the theme's has `loadColors` and `menu`,
+Qt's has `rgba`). Theme: accent `#3c5a78`, foreground `#9e8d7c`, red
+`#b01c2d`, menu `#445566` / `#e1d2c3`. Three runs, identical in every job
+they share (the second added the `QtQuick.Window` probe, the third the
+bare-path arm, both below):
+
+| Root | Guide `accent` / `urgent` / `background` / `foreground` | BarWidget `barFg` | `Color` in header probes |
+|---|---|---|---|
+| with the pragma, as shipped and qs imports first | `#3c5a78` / `#b01c2d` / `#445566` / `#e1d2c3` | `#9e8d7c` | the theme's (`Color_QMLTYPE_3`); Service's header: `Color is not defined` |
+| without it, both orders | `#000000` x4 | `#000000` | `QQuickColor(...)`, Service's header too |
+
+With the pragma the run logged no warning from the plugin's files; without
+it, 14 from each Guide load (lines 356-413) and 1 from each BarWidget load
+(line 90), the counts the first measurement saw.
+
+The live shell agrees, read without touching it. The running instance was
+started at 2026-10-31 16:54, after the update (`quickshell -n -p
+/usr/share/omarchy/shell` with `QS_DISABLE_FILE_WATCHER=1`, from
+`omarchy-launch-shell`), with this plugin in `bar.layout.right` and its
+`keepLoaded` overlay mounted at start. Its text log
+(`$XDG_RUNTIME_DIR/quickshell/by-id/<id>/log.log`, 16:54:03 to 2026-11-01
+01:59:59) holds the scanner's `Module path ".../io.github.rmcdavid.iptv" is
+outside of the config folder.` at 16:54:15 -- the patch's interceptor
+scanning this plugin's directory -- and not one `Guide.qml`, `BarWidget.qml`
+or `QColor` line, while the installed 0.15.0 Guide.qml reads `Color.menu.*`
+at creation on the same lines 356-413.
+
+What the recheck adds:
+
+- **A second way back to Qt's `Color` under the patch.** The rewrite touches
+  only `import QtQuick` lines, and `QtQuick.Window`'s qmldir says `import
+  QtQuick auto` (the only qmldir under `/usr/lib/qt6/qml` that imports
+  QtQuick), so an
+  unversioned `import QtQuick.Window` in a plugin file imports QtQuick at its
+  newest version behind the rewrite. Measured in the cage: Guide.qml's header
+  plus that one line reads `Color` as `QQuickColor(...)` with the pragma on.
+  No shipped file imports it today, and `test_with_the_rewrite_...` goes red
+  on a Guide.qml that does.
+- **The host hands the entry points over as local `file://` URLs, and this is
+  a join of its own.** The patched interceptor acts only on a URL that
+  `isLocalFile()`. Measured in the cage with the pragma on: a third copy of
+  the plugin handed to the same Loader and `Qt.createComponent` as a bare
+  path was resolved against the root's URL to `qs:<path>`, passed through to
+  the file as written (the interceptor's own `Passing through intercept`
+  lines), and drew `#000000` with Guide's 14 warnings, `Color` reading
+  `QQuickColor(...)`. Pinned by
+  `test_the_host_hands_every_entry_point_over_as_a_local_file_url`, which
+  runs the host's own `PluginRegistry.entryPointUrl` and `Util.fileUrl` for
+  each of the manifest's entry points (red on three host mutants: `fileUrl`
+  returning the path, `entryPointUrl` returning the path, and returning
+  `Qt.resolvedUrl` of it).
+- **What the rewrite hides besides `Color` costs nothing today, and would
+  cost the whole file.** `import QtQuick 6.11` also hides the QtQuick members
+  revisioned at 6.12 on the types a file names: `Item.mutabilityGroup` and
+  `AnimatedImage`'s `loops`, `finishBehavior` and `finished` (the
+  `StyleHints` and `AccessibilityHints` members at 6.12, reached through
+  `Application.styleHints`, stay visible); QtQml, QtQml.Models and
+  QtQml.WorkerScript revise nothing at 6.12. Measured under plain qml: an
+  `Item { mutabilityGroup: 0 }` under `import QtQuick 6.11` does not load at
+  all (`"Item.mutabilityGroup" is not available in QtQuick 6.11.`), and reads
+  `undefined` from script. The shipped QML uses none of them. But the gate's
+  qmllint, the dev harness and the a11y trees all see the full 6.12 API while
+  the host's plugin sees 6.11's, so a 6.12-only member would pass every check
+  here and leave the host without a guide.
+- **Reloads are unchanged.** `Qt.clearComponentCache` is `undefined` in the
+  cage's quickshell as it was on 0.3.1, so `rescanPlugins` rebuilds the
+  entry points from the cached components (D-REL-6): after a git-style
+  replace of Guide.qml, Mark.qml and Mark.mjs, the reloaded guide and probe
+  were the old ones in both roots. A load that bypasses the cache differs:
+  without the pragma it read the NEW Guide.qml and the new QML beside the
+  cached old `.mjs`, with it the OLD text, because the scanner keeps the text
+  of its first scan of a directory and serves that. A QML file that first
+  appears after the directory was read fails to load in both roots (`File
+  name case mismatch`, D-REL-6's error). Nothing in the host bypasses the
+  cache today, and a release that adds or renames a QML file is D-REL-6's
+  standing case either way. The live launcher sets
+  `QS_DISABLE_FILE_WATCHER=1`, so quickshell's watcher never reloads the
+  shell over a plugin's files.
