@@ -839,4 +839,4 @@ those three versions and only while D-A11Y-1's row on the board reads open. It
 is red on any other platform, on an exception missing or adding a field, and
 once the row reads fixed, which is the day the exception is removed and the
 premise re-measured. `scripts/release.py build` refuses to cut while the
-exception is present; `release.py check`, which the gate runs, does not.]**
+exception is present; `release.py check`, which the gate runs, does not.]
