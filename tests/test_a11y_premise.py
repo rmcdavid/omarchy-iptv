@@ -548,6 +548,57 @@ class ExceptionCase(unittest.TestCase):
         self.assertRed(self.outcome(self.fixture(authorisedBy='the lead'), have),
                        '`exception.authorisedBy`')
 
+    def test_an_empty_or_null_exception_is_red_wherever_it_runs(self):
+        # The cut refuses on the key alone (tests/test_release.py), and this
+        # test must not read an empty value as "no exception" either: on the
+        # measured platform, or where nothing is readable, a falsy exception
+        # would otherwise pass or skip in silence.
+        unreadable = dict((p, None) for p in MEASURED)
+        for value in ({}, None, '', [], 0, False):
+            for have in (dict(MEASURED), unreadable):
+                with self.subTest(value=value, have=have):
+                    fixture = self.fixture()
+                    fixture['exception'] = value
+                    self.assertRed(self.outcome(fixture, have),
+                                   'cannot', '`exception`')
+
+    # -- the platform test's own reads -----------------------------------
+
+    def run_platform_test(self, fixture, have, board_text):
+        """The platform test itself, not judge_premise: with the fixture, the
+        package versions and the board it reads replaced, so what it READS is
+        what decides. Restores the two names whatever happens."""
+        case = A11yPremiseCase(
+            'test_the_platform_the_premise_was_measured_on_is_still_the_one_here')
+        case.fixture = fixture
+        swapped = {'installed': lambda pkg: have.get(pkg),
+                   'read_board': lambda: board_text}
+        saved = dict((name, globals()[name]) for name in swapped)
+        globals().update(swapped)
+        try:
+            case.test_the_platform_the_premise_was_measured_on_is_still_the_one_here()
+        except unittest.SkipTest as skip:
+            return 'skip', str(skip)
+        except AssertionError as red:
+            return 'red', str(red)
+        finally:
+            globals().update(saved)
+        return 'pass', ''
+
+    def test_the_platform_test_judges_what_it_reads(self):
+        # judge_premise is driven above with a board and versions handed to
+        # it; this proves the platform test hands it the board and the pacman
+        # versions it READ, not a forgiving board or the exception's own list.
+        verdict, reason = self.run_platform_test(self.fixture(), dict(EXCEPTED), OPEN_BOARD)
+        self.assertEqual('skip', verdict, reason)
+        self.assertRed(self.run_platform_test(self.fixture(), dict(EXCEPTED),
+                                              board_with('fixed on dev')),
+                       'the exception has ended')
+        self.assertRed(self.run_platform_test(self.fixture(),
+                                              dict(EXCEPTED, **{'qt6-base': '6.12.1-1'}),
+                                              OPEN_BOARD),
+                       'qt6-base: excepted 6.12.0-3, installed 6.12.1-1')
+
 
 if __name__ == '__main__':
     unittest.main()
