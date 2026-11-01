@@ -25,9 +25,9 @@ cannot move into Sources in `state.json`, and bounds every download by a deadlin
 0.16.0 keeps the downloads a playlist chooses, and the channel addresses
 it writes, off this computer and your local network, sets the player's
 safety options after your own, takes your `mpvArgs` and your sources' keys
-off the helper's and the player's command lines, masks the Sources form on
-the desktop accessibility bus, and tells a failure on your own computer
-apart from a channel that does not work.
+off every command line, masks the Sources form on the desktop accessibility
+bus, and tells a failure on your own computer apart from a channel that does
+not work.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -291,10 +291,7 @@ URL by a one-way hash. It cannot be turned back into the URL; what it can do
 is confirm a guess — someone who can read the file and already holds a
 candidate URL can hash it and compare. That is far less than the URL itself
 and it is not nothing, which is why the permission change in the next
-paragraph stays. (Since 0.16.0 no key is on the helper's command line any
-more. A **Settings merged** notification names a source by its key, and a
-notification is on a command line for the moment it is being sent: see
-Playback notes.)
+paragraph stays. (Since 0.16.0 no key is on a command line any more.)
 
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
@@ -440,7 +437,7 @@ starting (mpv says so only on its own output, which the plugin discards, so a
 typo now fails quietly), and `--no-config` no longer stops mpv
 reading your own mpv config (to keep a setting of that config out of this
 player, take it out of the config). The keys that name your sources and the
-ids of channels reach the helper the same private way: neither is on its
+ids of channels reach the helper the same private way: neither is on a
 command line any more, and a source you add from now on gets a random key
 rather than one worked out from its address.
 
@@ -802,11 +799,10 @@ carry channel ids — most do — are not affected at all.
   down starts a fresh player once it has exited.
 - No stream address, credential or header value ever reaches **the player's**
   command line. The player starts empty and receives all of it over a private
-  socket only you can read. Two things are briefly visible to other local
+  socket only you can read. One thing is briefly visible to other local
   accounts in `ps`, because a notification's text is on its command line
   while it is being sent: the channel's name (a web address in it shown as
-  its host) in a notification naming it, and a source's short code in a
-  **Settings merged** notification (Troubleshooting). The channel's
+  its host) in a notification naming it. The channel's
   internal identifier, visible there while a change was being issued up to
   and including 0.15.0, now reaches the helper privately with its other
   private arguments, as your `mpvArgs` tokens and your sources' keys do
@@ -1392,7 +1388,8 @@ Nothing inside the plugin directory is written at runtime.
   not yet saved; kept the other program's version of ...`, naming the
   setting, or the source's short code and the fields that differed --
   never a URL or a value -- and, since 0.16.0, one notification titled
-  **Settings merged** says the same in a sentence for each. When the other
+  **Settings merged** says the same in a sentence for each, naming a source
+  by the fields that differed and never by its short code. When the other
   program removed the source that was active, no source is active
   afterwards, and the notification says so. If keeping both would go past a limit (50
   sources, 20 saved searches, 200 hidden groups), the other program's
