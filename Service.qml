@@ -2639,8 +2639,9 @@ Item {
     // D-SRC-33: and the user told once per merge that kept the other
     // program's version of something over a change made here (the journal
     // line was the only word until now): Model.mergeConflictNotice's
-    // sentences, through the one notify path -- a field name and a key,
-    // never a value. The in-flight and parked branches reach here alike.
+    // sentences, through the one notify path -- a field name, never a
+    // value, and since D-SINK-69 never a source's key, which the journal
+    // line above keeps. The in-flight and parked branches reach here alike.
     if (merged.conflicts.length > 0) root.notify("mergeConflict", { conflicts: merged.conflicts })
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same

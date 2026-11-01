@@ -121,7 +121,7 @@ HELPER_PARTS = (
     ("06-failed.py", 49608, 0x9e3407c4),
     ("07-player.py", 80795, 0xe7760d41),
     ("08-player-verbs.py", 101397, 0x9696944a),
-    ("09-cache.py", 26391, 0x5dd876a1),
+    ("09-cache.py", 26549, 0x60c9a9f1),
     ("10-state.py", 48632, 0x39b208e5),
     ("11-cli.py", 39916, 0x0a65d8c9),
 )

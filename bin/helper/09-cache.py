@@ -91,12 +91,14 @@ def remove_regular(path: str) -> bool:
 # cache_prune for the install-wide figure).
 CACHE_SUBDIRS = (LOGO_SUBDIR,)
 # D-LOGO-17 (the lead's ruling of 2026-10-24, K = 2): how many kept,
-# non-active sources keep their logo folder past a prune whatever its age
-# -- the two most recently fetched for -- so the install holds at most
-# 1 + LOGO_KEPT_FOLDERS folders after every start and switch. The day rule
-# still ages those two; this is the bound on the count, which the day
-# rule alone never gave (fifty sources switched through in a day kept
-# fifty folders). cache_prune states the figures.
+# non-active sources may keep their logo folder past a prune -- the two
+# most recently fetched for, and those only under the day rule; every
+# other kept, non-active folder goes whatever its age -- so the install
+# holds at most 1 + LOGO_KEPT_FOLDERS folders after every start and
+# switch. This is the bound on the count, which the day rule alone never
+# gave (fifty sources switched through in a day kept fifty folders).
+# cache_prune states the figures. (The ruling's own wording had the two
+# sets swapped; the code was always this, D-LOGO-17's 2026-11-01 note.)
 LOGO_KEPT_FOLDERS = 2
 # The age that makes age_logo_folder remove a folder whatever its mtime,
 # a future one included: no `now - mtime` is below it.

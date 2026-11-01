@@ -1505,7 +1505,7 @@ found `Color` defined by those imports in all three files without the
 pragma and none with it; the only other name defined was `BarWidget`, the
 plugin directory's own file, which the guard does not judge.
 
-What the fix does not reach (F-HARNESS-87): the dev harness's own root,
+What the fix does not reach (F-HARNESS-89): the dev harness's own root,
 `scripts/dev-harness/shell.qml`, carries no pragma and names `Color` bare in
 eight places, its fake `PluginBarApi` among them. Probed in the same run
 with that root's header, `Color` is `QQuickColor`, `Color.foreground` is
