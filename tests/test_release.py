@@ -71,6 +71,26 @@ def aggregator(parts):
 
 TODAY = '2026-09-26'
 
+
+def premise_fixture(exception=False):
+    """THIS repository's accessibility premise fixture, with or without its
+    exception. The cut reads it and the real tree always carries it, so the
+    double carries it too (rule 10); without the exception it is the fixture
+    as it reads when nothing excuses the premise."""
+    with io.open(os.path.join(ROOT, release.A11Y_PREMISE_FIXTURE), encoding='utf-8') as fh:
+        data = json.load(fh)
+    data.pop('exception', None)
+    if exception:
+        data['exception'] = {
+            'authorisedBy': 'the product owner', 'date': '2026-10-31',
+            'boardRow': 'D-A11Y-1',
+            'platform': {'quickshell': '0.3.2.r7.g2b4501a-1', 'qt6-base': '6.12.0-3',
+                         'at-spi2-core': '2.62.1-1'},
+            'evidence': {'upstreamFix': '916a0dd', 'probe': 'a11y-probe.sh'},
+            'why': 'unrelated work may land; nothing ships',
+        }
+    return json.dumps(data, indent=2) + '\n'
+
 MUST_NOT_SHIP = ('CLAUDE.md', 'docs/PRODUCT.md', 'tests/test_x.py',
                  'scripts/check.sh', '.gitignore')
 
@@ -105,6 +125,10 @@ class ReleaseCase(unittest.TestCase):
         # the build, so the double carries one (rule 10: a double that ships
         # what the real tree cannot is the forgiving kind).
         self.write('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (%s)\n\n- a thing\n' % TODAY)
+        # The cut refuses while D-A11Y-1's exception stands and refuses a tree
+        # it cannot read the premise from, so the double carries the fixture,
+        # as the real tree does, with no exception in it.
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture())
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
         self.git('checkout', '-q', '-b', 'dev')
@@ -207,6 +231,95 @@ class ReleaseCase(unittest.TestCase):
         self.git('tag', 'v0.9.9', 'main')
         with self.assertRaisesRegex(release.ReleaseError, 'already exists'):
             self.build()
+
+    # -- D-A11Y-1's exception: nothing ships while it stands --------------
+
+    def test_the_cut_refuses_while_the_a11y_exception_stands(self):
+        old_main = self.git('rev-parse', 'main').strip()
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture(exception=True))
+        self.commit_all('the owner\'s exception')
+        with self.assertRaises(release.ReleaseError) as refused:
+            self.build()
+        said = str(refused.exception)
+        self.assertIn('D-A11Y-1', said)
+        self.assertIn('no release is cut while it stands', said)
+        # One sentence: the releaser reads it at the prompt and acts on it.
+        self.assertNotIn('. ', said)
+        self.assertTrue(said.endswith('.'), said)
+        # Refused means nothing moved: no commit on main, no tag.
+        self.assertEqual(old_main, self.git('rev-parse', 'main').strip())
+        self.assertEqual('', self.git('tag', '--list', 'v0.9.9').strip())
+
+    def test_the_same_tree_cuts_once_the_exception_is_removed(self):
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture(exception=True))
+        self.commit_all('the owner\'s exception')
+        with self.assertRaisesRegex(release.ReleaseError, 'D-A11Y-1'):
+            self.build()
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture())
+        self.commit_all('D-A11Y-1 masked; the exception removed')
+        new = self.build()
+        self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+
+    def test_the_everyday_gate_stays_green_while_the_exception_stands(self):
+        # The exception exists so dev can take unrelated work; `check` runs in
+        # check.sh, and refusing there would undo the owner's decision.
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture(exception=True))
+        self.commit_all('the owner\'s exception')
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+        # And as check.sh runs it: the command, its exit status.
+        ran = self.release_cli('check')
+        self.assertEqual(0, ran.returncode, ran.stdout)
+
+    def release_cli(self, *args):
+        return subprocess.run(
+            [sys.executable, os.path.join(ROOT, 'scripts', 'release.py'), '--root', self.dir]
+            + list(args), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            universal_newlines=True, timeout=120)
+
+    def test_the_command_line_cut_refuses_in_one_sentence(self):
+        self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture(exception=True))
+        self.commit_all('the owner\'s exception')
+        ran = self.release_cli('build', '--gate-already-green', '--no-validate')
+        self.assertEqual(1, ran.returncode, ran.stdout)
+        self.assertRegex(ran.stdout, r'^release: REFUSED\. tests/fixtures/a11y-premise'
+                                     r'\.json carries the dated exception for D-A11Y-1')
+        self.assertEqual(1, len(ran.stdout.strip().splitlines()), ran.stdout)
+
+    def test_an_empty_or_null_exception_still_refuses(self):
+        # The premise test calls these malformed and goes red on them; the cut
+        # does not wait for that: the key being there is the condition.
+        for value in ('{}', 'null', '""'):
+            with self.subTest(value=value):
+                text = premise_fixture().rstrip().rstrip('}') + ',\n  "exception": %s\n}\n' % value
+                self.assertIn('exception', json.loads(text))
+                self.write(release.A11Y_PREMISE_FIXTURE, text)
+                self.commit_all('an empty exception')
+                with self.assertRaisesRegex(release.ReleaseError, 'no release is cut'):
+                    self.build()
+
+    def test_a_tree_without_the_premise_fixture_is_refused(self):
+        self.git('rm', '-q', release.A11Y_PREMISE_FIXTURE)
+        self.commit_all('no premise')
+        with self.assertRaisesRegex(release.ReleaseError, 'could not be read.*D-A11Y-1'):
+            self.build()
+
+    def test_a_premise_fixture_that_is_not_an_object_is_refused(self):
+        for text in ('not json\n', '["exception"]\n'):
+            with self.subTest(text=text):
+                self.write(release.A11Y_PREMISE_FIXTURE, text)
+                self.commit_all('broken premise')
+                with self.assertRaisesRegex(release.ReleaseError, 'D-A11Y-1 exception stands'):
+                    self.build()
+
+    def test_the_guard_reads_the_fixture_the_premise_test_reads(self):
+        # Two files name one path: the guard and tests/test_a11y_premise.py.
+        # Joined by a name, so the join is checked here (rule 13).
+        spec = importlib.util.spec_from_file_location(
+            'premise_for_release', os.path.join(ROOT, 'tests', 'test_a11y_premise.py'))
+        premise = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(premise)
+        self.assertEqual(os.path.join(ROOT, release.A11Y_PREMISE_FIXTURE), premise.FIXTURE)
+        self.assertTrue(os.path.isfile(premise.FIXTURE))
 
     # -- the allowlist check that runs in the gate ------------------------
 

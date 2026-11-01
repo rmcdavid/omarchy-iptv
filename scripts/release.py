@@ -314,6 +314,46 @@ def changelog_problems(root, strict, today=None):
     return problems
 
 
+# D-A11Y-1's dated exception. On 2026-10-31 the accessibility premise
+# tripwire (tests/test_a11y_premise.py) fired on a system update whose
+# Quickshell carries the upstream fix, so D-A11Y-1 -- provider credentials on
+# the session bus -- is treated as live. The product owner let unrelated work
+# land on dev under a narrow exception recorded in the fixture, on the
+# condition that NOTHING ships while it stands. The test honours the exception;
+# this is the condition.
+A11Y_PREMISE_FIXTURE = 'tests/fixtures/a11y-premise.json'
+
+
+def premise_exception_problems(root):
+    """Why the cut must stop for the accessibility premise; [] when it need not.
+
+    Only `build` calls this, for the reason `changelog_problems` gives: `check`
+    runs in the everyday gate, and the exception exists precisely so that the
+    gate can be green while it stands. Refusing in `check` would turn every
+    gate red and undo the owner's decision; refusing in `build` makes the cut
+    impossible and nothing else.
+
+    An unreadable fixture refuses too. The real tree always carries it (the
+    premise test reads it), so a cut that cannot see it cannot see whether the
+    exception stands, and deleting the file is not a way past the condition.
+    """
+    try:
+        data = json.loads(read(root, A11Y_PREMISE_FIXTURE))
+    except Exception as error:               # missing, unreadable, or not JSON
+        return ['%s could not be read (%s), so nothing shows whether the D-A11Y-1 '
+                'exception stands, and a cut that cannot see it does not ship.'
+                % (A11Y_PREMISE_FIXTURE, error)]
+    if not isinstance(data, dict):
+        return ['%s is not a JSON object, so nothing shows whether the D-A11Y-1 '
+                'exception stands, and a cut that cannot see it does not ship.'
+                % A11Y_PREMISE_FIXTURE]
+    if 'exception' in data:
+        return ['%s carries the dated exception for D-A11Y-1, and no release is cut '
+                'while it stands: fix D-A11Y-1, then remove the exception and '
+                're-measure the premise per its onRed.' % A11Y_PREMISE_FIXTURE]
+    return []
+
+
 def check(root, out=sys.stdout):
     """Prove the allowlist is whole. Returns a list of problems."""
     problems = []
@@ -595,6 +635,12 @@ def build(root, gate_already_green=False, validate=True, tag=True,
     if current_branch(root) != DEV_BRANCH:
         raise ReleaseError('releases are cut from %r, and this is %r'
                            % (DEV_BRANCH, current_branch(root)))
+    # After the clean-tree guard, so the fixture read is the committed one, and
+    # before the gate re-run, so a cut that cannot ship stops in a second
+    # rather than after the whole gate.
+    blocked = premise_exception_problems(root)
+    if blocked:
+        raise ReleaseError(' '.join(blocked))
     problems = check(root, out=out)
     if problems:
         raise ReleaseError('the allowlist is not whole:\n  ' + '\n  '.join(problems))
