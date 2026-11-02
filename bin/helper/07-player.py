@@ -18,8 +18,11 @@ PLAYER_LOCK_FILE = "player.lock"
 PLAYER_STASH_SCHEMA = 1
 # Two sibling top-level user-data nodes (4.6), probe-verified on mpv 0.41: a
 # second client reads back the identical object, the top level is not
-# writable, and there is no delete. The record dies with the process it
-# describes, which is exactly why it is not a file on disk.
+# writable, and `del_property` is not a command ("invalid parameter"). [The
+# `del` input command DOES remove a sub-path on mpv 0.41.0 -- `success`, then
+# `property not found`; `error running command` on an absent one -- measured
+# 2026-11-02 by lane-sk72; nothing here uses it.] The record dies with the
+# process it describes, which is exactly why it is not a file on disk.
 USER_DATA_STASH = "user-data/omarchy-iptv"
 USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
 # M5-01 live rewind (M5-01-LIVE-REWIND.md 2.2, dev branch): the third sibling node,
@@ -31,6 +34,21 @@ USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
 # `probe` reads it and never writes (the probe is side-effect-free).
 USER_DATA_REWIND = "user-data/omarchy-iptv-rewind"
 REWIND_SCHEMA = 1
+# D-SINK-72 (lane-sk72, 2026-11-02): one more sibling -- beside the stash,
+# the owner claim, the rewind zero point and the shell's picture-in-picture
+# snapshot (user-data/omarchy-iptv-pip, Model.PIP_SNAPSHOT_KEY) -- the fact
+# that a probe changed this player's TLS settings in place, kept ON THE
+# PLAYER so that it outlives the shell that learned it. Set by migrate_tls
+# when it has to act, read by every later probe (whose `migrated` it keeps
+# true), and cleared -- set to anything but the word -- only by
+# apply_channel's own load, the one act that re-establishes the connection
+# the migration could not reach. A fixed word: nothing private. Measured on
+# mpv 0.41.0, windowless (QA-RESULTS "D-SINK-72"): a get of the absent node
+# answers `property not found`; set_property answers success, a SECOND
+# client reads the word back, it survives two `loadfile ... replace`, and
+# the set changes no other property, idle or playing.
+USER_DATA_TLS = "user-data/omarchy-iptv-tls"
+TLS_MIGRATED_MARK = "migrated"
 PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"   # mirrors Model.PLAYER_GENERIC_FAILURE
 # The D-LIVE-17 ladder, unchanged: quit at 0, SIGTERM at 2 s, SIGKILL at 4 s.
 STOP_QUIT_GRACE_MS = 2000
@@ -1135,8 +1153,8 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
       - everything BEFORE the token is ignored: real mpv, the harness stub
         (`python3 /x/bin/mpv`), a wrapper that prepends its own options or a
         sandbox launcher all keep our elements whole after it;
-      - the tail from the token to the END must equal this build's composed
-        argv less its program name, in either form (no options file, or one
+      - the tail from the token must BEGIN with this build's composed argv
+        less its program name, in either form (no options file, or one
         named), byte for byte. Measured on mpv 0.41.0, windowless (lane RA's
         M1, 2026-11-01): /proc/<pid>/cmdline is the exec argv byte for byte
         in both forms, a 0xff byte in a path element kept, at bind and after
@@ -1144,13 +1162,40 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
         from the candidate at the same index when it is one: the only element
         derived from the CALLER's environment (state_dir) rather than from
         the socket path, so two shells on one runtime folder agree.
-    Elements after our last pin are NOT tolerated: a wrapper that appends
-    arguments has taken the pin block's last word (D-SINK-13 layer 2), and
-    "not this build's launch" is the honest reading.
+      - elements AFTER that composition are the user's `mpv` wrapper
+        appending its own options (`exec /usr/bin/mpv "$@" --hwdec=auto`),
+        and read "current" (D-PLY-61, the lead's decision of 2026-11-02),
+        with one exception below. Anything that differs INSIDE the composed
+        tail -- an element changed, dropped or moved, another build's marker
+        -- is "older".
+
+    What this does and does not protect. Its job is build IDENTITY: no verb
+    of this helper feeds a player another build launched (the build gate,
+    feed_gate). An older build cannot produce this prefix, because the marker
+    element in it carries the version and the CRC of the helper's part
+    table, so reading an appended tail as "current" admits no other build's
+    player. It does NOT police the user's own wrapper: a wrapper that
+    appends has taken the pin block's last word (D-SINK-13 layer 2) whatever
+    this answers, because the replacement a stricter answer would ask for
+    runs through the same wrapper and appends the same tokens again -- that
+    is the user's own configuration, PO-5's shape, like a token in mpvArgs.
+    The stricter reading this replaced cost such a user a new player window
+    at every channel change and every shell restart, and protected nothing.
+
+    The exception: a socket option among the appended elements
+    (`--input-ipc-server` in any of mpv's spellings) reads "older". mpv obeys
+    the LAST one, so a second one after ours re-points the very element this
+    reading is anchored on, and the command line no longer shows this build
+    launching a player on `sock_path`. The verdict is asked of the process
+    that listens on our socket (player_peer), so the only shape that reaches
+    it names our own socket again, which no wrapper needs to do; a wrapper
+    that names another socket cannot work with the plugin at all (the
+    player never binds ours, `no_socket`).
 
     Rule 5: the word is the whole answer. No element of the candidate's argv
     is returned, logged, put in an exception or compared out loud -- an older
-    player's argv holds the user's mpvArgs tokens (before D-SINK-47).
+    player's argv holds the user's mpvArgs tokens (before D-SINK-47), and the
+    appended elements are the user's own.
     """
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return "unknown"
@@ -1168,14 +1213,22 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
     build = player_build()
     for include in (False, True):
         expected = [os.fsencode(element) for element in compose_launch_argv(sock_path, include, where, build)[1:]]
-        if len(expected) != len(tail):
+        if len(tail) < len(expected):
             continue
+        head, appended = tail[:len(expected)], tail[len(expected):]
         for at, element in enumerate(expected):
-            if element.startswith(b"--screenshot-dir=") and tail[at].startswith(b"--screenshot-dir="):
-                expected[at] = tail[at]
-        if tail == expected:
-            return "current"
+            if element.startswith(b"--screenshot-dir=") and head[at].startswith(b"--screenshot-dir="):
+                expected[at] = head[at]
+        if head == expected:
+            return "older" if any(_names_ipc_server(element) for element in appended) else "current"
     return "older"
+
+
+def _names_ipc_server(element: bytes) -> bool:
+    """Whether one argv element is mpv's socket option, in any spelling mpv
+    takes: `--input-ipc-server=X`, `--input-ipc-server X` and the legacy
+    single-dash forms (man mpv, "Legacy option syntax")."""
+    return element.lstrip(b"-").split(b"=", 1)[0] == b"input-ipc-server" and element.startswith(b"-")
 
 
 def still_the_player(record: dict[str, Any], sock_path: str) -> bool:

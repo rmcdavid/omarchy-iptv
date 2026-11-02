@@ -114,6 +114,19 @@ def load_options(agent=helper.MPV_DEFAULT_USER_AGENT, referrer="", fields=()):
             + [["http-header-fields-append", f] for f in fields])
 
 
+# D-SINK-72 (lane-sk72, 2026-11-02): the last command of every load the
+# helper makes -- after the loadfile, the stash and the owner claim -- clears
+# the probe's migration mark (migrate_tls) to the empty word. Spelled out like
+# the prelude above, so a change to the tail has to be a change here too.
+MARK_CLEAR = ["set_property", "user-data/omarchy-iptv-tls", ""]
+
+
+def last_load(server):
+    """The last `loadfile` the FakeMpv was sent: no longer the last command,
+    since the mark clear follows it (MARK_CLEAR)."""
+    return [c for c in server.commands if c[0] == "loadfile"][-1]
+
+
 class Obj(dict):
     """A JSON object as mpv's own reader takes it: every key in order,
     repeats kept, in `pairs` (measured on mpv 0.41.0: three
@@ -672,8 +685,11 @@ class PlayTest(MpvTestCase):
             # another host and is dropped at parse time; the rest arrive.
             ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace", -1,
              dict(load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))],
+            # D-SINK-72: the load passed every assertion, so the probe's
+            # migration mark is spent; last, after any stash and claim.
+            MARK_CLEAR,
         ])
-        self.assertEqual(server.commands[-1][4].pairs,
+        self.assertEqual(last_load(server)[4].pairs,
                          load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))
         self.assertEqual(len(stdout.strip().splitlines()), 1)
         self.assertNotIn("espn.m3u8", stdout + stderr)
@@ -756,8 +772,9 @@ class PlayTest(MpvTestCase):
             ["set_property", "http-header-fields", []],
             ["loadfile", "http://stream.example.test/live/bbc1.m3u8", "replace", -1,
              dict(load_options("mpv-default-ua"))],
+            MARK_CLEAR,
         ])
-        self.assertEqual(server.commands[-1][4].pairs, load_options("mpv-default-ua"))
+        self.assertEqual(last_load(server)[4].pairs, load_options("mpv-default-ua"))
 
     def test_user_agent_falls_back_to_libmpv_without_option_info(self):
         server = self.start()
@@ -770,8 +787,9 @@ class PlayTest(MpvTestCase):
         code, payload, stdout, stderr = self.play("--url", "https://user:pw@live.example.test/secret/path.m3u8?token=abc")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": None, "name": "live.example.test"})
-        self.assertEqual(server.commands[-1][:4], ["loadfile", "https://user:pw@live.example.test/secret/path.m3u8?token=abc", "replace", -1])
-        self.assertEqual(server.commands[-1][4].pairs, load_options())
+        self.assertEqual(last_load(server)[:4], ["loadfile", "https://user:pw@live.example.test/secret/path.m3u8?token=abc", "replace", -1])
+        self.assertEqual(last_load(server)[4].pairs, load_options())
+        self.assertEqual(server.commands[-1], MARK_CLEAR)
         self.assertIn(["set_property", "http-header-fields", []], server.commands)
         for secret in ("user:pw", "secret", "token=abc"):
             self.assertNotIn(secret, stdout + stderr)
@@ -794,7 +812,7 @@ class PlayTest(MpvTestCase):
             with self.subTest(url=url):
                 code, _, _, stderr = self.play("--url", url)
                 self.assertEqual(code, 0, stderr)
-                self.assertEqual(server.commands[-1][4].pairs, load_options() + extra)
+                self.assertEqual(last_load(server)[4].pairs, load_options() + extra)
 
     def test_unknown_channel_never_touches_mpv(self):
         server = self.start()
@@ -832,7 +850,7 @@ class PlayTest(MpvTestCase):
         server = self.start(event_first=True)
         code, payload, _, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(server.commands[-1][0], "loadfile")
+        self.assertEqual(server.commands[-2:], [last_load(server), MARK_CLEAR])
 
     def test_header_failure_aborts_before_loadfile(self):
         server = self.start(refuse={"http-header-fields"})
@@ -848,7 +866,7 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 0)
         self.assertTrue(payload["ok"])
         self.assertIn("refused to set title", stderr)
-        self.assertEqual(server.commands[-1][0], "loadfile")
+        self.assertEqual(server.commands[-2:], [last_load(server), MARK_CLEAR])
 
     def test_silent_mpv_times_out(self):
         self.start(silent=True)
