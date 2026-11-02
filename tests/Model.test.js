@@ -6226,15 +6226,15 @@ checkCall("D-SINK-71: olderRestartDisposition -- a migrated older player is held
     "defer", "defer", "stop", "hold",
     "hold", "hold",
     "clear", "clear"])
-// lane-sk73 (2026-11-02): a later probe of the SAME older player keeps the
+// D-SINK-73 (2026-11-02): a later probe of the SAME older player keeps the
 // episode already open for it; a different player opens its own. Red on
 // c510985: no such model names (the re-open lived in Service.qml, where every
 // probe built the episode afresh). rc-sk73: the fresh rows' `migrated` was
-// false on lane-sk73's tip, which dropped the open episode's; it is carried
+// false on D-SINK-73's tip, which dropped the open episode's; it is carried
 // (D-SINK-71, as c510985 did), because the same player can be read under
 // another pid, so those rows read true now, and the last two rows show the
 // carry is an OR and not a constant.
-checkCall("lane-sk73 and rc-sk73: olderRestartOpen -- the first probe opens an unspent, unexpired episode and arms the hold; a later probe of the SAME player (pid and stash) keeps its spent, expired and intent, ORs `migrated`, takes this probe's `unsafe` and arms nothing; another pid, a recycled pid with another stash (since, entry, channel or source), or an open episode with no player recorded opens a FRESH one inheriting none of its spent, expiry or intent but carrying its `migrated`; a pid the probe did not name compares on the stash alone", () => {
+checkCall("D-SINK-73 and rc-sk73: olderRestartOpen -- the first probe opens an unspent, unexpired episode and arms the hold; a later probe of the SAME player (pid and stash) keeps its spent, expired and intent, ORs `migrated`, takes this probe's `unsafe` and arms nothing; another pid, a recycled pid with another stash (since, entry, channel or source), or an open episode with no player recorded opens a FRESH one inheriting none of its spent, expiry or intent but carrying its `migrated`; a pid the probe did not name compares on the stash alone", () => {
   const ST = { schema: 1, playing: true, id: "t:x", name: "X", group: "G", launchedFrom: "", sourceKey: "ka", since: 100, entryId: 1, seq: 1, verb: "start" }
   const first = Model.olderRestartOpen(null, { seq: 3, pid: 4242, stash: ST, unsafe: false, migrated: true })
   const held = Object.assign({}, first.episode, { spent: true, expired: true })
@@ -6273,7 +6273,7 @@ checkCall("lane-sk73 and rc-sk73: olderRestartOpen -- the first probe opens an u
 // spends the episode whichever branch is taken, and the line for a player
 // this shell's own restart started is journaled once per episode, not once
 // per probe.
-checkCall("lane-sk73: olderRestartOpen -- a stopped start's probe (`timedOut`) spends a fresh episode and keeps a kept one spent, arming nothing and journaling nothing; after a delivered restart a NEW episode is spent with the again-line, a later probe of the same player journals it no more", () => {
+checkCall("D-SINK-73: olderRestartOpen -- a stopped start's probe (`timedOut`) spends a fresh episode and keeps a kept one spent, arming nothing and journaling nothing; after a delivered restart a NEW episode is spent with the again-line, a later probe of the same player journals it no more", () => {
   const ST = { id: "t:x", sourceKey: "ka", since: 100, entryId: 1 }
   const brief = r => [r.episode.seq, r.episode.spent, r.episode.expired, r.armHold, r.again]
   const open = Model.olderRestartOpen(null, { seq: 3, pid: 4242, stash: ST })
@@ -6291,7 +6291,7 @@ checkCall("lane-sk73: olderRestartOpen -- a stopped start's probe (`timedOut`) s
 }, [[4, true, false, false, false], [3, true, false, false, false], [4, true, false, false, false], [4, true, false, false, false],
     [5, true, false, false, true], [5, true, false, false, false], [6, true, false, false, true],
     true])
-checkCall("lane-sk73: olderRestartWith -- changes the named fields, carries every other one (an unknown one included), never mutates its input, and is null for no episode", () => {
+checkCall("D-SINK-73: olderRestartWith -- changes the named fields, carries every other one (an unknown one included), never mutates its input, and is null for no episode", () => {
   const ep = { seq: 2, unsafe: false, spent: false, expired: false, migrated: true, player: { pid: 1, id: "t:x", sourceKey: "", since: 0, entryId: 0 }, extra: "kept" }
   const copy = JSON.stringify(ep)
   const out = Model.olderRestartWith(ep, { spent: true })
@@ -15226,7 +15226,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     }, [[[0, 0, "t:x", true, false], [["t:x keep"], 0, 1, 0, false], [false, true, 1, 1]],
         [[0, 0, "t:x", true, true], [[], 0, 0, 0, false], [true, false, 0, 0]]])
 
-    checkCall("D-SINK-71: the migration an AMBIGUOUS first probe made (idle, no stash) counts for the retry that adopts the player -- that retry reads nothing left to migrate, and a list landing after the hold still gets the one restart", () => {
+    checkCall("D-SINK-71: the migration an AMBIGUOUS first probe made (idle, no stash) counts for the retry that adopts the player -- that retry reads nothing left to migrate (the case where mpv refused the mark: since D-SINK-72 a marked player reads migrated on the retry too), and a list landing after the hold still gets the one restart", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ tls: MIGRATED, stash: null, idle: true }))
       const retried = [h.ids.probeRetryTimer.restarts, h.root.nowPlaying]
@@ -15239,12 +15239,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [retried, adopted, startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : "")), stops(h)]
     }, [[1, null], "t:x", ["t:x keep"], 0])
 
-    // Named until lane-sk73 for what c510985 did -- the later probe opened the
+    // Named until D-SINK-73 for what c510985 did -- the later probe opened the
     // episode afresh and "the second hold's end" did not defer it because
     // `migrated` was carried. Now no second hold exists: the probe keeps the
     // episode's expiry, which the first element reads (red on c510985: the
     // hold re-armed, `expired` false). The other three are as they were.
-    checkCall("D-SINK-71 and lane-sk73: a later probe of the same older player while its restart is held past the hold (the socket hunt's) reads it already migrated -- the episode keeps `migrated` and stays expired, and no second hold is armed, so the probe neither defers it nor starts it, and the list still gets the one restart", () => {
+    checkCall("D-SINK-71 and D-SINK-73: a later probe of the same older player while its restart is held past the hold (the socket hunt's) reads it safe (the case where mpv refused the mark: since D-SINK-72 a marked player reads migrated again) -- the episode keeps `migrated` and stays expired, and no second hold is armed, so the probe neither defers it nor starts it, and the list still gets the one restart", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ tls: MIGRATED }))
       attach(h)
@@ -15331,7 +15331,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     }, [[["t:x keep"], ["t:x", 0, true, 0], ["t:x keep"], 1],
         [["t:x keep"], 1, ["74011 Stream failed"], null, false]])
 
-    // ---- lane-sk73 (2026-11-02): a later probe of the same older player ----
+    // ---- D-SINK-73 (2026-11-02): a later probe of the same older player ----
     // The shell probes a player it is already holding when its own connect
     // fails while the helper's succeeds (the socket hunt's probe after its
     // burst, a `recover`), and every such probe opened the restart episode
@@ -15342,7 +15342,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     const PB73 = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
     const reprobe = (h, o) => { h.root.runPlayerProbe(); exit(h, probeOf(Object.assign({ seq: h.root.playSeq }, o || {}))) }
     const againLines = h => h.warnings.filter(w => w === M.OLDER_RESTART_AGAIN_LINE).length
-    checkCall("lane-sk73 (rc-sk71's probe E): a SAFE older player DEFERRED at the hold's end and probed again -- after its list landed, and before -- is NOT restarted: no start, no restart line, still owed and spent, no hold re-armed, nothing stopped; the next channel change replaces it without --keep-pause", () => {
+    checkCall("D-SINK-73 (rc-sk71's probe E): a SAFE older player DEFERRED at the hold's end and probed again -- after its list landed, and before -- is NOT restarted: no start, no restart line, still owed and spent, no hold re-armed, nothing stopped; the next channel change replaces it without --keep-pause", () => {
       const run = afterList => {
         const { h, slots, zaps } = boot()
         reattach(h, probeOf())
@@ -15360,7 +15360,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [run(true), run(false)]
     }, [[[[], 0, true, true, false, 0], ["t:y"], 0], [[[], 0, true, true, false, 0], ["t:y"], 0]])
 
-    checkCall("lane-sk73 (rc-sk71's probe F): an older player that could not be made safe, probed again 1 s before its hold ends, is stopped when the ORIGINAL hold ends -- not a whole hold after the probe -- and only once", () => {
+    checkCall("D-SINK-73 (rc-sk71's probe F): an older player that could not be made safe, probed again 1 s before its hold ends, is stopped when the ORIGINAL hold ends -- not a whole hold after the probe -- and only once", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ tls: UNSAFE }))
       attach(h)
@@ -15375,7 +15375,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [reprobed, before, atHoldEnd, stops(h), startArgs(slots).length]
     }, [[0, true, true], 0, [1, null, false], 1, 0])
 
-    checkCall("lane-sk73: a SPENT episode probed again stays spent -- after path 6 (a user's start the watchdog stopped, the older player still there), after the automatic restart was refused before the ladder (deferred), and after a delivered restart whose replacement reads as another build's (journaled once, not once per probe): no second automatic start, no second card", () => {
+    checkCall("D-SINK-73: a SPENT episode probed again stays spent -- after path 6 (a user's start the watchdog stopped, the older player still there), after the automatic restart was refused before the ladder (deferred), and after a delivered restart whose replacement reads as another build's (journaled once, not once per probe): no second automatic start, no second card", () => {
       const path6 = boot()
       land(path6.h)
       path6.h.root.play("t:y", true, "")
@@ -15405,7 +15405,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         [["t:x keep"], 1, 0, [true, true], 0],
         [["t:x keep"], 1, 1, [true, true], 0]])
 
-    checkCall("lane-sk73: a MIGRATED older player held and probed again 5 s before its hold ends keeps `migrated` AND its original expiry -- expired at 15 s, not 20, no hold re-armed, still owed and unspent, nothing started or stopped -- and the list still gets the one restart", () => {
+    checkCall("D-SINK-73: a MIGRATED older player held and probed again 5 s before its hold ends keeps `migrated` AND its original expiry -- expired at 15 s, not 20, no hold re-armed, still owed and unspent, nothing started or stopped -- and the list still gets the one restart", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ tls: MIGRATED }))
       attach(h)
@@ -15419,7 +15419,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [reprobed, atHoldEnd, startsKeep(slots), restartLines(h), stops(h)]
     }, [[[true, false, false], true], [[true, true, false], false, true, 0, 0], ["t:x keep"], 1, 0])
 
-    checkCall("lane-sk73 (unchanged): a DIFFERENT player answering while an episode is open -- another pid with another stash, or a recycled pid whose stash started at another time -- opens its OWN episode: unspent, unexpired, the hold armed, inheriting neither the deferred one's spent nor its expiry; its list gets its one restart", () => {
+    checkCall("D-SINK-73 (unchanged): a DIFFERENT player answering while an episode is open -- another pid with another stash, or a recycled pid whose stash started at another time -- opens its OWN episode: unspent, unexpired, the hold armed, inheriting neither the deferred one's spent nor its expiry; its list gets its one restart", () => {
       const run = o => {
         const { h, slots } = boot()
         reattach(h, probeOf())
@@ -15434,7 +15434,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [run({ pid: 5353, stash: STASH({ since: 9, entryId: 2 }) }), run({ stash: STASH({ since: 9 }) })]
     }, [[true, [false, false, true], ["t:x keep"], 1], [true, [false, false, true], ["t:x keep"], 1]])
 
-    checkCall("lane-sk73 (path 6 with an episode open): a channel change while the restart is owed goes out as a start, the watchdog stops it, and its probe finds the SAME older player -- the start's failure is still told once (Helper timed out), the episode stays spent and keeps the intent it was opened under (no start of it would keep the pause), nothing started automatically; the next change replaces it", () => {
+    checkCall("D-SINK-73 (path 6 with an episode open): a channel change while the restart is owed goes out as a start, the watchdog stops it, and its probe finds the SAME older player -- the start's failure is still told once (Helper timed out), the episode stays spent and keeps the intent it was opened under (no start of it would keep the pause), nothing started automatically; the next change replaces it", () => {
       const { h, slots } = boot()
       reattach(h, probeOf())
       attach(h)
@@ -15454,12 +15454,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [after, startsKeep(slots)]
     }, [[["74021 Could not start playback | Helper timed out"], "t:x", true, true, false, false, 0, ["t:y"]], ["t:y", "t:y"]])
 
-    // rc-sk73 (2026-11-02), the recheck of lane-sk73. The identity is the
+    // rc-sk73 (2026-11-02), the recheck of D-SINK-73. The identity is the
     // probe's pid and stash, and a probe can name the SAME player under
     // another pid: behind a user's `mpv` wrapper that runs the player as its
     // child (D-PLY-55) both processes carry the socket's argument, and when
     // mpv's own `pid` read fails `_connected_pid` names the lower one. That
-    // probe finds nothing left to migrate. lane-sk73's tip opened the fresh
+    // probe finds nothing left to migrate. D-SINK-73's tip opened the fresh
     // episode with this probe's `migrated` alone, so the hold's end deferred
     // a player whose open connection predates the migration and the late
     // list started nothing (D-SINK-71's exposure, back); c510985 carried it

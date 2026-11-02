@@ -634,7 +634,7 @@ TestCase {
   }
 
   function test_olderRestartReprobeUnderQtsEngine() {
-    // lane-sk73: a later probe of the SAME older player keeps the episode
+    // D-SINK-73: a later probe of the SAME older player keeps the episode
     // open for it (spent, expired, intent; no hold re-armed), a different
     // player opens its own, and every rebuild carries every field -- the
     // node suite's vectors, run again under Qt's own engine, where the

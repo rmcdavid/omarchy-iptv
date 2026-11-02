@@ -495,8 +495,10 @@ function wholeCount(count) {
 
 // What the reattach path does with the player it has just identified:
 //
-//   "feed"   it was already verifying (this shell launched it, or an earlier
-//            probe migrated it): adopt it, nothing else to do.
+//   "feed"   it was already verifying and nothing is owed: this shell launched
+//            it, or an earlier probe migrated it and a load of this build has
+//            since re-established its channel (D-SINK-72: that load spends the
+//            mark). Adopt it, nothing else to do.
 //   "reload" it was NOT, the helper has made it verify, and the channel must be
 //            re-established before anything else is sent to it. Setting the
 //            property covers the NEXT load; whether an already-open stream
@@ -507,12 +509,15 @@ function wholeCount(count) {
 //            it is precisely the act of handing a credentialed URL and the
 //            provider headers to a process we could not secure.
 //
-// `migrated` is the helper's answer to "was this player already safe when I
-// found it", so a second probe over an already-migrated player answers "feed"
-// and costs no further rebuffer. The caller must therefore only ever SET its
-// pending-reload flag from this, never clear it: an ambiguous first probe
-// (idle, or no stash yet) migrates the player and is then retried 500 ms later
-// by a probe that correctly sees nothing left to do.
+// `migrated` is the helper's answer to "has a probe had to change this
+// player's TLS settings since a load of this build last re-established its
+// channel". D-SINK-72: the migrating probe leaves a mark on the player, and
+// every later probe reports it until apply_channel's load clears it, so a
+// second probe before the reload answers "reload" again and one after it
+// answers "feed": the rebuffer is paid once. The caller still only ever SETS
+// its pending-reload flag from this, never clears it, because a mark mpv
+// refused leaves a later probe -- the 500 ms retry of an ambiguous first
+// probe (idle, or no stash yet) among them -- reading nothing left to do.
 // D-SINK-16. What to do with an owed TLS re-establish, as a function rather
 // than as three conditions in a row, because the first version got one of them
 // wrong in a way no test could see: it CLEARED the flag whenever `nowPlaying`
@@ -677,7 +682,7 @@ function olderRestartWith(episode, changes) {
   return out
 }
 
-// lane-sk73 (2026-11-02): which player an episode was opened for, from what
+// D-SINK-73 (2026-11-02): which player an episode was opened for, from what
 // the reattach probe tells the shell -- the process its connection reached
 // (`pid`) and the stash that process carries: the channel's id and source,
 // the time it started playing and the entry it loaded. A player another
@@ -706,7 +711,7 @@ function sameOlderPlayer(a, b) {
   return x.pid === 0 || y.pid === 0 || x.pid === y.pid
 }
 
-// lane-sk73: what a probe that finds a player another build launched does
+// D-SINK-73: what a probe that finds a player another build launched does
 // to the restart episode. The shell probes a player it is already holding
 // when its own connect fails while the helper's succeeds (the socket hunt's
 // probe after its burst, a `recover`), and every such probe used to open the
