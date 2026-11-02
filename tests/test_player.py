@@ -826,6 +826,65 @@ class FeedGateTest(GateTestCase):
         self.assertEqual([c for c in told if isinstance(c, list) and c[0] in ("loadfile", "set_property", "keybind")], [])
 
 
+class WrapperSpawnTest(GateTestCase):
+    """The fresh spawn is vouched for, never re-judged (design 3, 17.1), and
+    "vouched" may not mean "the very pid exec'd as `mpv`": a user's `mpv` on
+    PATH can be a wrapper script that runs the real player as its CHILD (no
+    `exec`), or starts it in the background and exits. Then the process the
+    connection reaches -- the listener, SO_PEERCRED -- is not the launched
+    pid, and a gate that demanded equality answered `player_foreign` to
+    every start: no playback at all, where 202a7bc played (found by the
+    recheck of lane RA, 2026-11-01). The peer is this build's when it is the
+    launched pid, a descendant of it, or a process whose own command line
+    reads `current`."""
+
+    def wrap(self, body):
+        """Turn the stub mpv into `mpv-real` and put a /bin/sh wrapper named
+        `mpv` in front of it; `body` is the line that runs it ("$@" is the
+        helper's argv). The trailing status line keeps the shell from turning
+        its last command into an exec."""
+        stub = os.path.join(self.bin, "mpv")
+        real = os.path.join(self.bin, "mpv-real")
+        os.rename(stub, real)
+        line = body.replace("REAL", "%s %s" % (sys.executable, real))
+        pathlib.Path(stub).write_text("#!/bin/sh\n%s\nstatus=$?\nexit $status\n" % line, encoding="utf-8")
+        os.chmod(stub, 0o755)
+
+    def played(self, payload):
+        """The pid of the process that answered the socket and what it was
+        told, found by the socket token (the wrapper carries it too)."""
+        players = [r["pid"] for r in helper.find_player(self.sock) if self.told(r["pid"])]
+        self.assertEqual(len(players), 1, players)
+        return [c[0] for c in self.told(players[0]) if isinstance(c, list)]
+
+    def assert_plays(self):
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("replaced", payload)
+        self.assertIn("loadfile", self.played(payload))
+        code, zapped, _, stderr = self.play()
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("outdated", zapped)
+        return payload
+
+    def test_a_wrapper_that_runs_mpv_as_its_child_still_plays(self):
+        self.wrap('REAL "$@"')
+        self.assert_plays()
+
+    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays_its_first_channel(self):
+        """Its player reads `older` to every later verdict (design 4.6: such a
+        wrapper took the pin block's last word), so a zap is a replacement --
+        degenerate, stated -- but the spawn this helper made is still fed."""
+        self.wrap('REAL "$@" --osd-level=1')
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("loadfile", self.played(payload))
+
+    def test_a_wrapper_that_starts_mpv_in_the_background_and_exits_still_plays(self):
+        self.wrap('REAL "$@" </dev/null >/dev/null 2>&1 &')
+        self.assert_plays()
+
+
 class ReplaceTest(GateTestCase):
     """`player start` replaces a player another build launched: reads, a
     quit, and the spawn; the old player is fed nothing (T3, T6, T8, T11)."""

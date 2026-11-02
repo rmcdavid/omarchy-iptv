@@ -1054,6 +1054,43 @@ def proc_start_time(pid: int) -> str:
     return fields[19] if len(fields) > 19 else ""
 
 
+# How far up the parent chain descends_from looks: a wrapper script, a
+# sandbox launcher and the player are a handful of levels, never this many.
+DESCENT_MAX_DEPTH = 16
+
+
+def proc_parent(pid: int) -> int:
+    """Field 4 of /proc/<pid>/stat (the parent's pid), 0 when unreadable;
+    read after the last ')' for the same reason as proc_start_time."""
+    try:
+        with open("/proc/%d/stat" % pid, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return 0
+    fields = data[data.rfind(b")") + 1:].split()
+    try:
+        return int(fields[1]) if len(fields) > 1 else 0
+    except ValueError:
+        return 0
+
+
+def descends_from(pid: int, ancestor: int) -> bool:
+    """Whether `ancestor` is a parent, grandparent ... of `pid`, at most
+    DESCENT_MAX_DEPTH levels up. Restart on adoption: the process exec'd as
+    `mpv` may be a user's wrapper that runs the real player as its CHILD, and
+    that child is the listener the connection reaches (feed_gate)."""
+    if ancestor <= 1:
+        return False
+    current = pid
+    for _ in range(DESCENT_MAX_DEPTH):
+        current = proc_parent(current)
+        if current <= 1:
+            return False
+        if current == ancestor:
+            return True
+    return False
+
+
 def proc_is_ours(pid: int) -> bool:
     try:
         return os.stat("/proc/%d" % pid).st_uid == os.getuid()

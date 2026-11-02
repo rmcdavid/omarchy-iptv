@@ -447,11 +447,17 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
     the player something about a channel. -> the peer's pid.
 
     With `vouched_pid` (`player start`: the pid it launched, or the current
-    player it adopted) the peer must BE that process, else `player_foreign`:
-    another process bound the socket the helper spawned on. The fresh spawn's
-    argv is never re-judged, so no disagreement between the builder and the
-    reader can turn a spawn into "no playback". Without it (`play`) the peer
-    must read "current" (launch_verdict), else `not_running` with `outdated`.
+    player it adopted) the peer must be that process, a DESCENDANT of it, or
+    a process whose own command line reads "current", else `player_foreign`:
+    another process bound the socket the helper spawned on. The process exec'd
+    as `mpv` can be a user's wrapper script that runs the real player as its
+    child (no `exec`) or in the background and exits, and the listener the
+    connection reaches is then that child; demanding the very pid answered
+    `player_foreign` to every start through such a wrapper, where 202a7bc
+    played (the recheck of lane RA, 2026-11-01). The fresh spawn's argv is
+    never re-judged, so no disagreement between the builder and the reader
+    can turn a spawn into "no playback". Without it (`play`) the peer must
+    read "current" (launch_verdict), else `not_running` with `outdated`.
 
     D-SINK-70 (shipped 0.16.0): after an update without a shell restart, the
     keepLoaded old Service fed a player an older build launched through this
@@ -460,9 +466,11 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
     running."""
     peer = player_peer(client)
     if vouched_pid is not None:
-        if peer <= 0 or peer != int(vouched_pid):
-            raise HelperError("player_foreign", FEED_REFUSED_FOREIGN)
-        return peer
+        vouched = int(vouched_pid)
+        if peer > 0 and (peer == vouched or descends_from(peer, vouched)
+                         or launch_verdict(peer, client.path) == "current"):
+            return peer
+        raise HelperError("player_foreign", FEED_REFUSED_FOREIGN)
     if launch_verdict(peer, client.path) != "current":
         raise HelperError("not_running", FEED_REFUSED_OLDER, outdated=True)
     return peer
