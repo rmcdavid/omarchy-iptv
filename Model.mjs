@@ -118,11 +118,12 @@ export {
   helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
   tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
-  parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
-  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
-  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
-  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
+  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
+  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
+  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
+  channelForEnd, endedReport, PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE,
+  unopenedFormatSentence, PLAYER_OUTPUT_ERRORS, outputFailure,
+  outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,

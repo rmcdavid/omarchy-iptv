@@ -150,16 +150,23 @@ class _Clock:
 
 
 _JUST_INSIDE = 1e-6
+_CARRY_ANSWERS = {("get_property", "volume"): 37.0, ("get_property", "mute"): True,
+                  ("get_property", "fullscreen"): True, ("get_property", "pause"): True}
 _REAL_IPC = helper.MpvIpc
 
 
-def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
+def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, older=False, spawned_slow=0):
     """Run `player <verb>` through the shipping code, every wait on the path
     at its bound. `survivor_answers`: how many requests the found player
     answers (just inside the bound) before it goes quiet. `lock_at` /
     `bind_after`: when the lock is granted / the new player's socket accepts
-    (seconds after the spawn), None for never. Returns (virtual seconds, the
-    reply, the signals the found player was sent, what was learned)."""
+    (seconds after the spawn), None for never. `older`: the found player
+    answers as one ANOTHER build launched (restart on adoption), so the start
+    replaces it -- reads its carry, ladders it from quit -- instead of
+    adopting it. `spawned_slow`: how many requests after its handshake the
+    new player answers just inside the bound (the carry's sets). Returns
+    (virtual seconds, the reply, the signals the found player was sent, what
+    was learned)."""
     clock = _Clock()
     state = {"phase": "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
@@ -219,7 +226,10 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
                 if self.answers == 0 and self.then_all:
                     self.answers = None
                 clock.t += self.timeout - _JUST_INSIDE
-                return self.line(request, "success", "mpv 0.41.0")
+                # what a player answers for the carry's reads (a volume, three
+                # booleans), so the replace walk carries all four and sets
+                # three; everything else it answers is the handshake's word
+                return self.line(request, "success", _CARRY_ANSWERS.get(tuple(command[:2]), "mpv 0.41.0"))
             if self.loaded and command[:2] == ["set_property", helper.USER_DATA_STASH]:
                 clock.t += self.timeout
                 self.loaded = False
@@ -273,7 +283,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
                 # bound, then everything at once but the one request after
                 # the loadfile whose timeout the verb survives.
                 state["phase"] = "spawned"
-                self.sock = Sock(1, then_all=True)
+                self.sock = Sock(1 + spawned_slow, then_all=True)
 
     patches = [
         mock.patch.object(helper, "time", types.SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep, time=clock.time)),
@@ -282,6 +292,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
         mock.patch.object(helper, "still_the_player", lambda record, _sock: record.get("pid") == survivor["pid"]),
         mock.patch.object(helper, "proc_start_time", lambda pid: "1"),
         mock.patch.object(helper, "limit_core_of", lambda pid: True),
+
         mock.patch.object(helper, "_read_pipe", read_pipe),
         mock.patch.object(helper, "spawn_detached", spawn),
         mock.patch.object(helper, "MpvIpc", Ipc),
@@ -296,6 +307,14 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
         mock.patch.object(helper.os, "fork", lambda: 2 ** 22 + 7),
         mock.patch.object(helper.os, "waitpid", mock.Mock(side_effect=ChildProcessError())),
     ]
+    # Restart on adoption: who each connection reaches. The found player is
+    # 777, the spawned one the pid its pipe reported (4242), and the found one
+    # reads as another build's when the walk says so -- the verdict is not
+    # this walk's subject; the time it costs is.
+    if hasattr(helper, "player_peer"):          # a tree before the gate (a --baseline run) has neither
+        patches += [mock.patch.object(helper, "player_peer", lambda client: 777 if state["phase"] == "found" else 4242),
+                    mock.patch.object(helper, "launch_verdict",
+                                      lambda pid, sock: "older" if older and pid == 777 else "current")]
     for patch in patches:
         patch.start()
     try:
@@ -313,14 +332,14 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
     return clock.t, (replies[-1] if replies else None), signals, learned
 
 
-def walk_long_path(verb):
+def walk_long_path(verb, **more):
     """The three walks the comment above describes, for start or restart."""
-    _, refused, _, learned = walk_player_verb(verb)
+    _, refused, _, learned = walk_player_verb(verb, **more)
     assert (refused or {}).get("error", {}).get("code") == "busy", refused
     lock_at = learned["lock_last"]
-    _, unbound, _, learned = walk_player_verb(verb, lock_at=lock_at)
+    _, unbound, _, learned = walk_player_verb(verb, lock_at=lock_at, **more)
     assert (unbound or {}).get("error", {}).get("code") == "no_socket", unbound
-    return walk_player_verb(verb, lock_at=lock_at, bind_after=learned["bind_last"])
+    return walk_player_verb(verb, lock_at=lock_at, bind_after=learned["bind_last"], **more)
 
 
 class PlayerWorstPathWalkTest(unittest.TestCase):
@@ -335,6 +354,21 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertTrue(reply and reply.get("ok"), reply)
         self.assertEqual(signals, [15, 9])            # one ladder, from quit
         self.assertGreater(spent, 37.0)               # the long path really was walked
+        self.assert_inside_its_watchdog("start", spent)
+
+    def test_a_start_that_replaces_another_builds_player_fits_its_watchdog(self):
+        """Restart on adoption (T9, the lane's M9): the replace branch. The
+        found player answers EVERY request just inside the bound -- its
+        handshake, each read of the carry, the quit -- and never dies, so the
+        whole ladder runs; the new player answers its handshake and each set
+        of the carry just inside the bound too. The carry is held to ONE
+        ipcMs a side (bounded_requests), which is the 2 * ipcMs the start's
+        bound gained over the wedged path (player-bounds.json)."""
+        spent, reply, signals, _ = walk_long_path("start", survivor_answers=10 ** 6, older=True, spawned_slow=3)
+        self.assertTrue(reply and reply.get("ok"), reply)
+        self.assertEqual(reply.get("replaced"), 1)
+        self.assertEqual(signals, [15, 9])            # one ladder, from quit
+        self.assertGreater(spent, 41.0)               # the long path really was walked
         self.assert_inside_its_watchdog("start", spent)
 
     def test_a_restart_whose_ladder_leaves_the_player_fits_its_watchdog(self):

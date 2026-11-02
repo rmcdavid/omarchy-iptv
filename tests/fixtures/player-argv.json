@@ -1622,7 +1622,11 @@
       "STOPPING the player - visible, at least - while a node that silently",
       "became unreadable in the other direction would hand a credentialed URL to",
       "a process nobody authenticated. The rule over these two values is its own",
-      "shared fixture, tests/fixtures/player-tls.json."
+      "shared fixture, tests/fixtures/player-tls.json.",
+      "Restart on adoption (2026-11-01): `launch` is the helper's one-word answer to 'was the player this",
+      "probe reached launched by THIS build' (launch_verdict on SO_PEERCRED): current, older or unknown, null when",
+      "nothing answered. Model.parsePlayerProbe keeps the three words and reads anything else as null, which the",
+      "shell treats as a helper too old to say (today's path, unchanged)."
     ],
     "reply": {
       "ok": true,
@@ -1669,12 +1673,14 @@
         "optionCount": 0,
         "unpinned": 0,
         "migrated": false
-      }
+      },
+      "launch": "current"
     },
     "keys": [
       "claimed",
       "idle",
       "kind",
+      "launch",
       "mpvVersion",
       "ok",
       "owner",
@@ -1712,7 +1718,8 @@
         "optionCount": 0,
         "unpinned": 0,
         "migrated": false
-      }
+      },
+      "launch": "current"
     }
   },
   "stopLadder": [

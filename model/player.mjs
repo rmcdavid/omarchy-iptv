@@ -121,7 +121,14 @@ function playerWatchdogMs(kind) {
   var lock = b.lockMs + b.lockPollMs
   var spawn = b.settleConnectMs + b.spawnPidMs + 2 * b.spawnMs + 2 * b.ipcMs
   var tail = Math.max(playerLadderMs("term") + b.settleConnectMs, b.ipcMs + b.firstLoadMs)
-  if (k === "start") return lock + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  // Restart on adoption (2026-11-01): `carry` -- a found player another build
+  // launched answers its probe and is REPLACED: its volume, mute, fullscreen
+  // and pause read inside one ipcMs (bounded_requests), the three set on the
+  // new player inside another. The wedged path's 2 * ipcMs is the same probe,
+  // so the replace path is the wedged one plus these two (walked: 42.07 s, past
+  // the 38.25 s the bound left without them; lane RA's M9).
+  var carry = 2 * b.ipcMs
+  if (k === "start") return lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "") return PLAYER_BIRTH_EDGE_MS
@@ -533,8 +540,19 @@ function playerTlsVerdict(tls) {
 // `player probe` stdout -> a shape the service can bind. Garbage, a truncated
 // line, a foreign JSON document or an error reply all return valid:false
 // rather than throwing, so a probe can never break the reattach path.
+// Restart on adoption (2026-11-01): the helper's one-word answer to "was the
+// player this probe reached launched by THIS build" (launch_verdict). The
+// three words it can say; anything else -- absent from a helper too old to
+// say it (D-REL-9's new-QML / old-helper window), a renamed node, garbage --
+// is null, which the shell reads as today's path, unchanged.
+var PLAYER_LAUNCH_WORDS = ["current", "older", "unknown"]
+
+function playerLaunch(raw) {
+  return typeof raw === "string" && PLAYER_LAUNCH_WORDS.indexOf(raw) !== -1 ? raw : null
+}
+
 function parsePlayerProbe(text) {
-  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null }
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null, launch: null }
   var doc = parseJsonObject(text)
   if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
   var pid = Math.floor(Number(doc.pid))
@@ -553,7 +571,9 @@ function parsePlayerProbe(text) {
     // adopt. Absent reads null, which playerTlsVerdict answers "stop" to - an
     // adopted player whose certificate handling cannot be established is not a
     // player to feed.
-    tls: playerTls(doc.tls)
+    tls: playerTls(doc.tls),
+    // Restart on adoption: current, older, unknown or null (playerLaunch).
+    launch: playerLaunch(doc.launch)
   }
 }
 
@@ -934,10 +954,11 @@ export {
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
   playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
-  playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
-  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
-  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport, PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE,
-  unopenedFormatSentence, PLAYER_OUTPUT_ERRORS, outputFailure,
-  outputFailureSentence, deathReport, loadFailedForOwnEntry
+  playerTlsVerdict, PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe,
+  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
+  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport,
+  loadFailedForOwnEntry
 }

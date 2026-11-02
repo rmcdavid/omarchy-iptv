@@ -418,17 +418,79 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
     return failed
 
 
+def player_peer(client: MpvIpc) -> int:
+    """The process a feed on this connection reaches (MpvIpc.peer_pid).
+
+    One function so that it is the ONE seam the tests whose subject is not a
+    player's identity patch (PlayerTestCase, MpvTestCase in the dev branch's
+    tests): their in-process double answers the socket, so the kernel names
+    the test process itself, which carries no socket token and reads
+    "unknown" -- what an impostor reads, and the right answer for one."""
+    return client.peer_pid()
+
+
+# The code a play refused by the build gate answers with, and the flag beside
+# it. `not_running` on purpose: every shell since v0.14.3 routes a `play` that
+# answered it to `player start` (Model.playFailureVerdict), and that start
+# replaces the player -- so the keepLoaded Service an `omarchy plugin update`
+# leaves running (shell.qml's unloadPluginServices, D-REL-6) restarts the
+# player at its first channel change with no shell change of its own.
+FEED_REFUSED_OLDER = "the running player was started by another build of this plugin; play again to replace it"
+FEED_REFUSED_FOREIGN = "another process answers the socket this helper started the player on"
+
+
+def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
+    """The build gate (restart on adoption, owner 2026-10-31): no verb of this
+    helper feeds a player another build launched. Asked of the process the
+    connection actually reaches (player_peer), before ANY command is sent on
+    it -- ahead of the TLS assertion, because every command after it tells
+    the player something about a channel. -> the peer's pid.
+
+    With `vouched_pid` (`player start`: the pid it launched, or the current
+    player it adopted) the peer must BE that process, else `player_foreign`:
+    another process bound the socket the helper spawned on. The fresh spawn's
+    argv is never re-judged, so no disagreement between the builder and the
+    reader can turn a spawn into "no playback". Without it (`play`) the peer
+    must read "current" (launch_verdict), else `not_running` with `outdated`.
+
+    D-SINK-70 (shipped 0.16.0): after an update without a shell restart, the
+    keepLoaded old Service fed a player an older build launched through this
+    verb, with none of pin_adopted_player's runtime pins and no
+    limit_core_of on the path. This gate is what closes it, whichever QML is
+    running."""
+    peer = player_peer(client)
+    if vouched_pid is not None:
+        if peer <= 0 or peer != int(vouched_pid):
+            raise HelperError("player_foreign", FEED_REFUSED_FOREIGN)
+        return peer
+    if launch_verdict(peer, client.path) != "current":
+        raise HelperError("not_running", FEED_REFUSED_OLDER, outdated=True)
+    return peer
+
+
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
-                  owner: dict[str, Any] | None = None, label: str = "play") -> int | None:
+                  owner: dict[str, Any] | None = None, label: str = "play",
+                  vouched_pid: int | None = None, paused: bool = False) -> int | None:
     """The wire sequence of a zap, shared verbatim by `play` and
     `player start` so first play and every later zap are one implementation.
 
-    the TLS assertion -> title -> force-media-title -> the three header
-    properties (always all three, so a channel without headers actively resets
-    the previous one's, which is requirement 7's clearing mechanism) -> the
-    stash -> loadfile -> the stash again with the entry id -> the owner claim.
+    the build gate -> the TLS assertion -> pause -> title -> force-media-title
+    -> the three header properties (always all three, so a channel without
+    headers actively resets the previous one's, which is requirement 7's
+    clearing mechanism) -> the stash -> loadfile -> the stash again with the
+    entry id -> the owner claim.
+
+    `paused` is the automatic restart's carry (`player start --keep-pause`):
+    pause is set TRUE before the load in place of FALSE, so a player that was
+    paused comes back paused. Measured on mpv 0.41.0, windowless (lane RA's
+    M4, 2026-11-01): with pause true before the loadfile, file-loaded arrives
+    (observe_first_load reads "playing") and time-pos does not move. Every
+    other caller, and every zap, clears it (PAUSE LIVE TV below).
     """
-    # D-SINK-16, and the FIRST thing this sequence does, because every line
+    # Restart on adoption, and before anything else: the process this
+    # connection reaches was launched by this build, or it is fed nothing.
+    feed_gate(client, vouched_pid)
+    # D-SINK-16, and the first thing after the gate, because every line
     # below it is a line that tells the player something about a channel. mpv
     # keeps `tls-verify` across a loadfile the way it keeps `pause`, `aid` and
     # `sid` -- and an adopted player may never have had it set at all. Unlike
@@ -443,7 +505,9 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # here rather than in the shell, because it must be atomic with the load:
     # the shell's own flag is optimistic and a refused clear would leave the
     # two disagreeing. Found by the 0.7.10 preflight, not by the suite.
-    client.try_command("set_property", "pause", False)
+    # The one exception is the automatic restart's carry (`paused`), which
+    # reloads the SAME channel into a new player and keeps what the user set.
+    client.try_command("set_property", "pause", bool(paused))
     # M3-02, and the same mechanism one property over. mpv keeps `aid` and
     # `sid` across a loadfile exactly as it keeps `pause`, so a user who
     # picked the Spanish audio on one channel got track 2 of the NEXT
@@ -811,43 +875,135 @@ def ensure_player_dirs(dirs: dict[str, str], warnings: list[str]) -> None:
             warnings.append("could not create %s (%s)" % (dirs[key], error.strerror or "error"))
 
 
+# The restart's carry (owner, 2026-11-01): what a user set on the player an
+# older build launched, read before it is stopped and set on its replacement.
+# Volume (a finite number), mute and fullscreen are set on the new player;
+# pause is read here and re-applied by apply_channel only with
+# `--keep-pause` (the automatic restart), never on a zap. Never emitted.
+PLAYER_CARRY = (("volume", "number"), ("mute", "bool"), ("fullscreen", "bool"), ("pause", "bool"))
+PLAYER_CARRY_SET = ("volume", "mute", "fullscreen")
+# The helper's journal line for a replacement: fixed text, no pid list, no
+# argv element, no channel (rule 5; the frozen interface of the design).
+PLAYER_REPLACED_LINE = "replaced a player another build of this plugin started"
+
+
+def carry_value(kind: str, value: Any) -> bool:
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return isinstance(value, bool)
+
+
+def bounded_requests(client: MpvIpc, requests: list[tuple[Any, ...]], budget: float) -> list[tuple[bool, Any]]:
+    """Run `requests` in order on `client`, all of them inside ONE budget of
+    `budget` seconds, stopping at the first that fails, is refused, or would
+    start with nothing left. -> the (ok, data) of each that answered ok.
+
+    The carry is best effort, and a player that answers every read just
+    inside the IPC timeout would otherwise spend one timeout per read; one
+    budget is what lets the start's bound count the carry as one ipcMs on
+    each side (player-bounds.json, dev branch). A reply that comes back after
+    its request gave up carries an id no later request waits for, and
+    MpvIpc drops it."""
+    answered: list[tuple[bool, Any]] = []
+    deadline = time.monotonic() + max(0.0, budget)
+    saved = client.timeout
+    try:
+        for request in requests:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            client.timeout = remaining
+            try:
+                ok, data = client.try_command(*request)
+            except HelperError:
+                break
+            if not ok:
+                break
+            answered.append((ok, data))
+    finally:
+        client.timeout = saved
+    return answered
+
+
+def read_carry(client: MpvIpc, budget: float) -> dict[str, Any]:
+    carry: dict[str, Any] = {}
+    replies = bounded_requests(client, [("get_property", prop) for prop, _ in PLAYER_CARRY], budget)
+    for (prop, kind), (_ok, value) in zip(PLAYER_CARRY, replies):
+        if not carry_value(kind, value):
+            break
+        carry[prop] = value
+    return carry
+
+
+def apply_carry(client: MpvIpc, carry: dict[str, Any], budget: float) -> None:
+    bounded_requests(client, [("set_property", prop, carry[prop]) for prop in PLAYER_CARRY_SET if prop in carry],
+                     budget)
+
+
 def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
                    ipc_timeout: float, warnings: list[str],
-                   dirs: dict[str, str] | None = None) -> dict[str, Any]:
+                   dirs: dict[str, str] | None = None, label: str = "player start") -> dict[str, Any]:
     """Requirement 1, all three layers: the /proc scan is the existence check,
     a live answering player is adopted rather than duplicated, several
     matches collapse to the one that answers, and a spawn whose socket never
     binds is reaped by the helper that created it - so an uncontrollable
     window can neither exist nor multiply.
+
+    Restart on adoption (owner, 2026-10-31 and 2026-11-01): an answering
+    player is adopted only when the process the connection reaches was
+    launched by THIS build (launch_verdict on player_peer). Any other -- an
+    older release's, another helper build's, or a process that is not ours
+    at all -- is REPLACED: its core limit lowered (a crash on its way out
+    leaves no core), its volume, mute, fullscreen and pause read (the carry),
+    then the whole ladder from quit and the spawn below, with the carry set
+    on the new player. The old one receives reads and `quit` (or a signal)
+    and nothing else: no title, no header, no stash, no loadfile.
+
+    -> spawned, client, pid, `vouched` (the pid apply_channel must find on
+    the connection: the launched pid, or the adopted current player's),
+    `replaced` (how many processes the replace branch stopped) and `carry`.
     """
     found = find_player(sock_path)
+    replaced = 0
+    carry: dict[str, Any] = {}
     if found:
         client = probe_client(sock_path, ipc_timeout)
         if client is not None:
-            keep = _connected_pid(client, found)
-            # D-SINK-39, D-SINK-16's shape: this player was forked by whoever
-            # ran before, so its core limit is whatever it inherited then.
-            # Lowered here, before apply_channel feeds it anything; a refusal
-            # is impossible for a live same-uid process, so it is reported
-            # rather than fatal (limit_core_of says why).
-            if not limit_core_of(keep):
-                warnings.append("could not limit the adopted player's core dumps")
-            # 2026-10-29: the pins that are not about the TLS peer (the TLS
-            # ones are apply_channel's, before the load). Best effort, so a
-            # journal line and not a warning the shell would show.
-            failed = pin_adopted_player(client, sock_path)
-            if failed:
-                log("player start: the adopted player refused %d pin(s)" % failed)
-            others = [record for record in found if record["pid"] != keep]
-            if others:
-                # Never rung 1 here: `quit` travels over the shared socket and
-                # would hit the player we are keeping. Signal the rest by pid.
-                warnings.append("stopped %d other player process(es) on this socket" % len(others))
-                stop_ladder(sock_path, others, "term", ipc_timeout)
-            return {"spawned": False, "client": client, "pid": keep}
-        # Matches found, none answers: wedged. Ladder them down and respawn.
-        warnings.append("stopped an unresponsive player")
-        stop_ladder(sock_path, found, "", ipc_timeout)
+            peer = player_peer(client)
+            if launch_verdict(peer, sock_path) == "current":
+                keep = peer if any(record["pid"] == peer for record in found) else _connected_pid(client, found)
+                # D-SINK-39, D-SINK-16's shape: this player was forked by whoever
+                # ran before, so its core limit is whatever it inherited then.
+                # Lowered here, before apply_channel feeds it anything; a refusal
+                # is impossible for a live same-uid process, so it is reported
+                # rather than fatal (limit_core_of says why).
+                if not limit_core_of(keep):
+                    warnings.append("could not limit the adopted player's core dumps")
+                # 2026-10-29: the pins that are not about the TLS peer (the TLS
+                # ones are apply_channel's, before the load). Best effort, so a
+                # journal line and not a warning the shell would show.
+                failed = pin_adopted_player(client, sock_path)
+                if failed:
+                    log("%s: the adopted player refused %d pin(s)" % (label, failed))
+                others = [record for record in found if record["pid"] != keep]
+                if others:
+                    # Never rung 1 here: `quit` travels over the shared socket and
+                    # would hit the player we are keeping. Signal the rest by pid.
+                    warnings.append("stopped %d other player process(es) on this socket" % len(others))
+                    stop_ladder(sock_path, others, "term", ipc_timeout)
+                return {"spawned": False, "client": client, "pid": keep, "vouched": keep, "replaced": 0, "carry": {}}
+            # Another build's player, or nothing of ours: replaced, never fed.
+            for record in found:
+                limit_core_of(int(record["pid"]))
+            carry = read_carry(client, ipc_timeout)
+            client.close()
+            log("%s: %s" % (label, PLAYER_REPLACED_LINE))
+            replaced = len(found)
+            stop_ladder(sock_path, found, "", ipc_timeout)
+        else:
+            # Matches found, none answers: wedged. Ladder them down and respawn.
+            warnings.append("stopped an unresponsive player")
+            stop_ladder(sock_path, found, "", ipc_timeout)
     settle_socket(sock_path)
     where = dirs or player_dirs(sock_path)
     ensure_player_dirs(where, warnings)
@@ -873,7 +1029,10 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         raise HelperError("no_socket", "the player did not open its socket" + (": %s" % detail if detail else ""))
     drain_launch_stderr(launched["stderrFd"], errors)
     os.close(launched["stderrFd"])
-    return {"spawned": True, "client": client, "pid": launched["pid"], "launchErrors": errors}
+    if carry:
+        apply_carry(client, carry, ipc_timeout)
+    return {"spawned": True, "client": client, "pid": launched["pid"], "launchErrors": errors,
+            "vouched": launched["pid"], "replaced": replaced, "carry": carry}
 
 
 def _connected_pid(client: MpvIpc, found: list[dict[str, Any]]) -> int:
@@ -919,8 +1078,13 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         if verb == "restart":
             stop_ladder(sock, find_player(sock), args.__dict__.get("from_rung") or "term", args.ipc_timeout)
             settle_socket(sock)
-        outcome = adopt_or_spawn(sock, mpv_args, args.spawn_timeout, args.ipc_timeout, warnings)
+        outcome = adopt_or_spawn(sock, mpv_args, args.spawn_timeout, args.ipc_timeout, warnings,
+                                 label="player %s" % verb)
         client = outcome["client"]
+        # The automatic restart's carry (owner, 2026-11-01): a player that was
+        # paused comes back paused -- only when the shell asked for it, the
+        # restart of the SAME channel; a zap that replaces a player plays.
+        paused = bool(getattr(args, "keep_pause", False)) and outcome["carry"].get("pause") is True
         # Subscribe BEFORE any load, so the first channel's failure text is
         # captured on the connection we already hold (F3).
         client.try_command("request_log_messages", "error")
@@ -942,7 +1106,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         newer = applied_by_another_client(client) if outcome["spawned"] else None
         if newer is None:
             entry_id = apply_channel(client, target, stash=stash, owner=owner_claim(args.owner_pid),
-                                     label="player %s" % verb)
+                                     label="player %s" % verb, vouched_pid=outcome["vouched"], paused=paused)
         else:
             entry_id = newer["entryId"]
             claim = owner_claim(args.owner_pid)
@@ -973,14 +1137,22 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
                       else observe_first_load(client, entry_id, args.first_load_timeout, outcome.get("launchErrors")))
     finally:
         client.close()
-    emit({"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
-          "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
-          "firstLoad": first_load, "warnings": warnings,
-          # Additive, and the two fields the shell's repair reads: whether
-          # this verb's own channel is what the player ended up on, and what
-          # it is on instead when it is not.
-          "applied": newer is None,
-          "playing": None if newer is None else {"id": newer["id"], "name": newer["name"]}})
+    reply = {"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
+             "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
+             "firstLoad": first_load, "warnings": warnings,
+             # Additive, and the two fields the shell's repair reads: whether
+             # this verb's own channel is what the player ended up on, and what
+             # it is on instead when it is not.
+             "applied": newer is None,
+             "playing": None if newer is None else {"id": newer["id"], "name": newer["name"]}}
+    # Restart on adoption, additive (the frozen interface): how many processes
+    # another build launched this start stopped before it spawned, and
+    # whether it re-applied their pause. Present only when they say so.
+    if outcome["replaced"]:
+        reply["replaced"] = int(outcome["replaced"])
+    if paused and newer is None:
+        reply["paused"] = True
+    emit(reply)
     return EXIT_OK
 
 
@@ -1040,6 +1212,10 @@ def player_probe(args: argparse.Namespace) -> int:
             # D-SINK-16. Read by Model.playerTlsVerdict; null for a player that
             # was never reached, which that verdict reads as "do not feed it".
             "tls": None,
+            # Restart on adoption: "current", "older" or "unknown" -- whether
+            # the process this probe's connection reached was launched by this
+            # build (launch_verdict). One word; null when nothing answered.
+            "launch": None,
         }
         client = probe_client(sock, args.ipc_timeout) if found else None
         if client is None:
@@ -1070,6 +1246,10 @@ def player_probe(args: argparse.Namespace) -> int:
             # property: nothing over IPC reaches a resource limit.
             if not limit_core_of(payload["pid"]):
                 log("player probe: could not limit the player's core dumps")
+            # Restart on adoption: a read, after the security writes above, so
+            # an older player is migrated, pinned and limited for the hold
+            # before the shell replaces it.
+            payload["launch"] = launch_verdict(player_peer(client), sock)
             ok, idle = client.try_command("get_property", "idle-active")
             payload["idle"] = bool(idle) if ok and idle is not None else None
             ok, version = client.try_command("get_property", "mpv-version")

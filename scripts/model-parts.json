@@ -446,6 +446,8 @@
         "wholeCount",
         "tlsReloadDisposition",
         "playerTlsVerdict",
+        "PLAYER_LAUNCH_WORDS",
+        "playerLaunch",
         "parsePlayerProbe",
         "parsePlayerEvent",
         "playerEntryId",

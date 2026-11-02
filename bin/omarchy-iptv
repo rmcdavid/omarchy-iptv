@@ -118,12 +118,12 @@ HELPER_PARTS = (
     ("03-io-playlist.py", 70532, 0x9eaff12f),
     ("04-epg.py", 81825, 0x0563ffbb),
     ("05-ipc-logos.py", 54292, 0x9e4eb9c3),
-    ("06-failed.py", 49608, 0x9e3407c4),
+    ("06-failed.py", 49904, 0xaa23de89),
     ("07-player.py", 87685, 0xcae1ed73),
-    ("08-player-verbs.py", 101397, 0x9696944a),
+    ("08-player-verbs.py", 111087, 0x91aebc36),
     ("09-cache.py", 26549, 0x60c9a9f1),
     ("10-state.py", 48632, 0x39b208e5),
-    ("11-cli.py", 39916, 0x0a65d8c9),
+    ("11-cli.py", 40379, 0x6bf97cbc),
 )
 
 

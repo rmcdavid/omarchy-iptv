@@ -5994,8 +5994,18 @@ check("playerStash reads a record written before the writer was named", Model.pl
 const probeFixture = playerFixture.playerProbe
 const probeBody = JSON.stringify(probeFixture.reply)
 check("parsePlayerProbe: a live player, from the shared vector",
-  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls } })(),
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls, launch: p.launch } })(),
   probeFixture.parsed)
+// Restart on adoption (N2): `launch` is one of the helper's three words or
+// null -- absent (a helper too old to say), renamed, another word, another
+// type, all null, which the shell reads as today's path.
+check("parsePlayerProbe: launch is current, older or unknown, and anything else -- absent, another word, a non-string, an error reply -- is null",
+  [["current"], ["older"], ["unknown"], ["Current"], ["stale"], [""], [1], [true], [null], [{}], [undefined]].map(function (row) {
+    const doc = Object.assign({}, probeFixture.reply)
+    if (row[0] === undefined) delete doc.launch; else doc.launch = row[0]
+    return Model.parsePlayerProbe(JSON.stringify(doc)).launch
+  }).concat([Model.parsePlayerProbe("garbage").launch, Model.parsePlayerProbe(JSON.stringify({ ok: false, kind: "player.probe", launch: "older" })).launch]),
+  ["current", "older", "unknown", null, null, null, null, null, null, null, null, null, null])
 // M5-01: the reattach read. The key is pinned on both sides like `pid`, and a
 // probe without it (an older helper) parses to null rather than to zero.
 // checkCall, not check: a parser that answered null here would throw on

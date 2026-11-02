@@ -435,6 +435,11 @@ def build_parser() -> argparse.ArgumentParser:
     player_session.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
     player_session.add_argument("--spawn-timeout", type=float, default=DEFAULT_SPAWN_TIMEOUT, help="seconds to wait for mpv to bind its socket (default %.1f)" % DEFAULT_SPAWN_TIMEOUT)
     player_session.add_argument("--first-load-timeout", type=float, default=DEFAULT_FIRST_LOAD_TIMEOUT, help="seconds to watch the first load (default %.1f)" % DEFAULT_FIRST_LOAD_TIMEOUT)
+    # Restart on adoption (owner, 2026-11-01): the shell's automatic restart of
+    # a player another build launched passes this, so a paused player comes
+    # back paused; a zap never does (PAUSE LIVE TV). Only a player this verb
+    # REPLACES has a pause to keep (a restart's own ladder runs first).
+    player_session.add_argument("--keep-pause", action="store_true", help="when this replaces a player another build started, keep its pause on the new one")
     start = player_actions.add_parser("start", parents=[player_socket, player_session], help="adopt or spawn the player and play a channel (idempotent)")
     start.add_argument("--from", dest="from_rung", default="", choices=["", "quit", "term", "kill"], help=argparse.SUPPRESS)
     restart = player_actions.add_parser("restart", parents=[player_socket, player_session], help="stop ladder and spawn under one lock (the health verdict)")
