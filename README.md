@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.16.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.17.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -27,7 +27,9 @@ it writes, off this computer and your local network, sets the player's
 safety options after your own, takes your `mpvArgs` and your sources' keys
 off every command line, masks the Sources form on the desktop accessibility
 bus, and tells a failure on your own computer apart from a channel that does
-not work.
+not work. 0.17.0 replaces a player another version of the plugin started,
+rather than sending it channels, so nothing that version put on the
+player's command line outlives the update.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -261,7 +263,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (139 checks, 2026-11-01).
+  branch (139 checks, 2026-11-02).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -430,8 +432,9 @@ can be read by every account on the computer, and a token is where a proxy
 password or a header value goes, so the plugin hands your tokens to its helper
 privately and the helper gives them to the player in a file only your account
 can read, which it deletes as soon as the player has read it. A player that was
-already running when you updated keeps its old command line until it is next
-restarted (stop and play again). Two things behave differently in that file:
+already running when you updated is sent no channel, and keeps its old command
+line (with your tokens on it, if 0.15.0 or earlier started it) until it is
+replaced by one this version starts (below). Two things behave differently in that file:
 an option mpv cannot understand is skipped instead of stopping the player from
 starting (mpv says so only on its own output, which the plugin discards, so a
 typo now fails quietly), and `--no-config` no longer stops mpv
@@ -470,22 +473,58 @@ plugin`) ahead of any warning about the options it keeps, which that line
 then counts (`+1 more`) rather than names -- by name only, never with the
 value you gave it. The shell's log names every refused option.
 
-If a player is already running when you update, the plugin does not leave it
-that way. The first time the new shell picks that player up it turns
-verification on inside it and then tunes your channel again, because the
-stream already open was opened without it -- so expect one short rebuffer,
-once, and nothing for you to do. If that player will not accept the change it
-is stopped instead of being handed your stream address again: press Enter on
-the channel and a fresh, verified player starts. The same happens to a player
-started by 0.15.0 or earlier whose mpv config holds a per-protocol or
-per-extension profile that sets any of the options the plugin now sets after
-yours (the certificate settings among them), or a `reset-on-next-file` list,
-because nothing can stop either undoing those settings at the next channel
-in a player that was not started with them; every other player from before
-the update rebuffers once, and is also given every other protection a
-running player can take (the select menu, the console and the statistics
-off, `Ctrl+V` and drag-and-drop off, no core dump). It keeps its old command
-line, though, until it is stopped and played again (above).
+If a player is already running when you update, the plugin does not keep
+feeding it: a player that an earlier version started is replaced by one this
+version starts. When the new shell picks it up, the old player plays on while
+the channel list loads. Then its window closes and a new one opens on the same
+channel, at live, with the same volume, mute, fullscreen and pause.
+
+If you have not restarted the shell, this happens at your first channel change
+instead. The new window opens on the channel you picked, with the same volume,
+mute and fullscreen, and playing.
+
+Picture in picture, where the window was, and the rewind history are not
+carried over: press `p` again for picture in picture. Until it is replaced,
+the old player is sent no channel, though your own pause, seek and track
+choices still reach it. When the new shell picks it up, the plugin also turns
+on every protection a running player can take:
+
+- certificate verification on;
+- the select menu, the console and the statistics off;
+- `Ctrl+V` and drag-and-drop off;
+- no core dump.
+
+Sometimes its channel cannot be put back: the playlist no longer has it, or
+another source is active. Then the old player plays on, sent no channel. Your
+next channel change replaces it, and stopping ends it.
+
+The channel list can also take more than 15 seconds to load. What happens then
+depends on what the new shell found:
+
+- If the old player already had every protection, as a player 0.16.0 started
+  does, it plays on, sent no channel, until your next channel change replaces
+  it (Enter on its own channel does too, at live and playing) or you stop.
+- If the new shell had to change the settings that keep certificate
+  verification on, as for a player 0.15.0 or earlier started, the first time
+  a shell of 0.16.0 or later picks it up, it plays on until the list has
+  loaded, and is replaced then if its channel is still there. This holds
+  after a shell restart too, until it is replaced. If the list never loads,
+  it plays on, sent no channel, as above.
+
+If, in any of these cases, it also cannot be made safe, it is stopped: press
+Enter on the channel and a fresh, verified player starts. A player cannot be
+made safe when it does not accept the change, or when it was started by 0.15.0
+or earlier and its mpv config holds either of these:
+
+- a per-protocol or per-extension profile that sets any of the options the
+  plugin now sets after yours (the certificate settings among them);
+- a `reset-on-next-file` list.
+
+Nothing can stop either undoing those settings at the next channel in a player
+that was not started with them. And if this version refuses the old player's
+channel outright, because it no longer plays an address of that kind, the old
+player is stopped, and you get the usual notification that the channel did not
+play.
 
 The cost, because it is not free for everyone: a provider whose certificate is
 self-signed, or signed by a CA your system does not already trust, stops
@@ -776,7 +815,9 @@ carry channel ids — most do — are not affected at all.
   *language* is a different feature and is not here yet.
 - Playback survives `omarchy restart shell`. The player runs on its own and
   the guide reattaches to it, so a restart, a theme change or installing
-  another plugin all leave what you are watching alone. (Not yet measured
+  another plugin all leave what you are watching alone. The first restart after
+  an update is the exception: it replaces the player window once, on the same
+  channel. (Not yet measured
   again on Omarchy 4.0.6, whose `omarchy-restart-shell` can take longer to
   end the old shell than the plugin's check for an orphaned player allows;
   if the player stops when you restart the shell, press `Enter` on the

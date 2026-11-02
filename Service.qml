@@ -670,6 +670,12 @@ Item {
   property int focusAttempts: 0
   property var pendingPlayId: ""
   property var previousPlaying: null       // restored when a switch over IPC fails
+  // The intent (playSeq) whose play() kept previousPlaying. A start of THAT
+  // intent that answered ok spends the label: D-PLY-52's kept adoption puts
+  // previousPlaying back, and a label nothing spent relabelled a later
+  // refused start to a channel no player plays any more (the recheck of
+  // lane RA, 2026-11-01).
+  property int previousPlayingSeq: -1
   property string controlKind: ""
   // M5-01 ruling D10, as ONE expression (F-RWD-19). `healthBusy` is what the
   // health tick counts as a strike; `controlRunning` is the raw Qt fact, so
@@ -873,6 +879,13 @@ Item {
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
   property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
+  // D-SINK-71: the TLS reading's `migrated` on the ambiguous first probe, read
+  // only by the retry that follows it (while `probeRetried` is true). The
+  // first probe migrates and marks the player, and the retry reads the mark
+  // (D-SINK-72); the memo is kept for a player whose mark mpv refused, where
+  // the retry would read nothing left to do. The restart episode needs the
+  // first answer, as tlsReloadPending keeps it for a player of this build.
+  property bool probeRetryMigrated: false
   // `playSeq` as it stood when the probe in flight was ISSUED (4.10). A
   // probe answers about the world it was sent into; an intent issued after
   // it - a play from the guide, or over IPC one frame after the shell came
@@ -883,7 +896,8 @@ Item {
   // certificate, the probe has migrated it, and the channel it is already
   // streaming must be re-established before anything else is sent to it. Set
   // from the probe's verdict, never cleared by it (an ambiguous first probe
-  // migrates and the retry then has nothing to report), and spent by
+  // migrates, and the retry reports it again from the mark the first left
+  // unless mpv refused the mark, D-SINK-72), and spent by
   // reestablishForTls().
   property bool tlsReloadPending: false
   property string playerSourceKey: ""       // the source the recovered stash belongs to
@@ -911,6 +925,37 @@ Item {
   // channel it was for) while the reattach probe finds out what it left;
   // null otherwise. Settled by settleTimedOutPlay() on the probe's answer.
   property var timedOutPlay: null
+  // Restart on adoption (owner, 2026-10-31 and 2026-11-01): the reattach
+  // found a player ANOTHER build of this plugin launched (the probe's
+  // `launch`), adopted it for a hold, and owes its replacement -- one
+  // automatic `player start --keep-pause` of the same channel once the
+  // channel list is applied (Model.olderRestartDisposition). null when
+  // nothing is owed; else { seq, unsafe, spent, expired, migrated, player }:
+  // the intent the restart was issued under, whether the player read unsafe,
+  // whether the restart was issued (or deferred: it plays on, fed nothing,
+  // until the user's next channel change replaces it), whether the hold ran
+  // out, whether the probe had to change its settings in place -- the
+  // stream it has open may predate them, so the hold's end does not defer it
+  // (D-SINK-71, Model.olderRestartDisposition) -- and which player it was
+  // opened for, so a later probe of that same player keeps it (D-SINK-73,
+  // Model.olderRestartOpen). Opened by Model.olderRestartOpen and rebuilt
+  // only through Model.olderRestartWith, which carries every field.
+  property var olderRestart: null
+  readonly property bool olderRestartOwed: !!root.olderRestart
+  // The four zap sites read this in place of playerUp: while a restart is
+  // owed a channel change is a `player start`, which replaces the older
+  // player in the same call (the helper refuses to feed it anyway).
+  readonly property bool zapReady: root.playerUp && !root.olderRestartOwed
+  // This shell already restarted a player another build launched and the
+  // restart answered ok: a later probe that reads the replacement as another
+  // build's again is not restarted twice (design 4.4.3).
+  property bool olderRestartDelivered: false
+  // D-PLY-52: the observer the player slot's start or restart was issued
+  // over, when it was attached to a live player then; null otherwise. A
+  // refusal that finds this SAME observer still attached was refused before
+  // the helper laddered anything (a laddered player's EOF releases it, and
+  // every later attempt is a fresh object), so the player it watches plays on.
+  property var sessionSocket: null
   // The channel of the most recent failure. The guide reads it to decide
   // whether an open is "come back after a dead stream" or a fresh start
   // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
@@ -1102,7 +1147,10 @@ Item {
     // ruling CL4 withholds the instrument that would). That ordering has
     // never been observed to fire - 0 in 30 live bursts - but "only costs"
     // overstated what is known and it is corrected here.
-    if (root.playerUp && root.nowPlaying && root.nowPlaying.id === key) {
+    // Restart on adoption: not while another build's player is owed its
+    // replacement -- the row's id may even be another source's channel (a
+    // deferred stash) -- so Enter there is the replacement, at live.
+    if (root.zapReady && root.nowPlaying && root.nowPlaying.id === key) {
       // Re-selected from another list: the zap ring follows the list the
       // user is in (UX 3.4, D-LIVE-12). A new object so bindings notice.
       var from = String(launchedFrom || "")
@@ -1153,6 +1201,7 @@ Item {
     root.stopConfirmPending = false
     root.playSeq += 1                       // every play is a new intent (4.10)
     root.previousPlaying = root.playerUp ? root.nowPlaying : null
+    root.previousPlayingSeq = root.playSeq
     root.nowPlaying = {
       id: key,
       name: String(channel.name || ""),
@@ -1185,19 +1234,33 @@ Item {
     // shell re-applies its intent when the two disagree.
     //
     // While `stopping` is true we always take the start branch, so a zap can
-    // never be written to a socket that is being torn down (4.10).
-    if (root.playerUp && !root.stopping) {
-      if (controlProc.running) {
-        // A zap burst: remember only the last target, applied when the
-        // current helper call returns.
-        root.pendingPlayId = key
-      } else {
-        root.runControl("play", root.playArgs(key))
-      }
-      if (root.wantFocus) root.focusPlayer()
-    } else {
-      root.startPlayer(channel)
+    // never be written to a socket that is being torn down (4.10). And while a
+    // restart of another build's player is owed (restart on adoption), the
+    // start branch too: the start replaces that player and plays this channel
+    // in one call. The decision is Model.playFork, called (F-GATE-18, rule
+    // 12): it used to be a statement of this fork, not a call of it.
+    // A channel change while a restart is owed IS the replacement: the
+    // automatic one is spent, so it can neither fire over this intent nor
+    // lend it the old player's pause (Model.olderRestartKeepsPause).
+    if (root.olderRestart && root.olderRestart.spent !== true) {
+      root.olderRestart = Model.olderRestartWith(root.olderRestart, { spent: true })
+      olderRestartTimer.stop()
     }
+    var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
+                                stopping: root.stopping, controlBusy: controlProc.running,
+                                restartOwed: root.olderRestartOwed })
+    if (fork === "start") {
+      root.startPlayer(channel)
+      return true
+    }
+    if (fork === "queue") {
+      // A zap burst: remember only the last target, applied when the
+      // current helper call returns.
+      root.pendingPlayId = key
+    } else {
+      root.runControl("play", root.playArgs(key))
+    }
+    if (root.wantFocus) root.focusPlayer()
     return true
   }
 
@@ -1234,6 +1297,9 @@ Item {
     root.nowPlaying = null
     root.userStopped = true
     root.playerPending = false
+    // Restart on adoption: the stop ends the older player too (its own
+    // ladder), so its replacement is owed to nothing.
+    root.endOlderRestart()
     // M5-01: the history goes with the player; a press queued behind the
     // stop has nothing to seek in.
     root.clearRewind()
@@ -2286,8 +2352,10 @@ Item {
     // cache the moment it lands (4.5); until then it is name-only.
     root.reconcileNowPlaying()
     // And D-SINK-16's reload needs the same arrival: the helper resolves the id
-    // against this cache directory, which the reattach ran before.
-    root.reestablishForTls()
+    // against this cache directory, which the reattach ran before. So does the
+    // restart of a player another build launched, which waits for the channel
+    // LIST (restart on adoption); reestablishAdopted asks both.
+    root.reestablishAdopted()
   }
 
   // D-ID-3. Move the loaded state onto the id scheme of the channel set that
@@ -3188,7 +3256,7 @@ Item {
     var id = root.pendingPlayId
     root.pendingPlayId = ""
     if (id === "" || root.stopping || root.userStopped || !root.nowPlaying) return
-    if (root.playerUp) {
+    if (root.zapReady) {
       if (!controlProc.running) root.runControl("play", root.playArgs(id))
       else root.pendingPlayId = id
       return
@@ -3206,7 +3274,9 @@ Item {
     var key = String(id || "")
     if (key === "" || root.stopping || root.userStopped) return false
     if (!root.nowPlaying || String(root.nowPlaying.id) !== key) return false
-    if (!root.playerUp) return false
+    // Restart on adoption: no zap into a player another build launched while
+    // its replacement is owed (the helper would refuse it anyway).
+    if (!root.zapReady) return false
     if (controlProc.running) {
       root.pendingPlayId = key
       return true
@@ -3279,9 +3349,14 @@ Item {
     var key = np ? String(np.id) : Model.channelId(channel)
     var scope = np ? String(np.launchedFrom || "") : ""
     var since = np ? Math.floor(Number(np.since) || 0) : 0
+    // Restart on adoption: the episode's own automatic restart, and a retry
+    // of it, keeps the replaced player's pause; a user's channel change, which
+    // moves playSeq, never does (Model.olderRestartKeepsPause).
+    var keepPause = Model.olderRestartKeepsPause(root.olderRestart, root.playSeq)
     var argv = verb === "restart"
-      ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId)
-      : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId)
+      ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId, keepPause)
+      : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId, keepPause)
+    root.sessionSocket = root.socketAttached() ? root.playerSocket : null
     root.playerPending = true
     root.playerWanted = true
     root.armPlayerSocket()
@@ -3314,6 +3389,8 @@ Item {
     root.playerTimedOut = false
     if (kind === "probe") {
       root.applyProbe(text)
+      // A restart held because this slot was busy can be delivered now.
+      root.reestablishAdopted()
       root.drainPendingPlay()
       return
     }
@@ -3322,6 +3399,17 @@ Item {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
       root.relaunchPending = false
+      if (Number(status.seq) === root.previousPlayingSeq) root.previousPlaying = null
+      // Restart on adoption: a start or a restart that answered ok has
+      // replaced (or adopted, or spawned) the player, so nothing is owed any
+      // more; the reply's `paused` is the replaced player's pause, kept.
+      if (root.olderRestart) {
+        if (root.olderRestart.spent === true && Model.olderRestartKeepsPause(root.olderRestart, Number(status.seq))) {
+          root.olderRestartDelivered = true
+        }
+        root.paused = status.paused === true
+        root.endOlderRestart()
+      }
       // A start or a restart that answered ok IS the relaunch, delivered.
       // Leaving the queue armed is how the health path fired a SECOND
       // `player restart --from term` at the player it had just respawned,
@@ -3419,6 +3507,8 @@ Item {
       root.playerWanted = false
       playerSocketTimer.stop()
       root.nowPlaying = null
+      // spawn_detached refuses after the ladder: an older player is gone too
+      root.endOlderRestart()
       root.notify("mpvMissing", {})
       // The user has been told, in a critical toast, that the player program
       // is not installed. Leaving the record would spend that same event a
@@ -3438,11 +3528,38 @@ Item {
     }
     root.lastError = reason
     console.warn("omarchy-iptv: player " + kind + " failed:", reason)
+    // D-PLY-52 and restart on adoption: refused while the observer is still
+    // on a live player -- the helper refused before it laddered anything, so
+    // the player this shell adopted plays on. The tail below assumes "the
+    // player never started", and with it the bar went idle over a playing
+    // channel and a card said playback could not start.
+    var watched = root.sessionSocket
+    root.sessionSocket = null
+    // Q4's second exception: the episode's own automatic restart refused
+    // because THIS build refuses the channel the older player streams. Stopped
+    // and told whether or not an observer was on it when the restart went out
+    // (the reattach's connect can fail), so the older build's weaker policy
+    // never outlives the update (the recheck of lane RA).
+    if (kind === "start" && Model.playerStartFailure(code) === "channel" && root.olderRestart
+        && Model.olderRestartKeepsPause(root.olderRestart, Number(status.seq))) {
+      var refusedTarget = root.nowPlaying
+      root.endOlderRestart()
+      root.stopUnadoptedPlayer("failed")
+      root.raiseStreamFailure(refusedTarget, reason)
+      return
+    }
+    // A `player restart` is the health path's replacement of a player that
+    // stopped answering, never "refused while it plays on": its refusal takes
+    // the tail and is told, as before (the recheck of lane RA).
+    if (kind === "start" && watched && root.playerSocket === watched && root.socketAttached() && root.nowPlaying !== null
+        && root.refusedWhilePlaying(status, code, reason)) return
     root.playerWanted = false
     playerSocketTimer.stop()
     var target = root.nowPlaying
     root.nowPlaying = null
     root.playRetries = 0
+    // The player is gone or never came: an owed restart is owed to nothing.
+    root.endOlderRestart()
     // The player never started (requirement 6). D-PLY-32: and the reply is
     // no verdict on the stream, which was never contacted -- a refusal of
     // this machine (the runtime folder, the lock, the plugin's files, the
@@ -3549,6 +3666,8 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // Restart on adoption: no player, so nothing is owed a replacement.
+      root.endOlderRestart()
       // D-PLY-35: a stopped start that left no player failed, and is told.
       if (root.timedOutPlay !== null) {
         root.settleTimedOutPlay(false)
@@ -3568,9 +3687,10 @@ Item {
     // readings decide whether this player may be fed at all, and that question
     // outranks which channel it is on; and the ambiguous-stash branch below
     // RETURNS to be retried 500 ms later, by which time the helper's own
-    // migration has already happened and the second probe would honestly report
-    // nothing to do - so the flag has to be taken on the first answer that
-    // carries it. Only ever set here, never cleared (the property's comment).
+    // migration has already happened. Since D-SINK-72 the second probe reports
+    // it too, from the mark the first one left; the flag is still taken on the
+    // first answer that carries it, for a player whose mark mpv refused. Only
+    // ever set here, never cleared (the property's comment).
     //
     // 0.13.0 made every player this plugin LAUNCHES verify (D-SINK-13), but
     // every one of those four layers lives on the launch argv, and an adopted
@@ -3579,12 +3699,28 @@ Item {
     // were not merely leaving a stale setting there, we were sending that
     // process new provider headers and new credentialed URLs.
     var tls = Model.playerTlsVerdict(probe.tls)
-    if (!tls.safe) {
+    // D-SINK-71: whether this player had to be migrated, the retry of an
+    // ambiguous first probe keeping that probe's answer (probeRetryMigrated).
+    var migrated = tls.migrated === true || (root.probeRetried && root.probeRetryMigrated)
+    root.probeRetryMigrated = false
+    // Restart on adoption (owner, 2026-10-31): a player ANOTHER build launched
+    // is replaced, not migrated and kept. It is adopted for the hold below --
+    // unsafe or not, because it is fed nothing and the restart that replaces
+    // it sets every pin from its own command line -- and the restart is owed.
+    // `null` (a helper too old to say) keeps the path below exactly.
+    var older = Model.probeLaunchOlder(probe.launch)
+    // And a player that does NOT read as another build's owes nothing: an
+    // episode still open from before this probe (an automatic restart the
+    // watchdog stopped after its replacement came up) ends here, or its
+    // `unsafe` would stop the replacement and its spent restart would turn
+    // every later zap into a start (the recheck of lane RA).
+    if (!older) root.endOlderRestart()
+    if (!older && !tls.safe) {
       console.warn("omarchy-iptv: the player will not verify the stream's certificate, stopping it")
       root.stopUnadoptedPlayer("unverified")
       return
     }
-    if (tls.action === "reload") root.tlsReloadPending = true
+    if (!older && tls.action === "reload") root.tlsReloadPending = true
     var stash = probe.stash
     if (stash === null || stash.playing !== true || probe.idle === true) {
       // Under --idle=once an idle player exists only between spawn and the
@@ -3592,6 +3728,7 @@ Item {
       // pre-M2-02 player. Re-read once before deciding (4.5).
       if (!root.probeRetried) {
         root.probeRetried = true
+        root.probeRetryMigrated = migrated
         probeRetryTimer.restart()
         return
       }
@@ -3637,9 +3774,129 @@ Item {
     root.armPlayerSocket()
     playerWatchdog.restart()
     root.reconcileNowPlaying()
-    root.reestablishForTls()
+    if (older) root.openOlderRestart(!tls.safe, migrated, probe.pid, stash)
+    root.reestablishAdopted()
     // D-PLY-35: a stopped start's player, found and adopted.
     root.settleTimedOutPlay(true)
+  }
+
+  // Restart on adoption: the episode opens on the reattach's adoption of a
+  // player another build launched. The TLS reload is subsumed (the restart
+  // reloads the channel in a player that verifies). Two cases do not restart
+  // at once (design 4.4.3 and path 6): a start the watchdog stopped whose
+  // probe finds the older player still there -- that start's failure is told
+  // once, as it would have been, and the older player plays on, deferred --
+  // and a player this shell's own restart started that reads as another
+  // build's again, journaled and deferred, so a disagreement between the
+  // builder and the reader shows itself instead of looping.
+  // D-SINK-73: a later probe of the SAME player (the socket hunt's after
+  // its burst) keeps the episode already open for it -- spent, expired and
+  // its intent as they were, the hold not re-armed -- and a different player
+  // opens its own (Model.olderRestartOpen). D-SINK-71: `migrated` is kept
+  // from an open episode either way: a later probe reads it migrated again
+  // from the mark (D-SINK-72) or, if mpv refused the mark, already migrated,
+  // and the stream it has open is the same one -- also when that probe names
+  // it under another pid (rc-sk73). Path 6's card is raised
+  // whichever way the episode goes.
+  function openOlderRestart(unsafe, migrated, pid, stash) {
+    root.tlsReloadPending = false
+    var timedOut = false
+    if (root.timedOutPlay !== null) {
+      var pending = root.timedOutPlay
+      root.timedOutPlay = null
+      var kind = "player." + String(pending.kind || "start")
+      var reason = Model.statusReason(Model.parseHelperStatus(root.helperTimeoutStatus(kind, false), kind))
+      if (!root.userStopped) root.raiseLocalPlayFailure(pending.intent, reason)
+      else root.lastError = reason
+      timedOut = true
+    }
+    var open = Model.olderRestartOpen(root.olderRestart, {
+      seq: root.playSeq, pid: pid, stash: stash, unsafe: unsafe === true, migrated: migrated === true,
+      timedOut: timedOut, delivered: root.olderRestartDelivered
+    })
+    if (open.again) console.warn(Model.OLDER_RESTART_AGAIN_LINE)
+    root.olderRestart = open.episode
+    if (open.armHold) olderRestartTimer.restart()
+  }
+
+  function endOlderRestart() {
+    if (!root.olderRestart) return
+    root.olderRestart = null
+    olderRestartTimer.stop()
+  }
+
+  // The one question, asked from every place the restart can become
+  // deliverable: the channel list applied (applyChannels), the reattach's own
+  // end (applyProbe), the player slot freed by a probe, and the hold's end
+  // (olderRestartTimer). With no episode it is D-SINK-16's reload, unchanged.
+  function reestablishAdopted() {
+    var ep = root.olderRestart || null
+    var np = root.nowPlaying
+    var want = Model.olderRestartDisposition({
+      owed: ep !== null, spent: ep !== null && ep.spent === true,
+      stopping: root.stopping, userStopped: root.userStopped,
+      nowPlayingId: np === null ? "" : String(np.id),
+      channelsLoaded: root.cacheLoaded,
+      hasChannel: np !== null && !!root.channelIndex[String(np.id)],
+      sourceMatches: Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey),
+      playerUp: root.playerUp, slotBusy: playerProc.running,
+      expired: ep !== null && ep.expired === true, unsafe: ep !== null && ep.unsafe === true,
+      migrated: ep !== null && ep.migrated === true
+    })
+    if (want === "none") return root.reestablishForTls()
+    if (want === "clear") {
+      root.endOlderRestart()
+      return false
+    }
+    if (want === "hold") return false
+    if (want === "stop") {
+      console.warn("omarchy-iptv: the player another build started cannot be restarted and will not verify the stream's certificate, stopping it")
+      root.endOlderRestart()
+      root.stopUnadoptedPlayer("unverified")
+      return true
+    }
+    if (want === "defer") {
+      // Q4: it plays on, fed nothing; the user's next channel change replaces
+      // it and a stop ends it. The episode stays owed, so the zap sites send
+      // that change as a start.
+      if (ep.spent !== true) root.olderRestart = Model.olderRestartWith(ep, { spent: true })
+      olderRestartTimer.stop()
+      return false
+    }
+    // "restart": once per episode, the same channel, at live, keeping pause.
+    root.playSeq += 1
+    root.olderRestart = Model.olderRestartWith(ep, { seq: root.playSeq, spent: true })
+    olderRestartTimer.stop()
+    root.wantFocus = false
+    console.warn(Model.OLDER_RESTART_LINE)
+    root.issuePlayerSession("start", root.channelIndex[String(np.id)], "")
+    return true
+  }
+
+  // A `player start` refused while the observer is still on the player that
+  // was playing: nothing was laddered, so it plays on (D-PLY-52).
+  // -> true when the refusal is fully handled here.
+  //   - the episode's own automatic restart (its channel refusal is handled
+  //     before this is asked): journaled above, kept, deferred -- no card
+  //     (Q4), or stopped when it cannot be made safe
+  //   - anyone else's start (a user's channel change, a repair): the switch
+  //     did not happen and the player plays the channel it was on, so the
+  //     label goes back to the one play() kept, as a failed zap's does -- no
+  //     card, nothing dropped, the observer kept. A start of that intent that
+  //     answered ok has spent it (previousPlayingSeq), so a later refusal
+  //     keeps the label it has.
+  function refusedWhilePlaying(status, code, reason) {
+    var ep = root.olderRestart || null
+    var automatic = ep !== null && Model.olderRestartKeepsPause(ep, Number(status.seq))
+    root.playRetries = 0
+    if (automatic) {
+      root.reestablishAdopted()
+      return true
+    }
+    if (root.previousPlaying) root.nowPlaying = root.previousPlaying
+    root.previousPlaying = null
+    if (ep !== null) root.reestablishAdopted()
+    return true
   }
 
   // D-SINK-16's second half: the player has been MIGRATED, and now the channel
@@ -3664,7 +3921,8 @@ Item {
   // cache never lands at all - no source configured - the reload never fires
   // and that one already-open connection runs to the end of its stream
   // unverified. Every LATER load on that player is verified by the migration
-  // and by apply_channel's refusal.
+  // and by apply_channel's refusal. [D-SINK-72: the mark stays on the player
+  // until a load, so the next shell's probe owes the reload again.]
   function reestablishForTls() {
     // D-SINK-16. The three conditions are a FUNCTION (rule 12), because the
     // first version of this guard cleared the flag whenever `nowPlaying` was
@@ -3675,11 +3933,19 @@ Item {
     // is armed in exactly one place, and the already-open unverified stream
     // then ran to the end of its stream. Found by the review of the lane that
     // wrote this.
+    // D-PLY-51 (2026-11-01): and only for the channel THIS source's list
+    // holds. The reload re-sends the id against the active source's cache
+    // (playArgs), so a stash from another source -- switched while the shell
+    // was down -- played the active source's channel of the same id.
+    var np = root.nowPlaying
     var want = Model.tlsReloadDisposition({
       pending: root.tlsReloadPending, stopping: root.stopping,
       userStopped: root.userStopped,
-      nowPlayingId: root.nowPlaying === null ? null : String(root.nowPlaying.id),
-      cacheDir: root.activeCacheDir, playerUp: root.playerUp
+      nowPlayingId: np === null ? null : String(np.id),
+      cacheDir: root.activeCacheDir, playerUp: root.playerUp,
+      channelsLoaded: root.cacheLoaded,
+      hasChannel: np !== null && !!root.channelIndex[String(np.id)],
+      sourceMatches: Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey)
     })
     if (want === "none") return false
     if (want === "clear") {
@@ -3775,8 +4041,9 @@ Item {
     root.playerPending = false
     root.nowPlaying = null
     // Nothing of ours plays now, so a reload owed to D-SINK-16 is owed to
-    // nothing.
+    // nothing, and so is a restart (restart on adoption).
     root.tlsReloadPending = false
+    root.endOlderRestart()
     root.noteSessionOutcome(outcome)
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
     // D-PLY-35: when the reattach probe was looking for what a stopped start
@@ -3791,7 +4058,7 @@ Item {
   // another source is never resolved against this one.
   function reconcileNowPlaying() {
     if (!root.reconcilePending || !root.nowPlaying || !root.cacheLoaded) return
-    if (root.playerSourceKey !== "" && root.activeSourceKey !== "" && root.playerSourceKey !== root.activeSourceKey) {
+    if (!Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey)) {
       root.reconcilePending = false
       return
     }
@@ -4140,6 +4407,10 @@ Item {
       return
     }
     root.nowPlaying = null
+    // Restart on adoption: the older player ended on its own (the user pressed
+    // q in its window, the stream ended) with no start in flight: nothing to
+    // replace any more.
+    root.endOlderRestart()
     // Terminal: the player is gone and nothing is bringing it back, whatever
     // the verdict says. This is where a clean end, a crash we have just
     // toasted and a stop we did not issue all leave the session record
@@ -6393,6 +6664,25 @@ Item {
   }
 
   Timer {
+    // Restart on adoption: the hold. A player another build launched plays on,
+    // fed nothing, while the channel list is applied; when the hold runs out
+    // first the restart is deferred to the user's next channel change, or the
+    // player stopped when it cannot be made safe (Model.olderRestartDisposition).
+    // D-SINK-71: except a player the probe had to migrate, which keeps waiting
+    // for the list and is restarted when it lands. Marking `expired` and
+    // asking the disposition is all this does.
+    id: olderRestartTimer
+    interval: Model.OLDER_RESTART_HOLD_MS
+    repeat: false
+    onTriggered: {
+      var ep = root.olderRestart
+      if (ep === null) return
+      root.olderRestart = Model.olderRestartWith(ep, { expired: true })
+      root.reestablishAdopted()
+    }
+  }
+
+  Timer {
     // The single re-read of an ambiguous probe (4.5): an idle or stashless
     // player is either a racing start or a foreign one, and 500 ms tells
     // them apart without a second guess.
@@ -6449,7 +6739,7 @@ Item {
     onTriggered: {
       if (root.userStopped || root.stopping || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
-      if (root.playerUp) {
+      if (root.zapReady) {
         if (controlProc.running) root.pendingPlayId = id
         else root.runControl("play", root.playArgs(id))
         return

@@ -188,13 +188,18 @@ function mpvArgArgv(mpvArgs) {
   return out
 }
 
-function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
+// `keepPause` (restart on adoption, 2026-11-01): strictly true adds
+// `--keep-pause`, the automatic restart's request to keep a replaced player's
+// pause on the new one (Model.olderRestartKeepsPause decides when); anything
+// else adds nothing, so a zap never carries it.
+function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause) {
   var argv = ["--socket", str(socket), "--cache-dir", str(cacheDir), "--id", str(id), "--seq", seqArg(seq)]
   if (str(scope) !== "") argv = argv.concat(["--scope", str(scope)])
   var when = Math.floor(Number(since))
   if (isFinite(when) && when > 0) argv = argv.concat(["--since", String(when)])
   var pid = Math.floor(Number(ownerPid))
   if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
+  if (keepPause === true) argv = argv.concat(["--keep-pause"])
   return argv.concat(mpvArgArgv(mpvArgs))
 }
 
@@ -202,8 +207,8 @@ function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, own
 // claims the player for this shell at the same moment it starts playing, so
 // the plugin-removal case (PO-2 / PLAYER-LIVE-04) has a claim to check even
 // when the service never ran a probe that found anything.
-function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid) {
-  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
+function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause) {
+  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause))
 }
 
 // `from` picks the first rung: "" or "quit" starts at `quit` over IPC,
@@ -216,8 +221,8 @@ function playerStopArgv(socket, seq, from) {
   return argv
 }
 
-function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid) {
-  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid))
+function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid, keepPause) {
+  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause))
   var rung = str(from)
   if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
   return argv

@@ -449,6 +449,23 @@ function dirnameOf(path) {
   return text.substring(0, cut)
 }
 
+// Restart on adoption (owner, 2026-10-31 and 2026-11-01): the launch argv
+// names the build that launched the player, one script-opts key no script
+// reads, version and checksum only (rule 5). The helper is the only producer
+// of the build (`player_build`, from its own HELPER_PARTS) and the only
+// reader (`launch_verdict`, off /proc/<pid>/cmdline); this mirror takes the
+// build as an input so the shared player-argv.json vectors pin both renderings
+// of one token. A value outside the pattern is the word "unknown", as there.
+// Mirrors PLAYER_BUILD_KEY / PLAYER_BUILD_RE / mpv_build_marker in the helper.
+var PLAYER_BUILD_KEY = "omarchy_iptv-build"
+var PLAYER_BUILD_PATTERN = /^[0-9A-Za-z.+_-]{1,64}$/
+var PLAYER_BUILD_UNKNOWN = "unknown"
+
+function mpvBuildMarker(build) {
+  var value = typeof build === "string" && PLAYER_BUILD_PATTERN.test(build) ? build : PLAYER_BUILD_UNKNOWN
+  return "--script-opts-append=" + PLAYER_BUILD_KEY + "=" + value
+}
+
 // Full argv for the mpv launch (ARCHITECTURE-PLAYER.md section 6). Nothing
 // channel-specific is here any more: no URL, no trailing "--", no header
 // options and no per-channel title, because all of them travel over the 0600
@@ -527,7 +544,10 @@ function buildMpvArgv(params) {
     // `--tls-verify=no` (`mpv --list-options` on 0.41.0), so without this the
     // plugin handed provider headers and an HTTPS stream URL to a peer it
     // never authenticated. Layer 1 alone is NOT the fix - see the return.
-    MPV_TLS_VERIFY
+    MPV_TLS_VERIFY,
+    // Restart on adoption: which build launched this player (mpvBuildMarker
+    // above), the last element of the base section, ahead of the options file.
+    mpvBuildMarker(p.build)
   ]
   // D-SINK-13, LAYER 2, and the line that actually guarantees verification.
   //
@@ -1052,12 +1072,13 @@ export {
   mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvTokenWritable,
   demuxerNamesTls, scriptOptsRefused, mpvRejectedLine, mpvRejectedName,
   headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
-  buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
-  HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
-  helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
-  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
-  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
-  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  PLAYER_BUILD_KEY, PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN,
+  mpvBuildMarker, buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV,
+  HELPER_ARGS_FLAG, HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST,
+  HELPER_PRIVATE_ATTACHED, helperSpawn, cacheRunArgv, playlistFetchArgv,
+  fetchStateDir, playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV,
+  fetchEnvironment, failedArgv, logoFetchArgv, playerTracksArgv, trackChoice,
+  parseTracks, LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
   trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
   trackPanelMessage, trackAccessibleName
 }

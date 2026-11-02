@@ -79,6 +79,37 @@ class MpvIpc:
                 pass
             self.sock = None
 
+    def peer_pid(self) -> int:
+        """The pid of the process that is LISTENING on this connection's
+        socket, from the kernel (SO_PEERCRED), or 0 when it cannot be read or
+        the listener is not this uid.
+
+        Restart on adoption (owner, 2026-10-31): the build gate judges the
+        process a feed actually reaches, and this is the one answer bound to
+        the connection the feed travels on. The kernel records the
+        listener's tgid at listen(), so it names mpv itself, not the thread
+        that accepted, and it cannot go stale before the feed: if mpv dies,
+        the next request on this connection fails. A pid from the /proc scan
+        or from mpv's own `pid` property is bound to nothing. Measured on mpv
+        0.41.0, windowless, 2026-11-01 (lane RA's M3): the peer of two
+        connections was the player's own pid both times. The same run found
+        mpv's listening descriptor NOT close-on-exec (flags 0o2), and a child
+        mpv starts (`run`, `subprocess`) holds it; the peer is still the
+        process that listened, so a child that accepted on the inherited
+        descriptor would answer as mpv. None of the children mpv starts
+        accepts on it; a program written to is a same-uid process, which owns
+        the 0600 socket already."""
+        import socket
+        import struct
+        if self.sock is None:
+            return 0
+        try:
+            raw = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            pid, uid, _gid = struct.unpack("3i", raw)
+        except (OSError, AttributeError, TypeError, ValueError, struct.error):
+            return 0
+        return pid if pid > 0 and uid == os.getuid() else 0
+
     def read_line(self, deadline: float) -> bytes | None:
         """One JSON line from mpv, or None once mpv closed the connection."""
         assert self.sock is not None

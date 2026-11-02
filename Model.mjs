@@ -117,26 +117,30 @@ export {
   PLAYER_BIRTH_EDGE_MS, playerWatchdogMs, playFork, playForkBlind, zapArgs,
   helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
-  tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
-  parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
-  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
-  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
-  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
+  tlsPropertiesSafe, playerTls, tlsReloadDisposition, OLDER_RESTART_LINE,
+  OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS, probeLaunchOlder,
+  adoptedSourceMatches, adoptedChannelReach, olderRestartDisposition,
+  olderRestartKeepsPause, olderRestartWith, olderRestartOpen,
+  playerTlsVerdict, PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe,
+  parsePlayerEvent, endedVerdict, probeVerdict, playerDeathKind,
+  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
+  rememberEntryOwner, channelForEnd, endedReport, PLAYER_FORMAT_ERROR,
+  PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
+  outputFailure, outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
   mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings,
   MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
   demuxerNamesTls, mpvRejectedLine, mpvRejectedName, headerArgs,
-  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG, helperSpawn,
-  cacheRunArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
-  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
-  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, PLAYER_BUILD_KEY,
+  mpvBuildMarker, buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV,
+  HELPER_ARGS_FLAG, helperSpawn, cacheRunArgv, playlistFetchArgv,
+  fetchStateDir, playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV,
+  fetchEnvironment, failedArgv, logoFetchArgv, playerTracksArgv, trackChoice,
+  parseTracks, trackLanguage, trackLabel, trackDetail, trackRows,
+  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,
