@@ -218,7 +218,11 @@ fail=0
 # test_olderRestartUnderQtsEngine, the probe's launch word and the restart's
 # disposition under Qt's own engine, red on 202a7bc (no such model names);
 # the spec runs 83.
-QML_SPEC_MIN=${QML_SPEC_MIN:-83}
+# 2026-11-02, lane-sk73: 83 -> 84 --
+# test_olderRestartReprobeUnderQtsEngine, a re-probe of the same older
+# player keeping its episode under Qt's own engine, red on c510985 (no such
+# model names) and under three named mutants; the spec runs 84.
+QML_SPEC_MIN=${QML_SPEC_MIN:-84}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -475,7 +479,30 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # health `player restart` refusal told, the kept label spent by its start's
 # ok, and the retry and intent repair starting while owed; five red on
 # 072ec7d's Service.qml, all on named mutants; the suite runs 3279.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3279}
+# 2026-11-02, lane-sk71 (D-SINK-71): 3279 -> 3284 -- the disposition's
+# migrated-past-the-hold vectors and four service-harness cases (the late
+# list, the ambiguous probe's retry, a re-probe while held, and what stays
+# as it was around them); four red on 6b5ba6c, all five on ten named mutants
+# of the model and Service.qml; the suite runs 3284.
+# 2026-11-02, rc-sk71 (D-SINK-71's recheck): 3284 -> 3286 -- the owner's
+# other rules on the late path (another source defers, the late restart goes
+# out once and a refused channel stops); both red on 6b5ba6c, and red under
+# lane-sk71's M3 and the recheck's X4; the suite runs 3286.
+# 2026-11-02, lane-sk73: 3286 -> 3295 -- three model vectors
+# (olderRestartOpen twice, olderRestartWith) and six service-harness cases
+# (a deferred player re-probed, an unsafe one re-probed before its hold
+# ends, a spent episode re-probed three ways, a migrated one keeping its
+# expiry, a different player opening its own episode, path 6 with an
+# episode open); the renamed re-probe case gained an element. Nine red on
+# c510985, and each of the ten red under at least one of sixteen named
+# mutants of the model and Service.qml; the suite runs 3295.
+# 2026-11-02, rc-sk73: 3295 -> 3298 -- three service-harness cases: a
+# migrated player's `migrated` carried into a fresh episode when a later
+# probe names it under another pid (red on lane-sk73's d6a23dc, green on
+# c510985: the lane's tip had dropped it), a deferred player re-probed unsafe
+# stopped at once, and path 6 on the automatic restart itself (both red on
+# c510985); the suite runs 3298.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3298}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -800,7 +827,19 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3279}
 # child, appends to it, or backgrounds it; red on 072ec7d, player_foreign)
 # and the replacement of a socket answered by a process with no token of ours
 # (1: red on the mutant that adopts it); the suite runs 1942.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1942}
+# 2026-11-02, lane-sk72: 1942 -> 1951 -- WrapperSpawnTest 3 -> 6 (D-PLY-61:
+# an exec wrapper and a child wrapper that append keep one player across two
+# zaps and a second start, and a wrapper that appends a second socket option
+# is still replaced; the appending-wrapper case now plays its zap) and
+# ProbeTlsTest +6 (D-SINK-72: a marked player reads migrated, the second
+# probe of a migrated player, the load's clear, a refused load keeps the
+# mark, and the two fail-safe directions); red on c510985 or on a named
+# mutant of launch_verdict or the mark; the suite runs 1951.
+# 2026-11-02, rc-sk72: 1951 -> 1952 -- ProbeTlsTest +1 (D-SINK-72: a
+# `player start` that adopts a marked player clears it too; red on the
+# mutant that clears it only for `play`). The five launch vectors it added
+# are one test; the suite runs 1952.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1952}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

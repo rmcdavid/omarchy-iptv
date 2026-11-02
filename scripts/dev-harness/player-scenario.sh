@@ -63,11 +63,47 @@
 #                         same shell process, no card, one replaced line
 #   L5  never fed         a logging server for B: B's first request follows
 #                         P0's first absent sample, none with B's header before
+#   L7  late list         D-SINK-71: a v0.15.0 player the probe must migrate
+#                         (its load-auto-profiles read auto, then false), the
+#                         channel list withheld past the 15 s hold: P0 still
+#                         alone on the socket past the hold, and replaced only
+#                         after `ipc refresh` lands the list -- P1 this tree's,
+#                         the same channel, one restart line, no card, the
+#                         coredump journal +0
+#   L8  late, not migrated D-SINK-71's counter-case: a v0.16.0 player, every
+#                         pin on its own argv, the list withheld the same way:
+#                         P0 alone on the socket at every sample from the
+#                         refresh until 8 s after the list landed, no restart
+#                         line, no card, the coredump journal +0
+#   L9  wrapper appends   D-PLY-61: a user's `mpv` wrapper (`exec <mpv> "$@"
+#                         --hwdec=no`) first on the shell's PATH; this tree's
+#                         own player through it, P0 (the builder's argv with
+#                         the token last), is fed two zaps and adopted across
+#                         a shell restart: the same pid alone at every 50 ms
+#                         sample, stat field 22 unchanged, no replaced or
+#                         restart line, the probe `current`, time-pos
+#                         advancing, no card, the coredump journal +0
+#   L10 second shell      D-SINK-72: L7's v0.15.0 player and lever, with a
+#                         SECOND restart-shell after the first shell's probe
+#                         migrated P0 and before the list lands: P0 still
+#                         alone past the second shell's hold, then replaced
+#                         after `ipc refresh` -- P1 this tree's, the same
+#                         channel, one restart line, no card, journal +0
 #
 # L6 is the baseline: `--baseline 202a7bc` (v0.16.0's code) must red L1, L1b,
 # L2 and L4/L5 (P0 survives, is adopted and fed, keeps the canary) and L3's
 # probe check (that tree's probe has no `launch`, NOFIELD), and leave the rest
-# green.
+# green. `--baseline 6b5ba6c` (restart on adoption, before D-SINK-71) must red
+# L7's replacement checks: the expired hold deferred P0, so it is still alive
+# after the list lands and no restart line is written; its premises hold there.
+# L8 is green on `--baseline 6b5ba6c` (it defers P0 too), and red on a tree
+# whose hold's end late-delivers to every safe player (rc-sk71's run of
+# lane-sk71's mutant M1).
+# `--baseline c510985` (before lane-sk72) must red L9's kept-player checks
+# (every zap and the restart replaced P0: a new pid each time, replaced and
+# restart lines, the probe `older`) and L10's replacement checks (the second
+# shell's probe read P0 safe and unmigrated, the hold's end deferred it, and
+# it is still alive after the list lands); their premises hold there.
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
@@ -824,6 +860,9 @@ cleanup() {
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   local d; for d in "$L15_DIR" "$L16_DIR" "$L4_DIR"; do [[ -n $d && -d $d ]] && rm -rf -- "$d"; done
   rm -f -- "$SCRATCH/bin/omarchy-notification-send"
+  # L9's wrapper: left behind, it would stand in front of mpv for every later
+  # harness run on this scratch folder.
+  rm -f -- "$SCRATCH/bin/mpv"
   rmdir -- "$SCRATCH/bin" 2>/dev/null
   return 0
 }
@@ -1369,6 +1408,271 @@ is "L3 no restart line and no replaced line" "$(log_count "$L_RESTART_TEXT") $(l
 is "L3 the probe the shell runs reads it as this build's launch" "$(probe_launch)" "current"
 is "L3 the shell adopted it and plays its channel" "$(np id) $(svc "d['socketAttached']")" "t:live1 true"
 
+echo "== L7 D-SINK-71: a player v0.15.0 launched, which the probe must migrate, its channel list landing only after the hold"
+# The owner's decision of 2026-11-02: an older player whose settings the probe
+# had to change in place is replaced when the list lands, however late. The
+# lever is what the harness already has: the active source's channels.json is
+# moved aside before the shell starts (playlist-status.json stays, so the
+# cache reads fresh and nothing is fetched at start), so the shell has no list
+# when the 15 s hold (Model.OLDER_RESTART_HOLD_MS) runs out; `ipc refresh`
+# then runs the fixture server's fetch, whose exit reloads channels.json
+# (handlePlaylistExit), and the list lands. That the probe MIGRATED P0 is read
+# off P0 itself: v0.15.0 leaves load-auto-profiles at mpv's auto (a string,
+# which `get` never prints), and only the migration (secure_player) sets it
+# to no, which mpv answers as false.
+l_stop_all
+l_old_start "$L15_DIR" "t:live1"
+L7_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L7_CMD0=$(cmdline_of "$L7_P0")
+ck "L7 premise: v0.15.0's own helper launched one player P0 on the harness socket" '[[ $L7_P0 =~ ^[0-9]+$ && "$L7_CMD0" == *"input-ipc-server=$SOCK"* ]]'
+is "L7 premise: P0's load-auto-profiles is mpv's auto, so the shell's probe has to migrate it" "$(l_py get "$SOCK" load-auto-profiles)" "STR"
+mv -f -- "$L_CACHE/channels.json" "$SCRATCH/l7-channels.json" 2>>"$LOG"
+ck "L7 premise: the active source's channel list is withheld" '[[ ! -e $L_CACHE/channels.json && -s $SCRATCH/l7-channels.json ]]'
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l7.samples" 120
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L7 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L7 the shell did not start"
+L7_TS=$(l_py now)
+until_eq "t:live1" 15 np id || true
+# Past the hold: the probe goes out as the service loads and answers in well
+# under a second, so 19 s after the load was seen is 4 s past the hold's end.
+L7_PAST=$(python3 -I -c 'import sys, time; print("%.1f" % max(0.0, float(sys.argv[1]) + 19 - time.monotonic()))' "$L7_TS")
+sleep "$L7_PAST"
+L7_HELD=$(python3 -I -c 'import sys, time; print("%.1f" % (time.monotonic() - float(sys.argv[1])))' "$L7_TS")
+is "L7 premise: the shell adopted P0 and names its channel, with no channel list" "$(np id) $(svc "d['channels']")" "t:live1 0"
+is "L7 premise: the shell's probe migrated P0 in place (load-auto-profiles now reads false, mpv's no)" "$(l_py get "$SOCK" load-auto-profiles)" "false"
+is "L7 past the hold ($L7_HELD s after the shell loaded): P0 still holds the socket alone, and no restart line yet" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT")" "$L7_P0 0"
+L7_TR=$(l_py now)
+ipc refresh >/dev/null
+L7_P1=$(l_wait_replaced "$L7_P0" 40)
+until_eq "t:live1" 15 np id || true
+L7_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l7.samples"
+L7_TIMES=$(l_py p0times "$SCRATCH/l7.samples" "$L7_P0")
+printf '   L7 samples %s; P0 last seen / first missed %s (refresh at %s, shell loaded at %s); P1 %s\n' \
+  "$(l_py verdict "$SCRATCH/l7.samples" "$L7_P0" "$L7_P1")" "$L7_TIMES" "$L7_TR" "$L7_TS" "${L7_P1:-<none>}"
+# The fetch rewrote channels.json; the copy moved aside goes, or comes back
+# when the fetch did not write one (the later segments need the list).
+if [[ -e $L_CACHE/channels.json ]]; then rm -f -- "$SCRATCH/l7-channels.json"; else mv -f -- "$SCRATCH/l7-channels.json" "$L_CACHE/channels.json"; fi
+is "L7 the list landed: the fixture's 3 channels" "$(svc "d['channels']")" "3"
+is "L7 P0, the player v0.15.0 launched, is gone" "$(l_py alive "$SOCK" "$L7_P0")" "gone"
+ck "L7 one new player P1 holds the socket in its place" '[[ $L7_P1 =~ ^[0-9]+$ && $L7_P1 != "$L7_P0" ]]'
+ck "L7 the replacement followed the list, not the hold: P0 was still seen after the refresh went out and first missed after it ($L7_TIMES; refresh $L7_TR)" \
+   'python3 -I -c "import sys; last, gone, tr = map(float, sys.argv[1:4]); sys.exit(0 if last >= tr and gone > tr else 1)" $L7_TIMES "$L7_TR" 2>/dev/null'
+is "L7 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l7.samples" "$L7_P0" "$L7_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L7_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L7_P1")
+ck "L7 P1's argv is this tree's own composed launch ($L7_FORM)" '[[ $L7_FORM == plain || $L7_FORM == include ]]'
+# The stash and time-pos are read from whatever holds the socket, so this
+# passes on a tree that kept P0 too (it did, on 6b5ba6c): that the holder is
+# P1 is the checks above, and the label says only what this one reads.
+is "L7 the same channel plays on at the socket: the bar and the stash there name it, and time-pos advances" "$(np id) $(l_py stashid "$SOCK") $L7_ADV" "t:live1 t:live1 advancing"
+is "L7 exactly one restart line" "$(log_count "$L_RESTART_TEXT")" "1"
+is "L7 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+
+echo "== L8 D-SINK-71's counter-case: a player v0.16.0 launched, which the probe finds already safe, its channel list landing only after the hold"
+# The owner's decision is late delivery ONLY for a player whose settings the
+# probe had to change in place. v0.16.0 put every pin on its own argv, so this
+# tree's probe should find nothing to migrate, the hold's end defers it, and
+# the late list does NOT replace it: it plays on, fed nothing, until a channel
+# change (Q4). lane-sk71 had that premise by reading the helper diff only;
+# this observes it, and a tree that late-delivers to every safe player (the
+# migrated guard removed) reds the check that P0 survived the list (rc-sk71).
+# The lever is L7's.
+l_stop_all
+l_old_start "$L16_DIR" "t:live1"
+L8_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L8_CMD0=$(cmdline_of "$L8_P0")
+ck "L8 premise: v0.16.0's own helper launched one player P0 on the harness socket" '[[ $L8_P0 =~ ^[0-9]+$ && "$L8_CMD0" == *"input-ipc-server=$SOCK"* ]]'
+is "L8 premise: P0's load-auto-profiles already reads false, from its own argv's pin" "$(l_py get "$SOCK" load-auto-profiles)" "false"
+mv -f -- "$L_CACHE/channels.json" "$SCRATCH/l8-channels.json" 2>>"$LOG"
+ck "L8 premise: the active source's channel list is withheld" '[[ ! -e $L_CACHE/channels.json && -s $SCRATCH/l8-channels.json ]]'
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L8 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L8 the shell did not start"
+L8_TS=$(l_py now)
+until_eq "t:live1" 15 np id || true
+L8_PAST=$(python3 -I -c 'import sys, time; print("%.1f" % max(0.0, float(sys.argv[1]) + 19 - time.monotonic()))' "$L8_TS")
+sleep "$L8_PAST"
+L8_HELD=$(python3 -I -c 'import sys, time; print("%.1f" % (time.monotonic() - float(sys.argv[1])))' "$L8_TS")
+is "L8 premise: the shell adopted P0 and names its channel, with no channel list" "$(np id) $(svc "d['channels']")" "t:live1 0"
+is "L8 past the hold ($L8_HELD s after the shell loaded): P0 still holds the socket alone, and no restart line" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT")" "$L8_P0 0"
+sampler_start "$SCRATCH/l8.samples" 60
+ipc refresh >/dev/null
+until_eq 3 30 svc "d['channels']" || true
+# L7's replacement followed its refresh by 1.2 s; 8 s after the list landed
+# is well past any replacement the list could have caused.
+sleep 8
+sampler_stop "$SCRATCH/l8.samples"
+L8_VERDICT=$(l_py verdict "$SCRATCH/l8.samples" "$L8_P0" "")
+printf '   L8 samples %s\n' "$L8_VERDICT"
+if [[ -e $L_CACHE/channels.json ]]; then rm -f -- "$SCRATCH/l8-channels.json"; else mv -f -- "$SCRATCH/l8-channels.json" "$L_CACHE/channels.json"; fi
+is "L8 the list landed: the fixture's 3 channels" "$(svc "d['channels']")" "3"
+is "L8 P0 alone on the socket at every 50 ms sample from the refresh until 8 s after the list landed" "$(cut -d' ' -f2,3,5,6 <<<"$L8_VERDICT")" "max:1 p0:yes end:END p0all:yes"
+is "L8 P0 was not replaced: the same pid holds the socket alone, no restart line, the bar still names its channel" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT") $(np id)" "$L8_P0 0 t:live1"
+is "L8 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+# The deferred player is left to a stop, as Q4 leaves it to the user; P9
+# starts from no player.
+ipc stop >/dev/null
+until_eq 0 10 player_count || true
+
+echo "== L9 D-PLY-61: this tree's own player started through a user's mpv wrapper that appends an option, across two zaps and a shell restart"
+# The lead's decision of 2026-11-02: the build gate's job is build identity,
+# and a command line whose tail BEGINS with this build's composition was
+# launched by this build, whatever a wrapper appends after it. Before it,
+# launch_verdict read such a player "older": every zap was refused and
+# replaced, and so was the player at every shell restart (a new window each
+# time). The wrapper is the shape a user writes, `exec <mpv> "$@" <option>`,
+# put first on the PATH of the shell this segment starts (run.sh harness_env
+# puts $SCRATCH/bin in front), so the shell's own helper spawns through it.
+# Whether the player stayed the same is read off the kernel: the pids
+# holding the socket token at every 50 ms sample, and /proc stat field 22.
+L9_TOKEN="--hwdec=no"
+l_stop_all
+L9_REAL=$(command -v mpv)
+# The wrapper must not find itself: the driver's own PATH never holds
+# $SCRATCH/bin, and this says so before anything execs it.
+ck "L9 premise: the real mpv resolves outside the scenario's bin folder ($L9_REAL)" '[[ $L9_REAL == /* && $L9_REAL != "$SCRATCH/bin/"* ]]'
+printf '#!/bin/sh\n# player-scenario L9 (D-PLY-61): a user'"'"'s mpv wrapper that appends an option.\nexec %s "$@" %s\n' \
+  "$L9_REAL" "$L9_TOKEN" >"$SCRATCH/bin/mpv"
+chmod 0700 "$SCRATCH/bin/mpv"
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L9 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L9 the shell did not start"
+until_eq 3 20 svc "d['channels']" || true
+ipc play "t:live1" >/dev/null
+until_eq "t:live1" 20 l_py stashid "$SOCK" || true
+L9_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L9_START=$(l_py starttime "$L9_P0")
+# The premise, from the BUILDER and never from the verdict under test: P0's
+# argv is this tree's own composed launch, in either form, with the
+# wrapper's token after it as the last element.
+L9_FORM=$(python3 -I -B - "$PLUGIN_ROOT" "$SOCK" "${L9_P0:-0}" "$L9_TOKEN" <<'PY' 2>/dev/null || echo NOBUILDER
+import importlib.machinery, importlib.util, os, sys
+root, sock, pid, token = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    with open("/proc/%d/cmdline" % int(pid), "rb") as handle:
+        argv = [part for part in handle.read().split(b"\0") if part]
+except (OSError, ValueError):
+    print("NOARGV"); raise SystemExit(0)
+loader = importlib.machinery.SourceFileLoader("omarchy_iptv_l9", os.path.join(root, "bin", "omarchy-iptv"))
+spec = importlib.util.spec_from_loader("omarchy_iptv_l9", loader)
+helper = importlib.util.module_from_spec(spec)
+loader.exec_module(helper)
+forms = [("plain", helper.mpv_launch_argv(sock, [])), ("include", helper.mpv_launch_argv(sock, ["--osd-level=1"]))]
+body, last = argv[:-1], argv[-1:]
+# argv[0] is the path the wrapper exec'd, not `mpv`: compare from element 1.
+print(next((form + "+token" for form, want in forms if [os.fsencode(e) for e in want[1:]] == body[1:]
+            and last == [os.fsencode(token)]), "neither"))
+PY
+)
+ck "L9 premise: P0 is this tree's own composed launch with the wrapper's $L9_TOKEN appended ($L9_FORM)" '[[ $L9_P0 =~ ^[0-9]+$ && ( $L9_FORM == plain+token || $L9_FORM == include+token ) ]]'
+sampler_start "$SCRATCH/l9.samples" 180
+ipc play "t:live2" >/dev/null
+until_eq "t:live2" 20 l_py stashid "$SOCK" || true
+L9_Z1="$(l_py tokens "$SOCK") $(l_py stashid "$SOCK")"
+ipc play "t:live1" >/dev/null
+until_eq "t:live1" 20 l_py stashid "$SOCK" || true
+L9_Z2="$(l_py tokens "$SOCK") $(l_py stashid "$SOCK")"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L9 the second restart-shell failed (see $LOG)"
+until_eq 2 20 log_count 'service loaded' || bad "L9 the second shell did not start"
+until_eq true 15 svc "d['socketAttached']" || true
+until_eq "t:live1" 15 np id || true
+# Past the moment a shell that read P0 as another build's would have
+# replaced it: with the list there from the start, M6 measured the restart
+# 0.66-1.06 s after the probe answered.
+sleep 5
+L9_R="$(l_py tokens "$SOCK") $(np id)"
+L9_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l9.samples"
+L9_START1=$(l_py starttime "$(l_py tokens "$SOCK")")
+printf '   L9 samples %s; after zap 1 %s, after zap 2 %s, after the restart %s; start time %s -> %s\n' \
+  "$(l_py verdict "$SCRATCH/l9.samples" "$L9_P0" "")" "$L9_Z1" "$L9_Z2" "$L9_R" "$L9_START" "$L9_START1"
+is "L9 the first zap fed P0 itself: the same pid alone on the socket, now on t:live2" "$L9_Z1" "$L9_P0 t:live2"
+is "L9 the second zap fed P0 itself too, back on t:live1" "$L9_Z2" "$L9_P0 t:live1"
+is "L9 a shell restart kept P0: the same pid alone on the socket, the bar naming its channel" "$L9_R" "$L9_P0 t:live1"
+ck "L9 the same process throughout: /proc stat field 22 unchanged ($L9_START -> $L9_START1)" '[[ $L9_START =~ ^[0-9]+$ && $L9_START1 == "$L9_START" ]]'
+is "L9 P0 alone on the socket at every 50 ms sample, from before the first zap to after the restart" "$(l_py verdict "$SCRATCH/l9.samples" "$L9_P0" "" | cut -d' ' -f2,5,6)" "max:1 end:END p0all:yes"
+is "L9 no replaced line and no restart line" "$(log_count "$L_REPLACED_TEXT") $(log_count "$L_RESTART_TEXT")" "0 0"
+is "L9 the probe reads P0 as this build's launch" "$(probe_launch)" "current"
+is "L9 P0 plays: time-pos advances" "$L9_ADV" "advancing"
+is "L9 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+# The wrapper goes before anything else starts a player: the next shell
+# resolves the real mpv again.
+l_stop_all
+rm -f -- "$SCRATCH/bin/mpv"
+
+echo "== L10 D-SINK-72: a player v0.15.0 launched, migrated by one shell's probe, met by a SECOND shell before its channel list lands"
+# D-SINK-71's late replacement, with the shell restarted in between. The first
+# shell's probe migrates P0 in place (load-auto-profiles auto -> false, read
+# off P0); a second restart-shell comes before the list lands, so the fact
+# that P0's open stream predates the migration has to reach the second shell.
+# Before the fix it lived only in the first shell's memory: the second probe
+# found nothing left to change, the hold's end deferred P0, and the late list
+# replaced nothing. Since D-SINK-72 the first probe leaves a mark on P0
+# itself, which the second probe reads. The lever is L7's (channels.json
+# aside, `ipc refresh` 19 s after the second shell loaded).
+l_stop_all
+l_old_start "$L15_DIR" "t:live1"
+L10_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L10_CMD0=$(cmdline_of "$L10_P0")
+ck "L10 premise: v0.15.0's own helper launched one player P0 on the harness socket" '[[ $L10_P0 =~ ^[0-9]+$ && "$L10_CMD0" == *"input-ipc-server=$SOCK"* ]]'
+is "L10 premise: P0's load-auto-profiles is mpv's auto, so the first shell's probe has to migrate it" "$(l_py get "$SOCK" load-auto-profiles)" "STR"
+mv -f -- "$L_CACHE/channels.json" "$SCRATCH/l10-channels.json" 2>>"$LOG"
+ck "L10 premise: the active source's channel list is withheld" '[[ ! -e $L_CACHE/channels.json && -s $SCRATCH/l10-channels.json ]]'
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l10.samples" 150
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L10 the first restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L10 the first shell did not start"
+until_eq "t:live1" 15 np id || true
+until_eq false 10 l_py get "$SOCK" load-auto-profiles || true
+is "L10 premise: the first shell adopted P0 and its probe migrated it in place (load-auto-profiles now reads false)" "$(np id) $(l_py get "$SOCK" load-auto-profiles)" "t:live1 false"
+# The mark itself, printed and not asserted: the checks below are on what
+# the second shell DOES, which is the defect, not on the mechanism (a string
+# reads STR; a tree without the mark reads ERR, property not found).
+printf '   L10 the migration mark on P0 after the first shell: %s\n' "$(l_py get "$SOCK" user-data/omarchy-iptv-tls)"
+L10_A_RESTARTS=$(log_count "$L_RESTART_TEXT")
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L10 the second restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L10 the second shell did not start"
+L10_TS=$(l_py now)
+until_eq "t:live1" 15 np id || true
+L10_PAST=$(python3 -I -c 'import sys, time; print("%.1f" % max(0.0, float(sys.argv[1]) + 19 - time.monotonic()))' "$L10_TS")
+sleep "$L10_PAST"
+L10_HELD=$(python3 -I -c 'import sys, time; print("%.1f" % (time.monotonic() - float(sys.argv[1])))' "$L10_TS")
+is "L10 premise: the second shell adopted P0 and names its channel, with no channel list" "$(np id) $(svc "d['channels']")" "t:live1 0"
+is "L10 past the second shell's hold ($L10_HELD s after it loaded): P0 still holds the socket alone, and no restart line from either shell" "$(l_py tokens "$SOCK") $((L10_A_RESTARTS + $(log_count "$L_RESTART_TEXT")))" "$L10_P0 0"
+L10_TR=$(l_py now)
+ipc refresh >/dev/null
+L10_P1=$(l_wait_replaced "$L10_P0" 40)
+until_eq "t:live1" 15 np id || true
+L10_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l10.samples"
+L10_TIMES=$(l_py p0times "$SCRATCH/l10.samples" "$L10_P0")
+printf '   L10 samples %s; P0 last seen / first missed %s (refresh at %s, second shell loaded at %s); P1 %s\n' \
+  "$(l_py verdict "$SCRATCH/l10.samples" "$L10_P0" "$L10_P1")" "$L10_TIMES" "$L10_TR" "$L10_TS" "${L10_P1:-<none>}"
+if [[ -e $L_CACHE/channels.json ]]; then rm -f -- "$SCRATCH/l10-channels.json"; else mv -f -- "$SCRATCH/l10-channels.json" "$L_CACHE/channels.json"; fi
+is "L10 the list landed: the fixture's 3 channels" "$(svc "d['channels']")" "3"
+is "L10 P0, the player the first shell migrated, is gone" "$(l_py alive "$SOCK" "$L10_P0")" "gone"
+ck "L10 one new player P1 holds the socket in its place" '[[ $L10_P1 =~ ^[0-9]+$ && $L10_P1 != "$L10_P0" ]]'
+ck "L10 the replacement followed the list: P0 was still seen after the refresh went out and first missed after it ($L10_TIMES; refresh $L10_TR)" \
+   'python3 -I -c "import sys; last, gone, tr = map(float, sys.argv[1:4]); sys.exit(0 if last >= tr and gone > tr else 1)" $L10_TIMES "$L10_TR" 2>/dev/null'
+is "L10 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l10.samples" "$L10_P0" "$L10_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L10_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L10_P1")
+ck "L10 P1's argv is this tree's own composed launch ($L10_FORM)" '[[ $L10_FORM == plain || $L10_FORM == include ]]'
+is "L10 the same channel plays on at the socket: the bar and the stash there name it, and time-pos advances" "$(np id) $(l_py stashid "$SOCK") $L10_ADV" "t:live1 t:live1 advancing"
+is "L10 exactly one restart line, from the second shell" "$((L10_A_RESTARTS + $(log_count "$L_RESTART_TEXT")))" "1"
+is "L10 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+ipc stop >/dev/null
+until_eq 0 10 player_count || true
+
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P9 no player to reap"
@@ -1519,7 +1823,12 @@ until_eq 0 8 player_count || true
 # server premise, L5 2; the two window checks SKIP under a nested compositor
 # and still count here).
 # 142 -> 143 (rc-rao-b, 2026-11-02): L5's control that B's header is seen at all.
-EXPECTED_CHECKS=143
+# 143 -> 158 (lane-sk71, 2026-11-02): L7's 15, the late list (D-SINK-71).
+# 158 -> 167 (rc-sk71, 2026-11-02): L8's 9, its counter-case.
+# 167 -> 193 (lane-sk72, 2026-11-02): L9's 11, a player kept through an
+# appending mpv wrapper (D-PLY-61), and L10's 15, a migrated player met by a
+# second shell before its list lands (D-SINK-72).
+EXPECTED_CHECKS=193
 ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 

@@ -631,6 +631,15 @@ requests and raise the batch.
      - Migration stays for the hold before that restart, for a player whose
        restart is deferred and which plays on, and for a player of THIS
        build changed at runtime by another client.
+     - The migration fact lives on the player (D-SINK-72, 2026-11-02). The
+       probe that migrates a player leaves the fixed word `migrated` in
+       `user-data/omarchy-iptv-tls`, and every later probe answers
+       `migrated` until a load of this build clears it. So a shell
+       restart before the replacement, or before this build's reload, does
+       not lose it. A player started through the user's own `mpv` wrapper
+       that appends options after this build's whole launch argv reads as
+       this build's (D-PLY-61), unless what it appends includes a second
+       socket option.
      - D-SINK-70, which shipped in 0.16.0, was the keepLoaded old Service
        feeding an older player through `play` after an update, with none of
        the adoption pins. The gate closes it whichever QML runs.

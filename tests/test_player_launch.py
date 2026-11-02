@@ -3,9 +3,11 @@ launched the player a connection reaches.
 
 The launch argv names the build (`player_build`, one script-opts key, version
 and checksum only), and `launch_verdict` reads a process's /proc/<pid>/cmdline
-back as bytes: "current" when the tail from our socket token is exactly what
-this build composes (either form; the screenshot folder tolerated), "older"
-for any other launch of ours, "unknown" when there is nothing of ours to read.
+back as bytes: "current" when the tail from our socket token BEGINS with what
+this build composes (either form; the screenshot folder tolerated), whatever
+a user's `mpv` wrapper appends after it but a second socket option (D-PLY-61),
+"older" for any other launch of ours, "unknown" when there is nothing of ours
+to read.
 Every case here is judged on a REAL process, whose command line the kernel
 reports, never on a list handed to the function: the shape the verdict reads
 is the one the kernel keeps (measured on mpv 0.41.0 by lane RA's M1, byte for
@@ -37,18 +39,30 @@ VECTORS = json.loads(FIXTURE.read_text(encoding="utf-8"))
 HOLDER = "import time\ntime.sleep(30)\n"
 
 
-def edited(argv, edit):
+def edited(argv, edit, fill=lambda a: a):
+    """`argv` with the case's edit applied; `fill` resolves the fixture's
+    placeholders in the elements the edit brings in (an appended
+    `--input-ipc-server=__SOCK__`, D-PLY-61)."""
     out = list(argv)
     if not edit:
         return out
     if "replace" in edit:
         prefix, element = edit["replace"]
         at = next(i for i, a in enumerate(out) if a.startswith(prefix))
-        out[at] = element
+        out[at] = fill(element)
     if "drop" in edit:
         out.remove(edit["drop"])
+    # rc-sk72: the prefix rule's edges -- an element moved to the end, the
+    # tail cut short from the end or down to its first elements.
+    if "move" in edit:
+        at = next(i for i, a in enumerate(out) if a.startswith(edit["move"]))
+        out.append(out.pop(at))
+    if "pop" in edit:
+        del out[len(out) - int(edit["pop"]):]
+    if "keep" in edit:
+        del out[int(edit["keep"]):]
     if "append" in edit:
-        out += list(edit["append"])
+        out += [fill(a) for a in edit["append"]]
     return out
 
 
@@ -98,11 +112,11 @@ class LaunchCase(unittest.TestCase):
 
     def case_argv(self, case, sock=None):
         sock = sock or self.sock
+        fill = lambda a: (a.replace("__SOCK__", sock).replace("__RUNTIME__", os.path.dirname(sock))
+                          .replace("__STATE__", helper.state_dir()))
         if "shape" in case:
-            fill = lambda a: (a.replace("__SOCK__", sock).replace("__RUNTIME__", os.path.dirname(sock))
-                              .replace("__STATE__", helper.state_dir()))
-            return [fill(a) for a in VECTORS["older"][case["shape"]]]
-        return list(case["prefix"]) + edited(self.current_tail(case["include"], sock), case.get("edit"))
+            return edited([fill(a) for a in VECTORS["older"][case["shape"]]], case.get("edit"), fill)
+        return list(case["prefix"]) + edited(self.current_tail(case["include"], sock), case.get("edit"), fill)
 
 
 class LaunchVerdictVectorTest(LaunchCase):
@@ -123,12 +137,24 @@ class LaunchVerdictVectorTest(LaunchCase):
         self.assertEqual(got, ["%s: %s" % (c["name"], c["verdict"]) for c in cases])
         # The fixture keeps the cases that make each mutant of the verdict
         # visible (the lane's report runs them): an older argv from a REAL
-        # release, a pin removed, a token appended, a foreign screenshot
-        # folder, a prepending wrapper, both option-file forms.
+        # release, a pin removed, a foreign screenshot folder, a prepending
+        # wrapper, both option-file forms -- and, since D-PLY-61, a wrapper's
+        # tokens appended after each form (current), the same appended after
+        # an older argv, after a change inside the tail and after another
+        # build's marker (older), and a second socket option in two
+        # spellings (older). And (rc-sk72) the prefix rule's edges, each
+        # older: the composition's last element replaced or run on into a
+        # longer one, an element moved, the tail cut short -- red under the
+        # comparison read off by one, order-blind or as joined bytes.
         verdicts = [c["verdict"] for c in cases]
-        self.assertGreaterEqual(verdicts.count("current"), 5)
-        self.assertGreaterEqual(verdicts.count("older"), 5)
+        self.assertGreaterEqual(verdicts.count("current"), 7)
+        self.assertGreaterEqual(verdicts.count("older"), 16)
         self.assertIn("unknown", verdicts)
+        appended = [c["verdict"] for c in cases if "append" in c.get("edit", {})]
+        self.assertGreaterEqual(appended.count("current"), 2)
+        self.assertGreaterEqual(appended.count("older"), 8)
+        edges = [c["verdict"] for c in cases if {"move", "pop", "keep"} & set(c.get("edit", {}))]
+        self.assertEqual(edges, ["older"] * 5)
 
     def test_the_older_shapes_are_the_tags_own_and_differ_from_this_build_only_where_they_should(self):
         """v0.16.0's argv is this tree's less the marker (the shapes were

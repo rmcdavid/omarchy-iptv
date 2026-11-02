@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.16.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.17.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -27,7 +27,9 @@ it writes, off this computer and your local network, sets the player's
 safety options after your own, takes your `mpvArgs` and your sources' keys
 off every command line, masks the Sources form on the desktop accessibility
 bus, and tells a failure on your own computer apart from a channel that does
-not work.
+not work. 0.17.0 replaces a player another version of the plugin started,
+rather than sending it channels, so nothing that version put on the
+player's command line outlives the update.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -261,7 +263,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (139 checks, 2026-11-01).
+  branch (139 checks, 2026-11-02).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -492,13 +494,27 @@ on every protection a running player can take:
 - `Ctrl+V` and drag-and-drop off;
 - no core dump.
 
-Sometimes its channel cannot be put back: the playlist no longer has it,
-another source is active, or the channel list takes too long to load. Then the
-old player plays on, sent no channel, until you change channel or stop. If, in
-that case, it also cannot be made safe, it is stopped: press Enter on the
-channel and a fresh, verified player starts. A player cannot be made safe when
-it does not accept the change, or when it was started by 0.15.0 or earlier and
-its mpv config holds either of these:
+Sometimes its channel cannot be put back: the playlist no longer has it, or
+another source is active. Then the old player plays on, sent no channel. Your
+next channel change replaces it, and stopping ends it.
+
+The channel list can also take more than 15 seconds to load. What happens then
+depends on what the new shell found:
+
+- If the old player already had every protection, as a player 0.16.0 started
+  does, it plays on, sent no channel, until your next channel change replaces
+  it (Enter on its own channel does too, at live and playing) or you stop.
+- If the new shell had to change the settings that keep certificate
+  verification on, as for a player 0.15.0 or earlier started, the first time
+  a shell of 0.16.0 or later picks it up, it plays on until the list has
+  loaded, and is replaced then if its channel is still there. This holds
+  after a shell restart too, until it is replaced. If the list never loads,
+  it plays on, sent no channel, as above.
+
+If, in any of these cases, it also cannot be made safe, it is stopped: press
+Enter on the channel and a fresh, verified player starts. A player cannot be
+made safe when it does not accept the change, or when it was started by 0.15.0
+or earlier and its mpv config holds either of these:
 
 - a per-protocol or per-extension profile that sets any of the options the
   plugin now sets after yours (the certificate settings among them);

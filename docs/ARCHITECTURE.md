@@ -3639,7 +3639,12 @@ Performance budget (10k channels):
     safe, and adoption migrates an older player, reads the properties back, and
     re-establishes the channel rather than letting an unverified connection
     continue [2026-11-02: a player another build launched is replaced
-    instead, ARCHITECTURE-PLAYER 4.5.2]. Measured, specified and costed in `ARCHITECTURE-PLAYER.md` 4.15
+    instead when its channel can be put back: within the 15 s hold, or, if
+    the probe had to migrate it and it reads safe, whenever its list lands.
+    Otherwise it plays on, fed nothing, until the next channel change or a
+    stop, unless it cannot be made safe, this build refuses its channel, or,
+    as for any player, its stash is unusable, when it is stopped
+    (ARCHITECTURE-PLAYER 4.5.1's D-DOC-34 note and 4.5.2)]. Measured, specified and costed in `ARCHITECTURE-PLAYER.md` 4.15
     and 4.5.1 (D-SINK-13, D-SINK-15, D-SINK-16); a check that only greps the
     base argv for the token cannot see the layer that binds, which is
     engineering rule 14's shape, so it is verified by composing the argv with

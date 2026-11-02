@@ -13389,6 +13389,372 @@ So the feed gate is observed live by L4 and L5 alone (D-SINK-70's path: the old 
 
 *Rule 15, beyond the lane's search.* rewind-scenario's R16 starts a second shell on a slow-helper copy of the tree: it reaps first, and the copy carries the same parts and manifest, so its own player reads current; cleared. PLY-MIG-01 (a hand-started player with no stash) is still stopped as foreign. QA-SOURCES 9.2's live update path expects no same pid across the update. D-PLY-28 over the recheck's runs: 8 of 35 trials, one or two in every run (the tree 4 of 15, 202a7bc 1 of 5, the three mutants 1 of 5 each), at load 3.2-4.6; with lane RB's, the tree 7 of 40 and 202a7bc 4 of 20, the same rate, so not this work's.
 
+### D-SINK-71: the late list, replaced (lane-sk71, 2026-11-02)
+
+Built on dev 6b5ba6c from the owner's decision of 2026-11-02, "replace late, when the list lands". Branch lane-sk71, three commits:
+
+- fb44bdf: the model, the shell and the tests.
+- 26c2ef2: the node floor.
+- 86154bb: player-scenario L7.
+
+*Service harness and node, red first.* The five new node checks:
+
+- the disposition's migrated-past-the-hold vectors;
+- the late list, with its counter-case (a player that read safe without migration is still deferred);
+- the ambiguous probe's retry;
+- a later probe of the same player while it is held;
+- what stays as it was around them: a channel change while owed, a stop, a gone channel, and an unsafe player at the expiry.
+
+The suite runs 3284 on the tip. On 6b5ba6c it runs 3284 with 4 failures; the fifth check is green there by design and is red under mutants. In the late-list case on 6b5ba6c, the hold's expiry spent the episode and no start went out when the list landed.
+
+Ten named mutants of the shipping change, each a fresh copy of the tip with one decision broken, were all red:
+
+- M1, expiry holds every safe player: 3 failures.
+- M2, migrated bypasses the unsafe stop: 3.
+- M3, migrated holds when the channel is gone: 2.
+- M4, a loose `migrated` test: 1.
+- M5, no retry memo: 1.
+- M6, no carry from the open episode: 1.
+- M7, the timer drops `migrated`: 3.
+- M8, the shell passes only this probe's word: 1.
+- M9, the disposition is not told `migrated`: 3.
+- M10, a channel change does not spend the episode: 2.
+
+The QML spec, test_olderRestartUnderQtsEngine with three more compares, runs 83 on the tip; on 6b5ba6c it is 82 passed, 1 failed (defer where hold was wanted).
+
+*Live: player-scenario L7.* Each run was in its own nested headless pixman cage on a private D-Bus (rc-rao-b's rig shape), under the heavy lock, with a refusing `hyprctl` and a logging notifier first on PATH. The harness directory was `/run/user/1000/oisk-h<stamp>`. The lever already existed in the harness:
+
+1. Move the active source's `channels.json` aside before restart-shell. `playlist-status.json` stays, so the cache reads fresh and nothing is fetched at start.
+2. Run `ipc refresh` 19 s after the shell loaded. The fetch's exit reloads the list (handlePlaylistExit).
+
+The migration is read off P0 itself: `load-auto-profiles` reads mpv's auto (a string) before the shell and false (no) after the shell's probe. Only the migration (secure_player) sets it.
+
+- **Tip 86154bb** (transcript player-20261102-101943-3163451): L7 passed 15 of 15. P0 was last seen 1.204 s after the refresh went out and first missed 0.055 s later, 20.7 s after the shell loaded. It was never two players at a 50 ms sample (430 samples). P1 is this tree's own launch (include form), playing the same channel with time-pos advancing. One restart line, no card. The scenario as a whole: 148 passed, 9 failed (the window checks a nested compositor cannot answer), 2 skipped, 157 assertions; floor 143 -> 158.
+- **`--baseline 6b5ba6c`** (player-20261102-102316-3174754): L7's 6 replacement checks were red and its 9 others green:
+  - P0 was alive 66.9 s after the refresh, at every one of 1,492 samples;
+  - no P1 and no restart line.
+
+  The scenario as a whole: 141 passed, 17 failed. That is the 9 window checks, L7's 6, and P13's dropped start-up play (D-PLY-28, trial 4, 2 checks). The tip run passed P13.
+- Coredump journal 81 before and 81 after both runs. No process was left behind.
+
+### D-SINK-71 rechecked (rc-sk71, 2026-11-02)
+
+Branch rc-sk71 adds four commits on lane-sk71's 86154bb: c908801, be45fdb, dbad646 and edf03fe.
+
+*The lane's red and green claims, re-run.*
+- Node: 3284 checks on 86154bb, 0 failures. Its tests against 6b5ba6c's Service.qml and model: 4 failures, the four it named.
+- QML spec: 83 on the tip. On the base copy, 82 passed and 1 failed (defer where hold was wanted).
+
+*The recheck's own mutants of the shipping change.*
+
+Each ran on a fresh `git archive` copy with one replacement.
+- X1, a migrated episode escaping the spent branch: 2 red.
+- X2, the hold timer never expiring a migrated episode, so an unsafe one is never stopped: 2 red.
+- X4, the late restart not spending the episode: 7 red, and 8 once the recheck's case is in.
+- X6, a migrated player busy at the expiry deferred: 1 red.
+- X9, the timer not re-asking for a migrated episode: 2 red.
+- X3, the retry memo read without its probeRetried guard: survives. It drops a true memo only after a stale retry, whose intent replaces the player, or after the observer attaches between the ambiguous probe and its retry, which this recheck found is not reached in practice.
+- X7, play()'s spend dropping `migrated`: survives, equivalent.
+
+*Two cases added for the owner's other rules on the late path.*
+
+Both are red on 6b5ba6c. The node floor moves 3284 -> 3286.
+- Another source while held past the hold: held, then deferred when the list lands. Red under M3.
+- The late restart goes out once. Refused locally, it defers with no card and nothing more starts. Refused for the channel, it stops and tells Stream failed. Red under X4.
+
+*Scratch probes, not committed.* Injected into copies of the tip and of 6b5ba6c:
+- A, another source while held past the hold: held, then deferred, then a change starts the new channel.
+- B, the late restart refused locally: deferred, no loop.
+- C, the late restart refused for the channel: a stop and Stream failed.
+- D, EOF during the extended hold: the episode ends and nothing starts.
+- E and F, identical on both trees: a later probe of the same older player re-opens a deferred or held episode, unspent and unexpired, and re-arms the hold (the lane's finding; filed as D-SINK-73 and fixed by lane-sk73 and rc-sk73, below).
+- G, identical on both trees: a second shell reads a player the first shell's probe migrated as safe without migration, and defers it at the hold's end (a new finding; filed as D-SINK-72 and fixed by lane-sk72 and rc-sk72, below).
+- H, an ambiguous retry made stale, then a re-probe of the same player: the episode reads migrated false and nothing starts, and the intent that made the retry stale replaces the player (the X3 guard's effect; X3 is the mutant above). [Since D-SINK-72 that re-probe reads the player's mark and answers migrated, unless mpv refused the mark.]
+
+*Live: player-scenario in the recheck's own nested headless pixman cage.*
+
+Every run was on a private D-Bus under heavy.lock, with a refusing hyprctl and a logging notifier. L8 is new: a v0.16.0 player and L7's lever (channels.json moved aside, `ipc refresh` 19 s after the shell loaded).
+
+- **c908801:** L7 15 of 15, with P0 first missed 1.166 s after the refresh and 20.63 s after the shell loaded. L8 9 of 9: 155 samples, P0 alone at every one.
+- **--baseline 6b5ba6c:** L7 has 6 red, with P0 alive at all 1,500 samples through 66.8 s after the refresh. L8 9 of 9.
+- **The M1 tree** (the migrated guard removed, uncommitted in a scratch worktree): L7 15 of 15. L8 has 2 red: P0 3266161 replaced by 3266730, with 1 restart line.
+- **edf03fe:** L7 15 of 15 (+1.163 s, 20.57 s). L8 9 of 9.
+
+The whole-scenario failures are the 9 window checks a nested compositor cannot answer, plus P13's dropped start-up play (D-PLY-28), which hit 3 of 20 trials. The coredump journal stayed at 81 before and after every run and the gate.
+
+*Gate.* check.sh on edf03fe, alone under the lock, fails only the defect ledger (D-SINK-71's row). With the row it is green (646 of 646).
+
+### D-PLY-61 and D-SINK-72: an appending wrapper's player is this build's, and the migration fact lives on the player (lane-sk72, 2026-11-02)
+
+Built on int-sk71 c510985 from the lead's two decisions of 2026-11-02. Branch lane-sk72, five commits:
+
+- 1894a81: launch_verdict reads a tail that BEGINS with this build's composition as current, whatever a wrapper appends after it (D-PLY-61).
+- 8bd080d: the migration mark (D-SINK-72).
+- 3821e56: player-scenario L9 and L10 (floor 167 -> 193).
+- 86aa328: the python floor, 1942 -> 1951.
+- 6e936ff: the user-data comment's "no delete" corrected.
+
+*Measured first, mpv 0.41.0, windowless.* The flags were `--no-config --idle=yes --vo=null --ao=null`, with a relative socket in the lane's scratch folder and no display. Results for `user-data/omarchy-iptv-tls`:
+
+- A get of the absent node answers `property not found`.
+- `set_property` answers success. The same client and a second client read the word back, and it survives two `loadfile ... replace`.
+- A full `property-list` snapshot shows the set changes no other property, idle or playing. The two-snapshot noise, `osd-sym-cc` and `perf-info`, was excluded.
+- The stash sibling is untouched.
+- `del` answers success, and the node then reads `property not found`. `del` of an absent node answers `error running command`, and `del_property` answers `invalid parameter`.
+- A set of `""` reads `""`.
+
+mpv exited 0 with 0 bytes on stderr.
+
+*The shipping functions on real mpv* (windowless, the same shape, a local http server on 127.0.0.1):
+
+- Each build's own composed argv, with `--vo=null --ao=null` appended, puts the composition and then the two tokens on /proc/<pid>/cmdline. c510985's helper reads its own such player `older`; the tree's reads its own `current`.
+- On the tree's player:
+  - A fresh probe reads `migrated` False and finds no mark.
+  - After another client sets `tls-verify` false, the probe migrates the player. It reads `migrated` True, the mark reads `migrated` from a second client, and `tls-verify` reads True.
+  - A later probe still reads True. c510985's helper reads False on the same player.
+  - `apply_channel` goes through the build gate (peer is mpv, verdict `current`) and loads entry 1, which plays. The mark then reads `""`, and the next probe reads False.
+
+*Tests, red first.* The python suite runs 1951 on the tip; c510985 runs 1942. I ran the 45 targeted tests on an export of c510985 holding the tip's test files: 13 failures.
+
+- The vector test: two appended `current` vectors read `older` there.
+- WrapperSpawnTest, 3: the appending child wrapper plays its zap; the exec and child wrappers keep one player across two zaps and a second start.
+- ProbeTlsTest, 4: a marked player reads migrated; the second probe of a migrated player; the load's clear; the refused-mark journal line.
+- test_mpv, 5: the wire-sequence tests whose last command is now the clear.
+
+The guards are green on c510985 and red under mutants: the second-socket wrapper (P1), the TLS-refused load keeping the mark (K5), and the unreadable or not-the-word mark (K6, K8).
+
+Thirteen named mutants of the shipping change were all red:
+
+- P1, no socket exception: 2 red.
+- P2, c510985's length rule: 4.
+- P3, compared only through the marker: 1.
+- P4, one spelling: 1.
+- P5, plain form only: 2.
+- K1, never read: 2.
+- K2, never set: 2.
+- K3, set after the writes: 1.
+- K4, never cleared: 6.
+- K5, cleared before the gate: 8.
+- K6, fail-open read: 3.
+- K7, a refused set raises: 1.
+- K8, truthiness: 1.
+
+*Live: player-scenario.* Each run was in the lane's own nested headless pixman cage on a private D-Bus (rc-sk71's rig shape), under heavy.lock, with a refusing hyprctl and a logging notifier first on PATH and the harness at /run/user/1000/oisk72-h<stamp>.
+
+- L9 puts `exec /usr/bin/mpv "$@" --hwdec=no` first on the shell's PATH.
+- L10 is L7's v0.15.0 player and late list, with a second restart-shell after the first shell's probe migrated P0 (load-auto-profiles auto -> false).
+
+Results:
+
+- **Tip 3821e56** (player-20261102-125436-3453735): L9 passed 11 of 11. P0 was alone at all 189 samples and kept the same pid after zap 1, zap 2 and the restart, with stat field 22 unchanged. There were no replaced or restart lines, the probe read `current`, and time-pos advanced. L10 passed 15 of 15. The mark read STR after the first shell. P0 was still alone 19.1 s after the second shell loaded; it was last seen 1.229 s after the refresh and first missed 0.058 s later. P1 is this tree's own launch (include form), on the same channel, with one restart line. The scenario as a whole: 181 passed, 12 failed, 2 skipped. The failures are the 9 window checks and P13's dropped start-up play (D-PLY-28, trial 5).
+- **Final tip 6e936ff** (player-20261102-132614-3539519): L9 11 of 11 and L10 15 of 15 (P0 last seen 1.128 s after the refresh, 20.54 s after the second shell loaded). 182 passed, 11 failed: the 9 window checks and P13 (D-PLY-28, trial 4).
+- **`--baseline c510985`** (player-20261102-130907-3496130):
+  - L9: 7 red. P0 3507405 became 3507506 at zap 1, 3507646 at zap 2 and 3507990 at the restart; 3 replaced lines and 1 restart line; the probe read `older`.
+  - L10: 6 red. P0 was alive at all 1,540 samples through 67.4 s after the refresh; no P1 and no restart line; the mark read ERR.
+  - The premises of both segments were green, and so was P13. The scenario as a whole: 170 passed, 22 failed.
+
+The coredump journal read 81 before and after every run. No process was left behind.
+
+*Gate.* check.sh on 6e936ff, alone under the lock, fails only the defect ledger, because D-PLY-61 and D-SINK-72 have no rows. With the two rows in a scratch copy, the ledger reads 648 rows for 648 ids. Node 3286, python 1951, QML spec 83.
+
+### rc-sk72: the recheck of lane-sk72 (D-PLY-61 and D-SINK-72), 2026-11-02
+
+The branch rc-sk72 starts from lane-sk72's 6e936ff and adds four commits:
+
+- 1167e6c: five edge vectors for the launch verdict.
+- 5cbab40: a `player start` that adopts a marked player clears the mark.
+- c2f19a5: two helper comments corrected, re-sealed.
+- 74436c6: the python floor, 1951 -> 1952.
+
+*The lane's claims, re-run.* On the lane tip, the targeted suites ran 229 tests and passed. On an export of c510985 carrying the tip's tests and fixture there were 13 failures, the same 13 the lane named. I re-ran the lane's two rigs on real mpv 0.41.0, windowless, with a private HOME and runtime folder: measure_mark.py and e2e.py. Every line came out as reported, and the crash journal read 81 -> 81 for each.
+
+*The recheck's own mutants* ran over eight suites (347 tests on 6e936ff).
+
+Five were red on the lane tip:
+
+- Q1: the socket exception reads only the first appended element. 1 red.
+- R1: the mark is cleared after the TLS assertion, before the load. 7 red.
+- R3: every probe marks. 4 red.
+- R4: `migrated` follows the mark write. 1 red.
+- R5: the mark is cleared only when the load carried a stash. 6 red.
+
+Four survived, which means there were test gaps:
+
+- Q2: the composition's last element is not compared.
+- Q3: the composition is compared as a set.
+- Q4: the prefix is compared as joined bytes.
+- R2: only `play` clears the mark.
+
+1167e6c adds five vectors, each `older`, and each `older` on c510985 too:
+
+- layer 2's trailing `--tls-verify=yes` replaced by a wrapper's token;
+- that element run on into a longer one;
+- a pin moved to the end;
+- the tail cut short by one element;
+- the socket token alone.
+
+5cbab40 adds a ProbeTlsTest case, which is red on c510985 ('migrated' != ''). On that tree (348 tests), Q2, Q3 and Q4 are red in the vector test, and R2 is red in the new case.
+
+*Live.* Each run was in my own nested headless pixman cage on a private D-Bus, under heavy.lock.
+
+- **Tip 74436c6** (player-20261102-140223-3610206): 182 passed, 11 failed, 2 skipped.
+  - L9 passed 11 of 11. P0 was alone at all 190 samples, with the same pid after both zaps and after the restart, and stat field 22 unchanged.
+  - L10 passed 15 of 15. The mark read STR. P0 was last seen 1.161 s after the refresh, 20.51 s after the second shell loaded. P1 was this tree's include-form launch, with one restart line.
+  - The failures are the 9 window checks and P13 trial 2 (D-PLY-28).
+- **`--baseline c510985`** (player-20261102-140704-3624340): 170 passed, 22 failed.
+  - L9: 7 red. P0 went 3635572 -> 3635680 -> 3635773 -> 3636139. There were 3 replaced lines and 1 restart line, and the probe read `older`.
+  - L10: 6 red. P0 was alive 67.25 s after the refresh. There was no P1 and no restart line, and the mark read ERR.
+  - Both premises were green, and so was P13.
+- **`--baseline 182952f`** (player-20261102-141251-3640433): a scratch commit of the tip with the mark never set, never merged. 176 passed, 17 failed.
+  - L9: 11 of 11.
+  - L10: the same 6 red as on c510985. P0 was alive 66.87 s after the refresh, and the mark read ERR.
+  - So L10 goes red on the mark alone, and L9 does not depend on it.
+
+The crash journal read 81 before and after each run, and no process was left behind.
+
+*Gate.* check.sh on 74436c6, alone under the lock, fails only the defect ledger. D-PLY-61 and D-SINK-72 have no rows yet. The other steps: node 3286, python 1952, QML spec 83, qa-lib 609. With the two rows in a scratch copy, the ledger reads 648 rows for 648 ids.
+
+### D-SINK-73: a later probe keeps the restart episode (lane-sk73, 2026-11-02)
+
+Branch lane-sk73, one commit d6a23dc on c510985 (int-sk71).
+
+*What changed.*
+- `Model.olderRestartOpen` decides what a probe that finds a player another build launched does to an open episode. The same player keeps its spent, expired and intent, and no hold is armed. `migrated` is ORed. `unsafe` is this probe's reading.
+- The same player is the probe's pid together with its stash (id, sourceKey, since, entryId). A pid that is not named compares on the stash alone.
+- A different player opens its own episode and inherits nothing. [rc-sk73 found that this dropped `migrated` for the same player read under another pid, and restored the carry: below.]
+- Path 6's card is raised either way.
+- `Model.olderRestartWith` rebuilds the episode in play()'s spend, the defer, the restart and the hold's end, and carries every field.
+
+*Red first.* The tip's tests were run against a `git archive` of c510985:
+- Node: 3295 checks with 9 failures, against 3295 with 0 on d6a23dc.
+- QML spec: 83 passed and 1 failed (test_olderRestartReprobeUnderQtsEngine: no such function), against 84 on the tip.
+
+The six red harness cases, on c510985:
+- A deferred safe player re-probed (rc-sk71's probe E), after the list landed and before it: 't:x keep' started on the re-probe in both orders.
+- An unsafe player re-probed 1 s before its hold ends (probe F): 0 stops at 15 s and 1 at 29 s.
+- A spent episode re-probed:
+  - after path 6: [t:y, 't:x keep'] and 1 restart line;
+  - after a locally refused restart: a second 't:x keep' and 2 lines;
+  - after a delivered restart: 2 again-lines.
+- A migrated held player re-probed at 10 s: `expired` false at 15 s, and the hold re-armed.
+- Path 6 with an episode open: the episode took the timed-out start's seq.
+- The renamed re-probe case: the hold re-armed and `expired` false.
+
+The case for a different player answering mid-episode is green on c510985 by design. It is red under M5 and M7.
+
+*Mutants.* Sixteen named mutants of the shipping change, each run on a fresh copy of the tip with one replacement. All were red (failures out of 3295):
+
+| Mutant | Failures |
+|---|---|
+| M1 never the same | 8 |
+| M2 keep unspends | 4 |
+| M3 keep unexpires | 2 |
+| M4 keep re-arms | 5 |
+| M5 identity ignored | 3 |
+| M6 pid ignored | 2 |
+| M7 stash ignored | 2 |
+| M8 keep takes the new seq | 3 |
+| M9 keep drops migrated | 3 |
+| M10 card only when fresh | 1 |
+| M11 timer drops the player | 2 |
+| M12 again-line every probe | 1 |
+| M13 QML re-arms unspent | 3 |
+| M14 probe passes no stash | 6 |
+| M15 With mutates its input | 1 |
+| M16 With copies five fields | 6 |
+
+The spec function is also red under M1, M4 and M6.
+
+*Not run live.* A re-probe of a held older player needs the shell's connect to fail while the helper's succeeds. The nested cage cannot stage that without new machinery.
+
+*Gate.* check.sh was run alone under the heavy lock on d6a23dc and was all green:
+- node 3295;
+- python 1942;
+- spec 84.
+
+Floors: node 3286 -> 3295 and spec 83 -> 84.
+
+*Coredump journal.* 81 before and 81 after. No mpv was started.
+
+### D-SINK-73: the recheck of lane-sk73 (rc-sk73, 2026-11-02)
+
+Branch rc-sk73: d6a23dc (lane-sk73) plus one commit, 90dea09, on c510985.
+
+*The lane's claims, re-run.*
+- d6a23dc: node 3295/0 and spec 84.
+- c510985's code with d6a23dc's tests: node 3295/9 (the nine named) and spec 83/1. Each red element was read and is red for the stated reason.
+- The lane's sixteen mutants were re-run with its own definitions on d6a23dc. Every count matched (M1 8, M2 4, M3 2, M4 5, M5 3, M6 2, M7 2, M8 3, M9 3, M10 1, M11 2, M12 1, M13 3, M14 6, M15 1, M16 6).
+
+*What the recheck found.* d6a23dc's fresh episode took `migrated` from its own probe alone, where c510985 carried it from any open episode. The probe's pid is `_connected_pid`: the /proc scan's process carrying the socket's argument; with several, mpv's own `pid`; and when that read fails, the lowest pid. So behind a wrapper that runs mpv as its child (D-PLY-55), the same player can be named under another pid.
+
+Measured in the service harness: migrated at 0 s, re-probed SAFE at 5 s under pid 5353, the hold expires, then the list lands.
+- c510985: ['t:x keep'].
+- d6a23dc: [] (deferred, so the pre-migration stream plays on).
+- A different older player answering mid-episode: the same on both trees.
+
+90dea09 carries `migrated` into a fresh episode again. Spent, expiry and intent are still not inherited.
+
+*Scratch probes, tip against c510985* (Service.qml's own functions under node; not committed except where marked):
+- Safe, re-probed unsafe at 5 s: stopped at 15 s against 20 s.
+- Deferred, re-probed unsafe after the list landed: stopped at once, against restarted (committed).
+- Unsafe, re-probed four times at 3 s intervals: stopped at 15 s, against not by 15 s.
+- Path 6 on the automatic restart, then a re-probe: 1 start against 2 (committed).
+- This build's player found mid-episode, or none: ended on both trees.
+- The renamed check's re-probe: migrated true, expired true, timer stopped.
+
+*Red first, for the three new cases and the changed vector.*
+- On d6a23dc: node 3298/2 (the vector, the carry case) and spec 83/1.
+- On c510985: node 3298/11 (the lane's nine, plus the unsafe re-probe and path 6 on the automatic restart). The carry case is green there by design.
+- On 90dea09: node 3298/0 and spec 84.
+
+*Mutants.* Seventeen, failures out of 3298:
+
+| Mutant | Failures |
+|---|---|
+| X1 identity ignores since | 2 |
+| X2 ignores entryId | 1 |
+| X3 ignores sourceKey | 1 |
+| X4 no unnamed-pid tolerance | 1 |
+| X5 keep holds the old unsafe | 2 |
+| X6 keep ignores timedOut | 1 |
+| X7 again-line ignores timedOut | 1 |
+| X8 keep stops the hold | 2 |
+| X9 play() literal | 1 |
+| X10 defer literal | 2 |
+| X11 restart literal | 2 |
+| X12 playerPid for probe.pid | survives (equivalent) |
+| X13 keep re-arms a live hold | 4 |
+| X14 the same in QML | 2 |
+| Y1 no carry | 2 |
+| Y2 carry spent too | 2 |
+| Y3 carry only unspent | 1 |
+
+The spec function is also red under X1, X4, X5, X6, X13, Y1, Y2 and Y3.
+
+*Not run live*, for the lane's reason.
+
+*Gate.* check.sh was run alone under the heavy lock on 90dea09 and was all green:
+- node 3298, and 3298 without the own-write echo;
+- python 1942;
+- spec 84;
+- the ledger and board staleness green.
+
+Floor: node 3295 -> 3298.
+
+*Coredump journal.* 81 before and 81 after. No mpv was started.
+
+### 0.17.0 pre-cut record (2026-11-02): the gate and the release recipe's live run on the final tree
+
+**Tree.** int-sk71 10446f9: dev 6b5ba6c (restart on adoption) plus D-SINK-71's fix (rc-sk71 edf03fe), D-PLY-61's and D-SINK-72's (rc-sk72 74436c6), D-SINK-73's (rc-sk73 90dea09), the lead's board, comment and doc commits after three claims checks (0b7a42a, ba81d64, c510985, cfa5ab5, 0337e8f, 5e96e3b, 21b429b), and the version bump with the release notes (10446f9).
+
+**Gate.** `scripts/check.sh` under the shared heavy lock on 10446f9, quiet (load 1.28 at the start, 1.55 at the end): **all green**, rc 0. node 3298 checks (both echo modes), python 1952 tests, qml spec 84, theme name guard 279 uses, release allowlist 42 files, helper split 11 parts. Crash journal 81 before and after.
+
+**key-scenario live** (the release recipe's step; `scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, under the heavy lock), on 10446f9: **139 passed, 0 failed** (138 lettered checks and the floor line) in 534.0 s, 16:02:13 to 16:11:07 CST, load 1.36 at the start and 2.52 at the end. Crash journal 81 before and after. Transcript `/run/user/1000/omarchy-iptv-c170-h/transcripts/key-20261102-160213-3842409.out` (0600; 139 PASS lines, 0 FAIL). The README's "(139 checks, 2026-11-02)" rests on this run.
+
+**Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.17.0; the CHANGELOG's top heading `## 0.17.0 (2026-11-02)` passes `changelog_problems` strictly for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.17.0 tag locally or on the remote.
+
+**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word.
+
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 
 Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy build carrying omarchy-pkgs load_qtquick_611.patch; .BUILDINFO pkgbuild_sha256sum e871efd5... = omarchy-pkgs 2be7cd9839), omarchy 4.0.6-1. Tree: rel-0160 bcce3f8.

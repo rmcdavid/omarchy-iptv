@@ -711,6 +711,12 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
 FEED_COMMANDS = ("loadfile", "keybind", "change-list", "set_property", "request_log_messages")
 
 
+def proc_items(pid):
+    """/proc/<pid>/cmdline as the kernel holds it: its elements, as bytes."""
+    with open("/proc/%d/cmdline" % pid, "rb") as handle:
+        return [part for part in handle.read().split(b"\0") if part]
+
+
 def core_limit_of(pid):
     for line in pathlib.Path("/proc/%d/limits" % pid).read_text(encoding="ascii").splitlines():
         if line.startswith("Max core file size"):
@@ -871,14 +877,70 @@ class WrapperSpawnTest(GateTestCase):
         self.wrap('REAL "$@"')
         self.assert_plays()
 
-    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays_its_first_channel(self):
-        """Its player reads `older` to every later verdict (design 4.6: such a
-        wrapper took the pin block's last word), so a zap is a replacement --
-        degenerate, stated -- but the spawn this helper made is still fed."""
+    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays(self):
+        """D-PLY-61 (lane-sk72, 2026-11-02): the player such a wrapper starts
+        is THIS build's -- no other build can produce the prefix -- so a zap
+        feeds it. On c510985 it read `older` to every later verdict, the zap
+        answered `outdated`, and every channel change replaced it."""
         self.wrap('REAL "$@" --osd-level=1')
+        self.assert_plays()
+
+    def assert_kept_across_zaps_and_starts(self):
+        """Start, zap twice, start again (the shell's own path after a
+        restart), probe: one process throughout, fed every load, never
+        replaced, and the probe names it this build's launch."""
+        code, first, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        # Every token holder (a child wrapper holds the token too) and the
+        # one of them that answers the socket: the process that was told.
+        holders = sorted(r["pid"] for r in helper.find_player(self.sock))
+        player = [pid for pid in holders if self.told(pid)]
+        self.assertEqual(len(player), 1, holders)
+        for _ in range(2):
+            code, zapped, _, stderr = self.play()
+            self.assertEqual((code, zapped.get("outdated")), (0, None), stderr)
+        code, again, _, stderr = self.player_start("--seq", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((again["spawned"], again.get("replaced")), (False, None))
+        code, probe, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(probe["launch"], "current")
+        # The answering player is still there. (A child wrapper's own shell,
+        # which holds the token too, is laddered by the adopting start as
+        # "another player process on this socket" -- adopt_or_spawn's rule
+        # for every token holder but the one it keeps, D-PLY-55's shape and
+        # not this test's subject.)
+        self.assertIn(player[0], [r["pid"] for r in helper.find_player(self.sock)])
+        loads = [c for c in self.told(player[0]) if isinstance(c, list) and c[:1] == ["loadfile"]]
+        self.assertEqual(len(loads), 4, "start, two zaps and the second start each load into the same player")
+        self.assertNotIn(helper.PLAYER_REPLACED_LINE, stderr)
+        return first
+
+    def test_d_ply_61_an_exec_wrapper_that_appends_keeps_one_player_across_zaps_and_starts(self):
+        """The wrapper a user writes: `exec /usr/bin/mpv "$@" --hwdec=auto`.
+        The launched pid IS the player, and its command line is this build's
+        composition with the wrapper's token after the pin block."""
+        self.wrap('exec REAL "$@" --hwdec=auto')
+        first = self.assert_kept_across_zaps_and_starts()
+        argv = proc_items(first["pid"])
+        self.assertEqual(argv[-1], b"--hwdec=auto", "the premise: the wrapper's token is the last element")
+
+    def test_d_ply_61_a_child_wrapper_that_appends_keeps_one_player_across_zaps_and_starts(self):
+        self.wrap('REAL "$@" --hwdec=auto --osd-level=1')
+        self.assert_kept_across_zaps_and_starts()
+
+    def test_d_ply_61_a_wrapper_that_appends_a_second_socket_option_is_still_replaced(self):
+        """The one appended element that keeps `older` (launch_verdict): a
+        second `--input-ipc-server`, which mpv obeys over ours. Here it names
+        our socket again, the only shape the verdict can reach; the start's
+        own spawn is vouched for, and the zap is refused and replaces it."""
+        self.wrap('exec REAL "$@" --input-ipc-server="$OMARCHY_TEST_SOCK"')
+        self.env(OMARCHY_TEST_SOCK=self.sock)
         code, payload, _, stderr = self.player_start()
         self.assertEqual(code, 0, stderr)
-        self.assertIn("loadfile", self.played(payload))
+        self.assertEqual(helper.launch_verdict(payload["pid"], self.sock), "older")
+        code, zapped, _, _ = self.play()
+        self.assertEqual((code, zapped["error"]["code"], zapped.get("outdated")), (1, "not_running", True))
 
     def test_a_wrapper_that_starts_mpv_in_the_background_and_exits_still_plays(self):
         self.wrap('REAL "$@" </dev/null >/dev/null 2>&1 &')
@@ -2544,6 +2606,129 @@ class ProbeTlsTest(PlayerTestCase):
         self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "unpinned": 0, "migrated": True})
         for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
             self.assertNotIn(secret, stdout + stderr, secret)
+
+    # ---- D-SINK-72 (lane-sk72, 2026-11-02): the migration fact on the player.
+    # The names are spelled out, not taken from the helper, so the same file
+    # runs against c510985 and reads red there for the behaviour, not for a
+    # missing constant.
+    MARK = "omarchy-iptv-tls"
+
+    def test_d_sink_72_a_marked_player_is_reported_migrated_though_nothing_needed_changing(self):
+        """A probe of a player an earlier probe migrated, before any load re-
+        established it: nothing is left to change, and the reply still says
+        `migrated`, so the shell asking -- a NEW shell, after a restart --
+        still owes the re-establishment (the restart episode's late
+        replacement, or tlsReloadPending's reload for this build's player)."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "tls-verify"]], [])
+        self.assertEqual(server.user_data[self.MARK], "migrated")
+
+    def test_d_sink_72_the_migration_marks_the_player_so_the_next_shells_probe_still_owes_it(self):
+        """The first probe (the shell that then restarts) migrates and marks;
+        the second (the next shell's) finds the player safe and still answers
+        `migrated`. On c510985 the second answered False, the hold's end
+        deferred the player, and its pre-migration connection streamed on."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper(launch="older")
+        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        code, first, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        code, second, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((first["tls"], second["tls"]),
+                         ({"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True},) * 2)
+        self.assertEqual(server.user_data.get(self.MARK), "migrated")
+        # On before the writes, so a probe cut off between them leaves it.
+        names = [c[:2] for c in server.commands]
+        self.assertLess(names.index(["set_property", "user-data/" + self.MARK]),
+                        names.index(["set_property", "tls-verify"]))
+
+    def test_d_sink_72_a_load_clears_the_mark_and_the_probe_after_it_owes_nothing(self):
+        """apply_channel's load passed the gate and every TLS assertion and
+        replaced the open connection: the mark is spent, AFTER the loadfile,
+        and the next probe answers `migrated: False` -- so the one rebuffer is
+        paid once, not at every shell start."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock, "--cache-dir", self.cache,
+                                 "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(server.user_data.get(self.MARK), "")
+        load = next(i for i, c in enumerate(server.commands) if c[0] == "loadfile")
+        clear = server.commands.index(["set_property", "user-data/" + self.MARK, ""])
+        self.assertGreater(clear, load)
+        code, after, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIs(after["tls"]["migrated"], False)
+
+    def test_d_sink_72_a_player_start_that_adopts_a_marked_player_clears_it_too(self):
+        """rc-sk72: every caller of apply_channel ends in the same load and so
+        spends the mark -- a `player start` that ADOPTS this build's marked
+        player as much as a `play`. Held because the mutant that clears it
+        only for `play` (no vouched pid) passed every test before this one;
+        left standing, the next shell would owe a reload the start already
+        delivered."""
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["spawned"], payload["pid"]), (False, idle.pid))
+        self.assertEqual(server.user_data.get(self.MARK), "")
+        load = next(i for i, c in enumerate(server.commands) if c[0] == "loadfile")
+        self.assertGreater(server.commands.index(["set_property", "user-data/" + self.MARK, ""]), load)
+        code, after, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIs(after["tls"]["migrated"], False)
+
+    def test_d_sink_72_a_load_the_tls_assertion_refuses_leaves_the_mark(self):
+        """Only a load that went out clears it: a player that will not verify
+        is refused before the loadfile and stays marked."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(props={"tls-verify": False}, refuse={"tls-verify"},
+                                    user_data={self.MARK: "migrated"})
+        code, payload, _, _ = run("play", "--id", "t:espn.us", "--socket", self.sock, "--cache-dir", self.cache,
+                                  "--ipc-timeout", "1")
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"))
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+        self.assertEqual(server.user_data.get(self.MARK), "migrated")
+
+    def test_d_sink_72_a_mark_that_cannot_be_set_leaves_the_probe_answering_as_before(self):
+        """Fail-safe, the write: mpv refusing the mark changes nothing else --
+        the player is still migrated and read back, and THIS probe still says
+        `migrated` -- and it is journaled without a value."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper(launch="older")
+        server = self.start(props={"mpv-version": "mpv 0.41.0"}, refuse={"user-data/" + self.MARK})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        self.assertIs(server.props["tls-verify"], True)
+        self.assertNotIn(self.MARK, server.user_data)
+        self.assertIn("could not mark the player as migrated", stderr)
+
+    def test_d_sink_72_a_mark_that_cannot_be_read_or_is_not_the_word_reads_not_marked(self):
+        """Fail-safe, the read: an unreadable node, and any value but the
+        exact word, read "not marked" -- the answer a probe gave before."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        cases = [({"missing": {"user-data/" + self.MARK}, "user_data": {self.MARK: "migrated"}}, "unreadable")]
+        cases += [({"user_data": {self.MARK: value}}, repr(value))
+                  for value in ("", "MIGRATED", "migrated ", True, 1, {"migrated": True}, ["migrated"], None)]
+        for kwargs, label in cases:
+            with self.subTest(label):
+                server = self.start_current(**kwargs)
+                code, payload, _, stderr = self.probe()
+                self.assertEqual(code, 0, stderr)
+                self.assertIs(payload["tls"]["migrated"], False, label)
+                server.close()
 
     def test_mutating_the_migration_into_a_read_lets_the_shell_adopt_it_anyway(self):
         """Rule 11 where there is no `before`: break the one decision and watch

@@ -495,8 +495,10 @@ function wholeCount(count) {
 
 // What the reattach path does with the player it has just identified:
 //
-//   "feed"   it was already verifying (this shell launched it, or an earlier
-//            probe migrated it): adopt it, nothing else to do.
+//   "feed"   it was already verifying and nothing is owed: this shell launched
+//            it, or an earlier probe migrated it and a load of this build has
+//            since re-established its channel (D-SINK-72: that load spends the
+//            mark). Adopt it, nothing else to do.
 //   "reload" it was NOT, the helper has made it verify, and the channel must be
 //            re-established before anything else is sent to it. Setting the
 //            property covers the NEXT load; whether an already-open stream
@@ -507,12 +509,15 @@ function wholeCount(count) {
 //            it is precisely the act of handing a credentialed URL and the
 //            provider headers to a process we could not secure.
 //
-// `migrated` is the helper's answer to "was this player already safe when I
-// found it", so a second probe over an already-migrated player answers "feed"
-// and costs no further rebuffer. The caller must therefore only ever SET its
-// pending-reload flag from this, never clear it: an ambiguous first probe
-// (idle, or no stash yet) migrates the player and is then retried 500 ms later
-// by a probe that correctly sees nothing left to do.
+// `migrated` is the helper's answer to "has a probe had to change this
+// player's TLS settings since a load of this build last re-established its
+// channel". D-SINK-72: the migrating probe leaves a mark on the player, and
+// every later probe reports it until apply_channel's load clears it, so a
+// second probe before the reload answers "reload" again and one after it
+// answers "feed": the rebuffer is paid once. The caller still only ever SETS
+// its pending-reload flag from this, never clears it, because a mark mpv
+// refused leaves a later probe -- the 500 ms retry of an ambiguous first
+// probe (idle, or no stash yet) among them -- reading nothing left to do.
 // D-SINK-16. What to do with an owed TLS re-establish, as a function rather
 // than as three conditions in a row, because the first version got one of them
 // wrong in a way no test could see: it CLEARED the flag whenever `nowPlaying`
@@ -618,6 +623,22 @@ function adoptedChannelReach(o) {
 // An unsafe player whose restart CAN be delivered is restarted, not stopped:
 // the new player sets every pin from its own command line, which no
 // [protocol.*] profile replaces (D-SINK-44), so the user keeps the channel.
+//
+// D-SINK-71 (owner, 2026-11-02, "replace late, when the list lands"): the
+// hold's expiry does not defer a player the probe had to MIGRATE (`migrated`,
+// the TLS reading's own word: its settings were changed in place, so the
+// stream it already has open may have been opened without them -- every
+// 0.15.0 player reads so). For it, "expired" keeps holding and the one
+// automatic restart goes out whenever the list lands and the channel is
+// deliverable; that restart is what the D-SINK-16 reload was for. (0.16.0's
+// reload had no hold, but it never waited for the list either: it went out
+// once the cache DIRECTORY was known, at the probe or the channel file's
+// first load or load failure, and the helper resolved the id against the
+// channels.json on disk -- so with no file there yet it failed and was spent;
+// read in 202a7bc, rc-sk71.) Unchanged: a channel gone defers, an unsafe
+// player still stops at the expiry (it cannot be delivered then and cannot
+// be made safe), a player that read safe without migration still defers at
+// the expiry, and a spent episode stays spent.
 function olderRestartDisposition(o) {
   var s = o || {}
   if (s.owed !== true) return "none"
@@ -628,7 +649,11 @@ function olderRestartDisposition(o) {
   }
   var reach = adoptedChannelReach(s)
   if (reach === "ready") return "restart"
-  if (reach === "gone" || s.expired === true) return s.unsafe === true ? "stop" : "defer"
+  if (reach === "gone") return s.unsafe === true ? "stop" : "defer"
+  if (s.expired === true) {
+    if (s.unsafe === true) return "stop"
+    if (s.migrated !== true) return "defer"
+  }
   return "hold"
 }
 
@@ -639,6 +664,117 @@ function olderRestartDisposition(o) {
 function olderRestartKeepsPause(episode, playSeq) {
   var e = episode && typeof episode === "object" ? episode : null
   return e !== null && e.spent === true && Math.floor(Number(e.seq)) === Math.floor(Number(playSeq))
+}
+
+// The episode record with some fields changed and every other one carried,
+// whatever fields it has: each place that moves the episode (a channel
+// change spending it, a deferral, the restart, the hold's end) rebuilds it
+// through this, so none of them can drop a field a later reader needs --
+// the player it was opened for above all (olderRestartOpen). null for no
+// episode.
+function olderRestartWith(episode, changes) {
+  var e = episode && typeof episode === "object" ? episode : null
+  if (e === null) return null
+  var c = changes && typeof changes === "object" ? changes : {}
+  var out = {}
+  for (var k in e) if (Object.prototype.hasOwnProperty.call(e, k)) out[k] = e[k]
+  for (var j in c) if (Object.prototype.hasOwnProperty.call(c, j)) out[j] = c[j]
+  return out
+}
+
+// D-SINK-73 (2026-11-02): which player an episode was opened for, from what
+// the reattach probe tells the shell -- the process its connection reached
+// (`pid`) and the stash that process carries: the channel's id and source,
+// the time it started playing and the entry it loaded. A player another
+// build launched is fed nothing, so none of these moves while it is the same
+// process. Not the episode's `seq`: that is this shell's intent counter, which
+// says whether the shell has acted since, not which process answered -- the
+// same player answers after a user's start the watchdog stopped (path 6, the
+// counter moved), and a different one can answer while it stands still. A
+// pid the probe did not name is 0 and compares on the stash alone; no stash
+// is no identity (the probe never adopts a player without one).
+function olderPlayerIdentity(pid, stash) {
+  var s = stash && typeof stash === "object" ? stash : null
+  if (s === null || str(s.id) === "") return null
+  var p = Math.floor(Number(pid))
+  var since = Math.floor(Number(s.since))
+  var entry = Math.floor(Number(s.entryId))
+  return { pid: isFinite(p) && p > 0 ? p : 0, id: str(s.id), sourceKey: str(s.sourceKey),
+           since: isFinite(since) && since > 0 ? since : 0, entryId: isFinite(entry) && entry > 0 ? entry : 0 }
+}
+
+function sameOlderPlayer(a, b) {
+  var x = a && typeof a === "object" ? a : null
+  var y = b && typeof b === "object" ? b : null
+  if (x === null || y === null) return false
+  if (x.id !== y.id || x.sourceKey !== y.sourceKey || x.since !== y.since || x.entryId !== y.entryId) return false
+  return x.pid === 0 || y.pid === 0 || x.pid === y.pid
+}
+
+// D-SINK-73: what a probe that finds a player another build launched does
+// to the restart episode. The shell probes a player it is already holding
+// when its own connect fails while the helper's succeeds (the socket hunt's
+// probe after its burst; a `recover` runs only after a start's ok reply has
+// ended the episode), and every such probe used to open the
+// episode afresh: unspent, unexpired, the hold re-armed. So a DEFERRED
+// player got the automatic restart after all, against the design's `defer`
+// for a spent episode and "one automatic restart per shell start"
+// (ARCHITECTURE-PLAYER 4.5.2), and an UNSAFE one's
+// stop at the hold's end moved 15 s later with every probe (rc-sk71's
+// probes E and F).
+//
+// The SAME player (sameOlderPlayer) keeps its open episode: spent, expired
+// and the intent it was issued under stay as they were, and the hold is not
+// re-armed (`armHold` false), so it ends when it was going to. `migrated`
+// is kept too (D-SINK-71: a later probe normally reads it again from the
+// player's mark, D-SINK-72; where mpv refused the mark, or the mark could
+// not be read, that probe finds nothing left to migrate), and
+// `unsafe` is this probe's reading, as before: an unsafe one is stopped at
+// once if the episode is spent; otherwise it is restarted if its channel
+// becomes deliverable before the hold ends, and stopped at the hold's end
+// if not. A DIFFERENT
+// player -- the old one gone, another answering, or the same one read under
+// another pid -- opens its own episode, inheriting none of the old one's
+// spent, expiry or intent; it carries `migrated` (rc-sk73, below). A start
+// the watchdog stopped whose probe finds the older player (path 6) spends the
+// episode either way: that start's failure is told once, by the caller,
+// whichever branch this takes ("while path 6's card is still raised",
+// rc-sk71).
+//   current   the open episode, or null
+//   o         { seq, pid, stash, unsafe, migrated, timedOut, delivered }:
+//             the shell's intent counter, the probe's pid and stash, its TLS
+//             reading, whether a stopped start is being settled, and whether
+//             this shell already restarted a player another build launched
+// -> { episode, armHold, again }: the record to hold; whether to start the
+// hold; whether to journal OLDER_RESTART_AGAIN_LINE (a new episode on a
+// player this shell's own restart started, design 4.4.3 -- once per episode,
+// not once per probe).
+function olderRestartOpen(current, o) {
+  var s = o || {}
+  var cur = current && typeof current === "object" ? current : null
+  var player = olderPlayerIdentity(s.pid, s.stash)
+  var timedOut = s.timedOut === true
+  if (cur !== null && sameOlderPlayer(cur.player, player)) {
+    return { episode: olderRestartWith(cur, { unsafe: s.unsafe === true, spent: cur.spent === true || timedOut,
+                                              migrated: cur.migrated === true || s.migrated === true }),
+             armHold: false, again: false }
+  }
+  var again = !timedOut && s.delivered === true
+  var spent = timedOut || again
+  // rc-sk73: `migrated` is carried from ANY open episode, as it was before
+  // the identity existed (D-SINK-71). The same player can be read under
+  // another pid -- behind a wrapper that runs mpv as its child both carry
+  // the socket's argument, and when mpv's own pid read fails the probe names
+  // the lower one. That probe reads the player's mark and answers `migrated`
+  // itself (D-SINK-72). Where mpv refused the mark, it finds nothing left to
+  // migrate, and taking its reading alone would let the hold's end defer a
+  // player whose open stream predates the migration (as it did on d6a23dc,
+  // before the mark). A different player that takes it costs at most one
+  // restart when its list lands late.
+  var carried = cur !== null && cur.migrated === true
+  return { episode: { seq: Math.floor(Number(s.seq)) || 0, unsafe: s.unsafe === true, spent: spent, expired: false,
+                      migrated: s.migrated === true || carried, player: player },
+           armHold: !spent, again: again }
 }
 
 function playerTlsVerdict(tls) {
@@ -1069,7 +1205,8 @@ export {
   playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
   OLDER_RESTART_LINE, OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS,
   probeLaunchOlder, adoptedSourceMatches, adoptedChannelReach,
-  olderRestartDisposition, olderRestartKeepsPause, playerTlsVerdict,
+  olderRestartDisposition, olderRestartKeepsPause, olderRestartWith,
+  olderPlayerIdentity, sameOlderPlayer, olderRestartOpen, playerTlsVerdict,
   PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
   playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
   playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
