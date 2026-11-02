@@ -15212,6 +15212,45 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
               [stops(unsafe.h), unsafe.h.root.nowPlaying, unsafe.h.root.olderRestartOwed === true, UNSAFE.migrated]]
     }, [[0, ["t:y"], 0, 0], [0, false], [0, true, true, 0], [1, null, false, true]])
 
+    // rc-sk71: the owner's other rules, on the LATE path the fix opens (the
+    // cases above run them with the list in time, or before the expiry).
+    const startsKeep = slots => startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
+    checkCall("D-SINK-71 (rc-sk71): another source while a migrated older player's restart is held past the hold -- still held when the hold ends (owed, unspent, nothing started), then DEFERRED, not restarted, when this source's list lands (spent, nothing started or stopped, no restart line); the next channel change replaces it without --keep-pause", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: MIGRATED, stash: STASH({ sourceKey: KB }) }))
+      attach(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      const held = [startsKeep(slots), h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true)]
+      land(h)
+      const deferred = [startsKeep(slots), h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true), stops(h), restartLines(h)]
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [held, deferred, startsKeep(slots)]
+    }, [[[], true, false], [[], true, true, 0, 0], ["t:y"]])
+
+    checkCall("D-SINK-71 (rc-sk71): the late restart goes out ONCE -- refused before the ladder for a local reason (the observer still on the older player) it is deferred, no card, the channel kept, nothing stopped, and a later list, a hold's length and another list start nothing more; refused because THIS build refuses the channel, the older player is stopped and `Stream failed` told", () => {
+      const local = boot()
+      reattach(local.h, probeOf({ tls: MIGRATED }))
+      attach(local.h)
+      local.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      land(local.h)
+      const issued = startsKeep(local.slots)
+      exit(local.h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "runtime_unwritable", message: "could not make the player's runtime folder: Read-only file system" }, id: "t:x", seq: local.h.root.playSeq }))
+      const kept = [local.h.root.nowPlaying ? local.h.root.nowPlaying.id : null, toasts(local.h).length, local.h.root.olderRestartOwed === true, stops(local.h)]
+      land(local.h)
+      local.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      land(local.h)
+      const refusedChannel = boot()
+      reattach(refusedChannel.h, probeOf({ tls: MIGRATED }))
+      attach(refusedChannel.h)
+      refusedChannel.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      land(refusedChannel.h)
+      exit(refusedChannel.h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "local_address", message: "the stream address is on this machine or its network" }, id: "t:x", seq: refusedChannel.h.root.playSeq }))
+      return [[issued, kept, startsKeep(local.slots), restartLines(local.h)],
+              [startsKeep(refusedChannel.slots), stops(refusedChannel.h), toasts(refusedChannel.h).map(t => t.split(" | ")[0]), refusedChannel.h.root.nowPlaying, refusedChannel.h.root.olderRestartOwed === true]]
+    }, [[["t:x keep"], ["t:x", 0, true, 0], ["t:x keep"], 1],
+        [["t:x keep"], 1, ["74011 Stream failed"], null, false]])
+
     checkCall("restart on adoption (N5): Enter on the row of the channel the deferred older player is playing is the replacement (a start, at live), not the focus-only shortcut -- its id may be another source's", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ stash: STASH({ sourceKey: KB }) }))

@@ -480,7 +480,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # list, the ambiguous probe's retry, a re-probe while held, and what stays
 # as it was around them); four red on 6b5ba6c, all five on ten named mutants
 # of the model and Service.qml; the suite runs 3284.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3284}
+# 2026-11-02, rc-sk71 (D-SINK-71's recheck): 3284 -> 3286 -- the owner's
+# other rules on the late path (another source defers, the late restart goes
+# out once and a refused channel stops); both red on 6b5ba6c, and red under
+# lane-sk71's M3 and the recheck's X4; the suite runs 3286.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3286}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
