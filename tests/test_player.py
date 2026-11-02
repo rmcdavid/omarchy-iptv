@@ -909,6 +909,36 @@ class ReplaceTest(GateTestCase):
         self.assertIn("player start: %s" % helper.PLAYER_REPLACED_LINE, stderr)
         self.assertNotIn(str(old.pid), stderr)
 
+    def test_a_socket_answered_by_a_process_with_no_token_of_ours_is_replaced_and_never_fed(self):
+        """Design 2.4's `unknown` row, through `player start`: a process
+        carrying THIS build's exact argv exists (find_player sees it), but the
+        socket is answered by another process, which the kernel names: the
+        stub mpv bound through a symlinked folder, so the token on ITS command
+        line is not ours (a process that quits on `quit`, as mpv does -- an
+        in-process FakeMpv keeps its listener through any ladder and would
+        answer the new spawn's handshake). No seam is set. The start may not
+        adopt what it cannot judge: it ladders the token bearer and the
+        answering process, spawns, and the old one is told reads and `quit`
+        and nothing else (the recheck of lane RA: adopting an unknown peer
+        survived every test, and ended in player_foreign, the impostor told
+        the adoption's pins)."""
+        os.makedirs(self.runtime, 0o700)
+        holder = hold_launch(self.sock, "current")
+        self.addCleanup(self.reap_process, holder)
+        link = os.path.join(self.dir, "link")
+        os.symlink(self.runtime, link)
+        other = self.old_player(argv=launch_argv(os.path.join(link, "mpv.sock"), "current"))
+        self.assertEqual(helper.launch_verdict(other.pid, self.sock), "unknown")
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["spawned"], payload.get("replaced")), (True, 1), payload)
+        told = self.told(other.pid)
+        self.assertEqual(self.feeds(told), [], "the process we could not judge was fed")
+        self.assertEqual(sorted({c[0] for c in told if isinstance(c, list)}), ["get_property", "quit"])
+        self.assertTrue(wait_gone(holder), "the token bearer outlived its replacement")
+        self.assertTrue(wait_gone(other), "the answering process outlived its replacement")
+        self.assertEqual(helper.launch_verdict(payload["pid"], self.sock), "current")
+
     def test_the_replacement_reads_as_this_builds_so_the_next_start_adopts_it(self):
         """T2, the loop proof: the builder and the verdict call one function
         with the same inputs, so a player this build launched reads current
