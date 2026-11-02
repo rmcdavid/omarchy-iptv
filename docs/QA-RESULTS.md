@@ -13389,6 +13389,98 @@ So the feed gate is observed live by L4 and L5 alone (D-SINK-70's path: the old 
 
 *Rule 15, beyond the lane's search.* rewind-scenario's R16 starts a second shell on a slow-helper copy of the tree: it reaps first, and the copy carries the same parts and manifest, so its own player reads current; cleared. PLY-MIG-01 (a hand-started player with no stash) is still stopped as foreign. QA-SOURCES 9.2's live update path expects no same pid across the update. D-PLY-28 over the recheck's runs: 8 of 35 trials, one or two in every run (the tree 4 of 15, 202a7bc 1 of 5, the three mutants 1 of 5 each), at load 3.2-4.6; with lane RB's, the tree 7 of 40 and 202a7bc 4 of 20, the same rate, so not this work's.
 
+### D-SINK-71: the late list, replaced (lane-sk71, 2026-11-02)
+
+Built on dev 6b5ba6c from the owner's decision of 2026-11-02, "replace late, when the list lands". Branch lane-sk71, three commits:
+
+- fb44bdf: the model, the shell and the tests.
+- 26c2ef2: the node floor.
+- 86154bb: player-scenario L7.
+
+*Service harness and node, red first.* The five new node checks:
+
+- the disposition's migrated-past-the-hold vectors;
+- the late list, with its counter-case (a player that read safe without migration is still deferred);
+- the ambiguous probe's retry;
+- a later probe of the same player while it is held;
+- what stays as it was around them: a channel change while owed, a stop, a gone channel, and an unsafe player at the expiry.
+
+The suite runs 3284 on the tip. On 6b5ba6c it runs 3284 with 4 failures; the fifth check is green there by design and is red under mutants. In the late-list case on 6b5ba6c, the hold's expiry spent the episode and no start went out when the list landed.
+
+Ten named mutants of the shipping change, each a fresh copy of the tip with one decision broken, were all red:
+
+- M1, expiry holds every safe player: 3 failures.
+- M2, migrated bypasses the unsafe stop: 3.
+- M3, migrated holds when the channel is gone: 2.
+- M4, a loose `migrated` test: 1.
+- M5, no retry memo: 1.
+- M6, no carry from the open episode: 1.
+- M7, the timer drops `migrated`: 3.
+- M8, the shell passes only this probe's word: 1.
+- M9, the disposition is not told `migrated`: 3.
+- M10, a channel change does not spend the episode: 2.
+
+The QML spec, test_olderRestartUnderQtsEngine with three more compares, runs 83 on the tip; on 6b5ba6c it is 82 passed, 1 failed (defer where hold was wanted).
+
+*Live: player-scenario L7.* Each run was in its own nested headless pixman cage on a private D-Bus (rc-rao-b's rig shape), under the heavy lock, with a refusing `hyprctl` and a logging notifier first on PATH. The harness directory was `/run/user/1000/oisk-h<stamp>`. The lever already existed in the harness:
+
+1. Move the active source's `channels.json` aside before restart-shell. `playlist-status.json` stays, so the cache reads fresh and nothing is fetched at start.
+2. Run `ipc refresh` 19 s after the shell loaded. The fetch's exit reloads the list (handlePlaylistExit).
+
+The migration is read off P0 itself: `load-auto-profiles` reads mpv's auto (a string) before the shell and false (no) after the shell's probe. Only the migration (secure_player) sets it.
+
+- **Tip 86154bb** (transcript player-20261102-101943-3163451): L7 passed 15 of 15. P0 was last seen 1.204 s after the refresh went out and first missed 0.055 s later, 20.7 s after the shell loaded. It was never two players at a 50 ms sample (430 samples). P1 is this tree's own launch (include form), playing the same channel with time-pos advancing. One restart line, no card. The scenario as a whole: 148 passed, 9 failed (the window checks a nested compositor cannot answer), 2 skipped, 157 assertions; floor 143 -> 158.
+- **`--baseline 6b5ba6c`** (player-20261102-102316-3174754): L7's 6 replacement checks were red and its 9 others green:
+  - P0 was alive 66.9 s after the refresh, at every one of 1,492 samples;
+  - no P1 and no restart line.
+
+  The scenario as a whole: 141 passed, 17 failed. That is the 9 window checks, L7's 6, and P13's dropped start-up play (D-PLY-28, trial 4, 2 checks). The tip run passed P13.
+- Coredump journal 81 before and 81 after both runs. No process was left behind.
+
+### D-SINK-71 rechecked (rc-sk71, 2026-11-02)
+
+Branch rc-sk71 adds four commits on lane-sk71's 86154bb: c908801, be45fdb, dbad646 and edf03fe.
+
+*The lane's red and green claims, re-run.*
+- Node: 3284 checks on 86154bb, 0 failures. Its tests against 6b5ba6c's Service.qml and model: 4 failures, the four it named.
+- QML spec: 83 on the tip. On the base copy, 82 passed and 1 failed (defer where hold was wanted).
+
+*The recheck's own mutants of the shipping change.*
+
+Each ran on a fresh `git archive` copy with one replacement.
+- X1, a migrated episode escaping the spent branch: 2 red.
+- X2, the hold timer never expiring a migrated episode, so an unsafe one is never stopped: 2 red.
+- X4, the late restart not spending the episode: 7 red, and 8 once the recheck's case is in.
+- X6, a migrated player busy at the expiry deferred: 1 red.
+- X9, the timer not re-asking for a migrated episode: 2 red.
+- X3, the retry memo read without its probeRetried guard: survives. Its only effect is to drop a true memo after a stale retry.
+- X7, play()'s spend dropping `migrated`: survives, equivalent.
+
+*Two cases added for the owner's other rules on the late path.*
+
+Both are red on 6b5ba6c. The node floor moves 3284 -> 3286.
+- Another source while held past the hold: held, then deferred when the list lands. Red under M3.
+- The late restart goes out once. Refused locally, it defers with no card and nothing more starts. Refused for the channel, it stops and tells Stream failed. Red under X4.
+
+*Scratch probes, not committed.*
+
+Identical on both trees:
+- a re-probe re-opens a deferred or held episode (E and F, the lane's finding);
+- a second shell reads a migrated player as safe without migration and defers it (G, a new finding).
+
+*Live: player-scenario in the recheck's own nested headless pixman cage.*
+
+Every run was on a private D-Bus under heavy.lock, with a refusing hyprctl and a logging notifier. L8 is new: a v0.16.0 player and L7's lever (channels.json moved aside, `ipc refresh` 19 s after the shell loaded).
+
+- **c908801:** L7 15 of 15, with P0 first missed 1.166 s after the refresh and 20.63 s after the shell loaded. L8 9 of 9: 155 samples, P0 alone at every one.
+- **--baseline 6b5ba6c:** L7 has 6 red, with P0 alive at all 1,500 samples through 66.8 s after the refresh. L8 9 of 9.
+- **The M1 tree** (the migrated guard removed, uncommitted in a scratch worktree): L7 15 of 15. L8 has 2 red: P0 3266161 replaced by 3266730, with 1 restart line.
+- **edf03fe:** L7 15 of 15 (+1.163 s, 20.57 s). L8 9 of 9.
+
+The whole-scenario failures are the 9 window checks a nested compositor cannot answer, plus P13's dropped start-up play (D-PLY-28), which hit 3 of 20 trials. The coredump journal stayed at 81 before and after every run and the gate.
+
+*Gate.* check.sh on edf03fe, alone under the lock, fails only the defect ledger (D-SINK-71's row). With the row it is green (646 of 646).
+
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 
 Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy build carrying omarchy-pkgs load_qtquick_611.patch; .BUILDINFO pkgbuild_sha256sum e871efd5... = omarchy-pkgs 2be7cd9839), omarchy 4.0.6-1. Tree: rel-0160 bcce3f8.
