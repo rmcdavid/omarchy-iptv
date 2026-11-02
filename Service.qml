@@ -1121,7 +1121,10 @@ Item {
     // ruling CL4 withholds the instrument that would). That ordering has
     // never been observed to fire - 0 in 30 live bursts - but "only costs"
     // overstated what is known and it is corrected here.
-    if (root.playerUp && root.nowPlaying && root.nowPlaying.id === key) {
+    // Restart on adoption: not while another build's player is owed its
+    // replacement -- the row's id may even be another source's channel (a
+    // deferred stash) -- so Enter there is the replacement, at live.
+    if (root.zapReady && root.nowPlaying && root.nowPlaying.id === key) {
       // Re-selected from another list: the zap ring follows the list the
       // user is in (UX 3.4, D-LIVE-12). A new object so bindings notice.
       var from = String(launchedFrom || "")

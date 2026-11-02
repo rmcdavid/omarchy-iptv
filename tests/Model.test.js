@@ -15087,6 +15087,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [deferred, startArgs(slots).map(idOf), zaps.length]
     }, [[0, 0, "t:x", true], ["t:y"], 0])
 
+    checkCall("restart on adoption (N5): Enter on the row of the channel the deferred older player is playing is the replacement (a start, at live), not the focus-only shortcut -- its id may be another source's", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ stash: STASH({ sourceKey: KB }) }))
+      land(h)
+      h.root.play("t:x", true, "")
+      h.drain()
+      return startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
+    }, ["t:x"])
+
     checkCall("restart on adoption (N5): the channel the older player streams is not on the applied list -- deferred at once, not held for the whole hold, and no start", () => {
       const { h, slots } = boot()
       reattach(h, probeOf())
