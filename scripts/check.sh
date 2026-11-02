@@ -475,7 +475,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # health `player restart` refusal told, the kept label spent by its start's
 # ok, and the retry and intent repair starting while owed; five red on
 # 072ec7d's Service.qml, all on named mutants; the suite runs 3279.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3279}
+# 2026-11-02, lane-sk71 (D-SINK-71): 3279 -> 3284 -- the disposition's
+# migrated-past-the-hold vectors and four service-harness cases (the late
+# list, the ambiguous probe's retry, a re-probe while held, and what stays
+# as it was around them); four red on 6b5ba6c, all five on ten named mutants
+# of the model and Service.qml; the suite runs 3284.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3284}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
