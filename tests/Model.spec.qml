@@ -633,6 +633,44 @@ TestCase {
     compare(Model.olderRestartKeepsPause({ seq: 3, spent: true }, 4), false)
   }
 
+  function test_olderRestartReprobeUnderQtsEngine() {
+    // lane-sk73: a later probe of the SAME older player keeps the episode
+    // open for it (spent, expired, intent; no hold re-armed), a different
+    // player opens its own, and every rebuild carries every field -- the
+    // node suite's vectors, run again under Qt's own engine, where the
+    // for-in copy and the nested identity object are what the shell runs.
+    var st = { id: "t:x", sourceKey: "ka", since: 100, entryId: 1 }
+    var first = Model.olderRestartOpen(null, { seq: 3, pid: 4242, stash: st, unsafe: false, migrated: true })
+    compare(first.armHold, true)
+    compare(first.again, false)
+    compare(first.episode.player, { pid: 4242, id: "t:x", sourceKey: "ka", since: 100, entryId: 1 })
+    var held = Model.olderRestartWith(first.episode, { spent: true, expired: true })
+    compare(held.player, first.episode.player)
+    compare(held.seq, 3)
+    var same = Model.olderRestartOpen(held, { seq: 9, pid: 4242, stash: st, unsafe: true, migrated: false })
+    compare([same.episode.seq, same.episode.spent, same.episode.expired, same.episode.migrated, same.episode.unsafe, same.armHold, same.again],
+            [3, true, true, true, true, false, false])
+    // rc-sk73: a different pid takes none of the episode's spent, expiry or
+    // intent, and carries its `migrated` (the same player can read under
+    // another pid); from an episode that was not migrated it stays false.
+    var other = Model.olderRestartOpen(held, { seq: 9, pid: 5353, stash: st })
+    compare([other.episode.seq, other.episode.spent, other.episode.expired, other.episode.migrated, other.armHold],
+            [9, false, false, true, true])
+    var plain = Model.olderRestartOpen(Model.olderRestartWith(held, { migrated: false }), { seq: 9, pid: 5353, stash: st })
+    compare(plain.episode.migrated, false)
+    var recycled = Model.olderRestartOpen(held, { seq: 9, pid: 4242, stash: { id: "t:x", sourceKey: "ka", since: 101, entryId: 1 } })
+    compare(recycled.armHold, true)
+    var unnamed = Model.olderRestartOpen(held, { seq: 9, pid: null, stash: st })
+    compare(unnamed.armHold, false)
+    compare(unnamed.episode.spent, true)
+    var timedOut = Model.olderRestartOpen(first.episode, { seq: 4, pid: 4242, stash: st, timedOut: true })
+    compare([timedOut.episode.seq, timedOut.episode.spent, timedOut.armHold, timedOut.again], [3, true, false, false])
+    var delivered = Model.olderRestartOpen(null, { seq: 5, pid: 5151, stash: st, delivered: true })
+    compare([delivered.episode.spent, delivered.armHold, delivered.again], [true, false, true])
+    compare(Model.olderRestartOpen(delivered.episode, { seq: 6, pid: 5151, stash: st, delivered: true }).again, false)
+    compare(Model.olderRestartWith(null, { spent: true }), null)
+  }
+
   function test_probeAnIntentHasOvertakenKeepsOnlyItsResync() {
     compare(Model.probeVerdict(5, 0, 0), { seq: 6, stale: false })   // the startup probe
     compare(Model.probeVerdict(5, 0, 3), { seq: 6, stale: true })    // a play went out after it

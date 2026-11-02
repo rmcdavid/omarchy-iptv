@@ -218,7 +218,11 @@ fail=0
 # test_olderRestartUnderQtsEngine, the probe's launch word and the restart's
 # disposition under Qt's own engine, red on 202a7bc (no such model names);
 # the spec runs 83.
-QML_SPEC_MIN=${QML_SPEC_MIN:-83}
+# 2026-11-02, lane-sk73: 83 -> 84 --
+# test_olderRestartReprobeUnderQtsEngine, a re-probe of the same older
+# player keeping its episode under Qt's own engine, red on c510985 (no such
+# model names) and under three named mutants; the spec runs 84.
+QML_SPEC_MIN=${QML_SPEC_MIN:-84}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -484,7 +488,21 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # other rules on the late path (another source defers, the late restart goes
 # out once and a refused channel stops); both red on 6b5ba6c, and red under
 # lane-sk71's M3 and the recheck's X4; the suite runs 3286.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3286}
+# 2026-11-02, lane-sk73: 3286 -> 3295 -- three model vectors
+# (olderRestartOpen twice, olderRestartWith) and six service-harness cases
+# (a deferred player re-probed, an unsafe one re-probed before its hold
+# ends, a spent episode re-probed three ways, a migrated one keeping its
+# expiry, a different player opening its own episode, path 6 with an
+# episode open); the renamed re-probe case gained an element. Nine red on
+# c510985, and each of the ten red under at least one of sixteen named
+# mutants of the model and Service.qml; the suite runs 3295.
+# 2026-11-02, rc-sk73: 3295 -> 3298 -- three service-harness cases: a
+# migrated player's `migrated` carried into a fresh episode when a later
+# probe names it under another pid (red on lane-sk73's d6a23dc, green on
+# c510985: the lane's tip had dropped it), a deferred player re-probed unsafe
+# stopped at once, and path 6 on the automatic restart itself (both red on
+# c510985); the suite runs 3298.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3298}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
