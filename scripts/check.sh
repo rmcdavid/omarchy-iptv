@@ -809,7 +809,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3286}
 # child, appends to it, or backgrounds it; red on 072ec7d, player_foreign)
 # and the replacement of a socket answered by a process with no token of ours
 # (1: red on the mutant that adopts it); the suite runs 1942.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1942}
+# 2026-11-02, lane-sk72: 1942 -> 1951 -- WrapperSpawnTest 3 -> 6 (D-PLY-61:
+# an exec wrapper and a child wrapper that append keep one player across two
+# zaps and a second start, and a wrapper that appends a second socket option
+# is still replaced; the appending-wrapper case now plays its zap) and
+# ProbeTlsTest +6 (D-SINK-72: a marked player reads migrated, the second
+# probe of a migrated player, the load's clear, a refused load keeps the
+# mark, and the two fail-safe directions); red on c510985 or on a named
+# mutant of launch_verdict or the mark; the suite runs 1951.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1951}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
