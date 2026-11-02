@@ -1442,7 +1442,10 @@ ck "L7 the replacement followed the list, not the hold: P0 was still seen after 
 is "L7 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l7.samples" "$L7_P0" "$L7_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
 L7_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L7_P1")
 ck "L7 P1's argv is this tree's own composed launch ($L7_FORM)" '[[ $L7_FORM == plain || $L7_FORM == include ]]'
-is "L7 the same channel plays on, in P1's own stash: time-pos advances" "$(np id) $(l_py stashid "$SOCK") $L7_ADV" "t:live1 t:live1 advancing"
+# The stash and time-pos are read from whatever holds the socket, so this
+# passes on a tree that kept P0 too (it did, on 6b5ba6c): that the holder is
+# P1 is the checks above, and the label says only what this one reads.
+is "L7 the same channel plays on at the socket: the bar and the stash there name it, and time-pos advances" "$(np id) $(l_py stashid "$SOCK") $L7_ADV" "t:live1 t:live1 advancing"
 is "L7 exactly one restart line" "$(log_count "$L_RESTART_TEXT")" "1"
 is "L7 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
 
