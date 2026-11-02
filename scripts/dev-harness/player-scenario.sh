@@ -63,11 +63,20 @@
 #                         same shell process, no card, one replaced line
 #   L5  never fed         a logging server for B: B's first request follows
 #                         P0's first absent sample, none with B's header before
+#   L7  late list         D-SINK-71: a v0.15.0 player the probe must migrate
+#                         (its load-auto-profiles read auto, then false), the
+#                         channel list withheld past the 15 s hold: P0 still
+#                         alone on the socket past the hold, and replaced only
+#                         after `ipc refresh` lands the list -- P1 this tree's,
+#                         the same channel, one restart line, no card, the
+#                         coredump journal +0
 #
 # L6 is the baseline: `--baseline 202a7bc` (v0.16.0's code) must red L1, L1b,
 # L2 and L4/L5 (P0 survives, is adopted and fed, keeps the canary) and L3's
 # probe check (that tree's probe has no `launch`, NOFIELD), and leave the rest
-# green.
+# green. `--baseline 6b5ba6c` (restart on adoption, before D-SINK-71) must red
+# L7's replacement checks: the expired hold deferred P0, so it is still alive
+# after the list lands and no restart line is written; its premises hold there.
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
@@ -1369,6 +1378,66 @@ is "L3 no restart line and no replaced line" "$(log_count "$L_RESTART_TEXT") $(l
 is "L3 the probe the shell runs reads it as this build's launch" "$(probe_launch)" "current"
 is "L3 the shell adopted it and plays its channel" "$(np id) $(svc "d['socketAttached']")" "t:live1 true"
 
+echo "== L7 D-SINK-71: a player v0.15.0 launched, which the probe must migrate, its channel list landing only after the hold"
+# The owner's decision of 2026-11-02: an older player whose settings the probe
+# had to change in place is replaced when the list lands, however late. The
+# lever is what the harness already has: the active source's channels.json is
+# moved aside before the shell starts (playlist-status.json stays, so the
+# cache reads fresh and nothing is fetched at start), so the shell has no list
+# when the 15 s hold (Model.OLDER_RESTART_HOLD_MS) runs out; `ipc refresh`
+# then runs the fixture server's fetch, whose exit reloads channels.json
+# (handlePlaylistExit), and the list lands. That the probe MIGRATED P0 is read
+# off P0 itself: v0.15.0 leaves load-auto-profiles at mpv's auto (a string,
+# which `get` never prints), and only the migration (secure_player) sets it
+# to no, which mpv answers as false.
+l_stop_all
+l_old_start "$L15_DIR" "t:live1"
+L7_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L7_CMD0=$(cmdline_of "$L7_P0")
+ck "L7 premise: v0.15.0's own helper launched one player P0 on the harness socket" '[[ $L7_P0 =~ ^[0-9]+$ && "$L7_CMD0" == *"input-ipc-server=$SOCK"* ]]'
+is "L7 premise: P0's load-auto-profiles is mpv's auto, so the shell's probe has to migrate it" "$(l_py get "$SOCK" load-auto-profiles)" "STR"
+mv -f -- "$L_CACHE/channels.json" "$SCRATCH/l7-channels.json" 2>>"$LOG"
+ck "L7 premise: the active source's channel list is withheld" '[[ ! -e $L_CACHE/channels.json && -s $SCRATCH/l7-channels.json ]]'
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l7.samples" 120
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L7 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L7 the shell did not start"
+L7_TS=$(l_py now)
+until_eq "t:live1" 15 np id || true
+# Past the hold: the probe goes out as the service loads and answers in well
+# under a second, so 19 s after the load was seen is 4 s past the hold's end.
+L7_PAST=$(python3 -I -c 'import sys, time; print("%.1f" % max(0.0, float(sys.argv[1]) + 19 - time.monotonic()))' "$L7_TS")
+sleep "$L7_PAST"
+L7_HELD=$(python3 -I -c 'import sys, time; print("%.1f" % (time.monotonic() - float(sys.argv[1])))' "$L7_TS")
+is "L7 premise: the shell adopted P0 and names its channel, with no channel list" "$(np id) $(svc "d['channels']")" "t:live1 0"
+is "L7 premise: the shell's probe migrated P0 in place (load-auto-profiles now reads false, mpv's no)" "$(l_py get "$SOCK" load-auto-profiles)" "false"
+is "L7 past the hold ($L7_HELD s after the shell loaded): P0 still holds the socket alone, and no restart line yet" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT")" "$L7_P0 0"
+L7_TR=$(l_py now)
+ipc refresh >/dev/null
+L7_P1=$(l_wait_replaced "$L7_P0" 40)
+until_eq "t:live1" 15 np id || true
+L7_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l7.samples"
+L7_TIMES=$(l_py p0times "$SCRATCH/l7.samples" "$L7_P0")
+printf '   L7 samples %s; P0 last seen / first missed %s (refresh at %s, shell loaded at %s); P1 %s\n' \
+  "$(l_py verdict "$SCRATCH/l7.samples" "$L7_P0" "$L7_P1")" "$L7_TIMES" "$L7_TR" "$L7_TS" "${L7_P1:-<none>}"
+# The fetch rewrote channels.json; the copy moved aside goes, or comes back
+# when the fetch did not write one (the later segments need the list).
+if [[ -e $L_CACHE/channels.json ]]; then rm -f -- "$SCRATCH/l7-channels.json"; else mv -f -- "$SCRATCH/l7-channels.json" "$L_CACHE/channels.json"; fi
+is "L7 the list landed: the fixture's 3 channels" "$(svc "d['channels']")" "3"
+is "L7 P0, the player v0.15.0 launched, is gone" "$(l_py alive "$SOCK" "$L7_P0")" "gone"
+ck "L7 one new player P1 holds the socket in its place" '[[ $L7_P1 =~ ^[0-9]+$ && $L7_P1 != "$L7_P0" ]]'
+ck "L7 the replacement followed the list, not the hold: P0 was still seen after the refresh went out and first missed after it ($L7_TIMES; refresh $L7_TR)" \
+   'python3 -I -c "import sys; last, gone, tr = map(float, sys.argv[1:4]); sys.exit(0 if last >= tr and gone > tr else 1)" $L7_TIMES "$L7_TR" 2>/dev/null'
+is "L7 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l7.samples" "$L7_P0" "$L7_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L7_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L7_P1")
+ck "L7 P1's argv is this tree's own composed launch ($L7_FORM)" '[[ $L7_FORM == plain || $L7_FORM == include ]]'
+is "L7 the same channel plays on, in P1's own stash: time-pos advances" "$(np id) $(l_py stashid "$SOCK") $L7_ADV" "t:live1 t:live1 advancing"
+is "L7 exactly one restart line" "$(log_count "$L_RESTART_TEXT")" "1"
+is "L7 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P9 no player to reap"
@@ -1519,7 +1588,8 @@ until_eq 0 8 player_count || true
 # server premise, L5 2; the two window checks SKIP under a nested compositor
 # and still count here).
 # 142 -> 143 (rc-rao-b, 2026-11-02): L5's control that B's header is seen at all.
-EXPECTED_CHECKS=143
+# 143 -> 158 (lane-sk71, 2026-11-02): L7's 15, the late list (D-SINK-71).
+EXPECTED_CHECKS=158
 ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
