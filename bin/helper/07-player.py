@@ -368,7 +368,11 @@ MPV_GPU_SW = "--gpu-sw=yes"
 # model's PLAYER_BUILD_KEY; the shared player-argv.json vectors carry a
 # fixed build so both mirrors render the same token.
 PLAYER_BUILD_KEY = "omarchy_iptv-build"
-PLAYER_BUILD_RE = re.compile(r"[0-9A-Za-z.+_-]{1,64}")
+# What a build may be spelled with, at most PLAYER_BUILD_MAX of them (the
+# model's PLAYER_BUILD_PATTERN is the same set and bound); a set, not a
+# regex, so it adds nothing for the helper's regex-cost guard to review.
+PLAYER_BUILD_CHARS = frozenset("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.+_-")
+PLAYER_BUILD_MAX = 64
 PLAYER_BUILD_UNKNOWN = "unknown"
 LAUNCH_VERDICTS = ("current", "older", "unknown")
 # D-SINK-16. The same two knobs, named as mpv PROPERTIES rather than as
@@ -707,7 +711,7 @@ def player_build() -> str:
     every part edit changes it (`--seal` rewrites the entry) and every release
     changes the version, so nothing is bumped by hand. The ONLY producer: the
     launch argv and launch_verdict both call it. A value outside
-    PLAYER_BUILD_RE (a manifest version with a space in it) is the word
+    player_build_ok (a manifest version with a space in it) is the word
     `unknown`, which every build then shares -- a marker that cannot tell
     builds apart is honest about it, and the version read is nothing private."""
     parts = globals().get("HELPER_PARTS") or ()
@@ -718,13 +722,19 @@ def player_build() -> str:
     if not text:
         return PLAYER_BUILD_UNKNOWN
     build = "%s+%08x" % (VERSION, zlib.crc32(text.encode("ascii", "replace")) & 0xFFFFFFFF)
-    return build if PLAYER_BUILD_RE.fullmatch(build) else PLAYER_BUILD_UNKNOWN
+    return build if player_build_ok(build) else PLAYER_BUILD_UNKNOWN
+
+
+def player_build_ok(value: Any) -> bool:
+    """A build is 1 to PLAYER_BUILD_MAX of PLAYER_BUILD_CHARS."""
+    return (isinstance(value, str) and 0 < len(value) <= PLAYER_BUILD_MAX
+            and all(char in PLAYER_BUILD_CHARS for char in value))
 
 
 def mpv_build_marker(build: Any) -> str:
     """The launch marker for `build`, `unknown` when it is not one. Mirror of
     the model's mpvBuildMarker."""
-    value = build if isinstance(build, str) and PLAYER_BUILD_RE.fullmatch(build) else PLAYER_BUILD_UNKNOWN
+    value = build if player_build_ok(build) else PLAYER_BUILD_UNKNOWN
     return "--script-opts-append=%s=%s" % (PLAYER_BUILD_KEY, value)
 
 
