@@ -111,7 +111,14 @@ class LaunchVerdictVectorTest(LaunchCase):
         cases = VECTORS["cases"]
         got = []
         for case in cases:
-            process = self.hold(self.case_argv(case))
+            try:
+                argv = self.case_argv(case)
+            except StopIteration:
+                # an edit whose element this build no longer composes: say so
+                # in the comparison rather than stopping before the others
+                got.append("%s: cannot be built" % case["name"])
+                continue
+            process = self.hold(argv)
             got.append("%s: %s" % (case["name"], helper.launch_verdict(process.pid, self.sock)))
         self.assertEqual(got, ["%s: %s" % (c["name"], c["verdict"]) for c in cases])
         # The fixture keeps the cases that make each mutant of the verdict
