@@ -110,6 +110,16 @@
 #                at all.
 #           Then a control that passes on both trees: a zap to the CA-signed
 #           provider still plays, so a zero above is a refusal and not a corpse.
+#           RESTART ON ADOPTION (owner, 2026-10-31; lane RB, 2026-11-02): the
+#           staged player is another build's launch, so the upgraded shell no
+#           longer migrates it and reloads the channel into it -- it adopts it
+#           for the hold, fed nothing, and REPLACES it once the channel list
+#           lands. Question 1's second half therefore asks for exactly one
+#           restart line and no reload or rejection line; the staged process
+#           is asserted gone; and the control's player is asserted to be the
+#           tree's own launch (its argv byte for byte the tree's own builder's)
+#           and not the staged one. Every `--baseline` older than the restart
+#           now reds that second half too (it migrates and reloads).
 #           THE MECHANISM S6 RESTS ON WAS MEASURED BY THE LEAD, not here, on
 #           2026-10-07 over a real IPC socket: on a player launched with no TLS
 #           tokens `get_property tls-verify` reads False, `set_property
@@ -633,6 +643,34 @@ wait_closed() {   # wait_closed <stem> <secs>: the attacker saw this connection 
 # Is the process we staged still the mpv on OUR scratch socket? Not `-d /proc`
 # alone: a recycled pid would answer yes. The cmdline has to still name this
 # run's socket, which no other process on the machine carries.
+# tree_launch <pid>: plain | include | neither | NOARGV | NOBUILDER -- whether
+# <pid>'s /proc/<pid>/cmdline equals, byte for byte, what the TREE UNDER TEST's
+# own mpv_launch_argv composes for this socket in either form (no options file
+# or one named). The builder, never launch_verdict; it prints a word only. Run
+# -I -B, so no .pyc lands in the tree it loads the helper from.
+tree_launch() {
+  python3 -I -B - "$PLUGIN_ROOT/bin/omarchy-iptv" "$SOCK" "${1-}" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+try:
+    with open("/proc/%d/cmdline" % int(sys.argv[3]), "rb") as handle:
+        argv = [part for part in handle.read().split(b"\0") if part]
+except (OSError, ValueError):
+    argv = []
+if not argv:
+    print("NOARGV")
+    raise SystemExit(0)
+try:
+    loader = importlib.machinery.SourceFileLoader("omarchy_iptv_tls_launch", sys.argv[1])
+    spec = importlib.util.spec_from_loader("omarchy_iptv_tls_launch", loader)
+    helper = importlib.util.module_from_spec(spec)
+    loader.exec_module(helper)
+    forms = [("plain", helper.mpv_launch_argv(sys.argv[2], [])), ("include", helper.mpv_launch_argv(sys.argv[2], ["--osd-level=1"]))]
+except BaseException:
+    print("NOBUILDER")
+    raise SystemExit(0)
+print(next((name for name, want in forms if [os.fsencode(e) for e in want] == argv), "neither"))
+PY
+}
 staged_alive() {
   local pid=${1-} cmd
   [[ $pid =~ ^[0-9]+$ ]] || return 1
@@ -1228,10 +1266,19 @@ ck "S6 the upgraded shell MET the staged player ('$s6_adopt': pid = it named tha
 #
 # The shell says which it did, and the two vocabularies do not overlap. This
 # is why $HARNESS_LOG is deliberately left untruncated across both shells.
-s6_adopted_log=$(qa_count 're-establishing the channel on an adopted player that was not verifying certificates|the player will not verify the stream.s certificate, stopping it' "$HARNESS_LOG")
+#
+# Restart on adoption (owner, 2026-10-31; lane RB, 2026-11-02): the staged
+# player is ANOTHER build's launch, so the upgraded shell no longer migrates it
+# and reloads the channel into it (the D-SINK-16 reload line); it adopts it for
+# the hold, fed nothing, and REPLACES it once the channel list lands, with one
+# restart line (Model.OLDER_RESTART_LINE, fixed text). This check used to count
+# the reload line, which no longer fires for a player another build launched;
+# it now asks for exactly that replacement and for neither of the other two.
+s6_restart_log=$(qa_count 'restarting a player another build of this plugin started' "$HARNESS_LOG")
+s6_reload_log=$(qa_count 're-establishing the channel on an adopted player that was not verifying certificates|the player will not verify the stream.s certificate, stopping it' "$HARNESS_LOG")
 s6_rejected_log=$(qa_count 'found a player this shell cannot identify, stopping it|the player is not answering, stopping it' "$HARNESS_LOG")
-ck "S6 and it ADOPTED it rather than rejecting it (adoption lines $s6_adopted_log, rejection lines $s6_rejected_log)" \
-   '[[ ${s6_adopted_log:-0} -ge 1 && ${s6_rejected_log:-0} -eq 0 ]]'
+ck "S6 and it REPLACED it: one restart of another build's player, no migrate-and-reload, no rejection (restart lines $s6_restart_log, reload lines $s6_reload_log, rejection lines $s6_rejected_log)" \
+   '[[ ${s6_restart_log:-0} -eq 1 && ${s6_reload_log:-0} -eq 0 && ${s6_rejected_log:-0} -eq 0 ]]'
 # The already-open stream. `wait_closed` giving up IS the finding on a tree that
 # does not migrate: nothing there ever ends that connection, and the player goes
 # on reading a server nobody authenticated. The settle afterwards is four pace
@@ -1248,6 +1295,10 @@ s6_stream=$(qa_stream_stopped "$s6_closed" "$chunks_at_close" "$chunks_after")
 printf '   info S6: stage pieces %s -> %s at the adoption -> %s at the close -> %s after a 4 s settle; closes seen %s\n' \
   "$stage_chunks_before" "$chunks_at_witness" "$chunks_at_close" "$chunks_after" "$s6_closed"
 is "S6 the already-open unverified stream stopped being fed" "$s6_stream" "stopped"
+# The replacement's other half: the staged process itself is gone, laddered by
+# the start that replaced it (on a tree that migrates and reloads, the refused
+# reload ended it too, so this is a guard and not a discriminator).
+ck "S6 the staged player is gone" '! staged_alive "$stage_pid"'
 # The ordering check, from the other side: a reattach that re-establishes the
 # channel BEFORE it migrates the properties fetches from the attacker again, and
 # that fetch lands here whatever path it is on.
@@ -1272,6 +1323,14 @@ s8_hits=$(hits s8)
 segment_info S6ctl s8
 is "S6 control: the upgraded shell can still make a player fetch a stream" "$s8_outcome" "played"
 ck "S6 control: and the provider logged that GET (control: $s8_hits)" '(( s8_hits >= 1 ))'
+# And the player that plays it is the tree's own launch -- its argv byte for
+# byte what the tree's OWN builder composes, never the verdict under test --
+# and not the staged one: after the adoption the zaps reach only a player
+# that verifies.
+s8_pid=$(player_pid)
+s8_form=$(tree_launch "$s8_pid")
+ck "S6 control: the player playing it is the tree's own launch ($s8_form), not the staged player" \
+   '[[ ( $s8_form == plain || $s8_form == include ) && -n $s8_pid && $s8_pid != "$stage_pid" ]]'
 
 # ============================================================== privacy
 echo "== the credential in the fixture URL reaches no log of ours"
@@ -1313,7 +1372,7 @@ echo "what the attacker logged for the three cases that must refuse (empty is th
 echo "S6: adoption=$s6_adopt stage=$s6_stage stream=$s6_stream attacker GETs across the adoption $self_before -> $self_after"
 if [[ -n $BASELINE ]]; then
   echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's four argv checks and its log check, because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
-  echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything."
+  echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness, the staged-gone guard and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything. Since restart on adoption the replacement check (one restart line, no reload line) reds on every tree older than it: those migrate and reload instead."
 fi
 
 # The floor, live half. D-PLY-9 was not that an assertion was wrong -- it was
@@ -1338,7 +1397,10 @@ fi
 # outlived its shell, the adoption witness, the already-open stream, the
 # attacker's count across the adoption, the zap and its hit log, and the two
 # halves of the provider control.
-EXPECTED_CHECKS=47
+# 47 -> 49 (lane RB, 2026-11-02, restart on adoption): the adoption check now
+# asks for the replacement, and S6 gains two: the staged player gone, and the
+# control played by the tree's own launch rather than the staged player.
+EXPECTED_CHECKS=49
 ran=$checks
 is "the scenario ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
