@@ -757,10 +757,11 @@ refused, 0 GETs). Every player launched by 0.15.0 or earlier now reads
 "migrated" on the first probe after the upgrade (its `load-auto-profiles` is
 mpv's `auto`), so the one rebuffer of the second row is paid once by every
 such player, not only by a pre-0.13.0 one. [2026-11-02: every such player
-is now another build's, and is replaced rather than reloaded (4.5.2; one
-the probe migrated is replaced however late its list lands); an
-unsafe one is restarted when its channel can be put back, and stopped only
-when it cannot, or when this build refuses its channel.] The probe and the adoption branch
+is now another build's, and is replaced rather than reloaded (4.5.2; a
+safe one the probe migrated is replaced however late its list lands, if its
+channel is still there); an unsafe one is restarted when its channel can be
+put back before the hold ends, and stopped when it cannot, when the hold
+ends first, or when this build refuses its channel.] The probe and the adoption branch
 of `player start` also carry the pins that are not about the TLS peer, best
 effort (`pin_adopted_player`, 4.12.1). Section 4.12.1 has the measurements.
 
@@ -1014,8 +1015,8 @@ adoption, live", M6), the list was applied 0.66-1.06 s after the probe
 answered, against the 15 s hold. With the list withheld past the hold
 (player-scenario L7, 2026-11-02), a player v0.15.0's own helper launched was
 replaced 1.16-1.26 s after the refresh that landed the list went out, and
-20.6-20.7 s after the shell loaded; on 6b5ba6c it was still there 67 s after
-the refresh. With the same late list, a player v0.16.0 launched was left
+20.6-20.7 s after the shell loaded; on 6b5ba6c it was still there through
+66.9 s after the refresh. With the same late list, a player v0.16.0 launched was left
 playing (L8).
 
 **Not carried:** picture in picture, window placement, and the rewind

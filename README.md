@@ -494,16 +494,19 @@ on every protection a running player can take:
 
 Sometimes its channel cannot be put back: the playlist no longer has it, or
 another source is active. Then the old player plays on, sent no channel, until
-you change channel or stop.
+you change channel, press Enter on its channel (which replaces it at live), or
+stop.
 
 The channel list can also take more than 15 seconds to load. What happens then
 depends on what the new shell found:
 
 - If the old player already had every protection, as a player 0.16.0 started
-  does, it plays on, sent no channel, until you change channel or stop.
+  does, it plays on, sent no channel, as above.
 - If the new shell had to turn its protections on, as for a player 0.15.0 or
-  earlier started that 0.16.0 never picked up, it plays on until the list has
-  loaded, and is replaced then.
+  earlier started, the first time a shell of 0.16.0 or later picks it up, it
+  plays on until the list has loaded, and is replaced then if its channel is
+  still there. If the list never loads, it plays on, sent no channel, as
+  above.
 
 If, in any of these cases, it also cannot be made safe, it is stopped: press
 Enter on the channel and a fresh, verified player starts. A player cannot be

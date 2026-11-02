@@ -13462,11 +13462,12 @@ Both are red on 6b5ba6c. The node floor moves 3284 -> 3286.
 - Another source while held past the hold: held, then deferred when the list lands. Red under M3.
 - The late restart goes out once. Refused locally, it defers with no card and nothing more starts. Refused for the channel, it stops and tells Stream failed. Red under X4.
 
-*Scratch probes, not committed.*
-
-Identical on both trees:
-- a re-probe re-opens a deferred or held episode (E and F, the lane's finding);
-- a second shell reads a migrated player as safe without migration and defers it (G, a new finding).
+*Scratch probes, not committed.* Injected into copies of the tip and of 6b5ba6c:
+- A, another source while held past the hold: held, then deferred, then a change starts the new channel.
+- B, the late restart refused locally: deferred, no loop.
+- C, the late restart refused for the channel: a stop and Stream failed.
+- D, EOF during the extended hold: the episode ends and nothing starts.
+- H, an ambiguous retry made stale, then a re-probe of the same player: the episode reads migrated false and nothing starts (the X3 guard's only effect).
 
 *Live: player-scenario in the recheck's own nested headless pixman cage.*
 
