@@ -13743,6 +13743,18 @@ Floor: node 3295 -> 3298.
 
 *Coredump journal.* 81 before and 81 after. No mpv was started.
 
+### 0.17.0 pre-cut record (2026-11-02): the gate and the release recipe's live run on the final tree
+
+**Tree.** int-sk71 10446f9: dev 6b5ba6c (restart on adoption) plus D-SINK-71's fix (rc-sk71 edf03fe), D-PLY-61's and D-SINK-72's (rc-sk72 74436c6), D-SINK-73's (rc-sk73 90dea09), the lead's board, comment and doc commits after three claims checks (0b7a42a, ba81d64, c510985, cfa5ab5, 0337e8f, 5e96e3b, 21b429b), and the version bump with the release notes (10446f9).
+
+**Gate.** `scripts/check.sh` under the shared heavy lock on 10446f9, quiet (load 1.28 at the start, 1.55 at the end): **all green**, rc 0. node 3298 checks (both echo modes), python 1952 tests, qml spec 84, theme name guard 279 uses, release allowlist 42 files, helper split 11 parts. Crash journal 81 before and after.
+
+**key-scenario live** (the release recipe's step; `scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, under the heavy lock), on 10446f9: **139 passed, 0 failed** (138 lettered checks and the floor line) in 534.0 s, 16:02:13 to 16:11:07 CST, load 1.36 at the start and 2.52 at the end. Crash journal 81 before and after. Transcript `/run/user/1000/omarchy-iptv-c170-h/transcripts/key-20261102-160213-3842409.out` (0600; 139 PASS lines, 0 FAIL). The README's "(139 checks, 2026-11-02)" rests on this run.
+
+**Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.17.0; the CHANGELOG's top heading `## 0.17.0 (2026-11-02)` passes `changelog_problems` strictly for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.17.0 tag locally or on the remote.
+
+**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word.
+
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 
 Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy build carrying omarchy-pkgs load_qtquick_611.patch; .BUILDINFO pkgbuild_sha256sum e871efd5... = omarchy-pkgs 2be7cd9839), omarchy 4.0.6-1. Tree: rel-0160 bcce3f8.
