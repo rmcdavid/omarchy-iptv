@@ -24,6 +24,7 @@ import helper_loader  # noqa: F401  (the sandboxed HOME, before the helper loads
 # the zero-point clock is held still by patching that object, and a patch on
 # a private copy would hold nothing the verb under test reads.
 from test_player import PASSWORD, TOKEN, PlayerTestCase, helper, run
+from test_mpv import PINNED_CMDLINE, current_props
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -224,7 +225,11 @@ class RewindPlayerTestCase(PlayerTestCase):
         seek_silent = kwargs.pop("seek_silent", False)
         landing = {key: kwargs.pop(key) for key in ("landing_offset", "restart_lag_s", "restart_silent", "restart_before_seek")
                    if key in kwargs}
-        return self.start(props=self.props(**kwargs), user_data=data, seek_moves=seek_moves,
+        # Restart on adoption: the sleeper is a player THIS build launched, so
+        # the FakeMpv answers as one (current_props, set from the command line),
+        # the real pair (PlayerTestCase); the rewind readings ride on top.
+        return self.start(props=dict(current_props(self.sock), **self.props(**kwargs)), cmdline=PINNED_CMDLINE,
+                          user_data=data, seek_moves=seek_moves,
                           seek_lag_s=seek_lag_s, seek_silent=seek_silent, **landing)
 
     def read_after_seek_s(self):

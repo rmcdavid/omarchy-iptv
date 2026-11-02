@@ -815,6 +815,11 @@ def cmd_play(args: argparse.Namespace) -> int:
     refreshes the now-playing stash inside mpv and the reply carries the new
     `entryId`, which is what makes a reattach after a shell restart name the
     channel the user actually switched to.
+
+    Restart on adoption: apply_channel's build gate is unvouched here, so a
+    player another build launched is refused with zero commands sent --
+    `not_running`, and `outdated: true` beside the error -- and every shell
+    since v0.14.3 answers that with `player start`, which replaces it.
     """
     sock = socket_path(args.socket)
     client = MpvIpc(sock, args.ipc_timeout)

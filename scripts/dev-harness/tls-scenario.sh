@@ -69,12 +69,22 @@
 #           different finding from "the escape does not work".
 #   S5      THE RESERVATION AND THE COMPOSED ARGV, read off /proc/<pid>/cmdline
 #           of the player that is actually playing -- the real process, not the
-#           source text (rule 14). `--tls-verify=no` and `--no-tls-verify` must
-#           not reach mpv and must be NAMED in the shell's log; `--profile=evil`
-#           and `--tls-ca-file=` must reach it (the control: the attack and the
-#           escape were really delivered); the LAST token must be
-#           `--tls-verify=yes` and the token must appear at least twice, which
-#           is layer 2 and layer 1 respectively.
+#           source text (rule 14) -- and, since D-SINK-47 (0.16.0), off the 0600
+#           options file the player reads the user's tokens from (`--include=`),
+#           caught while it exists. `--tls-verify=no`, `--no-tls-verify` and
+#           `--stream-lavf-o` must reach mpv by neither route and must be NAMED
+#           in the shell's log (by option name only, D-SINK-24); `--profile=evil`
+#           and `--tls-ca-file=` must reach it through the file, or on the argv
+#           on a `--baseline` before 0.16.0 (the control: the attack and the
+#           escape were really delivered); the LAST token
+#           must be `--tls-verify=yes` and the token must appear at least twice,
+#           which is layer 2 and layer 1 respectively. Until 2026-11-02 the
+#           delivery controls and the layer-5 check read the ARGV alone, so on
+#           every tree since 0.16.0 three of them read red (the tokens moved to
+#           the file; the pin block's own `--stream-lavf-o-clr` matched
+#           `--stream-lavf-o`) and the two layer-3 argv checks could not go red
+#           at all; the log check wanted `--tls-verify=no` in a line that has
+#           named options without values since D-SINK-24 (rc-rao-b).
 #   S6      THE ADOPTION CASE, D-SINK-16, and the one segment here that is not
 #           about how a player is LAUNCHED. The marketplace maintainer raised it
 #           against the shipped 0.13.0 (omacom/omarchy-plugin-marketplace#10389)
@@ -110,6 +120,16 @@
 #                at all.
 #           Then a control that passes on both trees: a zap to the CA-signed
 #           provider still plays, so a zero above is a refusal and not a corpse.
+#           RESTART ON ADOPTION (owner, 2026-10-31; lane RB, 2026-11-02): the
+#           staged player is another build's launch, so the upgraded shell no
+#           longer migrates it and reloads the channel into it -- it adopts it
+#           for the hold, fed nothing, and REPLACES it once the channel list
+#           lands. Question 1's second half therefore asks for exactly one
+#           restart line and no reload or rejection line; the staged process
+#           is asserted gone; and the control's player is asserted to be the
+#           tree's own launch (its argv byte for byte the tree's own builder's)
+#           and not the staged one. Every `--baseline` older than the restart
+#           now reds that second half too (it migrates and reloads).
 #           THE MECHANISM S6 RESTS ON WAS MEASURED BY THE LEAD, not here, on
 #           2026-10-07 over a real IPC socket: on a player launched with no TLS
 #           tokens `get_property tls-verify` reads False, `set_property
@@ -630,6 +650,34 @@ wait_closed() {   # wait_closed <stem> <secs>: the attacker saw this connection 
   printf 'gave up after %ss waiting for the attacker to see /%s/%s.ts close\n' "$secs" "$TOKEN" "$stem" >&2
   return 1
 }
+# tree_launch <pid>: plain | include | neither | NOARGV | NOBUILDER -- whether
+# <pid>'s /proc/<pid>/cmdline equals, byte for byte, what the TREE UNDER TEST's
+# own mpv_launch_argv composes for this socket in either form (no options file
+# or one named). The builder, never launch_verdict; it prints a word only. Run
+# -I -B, so no .pyc lands in the tree it loads the helper from.
+tree_launch() {
+  python3 -I -B - "$PLUGIN_ROOT/bin/omarchy-iptv" "$SOCK" "${1-}" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+try:
+    with open("/proc/%d/cmdline" % int(sys.argv[3]), "rb") as handle:
+        argv = [part for part in handle.read().split(b"\0") if part]
+except (OSError, ValueError):
+    argv = []
+if not argv:
+    print("NOARGV")
+    raise SystemExit(0)
+try:
+    loader = importlib.machinery.SourceFileLoader("omarchy_iptv_tls_launch", sys.argv[1])
+    spec = importlib.util.spec_from_loader("omarchy_iptv_tls_launch", loader)
+    helper = importlib.util.module_from_spec(spec)
+    loader.exec_module(helper)
+    forms = [("plain", helper.mpv_launch_argv(sys.argv[2], [])), ("include", helper.mpv_launch_argv(sys.argv[2], ["--osd-level=1"]))]
+except BaseException:
+    print("NOBUILDER")
+    raise SystemExit(0)
+print(next((name for name, want in forms if [os.fsencode(e) for e in want] == argv), "neither"))
+PY
+}
 # Is the process we staged still the mpv on OUR scratch socket? Not `-d /proc`
 # alone: a recycled pid would answer yes. The cmdline has to still name this
 # run's socket, which no other process on the machine carries.
@@ -638,6 +686,77 @@ staged_alive() {
   [[ $pid =~ ^[0-9]+$ ]] || return 1
   cmd=$(qa_cmdline "$pid") || return 1
   [[ $cmd == *"input-ipc-server=$SOCK"* ]]
+}
+# opts_watch <out> <secs> (rc-rao-b, 2026-11-02): S5's other sink since
+# D-SINK-47. The user's mpvArgs no longer reach mpv on its command line: the
+# helper writes the ones it keeps to a 0600 options file in the runtime
+# folder (by a rename, so whole or not at all), the player reads it through
+# `--include=`, and the helper removes it once the player answers. So what
+# reached mpv is that file, read the moment it exists -- polled every 2 ms
+# for at most <secs>, from BEFORE the play, so it cannot come and go unseen.
+# One line of WORDS into <out> (0600): whether it was seen, whether its
+# `profile` is `evil` and its `tls-ca-file` this run's CA, whether any line
+# names `tls-verify`, `no-tls-verify` or a `stream-lavf-o*` option, and the
+# option names -- never a value. A file never seen reads `seen:no`, and every
+# check that reads this line then fails rather than passing on nothing.
+opts_watch() {
+  python3 -I - "$SCRATCH/runtime/omarchy-iptv/mpv-args.conf" "$1" "$2" "$CA_PEM" <<'PY'
+import os, sys, time
+path, out, secs, ca = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+end = time.monotonic() + secs
+text = None
+while time.monotonic() < end:
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        if data:
+            text = data.decode("utf-8", "replace")
+            break
+    except OSError:
+        pass
+    time.sleep(0.002)
+names, values = [], {}
+for line in (text or "").splitlines():
+    name, eq, rest = line.partition("=")
+    if eq and rest.startswith("%"):
+        size, _, tail = rest[1:].partition("%")
+        rest = tail[:int(size)] if size.isdigit() else tail
+    names.append(name)
+    values.setdefault(name, rest)
+yes = lambda flag: "yes" if flag else "no"
+line = "seen:%s profile-evil:%s ca-file:%s tls-verify:%s no-tls-verify:%s stream-lavf-o:%s names:%s\n" % (
+    yes(text is not None), yes(values.get("profile") == "evil"), yes(values.get("tls-ca-file") == ca),
+    yes("tls-verify" in names), yes("no-tls-verify" in names),
+    yes(any(n.startswith("stream-lavf-o") for n in names)), ",".join(names) or "-")
+fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+os.write(fd, line.encode())
+os.close(fd)
+PY
+}
+# argv_opts <pid> (rc-rao-b): the player's /proc/<pid>/cmdline as NUL-split
+# items (F-HARNESS-46's shape, not qa_cmdline's joined string), counted for
+# S5: `--tls-verify=no`, `--no-tls-verify`, every `--stream-lavf-o*` item but
+# the pin block's own `--stream-lavf-o-clr` (D-SINK-44), and the user's
+# `--profile=evil` and `--tls-ca-file=` -- on a tree before D-SINK-47 the
+# user's tokens were delivered there, since then none is. Counts only.
+argv_opts() {
+  python3 -I - "${1-}" <<'PY'
+import sys
+try:
+    with open("/proc/%d/cmdline" % int(sys.argv[1]), "rb") as handle:
+        argv = [part for part in handle.read().split(b"\0") if part]
+except (OSError, ValueError):
+    argv = []
+if not argv:
+    print("NOARGV")
+    raise SystemExit(0)
+print("tvno:%d notv:%d lavf:%d evil:%d ca:%d" % (
+    sum(1 for a in argv if a == b"--tls-verify=no"),
+    sum(1 for a in argv if a == b"--no-tls-verify"),
+    sum(1 for a in argv if a.startswith(b"--stream-lavf-o") and a != b"--stream-lavf-o-clr"),
+    sum(1 for a in argv if a == b"--profile=evil"),
+    sum(1 for a in argv if a.startswith(b"--tls-ca-file="))))
+PY
 }
 
 # ---- the certificates. Three openssl runs, every argument a literal or a path
@@ -1101,10 +1220,21 @@ ck "S4 and the stream really was fetched (control: $s4_hits)" '(( s4_hits >= 1 )
 echo "== S5 the reservation and the composed argv, read off the player that is playing"
 segment "--tls-verify=no --no-tls-verify --stream-lavf-o=tls_verify=0 --profile=evil --tls-ca-file=$CA_PEM" \
   || bad "S5 the harness did not come up (see $LOG)"
+rm -f -- "$WORK/s5.opts"
+opts_watch "$WORK/s5.opts" 45 >/dev/null 2>&1 &
+s5_watch=$!
 ipc play "t:s5" >/dev/null
 s5_outcome=$(outcome "t:s5" s5 40)
 s5_hits=$(hits s5)
 s5_pid=$(player_pid)
+# The watcher ends when it has read the file, or at its own 45 s; bounded
+# here as well, and it says when it gave up.
+for ((i = 0; i < 120; i++)); do kill -0 "$s5_watch" 2>/dev/null || break; sleep 0.5; done
+kill -0 "$s5_watch" 2>/dev/null && { printf 'gave up after 60s waiting for the options-file watcher\n' >&2; kill -TERM "$s5_watch" 2>/dev/null; }
+wait "$s5_watch" 2>/dev/null
+s5_opts=$(cat "$WORK/s5.opts" 2>/dev/null)
+s5_argv=$(argv_opts "$s5_pid")
+printf '   info S5: options file %s; argv %s\n' "${s5_opts:-NONE}" "$s5_argv"
 # qa_cmdline refuses an EMPTY pid: /proc//cmdline is /proc/cmdline, and six
 # S-03 sweeps once compared their secrets against the KERNEL command line and
 # passed.
@@ -1117,10 +1247,17 @@ ck "S5 the stream was fetched (control: $s5_hits)" '(( s5_hits >= 1 ))'
 # The positive control. Without it every sweep below is a statement about a
 # string nobody has established is the player's argv.
 ck "S5 the player's command line was actually read" '[[ -n "$s5_cmd" && "$s5_cmd" == *"input-ipc-server=$SOCK"* ]]'
-ck "S5 the hostile profile really was delivered to mpv (control for S3)" '[[ "$s5_cmd" == *"--profile=evil"* ]]'
-ck "S5 the CA file really was delivered to mpv (control for S4)" '[[ "$s5_cmd" == *"--tls-ca-file="* ]]'
-ck "S5 layer 3: --tls-verify=no never reached mpv" '[[ "$s5_cmd" != *"--tls-verify=no"* ]]'
-ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ "$s5_cmd" != *"--no-tls-verify"* ]]'
+# Where the user's tokens reach mpv: the options file since D-SINK-47
+# (0.16.0), the argv before it (so a `--baseline` at 0.13.0-0.15.0 still
+# reads its own delivery). Seen in neither place, nothing below is about
+# what mpv was given, and every check that reads this fails.
+s5_seen=no
+[[ $s5_opts == "seen:yes "* || $s5_argv == *" evil:1 "* ]] && s5_seen=yes
+ck "S5 the user's tokens were caught where they reach mpv (the options file it reads since D-SINK-47, the argv before), so the checks below read what reached mpv" '[[ $s5_seen == yes ]]'
+ck "S5 the hostile profile really was delivered to mpv (control for S3)" '[[ $s5_opts == *" profile-evil:yes "* || $s5_argv == *" evil:1 "* ]]'
+ck "S5 the CA file really was delivered to mpv (control for S4)" '[[ $s5_opts == *" ca-file:yes "* || $s5_argv == *" ca:1"* ]]'
+ck "S5 layer 3: --tls-verify=no never reached mpv, by the file or the argv" '[[ $s5_seen == yes && $s5_opts == *" tls-verify:no "* && $s5_argv == "tvno:0 "* ]]'
+ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_seen == yes && $s5_opts == *" no-tls-verify:no "* && $s5_argv == *" notv:0 "* ]]'
 # D-SINK-13 layer 5, the bypass the trailing token CANNOT reach and so the one
 # the reserved list has to. `--stream-lavf-o` forwards key=value to
 # libavformat for the stream, and FFmpeg's own AVOption `tls_verify` is a
@@ -1130,13 +1267,18 @@ ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ "$s5_cmd" != *"--n
 # Found by all three reviewers of the round, against a fix already measured
 # working. Asserted on the argv the player is actually running, like its
 # siblings above.
-ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ "$s5_cmd" != *"--stream-lavf-o"* ]]'
+ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_seen == yes && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
 is "S5 layer 2: the LAST token of the composed argv re-asserts verification" "$s5_last" "--tls-verify=yes"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
 ck "S5 and S-03 still holds: no URL and no credential on the argv" \
    '[[ "$s5_cmd" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
 wait_log 'ignoring mpvArgs tokens' 10 || true
-s5_warn=$(qa_count 'ignoring mpvArgs tokens.*--tls-verify=no.*--no-tls-verify' "$HARNESS_LOG")
+# By option NAME: since D-SINK-24 the line names a refused token's option and
+# never its value (Model.mpvRejectedLine), so `--tls-verify=no` reads
+# `--tls-verify` there (rc-rao-b; the old pattern wanted the value, which no
+# tree since then prints). A `--baseline` before it printed the token whole,
+# and that line names both spellings too, so both forms are heard.
+s5_warn=$(qa_count 'ignoring mpvArgs tokens:(.* )? ?--tls-verify(=no)?( .*)? --no-tls-verify( |$)' "$HARNESS_LOG")
 ck "S5 layer 3 is HEARD: the shell names both refused spellings in its log" '(( s5_warn >= 1 ))'
 
 # ============================================================== S6, the adoption case
@@ -1228,10 +1370,19 @@ ck "S6 the upgraded shell MET the staged player ('$s6_adopt': pid = it named tha
 #
 # The shell says which it did, and the two vocabularies do not overlap. This
 # is why $HARNESS_LOG is deliberately left untruncated across both shells.
-s6_adopted_log=$(qa_count 're-establishing the channel on an adopted player that was not verifying certificates|the player will not verify the stream.s certificate, stopping it' "$HARNESS_LOG")
+#
+# Restart on adoption (owner, 2026-10-31; lane RB, 2026-11-02): the staged
+# player is ANOTHER build's launch, so the upgraded shell no longer migrates it
+# and reloads the channel into it (the D-SINK-16 reload line); it adopts it for
+# the hold, fed nothing, and REPLACES it once the channel list lands, with one
+# restart line (Model.OLDER_RESTART_LINE, fixed text). This check used to count
+# the reload line, which no longer fires for a player another build launched;
+# it now asks for exactly that replacement and for neither of the other two.
+s6_restart_log=$(qa_count 'restarting a player another build of this plugin started' "$HARNESS_LOG")
+s6_reload_log=$(qa_count 're-establishing the channel on an adopted player that was not verifying certificates|the player will not verify the stream.s certificate, stopping it' "$HARNESS_LOG")
 s6_rejected_log=$(qa_count 'found a player this shell cannot identify, stopping it|the player is not answering, stopping it' "$HARNESS_LOG")
-ck "S6 and it ADOPTED it rather than rejecting it (adoption lines $s6_adopted_log, rejection lines $s6_rejected_log)" \
-   '[[ ${s6_adopted_log:-0} -ge 1 && ${s6_rejected_log:-0} -eq 0 ]]'
+ck "S6 and it REPLACED it: one restart of another build's player, no migrate-and-reload, no rejection (restart lines $s6_restart_log, reload lines $s6_reload_log, rejection lines $s6_rejected_log)" \
+   '[[ ${s6_restart_log:-0} -eq 1 && ${s6_reload_log:-0} -eq 0 && ${s6_rejected_log:-0} -eq 0 ]]'
 # The already-open stream. `wait_closed` giving up IS the finding on a tree that
 # does not migrate: nothing there ever ends that connection, and the player goes
 # on reading a server nobody authenticated. The settle afterwards is four pace
@@ -1248,6 +1399,10 @@ s6_stream=$(qa_stream_stopped "$s6_closed" "$chunks_at_close" "$chunks_after")
 printf '   info S6: stage pieces %s -> %s at the adoption -> %s at the close -> %s after a 4 s settle; closes seen %s\n' \
   "$stage_chunks_before" "$chunks_at_witness" "$chunks_at_close" "$chunks_after" "$s6_closed"
 is "S6 the already-open unverified stream stopped being fed" "$s6_stream" "stopped"
+# The replacement's other half: the staged process itself is gone, laddered by
+# the start that replaced it (on a tree that migrates and reloads, the refused
+# reload ended it too, so this is a guard and not a discriminator).
+ck "S6 the staged player is gone" '! staged_alive "$stage_pid"'
 # The ordering check, from the other side: a reattach that re-establishes the
 # channel BEFORE it migrates the properties fetches from the attacker again, and
 # that fetch lands here whatever path it is on.
@@ -1272,6 +1427,14 @@ s8_hits=$(hits s8)
 segment_info S6ctl s8
 is "S6 control: the upgraded shell can still make a player fetch a stream" "$s8_outcome" "played"
 ck "S6 control: and the provider logged that GET (control: $s8_hits)" '(( s8_hits >= 1 ))'
+# And the player that plays it is the tree's own launch -- its argv byte for
+# byte what the tree's OWN builder composes, never the verdict under test --
+# and not the staged one: after the adoption the zaps reach only a player
+# that verifies.
+s8_pid=$(player_pid)
+s8_form=$(tree_launch "$s8_pid")
+ck "S6 control: the player playing it is the tree's own launch ($s8_form), not the staged player" \
+   '[[ ( $s8_form == plain || $s8_form == include ) && -n $s8_pid && $s8_pid != "$stage_pid" ]]'
 
 # ============================================================== privacy
 echo "== the credential in the fixture URL reaches no log of ours"
@@ -1312,8 +1475,8 @@ echo "hits: s1=$s1_hits s2=$s2_hits s3=$s3_hits s4=$s4_hits s5=$s5_hits s6=$(hit
 echo "what the attacker logged for the three cases that must refuse (empty is the point): s1=[$(hit_lines s1)] s3=[$(hit_lines s3)] s7=[$(hit_lines s7)]"
 echo "S6: adoption=$s6_adopt stage=$s6_stage stream=$s6_stream attacker GETs across the adoption $self_before -> $self_after"
 if [[ -n $BASELINE ]]; then
-  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's four argv checks and its log check, because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
-  echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything."
+  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's layer checks and its log check (read off the argv, where that tree put the user's tokens; the options file is D-SINK-47's, 0.16.0), because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
+  echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness, the staged-gone guard and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything. Since restart on adoption the replacement check (one restart line, no reload line) reds on every tree older than it: those migrate and reload instead."
 fi
 
 # The floor, live half. D-PLY-9 was not that an assertion was wrong -- it was
@@ -1338,7 +1501,12 @@ fi
 # outlived its shell, the adoption witness, the already-open stream, the
 # attacker's count across the adoption, the zap and its hit log, and the two
 # halves of the provider control.
-EXPECTED_CHECKS=47
+# 47 -> 49 (lane RB, 2026-11-02, restart on adoption): the adoption check now
+# asks for the replacement, and S6 gains two: the staged player gone, and the
+# control played by the tree's own launch rather than the staged player.
+# 49 -> 50 (rc-rao-b, 2026-11-02): S5's control that the options file the
+# player reads was caught, which the delivery and layer checks now read.
+EXPECTED_CHECKS=50
 ran=$checks
 is "the scenario ran every check it has" "$ran" "$EXPECTED_CHECKS"
 

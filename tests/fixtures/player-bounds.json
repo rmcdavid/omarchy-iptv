@@ -18,7 +18,10 @@
     "  ladder(\"term\") = killGraceMs + 2 settleMs                               = 3000",
     "  spawn          = settleConnectMs + spawnPidMs + 2 spawnMs + 2i          = 200 + 2000 + 10000 + 4000 = 16200",
     "  tail           = max(ladder(\"term\") + settleConnectMs, i + firstLoadMs) = max(3200, 5000) = 5000",
-    "  start   = lockMs + lockPollMs + 2i + ladder(\"\") + spawn + tail + marginMs = 6050 + 4000 + 7000 + 16200 + 5000 + 5000 = 43250",
+    "  start   = lockMs + lockPollMs + 2i + carry + ladder(\"\") + spawn + tail + marginMs = 6050 + 4000 + 4000 + 7000 + 16200 + 5000 + 5000 = 47250",
+    "  (carry = 2i, restart on adoption, 2026-11-01: a found player ANOTHER build launched answers its probe and is",
+    "  replaced, not adopted -- its volume, mute, fullscreen and pause read inside one ipcMs, the three set on the new",
+    "  player inside another; walked at 42.07 s against the 38.25 s 43250 left, lane RA's M9.)",
     "  restart = lockMs + lockPollMs + ladder(\"term\") + settleConnectMs + 2i + ladder(\"\") + spawn + tail + marginMs",
     "                                                                         = 6050 + 3000 + 200 + 4000 + 7000 + 16200 + 5000 + 5000 = 46450",
     "  (a restart's own ladder can leave a player in uninterruptible sleep, and adopt_or_spawn then meets it as a",
@@ -57,7 +60,7 @@
   },
   "marginMs": 5000,
   "watchdogMs": {
-    "start": 43250,
+    "start": 47250,
     "restart": 46450,
     "probe": 11000,
     "": 12000

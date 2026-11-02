@@ -184,6 +184,31 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-PLAY-13 | mpv missing notification `mpv not found` / `Install mpv to play channels.` (critical) | M not runnable here (mpv is an Omarchy dependency); verify by code review of the exit-code path | recorded `not run` |
 | TC-PLAY-14 | guide over fullscreen mpv (UX 7.5) | M 5.4 US3 step 10 | overlay draws above; Esc returns; mpv neither paused nor muted |
 
+#### Restart on adoption (owner, 2026-10-31 and 2026-11-01; PLY-RST-21..28)
+
+A player ANOTHER build of this plugin launched is replaced, never fed. These
+rows continue docs/QA-PLAYER.md's PLY-RST table (01-20), which is where they
+belong; they are written here because this lane's brief names this file.
+Every row is a check in `scripts/dev-harness/player-scenario.sh` (or
+`tls-scenario.sh` S6) that reads the kernel, the player's own socket or a
+server's log, run in a nested headless cage on a private bus. The older
+players are launched by the real tags' OWN helpers (`git archive v0.15.0` /
+`v0.16.0`, checked whole with `qa_helper_parts`), never by a hand-written
+copy of their argv. "This tree's launch" is always the tree's own
+`mpv_launch_argv` composed and compared byte for byte, never `launch_verdict`,
+the reading under test.
+
+| ID | Verifies | How | Expected |
+|---|---|---|---|
+| PLY-RST-21 | the decision's case: a shell restart over a player an earlier release launched | H player-scenario L1 | v0.15.0's helper starts P0 with the canary `--osd-duration=4321` on its argv (premise, read off `/proc`); this tree's shell starts: P0 gone, never two token-holders at any 50 ms sample (both seen), P1's argv byte for byte this tree's composed launch with the build marker, the canary on no command line that holds the socket token, `/proc/P1/limits` core `0 0`, `mpv-args.conf` gone, the same channel in the shell and in P1's stash, `time-pos` advancing, exactly one restart line, no player card (the scenario's logging notification stub), the coredump journal +0; one window (asserted on the desk, SKIP under a nested compositor, where hyprctl cannot list it) |
+| PLY-RST-22 | the replacement keeps pause and volume (owner's answer 3) | H L1b | P0 (v0.15.0's) set paused at volume 37 over its own socket (premise read back); after the restart P1 reads `pause true`, `volume 37`, and the shell's `paused` is true |
+| PLY-RST-23 | a v0.16.0 player (no marker) is another build's | H L2 | premise from the two trees' OWN builders: v0.16.0's composed launch differs from this tree's; P0's argv is exactly v0.16.0's; then as PLY-RST-21: P0 gone, never two, P1 this tree's launch, core `0 0`, the same channel playing, one restart line, coredump +0 |
+| PLY-RST-24 | the counter-case: this build's own player is adopted, never restarted; and D-HOST-8 as the cage can show it (M8) | H L3, P4 | the harness shell stopped with `quickshell kill`, the command `omarchy-restart-shell` 4.0.6 stops the real shell with (there by config path, here by the harness shell's recorded pid under the harness's runtime folder), and no new shell started until it had exited and its orphan check had run out: the check seen (premise), the player alive after it; the new shell: same pid alone at every sample and the sampler ran to its END, `/proc/<pid>/stat` field 22 read as a number and unchanged, `time-pos` past the seconds the new shell has existed (a replacement is spawned after it, so it cannot be), no restart line and no replaced line, the shipping probe answers `launch: current`, the shell attached on the same channel. P4: no restart line and no replaced line across `restart-shell` |
+| PLY-RST-25 | the old QML after `omarchy plugin update` without a shell restart: the first zap replaces (owner's answer 2, D-SINK-70's path) | H L4 | the harness on a v0.16.0 export plays A (P0 exactly v0.16.0's launch); this tree's stub, parts and manifest replace the export's by rename under the running shell; a zap to B: the same shell process throughout, P0 gone, never two, P1 this tree's launch with core `0 0`, the old Service plays B and P1's `time-pos` advances, the helper's one replaced line, no player card, coredump +0, one window (desk) |
+| PLY-RST-26 | the older player is never fed | H L5 | a logging server for B stamps every GET on CLOCK_MONOTONIC, the sampler every sample: B was fetched and B's provider header was seen on some request (the two positive controls), its first request follows P0's first absent sample, and no request carrying that header came before it |
+| PLY-RST-27 | a pre-TLS player (0.12.1's own launch) adopted through the real reattach path is replaced, never migrated and reloaded | H tls-scenario S6 | as before, the stage player played the attacker and outlived its shell, the already-open stream stops being fed, the attacker logs nothing new and the zap after it is refused with 0 GETs; now also exactly one restart line, no reload line, no rejection line, the staged process gone, and the control played by the tree's own launch rather than the staged player |
+| PLY-RST-28 | rule 11: the L checks can fail | H `player-scenario.sh --baseline 202a7bc` (0.16.0's code) | red: L1's, L1b's, L2's and L4/L5's replacement checks (P0 survives, is adopted and fed, keeps the canary), L2's builder premise (0.16.0's builder IS 202a7bc's), L3's premise (there is no L2 P1 to adopt) and L3's probe check (that tree's probe has no `launch`); green: the other premises, the two L5 controls, L3's adoption checks (202a7bc never restarts, so they are seen red only under a mutant whose verdict never reads current), and every P check green on the tree but P13's dropped play, D-PLY-28, which recurs on both trees |
+
 #### Bar widget (US4, R7, UX 3.3, 3.4, 4.8, 6.3)
 
 | ID | Verifies | How | Expected |

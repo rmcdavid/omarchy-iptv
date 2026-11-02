@@ -5014,7 +5014,9 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+// Restart on adoption: with no build given the marker names none -- the word
+// the helper uses for a build that is not one (mpv_build_marker).
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--script-opts-append=omarchy_iptv-build=unknown", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -5992,8 +5994,18 @@ check("playerStash reads a record written before the writer was named", Model.pl
 const probeFixture = playerFixture.playerProbe
 const probeBody = JSON.stringify(probeFixture.reply)
 check("parsePlayerProbe: a live player, from the shared vector",
-  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls } })(),
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls, launch: p.launch } })(),
   probeFixture.parsed)
+// Restart on adoption (N2): `launch` is one of the helper's three words or
+// null -- absent (a helper too old to say), renamed, another word, another
+// type, all null, which the shell reads as today's path.
+check("parsePlayerProbe: launch is current, older or unknown, and anything else -- absent, another word, a non-string, an error reply -- is null",
+  [["current"], ["older"], ["unknown"], ["Current"], ["stale"], [""], [1], [true], [null], [{}], [undefined]].map(function (row) {
+    const doc = Object.assign({}, probeFixture.reply)
+    if (row[0] === undefined) delete doc.launch; else doc.launch = row[0]
+    return Model.parsePlayerProbe(JSON.stringify(doc)).launch
+  }).concat([Model.parsePlayerProbe("garbage").launch, Model.parsePlayerProbe(JSON.stringify({ ok: false, kind: "player.probe", launch: "older" })).launch]),
+  ["current", "older", "unknown", null, null, null, null, null, null, null, null, null, null])
 // M5-01: the reattach read. The key is pinned on both sides like `pid`, and a
 // probe without it (an older helper) parses to null rather than to zero.
 // checkCall, not check: a parser that answered null here would throw on
@@ -6129,16 +6141,74 @@ checkCall("D-SINK-19: one writer for the bar entry, and the shield re-armed afte
 // place) and the already-open unverified stream ran to the end of its stream.
 // "hold" is the arm that did not exist. Found by the review of that lane.
 checkCall("D-SINK-16: an owed TLS reload is HELD when the shell is not ready, and only cleared by a deliberate stop", () => {
+  const ready = { pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: true, channelsLoaded: true, hasChannel: true, sourceMatches: true }
   return [
     Model.tlsReloadDisposition({ pending: false }),
     Model.tlsReloadDisposition({ pending: true, userStopped: true }),
     Model.tlsReloadDisposition({ pending: true, stopping: true }),
-    Model.tlsReloadDisposition({ pending: true, nowPlayingId: null, cacheDir: "/c", playerUp: true }),
-    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "", playerUp: true }),
-    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: false }),
-    Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: true })
+    Model.tlsReloadDisposition(Object.assign({}, ready, { nowPlayingId: null })),
+    Model.tlsReloadDisposition(Object.assign({}, ready, { cacheDir: "" })),
+    Model.tlsReloadDisposition(Object.assign({}, ready, { playerUp: false })),
+    Model.tlsReloadDisposition(ready),
+    // D-PLY-51 (2026-11-01): it waits for the channel LIST, and a channel this
+    // source's list cannot hold -- another source's stash, or an id the list
+    // lacks -- is owed to nothing: cleared, never re-sent against this cache.
+    Model.tlsReloadDisposition(Object.assign({}, ready, { channelsLoaded: false })),
+    Model.tlsReloadDisposition(Object.assign({}, ready, { sourceMatches: false })),
+    Model.tlsReloadDisposition(Object.assign({}, ready, { hasChannel: false })),
+    Model.tlsReloadDisposition(Object.assign({}, ready, { channelsLoaded: false, sourceMatches: false }))
   ]
-}, ["none", "clear", "clear", "hold", "hold", "hold", "deliver"])
+}, ["none", "clear", "clear", "hold", "hold", "hold", "deliver", "hold", "clear", "clear", "hold"])
+// ---- restart on adoption (N3, N4): the shell's rules, called ----
+checkCall("restart on adoption: the probe words that ask for a restart are older and unknown; current and a helper too old to say (null) do not", () =>
+  ["older", "unknown", "current", null, undefined, "", "Older"].map(w => Model.probeLaunchOlder(w)),
+  [true, true, false, false, false, false, false])
+checkCall("restart on adoption: a stash from another source never matches; an empty key on either side does (reconcileNowPlaying's test, now one function)", () =>
+  [Model.adoptedSourceMatches("a", "a"), Model.adoptedSourceMatches("a", "b"), Model.adoptedSourceMatches("", "b"),
+   Model.adoptedSourceMatches("a", ""), Model.adoptedSourceMatches(null, undefined)],
+  [true, false, true, true, true])
+checkCall("D-PLY-51 / restart on adoption: adoptedChannelReach -- hold until an id and the LIST are there, gone for another source or a missing id, busy while the player is not up or the slot is busy, else ready", () => {
+  const r = { nowPlayingId: "t:a", channelsLoaded: true, hasChannel: true, sourceMatches: true, playerUp: true, slotBusy: false }
+  const w = o => Model.adoptedChannelReach(Object.assign({}, r, o))
+  return [w({}), w({ nowPlayingId: "" }), w({ nowPlayingId: null }), w({ channelsLoaded: false }), w({ channelsLoaded: false, sourceMatches: false }),
+          w({ sourceMatches: false }), w({ hasChannel: false }), w({ playerUp: false }), w({ slotBusy: true }), Model.adoptedChannelReach(null)]
+}, ["ready", "hold", "hold", "hold", "hold", "gone", "gone", "busy", "busy", "hold"])
+// One vector per row of design 4.2's table, and the four orderings its
+// mutants break: sourceMatches dropped (row "defer: other source" would read
+// restart), spent dropped (a second automatic restart), unsafe dropped on
+// expiry (an unsafe player kept), unsafe before deliverable (an unsafe player
+// whose channel CAN come back stopped instead of restarted).
+checkCall("restart on adoption (N3): olderRestartDisposition, one vector per row -- none, clear, hold, restart, defer, stop", () => {
+  const d = { owed: true, spent: false, stopping: false, userStopped: false, nowPlayingId: "t:a", channelsLoaded: true, hasChannel: true,
+              sourceMatches: true, playerUp: true, slotBusy: false, expired: false, unsafe: false }
+  const w = o => Model.olderRestartDisposition(Object.assign({}, d, o))
+  return [
+    Model.olderRestartDisposition({ owed: false }), Model.olderRestartDisposition(null),
+    w({ userStopped: true }), w({ stopping: true }), w({ stopping: true, unsafe: true }),
+    w({ channelsLoaded: false }), w({ slotBusy: true }), w({ playerUp: false }), w({ nowPlayingId: "" }),
+    w({}), w({ unsafe: true }),
+    w({ hasChannel: false }), w({ sourceMatches: false }), w({ channelsLoaded: false, expired: true }), w({ slotBusy: true, expired: true }),
+    w({ hasChannel: false, unsafe: true }), w({ sourceMatches: false, unsafe: true }), w({ channelsLoaded: false, expired: true, unsafe: true }),
+    w({ spent: true }), w({ spent: true, unsafe: true }), w({ spent: true, slotBusy: true }), w({ spent: true, slotBusy: true, unsafe: true })
+  ]
+}, ["none", "none",
+    "clear", "clear", "clear",
+    "hold", "hold", "hold", "hold",
+    "restart", "restart",
+    "defer", "defer", "defer", "defer",
+    "stop", "stop", "stop",
+    "defer", "stop", "hold", "hold"])
+checkCall("restart on adoption: the new refusal `player_foreign` has a sentence on a player verb, is local (marks nothing), and its helper message never reaches the user", () => {
+  const st = { ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" } }
+  return [Model.statusReason(st), Model.playerStartFailure("player_foreign")]
+}, ["Another program answers the player's socket", "local"])
+checkCall("restart on adoption (N4): playFork answers start while a restart is owed, whatever else it would answer; and a refused play that says `outdated` is routed to start", () => [
+  Model.playFork({ socketAttached: true, restartOwed: true }), Model.playFork({ socketAttached: true, controlBusy: true, restartOwed: true }),
+  Model.playFork({ playerPending: true, restartOwed: true }), Model.playFork({ socketAttached: true, restartOwed: "yes" }),
+  Model.playFork({ socketAttached: true }),
+  Model.playFailureVerdict("not_running", { nowPlaying: true, playerUp: true, userStopped: false, retriesLeft: true, outdated: true }),
+  Model.playFailureVerdict("not_running", { nowPlaying: true, playerUp: true, userStopped: false, retriesLeft: false })
+], ["start", "start", "start", "zap", "zap", "start", "start"])
 // The reading is three-valued and a count is a count. A reader that let `false`
 // coerce to 0 would read an unreadable player as SAFE, which is the one error
 // whose cost is the credential.
@@ -6192,37 +6262,11 @@ check("the four property names the helper and the shell must spell the same",
   [tlsFixture.properties.verify, tlsFixture.properties.streamOptions, tlsFixture.properties.demuxerOptions, tlsFixture.properties.autoProfiles])
 check("and the fixture names them, so the join is a call and not a copy",
   [tlsFixture.properties.verify, tlsFixture.properties.streamOptions], ["tls-verify", "stream-lavf-o"])
-// WHAT THIS PAIR IS AND IS NOT (rule 14, said out loud rather than implied).
-// Everything above calls the shipping rule. These two read Service.qml as TEXT,
-// because nothing in this suite can run a Quickshell component, and a regex over
-// a file CANNOT go red for the failure the fix exists to prevent - an adopted
-// player that goes on streaming unverified. They are wiring pins: they catch the
-// decision being deleted or routed somewhere else, which is the failure mode this
-// fix's own predecessor had (D-PLY-25 filed it and nothing acted). The behaviour
-// claim belongs to the live end-to-end pass on a real mpv, and is UNVERIFIED by
-// this suite - see the runnable steps left with D-SINK-16.
-check("wiring pin, not a behaviour test: the reattach asks the rule before it adopts", [
-  /var tls = Model\.playerTlsVerdict\(probe\.tls\)/.test(serviceSource),
-  // The verdict is taken BEFORE the stash branch, because that branch returns to
-  // be retried and the second probe honestly has nothing left to report.
-  serviceSource.indexOf("Model.playerTlsVerdict(probe.tls)") < serviceSource.indexOf("var stash = probe.stash"),
-  // Unsafe ends in the ladder, not in an adoption.
-  /if \(!tls\.safe\) \{[\s\S]{0,220}?stopUnadoptedPlayer\("unverified"\)[\s\S]{0,40}?return/.test(serviceSource),
-  // And the flag is only ever SET from the verdict.
-  (serviceSource.match(/root\.tlsReloadPending = true/g) || []).length
-], [true, true, true, 1])
-check("wiring pin, not a behaviour test: the reload is delivered from both places the cache can land", [
-  (serviceSource.match(/root\.reestablishForTls\(\)/g) || []).length,
-  // It re-sends the user's own intent, which is the only repair ruling CL5
-  // allows, rather than inventing a second load path.
-  /function reestablishForTls\(\)[\s\S]{0,2200}?root\.reapplyIntent\(String\(root\.nowPlaying\.id\)\)/.test(serviceSource),
-  // And it ASKS Model.tlsReloadDisposition rather than deciding inline. The
-  // three conditions used to be written out here, and one of them was wrong in
-  // a way no test could see, so the decision moved to Model.js where the check
-  // above calls it for real. The cache directory is now an argument rather than
-  // a comparison, which is what this line pins.
-  /function reestablishForTls\(\)[\s\S]{0,2200}?Model\.tlsReloadDisposition\(\{[\s\S]{0,400}?cacheDir: root\.activeCacheDir/.test(serviceSource)
-], [2, true, true])
+// The two wiring pins that stood here read Service.qml as TEXT and could not
+// go red for the failure they guarded (rule 14). They are calls now, through
+// tests/service-harness.js, in the restart-on-adoption block below: "the
+// reattach asks the rule before it adopts" and "the reload is delivered from
+// both places the cache can land".
 // The helper's refusal has to land as a FAILED play rather than a silent no-op:
 // `tls_unverified` is not retryable (it will not fix itself) and not unreadable
 // (we know exactly what happened), so it takes the rollback branch and the user
@@ -6470,7 +6514,7 @@ check("player fixture has all four tables", [playerFixture.mpvArgv.length > 0, p
 check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
 for (const v of playerFixture.mpvArgv) {
   const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
-  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args }), v.argv)
+  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args, build: v.build }), v.argv)
   if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
 }
 // D-SINK-13. The exact-array checks above already catch a dropped trailing
@@ -6484,6 +6528,24 @@ check("fixture mpvArgv: every composed argv ends with the fixture's own trailing
     return a[a.length - 1] !== playerFixture.tlsTrailing
   }).map(function (v) { return v.name }) },
   { token: Model.MPV_TLS_VERIFY, offenders: [] })
+// Restart on adoption (N1): every vector names its build, and the marker is
+// in every composed argv exactly once, the last element of the base section
+// (right after layer 1 of TLS, before the options file and the pin block) --
+// the python mirror asserts the same over the same vectors -- and a build
+// that is not one renders as the word "unknown" in both.
+check("fixture mpvArgv: the build marker is in every composed argv once, right after layer 1 of TLS and ahead of the options file and the pin block; at least one vector's build renders as unknown",
+  { offenders: playerFixture.mpvArgv.filter(function (v) {
+    const user = Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args
+    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user, build: v.build })
+    const marker = Model.mpvBuildMarker(v.build)
+    const at = a.indexOf(marker)
+    const inc = a.findIndex(function (t) { return t.indexOf("--include=") === 0 })
+    return typeof v.build !== "string" || a.filter(function (t) { return t === marker }).length !== 1
+      || at !== a.indexOf(Model.MPV_TLS_VERIFY) + 1 || (inc !== -1 && inc < at)
+      || at >= a.length - Model.mpvPinBlock(Model.playerDirs(v.socketPath, v.stateDir)).length
+  }).map(function (v) { return v.name }),
+    unknown: playerFixture.mpvArgv.some(function (v) { return v.argv.indexOf("--script-opts-append=" + Model.PLAYER_BUILD_KEY + "=unknown") !== -1 }) },
+  { offenders: [], unknown: true })
 check("fixture mpvArgv: at least one vector passes user arguments, or the trailing token is invisible to the pinning",
   playerFixture.mpvArgv.filter(function (v) { return (v.mpvArgs || []).length > 0 && Model.splitMpvArgs(v.mpvArgs.join(" ")).args.length > 0 }).length > 0, true)
 // D-PLY-27. The exact-array checks above carry the software-renderer token by
@@ -14830,6 +14892,432 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
       return [settling, said(h)]
     }, [true, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]])
+  }
+
+  // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----
+  //
+  // A player ANOTHER build of this plugin launched is replaced, never fed:
+  // the reattach adopts it for a hold, waits for the channel LIST, and issues
+  // one `player start --keep-pause` of the same channel (the helper replaces
+  // the player in that call). Every case runs Service.qml's own functions;
+  // the probe's reply arrives on the player slot's exit as the real one
+  // does, the channel list through applyChannels, the hold through its own
+  // Timer block (h.elapse). The harness's Socket never connects (C4/C5, the
+  // harness's own rule 10); where the case needs the observer ON the player
+  // it sets root.playerSocket to a connected socket and runs
+  // onPlayerAttached with it, which is what a successful connect does, and
+  // releasePlayerSocket + handlePlayerGone for its EOF, which is what the
+  // disconnect does (the Socket's onConnectionStateChanged).
+  {
+    const X = { name: "X", group: "G", tvgId: "x", url: "http://s.example.test/x.ts" }
+    const Y = { name: "Y", group: "G", tvgId: "y", url: "http://s.example.test/y.ts" }
+    const STASH = o => Object.assign({ schema: 1, playing: true, id: "t:x", name: "X", group: "G", launchedFrom: "", sourceKey: KA,
+                                       since: 1, entryId: 1, seq: 1, verb: "start" }, o || {})
+    const SAFE = { verify: true, optionCount: 0, unpinned: 0, migrated: false }
+    const MIGRATED = { verify: true, optionCount: 0, unpinned: 0, migrated: true }
+    const UNSAFE = { verify: false, optionCount: 0, unpinned: 0, migrated: true }
+    const probeOf = o => JSON.stringify(Object.assign({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 4242, idle: false,
+      stash: STASH(), owner: null, seq: 1, claimed: true, rewind: null, tls: SAFE, launch: "older" }, o || {}))
+    const channelsDoc = rows => JSON.stringify({ version: 1, generatedAt: 1, channels: rows })
+    const spy = (h, proc) => {
+      const seen = []
+      let held = h.ids[proc].running
+      Object.defineProperty(h.ids[proc], "running", { get() { return held }, set(v) { held = v; if (v === true) seen.push(H.helperView(h.ids[proc].command, h.ids[proc].environment)) }, configurable: true })
+      return seen
+    }
+    const verbOf = c => { const i = c.indexOf("player"); return i === -1 ? (c.indexOf("play") === -1 ? "" : "play") : "player " + c[i + 1] }
+    const idOf = c => c[c.indexOf("--id") + 1]
+    const exit = (h, text) => { h.ids.playerProc.running = false; h.root.handlePlayerResult(text); h.drain() }
+    const reattach = (h, reply) => { h.root.runPlayerProbe(); exit(h, reply) }
+    const land = (h, rows) => { h.root.applyChannels(channelsDoc(rows || [X, Y]), h.root.activeCacheDir); h.drain() }
+    const attach = h => {
+      const sock = { connected: true, write() {}, flush() {}, destroy() {} }
+      h.root.playerSocket = sock
+      h.root.onPlayerAttached(sock)
+      h.drain()
+    }
+    const eof = h => { h.root.releasePlayerSocket(); h.root.handlePlayerGone(); h.drain() }
+    const stops = h => h.detached.filter(a => a.indexOf("player") !== -1 && a[a.indexOf("player") + 1] === "stop").length
+    const restartLines = h => h.warnings.filter(w => w === M.OLDER_RESTART_LINE).length
+    const okStart = (id, o) => JSON.stringify(Object.assign({ ok: true, kind: "player.start", spawned: true, pid: 5151, id, name: id.slice(2).toUpperCase(),
+      entryId: 1, seq: 0, firstLoad: { state: "playing", reason: "" }, warnings: [], applied: true, playing: null, replaced: 1 }, o || {}))
+    const startArgs = slots => slots.filter(c => verbOf(c) === "player start")
+    const boot = () => {
+      const h = bootPlayer()
+      return { h, slots: spy(h, "playerProc"), zaps: spy(h, "controlProc") }
+    }
+
+    checkCall("restart on adoption (N5): a player another build launched is adopted for the hold -- the bar names its channel at once -- and once the channel LIST lands, exactly ONE `player start --id <stash> --keep-pause` goes out on the player slot: no `play`, no focus, one fixed journal line", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf())
+      const held = [h.root.nowPlaying ? h.root.nowPlaying.id : null, startArgs(slots).length, h.root.olderRestartOwed === true]
+      land(h)
+      const starts = startArgs(slots)
+      return [held, starts.length, starts.length ? [idOf(starts[0]), starts[0].indexOf("--keep-pause") !== -1] : null,
+              zaps.length, h.root.wantFocus, restartLines(h), h.warnings.some(w => w.indexOf("t:x") !== -1 || w.indexOf("4242") !== -1)]
+    }, [["t:x", 0, true], 1, ["t:x", true], 0, false, 1, false])
+
+    checkCall("restart on adoption (N5, the counter-case): a player THIS build launched is adopted as ever -- no start, ever, and no restart line", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ launch: "current" }))
+      land(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      return [h.root.nowPlaying ? h.root.nowPlaying.id : null, startArgs(slots).length, zaps.length, h.root.olderRestartOwed === true, restartLines(h)]
+    }, ["t:x", 0, 0, false, 0])
+
+    checkCall("restart on adoption (N5): a probe from a helper too old to say (`launch` absent) keeps today's path exactly: adopted, nothing started", () => {
+      const { h, slots } = boot()
+      const reply = JSON.parse(probeOf())
+      delete reply.launch
+      reattach(h, JSON.stringify(reply))
+      land(h)
+      return [h.root.nowPlaying ? h.root.nowPlaying.id : null, startArgs(slots).length, h.root.olderRestartOwed === true]
+    }, ["t:x", 0, false])
+
+    checkCall("restart on adoption (N5): the stash names ANOTHER source -- nothing is started (that id means another channel here), and the user's next channel change is a `player start` that replaces the player, not a `play` into it", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ stash: STASH({ sourceKey: KB }) }))
+      land(h)
+      const before = startArgs(slots).length
+      h.root.play("t:y", true, "")
+      h.drain()
+      const starts = startArgs(slots)
+      return [before, starts.map(idOf), starts.map(c => c.indexOf("--keep-pause") !== -1), zaps.length, h.root.olderRestartOwed === true]
+    }, [0, ["t:y"], [false], 0, true])
+
+    checkCall("restart on adoption (N5): a channel change while the restart is still owed (held: the slot was busy when the list landed) is a `player start` of the NEW channel, without --keep-pause, and the automatic restart never fires over it -- the replacement and the zap are one event", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf())
+      h.root.runPlayerProbe()
+      land(h)
+      h.root.play("t:y", true, "")       // the slot is busy: the start waits its turn
+      h.drain()
+      exit(h, probeOf())                 // stale (the play moved playSeq), then the queued start
+      const starts = startArgs(slots)
+      return [starts.map(idOf), starts.map(c => c.indexOf("--keep-pause") !== -1), zaps.length, restartLines(h)]
+    }, [["t:y"], [false], 0, 0])
+
+    checkCall("restart on adoption (N5): a stop before the restart is delivered ends it -- nothing is started when the list lands", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      h.root.stop()
+      h.drain()
+      land(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      return [startArgs(slots).length, h.root.olderRestartOwed === true]
+    }, [0, false])
+
+    checkCall("restart on adoption (N5): the restart's ok reply ends the episode and keeps the replaced player's pause; a later probe that reads the replacement as another build's is NOT restarted again (journaled, deferred)", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      land(h)
+      const seq = h.root.playSeq
+      exit(h, okStart("t:x", { seq, paused: true }))
+      const ended = [h.root.olderRestartOwed === true, h.root.paused]
+      reattach(h, probeOf({ seq }))
+      land(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      return [ended, startArgs(slots).length, h.warnings.filter(w => w === M.OLDER_RESTART_AGAIN_LINE).length, stops(h)]
+    }, [[false, true], 1, 1, 0])
+
+    checkCall("restart on adoption (N5): the older player's EOF while its replacement is being started is a respawn -- the birth edge held, no card, nothing dropped", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h)
+      eof(h)
+      return [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.playerPending, h.root.playerWanted, toasts(h).length]
+    }, ["t:x", true, true, 0])
+
+    checkCall("restart on adoption (N5): the older player ends on its own during the hold (no start in flight) -- the episode ends with it, nothing is started", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      eof(h)
+      land(h)
+      return [h.root.olderRestartOwed === true, startArgs(slots).length, h.root.nowPlaying]
+    }, [false, 0, null])
+
+    checkCall("restart on adoption (N5, Q4): the automatic restart refused BEFORE the ladder for a local reason, the observer still on the older player -- no card, the channel kept, deferred; the user's next change still replaces it", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h)
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "runtime_unwritable", message: "could not make the player's runtime folder: Read-only file system" }, id: "t:x", seq: h.root.playSeq }))
+      const kept = [h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h).length, h.root.playerWanted, h.root.olderRestartOwed === true, stops(h)]
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [kept, startArgs(slots).map(idOf)]
+    }, [["t:x", 0, true, true, 0], ["t:x", "t:y"]])
+
+    checkCall("D-PLY-52 (its bound): a refusal AFTER the ladder -- the older player's EOF arrived, and the observer has since reached the NEW player -- is not \"refused while playing\": the tail runs (the card, nothing kept)", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h)
+      eof(h)                              // the ladder took the older player down
+      attach(h)                           // and the observer reached the new one
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" }, id: "t:x", seq: h.root.playSeq }))
+      return [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [["74021 Could not start playback"], null, false])
+
+    checkCall("restart on adoption (N5, Q4's second exception): the automatic restart refused because THIS build refuses the channel the older player streams (local_address) -- the older player is stopped and `Stream failed` told", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h)
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "local_address", message: "the stream address is on this machine or its network" }, id: "t:x", seq: h.root.playSeq }))
+      return [stops(h), toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [1, ["74011 Stream failed"], null, false])
+
+    checkCall("restart on adoption (N5): an older player that could not be made safe, whose channel CAN be re-established, is restarted, not stopped (the new player pins everything from its own command line)", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      const held = [h.root.nowPlaying ? h.root.nowPlaying.id : null, stops(h)]
+      land(h)
+      return [held, startArgs(slots).map(idOf), stops(h)]
+    }, [["t:x", 0], ["t:x"], 0])
+
+    checkCall("restart on adoption (N5, Q4's first exception): an older player that could not be made safe and whose hold runs out first is stopped, as 0.16.0 stops one", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      h.elapse(M.OLDER_RESTART_HOLD_MS - 1)
+      const before = stops(h)
+      h.elapse(1)
+      return [before, stops(h), startArgs(slots).length, h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [0, 1, 0, null, false])
+
+    checkCall("restart on adoption (N5, Q4): a SAFE older player whose hold runs out first plays on, fed nothing -- no stop, no start -- and the next channel change replaces it", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf())
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      const deferred = [stops(h), startArgs(slots).length, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.olderRestartOwed === true]
+      land(h)
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [deferred, startArgs(slots).map(idOf), zaps.length]
+    }, [[0, 0, "t:x", true], ["t:y"], 0])
+
+    checkCall("restart on adoption (N5): Enter on the row of the channel the deferred older player is playing is the replacement (a start, at live), not the focus-only shortcut -- its id may be another source's", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ stash: STASH({ sourceKey: KB }) }))
+      land(h)
+      h.root.play("t:x", true, "")
+      h.drain()
+      return startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
+    }, ["t:x"])
+
+    checkCall("restart on adoption (path 6): a user's start the watchdog stopped, whose probe finds the OLDER player still there -- the start's failure told once (Helper timed out), the older player adopted and deferred, not restarted automatically; the next change replaces it", () => {
+      const PBX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+      const { h, slots } = boot()
+      land(h)
+      h.root.play("t:y", true, "")
+      h.drain()
+      h.elapse(PBX.watchdogMs.start)
+      exit(h, "")                                     // TERMed: no output; the probe is sent
+      exit(h, probeOf({ seq: h.root.playSeq }))      // the start never got to replace it
+      const after = [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying ? h.root.nowPlaying.id : null,
+                     h.root.olderRestartOwed === true, restartLines(h), startArgs(slots).map(idOf)]
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [after, startArgs(slots).map(idOf)]
+    }, [[["74021 Could not start playback"], "t:x", true, 0, ["t:y"]], ["t:y", "t:y"]])
+
+    checkCall("restart on adoption (N5): the channel the older player streams is not on the applied list -- deferred at once, not held for the whole hold, and no start", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      land(h, [Y])
+      return [startArgs(slots).length, h.root.olderRestartOwed === true, h.root.olderRestart && h.root.olderRestart.spent, h.ids.olderRestartTimer.running]
+    }, [0, true, true, false])
+
+    checkCall("restart on adoption (N5): a restart held because the player slot was busy is delivered when the slot frees (a probe's answer)", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      h.root.runPlayerProbe()         // the slot is busy when the list lands
+      land(h)
+      const held = startArgs(slots).length
+      exit(h, probeOf({ seq: h.root.playSeq }))
+      return [held, startArgs(slots).map(idOf)]
+    }, [0, ["t:x"]])
+
+    // D-PLY-51 (2026-11-01): the TLS reload re-sent the stash's id against the
+    // ACTIVE source's cache; with the source switched while the shell was down
+    // that played the active source's channel of the same id. Red on 202a7bc:
+    // one `play --id t:x` goes out.
+    checkCall("D-PLY-51: an adopted player of THIS build that the probe had to migrate, whose stash is ANOTHER source's -- no `play` re-establishes it against this source's list; the same stash from this source is re-established once", () => {
+      const other = boot()
+      reattach(other.h, probeOf({ launch: "current", tls: MIGRATED, stash: STASH({ sourceKey: KB }) }))
+      land(other.h)
+      const same = boot()
+      reattach(same.h, probeOf({ launch: "current", tls: MIGRATED }))
+      land(same.h)
+      return [other.zaps.map(c => verbOf(c) + ":" + idOf(c)), same.zaps.map(c => verbOf(c) + ":" + idOf(c)), other.h.root.tlsReloadPending]
+    }, [[], ["play:t:x"], false])
+
+    // The two regex wiring pins that stood here (rule 14: a grep cannot go red
+    // for the failure) are now calls. The first: the reattach asks the TLS
+    // rule before it adopts, and an unsafe player of this build is stopped on
+    // the FIRST answer, not adopted and not re-read.
+    checkCall("D-SINK-16 (was a wiring pin): an adopted player of this build that cannot be made safe is stopped on the first answer -- even with a stash too ambiguous to adopt -- and nothing is adopted; one that had to be migrated owes the reload", () => {
+      const rows = [probeOf({ launch: "current", tls: UNSAFE }), probeOf({ launch: "current", tls: UNSAFE, stash: null, idle: true }),
+                    (() => { const r = JSON.parse(probeOf({ tls: UNSAFE })); delete r.launch; return JSON.stringify(r) })()]
+      const out = rows.map(reply => {
+        const { h } = boot()
+        reattach(h, reply)
+        return [stops(h), h.root.nowPlaying, h.ids.probeRetryTimer.restarts]
+      })
+      const { h } = boot()
+      reattach(h, probeOf({ launch: "current", tls: MIGRATED }))
+      return out.concat([[h.root.tlsReloadPending, h.root.nowPlaying ? h.root.nowPlaying.id : null]])
+    }, [[1, null, 0], [1, null, 0], [1, null, 0], [true, "t:x"]])
+
+    // The second: the reload is delivered from both places the channel list
+    // can arrive -- after the probe (applyChannels) and before it (the end of
+    // applyProbe) -- as a re-sent intent, the one repair ruling CL5 allows.
+    checkCall("D-SINK-16 (was a wiring pin): the reload of a migrated player goes out ONCE, as `play --id <stash>`, whether the channel list lands after the probe or before it", () => {
+      const after = boot()
+      reattach(after.h, probeOf({ launch: "current", tls: MIGRATED }))
+      const early = after.zaps.length
+      land(after.h)
+      const before = boot()
+      land(before.h)
+      reattach(before.h, probeOf({ launch: "current", tls: MIGRATED }))
+      return [early, after.zaps.map(c => verbOf(c) + ":" + idOf(c)), before.zaps.map(c => verbOf(c) + ":" + idOf(c))]
+    }, [0, ["play:t:x"], ["play:t:x"]])
+
+    // D-PLY-52 (2026-11-01): a user's `player start` that adopts the player
+    // this shell observes, refused before the lock, took the tail that assumes
+    // the player never started: nowPlaying dropped and a card posted while the
+    // player played on. Red on 202a7bc: the bar goes idle and the card is up.
+    checkCall("D-PLY-52: a user's adopting start refused before the lock while the observed player plays on -- the label goes back to the channel still playing, as a failed zap's does: no card, nothing dropped, the observer kept", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ launch: "current" }))
+      attach(h)
+      land(h)
+      // A start that ADOPTS the observed player, as play() issues one when its
+      // fork answers "start" over a live player (a restart owed, or the
+      // redundant start its comment allows): the intent moved to Y, the label
+      // of what plays kept in previousPlaying for that intent -- play()'s own
+      // three writes (previousPlayingSeq since the recheck of lane RA).
+      h.root.nowPlaying = { id: "t:y", name: "Y", group: "G", launchedFrom: "", since: 2 }
+      h.root.previousPlaying = { id: "t:x", name: "X", group: "G", launchedFrom: "", since: 1 }
+      h.root.previousPlayingSeq = h.root.playSeq
+      h.root.issuePlayerSession("start", h.root.channelIndex["t:y"], "")
+      h.drain()
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "socket_path_blocked", message: "the socket path is not a socket" }, id: "t:y", seq: h.root.playSeq }))
+      return [h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h).length, h.root.playerWanted, h.root.lastError !== ""]
+    }, ["t:x", 0, true, true])
+
+    checkCall("D-PLY-52 (the restart's path): a channel change while another build's player is owed, refused before the lock -- the player still plays its channel, the label goes back to it, no card", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is not on the list: the restart is deferred
+      h.root.play("t:y", true, "")
+      h.drain()
+      const asked = startArgs(slots).map(idOf)
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "no_cache", message: "no channel list" }, id: "t:y", seq: h.root.playSeq }))
+      return [asked, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h).length, h.root.playerWanted, h.root.olderRestartOwed === true]
+    }, [["t:y"], "t:x", 0, true, true])
+
+    checkCall("restart on adoption: the argv the shell builds carries --keep-pause only for the episode's own restart -- not for a zap's start, not once a newer intent moved playSeq", () => {
+      const ep = { seq: 7, spent: true }
+      return [M.olderRestartKeepsPause(ep, 7), M.olderRestartKeepsPause(ep, 8), M.olderRestartKeepsPause({ seq: 7, spent: false }, 7),
+              M.olderRestartKeepsPause(null, 7), M.olderRestartKeepsPause(undefined, 0),
+              M.playerStartArgv("/s", "/c", "t:x", 7, "", 0, [], 0, true).indexOf("--keep-pause") !== -1,
+              M.playerStartArgv("/s", "/c", "t:x", 7, "", 0, [], 0, "yes").indexOf("--keep-pause") !== -1,
+              M.playerStartArgv("/s", "/c", "t:x", 7, "", 0, ["--cache=yes"], 42).indexOf("--keep-pause") !== -1,
+              M.playerRestartArgv("/s", "/c", "t:x", 7, "", 0, [], "term", 0, true).indexOf("--keep-pause") !== -1]
+    }, [true, false, false, false, false, true, false, false, true])
+
+    // ---- the recheck of lane RA (2026-11-01): four gaps, each red on 072ec7d ----
+    const refusal = (kind, code, message, id, seq) => JSON.stringify({ ok: false, kind: "player." + kind, error: { code, message }, id, seq })
+    const READONLY = "could not make the player's runtime folder: Read-only file system"
+
+    checkCall("restart on adoption (recheck): the automatic restart refused because THIS build refuses the channel stops the older player even when no observer was attached when it was issued (Q4's second exception does not depend on the observer)", () => {
+      const { h } = boot()
+      land(h)
+      reattach(h, probeOf())              // the list is there: the restart goes out from applyProbe's own end
+      exit(h, refusal("start", "local_address", "the stream address is on this machine or its network", "t:x", h.root.playSeq))
+      return [stops(h), toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [1, ["74011 Stream failed"], null, false])
+
+    checkCall("restart on adoption (recheck): a probe that finds THIS build's player -- the automatic restart timed out after its replacement came up -- ends the episode: the replacement is adopted and not stopped as the unsafe older player it replaced, and the next change is a zap", () => {
+      const PBX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      land(h)
+      const issued = startArgs(slots).length
+      h.elapse(PBX.watchdogMs.start)
+      exit(h, "")                                   // TERMed: no output; the probe is sent
+      exit(h, probeOf({ launch: "current", seq: h.root.playSeq }))
+      const adopted = [h.root.nowPlaying ? h.root.nowPlaying.id : null, stops(h), h.root.olderRestartOwed === true]
+      land(h)
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [issued, adopted, stops(h), startArgs(slots).length, zaps.map(verbOf)]
+    }, [1, ["t:x", 0, false], 0, 1, ["play"]])
+
+    checkCall("restart on adoption (recheck): a probe that finds NO player ends the episode with it", () => {
+      const { h } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      reattach(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null, launch: null, seq: h.root.playSeq }))
+      return [h.root.olderRestartOwed === true, stops(h), h.root.nowPlaying]
+    }, [false, 0, null])
+
+    checkCall("D-PLY-52 (recheck): a health `player restart` refused before the lock is told and ends the session as before -- it replaces a player that stopped answering, so \"refused while it plays on\" is not its case", () => {
+      const { h } = boot()
+      reattach(h, probeOf({ launch: "current" }))
+      attach(h)
+      land(h)
+      h.root.restartPlayer()
+      h.drain()
+      exit(h, refusal("restart", "runtime_unwritable", READONLY, "t:x", h.root.playSeq))
+      return [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying]
+    }, [["74021 Could not start playback"], null])
+
+    checkCall("D-PLY-52 (recheck): the label a refused start puts back is the one the play() that issued it kept -- once that start answered ok it is spent, and a later refused start of the same player never relabels to the channel the replaced player had", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: the restart is deferred
+      h.root.play("t:y", true, "")       // the replacement, a start
+      h.drain()
+      eof(h)                              // the older player laddered during it
+      attach(h)                           // the observer on the new one
+      exit(h, okStart("t:y", { seq: h.root.playSeq }))
+      const playing = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.previousPlaying]
+      h.root.issuePlayerSession("start", h.root.channelIndex["t:y"], "")   // a start no play() issued (a repair)
+      h.drain()
+      exit(h, refusal("start", "runtime_unwritable", READONLY, "t:y", h.root.playSeq))
+      return [playing, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+    }, [["t:y", null], "t:y"])
+
+    checkCall("restart on adoption (recheck): while another build's player is owed its replacement, the retry of a channel change's start that lost the lock is a `player start` again -- never a `play` into that player (playRetryTimer reads zapReady)", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: deferred, still owed
+      h.root.play("t:y", true, "")
+      h.drain()
+      exit(h, refusal("start", "busy", "another player start holds the lock", "t:y", h.root.playSeq))
+      const armed = h.ids.playRetryTimer.restarts
+      const fired = h.fireTimer("playRetryTimer")
+      h.drain()
+      return [armed, fired, startArgs(slots).map(idOf), zaps.map(verbOf)]
+    }, [1, true, ["t:y", "t:y"], []])
+
+    checkCall("restart on adoption (recheck): while another build's player is owed its replacement, a health tick that finds it on another channel of this source re-applies nothing into it (reapplyIntent reads zapReady)", () => {
+      const { h, zaps } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: deferred, still owed
+      h.root.controlKind = "status"
+      h.root.handleControlResult(JSON.stringify({ ok: true, kind: "status", running: true, playing: true, mpv: "0.41.0",
+                                                  stash: STASH({ id: "t:y", name: "Y" }) }) + "\n")
+      h.drain()
+      return [h.root.olderRestartOwed === true, h.root.channelRepairs, zaps.map(verbOf)]
+    }, [true, 1, []])
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----

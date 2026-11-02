@@ -1036,7 +1036,12 @@ with `-I`, medians 24.95 and 23.1, at a load average of 2.2-3.0, so the lower
 end is the noise's, not a bound). Every run's reads ended in EACCES once
 shielded, 96 of 96. Readable by same-uid processes only in that
 window, as before. What remains: a player adopted after the upgrade keeps the
-tokens on its argv until it restarts; and the measurement is not valid inside
+tokens on its argv until it restarts **[2026-11-02, restart on adoption (ARCHITECTURE-PLAYER 4.5.2), on dev and
+unreleased: such a player is fed no channel. It is replaced at the first
+reattach after the update, or at the first channel change when the shell was
+not restarted. Where its
+channel cannot be re-established, it plays on, fed nothing, until the next
+channel change or a stop, or is stopped when it cannot be made safe.]**; and the measurement is not valid inside
 `unshare -rn` (the rig's own user namespace grants its reader CAP_SYS_PTRACE
 over the helper, and every read succeeded), so it was taken outside one.
 
@@ -1384,7 +1389,12 @@ reloads instead of trusting the set to reach the open connection; the reload
 may be dropped on a measurement of a real live stream and on nothing else.
 The cost is not nothing: one visible rebuffer on the upgrade that crosses this
 version, and a stopped player when the properties cannot be set, which is
-playback the user did not ask to lose. One ordering gap is accepted and
+playback the user did not ask to lose. [2026-11-02: for a player another
+build launched, adoption no longer re-establishes in place. The player is
+replaced by one this build launches (ARCHITECTURE-PLAYER 4.5.2), so the cost
+is a new window once, and an unsafe player is stopped only when its restart
+cannot be delivered, or when this build refuses its channel. For such a player the ordering gap
+below is closed too, since the user's play meets the build gate.] One ordering gap is accepted and
 recorded in 4.5.1: when a user's own play supersedes the adoption reply, a
 player that could not be secured is refused any further load but is not
 stopped by that path. And the scope sentence from the entry above still holds
@@ -3628,7 +3638,8 @@ Performance budget (10k channels):
     process about to receive the URL and refuses to load if they cannot be made
     safe, and adoption migrates an older player, reads the properties back, and
     re-establishes the channel rather than letting an unverified connection
-    continue. Measured, specified and costed in `ARCHITECTURE-PLAYER.md` 4.15
+    continue [2026-11-02: a player another build launched is replaced
+    instead, ARCHITECTURE-PLAYER 4.5.2]. Measured, specified and costed in `ARCHITECTURE-PLAYER.md` 4.15
     and 4.5.1 (D-SINK-13, D-SINK-15, D-SINK-16); a check that only greps the
     base argv for the token cannot see the layer that binds, which is
     engineering rule 14's shape, so it is verified by composing the argv with

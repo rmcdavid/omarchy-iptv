@@ -30,7 +30,8 @@ import sys
 import unittest
 
 from helper_loader import HELPER, load_helper
-from test_mpv import FakeMpv, PINNED_CMDLINE, PINNED_PROPS, load_options
+from test_mpv import (FakeMpv, IdentitySeam, PINNED_CMDLINE, PINNED_PROPS, current_props, hold_launch,
+                      launch_argv, load_options)
 
 helper = load_helper()
 
@@ -121,10 +122,35 @@ for arg in argv:
     if arg.startswith("--input-ipc-server="):
         path = arg.split("=", 1)[1]
 server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+# mpv unlinks the path before it binds, so a new player takes the socket over
+# from one that is still listening (measured on mpv 0.41.0, lane RA's M3c,
+# 2026-11-01); a stub that could not would be LESS able than mpv.
+try:
+    if stat.S_ISSOCK(os.lstat(path).st_mode):
+        os.unlink(path)
+except OSError:
+    pass
 server.bind(path)
 os.chmod(path, 0o600)
 server.listen(8)
 state = {"entry": 0, "url": "", "user_data": {}, "props": {}}
+# Restart on adoption: every command this process receives, in order, one
+# JSON line each, in <STUB_MPV_IPC_LOG>.<pid> -- so a test reads what the OLD
+# player and the NEW one were each told, by process.
+ipc_log = os.environ.get("STUB_MPV_IPC_LOG", "")
+
+
+def log_command(entry):
+    if ipc_log:
+        with open("%s.%d" % (ipc_log, os.getpid()), "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\\n")
+
+
+def core_limit():
+    for line in open("/proc/self/limits", encoding="ascii"):
+        if line.startswith("Max core file size"):
+            return line.split()[4:6]
+    return None
 # 2026-10-29 (the pin block). What real mpv 0.41 answers for the options the
 # TLS read-back asks about is what its OWN ARGV made them, so the stub derives
 # them from its argv the way mpv does -- the last token wins, `-clr` empties a
@@ -149,6 +175,9 @@ state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o
                        # lane-p2a (2026-10-29): and the stats overlay loaded,
                        # mpv 0.41's default (measured: True).
                        "load-stats-overlay": True})
+# What this player answers for properties a test sets up (the carry's volume,
+# mute, fullscreen and pause), as JSON in STUB_MPV_PROPS.
+state["props"].update(json.loads(os.environ.get("STUB_MPV_PROPS", "") or "{}"))
 for arg in argv:
     if not arg.startswith("--"):
         continue
@@ -256,6 +285,7 @@ def _handle(conn):
             if not line.strip():
                 continue
             message = json.loads(line.decode("utf-8"))
+            log_command(message.get("command"))
             if mode == "wedge":
                 continue
             command = message.get("command") or [""]
@@ -263,6 +293,10 @@ def _handle(conn):
             name = command[0]
             events = []
             if name == "quit":
+                # and the core limit it was quit with: the replace branch
+                # lowers it BEFORE the ladder (limit_core_of), so a crash on
+                # the way out leaves no core
+                log_command({"quitWithCoreLimit": core_limit()})
                 orderly_exit(0)
             if name == "get_property":
                 prop = command[1]
@@ -537,7 +571,22 @@ def applied(argv, tokens):
     return list(argv)
 
 
-class PlayerTestCase(unittest.TestCase):
+class PlayerTestCase(IdentitySeam, unittest.TestCase):
+    """The detached player's verbs against the stub mpv (a real process that
+    holds both the launch argv and the socket, so the build gate reads the
+    kernel's own answer for it) or an in-process FakeMpv plus a `sleeper`.
+
+    Restart on adoption: a sleeper is the player's /proc identity (find_player
+    and the ladder key on it) and, through the helper's one seam
+    `player_peer` (IdentitySeam), the identity the build gate judges for the
+    FakeMpv's connection. Every sleeper is a REAL pair with its FakeMpv: a
+    launch argv `current` (this build's own composition, the default) with
+    the props a player of this build answers (current_props, cmdline
+    PINNED_CMDLINE) where the test adopts or feeds it, or `older` (v0.16.0's
+    own argv) with mpv's defaults, the pre-pin player, where the subject is
+    an older player. A current argv with pre-pin props would be a double more
+    forgiving than mpv (design 9.1, T5)."""
+
     def setUp(self):
         # AF_UNIX paths are limited to ~108 bytes: keep the socket under /tmp.
         # (mpv fails completely silently when the path is too long or its
@@ -560,6 +609,7 @@ class PlayerTestCase(unittest.TestCase):
         self.env(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""), STUB_MPV_RECORD=self.record)
         self.addCleanup(self.reap)
         self.server = None
+        self.install_identity_seam(helper)
 
     def env(self, **values):
         for name, value in values.items():
@@ -581,10 +631,21 @@ class PlayerTestCase(unittest.TestCase):
             except OSError:
                 pass
 
-    def sleeper(self, ignore_term=False):
-        process = sleeper("--input-ipc-server=%s" % self.sock, ignore_term=ignore_term)
+    def sleeper(self, ignore_term=False, launch="current"):
+        """A real process carrying a player's launch argv for this socket
+        (`current` by default: see the class), registered as the identity the
+        FakeMpv's connection reaches."""
+        process = hold_launch(self.sock, launch, ignore_term)
         self.addCleanup(self.reap_process, process)
+        self.identities[self.sock] = process.pid
         return process
+
+    def start_current(self, **kwargs):
+        """A FakeMpv answering as a player THIS build launched (current_props,
+        cmdline PINNED_CMDLINE), the pair of a `current` sleeper."""
+        props = current_props(self.sock, **{"mpv-version": "mpv 0.41.0"})
+        props.update(kwargs.pop("props", {}) or {})
+        return self.start(props=props, cmdline=PINNED_CMDLINE, **kwargs)
 
     def shed_double(self, hold=0.4, on_term=False):
         """A process holding our socket bound with our token already gone
@@ -635,6 +696,331 @@ class PlayerTestCase(unittest.TestCase):
         return run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
                    "--id", "t:bbc1.uk", "--seq", "1", "--ipc-timeout", "1",
                    "--lock-timeout", "1", "--spawn-timeout", "4", "--first-load-timeout", "1", *args)
+
+
+# ---- restart on adoption: the build gate and the replacement ---------------
+#
+# design.md 9.1, T2-T8, T11, T12 (lane RA, 2026-11-01). The OLD player here is
+# the stub mpv started DIRECTLY with another build's launch argv -- one process
+# that holds both the argv the verdict reads and the socket the feed travels
+# on, so SO_PEERCRED names it and nothing is patched: the double the gate has
+# to judge by the kernel's own answer (an in-process FakeMpv would read
+# "unknown" for the wrong reason, design 17.8). Each process logs what it was
+# told, in order, to <ipc log>.<pid>.
+
+FEED_COMMANDS = ("loadfile", "keybind", "change-list", "set_property", "request_log_messages")
+
+
+def core_limit_of(pid):
+    for line in pathlib.Path("/proc/%d/limits" % pid).read_text(encoding="ascii").splitlines():
+        if line.startswith("Max core file size"):
+            fields = line.split()
+            return fields[4], fields[5]
+    raise AssertionError("no core row for %d" % pid)
+
+
+class GateTestCase(PlayerTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.ipc_log = os.path.join(self.dir, "ipc")
+        self.env(STUB_MPV_IPC_LOG=self.ipc_log)
+
+    def old_player(self, launch="older", props=None, argv=None):
+        """The stub mpv started directly with `launch`'s argv (or `argv`),
+        answering once it has bound. Not a spawn of the helper's: it records
+        no launch."""
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        argv = argv or launch_argv(self.sock, launch)
+        env = dict(os.environ)
+        env.pop("STUB_MPV_RECORD", None)
+        if props:
+            env["STUB_MPV_PROPS"] = json.dumps(props)
+        process = subprocess.Popen([sys.executable, os.path.join(self.bin, "mpv")] + argv[1:], env=env,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.reap_process, process)
+        client = helper.wait_for_socket(self.sock, 5.0, 1.0)
+        self.assertIsNotNone(client, "the old player did not bind")
+        client.close()
+        return process
+
+    def told(self, pid):
+        path = "%s.%d" % (self.ipc_log, pid)
+        if not os.path.exists(path):
+            return []
+        return [json.loads(line) for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    @staticmethod
+    def feeds(commands):
+        return [c for c in commands if isinstance(c, list) and c and c[0] in FEED_COMMANDS]
+
+    def play(self, *extra):
+        return run("play", "--id", "t:espn.us", "--socket", self.sock, "--cache-dir", self.cache,
+                   "--ipc-timeout", "1", *extra)
+
+
+class FeedGateTest(GateTestCase):
+    """The invariant: no verb of this helper feeds a player another build
+    launched. D-SINK-70 is what it closes: shipped 0.16.0, after `omarchy
+    plugin update` without a shell restart the keepLoaded old Service fed an
+    older player through `play`, with none of the adoption pins and no core
+    limit on that path."""
+
+    def test_d_sink_70_play_into_another_builds_player_is_refused_with_nothing_sent(self):
+        """T4 and T7: exit 1, `not_running` with `outdated`, and NOTHING on the
+        old player's connection -- not even the TLS assertion, which tells a
+        player something about a channel too."""
+        old = self.old_player("older")
+        before = self.told(old.pid)
+        code, payload, stdout, stderr = self.play()
+        self.assertEqual(code, 1, stdout)
+        self.assertEqual(payload["error"]["code"], "not_running")
+        self.assertIs(payload.get("outdated"), True)
+        self.assertEqual(self.told(old.pid), before, "the older player was told something")
+        self.assertIsNone(old.poll(), "a refused play stops nothing: the start that follows replaces it")
+
+    def test_d_sink_70_a_v0_15_player_with_no_pins_is_refused_the_same_way(self):
+        old = self.old_player("v0.15.0")
+        before = self.told(old.pid)
+        code, payload, _, _ = self.play()
+        self.assertEqual((code, payload["error"]["code"], payload.get("outdated")), (1, "not_running", True))
+        self.assertEqual(self.told(old.pid), before)
+
+    def test_play_into_a_player_this_build_launched_still_plays(self):
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        code, played, _, stderr = self.play()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(played["kind"], "play")
+        self.assertNotIn("outdated", played)
+        loads = [c for c in self.told(payload["pid"]) if isinstance(c, list) and c[:1] == ["loadfile"]]
+        self.assertEqual(len(loads), 2)
+
+    def test_an_impostor_answering_the_socket_is_refused_even_beside_our_exact_argv(self):
+        """T5 (rule 10): a process with THIS build's exact launch argv exists
+        -- find_player sees it -- but the socket is answered by another
+        process (an in-process FakeMpv), and the kernel names that one. No seam
+        is set: the gate reads `unknown` for the process it reaches."""
+        os.makedirs(self.runtime, 0o700)
+        holder = hold_launch(self.sock, "current")
+        self.addCleanup(self.reap_process, holder)
+        server = self.start_current()
+        code, payload, _, _ = self.play()
+        self.assertEqual((code, payload["error"]["code"], payload.get("outdated")), (1, "not_running", True))
+        self.assertEqual(server.commands, [])
+        self.assertEqual(helper.launch_verdict(holder.pid, self.sock), "current")
+
+    def test_a_fresh_spawn_that_another_process_answers_for_is_player_foreign_and_fed_nothing(self):
+        """T12: `player start` vouches for the pid it launched; when the
+        connection reaches another process, nothing is fed."""
+        os.makedirs(self.runtime, 0o700)
+        other = hold_launch(os.path.join(self.dir, "elsewhere", "mpv.sock"), "current")
+        self.addCleanup(self.reap_process, other)
+        self.identities[self.sock] = other.pid
+        code, payload, _, _ = self.player_start()
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "player_foreign")
+        spawned = helper.find_player(self.sock)
+        self.assertEqual(len(spawned), 1)
+        told = self.told(spawned[0]["pid"])
+        self.assertEqual([c for c in told if isinstance(c, list) and c[0] in ("loadfile", "set_property", "keybind")], [])
+
+
+class WrapperSpawnTest(GateTestCase):
+    """The fresh spawn is vouched for, never re-judged (design 3, 17.1), and
+    "vouched" may not mean "the very pid exec'd as `mpv`": a user's `mpv` on
+    PATH can be a wrapper script that runs the real player as its CHILD (no
+    `exec`), or starts it in the background and exits. Then the process the
+    connection reaches -- the listener, SO_PEERCRED -- is not the launched
+    pid, and a gate that demanded equality answered `player_foreign` to
+    every start: no playback at all, where 202a7bc played (found by the
+    recheck of lane RA, 2026-11-01). The peer is this build's when it is the
+    launched pid, a descendant of it, or a process whose own command line
+    reads `current`."""
+
+    def wrap(self, body):
+        """Turn the stub mpv into `mpv-real` and put a /bin/sh wrapper named
+        `mpv` in front of it; `body` is the line that runs it ("$@" is the
+        helper's argv). The trailing status line keeps the shell from turning
+        its last command into an exec."""
+        stub = os.path.join(self.bin, "mpv")
+        real = os.path.join(self.bin, "mpv-real")
+        os.rename(stub, real)
+        line = body.replace("REAL", "%s %s" % (sys.executable, real))
+        pathlib.Path(stub).write_text("#!/bin/sh\n%s\nstatus=$?\nexit $status\n" % line, encoding="utf-8")
+        os.chmod(stub, 0o755)
+
+    def played(self, payload):
+        """The pid of the process that answered the socket and what it was
+        told, found by the socket token (the wrapper carries it too)."""
+        players = [r["pid"] for r in helper.find_player(self.sock) if self.told(r["pid"])]
+        self.assertEqual(len(players), 1, players)
+        return [c[0] for c in self.told(players[0]) if isinstance(c, list)]
+
+    def assert_plays(self):
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("replaced", payload)
+        self.assertIn("loadfile", self.played(payload))
+        code, zapped, _, stderr = self.play()
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("outdated", zapped)
+        return payload
+
+    def test_a_wrapper_that_runs_mpv_as_its_child_still_plays(self):
+        self.wrap('REAL "$@"')
+        self.assert_plays()
+
+    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays_its_first_channel(self):
+        """Its player reads `older` to every later verdict (design 4.6: such a
+        wrapper took the pin block's last word), so a zap is a replacement --
+        degenerate, stated -- but the spawn this helper made is still fed."""
+        self.wrap('REAL "$@" --osd-level=1')
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("loadfile", self.played(payload))
+
+    def test_a_wrapper_that_starts_mpv_in_the_background_and_exits_still_plays(self):
+        self.wrap('REAL "$@" </dev/null >/dev/null 2>&1 &')
+        self.assert_plays()
+
+
+class ReplaceTest(GateTestCase):
+    """`player start` replaces a player another build launched: reads, a
+    quit, and the spawn; the old player is fed nothing (T3, T6, T8, T11)."""
+
+    def test_a_player_another_build_launched_is_replaced_and_never_fed(self):
+        old = self.old_player("older")
+        code, payload, stdout, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["spawned"], payload)
+        self.assertEqual(payload.get("replaced"), 1)
+        self.assertNotEqual(payload["pid"], old.pid)
+        self.assertTrue(wait_gone(old), "the older player outlived its replacement")
+        told = self.told(old.pid)
+        self.assertEqual(self.feeds(told), [], "the older player was fed")
+        self.assertEqual(sorted({c[0] for c in told if isinstance(c, list)}), ["get_property", "quit"])
+        self.assertIn({"quitWithCoreLimit": ["0", "0"]}, told, "its core limit is lowered before the ladder")
+        self.assertEqual(helper.launch_verdict(payload["pid"], self.sock), "current")
+        self.assertIn("loadfile", [c[0] for c in self.told(payload["pid"]) if isinstance(c, list)])
+        self.assertEqual(core_limit_of(payload["pid"]), ("0", "0"))
+        self.assertEqual(len(helper.find_player(self.sock)), 1)
+        # one fixed journal line: no pid, no argv element, no channel
+        self.assertIn("player start: %s" % helper.PLAYER_REPLACED_LINE, stderr)
+        self.assertNotIn(str(old.pid), stderr)
+
+    def test_a_socket_answered_by_a_process_with_no_token_of_ours_is_replaced_and_never_fed(self):
+        """Design 2.4's `unknown` row, through `player start`: a process
+        carrying THIS build's exact argv exists (find_player sees it), but the
+        socket is answered by another process, which the kernel names: the
+        stub mpv bound through a symlinked folder, so the token on ITS command
+        line is not ours (a process that quits on `quit`, as mpv does -- an
+        in-process FakeMpv keeps its listener through any ladder and would
+        answer the new spawn's handshake). No seam is set. The start may not
+        adopt what it cannot judge: it ladders the token bearer and the
+        answering process, spawns, and the old one is told reads and `quit`
+        and nothing else (the recheck of lane RA: adopting an unknown peer
+        survived every test, and ended in player_foreign, the impostor told
+        the adoption's pins)."""
+        os.makedirs(self.runtime, 0o700)
+        holder = hold_launch(self.sock, "current")
+        self.addCleanup(self.reap_process, holder)
+        link = os.path.join(self.dir, "link")
+        os.symlink(self.runtime, link)
+        other = self.old_player(argv=launch_argv(os.path.join(link, "mpv.sock"), "current"))
+        self.assertEqual(helper.launch_verdict(other.pid, self.sock), "unknown")
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["spawned"], payload.get("replaced")), (True, 1), payload)
+        told = self.told(other.pid)
+        self.assertEqual(self.feeds(told), [], "the process we could not judge was fed")
+        self.assertEqual(sorted({c[0] for c in told if isinstance(c, list)}), ["get_property", "quit"])
+        self.assertTrue(wait_gone(holder), "the token bearer outlived its replacement")
+        self.assertTrue(wait_gone(other), "the answering process outlived its replacement")
+        self.assertEqual(helper.launch_verdict(payload["pid"], self.sock), "current")
+
+    def test_the_replacement_reads_as_this_builds_so_the_next_start_adopts_it(self):
+        """T2, the loop proof: the builder and the verdict call one function
+        with the same inputs, so a player this build launched reads current
+        -- on the kernel's own /proc, both option-file forms -- and the next
+        start adopts it, never replaces it again."""
+        old = self.old_player("older")
+        code, first, _, stderr = self.player_start("--mpv-arg=--cache=yes")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(helper.launch_verdict(first["pid"], self.sock), "current")
+        code, probe, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual((code, probe["launch"]), (0, "current"), stderr)
+        code, second, _, stderr = self.player_start("--seq", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((second["spawned"], second["pid"]), (False, first["pid"]))
+        self.assertNotIn("replaced", second)
+        code, plain, _, stderr = run("player", "restart", "--socket", self.sock, "--cache-dir", self.cache,
+                                     "--id", "t:bbc1.uk", "--seq", "3", "--ipc-timeout", "1",
+                                     "--spawn-timeout", "4", "--first-load-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(helper.launch_verdict(plain["pid"], self.sock), "current")
+
+    def test_the_probe_names_the_launch_after_securing_the_player(self):
+        """T6: an older player is still migrated, limited and claimed by the
+        probe -- the hold before the shell's restart -- and the reply says
+        `older`; a current one reads `current`."""
+        if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process")
+        old = self.old_player("v0.15.0")
+        self.assertNotEqual(core_limit_of(old.pid), ("0", "0"))
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1",
+                                       "--owner-pid", str(os.getpid()))
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["launch"], "older")
+        self.assertIsInstance(payload["tls"], dict)
+        self.assertTrue(payload["claimed"])
+        self.assertEqual(core_limit_of(old.pid), ("0", "0"))
+        names = [c[:2] for c in self.told(old.pid) if isinstance(c, list)]
+        self.assertIn(["set_property", helper.USER_DATA_OWNER], names)
+        self.assertNotIn("loadfile", [n[0] for n in names])
+
+    def test_the_carry_reaches_the_new_player_and_pause_only_with_keep_pause(self):
+        """T8: volume, mute and fullscreen are set on the new player before
+        its load; pause TRUE before the loadfile only with --keep-pause (the
+        automatic restart), FALSE on a zap (PAUSE LIVE TV)."""
+        carry = {"volume": 37, "mute": True, "fullscreen": True, "pause": True}
+        for seq, flag, paused in ((5, ["--keep-pause"], True), (7, [], False)):
+            with self.subTest(flag=flag):
+                self.old_player("older", props=carry)
+                code, payload, _, stderr = self.player_start("--seq", str(seq), *flag)
+                self.assertEqual(code, 0, stderr)
+                told = [c for c in self.told(payload["pid"]) if isinstance(c, list)]
+                load = next(i for i, c in enumerate(told) if c[0] == "loadfile")
+                before = told[:load]
+                for prop, value in (("volume", 37), ("mute", True), ("fullscreen", True)):
+                    self.assertIn(["set_property", prop, value], before, prop)
+                pauses = [c[2] for c in before if c[:2] == ["set_property", "pause"]]
+                self.assertEqual(pauses, [paused])
+                self.assertIs(payload.get("paused"), True if paused else None)
+                code, _, _, _ = run("player", "stop", "--socket", self.sock, "--seq", str(seq + 1))
+                self.assertEqual(code, 0)
+
+    def test_nothing_of_an_older_players_argv_reaches_any_output(self):
+        """T11, rule 5: a v0.15.0 player carried the user's tokens on its
+        argv; one with a proxy password there is probed and replaced, and
+        neither the password nor the host reaches stdout, stderr or the new
+        player's command line."""
+        argv = [a if a != "--osd-duration=4321" else "--http-proxy=http://u:rao-pw@proxy.test/"
+                for a in launch_argv(self.sock, "v0.15.0")]
+        self.assertIn("--http-proxy=http://u:rao-pw@proxy.test/", argv)
+        self.old_player(argv=argv)
+        outputs = []
+        code, payload, stdout, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        outputs.append(stdout + stderr)
+        self.assertEqual(payload["launch"], "older")
+        code, payload, stdout, stderr = self.player_start()
+        outputs.append(stdout + stderr)
+        self.assertEqual((code, payload.get("replaced")), (0, 1), stderr)
+        with open("/proc/%d/cmdline" % payload["pid"], "rb") as handle:
+            outputs.append(handle.read().decode("utf-8", "replace"))
+        for text in outputs:
+            for secret in ("rao-pw", "proxy.test"):
+                self.assertNotIn(secret, text)
 
 
 class StartTest(PlayerTestCase):
@@ -1218,21 +1604,28 @@ class CoreDumpLimitTest(PlayerTestCase):
         if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
             self.skipTest("RLIMIT_CORE is already hard-zero in this process; the adopted player cannot be told apart from it")
         os.makedirs(self.runtime, 0o700)
-        idle = self.sleeper()
+        # A pre-upgrade player: v0.16.0's own argv, mpv's defaults (the pair).
+        idle = self.sleeper(launch="older")
         self.assertNotEqual(self.core_limit(idle.pid), ("0", "0"), "the pre-upgrade player must start unlimited")
         self.start(props={"mpv-version": "mpv 0.41.0"})
         code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["pid"], idle.pid)
+        self.assertEqual(payload["launch"], "older")
         self.assertEqual(self.core_limit(idle.pid), ("0", "0"))
 
     def test_a_player_adopted_by_start_gets_its_core_limit_lowered(self):
+        """Restart on adoption: `player start` adopts only a player this build
+        launched -- an older one is replaced (ReplaceTest) -- and this build's
+        spawn already sets (0, 0), so an unlimited current player is a state
+        the field never shows. The adopt branch keeps the lever anyway, as
+        defence in depth (design 6), and this keeps it held."""
         if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
             self.skipTest("RLIMIT_CORE is already hard-zero in this process; the adopted player cannot be told apart from it")
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        self.assertNotEqual(self.core_limit(idle.pid), ("0", "0"), "the pre-upgrade player must start unlimited")
-        self.start(props={"mpv-version": "mpv 0.41.0"})
+        self.assertNotEqual(self.core_limit(idle.pid), ("0", "0"), "the adopted player must start unlimited here")
+        self.start_current()
         code, payload, _, stderr = self.player_start()
         self.assertEqual(code, 0, stderr)
         self.assertFalse(payload["spawned"])
@@ -1244,7 +1637,7 @@ class IdempotenceTest(PlayerTestCase):
     def test_a_live_player_is_adopted_and_zapped_never_duplicated(self):
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        server = self.start_current()
         code, payload, _, stderr = self.player_start("--scope", "g:uk")
         self.assertEqual(code, 0, stderr)
         self.assertFalse(payload["spawned"])
@@ -1273,27 +1666,20 @@ class IdempotenceTest(PlayerTestCase):
         # ones whose failure means "do not load at all", so they are asserted
         # before the player is told anything about the channel.
         # 2026-10-29: an ADOPTED player is first given the pins that are not
-        # about the TLS peer (pin_adopted_player, best effort; this double is a
-        # pre-pin player at mpv's defaults, so the select menu is on and the
-        # resume folder is mpv's own), then apply_channel's TLS assertion, which
-        # now turns auto-profiles off as well.
-        # 2026-10-29 (lane-p1b): and drag-and-drop off (D-PLY-46), and the
-        # three GLOBAL header properties at values that belong to no provider,
-        # because a player last driven by an older helper holds the previous
-        # channel's headers there (the channel's own now ride the loadfile).
-        # lane-p1c (2026-10-29): and the console unloaded (D-SINK-61; this
-        # double's console is mpv's default, on), prefetch already off here.
-        # lane-p2a (2026-10-29): and the stats overlay unloaded (D-SINK-67).
-        self.assertEqual(sets[:8], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
-                                    ["set_property", "drag-and-drop"], ["set_property", "load-console"],
-                                    ["set_property", "load-stats-overlay"], ["set_property", "user-agent"],
-                                    ["set_property", "referrer"], ["set_property", "http-header-fields"]])
+        # about the TLS peer (pin_adopted_player, best effort), reading each
+        # before it writes it -- and since restart on adoption the adopted
+        # player is one THIS build launched, which holds every one of them,
+        # so nothing is rewritten but the paste key and the three GLOBAL
+        # header properties at values that belong to no provider (always
+        # set). Then apply_channel's TLS assertion: its two unconditional
+        # sets, and nothing else to change on a pinned player.
+        self.assertEqual(sets[:3], [["set_property", "user-agent"], ["set_property", "referrer"],
+                                    ["set_property", "http-header-fields"]])
         self.assertIn(["keybind", "ctrl+v", "ignore"], server.commands)
-        self.assertIn(["change-list", "script-opts", "append", "osc-title_mbtn_mid_command=ignore"], server.commands)
-        sets = sets[8:]
-        self.assertEqual(sets[:8], [["set_property", "tls-verify"],
+        self.assertNotIn("change-list", [c[0] for c in server.commands])
+        sets = sets[3:]
+        self.assertEqual(sets[:7], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
-                                    ["set_property", "load-auto-profiles"],
                                     ["set_property", "pause"],
                                     ["set_property", "aid"],
                                     ["set_property", "sid"],
@@ -1922,7 +2308,7 @@ class RestartTest(PlayerTestCase):
     def test_restart_sends_the_channel_headers_so_nothing_leaks_between_channels(self):
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        server = self.start_current()
         code, _, _, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
                                  "--id", "t:espn.us", "--seq", "1", "--ipc-timeout", "1", "--first-load-timeout", "0.2")
         self.assertEqual(code, 0, stderr)
@@ -1984,10 +2370,10 @@ class ProbeTest(PlayerTestCase):
     def test_merges_the_proc_half_and_the_socket_half_and_never_reads_path(self):
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0", "idle-active": False,
-                                   "path": "http://user:%s@provider.test/live/%s/bbc1.m3u8" % (PASSWORD, TOKEN),
-                                   "media-title": "stale title"},
-                            user_data={"omarchy-iptv": self.stash()})
+        server = self.start_current(props={"idle-active": False,
+                                           "path": "http://user:%s@provider.test/live/%s/bbc1.m3u8" % (PASSWORD, TOKEN),
+                                           "media-title": "stale title"},
+                                    user_data={"omarchy-iptv": self.stash()})
         code, payload, stdout, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         self.assertTrue(payload["running"])
@@ -2019,8 +2405,7 @@ class ProbeTest(PlayerTestCase):
         fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))["playerProbe"]
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        self.start(props={"mpv-version": "mpv 0.41.0", "idle-active": False},
-                   user_data={"omarchy-iptv": self.stash()})
+        self.start_current(props={"idle-active": False}, user_data={"omarchy-iptv": self.stash()})
         code, payload, _, stderr = run("player", "probe", "--socket", self.sock,
                                        "--ipc-timeout", "1", "--owner-pid", str(os.getpid()))
         self.assertEqual(code, 0, stderr)
@@ -2034,7 +2419,7 @@ class ProbeTest(PlayerTestCase):
     def test_the_owner_claim_is_written_only_with_owner_pid(self):
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        server = self.start_current()
         run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertNotIn("omarchy-iptv-owner", server.user_data)
         code, payload, _, _ = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1", "--owner-pid", str(os.getpid()))
@@ -2077,7 +2462,7 @@ class ProbeTlsTest(PlayerTestCase):
 
     def test_a_pre_upgrade_player_is_migrated_and_the_reply_says_so(self):
         os.makedirs(self.runtime, 0o700)
-        self.sleeper()
+        self.sleeper(launch="older")
         server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False,
                                    "stream-lavf-o": {"tls_verify": "0"}})
         code, payload, _, stderr = self.probe()
@@ -2104,8 +2489,9 @@ class ProbeTlsTest(PlayerTestCase):
         os.makedirs(self.runtime, 0o700)
         self.sleeper()
         # Since 2026-10-29 "upgraded" means launched with the pin block: the
-        # pinned values, set from the command line (test_mpv's PINNED_*).
-        server = self.start(props=dict(PINNED_PROPS, **{"mpv-version": "mpv 0.41.0"}), cmdline=PINNED_CMDLINE)
+        # pinned values, set from the command line (test_mpv's PINNED_*) --
+        # and since restart on adoption, launched by THIS build (the pair).
+        server = self.start_current()
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": False})
@@ -2116,7 +2502,7 @@ class ProbeTlsTest(PlayerTestCase):
         actually ended up with, so `migrated: True` with an unsafe reading is
         "I had to act and it did not work" rather than "all is well"."""
         os.makedirs(self.runtime, 0o700)
-        self.sleeper()
+        self.sleeper(launch="older")
         self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False}, refuse={"tls-verify"})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
@@ -2126,7 +2512,7 @@ class ProbeTlsTest(PlayerTestCase):
 
     def test_an_unreadable_property_is_reported_as_no_reading(self):
         os.makedirs(self.runtime, 0o700)
-        self.sleeper()
+        self.sleeper(launch="older")
         self.start(props={"mpv-version": "mpv 0.41.0"}, missing={"tls-verify"})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
@@ -2149,7 +2535,7 @@ class ProbeTlsTest(PlayerTestCase):
         """Rule 5. `stream-lavf-o` can hold a proxy address with credentials in
         it, and this reply crosses a process boundary into the shell."""
         os.makedirs(self.runtime, 0o700)
-        self.sleeper()
+        self.sleeper(launch="older")
         self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False,
                           "stream-lavf-o": {"tls_verify": "0", "http_proxy": "http://u:pw@proxy.test/x"}},
                    refuse={"stream-lavf-o"})
@@ -2166,7 +2552,7 @@ class ProbeTlsTest(PlayerTestCase):
         `feed`, adopting an unverified player without re-establishing anything.
         """
         os.makedirs(self.runtime, 0o700)
-        self.sleeper()
+        self.sleeper(launch="older")
         server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False})
         original = helper.migrate_tls
 
@@ -2193,7 +2579,7 @@ class OrphanCheckTest(PlayerTestCase):
         if claim_pid is not None:
             user_data["omarchy-iptv-owner"] = {"schema": 1, "pid": claim_pid,
                                                "startTime": helper.proc_start_time(claim_pid), "at": 1758000100}
-        self.start(props={"mpv-version": "mpv 0.41.0"}, user_data=user_data)
+        self.start_current(user_data=user_data)
         return idle
 
     def test_a_claim_reassigned_to_a_successor_shell_is_a_no_op(self):
@@ -2673,11 +3059,28 @@ class ParityTest(unittest.TestCase):
         for vector in self.fixture["mpvArgv"]:
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
             dirs = helper.player_dirs(vector["socketPath"], vector["stateDir"])
-            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs), vector["argv"], vector["name"])
+            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs, build=vector["build"]),
+                             vector["argv"], vector["name"])
             # D-SINK-47: and the private file's lines, which only python writes.
             self.assertEqual(helper.mpv_args_config(args).splitlines(), vector["include"], vector["name"])
             if "rejected" in vector:
                 self.assertEqual(rejected, vector["rejected"], vector["name"])
+
+    def test_every_shared_vector_names_its_build_once_at_the_end_of_the_base_section(self):
+        """Restart on adoption: the marker is the base section's last element
+        (after layer 1 of TLS, ahead of the options file and the pin block),
+        once; a build that is not one is the word `unknown`. The node suite
+        asserts the same over the same vectors (N1)."""
+        unknown = False
+        for case in self.fixture["mpvArgv"]:
+            argv = case["argv"]
+            marker = helper.mpv_build_marker(case["build"])
+            self.assertEqual(argv.count(marker), 1, case["name"])
+            self.assertEqual(argv.index(marker), argv.index(helper.MPV_TLS_VERIFY) + 1, case["name"])
+            pins = helper.mpv_pin_block(helper.player_dirs(case["socketPath"], case["stateDir"]))
+            self.assertLess(argv.index(marker), len(argv) - len(pins), case["name"])
+            unknown = unknown or marker.endswith("=" + helper.PLAYER_BUILD_UNKNOWN)
+        self.assertTrue(unknown)
 
     def test_the_composed_argv_always_ends_with_the_tls_token(self):
         """D-SINK-13 layer 2, the layer that actually guarantees verification.
@@ -2993,7 +3396,7 @@ class BroadcastAndZap(PlayerTestCase):
         # deterministic rather than raced.
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0"}, entry_ids=True)
+        server = self.start_current(entry_ids=True)
 
         def zap():
             for _ in range(200):                       # bounded: ~2 s
@@ -3032,7 +3435,7 @@ class BroadcastAndZap(PlayerTestCase):
         import threading as _t
         os.makedirs(self.runtime, 0o700)
         idle = self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0"}, entry_ids=True)
+        server = self.start_current(entry_ids=True)
 
         def resolve_then_fail():
             for _ in range(200):                       # bounded: ~2 s
@@ -3086,9 +3489,9 @@ class TracksTest(PlayerTestCase):
         the track list above unless overridden."""
         os.makedirs(self.runtime, 0o700, exist_ok=True)
         self.sleeper()
-        props = {"mpv-version": "mpv 0.41.0", "track-list": self.TRACK_LIST}
+        props = {"track-list": self.TRACK_LIST}
         props.update(kwargs.pop("props", {}))
-        return self.start(props=props, **kwargs)
+        return self.start_current(props=props, **kwargs)
 
     def test_without_a_player_it_reports_not_running_and_touches_nothing(self):
         code, payload, _, _ = self.tracks()

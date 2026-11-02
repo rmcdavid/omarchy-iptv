@@ -10,10 +10,13 @@ import os
 import pathlib
 import shutil
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from helper_loader import load_helper
 
@@ -487,7 +490,137 @@ class FakeMpv:
             pass
 
 
-class MpvTestCase(unittest.TestCase):
+# ---- restart on adoption: who the connection reaches -----------------------
+#
+# The build gate (feed_gate) judges the process the connection reaches, by
+# SO_PEERCRED, and reads its /proc/<pid>/cmdline (launch_verdict). An
+# in-process FakeMpv makes the kernel name THIS test process, which carries no
+# socket token: "unknown", what an impostor reads, and refused. A test whose
+# subject is not the player's identity gives the connection a REAL one through
+# the helper's one seam, `player_peer`: a process holding a launch argv for the
+# socket, `current` (this build's own composition, both forms of which
+# launch_verdict accepts) or `older` (v0.16.0's own, tests/fixtures/
+# player-launch.json). A process, never a pid made up: the verdict still reads
+# the kernel. The seam answers only for the sockets a test registered.
+LAUNCH_VECTORS = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "player-launch.json")
+                            .read_text(encoding="utf-8"))
+HOLDER_CODE = "import signal, sys, time\nif sys.argv[1] == 'ignore-term': signal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(30)\n"
+
+
+def launch_argv(sock, launch="current"):
+    """The argv a player of `launch` was started with on `sock`: this build's
+    own composition, or an older tag's shape (player-launch.json), or the bare
+    socket token (`token`, the shape every double carried before the gate)."""
+    if launch == "current":
+        return helper.mpv_launch_argv(sock, [], helper.player_dirs(sock))
+    if launch == "token":
+        return ["mpv", "--input-ipc-server=%s" % sock]
+    shape = LAUNCH_VECTORS["older"]["v0.16.0" if launch == "older" else launch]
+    return [a.replace("__SOCK__", sock).replace("__RUNTIME__", os.path.dirname(sock))
+            .replace("__STATE__", helper.state_dir()) for a in shape]
+
+
+def hold_launch(sock, launch="current", ignore_term=False):
+    """A real process whose command line is `python3 -c HOLDER <flag>` and
+    then a player's launch argv less its program name; everything before the
+    socket token is ignored by the verdict and by find_player. Returned once
+    the kernel reports the token (F-HARNESS-41) and, with `ignore_term`, once
+    SIGTERM is in its ignored mask -- a double never more forgiving than the
+    wedged player it stands for (CLAUDE.md 10)."""
+    argv = launch_argv(sock, launch)
+    process = subprocess.Popen([sys.executable, "-c", HOLDER_CODE, "ignore-term" if ignore_term else "-"] + argv[1:],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    token = os.fsencode("--input-ipc-server=%s" % sock)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            with open("/proc/%d/cmdline" % process.pid, "rb") as handle:
+                if token in handle.read().split(b"\0"):
+                    break
+        except OSError:
+            pass
+        time.sleep(0.005)
+    if ignore_term:
+        while time.monotonic() < deadline:
+            try:
+                status = pathlib.Path("/proc/%d/status" % process.pid).read_text()
+                ignored = int(next(l for l in status.splitlines() if l.startswith("SigIgn:")).split()[1], 16)
+                if ignored & (1 << 14):
+                    break
+            except Exception:
+                pass
+            time.sleep(0.01)
+    return process
+
+
+def current_props(sock, **more):
+    """What mpv 0.41 answers on a player THIS build launched on `sock`: the
+    pin block's values (PINNED_PROPS and the non-TLS pins) and the build
+    marker in script-opts. With `cmdline=PINNED_CMDLINE` a FakeMpv given these
+    is that player."""
+    where = helper.player_dirs(sock)
+    props = dict(PINNED_PROPS)
+    props.update({"load-select": False, "save-watch-history": False, "load-unsafe-playlists": False,
+                  "osd-playlist-entry": "title", "log-file": "", "watch-later-dir": where["watchLater"],
+                  "drag-and-drop": False, "prefetch-playlist": False, "load-console": False,
+                  "load-stats-overlay": False,
+                  "script-opts": dict({helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE},
+                                      # a tree before the marker (a --baseline run) launches none
+                                      **({helper.PLAYER_BUILD_KEY: helper.player_build()}
+                                         if hasattr(helper, "player_build") else {}))})
+    props.update(more)
+    return props
+
+
+class IdentitySeam:
+    """setUp half: the `player_peer` seam, answering for registered sockets
+    only (`self.identities`, socket -> pid), the kernel's answer otherwise."""
+
+    def install_identity_seam(self, module=None):
+        """`module`: the helper the test drives -- each test module loads its
+        own (load_helper), and a seam on another instance is no seam."""
+        module = module or helper
+        self.identities = {}
+        if not hasattr(module, "player_peer"):
+            return              # a tree before the gate (a --baseline run) has no seam to set
+        real = module.player_peer
+        patcher = mock.patch.object(module, "player_peer",
+                                    lambda client: self.identities.get(client.path) or real(client))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def identity(self, sock, launch="current", ignore_term=False):
+        process = hold_launch(sock, launch, ignore_term)
+        self.addCleanup(self.reap_holder, process)
+        self.identities[sock] = process.pid
+        return process
+
+    @staticmethod
+    def reap_holder(process):
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=5)
+        except Exception:
+            pass
+
+
+class MpvTestCase(IdentitySeam, unittest.TestCase):
+    """`play` against an in-process FakeMpv. The build gate is not the subject
+    here (tests/test_player.py's FeedGateTest and test_player_launch.py are):
+    the TLS assertion, the wire sequence and the refusals are, and they still
+    guard a CURRENT player whose properties another same-uid client changed at
+    runtime (design 6, defence in depth), which is the player `play()` gives
+    the connection (IdentitySeam). FakeMpv's defaults are mpv's own, so with no
+    `props` the values read are a player's whose TLS options were changed at
+    runtime; its `set-from-commandline` answers (none, without `cmdline`) are a
+    state a current player cannot reach (a runtime set does not clear the
+    flag, measured), which makes the read-back read MORE loose options than it
+    could, never fewer: less forgiving than mpv, not more (CLAUDE.md 10)."""
+
     def setUp(self):
         # AF_UNIX paths are limited to ~108 bytes: keep the socket under /tmp.
         self.dir = tempfile.mkdtemp(prefix="omarchy-iptv-test-", dir="/tmp")
@@ -499,6 +632,7 @@ class MpvTestCase(unittest.TestCase):
         code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
         self.assertEqual(code, 0, stderr)
         self.server = None
+        self.install_identity_seam()
 
     def start(self, **kwargs):
         self.server = FakeMpv(self.sock, **kwargs)
@@ -506,6 +640,8 @@ class MpvTestCase(unittest.TestCase):
         return self.server
 
     def play(self, *args):
+        if self.sock not in self.identities:
+            self.identity(self.sock)
         return run("play", *args, "--cache-dir", self.cache, "--socket", self.sock, "--ipc-timeout", "1")
 
 
@@ -716,6 +852,9 @@ class PlayTest(MpvTestCase):
 
     def test_silent_mpv_times_out(self):
         self.start(silent=True)
+        # a player of this build that stopped answering: the gate reads the
+        # kernel and /proc and sends nothing, so the first request times out
+        self.identity(self.sock)
         started = time.monotonic()
         code, payload, _, _ = run("play", "--id", "t:bbc1.uk", "--cache-dir", self.cache, "--socket", self.sock, "--ipc-timeout", "0.3")
         elapsed = time.monotonic() - started
@@ -789,6 +928,7 @@ class ShownNamesTest(MpvTestCase):
                 sock = os.path.join(self.dir, "s%d.sock" % i)
                 server = FakeMpv(sock)
                 self.addCleanup(server.close)
+                self.identity(sock)
                 code, payload, stdout, stderr = run("play", "--id", "t:n%d.test" % i, "--cache-dir", self.cache,
                                                     "--socket", sock, "--ipc-timeout", "1")
                 self.assertEqual(code, 0, stderr)

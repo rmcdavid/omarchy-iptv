@@ -162,6 +162,10 @@ function makeIds(h) {
     // read the adoption makes of a pid it did not have (pipPeek), which
     // nothing here answers -- the compositor's reply is not this harness's.
     probeRetryTimer: timer("probeRetryTimer"),
+    // Restart on adoption: the hold over a player another build launched,
+    // driven from its own Timer block by h.elapse (a tree without the block
+    // has a Timer that never comes due, which is that tree).
+    olderRestartTimer: timer("olderRestartTimer"),
     hyprPeekProc: proc("hyprPeekProc"),
     pipPeekWatchdog: timer("pipPeekWatchdog"),
     playerSocketComponent: {
@@ -958,6 +962,22 @@ function bootService(serviceText, Model, o) {
     t.stop = function () { this.stops++; this.running = false; this.armedAt = null }
     return [t, fire]
   }
+  // The recheck of lane RA (2026-11-01): fire ONE Timer block's own
+  // onTriggered, once, as QML does when it comes due -- for a timer h.elapse
+  // does not drive (playRetryTimer is counted, never run), without putting
+  // it on every test's clock. The double reads stopped afterwards, as a
+  // non-repeating Timer does. -> false when the tree has no such block.
+  h.fireTimer = (id) => {
+    const at = serviceText.indexOf("id: " + id + "\n")
+    if (at === -1) return false
+    const block = serviceText.slice(serviceText.lastIndexOf("  Timer {", at), serviceText.indexOf("\n  }", at))
+    const oneLine = (block.match(/^    onTriggered: (?!\{)(.*)$/m) || [])[1]
+    const body = oneLine || handlerBlock(block, "onTriggered: {")
+    if (!body) return false
+    if (ids[id]) ids[id].running = false
+    compile("", body, id + "_fired")()
+    return true
+  }
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
   // D-SRC-69: probeWatchdog joins them -- a probe HELD behind a cache job
   // is bounded by it, and a test that never moves the clock is unchanged.
@@ -965,7 +985,7 @@ function bootService(serviceText, Model, o) {
   // verb in flight (`root.playerTimeoutMs`), read at each restart() the way
   // QML's Timer reads it; h.elapse fires its own onTriggered, which TERMs a
   // running helper (recorded in playerProc.signals) and flags the exit.
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog"]) h.timed.push(treeTimer(id))
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog", "olderRestartTimer"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),

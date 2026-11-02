@@ -1,0 +1,268 @@
+{
+  "_comment": [
+    "Restart on adoption (owner, 2026-10-31 and 2026-11-01): the vectors of launch_verdict, the helper's answer to",
+    "'was the player this connection reaches launched by THIS build?' -- current, older or unknown. Python only:",
+    "the verdict lives only in the helper (the model mirrors the marker, never the reading). Run by",
+    "tests/test_player_launch.py, each case against a REAL process whose /proc/<pid>/cmdline is the case's argv",
+    "behind a holder script (everything before the socket token is ignored, so the holder's own two elements",
+    "change nothing).",
+    "Placeholders: __SOCK__ the test's socket, __RUNTIME__ its folder, __STATE__ the test's state folder.",
+    "`tail: current` is THIS build's composed argv less its program name (mpv_launch_argv, both forms by",
+    "`include`), never a literal: every part edit changes the build and so the marker. `older` shapes are each",
+    "tag's OWN mpv_launch_argv, composed by that tag's helper and never by the verdict under test (design 17.8),",
+    "generated once by",
+    "  git archive <tag> bin manifest.json | tar -x -C <dir>",
+    "then exec of <dir>/bin/omarchy-iptv into a namespace and",
+    "  mpv_launch_argv('/run/user/1000/omarchy-iptv/mpv.sock', TOKENS, player_dirs(that, '/home/u/.local/state/omarchy-iptv'))",
+    "with TOKENS [] for v0.16.0 and ['--osd-duration=4321'] (an inert canary) for v0.16.0-include and v0.15.0,",
+    "the concrete paths replaced by the placeholders. v0.15.0 carries the canary ON its argv (before D-SINK-47).",
+    "`edit`: replace (an element by its prefix, the new element), drop (an element), append (elements)."
+  ],
+  "older": {
+    "v0.16.0": [
+      "mpv",
+      "--input-ipc-server=__SOCK__",
+      "--wayland-app-id=omarchy-iptv",
+      "--force-window=immediate",
+      "--idle=once",
+      "--keep-open=no",
+      "--title=$>IPTV",
+      "--force-media-title=IPTV",
+      "--msg-level=all=error",
+      "--ytdl=no",
+      "--load-scripts=no",
+      "--screenshot-dir=__STATE__/screenshots",
+      "--watch-later-dir=__RUNTIME__/watch-later",
+      "--gpu-shader-cache-dir=__RUNTIME__/shader-cache",
+      "--icc-cache-dir=__RUNTIME__/shader-cache",
+      "--gpu-sw=yes",
+      "--tls-verify=yes",
+      "--watch-later-dir=__RUNTIME__/watch-later",
+      "--load-scripts=no",
+      "--scripts-clr",
+      "--input-commands-clr",
+      "--input-commands-append=keybind ctrl+v ignore",
+      "--load-auto-profiles=no",
+      "--player-operation-mode=cplayer",
+      "--load-select=no",
+      "--load-console=no",
+      "--load-stats-overlay=no",
+      "--prefetch-playlist=no",
+      "--load-unsafe-playlists=no",
+      "--save-watch-history=no",
+      "--log-file=",
+      "--reset-on-next-file-clr",
+      "--osd-playlist-entry=title",
+      "--drag-and-drop=no",
+      "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+      "--stream-lavf-o-clr",
+      "--demuxer-lavf-propagate-opts=yes",
+      "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+      "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+      "--demuxer-lavf-o-append=tls_verify=1",
+      "--tls-verify=yes"
+    ],
+    "v0.16.0-include": [
+      "mpv",
+      "--input-ipc-server=__SOCK__",
+      "--wayland-app-id=omarchy-iptv",
+      "--force-window=immediate",
+      "--idle=once",
+      "--keep-open=no",
+      "--title=$>IPTV",
+      "--force-media-title=IPTV",
+      "--msg-level=all=error",
+      "--ytdl=no",
+      "--load-scripts=no",
+      "--screenshot-dir=__STATE__/screenshots",
+      "--watch-later-dir=__RUNTIME__/watch-later",
+      "--gpu-shader-cache-dir=__RUNTIME__/shader-cache",
+      "--icc-cache-dir=__RUNTIME__/shader-cache",
+      "--gpu-sw=yes",
+      "--tls-verify=yes",
+      "--include=__RUNTIME__/mpv-args.conf",
+      "--watch-later-dir=__RUNTIME__/watch-later",
+      "--load-scripts=no",
+      "--scripts-clr",
+      "--input-commands-clr",
+      "--input-commands-append=keybind ctrl+v ignore",
+      "--load-auto-profiles=no",
+      "--player-operation-mode=cplayer",
+      "--load-select=no",
+      "--load-console=no",
+      "--load-stats-overlay=no",
+      "--prefetch-playlist=no",
+      "--load-unsafe-playlists=no",
+      "--save-watch-history=no",
+      "--log-file=",
+      "--reset-on-next-file-clr",
+      "--osd-playlist-entry=title",
+      "--drag-and-drop=no",
+      "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+      "--stream-lavf-o-clr",
+      "--demuxer-lavf-propagate-opts=yes",
+      "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+      "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+      "--demuxer-lavf-o-append=tls_verify=1",
+      "--tls-verify=yes"
+    ],
+    "v0.15.0": [
+      "mpv",
+      "--input-ipc-server=__SOCK__",
+      "--wayland-app-id=omarchy-iptv",
+      "--force-window=immediate",
+      "--idle=once",
+      "--keep-open=no",
+      "--title=$>IPTV",
+      "--force-media-title=IPTV",
+      "--msg-level=all=error",
+      "--ytdl=no",
+      "--load-scripts=no",
+      "--screenshot-dir=__STATE__/screenshots",
+      "--watch-later-dir=__RUNTIME__/watch-later",
+      "--gpu-shader-cache-dir=__RUNTIME__/shader-cache",
+      "--icc-cache-dir=__RUNTIME__/shader-cache",
+      "--tls-verify=yes",
+      "--osd-duration=4321",
+      "--tls-verify=yes"
+    ]
+  },
+  "cases": [
+    {
+      "name": "this build's argv behind `mpv`, no options file",
+      "verdict": "current",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false
+    },
+    {
+      "name": "this build's argv naming the options file",
+      "verdict": "current",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true
+    },
+    {
+      "name": "another shell's state folder: only the screenshot folder differs",
+      "verdict": "current",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--screenshot-dir=",
+          "--screenshot-dir=/home/other/.local/state/omarchy-iptv/screenshots"
+        ]
+      }
+    },
+    {
+      "name": "behind /usr/bin/mpv",
+      "verdict": "current",
+      "prefix": [
+        "/usr/bin/mpv"
+      ],
+      "tail": "current",
+      "include": true
+    },
+    {
+      "name": "behind the harness stub (python3 /x/bin/mpv)",
+      "verdict": "current",
+      "prefix": [
+        "python3",
+        "/x/bin/mpv"
+      ],
+      "tail": "current",
+      "include": false
+    },
+    {
+      "name": "behind a wrapper that PREPENDS its own options",
+      "verdict": "current",
+      "prefix": [
+        "mpv-real",
+        "--foo"
+      ],
+      "tail": "current",
+      "include": false
+    },
+    {
+      "name": "v0.16.0's own argv (no marker, otherwise this tree's)",
+      "verdict": "older",
+      "prefix": [],
+      "shape": "v0.16.0"
+    },
+    {
+      "name": "v0.16.0's own argv naming the options file",
+      "verdict": "older",
+      "prefix": [],
+      "shape": "v0.16.0-include"
+    },
+    {
+      "name": "v0.15.0's own argv, a user token on it",
+      "verdict": "older",
+      "prefix": [],
+      "shape": "v0.15.0"
+    },
+    {
+      "name": "another build's marker",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--script-opts-append=omarchy_iptv-build=",
+          "--script-opts-append=omarchy_iptv-build=0.16.0+ffffffff"
+        ]
+      }
+    },
+    {
+      "name": "this build's argv with one pin removed",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "drop": "--load-select=no"
+      }
+    },
+    {
+      "name": "this build's argv with one token APPENDED after the pin block",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "append": [
+          "--tls-verify=no"
+        ]
+      }
+    },
+    {
+      "name": "no socket token of ours (another socket)",
+      "verdict": "unknown",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--input-ipc-server=",
+          "--input-ipc-server=/run/user/1000/elsewhere/mpv.sock"
+        ]
+      }
+    }
+  ]
+}

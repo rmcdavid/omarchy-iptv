@@ -36,6 +36,39 @@
 #                         check is that the record is retired and NO mark lands
 #   P9  reap              the harness teardown still finds a detached grandchild
 #
+# Restart on adoption (owner, 2026-10-31 and 2026-11-01; lane RB): a player
+# ANOTHER build of this plugin launched is replaced, never fed. The older
+# players are started by the real tags' own helpers (git archive of v0.15.0
+# and v0.16.0, qa_helper_parts); the replacement is read off the kernel.
+#   L1  v0.15.0's player  this tree's shell starts over it: P0 (the canary
+#                         --osd-duration=4321 on its argv) gone, never two
+#                         token-holders at a 50 ms sample, P1's argv byte for
+#                         byte what this tree's OWN builder composes, core 0 0,
+#                         the options file gone, the same channel, time-pos
+#                         advancing, one restart line, no player card, the
+#                         coredump journal +0
+#   L1b paused, volume 37 the replacement comes back paused at 37 (answer 3)
+#   L2  v0.16.0's player  the same; that it is another build's comes from the
+#                         two trees' own builders, never from launch_verdict
+#   L3  counter-case      this tree's P1 across a shell stop, its orphan check
+#                         run out, and a start: same pid, same stat field 22,
+#                         time-pos continuous, no restart or replaced line, the
+#                         probe reads `current`; with M8's observation (P4
+#                         gains the no-restart-line check too)
+#   L4  old QML           v0.16.0's Service and helper play A; this tree's
+#                         helper and manifest replace the export's under the
+#                         running shell (the update's fast-forward; the host
+#                         keeps a keepLoaded service across rescanPlugins);
+#                         a zap to B: P0 gone, P1 this tree's, B playing, the
+#                         same shell process, no card, one replaced line
+#   L5  never fed         a logging server for B: B's first request follows
+#                         P0's first absent sample, none with B's header before
+#
+# L6 is the baseline: `--baseline 202a7bc` (v0.16.0's code) must red L1, L1b,
+# L2 and L4/L5 (P0 survives, is adopted and fed, keeps the canary) and L3's
+# probe check (that tree's probe has no `launch`, NOFIELD), and leave the rest
+# green.
+#
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
 # P2, P3, P4, P5, P6 and P8 MUST fail; P10 is evidence against the first
@@ -351,10 +384,447 @@ play_asap() {
   return 1
 }
 
+# ---- restart on adoption (owner, 2026-10-31 and 2026-11-01; lane RB): the
+# L segments' instruments. A player ANOTHER build of this plugin launched is
+# replaced, never fed, and the evidence is the KERNEL's: which processes hold
+# the socket token at every 50 ms sample, what /proc/<pid>/cmdline and
+# /proc/<pid>/limits say, what the player answers over its own socket, and,
+# for L5, what a logging server saw and when. The older players are launched
+# by the real tags' own helpers (git archive of v0.15.0 and v0.16.0, checked
+# whole with qa_helper_parts), never by a hand-made imitation of their argv.
+#
+# One python program, verbs below, run `-I -B` so it neither reads the
+# caller's site nor writes a .pyc into any tree it loads a helper from. It
+# prints words and numbers only: never an argv element, a string property, a
+# path the player holds, or a request's header value (rule 5 holds for a
+# scenario's own output too).
+#   tokens <sock>                      pids whose argv holds --input-ipc-server=<sock> as an item
+#   alive <sock> <pid>                 alive | gone (a zombie's empty cmdline is gone)
+#   sample <sock> <file> <secs>        every 50 ms, "<monotonic> <pids>" into <file> (0600)
+#                                      until <file>.stop exists or <secs> pass
+#   verdict <file> <p0> <p1>           samples:<n> max:<k> p0:yes|no p1:yes|no end:END|DEADLINE
+#                                      p0all:yes|no (P0 held the socket in EVERY sample)
+#   p0times <file> <p0>                "<last monotonic P0 was seen> <first monotonic it was not>"
+#   build <root> <sock> <pid>          plain | include | neither | NOARGV | NOBUILDER: whether
+#                                      <pid>'s argv equals what <root>'s OWN mpv_launch_argv
+#                                      composes, byte for byte, in either form -- the BUILDER,
+#                                      never launch_verdict, the reading under test
+#   differ <rootA> <rootB> <sock>      differ | same | NOBUILDER: two trees' own builders
+#   get <sock> <prop>                  a number (%g), true/false, null, STR (a string, never
+#                                      printed), ERR or NOREPLY
+#   set <sock> <prop> <json>           ok | ERR | NOREPLY
+#   stashid <sock>                     the stash's channel id, or NOSTASH
+#   starttime <pid>                    /proc/<pid>/stat field 22, or NOSTAT
+#   core <pid>                         "<soft> <hard>" of Max core file size, or NOLIMITS
+#   orphans <sock>                     pids of `player orphan-check` helpers on <sock>
+#   helpers <sock>                     pids of every `player ...` helper verb on <sock>
+#   serve <port> <dir> <log> <ua>      L5's server: one "<monotonic> GET <path> ua:yes|no" a request
+#   m8 <sock> <shellpid> <file> <secs> every 50 ms: "<monotonic> <shell up 0|1> <orphan-check
+#                                      pids or -> <player pids or ->" (L3's M8 reading)
+#   m8verdict <file> <t0>              shell-exit / orphan-seen / orphan-gone, seconds after t0
+#   now                                CLOCK_MONOTONIC, the clock every stamp here is on
+#   notifier <pid> <dir>               stub | other | none | NOENV: which omarchy-notification-send
+#                                      <pid>'s own PATH resolves first (/proc/<pid>/environ; the
+#                                      shell is ours and dumpable) -- the "no card" checks' control
+L_PY=$(cat <<'PY'
+import json, os, socket, sys, time
+
+def tok(sock):
+    return os.fsencode("--input-ipc-server=" + sock)
+
+def items(pid):
+    try:
+        with open("/proc/%d/cmdline" % int(pid), "rb") as handle:
+            return [part for part in handle.read().split(b"\0") if part]
+    except (OSError, ValueError):
+        return []
+
+def scan(token, needle=None):
+    me = os.getpid()
+    found = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) == me:
+            continue
+        argv = items(entry)
+        if needle is None and token in argv:
+            found.append(int(entry))
+        elif needle is not None and needle in argv and token in argv:
+            found.append(int(entry))
+    return sorted(found)
+
+def load_helper(root, name):
+    import importlib.machinery, importlib.util
+    path = os.path.join(root, "bin", "omarchy-iptv")
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+def composed(root, name, sock):
+    helper = load_helper(root, name)
+    return [("plain", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, [])]),
+            ("include", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, ["--osd-level=1"])])]
+
+def show(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return "%g" % value
+    if value is None:
+        return "null"
+    return "STR"
+
+def ipc(sock, command):
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(2.0)
+    try:
+        conn.connect(sock)
+        conn.sendall((json.dumps({"command": command, "request_id": 4242}) + "\n").encode())
+        buf = b""
+        end = time.monotonic() + 2.0
+        while time.monotonic() < end:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return None
+            buf += chunk
+            lines = buf.split(b"\n")
+            buf = lines.pop()
+            for line in lines:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(msg, dict) and msg.get("request_id") == 4242:
+                    return msg
+    except OSError:
+        return None
+    finally:
+        conn.close()
+    return None
+
+def main(verb, args):
+    if verb == "tokens":
+        print(" ".join(str(p) for p in scan(tok(args[0]))))
+    elif verb == "alive":
+        print("alive" if tok(args[0]) in items(args[1]) else "gone")
+    elif verb == "orphans":
+        print(" ".join(str(p) for p in scan(os.fsencode(args[0]), b"orphan-check")))
+    elif verb == "helpers":
+        print(" ".join(str(p) for p in scan(os.fsencode(args[0]), b"player")))
+    elif verb == "sample":
+        token, path, end = tok(args[0]), args[1], time.monotonic() + float(args[2])
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            while time.monotonic() < end and not os.path.exists(path + ".stop"):
+                pids = scan(token)
+                os.write(fd, ("%.3f %s\n" % (time.monotonic(), ",".join(str(p) for p in pids))).encode())
+                time.sleep(0.05)
+            os.write(fd, b"END\n" if os.path.exists(path + ".stop") else b"DEADLINE\n")
+        finally:
+            os.close(fd)
+    elif verb == "m8":
+        sock, shell, path, end = os.fsencode(args[0]), args[1], args[2], time.monotonic() + float(args[3])
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            while time.monotonic() < end and not os.path.exists(path + ".stop"):
+                up = 1 if items(shell) else 0
+                orphans = scan(sock, b"orphan-check")
+                players = scan(tok(args[0]))
+                os.write(fd, ("%.3f %d %s %s\n" % (time.monotonic(), up, ",".join(map(str, orphans)) or "-", ",".join(map(str, players)) or "-")).encode())
+                time.sleep(0.05)
+        finally:
+            os.close(fd)
+    elif verb == "m8verdict":
+        t0 = float(args[1])
+        exit_at = first_orphan = orphan_gone = None
+        seen = False
+        for line in open(args[0]).read().splitlines():
+            stamp, up, orphans, _ = line.split(" ")
+            stamp = float(stamp)
+            if exit_at is None and up == "0":
+                exit_at = stamp
+            if orphans != "-":
+                seen = True
+                if first_orphan is None:
+                    first_orphan = stamp
+            elif seen and orphan_gone is None:
+                orphan_gone = stamp
+        rel = lambda t: "NONE" if t is None else "%.2f" % (t - t0)
+        print("shell-exit:%s orphan-seen:%s orphan-gone:%s" % (rel(exit_at), rel(first_orphan), rel(orphan_gone)))
+    elif verb == "now":
+        print("%.3f" % time.monotonic())
+    elif verb == "notifier":
+        try:
+            env = open("/proc/%d/environ" % int(args[0]), "rb").read().split(b"\0")
+        except (OSError, ValueError):
+            print("NOENV")
+            return
+        path = next((e[5:].decode("utf-8", "replace") for e in env if e.startswith(b"PATH=")), "")
+        for folder in path.split(":"):
+            cand = os.path.join(folder, "omarchy-notification-send")
+            if folder and os.path.isfile(cand) and os.access(cand, os.X_OK):
+                print("stub" if os.path.realpath(folder) == os.path.realpath(args[1]) else "other")
+                return
+        print("none")
+    elif verb in ("verdict", "p0times"):
+        p0 = int(args[1] or 0) if args[1].isdigit() else 0
+        p1 = int(args[2]) if verb == "verdict" and args[2].isdigit() else 0
+        count = most = seen0 = seen1 = 0
+        last0 = gone0 = None
+        end = "none"
+        try:
+            lines = open(args[0]).read().splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            if line in ("END", "DEADLINE"):
+                end = line
+                continue
+            stamp, _, pids = line.partition(" ")
+            held = [int(x) for x in pids.split(",") if x.isdigit()]
+            count += 1
+            most = max(most, len(held))
+            if p0 and p0 in held:
+                seen0 += 1
+                last0, gone0 = float(stamp), None
+            elif last0 is not None and gone0 is None:
+                gone0 = float(stamp)
+            if p1 and p1 in held:
+                seen1 += 1
+        if verb == "verdict":
+            print("samples:%d max:%d p0:%s p1:%s end:%s p0all:%s" % (count, most, "yes" if seen0 else "no", "yes" if seen1 else "no", end,
+                                                                     "yes" if count and seen0 == count else "no"))
+        else:
+            print("%s %s" % ("%.3f" % last0 if last0 is not None else "NONE", "%.3f" % gone0 if gone0 is not None else "NONE"))
+    elif verb == "build":
+        argv = items(args[2])
+        if not argv:
+            print("NOARGV")
+            return
+        try:
+            forms = composed(args[0], "omarchy_iptv_rb_build", args[1])
+        except BaseException:
+            print("NOBUILDER")
+            return
+        print(next((form for form, want in forms if want == argv), "neither"))
+    elif verb == "differ":
+        try:
+            a = composed(args[0], "omarchy_iptv_rb_a", args[2])
+            b = composed(args[1], "omarchy_iptv_rb_b", args[2])
+        except BaseException:
+            print("NOBUILDER")
+            return
+        print("same" if any(x[1] == y[1] for x, y in zip(a, b)) else "differ")
+    elif verb == "get":
+        msg = ipc(args[0], ["get_property", args[1]])
+        print("NOREPLY" if msg is None else (show(msg.get("data")) if msg.get("error") == "success" else "ERR"))
+    elif verb == "set":
+        msg = ipc(args[0], ["set_property", args[1], json.loads(args[2])])
+        print("NOREPLY" if msg is None else ("ok" if msg.get("error") == "success" else "ERR"))
+    elif verb == "stashid":
+        msg = ipc(args[0], ["get_property", "user-data/omarchy-iptv"])
+        data = msg.get("data") if msg and msg.get("error") == "success" else None
+        ident = data.get("id") if isinstance(data, dict) else None
+        ok = isinstance(ident, str) and ident and all(c.isalnum() or c in ":._-" for c in ident) and len(ident) <= 64
+        print(ident if ok else "NOSTASH")
+    elif verb == "starttime":
+        try:
+            fields = open("/proc/%d/stat" % int(args[0])).read().rsplit(")", 1)[1].split()
+            print(fields[19])
+        except (OSError, ValueError, IndexError):
+            print("NOSTAT")
+    elif verb == "core":
+        try:
+            for line in open("/proc/%d/limits" % int(args[0])):
+                if line.startswith("Max core file size"):
+                    print(" ".join(line.split()[4:6]))
+                    return
+        except (OSError, ValueError):
+            pass
+        print("NOLIMITS")
+    elif verb == "serve":
+        import http.server, socketserver
+        port, root, log, agent = int(args[0]), args[1], args[2], args[3]
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *a, **k):
+                super().__init__(*a, directory=root, **k)
+            def log_message(self, *a):
+                pass
+            def do_GET(self):
+                has = "yes" if self.headers.get("User-Agent", "") == agent else "no"
+                os.write(fd, ("%.3f GET %s ua:%s\n" % (time.monotonic(), self.path.split("?")[0], has)).encode())
+                return super().do_GET()
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+        Server(("127.0.0.1", port), Handler).serve_forever()
+
+main(sys.argv[1], sys.argv[2:])
+PY
+)
+l_py() { python3 -I -B -c "$L_PY" "$@"; }
+# Model.OLDER_RESTART_LINE and the helper's PLAYER_REPLACED_LINE, fixed text
+# (the interface frozen for lane RB): the shell's one journal line per
+# automatic restart, and the helper's one per replaced player.
+L_RESTART_TEXT='restarting a player another build of this plugin started'
+L_REPLACED_TEXT='replaced a player another build of this plugin started'
+# The inert canary L1 puts on v0.15.0's own command line (that release put the
+# user's mpvArgs on the argv; D-SINK-47 moved them into a 0600 file in 0.16.0).
+L_CANARY='--osd-duration=4321'
+# The tokens every older player here is launched with, as run.sh's lever adds
+# them to the shell's (F-HARNESS-45): a software context mpv's VO probe accepts
+# under a pixman cage, and no sound on the user's own server.
+L_LEVER=(--mpv-arg=--gpu-sw=yes --mpv-arg=--ao=null)
+L5_PORT=8769
+L5_UA="RaoNeverFedAgent/1.0"
+L_NESTED=0
+L_CACHE=""
+SAMPLER_PID=""
+L5_PID=""
+L15_DIR=""
+L16_DIR=""
+L4_DIR=""
+crash_count() { journalctl -o json MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1 2>/dev/null | wc -l | tr -d ' '; }
+notify_cards() {   # player cards the scenario's notification stub logged (never "Bar setting ignored")
+  qa_count $'\t(Stream failed|Could not start playback|Playback stopped|Audio output failed|Video output failed|mpv not found)\t' "$SCRATCH/notify.log"
+}
+# l_export <tag>: the tag's own tree, checked whole (the stub and every part
+# it names), or nothing.
+l_export() {
+  local dir
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rao-XXXXXX") || return 1
+  if git -C "$ROOT" archive "$1" 2>/dev/null | tar -x -C "$dir" 2>/dev/null \
+     && [[ -f $dir/manifest.json ]] && [[ -n $(qa_helper_parts "$dir") ]]; then
+    printf '%s\n' "$dir"
+    return 0
+  fi
+  rm -rf -- "$dir"
+  return 1
+}
+# l_old_start <tree> <id> [more --mpv-arg tokens]: that tree's OWN helper runs
+# `player start` on the harness socket with no shell up, the way the release
+# that tree is would have; its reply goes to $LOG. The seq continues the
+# lock's, so the next shell's starts are not superseded by it.
+l_old_start() {
+  local tree=$1 id=$2 seq; shift 2
+  seq=$(lock_seq)
+  [[ $seq =~ ^[0-9]+$ ]] && seq=$((seq + 1)) || seq=1
+  env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE timeout -k 2 60 python3 -I "$tree/bin/omarchy-iptv" player start \
+    --socket "$SOCK" --cache-dir "$L_CACHE" --id "$id" --seq "$seq" "${L_LEVER[@]}" "$@" >>"$LOG" 2>&1
+}
+# l_wait_up <secs>: until the player on the socket reports a numeric time-pos.
+l_wait_up() {
+  local secs=$1 i v
+  for ((i = 0; i < secs * 10; i++)); do
+    v=$(l_py get "$SOCK" time-pos)
+    [[ $v =~ ^[0-9.e+-]+$ ]] && return 0
+    sleep 0.1
+  done
+  printf 'gave up after %ss waiting for a time-pos on the socket\n' "$secs" >&2
+  return 1
+}
+# l_advances: two time-pos readings 2 s apart, the second larger.
+l_advances() {
+  local a b
+  l_wait_up 20 || { echo "never-up"; return 0; }
+  a=$(l_py get "$SOCK" time-pos); sleep 2; b=$(l_py get "$SOCK" time-pos)
+  python3 -I -c 'import sys
+try:
+    print("advancing" if float(sys.argv[2]) > float(sys.argv[1]) else "stuck")
+except ValueError:
+    print("unreadable")' "$a" "$b"
+}
+# l_wait_replaced <p0> <secs>: until P0 is gone and exactly one other process
+# holds the token; prints it. Bounded, and says when it gave up.
+l_wait_replaced() {
+  local p0=$1 secs=$2 i pids
+  for ((i = 0; i < secs * 10; i++)); do
+    pids=$(l_py tokens "$SOCK")
+    if [[ -n $pids && $pids != *" "* && $pids != "$p0" && $(l_py alive "$SOCK" "$p0") == gone ]]; then
+      printf '%s\n' "$pids"
+      return 0
+    fi
+    sleep 0.1
+  done
+  printf 'gave up after %ss waiting for the older player %s to be replaced\n' "$secs" "${p0:-<none>}" >&2
+  return 1
+}
+# l_wait_orphans <secs> [verb]: until no `player orphan-check` helper of this
+# socket is left (the dying shell's, PO-2), so a player started next is never
+# judged by a check from the previous shell; with `helpers`, until no player
+# verb at all is left -- the shell's detached `player stop` writes the lock's
+# seq after `ipc stop` has returned, and an older helper's start read before
+# that write is superseded by it (seen on the first run). Prints the seconds.
+l_wait_orphans() {
+  local secs=$1 verb=${2:-orphans} i
+  for ((i = 0; i < secs * 10; i++)); do
+    [[ -z $(l_py "$verb" "$SOCK") ]] && { printf '%s\n' "$((i / 10)).$((i % 10))"; return 0; }
+    sleep 0.1
+  done
+  printf 'gave up after %ss waiting for the %s of this socket to exit\n' "$secs" "$verb" >&2
+  echo "NONE"
+  return 1
+}
+sampler_start() {   # sampler_start <file> <secs>
+  rm -f -- "$1" "$1.stop"
+  l_py sample "$SOCK" "$1" "$2" >/dev/null 2>&1 &
+  SAMPLER_PID=$!
+}
+sampler_stop() {
+  [[ -n $SAMPLER_PID ]] || return 0
+  : >"$1.stop"
+  local i
+  for ((i = 0; i < 50; i++)); do kill -0 "$SAMPLER_PID" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$SAMPLER_PID" 2>/dev/null && kill -TERM "$SAMPLER_PID" 2>/dev/null
+  wait "$SAMPLER_PID" 2>/dev/null
+  SAMPLER_PID=""
+}
+# l_stop_all: no player, no shell, and no orphan check of the last shell left.
+l_stop_all() {
+  ipc stop >/dev/null
+  until_eq 0 10 player_count || true
+  "$RUN" shell-stop >>"$LOG" 2>&1
+  l_wait_orphans 15 helpers >/dev/null || true
+}
+# l_update_tree <dir>: what `omarchy plugin update`'s fast-forward does to an
+# install, for the files a release changes under a running shell: the tree
+# under test's helper (the stub and every part it names) and its manifest
+# replace <dir>'s, each by a rename, so a running process keeps any file it
+# has open and the next spawn reads the new one. The QML is left alone: the
+# keepLoaded service the host keeps across rescanPlugins is still the old one.
+l_update_tree() {
+  local dir=$1 part
+  local -a parts=()
+  mapfile -t parts < <(qa_helper_parts "$PLUGIN_ROOT")
+  (( ${#parts[@]} > 0 )) || return 1
+  for part in "${parts[@]}"; do
+    cp -- "$part" "$dir/bin/helper/.rb-new" && mv -f -- "$dir/bin/helper/.rb-new" "$dir/bin/helper/${part##*/}" || return 1
+  done
+  cp -- "$PLUGIN_ROOT/bin/omarchy-iptv" "$dir/bin/.rb-new" && chmod 0755 "$dir/bin/.rb-new" \
+    && mv -f -- "$dir/bin/.rb-new" "$dir/bin/omarchy-iptv" || return 1
+  cp -- "$PLUGIN_ROOT/manifest.json" "$dir/.rb-new" && mv -f -- "$dir/.rb-new" "$dir/manifest.json"
+}
+probe_launch() {   # the shipping probe's `launch`, no owner claim written; NOFIELD on a tree without it
+  timeout -k 2 20 python3 -I "$PLUGIN_ROOT/bin/omarchy-iptv" player probe --socket "$SOCK" 2>>"$LOG" | python3 -I -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except ValueError:
+    print("NOREPLY"); raise SystemExit(0)
+print("NOFIELD" if "launch" not in d else str(d["launch"]))'
+}
+
 cleanup() {
+  [[ -n $SAMPLER_PID ]] && kill -TERM "$SAMPLER_PID" 2>/dev/null
+  [[ -n $L5_PID ]] && kill -TERM "$L5_PID" 2>/dev/null
   OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" shell-stop >/dev/null 2>&1
   "$RUN" reap >/dev/null 2>&1
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
+  local d; for d in "$L15_DIR" "$L16_DIR" "$L4_DIR"; do [[ -n $d && -d $d ]] && rm -rf -- "$d"; done
+  rm -f -- "$SCRATCH/bin/omarchy-notification-send"
+  rmdir -- "$SCRATCH/bin" 2>/dev/null
   return 0
 }
 trap cleanup EXIT
@@ -383,6 +853,14 @@ qa_transcript_start player || exit 2
 [[ -n $TREE_LINE ]] && echo "$TREE_LINE"
 export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
+# Restart on adoption: the two releases whose OWN helpers launch the older
+# players of L1, L1b, L2 and L4. A tag that cannot be exported whole is not a
+# refusal (the scenario's other checks still mean something) but every L check
+# that needs it then FAILS on its premise rather than passing on nothing.
+L15_DIR=$(l_export v0.15.0) || bad "L the v0.15.0 tag could not be exported whole (git archive, then qa_helper_parts)"
+L16_DIR=$(l_export v0.16.0) || bad "L the v0.16.0 tag could not be exported whole (git archive, then qa_helper_parts)"
+echo "== L helpers: v0.15.0 $(qa_json_field "d['version']" "$(cat "$L15_DIR/manifest.json" 2>/dev/null)") ($(qa_helper_parts "$L15_DIR" | wc -l) parts), v0.16.0 $(qa_json_field "d['version']" "$(cat "$L16_DIR/manifest.json" 2>/dev/null)") ($(qa_helper_parts "$L16_DIR" | wc -l) parts)"
+qa_target_nested "${WAYLAND_DISPLAY:-}" "$REAL_RUNTIME" && L_NESTED=1
 
 # ---- fixtures: two playable channels (so a zap keeps the window alive) and
 # one dead channel whose URL carries credentials and a token, with headers.
@@ -481,6 +959,10 @@ is "P4 still the same pid" "$(player_pid)" "$PID1"
 is "P4 still exactly one window" "$(windows_named)" "1"
 until_eq true 6 svc "d['socketAttached']" || true
 is "P4 the observer reattached to the surviving socket" "$(svc "d['socketAttached']")" "true"
+# Restart on adoption's counter-case on the headline path: a player this tree
+# launched is ADOPTED, so the shell writes no restart line (Model's
+# OLDER_RESTART_LINE) and the helper no replaced line.
+is "P4 no restart line and no replaced line: this tree's own player is adopted, not replaced" "$(log_count "$L_RESTART_TEXT") $(log_count "$L_REPLACED_TEXT")" "0 0"
 
 echo "== P5 zap reuses the one window"
 ipc zap 1 >/dev/null
@@ -699,6 +1181,194 @@ for again in 1 2; do
   is "P14 start $again still finds no record" "$(session_id)" "$QA_NO_SESSION"
 done
 
+echo "== L1 restart on adoption: a player v0.15.0's own helper launched, met by this tree's shell"
+# The decision's case (owner, 2026-10-31): the shell restarts over a player an
+# earlier release started. v0.15.0 put the user's mpvArgs ON the argv, so the
+# canary is the thing that must not survive: P1 is this tree's launch, built by
+# this tree's own builder, and P0 -- with the canary -- is gone, never two at
+# once. The notification stub is the scenario's own, in front of PATH for the
+# shells the L segments start (run.sh harness_env puts $SCRATCH/bin first), so
+# "no card" is read off what the shell actually posted.
+mkdir -p "$SCRATCH/bin"
+cat >"$SCRATCH/bin/omarchy-notification-send" <<'STUB'
+#!/bin/bash
+# player-scenario's L segments: the host's notification wrapper, logged. One
+# line per post (tab-separated argv) into $SCRATCH/notify.log, and, as the
+# real wrapper does with -p, a server id on stdout.
+log="${0%/*}/../notify.log"
+umask 077
+n=$(( $(wc -l <"$log" 2>/dev/null || echo 0) + 1 ))
+line=""
+for a in "$@"; do line="$line"$'\t'"$a"; done
+printf '%s%s\t\n' "$n" "$line" >>"$log"
+for a in "$@"; do [[ $a == -p ]] && { echo "$n"; break; }; done
+exit 0
+STUB
+chmod 0700 "$SCRATCH/bin/omarchy-notification-send"
+: >"$SCRATCH/notify.log"
+L_CACHE=$(ipc activeCache)
+ck "L1 premise: the shell names the active source's cache folder for the old helpers to resolve the channel in" '[[ $L_CACHE == /* && -d $L_CACHE ]]'
+l_stop_all
+l_old_start "$L15_DIR" "t:live1" "--mpv-arg=$L_CANARY"
+L1_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L1_CMD0=$(cmdline_of "$L1_P0")
+ck "L1 premise: v0.15.0's own helper launched one player P0 on the harness socket, its argv carrying the canary" \
+   '[[ $L1_P0 =~ ^[0-9]+$ && "$L1_CMD0" == *"input-ipc-server=$SOCK"* && "$L1_CMD0" == *"$L_CANARY"* ]]'
+printf '   L1 P0 %s argv vs this tree'"'"'s builder: %s\n' "${L1_P0:-<none>}" "$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L1_P0")"
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l1.samples" 120
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L1 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L1 the shell did not start"
+L1_P1=$(l_wait_replaced "$L1_P0" 60)
+until_eq "t:live1" 15 np id || true
+L1_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l1.samples"
+printf '   L1 samples %s; restart lines %s, helper replaced lines %s, P1 %s\n' "$(l_py verdict "$SCRATCH/l1.samples" "$L1_P0" "$L1_P1")" \
+  "$(log_count "$L_RESTART_TEXT")" "$(log_count "$L_REPLACED_TEXT")" "${L1_P1:-<none>}"
+is "L1 P0, the player v0.15.0 launched, is gone" "$(l_py alive "$SOCK" "$L1_P0")" "gone"
+ck "L1 one new player P1 holds the socket in its place" '[[ $L1_P1 =~ ^[0-9]+$ && $L1_P1 != "$L1_P0" ]]'
+is "L1 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l1.samples" "$L1_P0" "$L1_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L1_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L1_P1")
+ck "L1 P1's argv is this tree's own composed launch, byte for byte, build marker included ($L1_FORM)" '[[ $L1_FORM == plain || $L1_FORM == include ]]'
+# Every process that holds the socket token now, not P1 alone: on a tree that
+# kept P0 the canary is still on ITS argv, and that is what this reads
+# (rc-rao-b; the first version read only P1's, so on 202a7bc it went red for
+# want of a P1, never for the canary it names).
+L1_HOLDERS=$(l_py tokens "$SOCK")
+L1_CANARY_ON=""
+for p in $L1_HOLDERS; do [[ "$(cmdline_of "$p")" == *"$L_CANARY"* ]] && L1_CANARY_ON+="$p "; done
+ck "L1 and the canary from v0.15.0's argv is on no command line holding the socket (holders: ${L1_HOLDERS:-none}; with the canary: ${L1_CANARY_ON:-none})" '[[ -n $L1_HOLDERS && -z $L1_CANARY_ON ]]'
+is "L1 P1 dumps no core (its /proc limits)" "$(l_py core "$L1_P1")" "0 0"
+ck "L1 the private options file is gone once P1 answered" '[[ ! -e $SCRATCH/runtime/omarchy-iptv/mpv-args.conf ]]'
+is "L1 the shell still plays the channel P0 was playing" "$(np id)" "t:live1"
+is "L1 and P1's own stash names it" "$(l_py stashid "$SOCK")" "t:live1"
+is "L1 P1 plays: time-pos advances" "$L1_ADV" "advancing"
+is "L1 exactly one restart line in the journal" "$(log_count "$L_RESTART_TEXT")" "1"
+is "L1 no player card was posted, by a shell whose notifier is the logging stub" "$(qa_delta "$cards0" "$(notify_cards)") $(l_py notifier "$(shell_pid)" "$SCRATCH/bin")" "0 stub"
+is "L1 the coredump journal did not move" "$(qa_delta "$j0" "$(crash_count)")" "0"
+if (( L_NESTED )); then
+  skp "L1 exactly one omarchy-iptv window" "the target is a nested compositor and hyprctl lists only the session's own windows; one player process at every sample is what is observed here"
+else
+is "L1 exactly one omarchy-iptv window" "$(windows_named)" "1"
+fi
+
+echo "== L1b the replaced player's pause and volume come back (owner's answer 3)"
+l_stop_all
+l_old_start "$L15_DIR" "t:live1"
+L1B_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+l_py set "$SOCK" volume 37 >/dev/null
+l_py set "$SOCK" pause true >/dev/null
+is "L1b premise: P0 (v0.15.0's) is paused at volume 37" "$(l_py get "$SOCK" pause) $(l_py get "$SOCK" volume)" "true 37"
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L1b restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L1b the shell did not start"
+L1B_P1=$(l_wait_replaced "$L1B_P0" 60)
+until_eq "t:live1" 15 np id || true
+l_wait_up 20 || true
+ck "L1b P0 was replaced by P1" '[[ $L1B_P1 =~ ^[0-9]+$ && $L1B_P1 != "$L1B_P0" ]]'
+is "L1b P1 comes back paused, at volume 37" "$(l_py get "$SOCK" pause) $(l_py get "$SOCK" volume)" "true 37"
+is "L1b and the shell knows it is paused" "$(svc "d['paused']")" "true"
+
+echo "== L2 the same with a player v0.16.0's own helper launched: no marker, so another build's"
+l_stop_all
+# The expectation comes from the two TREES' OWN builders, never from the
+# verdict under test: v0.16.0's composed launch is not this tree's.
+is "L2 premise: v0.16.0's own builder and this tree's compose different launch argvs" "$(l_py differ "$L16_DIR" "$PLUGIN_ROOT" "$SOCK")" "differ"
+l_old_start "$L16_DIR" "t:live1"
+L2_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L2_FORM0=$(l_py build "$L16_DIR" "$SOCK" "$L2_P0")
+ck "L2 premise: P0's argv is exactly what v0.16.0's own builder composes ($L2_FORM0)" '[[ $L2_FORM0 == plain || $L2_FORM0 == include ]]'
+j0=$(crash_count)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l2.samples" 120
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L2 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L2 the shell did not start"
+L2_P1=$(l_wait_replaced "$L2_P0" 60)
+until_eq "t:live1" 15 np id || true
+L2_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l2.samples"
+printf '   L2 samples %s; P1 %s\n' "$(l_py verdict "$SCRATCH/l2.samples" "$L2_P0" "$L2_P1")" "${L2_P1:-<none>}"
+is "L2 P0, the player v0.16.0 launched, is gone" "$(l_py alive "$SOCK" "$L2_P0")" "gone"
+ck "L2 one new player P1 holds the socket in its place" '[[ $L2_P1 =~ ^[0-9]+$ && $L2_P1 != "$L2_P0" ]]'
+is "L2 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l2.samples" "$L2_P0" "$L2_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L2_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L2_P1")
+ck "L2 P1's argv is this tree's own composed launch ($L2_FORM)" '[[ $L2_FORM == plain || $L2_FORM == include ]]'
+is "L2 P1 dumps no core" "$(l_py core "$L2_P1")" "0 0"
+is "L2 P1 plays the same channel: time-pos advances" "$(np id) $L2_ADV" "t:live1 advancing"
+is "L2 exactly one restart line" "$(log_count "$L_RESTART_TEXT")" "1"
+is "L2 the coredump journal did not move" "$(qa_delta "$j0" "$(crash_count)")" "0"
+
+echo "== L3 the counter-case: this tree's own player across a shell stop and start is adopted, never restarted"
+L3_PID=$(l_py tokens "$SOCK")
+L3_START=$(l_py starttime "$L3_PID")
+L3_T0=$(l_py get "$SOCK" time-pos)
+: >"$SCRATCH/harness.log"
+sampler_start "$SCRATCH/l3.samples" 120
+# M8 (D-HOST-8), what the cage can show of it. omarchy 4.0.6's
+# omarchy-restart-shell asks the old instance to quit with `quickshell kill`,
+# loops until it has EXITED, and only then starts the new one, so the dying
+# service's orphan check (Service.qml onDestruction, grace 6 s, PO-2) decides
+# alone: it stops the player only if the old shell is still alive when the
+# grace ends. run.sh's shell-stop is a SIGTERM, under which the harness shell
+# exits without destroying its service (no orphan check is spawned: seen on
+# the first L run), so this stop is the host's own: `quickshell kill --pid`
+# of the harness shell's RECORDED pid, under the harness's runtime directory,
+# where only the harness's instances are registered. The m8 sampler stamps
+# the shell's exit and the orphan check's life on one clock.
+L3_QS=$(shell_pid)
+rm -f -- "$SCRATCH/m8.samples" "$SCRATCH/m8.samples.stop"
+l_py m8 "$SOCK" "${L3_QS:-0}" "$SCRATCH/m8.samples" 30 >/dev/null 2>&1 &
+L3_M8=$!
+L3_T=$(l_py now)
+[[ $L3_QS =~ ^[0-9]+$ ]] && XDG_RUNTIME_DIR="$SCRATCH/runtime" timeout -k 2 35 quickshell kill --pid "$L3_QS" >>"$LOG" 2>&1
+for ((i = 0; i < 300; i++)); do [[ -z $(l_py helpers "$SOCK") ]] && ! kill -0 "${L3_QS:-0}" 2>/dev/null && break; sleep 0.1; done
+# One more sample past the moment the loop above saw the check gone: the
+# sampler reads the stop file before it writes, so stopping it at once can
+# lose the only sample that shows the check ended (orphan-gone NONE, seen once).
+sleep 0.3
+: >"$SCRATCH/m8.samples.stop"; wait "$L3_M8" 2>/dev/null
+"$RUN" shell-stop >>"$LOG" 2>&1
+L3_M8V=$(l_py m8verdict "$SCRATCH/m8.samples" "$L3_T")
+printf '   L3 / M8: after `quickshell kill`: %s (seconds); the player %s\n' "$L3_M8V" "$(l_py alive "$SOCK" "$L3_PID")"
+ck "L3 premise: the dying shell spawned its orphan check and it ran out, so the player's survival is that check's answer ($L3_M8V)" \
+   '[[ $L3_M8V != *"orphan-seen:NONE"* && $L3_M8V != *"orphan-gone:NONE"* && -z $(l_py orphans "$SOCK") ]]'
+is "L3 the player outlived its shell's orphan check (M8: the restart case, not orphan-stopped)" "$(l_py alive "$SOCK" "$L3_PID")" "alive"
+L3_TRS=$(l_py now)
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L3 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L3 the shell did not start"
+until_eq true 10 svc "d['socketAttached']" || true
+sleep 3
+sampler_stop "$SCRATCH/l3.samples"
+L3_T1=$(l_py get "$SOCK" time-pos)
+L3_TREAD=$(l_py now)
+L3_START1=$(l_py starttime "$(l_py tokens "$SOCK")")
+ck "L3 premise: the player read before the stop is this tree's P1 of L2" '[[ $L3_PID =~ ^[0-9]+$ && $L3_PID == "$L2_P1" ]]'
+# end:END as well: a sampler that died early would have judged only the
+# samples before the stop (rc-rao-b).
+is "L3 the same pid holds the socket, alone, at every sample" "$(l_py verdict "$SCRATCH/l3.samples" "$L3_PID" "" | cut -d' ' -f2,5,6)" "max:1 end:END p0all:yes"
+# A start time that could not be read is not a match: NOSTAT on both sides (no
+# holder before, none after) used to read as "unchanged" (rc-rao-b).
+ck "L3 the same process: /proc stat field 22 unchanged ($L3_START -> $L3_START1)" '[[ $L3_START =~ ^[0-9]+$ && $L3_START1 == "$L3_START" ]]'
+# Continuous, and not by chance: a replacement can only be spawned after the
+# new shell starts, so its time-pos is at most the seconds since then. The
+# player read here must be PAST that -- it was playing before the new shell
+# existed. `T1 > T0` alone passed any replacement that had played longer than
+# the old player had when T0 was read (rc-rao-b; under M-OLDER it read 3.18 ->
+# 1.85 only because T0 was small).
+L3_UP=$(python3 -I -c 'import sys
+try:
+    print("%.2f" % (float(sys.argv[2]) - float(sys.argv[1])))
+except ValueError:
+    print("NOCLOCK")' "$L3_TRS" "$L3_TREAD")
+ck "L3 time-pos is continuous across the restart ($L3_T0 -> $L3_T1 s, past the new shell's $L3_UP s)" 'python3 -I -c "import sys; t0, t1, up = map(float, sys.argv[1:4]); sys.exit(0 if t1 > t0 and t1 > up else 1)" "$L3_T0" "$L3_T1" "$L3_UP" 2>/dev/null'
+is "L3 no restart line and no replaced line" "$(log_count "$L_RESTART_TEXT") $(log_count "$L_REPLACED_TEXT")" "0 0"
+is "L3 the probe the shell runs reads it as this build's launch" "$(probe_launch)" "current"
+is "L3 the shell adopted it and plays its channel" "$(np id) $(svc "d['socketAttached']")" "t:live1 true"
+
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P9 no player to reap"
@@ -712,6 +1382,116 @@ ck "P9 the reap pattern matches the running shell (positive control)" 'pgrep -f 
 until_eq 0 8 player_count || true
 is "P9 reap killed the detached player" "$(player_count)" "0"
 ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/null'
+
+echo "== L4 the old QML after an update: v0.16.0's keepLoaded Service, this tree's helper on disk, then a zap"
+# `omarchy plugin update` is `git merge --ff-only` and then `rescanPlugins`,
+# and the host KEEPS a keepLoaded service across that (shell.qml
+# unloadPluginServices; M7), so until the shell restarts the service that runs
+# is the old release's and every helper it spawns is the new one on disk
+# (design 1, D-SINK-70's path). The harness never destroys its service, which
+# is that state; the update is the helper and the manifest replaced under it
+# (l_update_tree). Then a channel change: the old Service's zap reaches the
+# NEW helper's `play`, the gate refuses another build's player before any
+# command, v0.16.0's QML routes `not_running` to `player start`, and the start
+# replaces the player. L5 reads the same moment off a logging server.
+L4_DIR=$(l_export v0.16.0) || bad "L4 the v0.16.0 tag could not be exported for the old QML"
+cat >"$FIX/l4.m3u" <<EOF
+#EXTM3U
+#EXTINF:-1 tvg-id="l4a" group-title="Harness",Harness L4 A
+http://127.0.0.1:8765/test.ts
+#EXTINF:-1 tvg-id="l4b" group-title="Harness",Harness L4 B
+#EXTVLCOPT:http-user-agent=$L5_UA
+http://127.0.0.1:$L5_PORT/l5b.ts
+EOF
+cp -f "$FIX/test.ts" "$FIX/l5b.ts"
+: >"$SCRATCH/l5.log"
+python3 -I -B -c "$L_PY" serve "$L5_PORT" "$FIX" "$SCRATCH/l5.log" "$L5_UA" >/dev/null 2>&1 &
+L5_STARTED=$!
+# The listener's pid from ss, never $! alone (working in parallel 3); the two
+# agree here because nothing wraps it -- python is started directly, not
+# through l_py, whose function body would be a subshell between them -- and
+# the check says so.
+for i in $(seq 1 50); do
+  L5_PID=$(ss -ltnpH "sport = :$L5_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+  [[ -n $L5_PID ]] && break
+  sleep 0.1
+done
+ck "L5 premise: the logging server holds its port and is the process this scenario started" '[[ -n $L5_PID && $L5_PID == "$L5_STARTED" ]]'
+: >"$SCRATCH/harness.log"
+OMARCHY_IPTV_PLUGIN_ROOT="$L4_DIR" QS_DISABLE_FILE_WATCHER=1 "$RUN" --detach --serve --timeout 0 --playlist "$FIX/l4.m3u" >>"$LOG" 2>&1
+wait_log 'service loaded' 20 || bad "L4 the v0.16.0 harness did not start (see $LOG)"
+until_eq 2 20 svc "d['channels']" || bad "L4 the L4 playlist did not load"
+ipc play "t:l4a" >/dev/null
+until_eq 1 15 player_count || true
+L4_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L4_FORM0=$(l_py build "$L4_DIR" "$SOCK" "$L4_P0")
+ck "L4 premise: v0.16.0's own Service and helper launched P0, exactly v0.16.0's composed argv ($L4_FORM0)" '[[ $L4_FORM0 == plain || $L4_FORM0 == include ]]'
+L4_QS=$(shell_pid)
+l_update_tree "$L4_DIR" || bad "L4 the update could not replace the export's helper and manifest"
+ck "L4 premise: the helper on disk is now this tree's, byte for byte" 'cmp -s "$L4_DIR/bin/omarchy-iptv" "$PLUGIN_ROOT/bin/omarchy-iptv" && cmp -s "$L4_DIR/manifest.json" "$PLUGIN_ROOT/manifest.json"'
+j0=$(crash_count); cards0=$(notify_cards)
+L5_BEFORE=$(wc -l <"$SCRATCH/l5.log" | tr -d ' ')
+sampler_start "$SCRATCH/l4.samples" 120
+ipc play "t:l4b" >/dev/null
+L4_P1=$(l_wait_replaced "$L4_P0" 60)
+until_eq "t:l4b" 15 np id || true
+L4_ADV=$(l_advances)
+sampler_stop "$SCRATCH/l4.samples"
+L4_TIMES=$(l_py p0times "$SCRATCH/l4.samples" "$L4_P0")
+printf '   L4 samples %s; P0 last seen / first gone %s; helper replaced lines %s; P1 %s\n' \
+  "$(l_py verdict "$SCRATCH/l4.samples" "$L4_P0" "$L4_P1")" "$L4_TIMES" "$(log_count "$L_REPLACED_TEXT")" "${L4_P1:-<none>}"
+ck "L4 the old Service ran throughout: the same shell process before the update and after the zap" '[[ -n $L4_QS && "$(shell_pid)" == "$L4_QS" ]] && kill -0 "$L4_QS" 2>/dev/null'
+is "L4 P0, v0.16.0's player, is gone" "$(l_py alive "$SOCK" "$L4_P0")" "gone"
+ck "L4 one new player P1 holds the socket in its place" '[[ $L4_P1 =~ ^[0-9]+$ && $L4_P1 != "$L4_P0" ]]'
+is "L4 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l4.samples" "$L4_P0" "$L4_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
+L4_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L4_P1")
+ck "L4 P1's argv is this tree's own composed launch ($L4_FORM)" '[[ $L4_FORM == plain || $L4_FORM == include ]]'
+is "L4 P1 dumps no core" "$(l_py core "$L4_P1")" "0 0"
+is "L4 the old Service plays B" "$(np id) $(svc "d['playing']")" "t:l4b true"
+is "L4 and P1 plays it: time-pos advances" "$L4_ADV" "advancing"
+is "L4 the helper journaled exactly one replacement" "$(log_count "$L_REPLACED_TEXT")" "1"
+is "L4 no player card was posted, by a shell whose notifier is the logging stub" "$(qa_delta "$cards0" "$(notify_cards)") $(l_py notifier "$(shell_pid)" "$SCRATCH/bin")" "0 stub"
+is "L4 the coredump journal did not move" "$(qa_delta "$j0" "$(crash_count)")" "0"
+if (( L_NESTED )); then
+  skp "L4 exactly one omarchy-iptv window" "the target is a nested compositor and hyprctl lists only the session's own windows; one player process at every sample is what is observed here"
+else
+is "L4 exactly one omarchy-iptv window" "$(windows_named)" "1"
+fi
+
+echo "== L5 never fed: B's URL and header reach the server only after P0 is gone"
+# The server stamps every GET with CLOCK_MONOTONIC, the sampler every sample:
+# one clock. A request for B, or one carrying B's header, before P0's first
+# absent sample could only be P0's -- P1 is spawned after the ladder has P0
+# gone -- so "every one after" is "none from P0".
+L5_VERDICT=$(python3 -I - "$SCRATCH/l5.log" "${L5_BEFORE:-0}" $L4_TIMES <<'PY'
+import sys
+path, before = sys.argv[1], int(sys.argv[2]) if sys.argv[2].isdigit() else 0
+gone = sys.argv[4] if len(sys.argv) > 4 else "NONE"
+try:
+    lines = open(path).read().splitlines()[before:]
+except OSError:
+    lines = []
+b = [float(l.split()[0]) for l in lines if " GET /l5b.ts " in l]
+ua = [float(l.split()[0]) for l in lines if l.endswith(" ua:yes")]
+if gone == "NONE":
+    print("requests:%d first:p0-never-gone header-before:NA header-all:%d" % (len(b), len(ua)))
+else:
+    g = float(gone)
+    first = "none" if not b else ("after" if min(b) > g else "before")
+    print("requests:%d first:%s header-before:%d header-all:%d" % (len(b), first, len([t for t in ua if t <= g]), len(ua)))
+PY
+)
+printf '   L5 %s\n' "$L5_VERDICT"
+ck "L5 B was fetched at all, so a zero below is about P0 ($L5_VERDICT)" '[[ $L5_VERDICT =~ ^requests:[1-9] ]]'
+# And B's header was seen at all: the server recognises it, so the zero below
+# is about P0 and not a header nobody sends (rc-rao-b; the first version had
+# no control for the header half).
+ck "L5 B's provider header reached the server on some request, so the header count below can see one ($L5_VERDICT)" '[[ $L5_VERDICT =~ header-all:[1-9] ]]'
+is "L5 every request for B's path follows P0's exit, and none carrying B's header came before it" "$(cut -d' ' -f2-3 <<<"$L5_VERDICT")" "first:after header-before:0"
+"$RUN" reap >>"$LOG" 2>&1
+[[ -n $L5_PID ]] && kill -TERM "$L5_PID" 2>/dev/null && { wait "$L5_STARTED" 2>/dev/null; L5_PID=""; }
+until_eq 0 8 player_count || true
 
 # The floor. D-PLY-9 was not that one assertion was wrong - it was that bash
 # offers NO way to turn a failed expansion into a failed test, so the check
@@ -734,7 +1514,12 @@ ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/n
 # skips on a baseline that predates D-PLY-27, and that run has still reached
 # every check site. A skip only ever comes from `skp`, which prints its line
 # and moves `skipped`, so the floor cannot be met by a check that vanished.
-EXPECTED_CHECKS=85
+# 85 -> 142 (lane RB, 2026-11-02, restart on adoption): P4's no-restart-line
+# check and the L segments' 56 (L1 16, L1b 4, L2 10, L3 9, L4 15 with L5's
+# server premise, L5 2; the two window checks SKIP under a nested compositor
+# and still count here).
+# 142 -> 143 (rc-rao-b, 2026-11-02): L5's control that B's header is seen at all.
+EXPECTED_CHECKS=143
 ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 

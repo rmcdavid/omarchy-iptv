@@ -50,7 +50,8 @@ e710341) followed the same day, filed as its own request; 0.14.3 stays the
 verified snapshot until a maintainer actions it.
 0.16.0 (`main` 103fa68) was cut on 2026-11-01 on the owner's word with
 #12636 still pending, which makes #12636 stale; it stays open (F-M3-4), and
-0.16.0's own request is filed only on the owner's word. 0.14.3 is still the
+0.16.0's own request was filed on the owner's word on 2026-11-01 as
+#13611 (validated, its automated baseline passed). 0.14.3 is still the
 verified snapshot.
 
 ## Branches: `dev` is the tree, `main` is the artifact
@@ -326,14 +327,23 @@ requests and raise the batch.
      six kinds that bypass it carry nothing private, held by a node check.
      mpvArgs tokens, source keys, `u:` ids and scopes are on no argv of a
      process this release starts (an older player adopted after the
-     upgrade keeps its own), and new sources get random keys.]**
+     upgrade keeps its own until it is replaced: on dev since 2026-11-02,
+     unreleased, it is fed no channel and is replaced at the first
+     reattach or channel change, or later where its channel cannot be put
+     back), and new sources get random keys.]**
      **[2026-11-01, D-SINK-69: one argv the shell starts still carried a key --
      the Settings merged notice put a source's key on
      `omarchy-notification-send`'s command line -- on `dev` from 2026-10-24
      (D-SRC-33, after 0.15.0) until 0.16.0's cut, so no release carried it;
      `Model.notifyArgv` now names no key and scrubs every string it puts on
      that argv, held by a node sweep that calls it for every event with a
-     private value in every parameter.]** In QML, assign
+     private value in every parameter.]**
+     **[2026-11-02, restart on adoption: the launch argv also carries
+     `--script-opts-append=omarchy_iptv-build=<version>+<crc>`, one token
+     naming the build that launched the player. It holds the version and the
+     CRC-32 of the helper's part table, nothing private: the version already
+     reaches every provider in the User-Agent.]**
+     In QML, assign
      `<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
      every `running = true`, `{}` included on a run that carries no URL:
      re-assignment REPLACES the previous value, and that is what keeps a
@@ -601,6 +611,40 @@ requests and raise the batch.
      `player probe` is therefore no longer purely a read, and that is
      deliberate: a probe that found the exposure and walked past it would be
      worse than the side effect.
+     **[2026-11-02, restart on adoption (the owner, 2026-10-31 and
+     2026-11-01; docs/ARCHITECTURE-PLAYER.md 4.5.2): a player ANOTHER build
+     of this plugin launched is replaced, never fed.** Another build means
+     another release or another helper build. It is read off the player's
+     own command line by `launch_verdict`, on the process the connection
+     actually reaches (SO_PEERCRED).
+     - `apply_channel`'s build gate refuses such a player before any
+       command. `play` answers `not_running` with `outdated`, which every
+       shell since v0.14.3 routes to `player start`.
+     - That start lowers the old player's core limit, reads its volume,
+       mute, fullscreen and pause, ladders it down, and spawns this build's
+       player on the channel asked for: the same one for the automatic
+       restart, the new one for a channel change.
+     - The fresh spawn is vouched for and never re-judged. Its listener
+       passes as the launched pid, as a descendant of it (a user's `mpv`
+       wrapper that runs the player as its child, D-PLY-55), or as a
+       process whose own command line reads as this build's.
+     - Migration stays for the hold before that restart, for a player whose
+       restart is deferred and which plays on, and for a player of THIS
+       build changed at runtime by another client.
+     - D-SINK-70, which shipped in 0.16.0, was the keepLoaded old Service
+       feeding an older player through `play` after an update, with none of
+       the adoption pins. The gate closes it whichever QML runs.
+     - The identity has one gap (D-PLY-59).
+       - Measured: mpv 0.41's IPC listener is not close-on-exec, and children
+         that mpv starts hold it.
+       - Read in unix(7): the credentials are those in effect at listen(2),
+         so SO_PEERCRED names the process that listened, even if a child
+         accepted (an inference from the page).
+       - Reasoned, not measured: none of mpv's own children accepts.
+     - Feeding means sending a channel: a channel's title or headers, a
+       stash or a load. The probe's neutral header values are not a channel.
+       `pause`, `seek` and `tracks` are not gated, and still reach an older
+       player.]
    - **The image decoder** (D-LOGO-11), which is the sink that is not a
      place a string goes but a place a NUMBER goes: a provider's logo is
      decoded inside the long-running shell, and the decoder's cost is
@@ -814,16 +858,18 @@ requests and raise the batch.
      What remains, stated exactly: the journal entry (`COREDUMP_CMDLINE` is
      the launch argv, URL-free by S-03 and, since D-SINK-47 (2026-10-31),
      free of the user's mpvArgs tokens, which mpv reads from a file -- a
-     player started before that and adopted after keeps them until it is
-     restarted; `COREDUMP_ENVIRON` is the shell's
+     player started before that keeps them until it is replaced, which on
+     dev since 2026-11-02 (unreleased) is the first reattach or channel
+     change, or later where its channel cannot be put back; `COREDUMP_ENVIRON` is the shell's
      whole environment, never handed a URL on the player's Process;
      `COREDUMP_OPEN_FDS` is sockets and pipes by inode, so a `file://`
      channel would show its path; `COREDUMP_PACKAGE_JSON` present); the
      card and the agent, which then find no core; the cost, accepted by the
      owner on 2026-10-26, that a crashed player leaves no core for the
-     user's own diagnosis either and no `mpvArgs` lever can restore it; a
-     `play` into a never-probed pre-upgrade player until its next probe or
-     start (`cmd_play` connects with no pid); the helper's own pre-shield
+     user's own diagnosis either and no `mpvArgs` lever can restore it
+     [a `play` into a never-probed pre-upgrade player is closed on dev:
+     D-SINK-70, 2026-11-02, unreleased; the build gate refuses it and the
+     start that follows lowers its core limit before its ladder]; the helper's own pre-shield
      window, a dump window of the same 22.9-40.1 ms; and the SHELL, which
      holds every source URL in its heap, is host-owned and dumpable, and is
      the same sink one layer up -- not ours to fix, reported upstream on the
@@ -1024,6 +1070,12 @@ requests and raise the batch.
   (`python3 <install>/bin/omarchy-iptv <verb>`), which compiles nothing.
   Done on 2026-09-27 and noticed only because the next update's
   pre-flight check found the install dirty.
+- The owner's live PLAYER. A dev-tree helper is another build whenever its
+  helper parts or manifest version differ from the install's (`player_build`;
+  restart on adoption, 2026-11-02), which is nearly always. Run against the default socket
+  (`$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock`), its next `play` is refused and
+  its `player start` REPLACES the owner's running player. Never run one
+  there: give it a scratch socket, the way every harness and rig does.
 
 ## Verify before you claim
 

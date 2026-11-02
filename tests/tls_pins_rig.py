@@ -148,12 +148,39 @@ SETUP is streamed, a UDP one answered with the client's own ports), and:
       player whose /proc/<pid>/cmdline holds none of them, only the name of
       the private options file, which is gone once the socket answers
 
+Restart on adoption (lane RA, 2026-11-01): the tree's apply_channel now
+refuses any player another build launched before it sends anything (the
+build gate, judged on SO_PEERCRED and the player's /proc/<pid>/cmdline), and
+every player here is one the rig itself spawned, its argv the tree's less
+--force-window, which reads as another build's. So the rig VOUCHES for the
+pid it spawned, as `player start` vouches for the pid it launched, and every
+W case keeps testing what it tested; the pre-pin cases (W9, W17, W18, W26b,
+W28a) then model a player of this build whose state was changed at runtime,
+the one the TLS layers still guard (design 6), and W9's refusal must be the
+TLS one, not the gate's. Without the split they would pass for the wrong
+reason. Added:
+  W30 the pre-pin player fed by the tree's UNVOUCHED apply_channel (the
+      keepLoaded old Service's `play` after an update, D-SINK-70): refused by
+      the gate, with nothing sent -- tls-verify still reads mpv's default,
+      nothing loaded -- and the attacker gets nothing
+  R1  the tree's own player: /proc/<pid>/cmdline is the exec argv byte for
+      byte, the build marker in it once (lane RA's M1, M2)
+  R2  its script-opts hold the marker's key and the tree's build, and (R2b)
+      nothing is logged at error level (M2)
+  R3  SO_PEERCRED on a client of its socket names it (M3)
+  R4  pause set before the load (the restart's --keep-pause): file-loaded
+      arrives and the player stays paused; volume, mute and fullscreen set
+      before the first load survive it (M4)
+  R5  `quit` over IPC: a second client sees end-file reason quit, then EOF (M5)
+A --baseline tree before the gate reds R1 and W30 (no marker, no gate).
+
 usage: tls_pins_rig.py --tree DIR [--pre-pin DIR] --work DIR
 Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
 """
 from __future__ import annotations
 
 import http.server
+import inspect
 import json
 import os
 import re
@@ -571,7 +598,7 @@ def listening(pid: int) -> list[str]:
 
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
           seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None,
-          drawwatch=False, cmdline_words=()) -> dict:
+          drawwatch=False, cmdline_words=(), vouch=True) -> dict:
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
@@ -642,9 +669,13 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                     argv_ns["apply_channel"](client, {"id": "", "url": first_url, "name": "Rig First",
                                                        "headers": {HEADER: HEADER_VALUE}, "group": ""})
                     time.sleep(1.5)
+                # Restart on adoption: the rig spawned this player and vouches
+                # for its pid, as `player start` does; W30 does not.
+                vouched = {"vouched_pid": player.pid} if vouch and "vouched_pid" in inspect.signature(
+                    logic_ns["apply_channel"]).parameters else {}
                 logic_ns["apply_channel"](client, {"id": "", "url": url, "name": "Rig Channel",
                                                     "headers": dict(headers) if headers is not None else {HEADER: HEADER_VALUE},
-                                                    "group": ""})
+                                                    "group": ""}, **vouched)
                 result["applied"] = True
             except logic_ns["HelperError"] as error:
                 result["applied"] = False
@@ -720,6 +751,95 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     result["leaks"] = leaks
     result["journal"] = [jb, journal()]
     return result
+
+
+def launch_checks(work: str, tree: dict, url: str) -> list[tuple[str, bool, str]]:
+    """R1-R5 (restart on adoption, lane RA's M1-M5 as assertions): the tree's
+    own player, windowless, its argv the tree's (less --force-window), the
+    channel a plain-http file on the rig's own server, loaded by the tree's
+    apply_channel with the pid the rig spawned vouched for."""
+    out: list[tuple[str, bool, str]] = []
+    if "player_build" not in tree:
+        return [("R1 the launch argv names the build (M1, M2)", False, "this tree composes no build marker")]
+    base = os.path.join(work, "cases", "R")
+    for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
+        os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
+    open(os.path.join(base, "config", "mpv", "mpv.conf"), "w").close()
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("DISPLAY", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DBUS_SESSION_BUS_ADDRESS", "MPV_HOME")}
+    env.update(HOME=base + "/home", XDG_CACHE_HOME=base + "/cache", XDG_STATE_HOME=base + "/state",
+               XDG_CONFIG_HOME=base + "/config", XDG_DATA_HOME=base + "/data", XDG_RUNTIME_DIR=base + "/run")
+    runtime = os.path.join(base, "run", "omarchy-iptv")
+    dirs = tree["player_dirs"](os.path.join(runtime, "mpv.sock"), os.path.join(base, "state", "omarchy-iptv"))
+    argv = tree["mpv_launch_argv"]("mpv.sock", [], dirs)
+    cmd = ["mpv", "--config-dir=" + base + "/config/mpv", "--vo=null", "--ao=null"] + \
+          [a for a in argv[1:] if not a.startswith("--force-window")]
+    marker = tree["mpv_build_marker"](tree["player_build"]())
+    old = os.getcwd()
+    os.chdir(runtime)
+    err = open(os.path.join(base, "mpv.stderr"), "wb")
+    player = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err, preexec_fn=no_core)
+    try:
+        client = tree["wait_for_socket"]("mpv.sock", 8.0, 3.0)
+        if client is None:
+            return [("R1 the tree's player answers its socket", False, "no socket")]
+        with open("/proc/%d/cmdline" % player.pid, "rb") as fh:
+            got = [a for a in fh.read().split(b"\0") if a]
+        want = [os.fsencode(a) for a in cmd]
+        out.append(("R1 /proc/<pid>/cmdline is the exec argv byte for byte, the build marker in it once (M1, M2)",
+                    got == want and got.count(os.fsencode(marker)) == 1,
+                    "%d elements, equal %s, marker %d" % (len(got), got == want, got.count(os.fsencode(marker)))))
+        ok, opts = client.try_command("get_property", "script-opts")
+        key = tree["PLAYER_BUILD_KEY"]
+        out.append(("R2 script-opts carry the build marker's key and the tree's build (M2)",
+                    ok and isinstance(opts, dict) and opts.get(key) == tree["player_build"](),
+                    "key there %s" % (isinstance(opts, dict) and key in opts)))
+        out.append(("R3 SO_PEERCRED on a client of its socket names the player (M3)", client.peer_pid() == player.pid,
+                    "peer %d, player %d" % (client.peer_pid(), player.pid)))
+        for prop, value in (("volume", 37), ("mute", True), ("fullscreen", True)):
+            client.try_command("set_property", prop, value)
+        client.try_command("request_log_messages", "error")
+        entry = tree["apply_channel"](client, {"id": "", "url": url, "name": "Rig R", "headers": {}, "group": ""},
+                                      vouched_pid=player.pid, paused=True)
+        first = tree["observe_first_load"](client, entry, 6.0)
+        time.sleep(1.0)
+        reads = {p: client.try_command("get_property", p)[1] for p in ("pause", "volume", "mute", "fullscreen", "time-pos")}
+        time.sleep(1.0)
+        later = client.try_command("get_property", "time-pos")[1]
+        out.append(("R4 paused before the load: file-loaded arrives and it stays paused; volume, mute, fullscreen survive (M4)",
+                    first.get("state") == "playing" and reads["pause"] is True and reads["volume"] == 37
+                    and reads["mute"] is True and reads["fullscreen"] is True and later == reads["time-pos"],
+                    "first load %s, %s, time-pos then %s" % (first.get("state"), reads, later)))
+        observer = tree["MpvIpc"]("mpv.sock", 3.0)
+        observer.connect()
+        time.sleep(0.3)
+        observer.events = []
+        client.request(["quit"], allow_close=True)
+        seen, eof = [], False
+        deadline = time.monotonic() + 6.0
+        while time.monotonic() < deadline:
+            batch = observer.drain_events(min(deadline, time.monotonic() + 1.0))
+            if batch is None:
+                eof = True
+                break
+            seen += [str(e.get("reason")) for e in batch if e.get("event") == "end-file"]
+        observer.close()
+        client.close()
+        out.append(("R5 quit over IPC: a second client sees end-file reason quit, then EOF (M5)", seen == ["quit"] and eof,
+                    "end-files %s, EOF %s" % (seen, eof)))
+    finally:
+        os.chdir(old)
+        try:
+            player.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            player.kill()
+            player.wait(timeout=5)
+        err.close()
+    with open(os.path.join(base, "mpv.stderr"), "rb") as fh:
+        logged = fh.read()
+    out.append(("R2b nothing at error level from the tree's player (M2)", logged == b"" and player.returncode == 0,
+                "%d bytes, exit %s" % (len(logged), player.returncode)))
+    return out
 
 
 def drain_draws(watcher, result: dict) -> None:
@@ -866,8 +986,31 @@ def main(argv: list[str]) -> int:
         if pre is not None:
             r = probe(work, "W9", pre, tree, direct_evil, conf="[protocol.https]\nstream-lavf-o=tls_verify=0\n", migrate=True)
             check("W9 an adopted pre-pin player with that profile: the load is refused and the attacker gets nothing",
-                  r["applied"] is False and got(r, "attacker") == 0,
-                  "applied %s, attacker requests %d" % (r["applied"], got(r, "attacker")))
+                  r["applied"] is False and got(r, "attacker") == 0 and r.get("refusal") == "tls_unverified",
+                  "applied %s, refused as %s, attacker requests %d" % (r["applied"], r.get("refusal"), got(r, "attacker")))
+            # W30 (restart on adoption, D-SINK-70): the same pre-pin player fed
+            # by the tree WITHOUT the rig's vouching -- the keepLoaded old
+            # Service's `play` after an update: refused by the gate before the
+            # TLS assertion's first set. The assertion would have turned
+            # load-auto-profiles off and appended the protocol whitelist on a
+            # v0.15.0 player (whose argv already says --tls-verify=yes), so
+            # both still read as that player's own -- nothing was sent --
+            # nothing is loaded, and the attacker gets nothing.
+            if "feed_gate" in tree:
+                r = probe(work, "W30", pre, tree, direct_evil, seconds=2, vouch=False,
+                          watch=("load-auto-profiles", "demuxer-lavf-o", "idle-active"))
+                demux = r["props"].get("demuxer-lavf-o")
+                check("W30 the pre-pin player fed by the tree's unvouched apply_channel: refused by the build gate with nothing sent, the attacker gets nothing",
+                      r["applied"] is False and r.get("refusal") == "not_running" and got(r, "attacker") == 0
+                      and r["props"].get("load-auto-profiles") == "auto" and isinstance(demux, dict)
+                      and "protocol_whitelist" not in demux and r["props"].get("idle-active") is True,
+                      "applied %s, refused as %s, load-auto-profiles %s, whitelist there %s, idle %s, attacker requests %d" % (
+                          r["applied"], r.get("refusal"), r["props"].get("load-auto-profiles"),
+                          isinstance(demux, dict) and "protocol_whitelist" in demux, r["props"].get("idle-active"),
+                          got(r, "attacker")))
+            else:
+                check("W30 the pre-pin player fed by the tree's unvouched apply_channel: refused by the build gate",
+                      False, "this tree has no build gate")
         lab = "http://127.0.0.1:%d" % PORTS["lab"]
         if os.environ.get("OMARCHY_IPTV_RIG_NETNS") != "1":
             # A baseline player LISTENS here, on every interface it has: only
@@ -1074,6 +1217,8 @@ def main(argv: list[str]) -> int:
         check("C2 a CA-signed HLS channel with a demuxer workaround plays and keeps the key (control)",
               r["timePos"] is not None and (r["props"].get("demuxer-lavf-o") or {}).get("live_start_index") == "-1",
               "played %s" % (r["timePos"] is not None))
+        for label, ok, detail in launch_checks(work, tree, "http://127.0.0.1:%d/live/rig/%s/long.ts" % (PORTS["plain"], SECRET)):
+            check(label, ok, detail)
     finally:
         for proc in procs:
             proc.terminate()

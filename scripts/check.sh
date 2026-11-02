@@ -214,7 +214,11 @@ fail=0
 # test_playerOutputEndingAndNoticeSlots, red on 9e380ae.
 # 2026-10-31, rc-p2c (D-SINK-49): 81 -> 82 -- the escaped notification body
 # laid out as its plain text, red on dev 2727179; the spec runs 82.
-QML_SPEC_MIN=${QML_SPEC_MIN:-82}
+# 2026-11-01, lane-rao-a (restart on adoption): 82 -> 83 --
+# test_olderRestartUnderQtsEngine, the probe's launch word and the restart's
+# disposition under Qt's own engine, red on 202a7bc (no such model names);
+# the spec runs 83.
+QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -458,7 +462,20 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-82}
 # mergeConflict argv holds no source key, and the rule-15 sweep over every
 # NOTIFY_IDS event; both red on rel-0160's model (968d097) and on composer
 # mutants (QA-RESULTS "D-HOST-9 fixed, D-SINK-69 fixed"); the suite runs 3240.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3240}
+# 2026-11-01, lane-rao-a (restart on adoption, D-SINK-70, D-PLY-51, D-PLY-52):
+# 3240 -> 3272 -- the build marker over the shared argv vectors, the probe's
+# launch word, the disposition, reach, fork and keep-pause rules, the start
+# bound's carry, and the service-harness cases of the restart episode (the two
+# regex wiring pins on the TLS reload replaced by harness calls); red on
+# 202a7bc's Service.qml and model (22 harness cases, the rest by absence) and
+# on 13 named mutants of Service.qml and the model; the suite runs 3272.
+# 2026-11-01, rc-rao-a (the recheck of lane RA): 3272 -> 3279 -- seven
+# service-harness cases: Q4's channel refusal with no observer attached, an
+# episode left open by a probe that finds this build's player or none, a
+# health `player restart` refusal told, the kept label spent by its start's
+# ok, and the retry and intent repair starting while owed; five red on
+# 072ec7d's Service.qml, all on named mutants; the suite runs 3279.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3279}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -771,7 +788,19 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3240}
 # `...Color`, each green under lane-fix160's guard) and test_host_load_patch
 # 11 -> 12 (the stub reader sees a qmldir singleton and a version-less type;
 # it returned {"Util"} of four); the suite runs 1918.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1918}
+# 2026-11-01, lane-rao-a (restart on adoption, D-SINK-70): 1918 -> 1938 --
+# test_player_launch (8: the verdict on real processes, the build), the gate
+# and replacement classes of test_player (10: FeedGateTest, ReplaceTest), the
+# marker over the shared vectors (1) and the replace path's bound walk (1);
+# red on 202a7bc (but FeedGateTest's counter-case) and on 15 named mutants of
+# launch_verdict, feed_gate, adopt_or_spawn, the probe and the carry; the
+# suite runs 1938.
+# 2026-11-01, rc-rao-a (the recheck of lane RA): 1938 -> 1942 --
+# WrapperSpawnTest (3: a user's `mpv` wrapper that runs the player as its
+# child, appends to it, or backgrounds it; red on 072ec7d, player_foreign)
+# and the replacement of a socket answered by a process with no token of ours
+# (1: red on the mutant that adopts it); the suite runs 1942.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1942}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

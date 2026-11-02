@@ -393,6 +393,24 @@ Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
 `status` keeps its current socket-answered semantics so `Model.statusHealthy`
 (`Model.js:1014`) and the 23 cases in `tests/test_mpv.py` are untouched.
 
+**[Amended 2026-11-02, restart on adoption (4.5.2). All of it is additive: a
+shell from before ignores the fields.**
+- `player.probe` gains `"launch":"current"|"older"|"unknown"`, which is
+  `null` when nothing answered.
+- `player.start` and `player.restart` gain `"replaced":N`, present only when
+  N is above 0, and `"paused":true`, present only when the replaced player's
+  pause was put back.
+- Both accept `--keep-pause`. It can never apply on `restart`, because the
+  restart's own ladder runs before `adopt_or_spawn`.
+- A `play` refused by the build gate answers `not_running`, with
+  `"outdated":true` beside the error, and sends nothing.
+- A new code, `player_foreign`, for a start whose spawned socket is answered
+  by a process that is none of these: the launched pid, a descendant of it,
+  or a process whose own command line reads as this build's.
+  `Model.statusReason` reads it as "Another program answers the player's
+  socket", and `Model.playerStartFailure` counts it as local.
+]
+
 ### 4.4 Exact startup sequence (cold play)
 
 1. `play(id, ...)` in Service.qml: preamble unchanged through `saveState()`
@@ -551,6 +569,7 @@ by the review of the lane that wrote it.
 
 | Probe result | Behaviour |
 |---|---|
+| `running:true, responsive:true`, `launch` `older` or `unknown` (another build of this plugin launched it, or something not ours answers), stash usable | **4.5.2**: the TLS reading of 4.5.1 is still taken, then the player is adopted for a hold and, once the channel list lands, replaced by one `player start --keep-pause` of the same channel; when that cannot be delivered it plays on, fed nothing, until the next channel change, or is stopped when it cannot be made safe. `launch` `current` or absent: the rows below, unchanged |
 | `running:false` | Nothing playing. `playerWanted = false` (the retry timer stops; no idle polling). If `state.json.session` names a channel, mark it in `failedAt` and clear `session` (PO-3) |
 | `running:true, responsive:true, stash.playing:true, idle:false` | Restore `nowPlaying` from the stash; `playerPending = true` until the socket connects; arm `healthTimer`; queue `reconcileNowPlaying()` for `channelsLoaded`. **4.5.1 runs on this row before any of it**, and its read-back can turn this row into a stop |
 | `running:true, responsive:true, stash absent or `playing:false`, or `idle:true`` | Under `--idle=once` an idle player exists only between spawn and first `loadfile`, so this is either a racing start or a foreign/pre-M2-02 player. Re-probe once after 500 ms; still ambiguous -> `player stop`, show idle |
@@ -634,6 +653,20 @@ that a credential has ever been in there.
 | NOT made safe: a refusal, a read-back that still reads unsafe, or a connection that died mid-sequence | The player is STOPPED, by the 4.9 ladder, and the shell shows idle: the `stopForeignPlayer()` path, which is already what a wedged or unidentifiable player gets. Loading is the act of handing over the URL and the headers, so a process that could not be secured is not loaded into, it is ended. The channel is NOT marked failed -- PO-3's mark is for a channel that died unattended, and this one was stopped by us |
 | Made safe, but the channel cannot be re-established: `unknown_channel`, because the playlist no longer carries the stash's id | Stopped, for the reason in the row above -- the connection still open is the unverified one, and leaving it running is the thing the finding is about. **This row is this section's reading of the ruling rather than the ruling itself**, which covered the properties and not a reload that cannot be issued; it is raised as a decision request instead of being treated as settled |
 
+**[2026-11-02, D-DOC-34: the last row above was never what the code did, and
+the owner has now settled it.** The reload answered `unknown_channel`, which
+`PLAY_UNREADABLE` reads as "unknown", and the player played on. The owner's
+answer of 2026-11-01 makes playing on the rule: a player made safe whose
+channel cannot be re-established plays on, fed nothing, until the next
+channel change or a stop. Since D-PLY-51 the reload is never sent for it at
+all: `Model.tlsReloadDisposition` asks `Model.adoptedChannelReach`, and a
+stash from another source, or an id the applied list lacks, is cleared
+instead of re-sent against the active source. For a player ANOTHER build
+launched, none of this table's reload rows applies. 4.5.2 replaces it. It
+stops it only when its restart cannot be delivered and it cannot be made
+safe, or when this build refuses its channel, or, as for any player, when its
+stash is unusable.]
+
 **The other adoption, and why it needs nothing of its own.** `player start` is
 idempotent: a live answering player is adopted and ZAPPED rather than
 duplicated (requirement 1). That path ends in a `loadfile`, so layer 6 covers
@@ -670,6 +703,11 @@ is left running its old stream, refused any further load, until the user stops
 it or the failure path ends it. Named here rather than papered over, and
 raised with the row above.
 
+**[2026-11-02: for a player another build launched, this gap is closed. The
+user's own `play` meets the build gate (4.5.2), and the `player start` that
+follows replaces the player instead of leaving it running. For this build's
+own player, the paragraph stands.]**
+
 **The cost, which is not nothing.** One rebuffer, visible, once, on the
 upgrade that crosses this version, on the player that happened to be running.
 A player that cannot be made safe is stopped, which is playback the user did
@@ -681,6 +719,11 @@ not a new one. **UNVERIFIED BY ME:** the lane that wrote this section holds no
 display and has run no player; everything outside the measurement paragraph is
 specification, and the live gate for it is QA's.
 
+**[2026-11-02: for a player another build launched, the cost is now a window
+replaced rather than a rebuffer, once per update (4.5.2). A player that
+cannot be made safe is stopped only when its restart cannot be delivered,
+or when this build refuses its channel.]**
+
 **What this deliberately does not do.** It does not relaunch the adopted
 player: relaunching is the other option D-PLY-25 left open and it would
 destroy the window whose survival is the entire point of M2-02 (sections 1 and
@@ -689,6 +732,10 @@ other launch option, `--tls-ca-file` included, which stays a user argument
 that takes effect on the next launch. It does not touch `--demuxer-lavf-o`,
 measured by D-SINK-15 as NOT a bypass and therefore neither reserved nor
 cleared here.
+
+**[2026-11-02: superseded for a player another build of this plugin launched,
+which is replaced (4.5.2, the owner's decision of 2026-10-31). For a player
+this build launched, it stands: a plain shell restart never relaunches it.]**
 
 **[2026-10-29, D-SINK-43 and D-SINK-44: the paragraph above is wrong in two
 places, and this bracket is what is true now.]** `--demuxer-lavf-o` IS a
@@ -709,7 +756,10 @@ readings and then fetched from the attacker; under the new ones the load is
 refused, 0 GETs). Every player launched by 0.15.0 or earlier now reads
 "migrated" on the first probe after the upgrade (its `load-auto-profiles` is
 mpv's `auto`), so the one rebuffer of the second row is paid once by every
-such player, not only by a pre-0.13.0 one. The probe and the adoption branch
+such player, not only by a pre-0.13.0 one. [2026-11-02: every such player
+is now another build's, and is replaced rather than reloaded (4.5.2); an
+unsafe one is restarted when its channel can be put back, and stopped only
+when it cannot, or when this build refuses its channel.] The probe and the adoption branch
 of `player start` also carry the pins that are not about the TLS peer, best
 effort (`pin_adopted_player`, 4.12.1). Section 4.12.1 has the measurements.
 
@@ -719,7 +769,8 @@ reading counts are now those that touch ANY option the pin block holds, not
 only the TLS ones (the lead's decision on rc-mpvpin's recheck, which measured
 a `[protocol.http]` profile with `save-watch-history`, `load-unsafe-playlists`
 or `load-select` undoing `pin_adopted_player`'s runtime writes at every load):
-such a pre-pin player is STOPPED rather than migrated (`tls-scenario.sh
+such a pre-pin player is STOPPED rather than migrated [2026-11-02: when its
+channel cannot be put back; otherwise it is restarted, 4.5.2] (`tls-scenario.sh
 --windowless` W18: refused, and no file outside the runtime folder holds the
 credential; on sec-int 6c79a9a it was loaded and the watch history held the
 URL). (2) D-SINK-60: a player whose `reset-on-next-file` holds any entry is
@@ -734,7 +785,8 @@ and fetched from it; and on a player started by v0.15.0's argv with a
 (W17), the first version of this fix removed the key AND emptied the list,
 read back safe, and the attacker still received the next HLS segment request.
 So the list is READ with the TLS pins (`read_tls_state`) and never written:
-a non-empty list counts one, and the player is stopped. (3) The adoption now
+a non-empty list counts one, and the player is stopped [2026-11-02: when its
+channel cannot be put back; otherwise it is restarted, 4.5.2]. (3) The adoption now
 also sets `drag-and-drop` off, binds `ctrl+v` to `ignore`, sets the OSC's
 title middle-click to `ignore` (one key of `script-opts`, the user's others
 kept) and puts the three GLOBAL header properties at values that belong to
@@ -750,7 +802,8 @@ key (D-SINK-64), which the read-back counts. `pin_adopted_player` sets
 console script at runtime (D-SINK-61; mpv answered both flags as booleans
 over IPC, measured). Every player started by sec-int 124589e or earlier lacks
 the format list, so it reads "migrated" on the first probe after the update
-and pays the one rebuffer of the second row.
+and pays the one rebuffer of the second row [2026-11-02: it is replaced
+instead, 4.5.2].
 
 **Where the flag and the field names are fixed.** The owner claim is the
 precedent for an opt-in write on a verb documented as a read
@@ -777,6 +830,190 @@ FFmpeg whose TLS default does not verify (before 8.0) would be the bypass, and
 the pin block's comment already records propagation as "a default this layer
 does not choose"; and a private-CA provider's segments fail on such a player,
 which is availability, not exposure.
+
+#### 4.5.2 A player another build launched is restarted (owner, 2026-10-31 and 2026-11-01)
+
+This supersedes 4.5.1's "does not relaunch the adopted player" for a player
+that ANOTHER build of this plugin launched. For a player this build launched,
+4.5.1 stands, and a plain shell restart still reattaches without a relaunch
+(PO-2). The owner decided on 2026-10-31 that an older player found on
+adoption is restarted rather than migrated. The answers of 2026-11-01 settle
+the rest: what counts as older, the first channel change, the case that
+cannot be delivered, and silence on success. They are recorded in the
+decisions log.
+
+**What counts as older.** Any player launched by another release or by
+another helper build. The base section of the launch argv ends with one
+token, after layer 1 of 4.15 and before the options file and the pin block:
+`--script-opts-append=omarchy_iptv-build=<version>+<crc>`. `<crc>` is eight
+hex digits: the CRC-32 of one `name:length:crc` line per entry of the stub's
+`HELPER_PARTS`.
+
+- It is produced by `player_build`.
+- `mpv_build_marker` renders the token in the helper, and
+  `Model.mpvBuildMarker` mirrors it in the model.
+- `tests/fixtures/player-argv.json` pins the two together.
+- Every release changes the version, and every part edit changes the table,
+  so nothing is bumped by hand.
+- The token holds nothing private: the version already reaches every
+  provider in the User-Agent.
+- The key is this plugin's own name, and no script that mpv runs here reads
+  it: this is read, not measured. Measured on mpv 0.41.0 (lane RA's M2), with
+  the key:
+  - mpv exits 0 and prints nothing at `--msg-level=all=error`;
+  - the key reads back exactly, and `script-opts` is otherwise equal;
+  - `osc`, `load-scripts` and `idle` read as without it.
+
+**The verdict.** `launch_verdict(pid, socket)` reads `/proc/<pid>/cmdline` as
+bytes and answers one of three words:
+
+- `unknown`: the command line is empty or unreadable, or it lacks our exact
+  socket token.
+- `current`: the tail from that token to the end equals what this build
+  composes, in either form (with or without the options file), byte for
+  byte. The `--screenshot-dir=` element is the one exception: it is taken
+  from the candidate.
+- `older`: anything else, including a wrapper that appends arguments after
+  the pin block.
+
+Everything before the token is ignored, so real mpv, the harness stub and a
+wrapper that prepends options all read alike. Measured on mpv 0.41.0 (M1):
+`/proc/<pid>/cmdline` is the exec argv byte for byte, in both forms, at bind
+and after a load. The word is the whole answer. No element of the
+candidate's argv is returned, logged or compared out loud, because an older
+player's argv holds the user's mpvArgs tokens (rule 5).
+
+**Which process is judged.** The process the connection actually reaches is
+read off the socket with SO_PEERCRED (`MpvIpc.peer_pid`). Measured on mpv
+0.41.0 (M3), it names the mpv pid. It has one gap (D-PLY-59):
+
+- Measured (M3): mpv's IPC listening socket is not close-on-exec, and a child
+  that mpv starts (`run`, or the `subprocess` command) holds it.
+- Read in unix(7): the credentials are those in effect at listen(2), so the
+  kernel names the process that listened even if that child accepted on it
+  (an inference from the page).
+- Reasoned, not measured: none of mpv's own children accepts.
+
+**The invariant: no verb of this helper feeds a player another build
+launched.** Feeding means sending a channel: a channel's title or headers,
+a stash or a load (the probe's neutral header values are not a channel). `pause`, `seek` and `tracks` are not gated, and still reach an older
+player. `apply_channel` runs `feed_gate` before any command, ahead of the
+TLS assertion:
+
+- **Without a vouched pid (`play`):** the peer must read `current`.
+  Otherwise the reply is `not_running`, with `"outdated": true` beside the
+  error, and nothing is sent. Every shell since v0.14.3 routes a `play` that
+  answered `not_running` to `player start`. So the keepLoaded Service that
+  `omarchy plugin update` leaves running (D-REL-6) replaces the player at
+  its first channel change, with no change of its own (D-SINK-70).
+- **With a vouched pid (`player start`):** this is the pid the helper
+  launched, or the current player it adopted. The peer must be that
+  process, a descendant of it (a user's `mpv` wrapper that runs the player
+  as its child, D-PLY-55), or a process whose own command line reads
+  `current`. Otherwise the reply is `player_foreign`.
+
+A fresh spawn's argv is never re-judged.
+
+**The replacement.** `player start` finds an answering player and reads its
+peer. If the peer does not read `current`, the start replaces the player
+instead of adopting it, under the lock:
+
+1. It lowers every found pid's core limit (`limit_core_of`).
+2. It reads volume, mute, fullscreen and pause, all four inside one `ipcMs`.
+3. It journals one fixed line: `replaced a player another build of this
+   plugin started`.
+4. It ladders the old player down from `quit`.
+5. It spawns this build's player.
+6. It sets volume, mute and fullscreen on the new player, inside one
+   `ipcMs`.
+7. It loads the channel with pause TRUE only under `--keep-pause`.
+
+The old process receives reads and `quit`, or a signal, and nothing else.
+Measured on mpv 0.41.0 (M4 and M5):
+
+- Pause, volume, mute and fullscreen set before the `loadfile` survive it,
+  and `file-loaded` still arrives.
+- `quit` delivers `end-file` with reason `quit`, then EOF, and exit 0.
+
+The reply gains `replaced` (the number of processes stopped), and `paused`
+when the old player's pause was put back. The start's watchdog bound gains
+the two carry budgets, `2 * ipcMs`, to 47,250 ms. `tests/test_player_bounds.py`
+walks it, and `tests/fixtures/player-bounds.json` and `Model.playerWatchdogMs`
+hold it together.
+
+**The shell.** The probe reply carries `launch`, one of the three words.
+`Model.parsePlayerProbe` reads anything else as `launch: null`, which takes
+the path from before this section.
+
+- **The hold.** An older or unknown player with a usable stash is adopted
+  for a hold of `Model.OLDER_RESTART_HOLD_MS` (15 s). The bar names its
+  channel at once, and the TLS reload of 4.5.1 is not issued for it.
+- **The decision.** When the channel list lands, the slot frees or the hold
+  ends, `Model.olderRestartDisposition` answers:
+  - `restart`: one `player start --keep-pause` of the same channel, and one
+    fixed journal line.
+  - `defer`: spent, or undeliverable (the channel is gone, another source is
+    active, or the hold expired), and the player reads safe. It plays on and
+    is fed nothing. While it is owed, every zap site starts rather than
+    plays (`Model.playFork`'s `restartOwed`), so the next channel change
+    replaces it.
+  - `stop`: as `defer`, but the player could not be made safe. It is stopped
+    as 0.16.0 stops one.
+  - `hold` or `clear`.
+- **An unsafe player whose channel is deliverable** is restarted, not
+  stopped. The new player sets every pin on its own command line, which no
+  per-file profile replaces.
+- **The channel itself:** `Model.adoptedChannelReach` resolves the stash's
+  id. It is the same question the TLS reload now asks (D-PLY-51), so a stash
+  from another source is never re-sent against this one.
+- **Refusals.** A refusal of the automatic restart before the ladder defers
+  it. `unsupported_scheme` and `local_address` (this build refuses the
+  channel) stop the older player and tell "Stream failed". A user's
+  `player start` refused while the observer it was issued over still watches
+  the playing player is handled as a failed zap: the label goes back, no
+  card is posted, and the observer is kept (D-PLY-52). A `player restart`
+  refusal is told.
+- **The episode ends** with:
+  - an ok reply;
+  - the old player's EOF with no start in flight;
+  - a probe that finds no player, or a player that does not read as another
+    build's (D-PLY-56).
+- **One automatic restart per shell start.** A replacement that does not read
+  as this build's is not restarted again. It is left playing, or stopped when
+  it reads unsafe, with its own journal line.
+
+Measured in a nested cage at 10,000 channels (QA-RESULTS "Restart on
+adoption, live", M6), the list was applied 0.66-1.06 s after the probe
+answered, against the 15 s hold.
+
+**Not carried:** picture in picture, window placement, and the rewind
+history ("behind live" returns to live). The new window is black until its
+stream opens.
+
+**What stays, as defence in depth:**
+
+- `migrate_tls`, `secure_player` and `read_tls_state` in the probe. They
+  cover the hold and the deferred player, and a player of THIS build changed
+  at runtime by another client.
+- `assert_tls_verification` after the gate.
+- `read_profile_threats` and the pre-pin stop.
+- `pin_adopted_player` and `limit_core_of` in the probe and in the
+  current-adopt branch.
+- The TLS reload, for a player of this build read `migrated`.
+- `apply_channel`'s neutral headers and per-file load options.
+
+**Open beside it:**
+
+- D-PLY-53: every respawn other than a replacement resets volume, mute and
+  fullscreen.
+- D-PLY-54: an mpv package upgrade under a running player is detected by no
+  check.
+- D-PLY-57: after `player_foreign` the helper's own spawn is left running.
+- D-PLY-58: the health relaunch of an adopted stash from another source.
+- D-PLY-59: mpv's listener and its children.
+- D-PLY-60: with no observer attached, a local refusal of the automatic
+  restart before the ladder takes the "never started" tail while the older
+  player plays on.
 
 ### 4.6 Now-playing recovery
 
@@ -1260,7 +1497,10 @@ helper's own descriptors: nothing on the stderr pipe the launch reason is read
 from, the same lines on stdout when stdout is a pipe. Capturing the player's
 stdout for a better launch reason would open it, and needs the kept tokens'
 values scrubbed first. Residual: a player adopted after the upgrade keeps the
-tokens it was launched with on its argv until it restarts.]**
+tokens it was launched with on its argv until it restarts; on dev since
+2026-11-02 (unreleased) it is fed no channel and is replaced at the first
+reattach or channel change, or later where its channel cannot be put back
+(4.5.2).]**
 
 `MPV_RESERVED` gains ten entries, every one of which is reachable today from the
 settings panel and writes a credentialed URL somewhere durable:
@@ -1677,7 +1917,8 @@ a player is migrated, not stopped, and those three stay open until it is
 replaced -- the owner's DR7 question. **[2026-10-29, lane-p1b: closed by the
 lead's decision.]** The third reading counts a per-file profile that touches
 ANY pinned option, an alias of one included (`script`, `watch-later-directory`,
-`script-opt`), so that player is stopped (W18). A player of THIS release reads every pin
+`script-opt`), so that player is stopped (W18) [2026-11-02: when its channel
+cannot be put back; otherwise it is restarted, 4.5.2]. A player of THIS release reads every pin
 set from the command line, so none of that applies to it.
 
 **What a user sees.** Their own profile-cond auto-profiles do not apply in the
@@ -1690,6 +1931,9 @@ A `--demuxer-lavf-o` workaround keeps working unless it names a TLS key.
 `--http-proxy` draws a footer warning. Every player running when the user
 upgrades rebuffers once when the new shell adopts it, and one whose mpv.conf
 carries a per-file profile that touches a TLS option is stopped instead.
+[2026-11-02: since restart on adoption, such a player is replaced instead
+(4.5.2): a new window once, on the same channel. It is stopped only when its
+restart cannot be delivered and it cannot be made safe, or when this build refuses its channel.]
 **[2026-10-29, lane-p1b.]** And: a channel whose address is itself a plain
 `.m3u` or `.pls` redirector no longer plays, told as "The address sent a
 playlist file or a web page, which the player does not open"
@@ -1705,7 +1949,10 @@ send to", and a `--demuxer-lavf-o` carrying `http_proxy` draws the handoff
 warning (D-SINK-59); a player started by an earlier version whose
 `reset-on-next-file` is set, or whose mpv.conf has a per-file profile that
 touches any pinned option, is stopped on the first probe instead of migrated
-(press Enter for a fresh player).
+(press Enter for a fresh player) [2026-11-02: it is restarted on its channel
+instead when that channel can be put back; otherwise it plays on through the
+hold and is stopped when the list shows the channel gone or the hold ends,
+4.5.2].
 **[2026-10-29, lane-p1c.]** And: the console is gone from the player (the
 `` ` `` key and `script-binding console/enable` do nothing); `--prefetch-playlist`,
 `--load-console` and its alias are refused by the footer line, as is a
@@ -1713,7 +1960,8 @@ touches any pinned option, is stopped on the first probe instead of migrated
 a channel whose server answers with a format the player does not take (4.12.2)
 fails with the sentence above; and a player started by an earlier version is
 given the format list and loses a `seg_format_options` key on its first
-probe, which is the rebuffer 4.5.1 already describes.
+probe, which is the rebuffer 4.5.1 already describes [2026-11-02: for a
+player another build launched, the replacement of 4.5.2].
 
 ### 4.12.2 The demuxers that open what a stream server names (2026-10-29, lane-p1c, D-SINK-62)
 
@@ -2003,6 +2251,12 @@ tokens so that the migration has something to migrate; a scenario that cannot
 be shown red against the code as it shipped in 0.13.0 is not evidence. Which
 scenario and which case ids are QA's to fix, not this section's.
 
+**[2026-11-02, restart on adoption: an adopted player that another build
+launched is no longer fed. It is migrated for the hold before its
+replacement, and for as long as a deferred replacement leaves it playing
+(4.5.2); its replacement carries every layer above on its own command
+line.]**
+
 ## 5. Hard requirements
 
 | # | Requirement | Status | Mechanism |
@@ -2057,6 +2311,13 @@ sits before the user's tokens and before the first `--tls-verify=yes`, and
 is never re-asserted). `Model.buildMpvArgv` and the helper's
 `mpv_launch_argv` are the current list, pinned to each other by
 `tests/fixtures/player-argv.json`.
+
+**[2026-11-02, restart on adoption (4.5.2): the base section now ends with the
+build marker, `--script-opts-append=omarchy_iptv-build=<version>+<crc>`. It
+comes after the first `--tls-verify=yes` and before the options file and the
+pin block. It holds the version and the CRC-32 of the helper's part table,
+and nothing private. `launch_verdict` reads it back off `/proc` to tell a
+player this build launched from one another build launched.]**
 
 Relative to `Model.js:1257-1281` this drops the trailing `"--"` and
 `str(p.url)`, drops the `headerArgs(p.headers)` splice, drops the per-channel
@@ -2220,7 +2481,9 @@ whose fields were read on a real dump of the harness rig -- `COREDUMP_CMDLINE`
 is the launch argv, URL-free by S-03 **[2026-10-29, lane-p2a: and free of
 the user's mpvArgs tokens since D-SINK-47 -- they carried a proxy password or a
 header value into the journal before; a player adopted after the upgrade keeps
-its old argv until it restarts]**; `COREDUMP_ENVIRON` is the shell's whole
+its old argv until it restarts; on dev since 2026-11-02 (unreleased) it is
+fed no channel and is replaced at the first reattach or channel change, or
+later where its channel cannot be put back (4.5.2)]**; `COREDUMP_ENVIRON` is the shell's whole
 environment, which the player's helper Process never hands a URL (no
 `OMARCHY_IPTV_URL` among its 257 names); `COREDUMP_OPEN_FDS` names sockets and
 pipes by inode, so an HTTP channel shows nothing and a `file://` channel would
@@ -2271,7 +2534,10 @@ the new shell goes on zapping it. 4.5.1 is what the adoption does about that:
 read the two properties, set them if they are not already safe, read them
 back, re-establish the current channel, and stop the player rather than feed
 it if the read-back is not clean. The user-visible shape of the upgrade is one
-rebuffer, once, and the README says so in the user's own words. This needs a
+rebuffer, once, and the README says so in the user's own words. [2026-11-02:
+since restart on adoption the shape is one window replaced, once, at the
+first reattach or channel change (4.5.2), and the README says that
+instead.] This needs a
 live case of its own, on a player launched from the 0.12.1 argv and adopted by
 an installed build, and the id for it is QA's; it cannot be proved by any fake
 for the reason section 12 gives about this whole feature.
