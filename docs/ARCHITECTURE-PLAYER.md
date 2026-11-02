@@ -466,6 +466,10 @@ shell from before ignores the fields.**
    e. `loadfile <url> replace` -> reply carries `data.playlist_entry_id`
    f. `set_property user-data/omarchy-iptv <stash with entryId:<from e>>`
    g. `set_property user-data/omarchy-iptv-owner <owner claim>` (start/probe only)
+   h. [2026-11-02, D-SINK-72] `set_property user-data/omarchy-iptv-tls ""`, on
+      every load (`play` and `player start` alike, unlike g): the probe's
+      migration mark is spent by this load. It is written last, so a
+      connection lost first leaves the mark standing.
 10. Helper: release the lock (close the fd). The lock is deliberately **not**
     held across step 11, so a `player stop` can interleave.
 11. Helper: observe the connection for `--first-load-timeout` (3 s), collecting
@@ -563,7 +567,14 @@ leave it verified, and a flag would mean a probe that found the exposure and
 walked past it -- so the honest statement is the one with the consequence in
 it: `player probe` is no longer purely a read, and a human running it against
 their own player will change that player's TLS setting. Corrected 2026-10-07
-by the review of the lane that wrote it.
+by the review of the lane that wrote it. [2026-11-02, D-SINK-72: the migration
+writes one more node, `user-data/omarchy-iptv-tls`, set to the fixed word
+`migrated` before its other writes, and every probe reads it. `apply_channel`
+sets it to the empty word after its loadfile. A probe therefore answers
+`migrated` until a load of this build re-establishes the player's channel, not
+only on the run that changed it. If mpv refuses the mark, the probe answers as
+before. A mark that cannot be read, or holds any other value, reads "not
+marked".]
 
 `applyProbe()` in Service.qml, by case:
 
@@ -759,7 +770,7 @@ mpv's `auto`), so the one rebuffer of the second row is paid once by every
 such player, not only by a pre-0.13.0 one. [2026-11-02: every such player
 is now another build's, and is replaced rather than reloaded (4.5.2; a
 safe one the probe migrated is replaced however late its list lands, if its
-channel is still there); an unsafe one is restarted when its channel can be
+channel is still there and its source still active); an unsafe one is restarted when its channel can be
 put back before the hold ends, and stopped when it cannot, when the hold
 ends first, or when this build refuses its channel.] The probe and the adoption branch
 of `player start` also carry the pins that are not about the TLS peer, best
@@ -871,12 +882,30 @@ bytes and answers one of three words:
 
 - `unknown`: the command line is empty or unreadable, or it lacks our exact
   socket token.
-- `current`: the tail from that token to the end equals what this build
-  composes, in either form (with or without the options file), byte for
-  byte. The `--screenshot-dir=` element is the one exception: it is taken
-  from the candidate.
-- `older`: anything else, including a wrapper that appends arguments after
-  the pin block.
+- `current`: the tail from that token BEGINS with what this build composes,
+  in either form (with or without the options file), byte for byte. The
+  `--screenshot-dir=` element is the one exception: it is taken from the
+  candidate. Elements after that composition are the user's `mpv` wrapper
+  appending its own options (`exec /usr/bin/mpv "$@" --hwdec=auto`), and are
+  judged for one thing only: a second socket option among them reads
+  `older` (below) (D-PLY-61, the lead's decision of 2026-11-02). No other
+  build can produce the prefix, because its marker carries the version and
+  the part table's CRC. (As before, two builds whose versions
+  `player_build_ok` refuses would both mark the word `unknown`. No released
+  version is refused.) The gate's job is build identity, not the wrapper: a
+  wrapper that appends takes the pin block's last word whatever the verdict
+  says. A replacement would run through the same wrapper and append the same
+  tokens again, so this is the user's own configuration (PO-5's shape).
+- `older`: anything else. That covers an element changed, dropped or moved
+  inside the composition, the composition's last element replaced, a
+  command line cut short, another build's marker, and a second
+  `--input-ipc-server` among the appended elements, in any spelling mpv
+  takes. Measured on mpv 0.41.0: it has no other name for the option, and
+  `--input-unix-socket` is "option not found". mpv obeys the last one, so it
+  re-points the element the reading is anchored on. Until D-PLY-61 a
+  wrapper that appended anything read `older`, and every channel change and
+  every shell restart replaced this build's own player (observed fixed:
+  player-scenario L9).
 
 Everything before the token is ignored, so real mpv, the harness stub and a
 wrapper that prepends options all read alike. Measured on mpv 0.41.0 (M1):
@@ -951,6 +980,7 @@ the path from before this section.
   for a hold of `Model.OLDER_RESTART_HOLD_MS` (15 s). The bar names its
   channel at once, and the TLS reload of 4.5.1 is not issued for it. The
   restart replaces the reload, including when the list lands late (below).
+  A later probe of the same player does not start the hold again (below).
 - **The decision.** When the channel list lands, the slot frees or the hold
   ends, `Model.olderRestartDisposition` answers:
   - `restart`: one `player start --keep-pause` of the same channel, and one
@@ -969,11 +999,17 @@ the path from before this section.
   per-file profile replaces.
 - **A player the probe had to migrate is replaced late** (D-SINK-71; the
   owner, 2026-11-02: "replace late, when the list lands").
-  - Its TLS reading says the probe changed its settings in place
+  - Its TLS reading says a probe changed its settings in place
     (`migrated`), so the stream it already has open may have been opened
-    without them. A player 0.15.0 or earlier launched reads this way the
-    first time a probe finds it, unless a 0.16.0 shell has already migrated
-    it.
+    without them. A player 0.15.0 or earlier launched normally reads this
+    way the first time a shell of 0.16.0 or later probes it (its
+    `load-auto-profiles` is mpv's auto), unless a 0.16.0 shell has already
+    migrated it. Since D-SINK-72 (2026-11-02), the probe that migrates a
+    player leaves a mark on the player itself: `user-data/omarchy-iptv-tls`
+    holds the fixed word `migrated`. Every later probe, in this shell or
+    the next, reads the player the same way until a load of this build
+    replaces the connection. An older build's player is never loaded into,
+    so its mark lasts until it is replaced.
   - For it, the hold's expiry does not defer. The episode keeps holding, and
     the one automatic restart goes out when the list lands and the channel
     is deliverable, however late.
@@ -984,10 +1020,14 @@ the path from before this section.
     failed.
   - A channel that is gone, or another source's, still defers it. An unsafe
     one is still stopped at the expiry.
-  - The shell takes `migrated` from the probe that migrated the player. The
-    retry of an ambiguous probe, and a later probe of the same player in the
-    same shell, find nothing left to migrate, and the shell keeps the first
-    answer.
+  - The shell takes `migrated` from the probe that migrated the player, and
+    every later probe reports it too while the mark stands: the retry of an
+    ambiguous probe, a later probe in the same shell, and the next shell's
+    probe after a restart (observed: player-scenario L10). For a player
+    whose mark mpv would not take, those probes find nothing left to
+    migrate, and the shell keeps the first answer: the retry through its
+    memo, a later probe in the same shell through the episode, which
+    carries it whether or not that probe reads as the same player (below).
   - A player that read safe without migration keeps the 15 s expiry. A
     player 0.16.0 started reads this way, because its pins are on its own
     command line (observed: player-scenario L8).
@@ -1005,10 +1045,37 @@ the path from before this section.
   - an ok reply;
   - the old player's EOF with no start in flight;
   - a probe that finds no player, or a player that does not read as another
-    build's (D-PLY-56).
+    build's (D-PLY-56);
+  - a stop, or the disposition's `clear` or `stop`.
 - **One automatic restart per shell start.** A replacement that does not read
   as this build's is not restarted again. It is left playing, or stopped when
-  it reads unsafe, with its own journal line.
+  it reads unsafe, with its own journal line, once per episode.
+- **A later probe of the same player keeps its episode** (D-SINK-73,
+  `Model.olderRestartOpen`). The shell probes a player it is already holding
+  when its own socket connect fails while the helper's succeeds: the socket
+  hunt's probe after its burst, or a `recover`.
+  - That probe keeps whether the restart is spent, whether the hold has
+    ended, and the intent the restart was issued under. It arms no new hold.
+    So a deferred player is not restarted after all, and an unsafe one is
+    stopped when its first hold ends.
+  - `unsafe` is that probe's reading, so a player that reads unsafe on a
+    spent episode is stopped at once.
+  - The same player is the pid the probe names, carrying the same stash:
+    the channel, the source, the time it started playing and the entry it
+    loaded. That pid is the process whose command line carries the socket's
+    argument. Behind a wrapper that runs mpv as its child (D-PLY-55) both
+    carry it, and the probe names the one mpv's own `pid` reads as. No verb
+    changes the stash of a player another build launched.
+  - A different player answering opens its own episode. It takes none of
+    the old one's spent, expiry or intent, and it keeps `migrated`: when
+    mpv's own `pid` read fails behind such a wrapper, the probe names the
+    same player under another pid, and that probe finds nothing left to
+    migrate. Keeping it costs a different player at most one restart when
+    its list lands late.
+  - A start the watchdog stopped whose probe finds the older player (path 6)
+    is told either way.
+  - Every rebuild of the episode goes through `Model.olderRestartWith`,
+    which carries every field.
 
 Measured in a nested cage at 10,000 channels (QA-RESULTS "Restart on
 adoption, live", M6), the list was applied 0.66-1.06 s after the probe
@@ -1032,7 +1099,9 @@ stream opens.
 - `read_profile_threats` and the pre-pin stop.
 - `pin_adopted_player` and `limit_core_of` in the probe and in the
   current-adopt branch.
-- The TLS reload, for a player of this build read `migrated`.
+- The TLS reload, for a player of this build read `migrated`. Since D-SINK-72
+  any probe reads it until the reload's own load clears the mark, so a shell
+  restart before the reload still owes it, and the one rebuffer is paid once.
 - `apply_channel`'s neutral headers and per-file load options.
 
 **Open beside it:**
@@ -1055,8 +1124,17 @@ top-level `user-data` nodes. Both were probe-verified on 0.41: a sub-path write
 returns success, a **different** client reads back the identical object with
 non-ASCII intact (`"Canal E 7"`), `observe_property` on the sub-path registers,
 the top level is not writable (`set_property user-data {...}` -> "error
-accessing property"), and there is no delete (`del_property` -> "invalid
-parameter"). Deep paths are deliberately not used - two siblings avoid both the
+accessing property"), and `del_property` is not a command ("invalid
+parameter"). [2026-11-02, lane-sk72: the `del` input command does remove a
+sub-path on mpv 0.41.0. It answers `success`, and the node then reads
+`property not found`; on an absent node it answers `error running command`.
+Nothing here uses it.] [And a fifth sibling (D-SINK-72), after the stash, the
+owner claim, the rewind zero point and the shell's picture-in-picture
+snapshot (`user-data/omarchy-iptv-pip`): `user-data/omarchy-iptv-tls` holds
+the fixed word `migrated` after a probe's TLS migration that no load of this
+build has followed yet, and the empty word after such a load. Measured on mpv
+0.41.0, windowless: a second client reads it back, it survives `loadfile ...
+replace`, and setting it changes no other property, idle or playing.] Deep paths are deliberately not used - two siblings avoid both the
 unverified nesting and any read-modify-write race.
 
 ```
