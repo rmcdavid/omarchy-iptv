@@ -6198,6 +6198,10 @@ checkCall("restart on adoption (N3): olderRestartDisposition, one vector per row
     "defer", "defer", "defer", "defer",
     "stop", "stop", "stop",
     "defer", "stop", "hold", "hold"])
+checkCall("restart on adoption: the new refusal `player_foreign` has a sentence on a player verb, is local (marks nothing), and its helper message never reaches the user", () => {
+  const st = { ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" } }
+  return [Model.statusReason(st), Model.playerStartFailure("player_foreign")]
+}, ["Another program answers the player's socket", "local"])
 checkCall("restart on adoption (N4): playFork answers start while a restart is owed, whatever else it would answer; and a refused play that says `outdated` is routed to start", () => [
   Model.playFork({ socketAttached: true, restartOwed: true }), Model.playFork({ socketAttached: true, controlBusy: true, restartOwed: true }),
   Model.playFork({ playerPending: true, restartOwed: true }), Model.playFork({ socketAttached: true, restartOwed: "yes" }),

@@ -341,6 +341,10 @@ function playerVerbReason(code) {
   if (code === "busy") return "The player is busy"
   if (code === "too_large") return "Helper ran out of memory"
   if (code === "spawn_failed") return "Could not start mpv"
+  // Restart on adoption (2026-11-01): `player start` vouches for the pid it
+  // launched, and another process answered the socket it spawned the player
+  // on (feed_gate in the helper). Local: the stream was never contacted.
+  if (code === "player_foreign") return "Another program answers the player's socket"
   return ""
 }
 
