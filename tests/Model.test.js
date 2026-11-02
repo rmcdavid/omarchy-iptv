@@ -15292,6 +15292,32 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, refusal("start", "runtime_unwritable", READONLY, "t:y", h.root.playSeq))
       return [playing, h.root.nowPlaying ? h.root.nowPlaying.id : null]
     }, [["t:y", null], "t:y"])
+
+    checkCall("restart on adoption (recheck): while another build's player is owed its replacement, the retry of a channel change's start that lost the lock is a `player start` again -- never a `play` into that player (playRetryTimer reads zapReady)", () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: deferred, still owed
+      h.root.play("t:y", true, "")
+      h.drain()
+      exit(h, refusal("start", "busy", "another player start holds the lock", "t:y", h.root.playSeq))
+      const armed = h.ids.playRetryTimer.restarts
+      const fired = h.fireTimer("playRetryTimer")
+      h.drain()
+      return [armed, fired, startArgs(slots).map(idOf), zaps.map(verbOf)]
+    }, [1, true, ["t:y", "t:y"], []])
+
+    checkCall("restart on adoption (recheck): while another build's player is owed its replacement, a health tick that finds it on another channel of this source re-applies nothing into it (reapplyIntent reads zapReady)", () => {
+      const { h, zaps } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: deferred, still owed
+      h.root.controlKind = "status"
+      h.root.handleControlResult(JSON.stringify({ ok: true, kind: "status", running: true, playing: true, mpv: "0.41.0",
+                                                  stash: STASH({ id: "t:y", name: "Y" }) }) + "\n")
+      h.drain()
+      return [h.root.olderRestartOwed === true, h.root.channelRepairs, zaps.map(verbOf)]
+    }, [true, 1, []])
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----

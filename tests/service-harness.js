@@ -962,6 +962,22 @@ function bootService(serviceText, Model, o) {
     t.stop = function () { this.stops++; this.running = false; this.armedAt = null }
     return [t, fire]
   }
+  // The recheck of lane RA (2026-11-01): fire ONE Timer block's own
+  // onTriggered, once, as QML does when it comes due -- for a timer h.elapse
+  // does not drive (playRetryTimer is counted, never run), without putting
+  // it on every test's clock. The double reads stopped afterwards, as a
+  // non-repeating Timer does. -> false when the tree has no such block.
+  h.fireTimer = (id) => {
+    const at = serviceText.indexOf("id: " + id + "\n")
+    if (at === -1) return false
+    const block = serviceText.slice(serviceText.lastIndexOf("  Timer {", at), serviceText.indexOf("\n  }", at))
+    const oneLine = (block.match(/^    onTriggered: (?!\{)(.*)$/m) || [])[1]
+    const body = oneLine || handlerBlock(block, "onTriggered: {")
+    if (!body) return false
+    if (ids[id]) ids[id].running = false
+    compile("", body, id + "_fired")()
+    return true
+  }
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
   // D-SRC-69: probeWatchdog joins them -- a probe HELD behind a cache job
   // is bounded by it, and a test that never moves the clock is unchanged.

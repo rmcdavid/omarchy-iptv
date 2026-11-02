@@ -670,11 +670,11 @@ Item {
   property int focusAttempts: 0
   property var pendingPlayId: ""
   property var previousPlaying: null       // restored when a switch over IPC fails
-  // The intent (playSeq) whose play() kept previousPlaying. D-PLY-52 puts that
-  // label back only for a start of THAT intent, and a start of it that
-  // answered ok spends it: a start no play() issued, or one long after,
-  // would otherwise relabel to a channel no player plays any more (the
-  // recheck of lane RA, 2026-11-01).
+  // The intent (playSeq) whose play() kept previousPlaying. A start of THAT
+  // intent that answered ok spends the label: D-PLY-52's kept adoption puts
+  // previousPlaying back, and a label nothing spent relabelled a later
+  // refused start to a channel no player plays any more (the recheck of
+  // lane RA, 2026-11-01).
   property int previousPlayingSeq: -1
   property string controlKind: ""
   // M5-01 ruling D10, as ONE expression (F-RWD-19). `healthBusy` is what the
@@ -3849,9 +3849,10 @@ Item {
   //     (Q4), or stopped when it cannot be made safe
   //   - anyone else's start (a user's channel change, a repair): the switch
   //     did not happen and the player plays the channel it was on, so the
-  //     label goes back to the one the play() of THIS intent kept, as a failed
-  //     zap's does -- no card, nothing dropped, the observer kept. A start no
-  //     play() of this intent issued keeps the label it has.
+  //     label goes back to the one play() kept, as a failed zap's does -- no
+  //     card, nothing dropped, the observer kept. A start of that intent that
+  //     answered ok has spent it (previousPlayingSeq), so a later refusal
+  //     keeps the label it has.
   function refusedWhilePlaying(status, code, reason) {
     var ep = root.olderRestart || null
     var automatic = ep !== null && Model.olderRestartKeepsPause(ep, Number(status.seq))
@@ -3860,7 +3861,7 @@ Item {
       root.reestablishAdopted()
       return true
     }
-    if (root.previousPlaying && Number(status.seq) === root.previousPlayingSeq) root.nowPlaying = root.previousPlaying
+    if (root.previousPlaying) root.nowPlaying = root.previousPlaying
     root.previousPlaying = null
     if (ep !== null) root.reestablishAdopted()
     return true
