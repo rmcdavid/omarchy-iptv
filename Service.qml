@@ -930,6 +930,12 @@ Item {
   // restart answered ok: a later probe that reads the replacement as another
   // build's again is not restarted twice (design 4.4.3).
   property bool olderRestartDelivered: false
+  // D-PLY-52: the observer the player slot's start or restart was issued
+  // over, when it was attached to a live player then; null otherwise. A
+  // refusal that finds this SAME observer still attached was refused before
+  // the helper laddered anything (a laddered player's EOF releases it, and
+  // every later attempt is a fresh object), so the player it watches plays on.
+  property var sessionSocket: null
   // The channel of the most recent failure. The guide reads it to decide
   // whether an open is "come back after a dead stream" or a fresh start
   // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
@@ -3329,6 +3335,7 @@ Item {
     var argv = verb === "restart"
       ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId, keepPause)
       : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId, keepPause)
+    root.sessionSocket = root.socketAttached() ? root.playerSocket : null
     root.playerPending = true
     root.playerWanted = true
     root.armPlayerSocket()
@@ -3504,7 +3511,10 @@ Item {
     // the player this shell adopted plays on. The tail below assumes "the
     // player never started", and with it the bar went idle over a playing
     // channel and a card said playback could not start.
-    if (root.socketAttached() && root.nowPlaying !== null && root.refusedWhilePlaying(status, code, reason)) return
+    var watched = root.sessionSocket
+    root.sessionSocket = null
+    if (watched && root.playerSocket === watched && root.socketAttached() && root.nowPlaying !== null
+        && root.refusedWhilePlaying(status, code, reason)) return
     root.playerWanted = false
     playerSocketTimer.stop()
     var target = root.nowPlaying

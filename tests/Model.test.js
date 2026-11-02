@@ -15050,6 +15050,17 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [kept, startArgs(slots).map(idOf)]
     }, [["t:x", 0, true, true, 0], ["t:x", "t:y"]])
 
+    checkCall("D-PLY-52 (its bound): a refusal AFTER the ladder -- the older player's EOF arrived, and the observer has since reached the NEW player -- is not \"refused while playing\": the tail runs (the card, nothing kept)", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h)
+      eof(h)                              // the ladder took the older player down
+      attach(h)                           // and the observer reached the new one
+      exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" }, id: "t:x", seq: h.root.playSeq }))
+      return [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [["74021 Could not start playback"], null, false])
+
     checkCall("restart on adoption (N5, Q4's second exception): the automatic restart refused because THIS build refuses the channel the older player streams (local_address) -- the older player is stopped and `Stream failed` told", () => {
       const { h } = boot()
       reattach(h, probeOf())
