@@ -1275,8 +1275,10 @@ ck "S5 and S-03 still holds: no URL and no credential on the argv" \
 wait_log 'ignoring mpvArgs tokens' 10 || true
 # By option NAME: since D-SINK-24 the line names a refused token's option and
 # never its value (Model.mpvRejectedLine), so `--tls-verify=no` reads
-# `--tls-verify` there (rc-rao-b; the old pattern wanted the value).
-s5_warn=$(qa_count 'ignoring mpvArgs tokens:(.* )? ?--tls-verify( .*)? --no-tls-verify( |$)' "$HARNESS_LOG")
+# `--tls-verify` there (rc-rao-b; the old pattern wanted the value, which no
+# tree since then prints). A `--baseline` before it printed the token whole,
+# and that line names both spellings too, so both forms are heard.
+s5_warn=$(qa_count 'ignoring mpvArgs tokens:(.* )? ?--tls-verify(=no)?( .*)? --no-tls-verify( |$)' "$HARNESS_LOG")
 ck "S5 layer 3 is HEARD: the shell names both refused spellings in its log" '(( s5_warn >= 1 ))'
 
 # ============================================================== S6, the adoption case
