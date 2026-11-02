@@ -928,13 +928,16 @@ Item {
   // `launch`), adopted it for a hold, and owes its replacement -- one
   // automatic `player start --keep-pause` of the same channel once the
   // channel list is applied (Model.olderRestartDisposition). null when
-  // nothing is owed; else { seq, unsafe, spent, expired, migrated }: the
-  // intent the restart was issued under, whether the player read unsafe,
+  // nothing is owed; else { seq, unsafe, spent, expired, migrated, player }:
+  // the intent the restart was issued under, whether the player read unsafe,
   // whether the restart was issued (or deferred: it plays on, fed nothing,
   // until the user's next channel change replaces it), whether the hold ran
-  // out, and whether the probe had to change its settings in place -- the
+  // out, whether the probe had to change its settings in place -- the
   // stream it has open may predate them, so the hold's end does not defer it
-  // (D-SINK-71, Model.olderRestartDisposition).
+  // (D-SINK-71, Model.olderRestartDisposition) -- and which player it was
+  // opened for, so a later probe of that same player keeps it (lane-sk73,
+  // Model.olderRestartOpen). Opened by Model.olderRestartOpen and rebuilt
+  // only through Model.olderRestartWith, which carries every field.
   property var olderRestart: null
   readonly property bool olderRestartOwed: !!root.olderRestart
   // The four zap sites read this in place of playerUp: while a restart is
@@ -1238,8 +1241,7 @@ Item {
     // automatic one is spent, so it can neither fire over this intent nor
     // lend it the old player's pause (Model.olderRestartKeepsPause).
     if (root.olderRestart && root.olderRestart.spent !== true) {
-      root.olderRestart = { seq: root.olderRestart.seq, unsafe: root.olderRestart.unsafe, spent: true, expired: root.olderRestart.expired,
-                            migrated: root.olderRestart.migrated }
+      root.olderRestart = Model.olderRestartWith(root.olderRestart, { spent: true })
       olderRestartTimer.stop()
     }
     var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
@@ -3769,7 +3771,7 @@ Item {
     root.armPlayerSocket()
     playerWatchdog.restart()
     root.reconcileNowPlaying()
-    if (older) root.openOlderRestart(!tls.safe, migrated)
+    if (older) root.openOlderRestart(!tls.safe, migrated, probe.pid, stash)
     root.reestablishAdopted()
     // D-PLY-35: a stopped start's player, found and adopted.
     root.settleTimedOutPlay(true)
@@ -3784,13 +3786,16 @@ Item {
   // and a player this shell's own restart started that reads as another
   // build's again, journaled and deferred, so a disagreement between the
   // builder and the reader shows itself instead of looping.
-  // D-SINK-71: `migrated` is kept from an episode already open on this
-  // player: a later probe of it reads it already migrated, and the stream it
-  // has open is the same one.
-  function openOlderRestart(unsafe, migrated) {
+  // lane-sk73: a later probe of the SAME player (the socket hunt's, a
+  // `recover`) keeps the episode already open for it -- spent, expired and
+  // its intent as they were, the hold not re-armed -- and a different player
+  // opens its own (Model.olderRestartOpen). D-SINK-71: `migrated` is kept
+  // from that episode: a later probe reads it already migrated, and the
+  // stream it has open is the same one. Path 6's card is raised whichever
+  // way the episode goes.
+  function openOlderRestart(unsafe, migrated, pid, stash) {
     root.tlsReloadPending = false
-    var wasMigrated = migrated === true || (root.olderRestart !== null && root.olderRestart.migrated === true)
-    var spent = false
+    var timedOut = false
     if (root.timedOutPlay !== null) {
       var pending = root.timedOutPlay
       root.timedOutPlay = null
@@ -3798,13 +3803,15 @@ Item {
       var reason = Model.statusReason(Model.parseHelperStatus(root.helperTimeoutStatus(kind, false), kind))
       if (!root.userStopped) root.raiseLocalPlayFailure(pending.intent, reason)
       else root.lastError = reason
-      spent = true
-    } else if (root.olderRestartDelivered) {
-      console.warn(Model.OLDER_RESTART_AGAIN_LINE)
-      spent = true
+      timedOut = true
     }
-    root.olderRestart = { seq: root.playSeq, unsafe: unsafe === true, spent: spent, expired: false, migrated: wasMigrated }
-    if (!spent) olderRestartTimer.restart()
+    var open = Model.olderRestartOpen(root.olderRestart, {
+      seq: root.playSeq, pid: pid, stash: stash, unsafe: unsafe === true, migrated: migrated === true,
+      timedOut: timedOut, delivered: root.olderRestartDelivered
+    })
+    if (open.again) console.warn(Model.OLDER_RESTART_AGAIN_LINE)
+    root.olderRestart = open.episode
+    if (open.armHold) olderRestartTimer.restart()
   }
 
   function endOlderRestart() {
@@ -3847,13 +3854,13 @@ Item {
       // Q4: it plays on, fed nothing; the user's next channel change replaces
       // it and a stop ends it. The episode stays owed, so the zap sites send
       // that change as a start.
-      if (ep.spent !== true) root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: true, expired: ep.expired, migrated: ep.migrated }
+      if (ep.spent !== true) root.olderRestart = Model.olderRestartWith(ep, { spent: true })
       olderRestartTimer.stop()
       return false
     }
     // "restart": once per episode, the same channel, at live, keeping pause.
     root.playSeq += 1
-    root.olderRestart = { seq: root.playSeq, unsafe: ep.unsafe, spent: true, expired: ep.expired, migrated: ep.migrated }
+    root.olderRestart = Model.olderRestartWith(ep, { seq: root.playSeq, spent: true })
     olderRestartTimer.stop()
     root.wantFocus = false
     console.warn(Model.OLDER_RESTART_LINE)
@@ -6664,7 +6671,7 @@ Item {
     onTriggered: {
       var ep = root.olderRestart
       if (ep === null) return
-      root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: ep.spent, expired: true, migrated: ep.migrated }
+      root.olderRestart = Model.olderRestartWith(ep, { expired: true })
       root.reestablishAdopted()
     }
   }

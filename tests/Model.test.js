@@ -6226,6 +6226,72 @@ checkCall("D-SINK-71: olderRestartDisposition -- a migrated older player is held
     "defer", "defer", "stop", "hold",
     "hold", "hold",
     "clear", "clear"])
+// lane-sk73 (2026-11-02): a later probe of the SAME older player keeps the
+// episode already open for it; a different player opens its own. Red on
+// c510985: no such model names (the re-open lived in Service.qml, where every
+// probe built the episode afresh).
+checkCall("lane-sk73: olderRestartOpen -- the first probe opens an unspent, unexpired episode and arms the hold; a later probe of the SAME player (pid and stash) keeps its spent, expired and intent, ORs `migrated`, takes this probe's `unsafe` and arms nothing; another pid, a recycled pid with another stash (since, entry, channel or source), or an open episode with no player recorded opens a FRESH one inheriting nothing; a pid the probe did not name compares on the stash alone", () => {
+  const ST = { schema: 1, playing: true, id: "t:x", name: "X", group: "G", launchedFrom: "", sourceKey: "ka", since: 100, entryId: 1, seq: 1, verb: "start" }
+  const first = Model.olderRestartOpen(null, { seq: 3, pid: 4242, stash: ST, unsafe: false, migrated: true })
+  const held = Object.assign({}, first.episode, { spent: true, expired: true })
+  const again = o => Model.olderRestartOpen(held, Object.assign({ seq: 9, pid: 4242, stash: ST, unsafe: false, migrated: false }, o))
+  const brief = r => [r.episode.seq, r.episode.spent, r.episode.expired, r.episode.migrated, r.episode.unsafe, r.armHold, r.again]
+  return [
+    first,
+    brief(again({})), brief(again({ unsafe: true })), brief(again({ migrated: true })),
+    again({}).episode.player === held.player,
+    brief(Model.olderRestartOpen(Object.assign({}, held, { spent: false, expired: false, migrated: false }), { seq: 9, pid: 4242, stash: ST, migrated: true })),
+    brief(again({ pid: 5353 })),
+    brief(again({ stash: Object.assign({}, ST, { since: 101 }) })), brief(again({ stash: Object.assign({}, ST, { entryId: 2 }) })),
+    brief(again({ stash: Object.assign({}, ST, { id: "t:y" }) })), brief(again({ stash: Object.assign({}, ST, { sourceKey: "kb" }) })),
+    brief(again({ pid: null })), brief(again({ pid: 0, stash: Object.assign({}, ST, { since: 101 }) })),
+    brief(Model.olderRestartOpen(Object.assign({}, held, { player: undefined }), { seq: 9, pid: 4242, stash: ST })),
+    brief(Model.olderRestartOpen(held, { seq: 9, pid: 4242, stash: null })),
+    again({ pid: 5353, migrated: true }).episode.player
+  ]
+}, [{ episode: { seq: 3, unsafe: false, spent: false, expired: false, migrated: true,
+                 player: { pid: 4242, id: "t:x", sourceKey: "ka", since: 100, entryId: 1 } }, armHold: true, again: false },
+    [3, true, true, true, false, false, false], [3, true, true, true, true, false, false], [3, true, true, true, false, false, false],
+    true,
+    [3, false, false, true, false, false, false],
+    [9, false, false, false, false, true, false],
+    [9, false, false, false, false, true, false], [9, false, false, false, false, true, false],
+    [9, false, false, false, false, true, false], [9, false, false, false, false, true, false],
+    [3, true, true, true, false, false, false], [9, false, false, false, false, true, false],
+    [9, false, false, false, false, true, false],
+    [9, false, false, false, false, true, false],
+    { pid: 5353, id: "t:x", sourceKey: "ka", since: 100, entryId: 1 }])
+// Path 6 (a start the watchdog stopped, whose probe finds the older player)
+// spends the episode whichever branch is taken, and the line for a player
+// this shell's own restart started is journaled once per episode, not once
+// per probe.
+checkCall("lane-sk73: olderRestartOpen -- a stopped start's probe (`timedOut`) spends a fresh episode and keeps a kept one spent, arming nothing and journaling nothing; after a delivered restart a NEW episode is spent with the again-line, a later probe of the same player journals it no more", () => {
+  const ST = { id: "t:x", sourceKey: "ka", since: 100, entryId: 1 }
+  const brief = r => [r.episode.seq, r.episode.spent, r.episode.expired, r.armHold, r.again]
+  const open = Model.olderRestartOpen(null, { seq: 3, pid: 4242, stash: ST })
+  const delivered = Model.olderRestartOpen(null, { seq: 5, pid: 5151, stash: ST, delivered: true })
+  return [
+    brief(Model.olderRestartOpen(null, { seq: 4, pid: 4242, stash: ST, timedOut: true })),
+    brief(Model.olderRestartOpen(open.episode, { seq: 4, pid: 4242, stash: ST, timedOut: true })),
+    brief(Model.olderRestartOpen(open.episode, { seq: 4, pid: 5353, stash: ST, timedOut: true })),
+    brief(Model.olderRestartOpen(null, { seq: 4, pid: 4242, stash: ST, timedOut: true, delivered: true })),
+    brief(delivered),
+    brief(Model.olderRestartOpen(delivered.episode, { seq: 6, pid: 5151, stash: ST, delivered: true })),
+    brief(Model.olderRestartOpen(delivered.episode, { seq: 6, pid: 5353, stash: ST, delivered: true })),
+    Model.olderRestartOpen(undefined, undefined).armHold
+  ]
+}, [[4, true, false, false, false], [3, true, false, false, false], [4, true, false, false, false], [4, true, false, false, false],
+    [5, true, false, false, true], [5, true, false, false, false], [6, true, false, false, true],
+    true])
+checkCall("lane-sk73: olderRestartWith -- changes the named fields, carries every other one (an unknown one included), never mutates its input, and is null for no episode", () => {
+  const ep = { seq: 2, unsafe: false, spent: false, expired: false, migrated: true, player: { pid: 1, id: "t:x", sourceKey: "", since: 0, entryId: 0 }, extra: "kept" }
+  const copy = JSON.stringify(ep)
+  const out = Model.olderRestartWith(ep, { spent: true })
+  return [out, out.player === ep.player, JSON.stringify(ep) === copy, Model.olderRestartWith(ep, null), Model.olderRestartWith(ep, { expired: true, seq: 7 }).seq,
+          Model.olderRestartWith(null, { spent: true }), Model.olderRestartWith(undefined), Model.olderRestartWith("x", {})]
+}, [{ seq: 2, unsafe: false, spent: true, expired: false, migrated: true, player: { pid: 1, id: "t:x", sourceKey: "", since: 0, entryId: 0 }, extra: "kept" },
+    true, true, { seq: 2, unsafe: false, spent: false, expired: false, migrated: true, player: { pid: 1, id: "t:x", sourceKey: "", since: 0, entryId: 0 }, extra: "kept" }, 7,
+    null, null, null])
 checkCall("restart on adoption: the new refusal `player_foreign` has a sentence on a player verb, is local (marks nothing), and its helper message never reaches the user", () => {
   const st = { ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" } }
   return [Model.statusReason(st), Model.playerStartFailure("player_foreign")]
@@ -15165,18 +15231,24 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [retried, adopted, startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : "")), stops(h)]
     }, [[1, null], "t:x", ["t:x keep"], 0])
 
-    checkCall("D-SINK-71: a later probe of the same older player while its restart is held past the hold (the socket hunt's) reads it already migrated -- the episode keeps `migrated`, so the second hold's end does not defer it either and the list still gets the one restart", () => {
+    // Named until lane-sk73 for what c510985 did -- the later probe opened the
+    // episode afresh and "the second hold's end" did not defer it because
+    // `migrated` was carried. Now no second hold exists: the probe keeps the
+    // episode's expiry, which the first element reads (red on c510985: the
+    // hold re-armed, `expired` false). The other three are as they were.
+    checkCall("D-SINK-71 and lane-sk73: a later probe of the same older player while its restart is held past the hold (the socket hunt's) reads it already migrated -- the episode keeps `migrated` and stays expired, and no second hold is armed, so the probe neither defers it nor starts it, and the list still gets the one restart", () => {
       const { h, slots } = boot()
       reattach(h, probeOf({ tls: MIGRATED }))
       attach(h)
       h.elapse(M.OLDER_RESTART_HOLD_MS)
       h.root.runPlayerProbe()
       exit(h, probeOf({ tls: SAFE, seq: h.root.playSeq }))
+      const reprobed = [h.ids.olderRestartTimer.running, !!(h.root.olderRestart && h.root.olderRestart.expired === true)]
       h.elapse(M.OLDER_RESTART_HOLD_MS)
       const held = [startArgs(slots).length, h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true)]
       land(h)
-      return [held, startArgs(slots).map(idOf), stops(h)]
-    }, [[0, true, false], ["t:x"], 0])
+      return [reprobed, held, startArgs(slots).map(idOf), stops(h)]
+    }, [[false, true], [0, true, false], ["t:x"], 0])
 
     checkCall("D-SINK-71 (unchanged around it): a migrated older player held past the hold -- a channel change while its restart is still owed (the slot busy when the list landed) replaces it with the NEW channel (no --keep-pause) and spends the episode, so the automatic restart never fires over it; a stop ends it, so nothing is started; a list without its channel defers it at once; and one that could not be made safe still stops at the expiry", () => {
       const change = boot()
@@ -15250,6 +15322,129 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
               [startsKeep(refusedChannel.slots), stops(refusedChannel.h), toasts(refusedChannel.h).map(t => t.split(" | ")[0]), refusedChannel.h.root.nowPlaying, refusedChannel.h.root.olderRestartOwed === true]]
     }, [[["t:x keep"], ["t:x", 0, true, 0], ["t:x keep"], 1],
         [["t:x keep"], 1, ["74011 Stream failed"], null, false]])
+
+    // ---- lane-sk73 (2026-11-02): a later probe of the same older player ----
+    // The shell probes a player it is already holding when its own connect
+    // fails while the helper's succeeds (the socket hunt's probe after its
+    // burst, a `recover`), and every such probe opened the restart episode
+    // afresh: unspent, unexpired, the hold re-armed. rc-sk71's scratch probes
+    // E and F, committed here with the owner's other two rules beside them.
+    // The first five are red on c510985; the last two hold what must not
+    // change with it (a different player, path 6's card).
+    const PB73 = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+    const reprobe = (h, o) => { h.root.runPlayerProbe(); exit(h, probeOf(Object.assign({ seq: h.root.playSeq }, o || {}))) }
+    const againLines = h => h.warnings.filter(w => w === M.OLDER_RESTART_AGAIN_LINE).length
+    checkCall("lane-sk73 (rc-sk71's probe E): a SAFE older player DEFERRED at the hold's end and probed again -- after its list landed, and before -- is NOT restarted: no start, no restart line, still owed and spent, no hold re-armed, nothing stopped; the next channel change replaces it without --keep-pause", () => {
+      const run = afterList => {
+        const { h, slots, zaps } = boot()
+        reattach(h, probeOf())
+        attach(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+        if (afterList) land(h)
+        reprobe(h)
+        if (!afterList) land(h)
+        const after = [startsKeep(slots), restartLines(h), h.root.olderRestartOwed === true,
+                       !!(h.root.olderRestart && h.root.olderRestart.spent === true), h.ids.olderRestartTimer.running, stops(h)]
+        h.root.play("t:y", true, "")
+        h.drain()
+        return [after, startsKeep(slots), zaps.length]
+      }
+      return [run(true), run(false)]
+    }, [[[[], 0, true, true, false, 0], ["t:y"], 0], [[[], 0, true, true, false, 0], ["t:y"], 0]])
+
+    checkCall("lane-sk73 (rc-sk71's probe F): an older player that could not be made safe, probed again 1 s before its hold ends, is stopped when the ORIGINAL hold ends -- not a whole hold after the probe -- and only once", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      attach(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS - 1000)
+      reprobe(h, { tls: UNSAFE })
+      const reprobed = [stops(h), h.root.olderRestartOwed === true, h.ids.olderRestartTimer.running]
+      h.elapse(999)
+      const before = stops(h)
+      h.elapse(1)
+      const atHoldEnd = [stops(h), h.root.nowPlaying, h.root.olderRestartOwed === true]
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      return [reprobed, before, atHoldEnd, stops(h), startArgs(slots).length]
+    }, [[0, true, true], 0, [1, null, false], 1, 0])
+
+    checkCall("lane-sk73: a SPENT episode probed again stays spent -- after path 6 (a user's start the watchdog stopped, the older player still there), after the automatic restart was refused before the ladder (deferred), and after a delivered restart whose replacement reads as another build's (journaled once, not once per probe): no second automatic start, no second card", () => {
+      const path6 = boot()
+      land(path6.h)
+      path6.h.root.play("t:y", true, "")
+      path6.h.drain()
+      path6.h.elapse(PB73.watchdogMs.start)
+      exit(path6.h, "")                                // TERMed: no output; the probe is sent
+      exit(path6.h, probeOf({ seq: path6.h.root.playSeq }))
+      reprobe(path6.h)
+      const local = boot()
+      reattach(local.h, probeOf())
+      attach(local.h)
+      land(local.h)
+      exit(local.h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "runtime_unwritable", message: "could not make the player's runtime folder: Read-only file system" }, id: "t:x", seq: local.h.root.playSeq }))
+      reprobe(local.h)
+      const told = boot()
+      reattach(told.h, probeOf())
+      land(told.h)
+      exit(told.h, okStart("t:x", { seq: told.h.root.playSeq }))
+      reprobe(told.h, { pid: 5151, stash: STASH({ since: 2 }) })   // the replacement reads as another build's
+      reprobe(told.h, { pid: 5151, stash: STASH({ since: 2 }) })   // and again
+      land(told.h)
+      const spent = h => [h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true)]
+      return [[startsKeep(path6.slots), restartLines(path6.h), toasts(path6.h).map(t => t.split(" | ")[0]), spent(path6.h)],
+              [startsKeep(local.slots), restartLines(local.h), toasts(local.h).length, spent(local.h), stops(local.h)],
+              [startsKeep(told.slots), restartLines(told.h), againLines(told.h), spent(told.h), stops(told.h)]]
+    }, [[["t:y"], 0, ["74021 Could not start playback"], [true, true]],
+        [["t:x keep"], 1, 0, [true, true], 0],
+        [["t:x keep"], 1, 1, [true, true], 0]])
+
+    checkCall("lane-sk73: a MIGRATED older player held and probed again 5 s before its hold ends keeps `migrated` AND its original expiry -- expired at 15 s, not 20, no hold re-armed, still owed and unspent, nothing started or stopped -- and the list still gets the one restart", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: MIGRATED }))
+      attach(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS - 5000)
+      reprobe(h, { tls: SAFE })
+      const ep = () => h.root.olderRestart ? [h.root.olderRestart.migrated, h.root.olderRestart.expired, h.root.olderRestart.spent] : null
+      const reprobed = [ep(), h.ids.olderRestartTimer.running]
+      h.elapse(5000)
+      const atHoldEnd = [ep(), h.ids.olderRestartTimer.running, h.root.olderRestartOwed === true, startArgs(slots).length, stops(h)]
+      land(h)
+      return [reprobed, atHoldEnd, startsKeep(slots), restartLines(h), stops(h)]
+    }, [[[true, false, false], true], [[true, true, false], false, true, 0, 0], ["t:x keep"], 1, 0])
+
+    checkCall("lane-sk73 (unchanged): a DIFFERENT player answering while an episode is open -- another pid with another stash, or a recycled pid whose stash started at another time -- opens its OWN episode: unspent, unexpired, the hold armed, inheriting nothing from the deferred one; its list gets its one restart", () => {
+      const run = o => {
+        const { h, slots } = boot()
+        reattach(h, probeOf())
+        attach(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+        const deferred = !!(h.root.olderRestart && h.root.olderRestart.spent === true)
+        reprobe(h, o)
+        const fresh = h.root.olderRestart ? [h.root.olderRestart.spent, h.root.olderRestart.expired, h.ids.olderRestartTimer.running] : null
+        land(h)
+        return [deferred, fresh, startsKeep(slots), restartLines(h)]
+      }
+      return [run({ pid: 5353, stash: STASH({ since: 9, entryId: 2 }) }), run({ stash: STASH({ since: 9 }) })]
+    }, [[true, [false, false, true], ["t:x keep"], 1], [true, [false, false, true], ["t:x keep"], 1]])
+
+    checkCall("lane-sk73 (path 6 with an episode open): a channel change while the restart is owed goes out as a start, the watchdog stops it, and its probe finds the SAME older player -- the start's failure is still told once (Helper timed out), the episode stays spent and keeps the intent it was opened under (no start of it would keep the pause), nothing started automatically; the next change replaces it", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      h.root.runPlayerProbe()                         // the slot is busy when the list lands
+      land(h)
+      h.root.play("t:y", true, "")                    // the start waits its turn
+      h.drain()
+      exit(h, probeOf())                              // stale (the play moved playSeq), then the queued start
+      h.elapse(PB73.watchdogMs.start)
+      exit(h, "")                                     // TERMed: no output; the probe is sent
+      exit(h, probeOf({ seq: h.root.playSeq }))      // the start never got to replace it
+      const after = [toasts(h).map(t => t.split(" | ")[0] + " | " + t.split(" | ")[1].split(M.SEP).pop()), h.root.nowPlaying ? h.root.nowPlaying.id : null,
+                     h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true),
+                     M.olderRestartKeepsPause(h.root.olderRestart, h.root.playSeq), h.ids.olderRestartTimer.running, restartLines(h), startsKeep(slots)]
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [after, startsKeep(slots)]
+    }, [[["74021 Could not start playback | Helper timed out"], "t:x", true, true, false, false, 0, ["t:y"]], ["t:y", "t:y"]])
 
     checkCall("restart on adoption (N5): Enter on the row of the channel the deferred older player is playing is the replacement (a start, at live), not the focus-only shortcut -- its id may be another source's", () => {
       const { h, slots } = boot()
