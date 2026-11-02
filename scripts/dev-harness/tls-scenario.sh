@@ -74,8 +74,9 @@
 #           caught while it exists. `--tls-verify=no`, `--no-tls-verify` and
 #           `--stream-lavf-o` must reach mpv by neither route and must be NAMED
 #           in the shell's log (by option name only, D-SINK-24); `--profile=evil`
-#           and `--tls-ca-file=` must reach it through the file (the control:
-#           the attack and the escape were really delivered); the LAST token
+#           and `--tls-ca-file=` must reach it through the file, or on the argv
+#           on a `--baseline` before 0.16.0 (the control: the attack and the
+#           escape were really delivered); the LAST token
 #           must be `--tls-verify=yes` and the token must appear at least twice,
 #           which is layer 2 and layer 1 respectively. Until 2026-11-02 the
 #           delivery controls and the layer-5 check read the ARGV alone, so on
@@ -736,7 +737,8 @@ PY
 # items (F-HARNESS-46's shape, not qa_cmdline's joined string), counted for
 # S5: `--tls-verify=no`, `--no-tls-verify`, every `--stream-lavf-o*` item but
 # the pin block's own `--stream-lavf-o-clr` (D-SINK-44), and the user's
-# `--profile=` / `--tls-ca-file=` (none since D-SINK-47). Counts only.
+# `--profile=evil` and `--tls-ca-file=` -- on a tree before D-SINK-47 the
+# user's tokens were delivered there, since then none is. Counts only.
 argv_opts() {
   python3 -I - "${1-}" <<'PY'
 import sys
@@ -748,11 +750,12 @@ except (OSError, ValueError):
 if not argv:
     print("NOARGV")
     raise SystemExit(0)
-print("tvno:%d notv:%d lavf:%d user:%d" % (
+print("tvno:%d notv:%d lavf:%d evil:%d ca:%d" % (
     sum(1 for a in argv if a == b"--tls-verify=no"),
     sum(1 for a in argv if a == b"--no-tls-verify"),
     sum(1 for a in argv if a.startswith(b"--stream-lavf-o") and a != b"--stream-lavf-o-clr"),
-    sum(1 for a in argv if a.startswith(b"--profile=") or a.startswith(b"--tls-ca-file="))))
+    sum(1 for a in argv if a == b"--profile=evil"),
+    sum(1 for a in argv if a.startswith(b"--tls-ca-file="))))
 PY
 }
 
@@ -1244,11 +1247,17 @@ ck "S5 the stream was fetched (control: $s5_hits)" '(( s5_hits >= 1 ))'
 # The positive control. Without it every sweep below is a statement about a
 # string nobody has established is the player's argv.
 ck "S5 the player's command line was actually read" '[[ -n "$s5_cmd" && "$s5_cmd" == *"input-ipc-server=$SOCK"* ]]'
-ck "S5 the options file the player reads was caught while it existed, so the checks below read what reached mpv" '[[ $s5_opts == "seen:yes "* ]]'
-ck "S5 the hostile profile really was delivered to mpv, through that file (control for S3)" '[[ $s5_opts == *" profile-evil:yes "* ]]'
-ck "S5 the CA file really was delivered to mpv, through that file (control for S4)" '[[ $s5_opts == *" ca-file:yes "* ]]'
-ck "S5 layer 3: --tls-verify=no never reached mpv, by the file or the argv" '[[ $s5_opts == "seen:yes "* && $s5_opts == *" tls-verify:no "* && $s5_argv == "tvno:0 "* ]]'
-ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_opts == "seen:yes "* && $s5_opts == *" no-tls-verify:no "* && $s5_argv == *" notv:0 "* ]]'
+# Where the user's tokens reach mpv: the options file since D-SINK-47
+# (0.16.0), the argv before it (so a `--baseline` at 0.13.0-0.15.0 still
+# reads its own delivery). Seen in neither place, nothing below is about
+# what mpv was given, and every check that reads this fails.
+s5_seen=no
+[[ $s5_opts == "seen:yes "* || $s5_argv == *" evil:1 "* ]] && s5_seen=yes
+ck "S5 the user's tokens were caught where they reach mpv (the options file it reads since D-SINK-47, the argv before), so the checks below read what reached mpv" '[[ $s5_seen == yes ]]'
+ck "S5 the hostile profile really was delivered to mpv (control for S3)" '[[ $s5_opts == *" profile-evil:yes "* || $s5_argv == *" evil:1 "* ]]'
+ck "S5 the CA file really was delivered to mpv (control for S4)" '[[ $s5_opts == *" ca-file:yes "* || $s5_argv == *" ca:1"* ]]'
+ck "S5 layer 3: --tls-verify=no never reached mpv, by the file or the argv" '[[ $s5_seen == yes && $s5_opts == *" tls-verify:no "* && $s5_argv == "tvno:0 "* ]]'
+ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_seen == yes && $s5_opts == *" no-tls-verify:no "* && $s5_argv == *" notv:0 "* ]]'
 # D-SINK-13 layer 5, the bypass the trailing token CANNOT reach and so the one
 # the reserved list has to. `--stream-lavf-o` forwards key=value to
 # libavformat for the stream, and FFmpeg's own AVOption `tls_verify` is a
@@ -1258,7 +1267,7 @@ ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_opts == "seen:
 # Found by all three reviewers of the round, against a fix already measured
 # working. Asserted on the argv the player is actually running, like its
 # siblings above.
-ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_opts == "seen:yes "* && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
+ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_seen == yes && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
 is "S5 layer 2: the LAST token of the composed argv re-asserts verification" "$s5_last" "--tls-verify=yes"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
 ck "S5 and S-03 still holds: no URL and no credential on the argv" \
@@ -1464,7 +1473,7 @@ echo "hits: s1=$s1_hits s2=$s2_hits s3=$s3_hits s4=$s4_hits s5=$s5_hits s6=$(hit
 echo "what the attacker logged for the three cases that must refuse (empty is the point): s1=[$(hit_lines s1)] s3=[$(hit_lines s3)] s7=[$(hit_lines s7)]"
 echo "S6: adoption=$s6_adopt stage=$s6_stage stream=$s6_stream attacker GETs across the adoption $self_before -> $self_after"
 if [[ -n $BASELINE ]]; then
-  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's four argv checks and its log check, because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
+  echo "baseline $BASELINE: S1 and S3 are expected RED here -- 'played', with a GET of the stream in the attacker's own log, is the finding reproduced -- and so are S5's layer checks and its log check (read off the argv, where that tree put the user's tokens; the options file is D-SINK-47's, 0.16.0), because --tls-verify is not reserved on that tree and nothing re-asserts it last. S1's 'no player left behind' goes red with them: a player that is playing is not a player a refusal left behind. S2, S4 and G1-G10 pass on both trees; they are controls, not discriminators."
   echo "baseline $BASELINE, S6: its two discriminators are expected RED -- the already-open stream reads 'open' (nothing ever closes it, so the wait for a close gives up and says so) and the zap after the adoption reads 'played' with its GET in the attacker's log. D-SINK-16 is reproduced by those two lines alone. S6's stage checks, its adoption witness, the staged-gone guard and its provider control pass on both trees: the stage tree is the same tree either way, and a shell that adopts is a shell that adopts whether or not it migrates anything. Since restart on adoption the replacement check (one restart line, no reload line) reds on every tree older than it: those migrate and reload instead."
 fi
 
