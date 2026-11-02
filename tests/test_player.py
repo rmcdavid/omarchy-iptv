@@ -2667,6 +2667,26 @@ class ProbeTlsTest(PlayerTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertIs(after["tls"]["migrated"], False)
 
+    def test_d_sink_72_a_player_start_that_adopts_a_marked_player_clears_it_too(self):
+        """rc-sk72: every caller of apply_channel ends in the same load and so
+        spends the mark -- a `player start` that ADOPTS this build's marked
+        player as much as a `play`. Held because the mutant that clears it
+        only for `play` (no vouched pid) passed every test before this one;
+        left standing, the next shell would owe a reload the start already
+        delivered."""
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["spawned"], payload["pid"]), (False, idle.pid))
+        self.assertEqual(server.user_data.get(self.MARK), "")
+        load = next(i for i, c in enumerate(server.commands) if c[0] == "loadfile")
+        self.assertGreater(server.commands.index(["set_property", "user-data/" + self.MARK, ""]), load)
+        code, after, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIs(after["tls"]["migrated"], False)
+
     def test_d_sink_72_a_load_the_tls_assertion_refuses_leaves_the_mark(self):
         """Only a load that went out clears it: a player that will not verify
         is refused before the loadfile and stays marked."""
