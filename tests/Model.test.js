@@ -15096,6 +15096,22 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
     }, ["t:x"])
 
+    checkCall("restart on adoption (path 6): a user's start the watchdog stopped, whose probe finds the OLDER player still there -- the start's failure told once (Helper timed out), the older player adopted and deferred, not restarted automatically; the next change replaces it", () => {
+      const PBX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+      const { h, slots } = boot()
+      land(h)
+      h.root.play("t:y", true, "")
+      h.drain()
+      h.elapse(PBX.watchdogMs.start)
+      exit(h, "")                                     // TERMed: no output; the probe is sent
+      exit(h, probeOf({ seq: h.root.playSeq }))      // the start never got to replace it
+      const after = [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying ? h.root.nowPlaying.id : null,
+                     h.root.olderRestartOwed === true, restartLines(h), startArgs(slots).map(idOf)]
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [after, startArgs(slots).map(idOf)]
+    }, [[["74021 Could not start playback"], "t:x", true, 0, ["t:y"]], ["t:y", "t:y"]])
+
     checkCall("restart on adoption (N5): the channel the older player streams is not on the applied list -- deferred at once, not held for the whole hold, and no start", () => {
       const { h, slots } = boot()
       reattach(h, probeOf())
