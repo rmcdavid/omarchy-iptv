@@ -2607,6 +2607,109 @@ class ProbeTlsTest(PlayerTestCase):
         for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
             self.assertNotIn(secret, stdout + stderr, secret)
 
+    # ---- D-SINK-72 (lane-sk72, 2026-11-02): the migration fact on the player.
+    # The names are spelled out, not taken from the helper, so the same file
+    # runs against c510985 and reads red there for the behaviour, not for a
+    # missing constant.
+    MARK = "omarchy-iptv-tls"
+
+    def test_d_sink_72_a_marked_player_is_reported_migrated_though_nothing_needed_changing(self):
+        """A probe of a player an earlier probe migrated, before any load re-
+        established it: nothing is left to change, and the reply still says
+        `migrated`, so the shell asking -- a NEW shell, after a restart --
+        still owes the re-establishment (the restart episode's late
+        replacement, or tlsReloadPending's reload for this build's player)."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "tls-verify"]], [])
+        self.assertEqual(server.user_data[self.MARK], "migrated")
+
+    def test_d_sink_72_the_migration_marks_the_player_so_the_next_shells_probe_still_owes_it(self):
+        """The first probe (the shell that then restarts) migrates and marks;
+        the second (the next shell's) finds the player safe and still answers
+        `migrated`. On c510985 the second answered False, the hold's end
+        deferred the player, and its pre-migration connection streamed on."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper(launch="older")
+        server = self.start(props={"mpv-version": "mpv 0.41.0"})
+        code, first, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        code, second, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((first["tls"], second["tls"]),
+                         ({"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True},) * 2)
+        self.assertEqual(server.user_data.get(self.MARK), "migrated")
+        # On before the writes, so a probe cut off between them leaves it.
+        names = [c[:2] for c in server.commands]
+        self.assertLess(names.index(["set_property", "user-data/" + self.MARK]),
+                        names.index(["set_property", "tls-verify"]))
+
+    def test_d_sink_72_a_load_clears_the_mark_and_the_probe_after_it_owes_nothing(self):
+        """apply_channel's load passed the gate and every TLS assertion and
+        replaced the open connection: the mark is spent, AFTER the loadfile,
+        and the next probe answers `migrated: False` -- so the one rebuffer is
+        paid once, not at every shell start."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(user_data={self.MARK: "migrated"})
+        code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock, "--cache-dir", self.cache,
+                                 "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(server.user_data.get(self.MARK), "")
+        load = next(i for i, c in enumerate(server.commands) if c[0] == "loadfile")
+        clear = server.commands.index(["set_property", "user-data/" + self.MARK, ""])
+        self.assertGreater(clear, load)
+        code, after, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertIs(after["tls"]["migrated"], False)
+
+    def test_d_sink_72_a_load_the_tls_assertion_refuses_leaves_the_mark(self):
+        """Only a load that went out clears it: a player that will not verify
+        is refused before the loadfile and stays marked."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        server = self.start_current(props={"tls-verify": False}, refuse={"tls-verify"},
+                                    user_data={self.MARK: "migrated"})
+        code, payload, _, _ = run("play", "--id", "t:espn.us", "--socket", self.sock, "--cache-dir", self.cache,
+                                  "--ipc-timeout", "1")
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"))
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+        self.assertEqual(server.user_data.get(self.MARK), "migrated")
+
+    def test_d_sink_72_a_mark_that_cannot_be_set_leaves_the_probe_answering_as_before(self):
+        """Fail-safe, the write: mpv refusing the mark changes nothing else --
+        the player is still migrated and read back, and THIS probe still says
+        `migrated` -- and it is journaled without a value."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper(launch="older")
+        server = self.start(props={"mpv-version": "mpv 0.41.0"}, refuse={"user-data/" + self.MARK})
+        code, payload, _, stderr = self.probe()
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        self.assertIs(server.props["tls-verify"], True)
+        self.assertNotIn(self.MARK, server.user_data)
+        self.assertIn("could not mark the player as migrated", stderr)
+
+    def test_d_sink_72_a_mark_that_cannot_be_read_or_is_not_the_word_reads_not_marked(self):
+        """Fail-safe, the read: an unreadable node, and any value but the
+        exact word, read "not marked" -- the answer a probe gave before."""
+        os.makedirs(self.runtime, 0o700)
+        self.sleeper()
+        cases = [({"missing": {"user-data/" + self.MARK}, "user_data": {self.MARK: "migrated"}}, "unreadable")]
+        cases += [({"user_data": {self.MARK: value}}, repr(value))
+                  for value in ("", "MIGRATED", "migrated ", True, 1, {"migrated": True}, ["migrated"], None)]
+        for kwargs, label in cases:
+            with self.subTest(label):
+                server = self.start_current(**kwargs)
+                code, payload, _, stderr = self.probe()
+                self.assertEqual(code, 0, stderr)
+                self.assertIs(payload["tls"]["migrated"], False, label)
+                server.close()
+
     def test_mutating_the_migration_into_a_read_lets_the_shell_adopt_it_anyway(self):
         """Rule 11 where there is no `before`: break the one decision and watch
         the reply go quiet about it. With migrate_tls reduced to a read, the

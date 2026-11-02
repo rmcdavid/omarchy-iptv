@@ -356,13 +356,54 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     TLS keys and load-auto-profiles are migrated here too, and a per-file
     profile in its mpv.conf that could undo a loose option after this read is
     counted -- that one no migration can fix, so the shell stops the player.
+
+    D-SINK-72 (lane-sk72, 2026-11-02): `migrated` used to mean "THIS probe
+    changed it", and the fact lived only in the memory of the shell that
+    asked (its restart episode, or tlsReloadPending for a player of this
+    build). A shell restart between that probe and the re-establishment lost
+    it: the next probe found nothing left to change, the hold's end deferred
+    the player, and the connection it opened before the migration streamed on
+    until the next channel change. So the fact now lives on the PLAYER
+    (USER_DATA_TLS): set here, before the writes, whenever this has to act,
+    and read by every later probe, which then answers `migrated` too. Only
+    apply_channel's load clears it (clear_tls_mark), because that load is
+    what replaces the connection. Fail-safe both ways: a mark that cannot be
+    set leaves this answering exactly as it did before (this probe still says
+    `migrated`), and a mark that cannot be read reads "not marked".
     """
     verify, count, unpinned = read_tls_state(client)
     if tls_properties_safe(verify, count, unpinned):
-        return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": False}
+        return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": read_tls_mark(client)}
+    # Before the writes, so that a probe cut off between them and its reply
+    # still leaves the fact behind; a mark set on a player whose writes then
+    # fail costs nothing, because that player reads unsafe and is stopped.
+    if not set_tls_mark(client):
+        log("player probe: could not mark the player as migrated")
     secure_player(client)
     verify, count, unpinned = read_tls_state(client)
     return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": True}
+
+
+def read_tls_mark(client: MpvIpc) -> bool:
+    """Whether a probe has marked this player migrated and no load has since
+    re-established its connection (D-SINK-72). Only the exact word counts;
+    an absent node (`property not found`), any other value, a refused read or
+    a connection that dies here all read False -- "not marked"."""
+    try:
+        ok, value = client.try_command("get_property", USER_DATA_TLS)
+    except HelperError:
+        return False
+    return bool(ok) and value == TLS_MIGRATED_MARK
+
+
+def set_tls_mark(client: MpvIpc) -> bool:
+    """Leave the D-SINK-72 mark on this player. -> whether mpv took it; a
+    failure is reported, never raised: the probe answers as it did before."""
+    try:
+        written, _ = client.try_command("set_property", USER_DATA_TLS, TLS_MIGRATED_MARK)
+    except HelperError:
+        return False
+    return bool(written)
 
 
 def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
@@ -574,8 +615,15 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # down before these land. A dead connection here means the load failed,
     # which is the first-load window's verdict to report - not an error that
     # should sink the whole verb.
+    #
+    # D-SINK-72, last: this load passed the build gate and every TLS
+    # assertion and replaced whatever connection the player had open, so a
+    # probe's migration mark (migrate_tls) is spent -- cleared to the empty
+    # word, which reads "not marked". Last, so that a connection lost first
+    # leaves the mark standing: the cost of that is one more re-establish at
+    # a later shell start, never a migrated player read as settled.
     for prop, value in ((USER_DATA_STASH, dict(stash, entryId=entry_id) if stash is not None else None),
-                        (USER_DATA_OWNER, owner)):
+                        (USER_DATA_OWNER, owner), (USER_DATA_TLS, "")):
         if value is None:
             continue
         try:
@@ -1207,8 +1255,12 @@ def player_probe(args: argparse.Namespace) -> int:
     shell holds a connection to a player it did not launch and has not yet sent
     anything to, which makes it the only place a pre-upgrade player can be made
     to verify before it is fed. The write is idempotent and it is a security
-    assertion, so a later probe over the same player changes nothing and reports
-    nothing to do."""
+    assertion, so a later probe over the same player changes nothing. Since
+    D-SINK-72 (2026-11-02) it does not report nothing to do: the migration
+    leaves a mark on the player (USER_DATA_TLS, migrate_tls), and every later
+    probe answers `migrated` until a load of this helper re-establishes the
+    channel and clears it -- so a shell that restarts before that load still
+    owes it."""
     sock = socket_path(args.socket)
     try:
         found = find_player(sock)
