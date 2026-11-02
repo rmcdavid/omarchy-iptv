@@ -757,7 +757,8 @@ refused, 0 GETs). Every player launched by 0.15.0 or earlier now reads
 "migrated" on the first probe after the upgrade (its `load-auto-profiles` is
 mpv's `auto`), so the one rebuffer of the second row is paid once by every
 such player, not only by a pre-0.13.0 one. [2026-11-02: every such player
-is now another build's, and is replaced rather than reloaded (4.5.2); an
+is now another build's, and is replaced rather than reloaded (4.5.2; one
+the probe migrated is replaced however late its list lands); an
 unsafe one is restarted when its channel can be put back, and stopped only
 when it cannot, or when this build refuses its channel.] The probe and the adoption branch
 of `player start` also carry the pins that are not about the TLS peer, best
@@ -947,22 +948,48 @@ the path from before this section.
 
 - **The hold.** An older or unknown player with a usable stash is adopted
   for a hold of `Model.OLDER_RESTART_HOLD_MS` (15 s). The bar names its
-  channel at once, and the TLS reload of 4.5.1 is not issued for it.
+  channel at once, and the TLS reload of 4.5.1 is not issued for it. The
+  restart replaces the reload, including when the list lands late (below).
 - **The decision.** When the channel list lands, the slot frees or the hold
   ends, `Model.olderRestartDisposition` answers:
   - `restart`: one `player start --keep-pause` of the same channel, and one
     fixed journal line.
   - `defer`: spent, or undeliverable (the channel is gone, another source is
-    active, or the hold expired), and the player reads safe. It plays on and
-    is fed nothing. While it is owed, every zap site starts rather than
+    active, or the hold expired on a player the probe did not have to
+    migrate), and the player reads safe. It plays on and is fed nothing. While it is owed, every zap site starts rather than
     plays (`Model.playFork`'s `restartOwed`), so the next channel change
     replaces it.
-  - `stop`: as `defer`, but the player could not be made safe. It is stopped
-    as 0.16.0 stops one.
+  - `stop`: as `defer`, but the player could not be made safe; at the
+    hold's expiry that holds whether or not the probe migrated it. It is
+    stopped as 0.16.0 stops one.
   - `hold` or `clear`.
 - **An unsafe player whose channel is deliverable** is restarted, not
   stopped. The new player sets every pin on its own command line, which no
   per-file profile replaces.
+- **A player the probe had to migrate is replaced late** (D-SINK-71; the
+  owner, 2026-11-02: "replace late, when the list lands").
+  - Its TLS reading says the probe changed its settings in place
+    (`migrated`), so the stream it already has open may have been opened
+    without them. A player 0.15.0 or earlier launched reads this way the
+    first time a probe finds it, unless a 0.16.0 shell has already migrated
+    it.
+  - For it, the hold's expiry does not defer. The episode keeps holding, and
+    the one automatic restart goes out when the list lands and the channel
+    is deliverable, however late.
+  - 0.16.0's reload had no hold either, but it never waited for the list. It
+    went out once the cache directory was known, at the probe or at the
+    channel file's first load or load failure, and the helper resolved the
+    channel against `channels.json` on disk. With no file there yet, it
+    failed.
+  - A channel that is gone, or another source's, still defers it. An unsafe
+    one is still stopped at the expiry.
+  - The shell takes `migrated` from the probe that migrated the player. The
+    retry of an ambiguous probe, and a later probe of the same player in the
+    same shell, find nothing left to migrate, and the shell keeps the first
+    answer.
+  - A player that read safe without migration keeps the 15 s expiry. A
+    player 0.16.0 started reads this way, because its pins are on its own
+    command line (observed: player-scenario L8).
 - **The channel itself:** `Model.adoptedChannelReach` resolves the stash's
   id. It is the same question the TLS reload now asks (D-PLY-51), so a stash
   from another source is never re-sent against this one.
@@ -984,7 +1011,12 @@ the path from before this section.
 
 Measured in a nested cage at 10,000 channels (QA-RESULTS "Restart on
 adoption, live", M6), the list was applied 0.66-1.06 s after the probe
-answered, against the 15 s hold.
+answered, against the 15 s hold. With the list withheld past the hold
+(player-scenario L7, 2026-11-02), a player v0.15.0's own helper launched was
+replaced 1.16-1.26 s after the refresh that landed the list went out, and
+20.6-20.7 s after the shell loaded; on 6b5ba6c it was still there 67 s after
+the refresh. With the same late list, a player v0.16.0 launched was left
+playing (L8).
 
 **Not carried:** picture in picture, window placement, and the rewind
 history ("behind live" returns to live). The new window is black until its

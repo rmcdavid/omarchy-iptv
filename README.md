@@ -492,13 +492,23 @@ on every protection a running player can take:
 - `Ctrl+V` and drag-and-drop off;
 - no core dump.
 
-Sometimes its channel cannot be put back: the playlist no longer has it,
-another source is active, or the channel list takes too long to load. Then the
-old player plays on, sent no channel, until you change channel or stop. If, in
-that case, it also cannot be made safe, it is stopped: press Enter on the
-channel and a fresh, verified player starts. A player cannot be made safe when
-it does not accept the change, or when it was started by 0.15.0 or earlier and
-its mpv config holds either of these:
+Sometimes its channel cannot be put back: the playlist no longer has it, or
+another source is active. Then the old player plays on, sent no channel, until
+you change channel or stop.
+
+The channel list can also take more than 15 seconds to load. What happens then
+depends on what the new shell found:
+
+- If the old player already had every protection, as a player 0.16.0 started
+  does, it plays on, sent no channel, until you change channel or stop.
+- If the new shell had to turn its protections on, as for a player 0.15.0 or
+  earlier started that 0.16.0 never picked up, it plays on until the list has
+  loaded, and is replaced then.
+
+If, in any of these cases, it also cannot be made safe, it is stopped: press
+Enter on the channel and a fresh, verified player starts. A player cannot be
+made safe when it does not accept the change, or when it was started by 0.15.0
+or earlier and its mpv config holds either of these:
 
 - a per-protocol or per-extension profile that sets any of the options the
   plugin now sets after yours (the certificate settings among them);
