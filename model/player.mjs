@@ -714,19 +714,25 @@ function sameOlderPlayer(a, b) {
 // D-SINK-73: what a probe that finds a player another build launched does
 // to the restart episode. The shell probes a player it is already holding
 // when its own connect fails while the helper's succeeds (the socket hunt's
-// probe after its burst, a `recover`), and every such probe used to open the
+// probe after its burst; a `recover` runs only after a start's ok reply has
+// ended the episode), and every such probe used to open the
 // episode afresh: unspent, unexpired, the hold re-armed. So a DEFERRED
-// player got the automatic restart after all, against "a spent episode stays
-// spent" and "one automatic restart per shell start", and an UNSAFE one's
+// player got the automatic restart after all, against the design's `defer`
+// for a spent episode and "one automatic restart per shell start"
+// (ARCHITECTURE-PLAYER 4.5.2), and an UNSAFE one's
 // stop at the hold's end moved 15 s later with every probe (rc-sk71's
 // probes E and F).
 //
 // The SAME player (sameOlderPlayer) keeps its open episode: spent, expired
 // and the intent it was issued under stay as they were, and the hold is not
 // re-armed (`armHold` false), so it ends when it was going to. `migrated`
-// is kept too (D-SINK-71: a later probe finds nothing left to migrate), and
+// is kept too (D-SINK-71: a later probe normally reads it again from the
+// player's mark, D-SINK-72; where mpv refused the mark, or the mark could
+// not be read, that probe finds nothing left to migrate), and
 // `unsafe` is this probe's reading, as before: an unsafe one is stopped at
-// once if the episode is spent, at the hold's end otherwise. A DIFFERENT
+// once if the episode is spent; otherwise it is restarted if its channel
+// becomes deliverable before the hold ends, and stopped at the hold's end
+// if not. A DIFFERENT
 // player -- the old one gone, another answering, or the same one read under
 // another pid -- opens its own episode, inheriting none of the old one's
 // spent, expiry or intent; it carries `migrated` (rc-sk73, below). A start
@@ -759,10 +765,12 @@ function olderRestartOpen(current, o) {
   // the identity existed (D-SINK-71). The same player can be read under
   // another pid -- behind a wrapper that runs mpv as its child both carry
   // the socket's argument, and when mpv's own pid read fails the probe names
-  // the lower one -- and that probe finds nothing left to migrate, so taking
-  // its reading alone let the hold's end defer a player whose open stream
-  // predates the migration. A different player that takes it costs at most
-  // one restart when its list lands late.
+  // the lower one. That probe reads the player's mark and answers `migrated`
+  // itself (D-SINK-72). Where mpv refused the mark, it finds nothing left to
+  // migrate, and taking its reading alone would let the hold's end defer a
+  // player whose open stream predates the migration (as it did on d6a23dc,
+  // before the mark). A different player that takes it costs at most one
+  // restart when its list lands late.
   var carried = cur !== null && cur.migrated === true
   return { episode: { seq: Math.floor(Number(s.seq)) || 0, unsafe: s.unsafe === true, spent: spent, expired: false,
                       migrated: s.migrated === true || carried, player: player },

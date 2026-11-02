@@ -505,8 +505,9 @@ depends on what the new shell found:
 - If the new shell had to change the settings that keep certificate
   verification on, as for a player 0.15.0 or earlier started, the first time
   a shell of 0.16.0 or later picks it up, it plays on until the list has
-  loaded, and is replaced then if its channel is still there. If the list
-  never loads, it plays on, sent no channel, as above.
+  loaded, and is replaced then if its channel is still there. This holds
+  after a shell restart too, until it is replaced. If the list never loads,
+  it plays on, sent no channel, as above.
 
 If, in any of these cases, it also cannot be made safe, it is stopped: press
 Enter on the channel and a fresh, verified player starts. A player cannot be

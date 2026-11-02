@@ -664,6 +664,12 @@ that a credential has ever been in there.
 | NOT made safe: a refusal, a read-back that still reads unsafe, or a connection that died mid-sequence | The player is STOPPED, by the 4.9 ladder, and the shell shows idle: the `stopForeignPlayer()` path, which is already what a wedged or unidentifiable player gets. Loading is the act of handing over the URL and the headers, so a process that could not be secured is not loaded into, it is ended. The channel is NOT marked failed -- PO-3's mark is for a channel that died unattended, and this one was stopped by us |
 | Made safe, but the channel cannot be re-established: `unknown_channel`, because the playlist no longer carries the stash's id | Stopped, for the reason in the row above -- the connection still open is the unverified one, and leaving it running is the thing the finding is about. **This row is this section's reading of the ruling rather than the ruling itself**, which covered the properties and not a reload that cannot be issued; it is raised as a decision request instead of being treated as settled |
 
+[2026-11-02, D-SINK-72: the first row is not for a player carrying a probe's
+migration mark that no load of this build has spent (`user-data/omarchy-iptv-tls`
+reads `migrated`). Whatever its properties read now, it reads `migrated`. A
+player of this build takes the second row's reload, and another build's player
+is replaced however late its list lands (4.5.2).]
+
 **[2026-11-02, D-DOC-34: the last row above was never what the code did, and
 the owner has now settled it.** The reload answered `unknown_channel`, which
 `PLAY_UNREADABLE` reads as "unknown", and the player played on. The owner's
@@ -1053,7 +1059,8 @@ the path from before this section.
 - **A later probe of the same player keeps its episode** (D-SINK-73,
   `Model.olderRestartOpen`). The shell probes a player it is already holding
   when its own socket connect fails while the helper's succeeds: the socket
-  hunt's probe after its burst, or a `recover`.
+  hunt's probe after its burst. (A `recover` probe runs only after a start's
+  ok reply, which has already ended the episode.)
   - That probe keeps whether the restart is spent, whether the hold has
     ended, and the intent the restart was issued under. It arms no new hold.
     So a deferred player is not restarted after all, and an unsafe one is
@@ -1067,11 +1074,12 @@ the path from before this section.
     carry it, and the probe names the one mpv's own `pid` reads as. No verb
     changes the stash of a player another build launched.
   - A different player answering opens its own episode. It takes none of
-    the old one's spent, expiry or intent, and it keeps `migrated`: when
+    the old one's spent, expiry or intent, and it keeps `migrated`. When
     mpv's own `pid` read fails behind such a wrapper, the probe names the
-    same player under another pid, and that probe finds nothing left to
-    migrate. Keeping it costs a different player at most one restart when
-    its list lands late.
+    same player under another pid. That probe reads the player's mark and
+    answers `migrated` itself. Where mpv refused the mark, it finds nothing
+    left to migrate, and the carry keeps the answer. Keeping it costs a
+    different player at most one restart when its list lands late.
   - A start the watchdog stopped whose probe finds the older player (path 6)
     is told either way.
   - Every rebuild of the episode goes through `Model.olderRestartWith`,
@@ -1113,9 +1121,11 @@ stream opens.
 - D-PLY-57: after `player_foreign` the helper's own spawn is left running.
 - D-PLY-58: the health relaunch of an adopted stash from another source.
 - D-PLY-59: mpv's listener and its children.
-- D-PLY-60: with no observer attached, a local refusal of the automatic
-  restart before the ladder takes the "never started" tail while the older
-  player plays on.
+- D-PLY-60: with no observer attached, a refusal before the ladder of a
+  start that replaces another build's player -- the automatic restart (a
+  local refusal), or a user's channel change while that restart is owed
+  (local, or the picked channel's own entry) -- takes the "never started"
+  tail while the older player plays on.
 
 ### 4.6 Now-playing recovery
 

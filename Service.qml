@@ -3789,8 +3789,8 @@ Item {
   // and a player this shell's own restart started that reads as another
   // build's again, journaled and deferred, so a disagreement between the
   // builder and the reader shows itself instead of looping.
-  // D-SINK-73: a later probe of the SAME player (the socket hunt's, a
-  // `recover`) keeps the episode already open for it -- spent, expired and
+  // D-SINK-73: a later probe of the SAME player (the socket hunt's after
+  // its burst) keeps the episode already open for it -- spent, expired and
   // its intent as they were, the hold not re-armed -- and a different player
   // opens its own (Model.olderRestartOpen). D-SINK-71: `migrated` is kept
   // from an open episode either way: a later probe reads it migrated again

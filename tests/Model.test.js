@@ -15334,7 +15334,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // ---- D-SINK-73 (2026-11-02): a later probe of the same older player ----
     // The shell probes a player it is already holding when its own connect
     // fails while the helper's succeeds (the socket hunt's probe after its
-    // burst, a `recover`), and every such probe opened the restart episode
+    // burst), and every such probe opened the restart episode
     // afresh: unspent, unexpired, the hold re-armed. rc-sk71's scratch probes
     // E and F, committed here with the owner's other two rules beside them.
     // The first five are red on c510985; the last two hold what must not
