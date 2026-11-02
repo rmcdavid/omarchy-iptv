@@ -366,8 +366,8 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     until the next channel change. So the fact now lives on the PLAYER
     (USER_DATA_TLS): set here, before the writes, whenever this has to act,
     and read by every later probe, which then answers `migrated` too. Only
-    apply_channel's load clears it (clear_tls_mark), because that load is
-    what replaces the connection. Fail-safe both ways: a mark that cannot be
+    apply_channel's load clears it (to the empty word, after its loadfile),
+    because that load is what replaces the connection. Fail-safe both ways: a mark that cannot be
     set leaves this answering exactly as it did before (this probe still says
     `migrated`), and a mark that cannot be read reads "not marked".
     """

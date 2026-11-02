@@ -34,17 +34,19 @@ USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
 # `probe` reads it and never writes (the probe is side-effect-free).
 USER_DATA_REWIND = "user-data/omarchy-iptv-rewind"
 REWIND_SCHEMA = 1
-# D-SINK-72 (lane-sk72, 2026-11-02): the fourth sibling, the fact that a probe
-# changed this player's TLS settings in place, kept ON THE PLAYER so that it
-# outlives the shell that learned it. Set by migrate_tls when it has to act,
-# read by every later probe (whose `migrated` it keeps true), and cleared --
-# set to anything but the word -- only by apply_channel's own load, the one
-# act that re-establishes the connection the migration could not reach. A
-# fixed word: nothing private. Measured on mpv 0.41.0, windowless
-# (QA-RESULTS "D-SINK-72"): a get of the absent node answers `property not
-# found`; set_property answers success, a SECOND client reads the word back,
-# it survives two `loadfile ... replace`, and the set changes no other
-# property, idle or playing.
+# D-SINK-72 (lane-sk72, 2026-11-02): one more sibling -- beside the stash,
+# the owner claim, the rewind zero point and the shell's picture-in-picture
+# snapshot (user-data/omarchy-iptv-pip, Model.PIP_SNAPSHOT_KEY) -- the fact
+# that a probe changed this player's TLS settings in place, kept ON THE
+# PLAYER so that it outlives the shell that learned it. Set by migrate_tls
+# when it has to act, read by every later probe (whose `migrated` it keeps
+# true), and cleared -- set to anything but the word -- only by
+# apply_channel's own load, the one act that re-establishes the connection
+# the migration could not reach. A fixed word: nothing private. Measured on
+# mpv 0.41.0, windowless (QA-RESULTS "D-SINK-72"): a get of the absent node
+# answers `property not found`; set_property answers success, a SECOND
+# client reads the word back, it survives two `loadfile ... replace`, and
+# the set changes no other property, idle or playing.
 USER_DATA_TLS = "user-data/omarchy-iptv-tls"
 TLS_MIGRATED_MARK = "migrated"
 PLAYER_GENERIC_FAILURE = "Playback stopped unexpectedly"   # mirrors Model.PLAYER_GENERIC_FAILURE
