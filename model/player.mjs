@@ -625,8 +625,12 @@ function adoptedChannelReach(o) {
 // stream it already has open may have been opened without them -- every
 // 0.15.0 player reads so). For it, "expired" keeps holding and the one
 // automatic restart goes out whenever the list lands and the channel is
-// deliverable; that restart is what the D-SINK-16 reload was for, which
-// 0.16.0 delivered late too. Unchanged: a channel gone defers, an unsafe
+// deliverable; that restart is what the D-SINK-16 reload was for. (0.16.0's
+// reload had no hold, but it never waited for the list either: it went out
+// once the cache DIRECTORY was known, at the probe or the channel file's
+// first load or load failure, and the helper resolved the id against the
+// channels.json on disk -- so with no file there yet it failed and was spent;
+// read in 202a7bc, rc-sk71.) Unchanged: a channel gone defers, an unsafe
 // player still stops at the expiry (it cannot be delivered then and cannot
 // be made safe), a player that read safe without migration still defers at
 // the expiry, and a spent episode stays spent.
