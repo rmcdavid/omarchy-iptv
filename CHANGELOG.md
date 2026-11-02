@@ -3,6 +3,167 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.17.0 (2026-11-02)
+
+**A player another version of the plugin started is replaced instead, and
+never sent a channel.** 0.16.0 brought a running player up to its new
+settings over the player's socket, and left everything else that version had
+put on the player's command line in place. This release replaces such a
+player instead, with one new player window. What to do: **restart the shell**
+(`omarchy-restart-shell`). If a channel was playing when you updated, expect
+it to reopen once in a new window when you restart the shell; if you change
+channel before restarting, the channel you pick opens in a new window
+instead.
+
+### Changed
+
+- **After an update, a channel that was playing reopens once in a new
+  player window**, on the same channel and at live, keeping its volume,
+  mute, fullscreen and pause, at the next shell restart. If you change
+  channel before restarting, that channel opens in the new window, with the
+  same volume, mute and fullscreen, and playing. A player another version
+  of the plugin started is replaced, so nothing that version put on its
+  command line stays -- for a player 0.15.0 or earlier started, your
+  `mpvArgs` tokens among it -- and it is never sent a channel. Picture in
+  picture is not carried over; press `p` again. (D-SINK-47)
+- **When the old player's channel cannot be put back**, because the
+  playlist no longer has it or another source is active, the old player
+  plays on, sent no channel: your next channel change replaces it, and a
+  stop ends it. If the channel list takes more than 15 seconds to load, a
+  player whose protections the new shell had to turn on -- as for a player
+  0.15.0 or earlier started, the first time a shell of 0.16.0 or later
+  picks it up -- is replaced once the list has loaded, if its channel is
+  still there; any other plays on in the same way, and `Enter` on its
+  channel replaces it too, at live and playing. A player that cannot be
+  made safe is stopped instead: press `Enter` on the channel and a fresh
+  player starts. And if this version no longer plays that channel's kind of
+  address, the old player is stopped and you get the usual `Stream failed`
+  notification. (D-SINK-47, D-SINK-71)
+
+### Fixed
+
+- **After `omarchy plugin update` without a shell restart, the old shell's
+  channel changes no longer reach a player another version started.** In
+  0.16.0 they reached that player through the new helper without the
+  protections the new shell sets when it picks a player up -- on a player
+  0.15.0 started, mpv's built-in select menu, console and statistics
+  overlay, each of which can reveal the stream's address, stayed switched
+  on -- and without the limit that keeps a crashed player from
+  leaving a core dump. The helper now refuses to send a channel to a player
+  another version of the plugin started, so your first channel change after
+  such an update replaces it. (D-SINK-70)
+- **A player whose protections the shell had to turn on is now
+  re-established whenever its channel can be put back.** In 0.16.0 the
+  reload that replaces the connection the player had opened before the
+  change worked only if the channel list was already on disk, and only from
+  the shell that turned the protections on: a list that arrived later, or a
+  shell restart in between, left that connection playing until your next
+  channel change. Such a player is now re-established when its list loads,
+  however late (replaced, when another version started it), and a mark on
+  the player itself carries the change across a shell restart. (D-SINK-71,
+  D-SINK-72)
+- **A player the shell picks up is no longer reloaded onto another source's
+  channel.** When the channel playing came from a source other than the
+  active one -- you had switched sources while it played, or while the
+  shell was down -- 0.16.0's one-time reload of a player 0.15.0 or earlier
+  started looked its channel up in the active source's playlist instead,
+  and played whichever channel there had the same internal identifier. That reload no longer
+  re-sends, and the restart that now replaces another version's player
+  never sends, a channel from another source or one the list no longer has
+  (a relaunch still can: see Known limitations). (D-PLY-51)
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration).
+- **The new window is black until its stream opens**, and is not put back
+  where the old one was. A channel you had paused comes back paused at the
+  shell restart; one you were watching behind live comes back at live.
+- For anyone scripting the plugin or running the helper by hand: the
+  helper's `player probe` reply gains `launch` (`current`, `older` or
+  `unknown`; `null` when nothing answered); `player start` accepts
+  `--keep-pause` (`player restart` accepts it with no effect) and may
+  answer `replaced` and `paused`; `player start` now replaces, rather than
+  adopts, a running player this build did not launch (another build's, or
+  one started by hand on the plugin's socket), and `replaced` says how many
+  processes it stopped; a `play` into such a player is refused and answers
+  `not_running` with `outdated`; a
+  start whose socket is answered by a program the helper did not start
+  fails with the new code `player_foreign`, shown as `Another program
+  answers the player's socket`; the player's command line carries one more
+  option, `--script-opts-append=omarchy_iptv-build=<version>+<checksum>`,
+  naming the build that launched it; and the player holds one more
+  `user-data` node, `omarchy-iptv-tls`, which a probe sets when it had to
+  change the settings its `tls` reading covers, and a channel load clears. So `player probe`'s
+  `tls.migrated` now stays `true` on every later probe of that player until
+  a `play` or `player start` loads a channel on it, where 0.16.0 answered
+  `true` only on the probe that made the change. The new reply fields are
+  additive.
+
+### Known limitations
+
+- **A player 0.15.0 or earlier started that is left playing rather than
+  replaced** (see Changed) keeps its old command line, your `mpvArgs`
+  tokens on it, until it is replaced or stopped. (D-SINK-47)
+- **A channel change refused before another version's player has been
+  replaced, while the shell is connected to that player,** writes a journal
+  line and shows no card, as a channel change
+  the running player refuses already did; the old channel plays on and the
+  bar names it. (D-PLY-42, D-PLY-52)
+- **If a replacement of another version's player, automatic or your
+  channel change, is refused by this computer before the old player is
+  stopped, while the shell could not connect to that player**, the bar goes
+  idle and a `Could not start playback` or `Stream failed` notification
+  appears although the old player plays on. (D-PLY-60)
+- **After a start refused with `Another program answers the player's
+  socket`**, the player the plugin had just started is left open, idle,
+  with a black window. (D-PLY-57)
+- **If your `mpv` is a wrapper script that runs mpv without `exec`**, the
+  plugin can stop the wrapper's own shell when it starts a channel on that
+  player while the shell is not connected to it. This is rare: a channel
+  change goes straight to a player the shell is connected to, or is still
+  finding after a restart, so it takes one made while the shell has lost
+  its connection to the running player. The player plays on, but anything the wrapper does
+  after mpv exits does not run. (D-PLY-62)
+- **When the plugin relaunches a player that stopped responding**, the new
+  one starts with the volume, mute and fullscreen your mpv config and
+  `mpvArgs` give any new player, not the ones the old player had. (D-PLY-53)
+- **If a player found playing a channel from a source other than the active
+  one stops responding**, the plugin's relaunch can bring it back on
+  whichever of the active source's channels has the same internal
+  identifier, while the bar keeps the old channel's name. (D-PLY-58)
+- **The plugin's check of which program answers the player's socket would
+  take a program mpv started for mpv itself**, if that program answered on
+  the socket: mpv 0.41 passes the socket to every program it starts (a
+  `run` key binding, or yt-dlp when your `mpvArgs` turn `--ytdl` on;
+  measured for the commands both use), and the kernel names the process
+  that opened it (read in its documentation, not measured). None of the
+  programs mpv starts by itself is expected to answer there (reasoned, not
+  measured). (D-PLY-59)
+- **An mpv update installed while a channel plays is not noticed**: the
+  running player stays on the old mpv until it is stopped or replaced.
+  (D-PLY-54)
+- **Whether a playing channel survives `omarchy-restart-shell` on Omarchy
+  4.0.6 is not yet measured.** The plugin stops the player if the old shell
+  is still running 6 seconds after the plugin unloads, and 4.0.6's script
+  waits up to 30 seconds per attempt for it to exit. In a test session
+  whose shell was stopped with `quickshell kill`, it exited within a third
+  of a second and the player survived. If the player stops when you restart
+  the shell, press `Enter` on the channel. (D-HOST-8)
+- Still as 0.16.0's notes say: the accessibility fix observed for the
+  Xtream form's fields only, and four checks of the guide's channel list
+  failing since the system update of 2026-10-31 (D-A11Y-1, D-A11Y-10); a
+  failed start never quoting mpv's own reason (D-PLY-48); a `Stream failed`
+  card that can name a trailing warning (D-PLY-29); a logo the shell could
+  not draw staying blank for the session (D-LOGO-19); every notice relying
+  on `omarchy-notification-send -p` (D-HOST-7); sources added before 0.16.0
+  keeping keys worked out from their addresses, on no command line
+  (D-SINK-48); and what 0.15.0's notes list: the narrow windows in which a
+  save can create `state.json` at 0644, a change another program writes in
+  the same instant as one of the plugin's saves, the first guide open of a
+  session, and an update writing the shell's files before the helper's
+  (D-SINK-22, D-SRC-48, D-PERF-2, D-REL-9).
+
 ## 0.16.0 (2026-11-01)
 
 **Security, and failures told for what they are.** This release carries
