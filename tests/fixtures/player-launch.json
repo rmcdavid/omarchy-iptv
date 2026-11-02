@@ -16,7 +16,13 @@
     "  mpv_launch_argv('/run/user/1000/omarchy-iptv/mpv.sock', TOKENS, player_dirs(that, '/home/u/.local/state/omarchy-iptv'))",
     "with TOKENS [] for v0.16.0 and ['--osd-duration=4321'] (an inert canary) for v0.16.0-include and v0.15.0,",
     "the concrete paths replaced by the placeholders. v0.15.0 carries the canary ON its argv (before D-SINK-47).",
-    "`edit`: replace (an element by its prefix, the new element), drop (an element), append (elements)."
+    "`edit`: replace (an element by its prefix, the new element), drop (an element), append (elements); a shape case",
+    "takes an edit too. The placeholders are filled in an edit's elements as well.",
+    "D-PLY-61 (lane-sk72, 2026-11-02, the lead's decision): elements APPENDED after this build's whole composition are",
+    "the user's `mpv` wrapper (`exec /usr/bin/mpv \"$@\" --hwdec=auto`) and read current -- no older build can produce",
+    "the prefix, whose marker carries the version and the part table's CRC -- except a second socket option, in any",
+    "spelling, which re-points the element the verdict is anchored on and reads older. A difference INSIDE the",
+    "composition, appended tokens or not, stays older."
   ],
   "older": {
     "v0.16.0": [
@@ -236,7 +242,110 @@
       }
     },
     {
-      "name": "this build's argv with one token APPENDED after the pin block",
+      "name": "this build's argv with one token APPENDED after the pin block (a wrapper's own option, D-PLY-61)",
+      "verdict": "current",
+      "prefix": [
+        "/usr/bin/mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "append": [
+          "--tls-verify=no"
+        ]
+      }
+    },
+    {
+      "name": "the options-file form with two tokens a wrapper appends",
+      "verdict": "current",
+      "prefix": [
+        "/usr/bin/mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "append": [
+          "--hwdec=auto",
+          "--profile=fast"
+        ]
+      }
+    },
+    {
+      "name": "v0.16.0's own argv with a token appended",
+      "verdict": "older",
+      "prefix": [],
+      "shape": "v0.16.0",
+      "edit": {
+        "append": [
+          "--hwdec=auto"
+        ]
+      }
+    },
+    {
+      "name": "v0.15.0's own argv with a token appended",
+      "verdict": "older",
+      "prefix": [],
+      "shape": "v0.15.0",
+      "edit": {
+        "append": [
+          "--hwdec=auto"
+        ]
+      }
+    },
+    {
+      "name": "this build's argv with a pin changed inside the tail AND a token appended",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--load-select=",
+          "--load-select=yes"
+        ],
+        "append": [
+          "--hwdec=auto"
+        ]
+      }
+    },
+    {
+      "name": "this build's argv with a pin dropped from inside the tail and appended back after a wrapper's token",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "drop": "--load-select=no",
+        "append": [
+          "--hwdec=auto",
+          "--load-select=no"
+        ]
+      }
+    },
+    {
+      "name": "another build's marker with a token appended",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--script-opts-append=omarchy_iptv-build=",
+          "--script-opts-append=omarchy_iptv-build=0.16.0+ffffffff"
+        ],
+        "append": [
+          "--hwdec=auto"
+        ]
+      }
+    },
+    {
+      "name": "a second socket option appended, naming our own socket again",
       "verdict": "older",
       "prefix": [
         "mpv"
@@ -245,7 +354,23 @@
       "include": false,
       "edit": {
         "append": [
-          "--tls-verify=no"
+          "--hwdec=auto",
+          "--input-ipc-server=__SOCK__"
+        ]
+      }
+    },
+    {
+      "name": "a second socket option appended in mpv's legacy spelling, its value the next element",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "append": [
+          "-input-ipc-server",
+          "/run/user/1000/elsewhere/mpv.sock"
         ]
       }
     },

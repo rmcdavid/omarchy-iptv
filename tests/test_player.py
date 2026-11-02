@@ -711,6 +711,12 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
 FEED_COMMANDS = ("loadfile", "keybind", "change-list", "set_property", "request_log_messages")
 
 
+def proc_items(pid):
+    """/proc/<pid>/cmdline as the kernel holds it: its elements, as bytes."""
+    with open("/proc/%d/cmdline" % pid, "rb") as handle:
+        return [part for part in handle.read().split(b"\0") if part]
+
+
 def core_limit_of(pid):
     for line in pathlib.Path("/proc/%d/limits" % pid).read_text(encoding="ascii").splitlines():
         if line.startswith("Max core file size"):
@@ -871,14 +877,70 @@ class WrapperSpawnTest(GateTestCase):
         self.wrap('REAL "$@"')
         self.assert_plays()
 
-    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays_its_first_channel(self):
-        """Its player reads `older` to every later verdict (design 4.6: such a
-        wrapper took the pin block's last word), so a zap is a replacement --
-        degenerate, stated -- but the spawn this helper made is still fed."""
+    def test_a_wrapper_that_appends_options_and_runs_mpv_as_its_child_still_plays(self):
+        """D-PLY-61 (lane-sk72, 2026-11-02): the player such a wrapper starts
+        is THIS build's -- no other build can produce the prefix -- so a zap
+        feeds it. On c510985 it read `older` to every later verdict, the zap
+        answered `outdated`, and every channel change replaced it."""
         self.wrap('REAL "$@" --osd-level=1')
+        self.assert_plays()
+
+    def assert_kept_across_zaps_and_starts(self):
+        """Start, zap twice, start again (the shell's own path after a
+        restart), probe: one process throughout, fed every load, never
+        replaced, and the probe names it this build's launch."""
+        code, first, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        # Every token holder (a child wrapper holds the token too) and the
+        # one of them that answers the socket: the process that was told.
+        holders = sorted(r["pid"] for r in helper.find_player(self.sock))
+        player = [pid for pid in holders if self.told(pid)]
+        self.assertEqual(len(player), 1, holders)
+        for _ in range(2):
+            code, zapped, _, stderr = self.play()
+            self.assertEqual((code, zapped.get("outdated")), (0, None), stderr)
+        code, again, _, stderr = self.player_start("--seq", "2")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((again["spawned"], again.get("replaced")), (False, None))
+        code, probe, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(probe["launch"], "current")
+        # The answering player is still there. (A child wrapper's own shell,
+        # which holds the token too, is laddered by the adopting start as
+        # "another player process on this socket" -- adopt_or_spawn's rule
+        # for every token holder but the one it keeps, D-PLY-55's shape and
+        # not this test's subject.)
+        self.assertIn(player[0], [r["pid"] for r in helper.find_player(self.sock)])
+        loads = [c for c in self.told(player[0]) if isinstance(c, list) and c[:1] == ["loadfile"]]
+        self.assertEqual(len(loads), 4, "start, two zaps and the second start each load into the same player")
+        self.assertNotIn(helper.PLAYER_REPLACED_LINE, stderr)
+        return first
+
+    def test_d_ply_61_an_exec_wrapper_that_appends_keeps_one_player_across_zaps_and_starts(self):
+        """The wrapper a user writes: `exec /usr/bin/mpv "$@" --hwdec=auto`.
+        The launched pid IS the player, and its command line is this build's
+        composition with the wrapper's token after the pin block."""
+        self.wrap('exec REAL "$@" --hwdec=auto')
+        first = self.assert_kept_across_zaps_and_starts()
+        argv = proc_items(first["pid"])
+        self.assertEqual(argv[-1], b"--hwdec=auto", "the premise: the wrapper's token is the last element")
+
+    def test_d_ply_61_a_child_wrapper_that_appends_keeps_one_player_across_zaps_and_starts(self):
+        self.wrap('REAL "$@" --hwdec=auto --osd-level=1')
+        self.assert_kept_across_zaps_and_starts()
+
+    def test_d_ply_61_a_wrapper_that_appends_a_second_socket_option_is_still_replaced(self):
+        """The one appended element that keeps `older` (launch_verdict): a
+        second `--input-ipc-server`, which mpv obeys over ours. Here it names
+        our socket again, the only shape the verdict can reach; the start's
+        own spawn is vouched for, and the zap is refused and replaces it."""
+        self.wrap('exec REAL "$@" --input-ipc-server="$OMARCHY_TEST_SOCK"')
+        self.env(OMARCHY_TEST_SOCK=self.sock)
         code, payload, _, stderr = self.player_start()
         self.assertEqual(code, 0, stderr)
-        self.assertIn("loadfile", self.played(payload))
+        self.assertEqual(helper.launch_verdict(payload["pid"], self.sock), "older")
+        code, zapped, _, _ = self.play()
+        self.assertEqual((code, zapped["error"]["code"], zapped.get("outdated")), (1, "not_running", True))
 
     def test_a_wrapper_that_starts_mpv_in_the_background_and_exits_still_plays(self):
         self.wrap('REAL "$@" </dev/null >/dev/null 2>&1 &')
