@@ -469,7 +469,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # regex wiring pins on the TLS reload replaced by harness calls); red on
 # 202a7bc's Service.qml and model (22 harness cases, the rest by absence) and
 # on 13 named mutants of Service.qml and the model; the suite runs 3272.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3272}
+# 2026-11-01, rc-rao-a (the recheck of lane RA): 3272 -> 3279 -- seven
+# service-harness cases: Q4's channel refusal with no observer attached, an
+# episode left open by a probe that finds this build's player or none, a
+# health `player restart` refusal told, the kept label spent by its start's
+# ok, and the retry and intent repair starting while owed; five red on
+# 072ec7d's Service.qml, all on named mutants; the suite runs 3279.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3279}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -789,7 +795,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3272}
 # red on 202a7bc (but FeedGateTest's counter-case) and on 15 named mutants of
 # launch_verdict, feed_gate, adopt_or_spawn, the probe and the carry; the
 # suite runs 1938.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1938}
+# 2026-11-01, rc-rao-a (the recheck of lane RA): 1938 -> 1942 --
+# WrapperSpawnTest (3: a user's `mpv` wrapper that runs the player as its
+# child, appends to it, or backgrounds it; red on 072ec7d, player_foreign)
+# and the replacement of a socket answered by a process with no token of ours
+# (1: red on the mutant that adopts it); the suite runs 1942.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1942}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
