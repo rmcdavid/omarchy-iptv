@@ -22,7 +22,12 @@
     "the user's `mpv` wrapper (`exec /usr/bin/mpv \"$@\" --hwdec=auto`) and read current -- no older build can produce",
     "the prefix, whose marker carries the version and the part table's CRC -- except a second socket option, in any",
     "spelling, which re-points the element the verdict is anchored on and reads older. A difference INSIDE the",
-    "composition, appended tokens or not, stays older."
+    "composition, appended tokens or not, stays older.",
+    "rc-sk72 (2026-11-02): `edit` also takes move (the first element with that prefix, moved to the end), pop (drop",
+    "that many elements off the end) and keep (keep only that many from the front), applied after drop and before",
+    "append. They pin the prefix rule at its edges: the composition's LAST element (layer 2's trailing",
+    "--tls-verify=yes) replaced or run on into a longer element, an element moved, and a tail cut short -- each",
+    "older, and each the case a mutant of the comparison (off by one, order-blind, compared as joined bytes) passed."
   ],
   "older": {
     "v0.16.0": [
@@ -372,6 +377,72 @@
           "-input-ipc-server",
           "/run/user/1000/elsewhere/mpv.sock"
         ]
+      }
+    },
+    {
+      "name": "this build's argv with its LAST element (layer 2's trailing --tls-verify=yes) replaced by a wrapper's token",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "pop": 1,
+        "append": [
+          "--hwdec=auto"
+        ]
+      }
+    },
+    {
+      "name": "the options-file form with its trailing --tls-verify=yes run on into a longer element",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "pop": 1,
+        "append": [
+          "--tls-verify=yesno"
+        ]
+      }
+    },
+    {
+      "name": "a pin MOVED from inside the composition to its end, nothing added",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "move": "--load-select=no"
+      }
+    },
+    {
+      "name": "this build's argv cut short by its last element",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "pop": 1
+      }
+    },
+    {
+      "name": "our socket token alone, the rest of the command line cut off",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "keep": 1
       }
     },
     {
