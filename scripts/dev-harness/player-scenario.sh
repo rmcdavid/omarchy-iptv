@@ -70,6 +70,11 @@
 #                         after `ipc refresh` lands the list -- P1 this tree's,
 #                         the same channel, one restart line, no card, the
 #                         coredump journal +0
+#   L8  late, not migrated D-SINK-71's counter-case: a v0.16.0 player, every
+#                         pin on its own argv, the list withheld the same way:
+#                         P0 alone on the socket at every sample from the
+#                         refresh until 8 s after the list landed, no restart
+#                         line, no card, the coredump journal +0
 #
 # L6 is the baseline: `--baseline 202a7bc` (v0.16.0's code) must red L1, L1b,
 # L2 and L4/L5 (P0 survives, is adopted and fed, keeps the canary) and L3's
@@ -77,6 +82,9 @@
 # green. `--baseline 6b5ba6c` (restart on adoption, before D-SINK-71) must red
 # L7's replacement checks: the expired hold deferred P0, so it is still alive
 # after the list lands and no restart line is written; its premises hold there.
+# L8 is green on `--baseline 6b5ba6c` (it defers P0 too), and red on a tree
+# whose hold's end late-delivers to every safe player (rc-sk71's run of
+# lane-sk71's mutant M1).
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
@@ -1438,6 +1446,54 @@ is "L7 the same channel plays on, in P1's own stash: time-pos advances" "$(np id
 is "L7 exactly one restart line" "$(log_count "$L_RESTART_TEXT")" "1"
 is "L7 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
 
+echo "== L8 D-SINK-71's counter-case: a player v0.16.0 launched, which the probe finds already safe, its channel list landing only after the hold"
+# The owner's decision is late delivery ONLY for a player whose settings the
+# probe had to change in place. v0.16.0 put every pin on its own argv, so this
+# tree's probe should find nothing to migrate, the hold's end defers it, and
+# the late list does NOT replace it: it plays on, fed nothing, until a channel
+# change (Q4). lane-sk71 had that premise by reading the helper diff only;
+# this observes it, and a tree that late-delivers to every safe player (the
+# migrated guard removed) reds the check that P0 survived the list (rc-sk71).
+# The lever is L7's.
+l_stop_all
+l_old_start "$L16_DIR" "t:live1"
+L8_P0=$(l_py tokens "$SOCK")
+l_wait_up 30 || true
+L8_CMD0=$(cmdline_of "$L8_P0")
+ck "L8 premise: v0.16.0's own helper launched one player P0 on the harness socket" '[[ $L8_P0 =~ ^[0-9]+$ && "$L8_CMD0" == *"input-ipc-server=$SOCK"* ]]'
+is "L8 premise: P0's load-auto-profiles already reads false, from its own argv's pin" "$(l_py get "$SOCK" load-auto-profiles)" "false"
+mv -f -- "$L_CACHE/channels.json" "$SCRATCH/l8-channels.json" 2>>"$LOG"
+ck "L8 premise: the active source's channel list is withheld" '[[ ! -e $L_CACHE/channels.json && -s $SCRATCH/l8-channels.json ]]'
+j0=$(crash_count); cards0=$(notify_cards)
+: >"$SCRATCH/harness.log"
+"$RUN" restart-shell >>"$LOG" 2>&1 || bad "L8 restart-shell failed (see $LOG)"
+wait_log 'service loaded' 20 || bad "L8 the shell did not start"
+L8_TS=$(l_py now)
+until_eq "t:live1" 15 np id || true
+L8_PAST=$(python3 -I -c 'import sys, time; print("%.1f" % max(0.0, float(sys.argv[1]) + 19 - time.monotonic()))' "$L8_TS")
+sleep "$L8_PAST"
+L8_HELD=$(python3 -I -c 'import sys, time; print("%.1f" % (time.monotonic() - float(sys.argv[1])))' "$L8_TS")
+is "L8 premise: the shell adopted P0 and names its channel, with no channel list" "$(np id) $(svc "d['channels']")" "t:live1 0"
+is "L8 past the hold ($L8_HELD s after the shell loaded): P0 still holds the socket alone, and no restart line" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT")" "$L8_P0 0"
+sampler_start "$SCRATCH/l8.samples" 60
+ipc refresh >/dev/null
+until_eq 3 30 svc "d['channels']" || true
+# L7's replacement followed its refresh by 1.2 s; 8 s after the list landed
+# is well past any replacement the list could have caused.
+sleep 8
+sampler_stop "$SCRATCH/l8.samples"
+L8_VERDICT=$(l_py verdict "$SCRATCH/l8.samples" "$L8_P0" "")
+printf '   L8 samples %s\n' "$L8_VERDICT"
+if [[ -e $L_CACHE/channels.json ]]; then rm -f -- "$SCRATCH/l8-channels.json"; else mv -f -- "$SCRATCH/l8-channels.json" "$L_CACHE/channels.json"; fi
+is "L8 the list landed: the fixture's 3 channels" "$(svc "d['channels']")" "3"
+is "L8 P0 alone on the socket at every 50 ms sample from the refresh until 8 s after the list landed" "$(cut -d' ' -f2,3,5,6 <<<"$L8_VERDICT")" "max:1 p0:yes end:END p0all:yes"
+is "L8 P0 was not replaced: the same pid holds the socket alone, no restart line, the bar still names its channel" "$(l_py tokens "$SOCK") $(log_count "$L_RESTART_TEXT") $(np id)" "$L8_P0 0 t:live1"
+is "L8 no player card, and the coredump journal did not move" "$(qa_delta "$cards0" "$(notify_cards)") $(qa_delta "$j0" "$(crash_count)")" "0 0"
+# The deferred player is left to a stop, as Q4 leaves it to the user; P9
+# starts from no player.
+ipc stop >/dev/null
+until_eq 0 10 player_count || true
+
 echo "== P9 the harness reaps a detached grandchild"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P9 no player to reap"
@@ -1589,7 +1645,8 @@ until_eq 0 8 player_count || true
 # and still count here).
 # 142 -> 143 (rc-rao-b, 2026-11-02): L5's control that B's header is seen at all.
 # 143 -> 158 (lane-sk71, 2026-11-02): L7's 15, the late list (D-SINK-71).
-EXPECTED_CHECKS=158
+# 158 -> 167 (rc-sk71, 2026-11-02): L8's 9, its counter-case.
+EXPECTED_CHECKS=167
 ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
