@@ -1319,11 +1319,16 @@ L3_M8=$!
 L3_T=$(l_py now)
 [[ $L3_QS =~ ^[0-9]+$ ]] && XDG_RUNTIME_DIR="$SCRATCH/runtime" timeout -k 2 35 quickshell kill --pid "$L3_QS" >>"$LOG" 2>&1
 for ((i = 0; i < 300; i++)); do [[ -z $(l_py helpers "$SOCK") ]] && ! kill -0 "${L3_QS:-0}" 2>/dev/null && break; sleep 0.1; done
+# One more sample past the moment the loop above saw the check gone: the
+# sampler reads the stop file before it writes, so stopping it at once can
+# lose the only sample that shows the check ended (orphan-gone NONE, seen once).
+sleep 0.3
 : >"$SCRATCH/m8.samples.stop"; wait "$L3_M8" 2>/dev/null
 "$RUN" shell-stop >>"$LOG" 2>&1
 L3_M8V=$(l_py m8verdict "$SCRATCH/m8.samples" "$L3_T")
 printf '   L3 / M8: after `quickshell kill`: %s (seconds); the player %s\n' "$L3_M8V" "$(l_py alive "$SOCK" "$L3_PID")"
-ck "L3 premise: the dying shell spawned its orphan check, so the player's survival is that check's answer ($L3_M8V)" '[[ $L3_M8V != *"orphan-seen:NONE"* ]]'
+ck "L3 premise: the dying shell spawned its orphan check and it ran out, so the player's survival is that check's answer ($L3_M8V)" \
+   '[[ $L3_M8V != *"orphan-seen:NONE"* && $L3_M8V != *"orphan-gone:NONE"* && -z $(l_py orphans "$SOCK") ]]'
 is "L3 the player outlived its shell's orphan check (M8: the restart case, not orphan-stopped)" "$(l_py alive "$SOCK" "$L3_PID")" "alive"
 "$RUN" restart-shell >>"$LOG" 2>&1 || bad "L3 restart-shell failed (see $LOG)"
 wait_log 'service loaded' 20 || bad "L3 the shell did not start"
