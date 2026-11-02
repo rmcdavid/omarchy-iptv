@@ -817,7 +817,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3286}
 # probe of a migrated player, the load's clear, a refused load keeps the
 # mark, and the two fail-safe directions); red on c510985 or on a named
 # mutant of launch_verdict or the mark; the suite runs 1951.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1951}
+# 2026-11-02, rc-sk72: 1951 -> 1952 -- ProbeTlsTest +1 (D-SINK-72: a
+# `player start` that adopts a marked player clears it too; red on the
+# mutant that clears it only for `play`). The five launch vectors it added
+# are one test; the suite runs 1952.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1952}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
