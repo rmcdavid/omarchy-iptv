@@ -6198,6 +6198,34 @@ checkCall("restart on adoption (N3): olderRestartDisposition, one vector per row
     "defer", "defer", "defer", "defer",
     "stop", "stop", "stop",
     "defer", "stop", "hold", "hold"])
+// D-SINK-71 (owner, 2026-11-02, "replace late, when the list lands"): for an
+// older player the probe had to MIGRATE, the hold's expiry no longer defers --
+// it keeps holding, and the restart goes out when the list lands. Red on
+// 6b5ba6c: every expired vector that is not "ready" or "gone" read defer.
+checkCall("D-SINK-71: olderRestartDisposition -- a migrated older player is held past the hold's expiry and restarted once its channel is deliverable; gone still defers (stops when unsafe), an unsafe player still stops at the expiry, one that read safe without migration still defers, `migrated` is strict, and a spent episode is unchanged", () => {
+  const d = { owed: true, spent: false, stopping: false, userStopped: false, nowPlayingId: "t:a", channelsLoaded: true, hasChannel: true,
+              sourceMatches: true, playerUp: true, slotBusy: false, expired: true, unsafe: false, migrated: true }
+  const w = o => Model.olderRestartDisposition(Object.assign({}, d, o))
+  return [
+    w({}), w({ unsafe: true }),
+    w({ channelsLoaded: false }), w({ slotBusy: true }), w({ playerUp: false }), w({ nowPlayingId: "" }),
+    w({ hasChannel: false }), w({ sourceMatches: false }), w({ channelsLoaded: false, sourceMatches: false }),
+    w({ hasChannel: false, unsafe: true }), w({ channelsLoaded: false, unsafe: true }), w({ slotBusy: true, unsafe: true }),
+    w({ migrated: false, channelsLoaded: false }), w({ migrated: false, slotBusy: true }), w({ migrated: false }),
+    w({ migrated: "yes", channelsLoaded: false }), w({ migrated: 1, channelsLoaded: false }), w({ migrated: undefined, channelsLoaded: false }),
+    w({ spent: true }), w({ spent: true, channelsLoaded: false }), w({ spent: true, unsafe: true }), w({ spent: true, slotBusy: true }),
+    w({ expired: false, channelsLoaded: false }), w({ expired: false, migrated: false, channelsLoaded: false }),
+    w({ userStopped: true }), w({ stopping: true, unsafe: true })
+  ]
+}, ["restart", "restart",
+    "hold", "hold", "hold", "hold",
+    "defer", "defer", "hold",
+    "stop", "stop", "stop",
+    "defer", "defer", "restart",
+    "defer", "defer", "defer",
+    "defer", "defer", "stop", "hold",
+    "hold", "hold",
+    "clear", "clear"])
 checkCall("restart on adoption: the new refusal `player_foreign` has a sentence on a player verb, is local (marks nothing), and its helper message never reaches the user", () => {
   const st = { ok: false, kind: "player.start", error: { code: "player_foreign", message: "another process answers the socket this helper started the player on" } }
   return [Model.statusReason(st), Model.playerStartFailure("player_foreign")]
@@ -15097,6 +15125,92 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.drain()
       return [deferred, startArgs(slots).map(idOf), zaps.length]
     }, [[0, 0, "t:x", true], ["t:y"], 0])
+
+    // ---- D-SINK-71 (owner, 2026-11-02, "replace late, when the list lands") ----
+    // An older player the probe had to MIGRATE may be streaming over a
+    // connection opened before its settings were changed; 0.16.0 re-established
+    // it whenever the list landed (the D-SINK-16 reload), and the restart that
+    // replaced that reload deferred it for good once the hold ran out. Red on
+    // 6b5ba6c: no start goes out after the expiry.
+    checkCall("D-SINK-71: an older player the probe had to MIGRATE, whose channel list lands only AFTER the hold ran out -- nothing stopped or started at the expiry, still owed and unspent; when the list lands exactly ONE `player start --id <stash> --keep-pause`, one journal line, nothing fed; its ok ends the episode with the pause kept, and nothing more is started. The counter-case, an older player that read safe WITHOUT migration, is still deferred at the expiry: no start when the list lands", () => {
+      const run = tls => {
+        const { h, slots, zaps } = boot()
+        reattach(h, probeOf({ tls }))
+        attach(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+        const expired = [stops(h), startArgs(slots).length, h.root.nowPlaying ? h.root.nowPlaying.id : null,
+                         h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true)]
+        land(h)
+        const starts = startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
+        const issued = [starts, zaps.length, restartLines(h), stops(h), h.root.wantFocus]
+        if (starts.length) exit(h, okStart("t:x", { seq: h.root.playSeq, paused: true }))
+        land(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+        return [expired, issued, [h.root.olderRestartOwed === true, h.root.paused, startArgs(slots).length, restartLines(h)]]
+      }
+      return [run(MIGRATED), run(SAFE)]
+    }, [[[0, 0, "t:x", true, false], [["t:x keep"], 0, 1, 0, false], [false, true, 1, 1]],
+        [[0, 0, "t:x", true, true], [[], 0, 0, 0, false], [true, false, 0, 0]]])
+
+    checkCall("D-SINK-71: the migration an AMBIGUOUS first probe made (idle, no stash) counts for the retry that adopts the player -- that retry reads nothing left to migrate, and a list landing after the hold still gets the one restart", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: MIGRATED, stash: null, idle: true }))
+      const retried = [h.ids.probeRetryTimer.restarts, h.root.nowPlaying]
+      h.fireTimer("probeRetryTimer")
+      exit(h, probeOf({ tls: SAFE }))
+      attach(h)
+      const adopted = h.root.nowPlaying ? h.root.nowPlaying.id : null
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      land(h)
+      return [retried, adopted, startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : "")), stops(h)]
+    }, [[1, null], "t:x", ["t:x keep"], 0])
+
+    checkCall("D-SINK-71: a later probe of the same older player while its restart is held past the hold (the socket hunt's) reads it already migrated -- the episode keeps `migrated`, so the second hold's end does not defer it either and the list still gets the one restart", () => {
+      const { h, slots } = boot()
+      reattach(h, probeOf({ tls: MIGRATED }))
+      attach(h)
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      h.root.runPlayerProbe()
+      exit(h, probeOf({ tls: SAFE, seq: h.root.playSeq }))
+      h.elapse(M.OLDER_RESTART_HOLD_MS)
+      const held = [startArgs(slots).length, h.root.olderRestartOwed === true, !!(h.root.olderRestart && h.root.olderRestart.spent === true)]
+      land(h)
+      return [held, startArgs(slots).map(idOf), stops(h)]
+    }, [[0, true, false], ["t:x"], 0])
+
+    checkCall("D-SINK-71 (unchanged around it): a migrated older player held past the hold -- a channel change while its restart is still owed (the slot busy when the list landed) replaces it with the NEW channel (no --keep-pause) and spends the episode, so the automatic restart never fires over it; a stop ends it, so nothing is started; a list without its channel defers it at once; and one that could not be made safe still stops at the expiry", () => {
+      const change = boot()
+      reattach(change.h, probeOf({ tls: MIGRATED }))
+      attach(change.h)
+      change.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      change.h.root.runPlayerProbe()          // the slot is busy when the list lands
+      land(change.h)
+      const heldStarts = startArgs(change.slots).length
+      change.h.root.play("t:y", true, "")     // the start waits its turn
+      change.h.drain()
+      exit(change.h, probeOf({ tls: SAFE }))  // stale (the play moved playSeq), then the queued start
+      const changed = [heldStarts, startArgs(change.slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : "")), change.zaps.length, restartLines(change.h)]
+      const stopped = boot()
+      reattach(stopped.h, probeOf({ tls: MIGRATED }))
+      attach(stopped.h)
+      stopped.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      stopped.h.root.stop()
+      stopped.h.drain()
+      land(stopped.h)
+      const gone = boot()
+      reattach(gone.h, probeOf({ tls: MIGRATED }))
+      attach(gone.h)
+      gone.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      land(gone.h, [Y])
+      const unsafe = boot()
+      reattach(unsafe.h, probeOf({ tls: UNSAFE }))
+      attach(unsafe.h)
+      unsafe.h.elapse(M.OLDER_RESTART_HOLD_MS)
+      return [changed,
+              [startArgs(stopped.slots).length, stopped.h.root.olderRestartOwed === true],
+              [startArgs(gone.slots).length, gone.h.root.olderRestartOwed === true, !!(gone.h.root.olderRestart && gone.h.root.olderRestart.spent === true), stops(gone.h)],
+              [stops(unsafe.h), unsafe.h.root.nowPlaying, unsafe.h.root.olderRestartOwed === true, UNSAFE.migrated]]
+    }, [[0, ["t:y"], 0, 0], [0, false], [0, true, true, 0], [1, null, false, true]])
 
     checkCall("restart on adoption (N5): Enter on the row of the channel the deferred older player is playing is the replacement (a start, at live), not the focus-only shortcut -- its id may be another source's", () => {
       const { h, slots } = boot()

@@ -618,6 +618,18 @@ function adoptedChannelReach(o) {
 // An unsafe player whose restart CAN be delivered is restarted, not stopped:
 // the new player sets every pin from its own command line, which no
 // [protocol.*] profile replaces (D-SINK-44), so the user keeps the channel.
+//
+// D-SINK-71 (owner, 2026-11-02, "replace late, when the list lands"): the
+// hold's expiry does not defer a player the probe had to MIGRATE (`migrated`,
+// the TLS reading's own word: its settings were changed in place, so the
+// stream it already has open may have been opened without them -- every
+// 0.15.0 player reads so). For it, "expired" keeps holding and the one
+// automatic restart goes out whenever the list lands and the channel is
+// deliverable; that restart is what the D-SINK-16 reload was for, which
+// 0.16.0 delivered late too. Unchanged: a channel gone defers, an unsafe
+// player still stops at the expiry (it cannot be delivered then and cannot
+// be made safe), a player that read safe without migration still defers at
+// the expiry, and a spent episode stays spent.
 function olderRestartDisposition(o) {
   var s = o || {}
   if (s.owed !== true) return "none"
@@ -628,7 +640,11 @@ function olderRestartDisposition(o) {
   }
   var reach = adoptedChannelReach(s)
   if (reach === "ready") return "restart"
-  if (reach === "gone" || s.expired === true) return s.unsafe === true ? "stop" : "defer"
+  if (reach === "gone") return s.unsafe === true ? "stop" : "defer"
+  if (s.expired === true) {
+    if (s.unsafe === true) return "stop"
+    if (s.migrated !== true) return "defer"
+  }
   return "hold"
 }
 

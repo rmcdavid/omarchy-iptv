@@ -879,6 +879,12 @@ Item {
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
   property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
+  // D-SINK-71: the TLS reading's `migrated` on the ambiguous first probe, read
+  // only by the retry that follows it (while `probeRetried` is true). The
+  // first probe migrates the player, so the retry honestly reads nothing left
+  // to do; the restart episode needs the first answer, as tlsReloadPending
+  // keeps it for a player of this build.
+  property bool probeRetryMigrated: false
   // `playSeq` as it stood when the probe in flight was ISSUED (4.10). A
   // probe answers about the world it was sent into; an intent issued after
   // it - a play from the guide, or over IPC one frame after the shell came
@@ -922,10 +928,13 @@ Item {
   // `launch`), adopted it for a hold, and owes its replacement -- one
   // automatic `player start --keep-pause` of the same channel once the
   // channel list is applied (Model.olderRestartDisposition). null when
-  // nothing is owed; else { seq, unsafe, spent, expired }: the intent the
-  // restart was issued under, whether the player read unsafe, whether the
-  // restart was issued (or deferred: it plays on, fed nothing, until the
-  // user's next channel change replaces it), whether the hold ran out.
+  // nothing is owed; else { seq, unsafe, spent, expired, migrated }: the
+  // intent the restart was issued under, whether the player read unsafe,
+  // whether the restart was issued (or deferred: it plays on, fed nothing,
+  // until the user's next channel change replaces it), whether the hold ran
+  // out, and whether the probe had to change its settings in place -- the
+  // stream it has open may predate them, so the hold's end does not defer it
+  // (D-SINK-71, Model.olderRestartDisposition).
   property var olderRestart: null
   readonly property bool olderRestartOwed: !!root.olderRestart
   // The four zap sites read this in place of playerUp: while a restart is
@@ -1229,7 +1238,8 @@ Item {
     // automatic one is spent, so it can neither fire over this intent nor
     // lend it the old player's pause (Model.olderRestartKeepsPause).
     if (root.olderRestart && root.olderRestart.spent !== true) {
-      root.olderRestart = { seq: root.olderRestart.seq, unsafe: root.olderRestart.unsafe, spent: true, expired: root.olderRestart.expired }
+      root.olderRestart = { seq: root.olderRestart.seq, unsafe: root.olderRestart.unsafe, spent: true, expired: root.olderRestart.expired,
+                            migrated: root.olderRestart.migrated }
       olderRestartTimer.stop()
     }
     var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
@@ -3684,6 +3694,10 @@ Item {
     // were not merely leaving a stale setting there, we were sending that
     // process new provider headers and new credentialed URLs.
     var tls = Model.playerTlsVerdict(probe.tls)
+    // D-SINK-71: whether this player had to be migrated, the retry of an
+    // ambiguous first probe keeping that probe's answer (probeRetryMigrated).
+    var migrated = tls.migrated === true || (root.probeRetried && root.probeRetryMigrated)
+    root.probeRetryMigrated = false
     // Restart on adoption (owner, 2026-10-31): a player ANOTHER build launched
     // is replaced, not migrated and kept. It is adopted for the hold below --
     // unsafe or not, because it is fed nothing and the restart that replaces
@@ -3709,6 +3723,7 @@ Item {
       // pre-M2-02 player. Re-read once before deciding (4.5).
       if (!root.probeRetried) {
         root.probeRetried = true
+        root.probeRetryMigrated = migrated
         probeRetryTimer.restart()
         return
       }
@@ -3754,7 +3769,7 @@ Item {
     root.armPlayerSocket()
     playerWatchdog.restart()
     root.reconcileNowPlaying()
-    if (older) root.openOlderRestart(!tls.safe)
+    if (older) root.openOlderRestart(!tls.safe, migrated)
     root.reestablishAdopted()
     // D-PLY-35: a stopped start's player, found and adopted.
     root.settleTimedOutPlay(true)
@@ -3769,8 +3784,12 @@ Item {
   // and a player this shell's own restart started that reads as another
   // build's again, journaled and deferred, so a disagreement between the
   // builder and the reader shows itself instead of looping.
-  function openOlderRestart(unsafe) {
+  // D-SINK-71: `migrated` is kept from an episode already open on this
+  // player: a later probe of it reads it already migrated, and the stream it
+  // has open is the same one.
+  function openOlderRestart(unsafe, migrated) {
     root.tlsReloadPending = false
+    var wasMigrated = migrated === true || (root.olderRestart !== null && root.olderRestart.migrated === true)
     var spent = false
     if (root.timedOutPlay !== null) {
       var pending = root.timedOutPlay
@@ -3784,7 +3803,7 @@ Item {
       console.warn(Model.OLDER_RESTART_AGAIN_LINE)
       spent = true
     }
-    root.olderRestart = { seq: root.playSeq, unsafe: unsafe === true, spent: spent, expired: false }
+    root.olderRestart = { seq: root.playSeq, unsafe: unsafe === true, spent: spent, expired: false, migrated: wasMigrated }
     if (!spent) olderRestartTimer.restart()
   }
 
@@ -3809,7 +3828,8 @@ Item {
       hasChannel: np !== null && !!root.channelIndex[String(np.id)],
       sourceMatches: Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey),
       playerUp: root.playerUp, slotBusy: playerProc.running,
-      expired: ep !== null && ep.expired === true, unsafe: ep !== null && ep.unsafe === true
+      expired: ep !== null && ep.expired === true, unsafe: ep !== null && ep.unsafe === true,
+      migrated: ep !== null && ep.migrated === true
     })
     if (want === "none") return root.reestablishForTls()
     if (want === "clear") {
@@ -3827,13 +3847,13 @@ Item {
       // Q4: it plays on, fed nothing; the user's next channel change replaces
       // it and a stop ends it. The episode stays owed, so the zap sites send
       // that change as a start.
-      if (ep.spent !== true) root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: true, expired: ep.expired }
+      if (ep.spent !== true) root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: true, expired: ep.expired, migrated: ep.migrated }
       olderRestartTimer.stop()
       return false
     }
     // "restart": once per episode, the same channel, at live, keeping pause.
     root.playSeq += 1
-    root.olderRestart = { seq: root.playSeq, unsafe: ep.unsafe, spent: true, expired: ep.expired }
+    root.olderRestart = { seq: root.playSeq, unsafe: ep.unsafe, spent: true, expired: ep.expired, migrated: ep.migrated }
     olderRestartTimer.stop()
     root.wantFocus = false
     console.warn(Model.OLDER_RESTART_LINE)
@@ -6635,13 +6655,16 @@ Item {
     // fed nothing, while the channel list is applied; when the hold runs out
     // first the restart is deferred to the user's next channel change, or the
     // player stopped when it cannot be made safe (Model.olderRestartDisposition).
+    // D-SINK-71: except a player the probe had to migrate, which keeps waiting
+    // for the list and is restarted when it lands. Marking `expired` and
+    // asking the disposition is all this does.
     id: olderRestartTimer
     interval: Model.OLDER_RESTART_HOLD_MS
     repeat: false
     onTriggered: {
       var ep = root.olderRestart
       if (ep === null) return
-      root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: ep.spent, expired: true }
+      root.olderRestart = { seq: ep.seq, unsafe: ep.unsafe, spent: ep.spent, expired: true, migrated: ep.migrated }
       root.reestablishAdopted()
     }
   }

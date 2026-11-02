@@ -621,6 +621,11 @@ TestCase {
     compare(w({ channelsLoaded: false, expired: true, unsafe: true }), "stop")
     compare(w({ spent: true }), "defer")
     compare(w({ spent: true, slotBusy: true }), "hold")
+    // D-SINK-71: a migrated player is held past the hold's expiry; one that
+    // read safe without migration is deferred, an unsafe one stopped.
+    compare(w({ channelsLoaded: false, expired: true, migrated: true }), "hold")
+    compare(w({ channelsLoaded: false, expired: true }), "defer")
+    compare(w({ channelsLoaded: false, expired: true, migrated: true, unsafe: true }), "stop")
     compare(Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: true, channelsLoaded: true,
                                          hasChannel: true, sourceMatches: false }), "clear")
     compare(Model.playFork({ socketAttached: true, restartOwed: true }), "start")
