@@ -670,6 +670,12 @@ Item {
   property int focusAttempts: 0
   property var pendingPlayId: ""
   property var previousPlaying: null       // restored when a switch over IPC fails
+  // The intent (playSeq) whose play() kept previousPlaying. D-PLY-52 puts that
+  // label back only for a start of THAT intent, and a start of it that
+  // answered ok spends it: a start no play() issued, or one long after,
+  // would otherwise relabel to a channel no player plays any more (the
+  // recheck of lane RA, 2026-11-01).
+  property int previousPlayingSeq: -1
   property string controlKind: ""
   // M5-01 ruling D10, as ONE expression (F-RWD-19). `healthBusy` is what the
   // health tick counts as a strike; `controlRunning` is the raw Qt fact, so
@@ -1181,6 +1187,7 @@ Item {
     root.stopConfirmPending = false
     root.playSeq += 1                       // every play is a new intent (4.10)
     root.previousPlaying = root.playerUp ? root.nowPlaying : null
+    root.previousPlayingSeq = root.playSeq
     root.nowPlaying = {
       id: key,
       name: String(channel.name || ""),
@@ -3378,6 +3385,7 @@ Item {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
       root.relaunchPending = false
+      if (Number(status.seq) === root.previousPlayingSeq) root.previousPlaying = null
       // Restart on adoption: a start or a restart that answered ok has
       // replaced (or adopted, or spawned) the player, so nothing is owed any
       // more; the reply's `paused` is the replaced player's pause, kept.
@@ -3513,7 +3521,23 @@ Item {
     // channel and a card said playback could not start.
     var watched = root.sessionSocket
     root.sessionSocket = null
-    if (watched && root.playerSocket === watched && root.socketAttached() && root.nowPlaying !== null
+    // Q4's second exception: the episode's own automatic restart refused
+    // because THIS build refuses the channel the older player streams. Stopped
+    // and told whether or not an observer was on it when the restart went out
+    // (the reattach's connect can fail), so the older build's weaker policy
+    // never outlives the update (the recheck of lane RA).
+    if (kind === "start" && Model.playerStartFailure(code) === "channel" && root.olderRestart
+        && Model.olderRestartKeepsPause(root.olderRestart, Number(status.seq))) {
+      var refusedTarget = root.nowPlaying
+      root.endOlderRestart()
+      root.stopUnadoptedPlayer("failed")
+      root.raiseStreamFailure(refusedTarget, reason)
+      return
+    }
+    // A `player restart` is the health path's replacement of a player that
+    // stopped answering, never "refused while it plays on": its refusal takes
+    // the tail and is told, as before (the recheck of lane RA).
+    if (kind === "start" && watched && root.playerSocket === watched && root.socketAttached() && root.nowPlaying !== null
         && root.refusedWhilePlaying(status, code, reason)) return
     root.playerWanted = false
     playerSocketTimer.stop()
@@ -3628,6 +3652,8 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // Restart on adoption: no player, so nothing is owed a replacement.
+      root.endOlderRestart()
       // D-PLY-35: a stopped start that left no player failed, and is told.
       if (root.timedOutPlay !== null) {
         root.settleTimedOutPlay(false)
@@ -3664,6 +3690,12 @@ Item {
     // it sets every pin from its own command line -- and the restart is owed.
     // `null` (a helper too old to say) keeps the path below exactly.
     var older = Model.probeLaunchOlder(probe.launch)
+    // And a player that does NOT read as another build's owes nothing: an
+    // episode still open from before this probe (an automatic restart the
+    // watchdog stopped after its replacement came up) ends here, or its
+    // `unsafe` would stop the replacement and its spent restart would turn
+    // every later zap into a start (the recheck of lane RA).
+    if (!older) root.endOlderRestart()
     if (!older && !tls.safe) {
       console.warn("omarchy-iptv: the player will not verify the stream's certificate, stopping it")
       root.stopUnadoptedPlayer("unverified")
@@ -3809,36 +3841,26 @@ Item {
     return true
   }
 
-  // A `player start` or `restart` refused while the observer is still on the
-  // player that was playing: nothing was laddered, so it plays on (D-PLY-52).
+  // A `player start` refused while the observer is still on the player that
+  // was playing: nothing was laddered, so it plays on (D-PLY-52).
   // -> true when the refusal is fully handled here.
-  //   - the episode's own automatic restart, refused because THIS build
-  //     refuses the channel the older player streams (Model.playerStartFailure
-  //     "channel"): the older build's weaker policy may not outlive the
-  //     update, so the player is stopped and the stream's failure told
-  //   - the episode's restart refused for anything else: journaled above,
-  //     kept, deferred -- no card (Q4), or stopped when it cannot be made safe
+  //   - the episode's own automatic restart (its channel refusal is handled
+  //     before this is asked): journaled above, kept, deferred -- no card
+  //     (Q4), or stopped when it cannot be made safe
   //   - anyone else's start (a user's channel change, a repair): the switch
   //     did not happen and the player plays the channel it was on, so the
-  //     label goes back to it, as a failed zap's does -- no card, nothing
-  //     dropped, the observer kept
+  //     label goes back to the one the play() of THIS intent kept, as a failed
+  //     zap's does -- no card, nothing dropped, the observer kept. A start no
+  //     play() of this intent issued keeps the label it has.
   function refusedWhilePlaying(status, code, reason) {
     var ep = root.olderRestart || null
     var automatic = ep !== null && Model.olderRestartKeepsPause(ep, Number(status.seq))
+    root.playRetries = 0
     if (automatic) {
-      if (Model.playerStartFailure(code) === "channel") {
-        var target = root.nowPlaying
-        root.endOlderRestart()
-        root.stopUnadoptedPlayer("failed")
-        root.raiseStreamFailure(target, reason)
-        return true
-      }
-      root.playRetries = 0
       root.reestablishAdopted()
       return true
     }
-    root.playRetries = 0
-    if (root.previousPlaying) root.nowPlaying = root.previousPlaying
+    if (root.previousPlaying && Number(status.seq) === root.previousPlayingSeq) root.nowPlaying = root.previousPlaying
     root.previousPlaying = null
     if (ep !== null) root.reestablishAdopted()
     return true

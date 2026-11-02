@@ -15197,9 +15197,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       // A start that ADOPTS the observed player, as play() issues one when its
       // fork answers "start" over a live player (a restart owed, or the
       // redundant start its comment allows): the intent moved to Y, the label
-      // of what plays kept in previousPlaying -- play()'s own two writes.
+      // of what plays kept in previousPlaying for that intent -- play()'s own
+      // three writes (previousPlayingSeq since the recheck of lane RA).
       h.root.nowPlaying = { id: "t:y", name: "Y", group: "G", launchedFrom: "", since: 2 }
       h.root.previousPlaying = { id: "t:x", name: "X", group: "G", launchedFrom: "", since: 1 }
+      h.root.previousPlayingSeq = h.root.playSeq
       h.root.issuePlayerSession("start", h.root.channelIndex["t:y"], "")
       h.drain()
       exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "socket_path_blocked", message: "the socket path is not a socket" }, id: "t:y", seq: h.root.playSeq }))
@@ -15227,6 +15229,69 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
               M.playerStartArgv("/s", "/c", "t:x", 7, "", 0, ["--cache=yes"], 42).indexOf("--keep-pause") !== -1,
               M.playerRestartArgv("/s", "/c", "t:x", 7, "", 0, [], "term", 0, true).indexOf("--keep-pause") !== -1]
     }, [true, false, false, false, false, true, false, false, true])
+
+    // ---- the recheck of lane RA (2026-11-01): four gaps, each red on 072ec7d ----
+    const refusal = (kind, code, message, id, seq) => JSON.stringify({ ok: false, kind: "player." + kind, error: { code, message }, id, seq })
+    const READONLY = "could not make the player's runtime folder: Read-only file system"
+
+    checkCall("restart on adoption (recheck): the automatic restart refused because THIS build refuses the channel stops the older player even when no observer was attached when it was issued (Q4's second exception does not depend on the observer)", () => {
+      const { h } = boot()
+      land(h)
+      reattach(h, probeOf())              // the list is there: the restart goes out from applyProbe's own end
+      exit(h, refusal("start", "local_address", "the stream address is on this machine or its network", "t:x", h.root.playSeq))
+      return [stops(h), toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.olderRestartOwed === true]
+    }, [1, ["74011 Stream failed"], null, false])
+
+    checkCall("restart on adoption (recheck): a probe that finds THIS build's player -- the automatic restart timed out after its replacement came up -- ends the episode: the replacement is adopted and not stopped as the unsafe older player it replaced, and the next change is a zap", () => {
+      const PBX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      land(h)
+      const issued = startArgs(slots).length
+      h.elapse(PBX.watchdogMs.start)
+      exit(h, "")                                   // TERMed: no output; the probe is sent
+      exit(h, probeOf({ launch: "current", seq: h.root.playSeq }))
+      const adopted = [h.root.nowPlaying ? h.root.nowPlaying.id : null, stops(h), h.root.olderRestartOwed === true]
+      land(h)
+      h.root.play("t:y", true, "")
+      h.drain()
+      return [issued, adopted, stops(h), startArgs(slots).length, zaps.map(verbOf)]
+    }, [1, ["t:x", 0, false], 0, 1, ["play"]])
+
+    checkCall("restart on adoption (recheck): a probe that finds NO player ends the episode with it", () => {
+      const { h } = boot()
+      reattach(h, probeOf({ tls: UNSAFE }))
+      reattach(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null, launch: null, seq: h.root.playSeq }))
+      return [h.root.olderRestartOwed === true, stops(h), h.root.nowPlaying]
+    }, [false, 0, null])
+
+    checkCall("D-PLY-52 (recheck): a health `player restart` refused before the lock is told and ends the session as before -- it replaces a player that stopped answering, so \"refused while it plays on\" is not its case", () => {
+      const { h } = boot()
+      reattach(h, probeOf({ launch: "current" }))
+      attach(h)
+      land(h)
+      h.root.restartPlayer()
+      h.drain()
+      exit(h, refusal("restart", "runtime_unwritable", READONLY, "t:x", h.root.playSeq))
+      return [toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying]
+    }, [["74021 Could not start playback"], null])
+
+    checkCall("D-PLY-52 (recheck): the label a refused start puts back is the one the play() that issued it kept -- once that start answered ok it is spent, and a later refused start of the same player never relabels to the channel the replaced player had", () => {
+      const { h } = boot()
+      reattach(h, probeOf())
+      attach(h)
+      land(h, [Y])                        // X is gone: the restart is deferred
+      h.root.play("t:y", true, "")       // the replacement, a start
+      h.drain()
+      eof(h)                              // the older player laddered during it
+      attach(h)                           // the observer on the new one
+      exit(h, okStart("t:y", { seq: h.root.playSeq }))
+      const playing = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.previousPlaying]
+      h.root.issuePlayerSession("start", h.root.channelIndex["t:y"], "")   // a start no play() issued (a repair)
+      h.drain()
+      exit(h, refusal("start", "runtime_unwritable", READONLY, "t:y", h.root.playSeq))
+      return [playing, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+    }, [["t:y", null], "t:y"])
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----
