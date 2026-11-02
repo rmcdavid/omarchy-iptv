@@ -162,6 +162,10 @@ function makeIds(h) {
     // read the adoption makes of a pid it did not have (pipPeek), which
     // nothing here answers -- the compositor's reply is not this harness's.
     probeRetryTimer: timer("probeRetryTimer"),
+    // Restart on adoption: the hold over a player another build launched,
+    // driven from its own Timer block by h.elapse (a tree without the block
+    // has a Timer that never comes due, which is that tree).
+    olderRestartTimer: timer("olderRestartTimer"),
     hyprPeekProc: proc("hyprPeekProc"),
     pipPeekWatchdog: timer("pipPeekWatchdog"),
     playerSocketComponent: {
@@ -965,7 +969,7 @@ function bootService(serviceText, Model, o) {
   // verb in flight (`root.playerTimeoutMs`), read at each restart() the way
   // QML's Timer reads it; h.elapse fires its own onTriggered, which TERMs a
   // running helper (recorded in playerProc.signals) and flags the exit.
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog"]) h.timed.push(treeTimer(id))
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog", "olderRestartTimer"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),

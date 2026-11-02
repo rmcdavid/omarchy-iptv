@@ -597,6 +597,37 @@ TestCase {
   // ~130 ms window was not merely stripped of its record, it was dropped -
   // the probe's "nothing is running" cleared nowPlaying and drainPendingPlay
   // needs one. 28 of 30 trials never started playing against 396a69a.
+  function test_olderRestartUnderQtsEngine() {
+    // Restart on adoption: the probe's `launch` word and the shell's
+    // disposition over an owed restart, the node suite's vectors run again
+    // under Qt's own engine (the one the shell runs them in).
+    var reply = { ok: true, kind: "player.probe", running: true, responsive: true, pid: 4242, idle: false, seq: 1, launch: "older" }
+    compare(Model.parsePlayerProbe(JSON.stringify(reply)).launch, "older")
+    reply.launch = "stale"
+    compare(Model.parsePlayerProbe(JSON.stringify(reply)).launch, null)
+    delete reply.launch
+    compare(Model.parsePlayerProbe(JSON.stringify(reply)).launch, null)
+    compare(Model.probeLaunchOlder("unknown"), true)
+    compare(Model.probeLaunchOlder(null), false)
+    var d = { owed: true, spent: false, nowPlayingId: "t:a", channelsLoaded: true, hasChannel: true, sourceMatches: true,
+              playerUp: true, slotBusy: false, expired: false, unsafe: false }
+    function w(o) { var x = {}; for (var k in d) x[k] = d[k]; for (var j in o) x[j] = o[j]; return Model.olderRestartDisposition(x) }
+    compare(Model.olderRestartDisposition({ owed: false }), "none")
+    compare(w({ userStopped: true }), "clear")
+    compare(w({ channelsLoaded: false }), "hold")
+    compare(w({}), "restart")
+    compare(w({ unsafe: true }), "restart")
+    compare(w({ sourceMatches: false }), "defer")
+    compare(w({ channelsLoaded: false, expired: true, unsafe: true }), "stop")
+    compare(w({ spent: true }), "defer")
+    compare(w({ spent: true, slotBusy: true }), "hold")
+    compare(Model.tlsReloadDisposition({ pending: true, nowPlayingId: "t:a", cacheDir: "/c", playerUp: true, channelsLoaded: true,
+                                         hasChannel: true, sourceMatches: false }), "clear")
+    compare(Model.playFork({ socketAttached: true, restartOwed: true }), "start")
+    compare(Model.olderRestartKeepsPause({ seq: 3, spent: true }, 3), true)
+    compare(Model.olderRestartKeepsPause({ seq: 3, spent: true }, 4), false)
+  }
+
   function test_probeAnIntentHasOvertakenKeepsOnlyItsResync() {
     compare(Model.probeVerdict(5, 0, 0), { seq: 6, stale: false })   // the startup probe
     compare(Model.probeVerdict(5, 0, 3), { seq: 6, stale: true })    // a play went out after it
