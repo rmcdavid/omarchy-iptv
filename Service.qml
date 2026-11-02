@@ -3790,9 +3790,10 @@ Item {
   // `recover`) keeps the episode already open for it -- spent, expired and
   // its intent as they were, the hold not re-armed -- and a different player
   // opens its own (Model.olderRestartOpen). D-SINK-71: `migrated` is kept
-  // from that episode: a later probe reads it already migrated, and the
-  // stream it has open is the same one. Path 6's card is raised whichever
-  // way the episode goes.
+  // from an open episode either way: a later probe reads it already
+  // migrated, and the stream it has open is the same one -- also when that
+  // probe names it under another pid (rc-sk73). Path 6's card is raised
+  // whichever way the episode goes.
   function openOlderRestart(unsafe, migrated, pid, stash) {
     root.tlsReloadPending = false
     var timedOut = false

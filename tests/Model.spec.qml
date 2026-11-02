@@ -650,9 +650,14 @@ TestCase {
     var same = Model.olderRestartOpen(held, { seq: 9, pid: 4242, stash: st, unsafe: true, migrated: false })
     compare([same.episode.seq, same.episode.spent, same.episode.expired, same.episode.migrated, same.episode.unsafe, same.armHold, same.again],
             [3, true, true, true, true, false, false])
+    // rc-sk73: a different pid takes none of the episode's spent, expiry or
+    // intent, and carries its `migrated` (the same player can read under
+    // another pid); from an episode that was not migrated it stays false.
     var other = Model.olderRestartOpen(held, { seq: 9, pid: 5353, stash: st })
     compare([other.episode.seq, other.episode.spent, other.episode.expired, other.episode.migrated, other.armHold],
-            [9, false, false, false, true])
+            [9, false, false, true, true])
+    var plain = Model.olderRestartOpen(Model.olderRestartWith(held, { migrated: false }), { seq: 9, pid: 5353, stash: st })
+    compare(plain.episode.migrated, false)
     var recycled = Model.olderRestartOpen(held, { seq: 9, pid: 4242, stash: { id: "t:x", sourceKey: "ka", since: 101, entryId: 1 } })
     compare(recycled.armHold, true)
     var unnamed = Model.olderRestartOpen(held, { seq: 9, pid: null, stash: st })

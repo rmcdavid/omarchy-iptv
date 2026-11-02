@@ -722,11 +722,13 @@ function sameOlderPlayer(a, b) {
 // is kept too (D-SINK-71: a later probe finds nothing left to migrate), and
 // `unsafe` is this probe's reading, as before: an unsafe one is stopped at
 // once if the episode is spent, at the hold's end otherwise. A DIFFERENT
-// player -- the old one gone, another answering -- opens its own episode,
-// inheriting nothing from the old one. A start the watchdog stopped whose
-// probe finds the older player (path 6) spends the episode either way: that
-// start's failure is told once, by the caller, whichever branch this takes
-// ("while path 6's card is still raised", rc-sk71).
+// player -- the old one gone, another answering, or the same one read under
+// another pid -- opens its own episode, inheriting none of the old one's
+// spent, expiry or intent; it carries `migrated` (rc-sk73, below). A start
+// the watchdog stopped whose probe finds the older player (path 6) spends the
+// episode either way: that start's failure is told once, by the caller,
+// whichever branch this takes ("while path 6's card is still raised",
+// rc-sk71).
 //   current   the open episode, or null
 //   o         { seq, pid, stash, unsafe, migrated, timedOut, delivered }:
 //             the shell's intent counter, the probe's pid and stash, its TLS
@@ -748,8 +750,17 @@ function olderRestartOpen(current, o) {
   }
   var again = !timedOut && s.delivered === true
   var spent = timedOut || again
+  // rc-sk73: `migrated` is carried from ANY open episode, as it was before
+  // the identity existed (D-SINK-71). The same player can be read under
+  // another pid -- behind a wrapper that runs mpv as its child both carry
+  // the socket's argument, and when mpv's own pid read fails the probe names
+  // the lower one -- and that probe finds nothing left to migrate, so taking
+  // its reading alone let the hold's end defer a player whose open stream
+  // predates the migration. A different player that takes it costs at most
+  // one restart when its list lands late.
+  var carried = cur !== null && cur.migrated === true
   return { episode: { seq: Math.floor(Number(s.seq)) || 0, unsafe: s.unsafe === true, spent: spent, expired: false,
-                      migrated: s.migrated === true, player: player },
+                      migrated: s.migrated === true || carried, player: player },
            armHold: !spent, again: again }
 }
 
