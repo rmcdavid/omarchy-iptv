@@ -467,8 +467,8 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-83}
 # launch word, the disposition, reach, fork and keep-pause rules, the start
 # bound's carry, and the service-harness cases of the restart episode (the two
 # regex wiring pins on the TLS reload replaced by harness calls); red on
-# 202a7bc's Service.qml and model (20 harness cases, the rest by absence) and
-# on 23 named mutants; the suite runs 3272.
+# 202a7bc's Service.qml and model (22 harness cases, the rest by absence) and
+# on 13 named mutants of Service.qml and the model; the suite runs 3272.
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3272}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
@@ -786,8 +786,9 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3272}
 # test_player_launch (8: the verdict on real processes, the build), the gate
 # and replacement classes of test_player (10: FeedGateTest, ReplaceTest), the
 # marker over the shared vectors (1) and the replace path's bound walk (1);
-# red on 202a7bc and on named mutants of launch_verdict, feed_gate,
-# adopt_or_spawn and the carry; the suite runs 1938.
+# red on 202a7bc (but FeedGateTest's counter-case) and on 15 named mutants of
+# launch_verdict, feed_gate, adopt_or_spawn, the probe and the carry; the
+# suite runs 1938.
 PY_TESTS_MIN=${PY_TESTS_MIN:-1938}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
