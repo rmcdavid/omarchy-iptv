@@ -18,8 +18,11 @@ PLAYER_LOCK_FILE = "player.lock"
 PLAYER_STASH_SCHEMA = 1
 # Two sibling top-level user-data nodes (4.6), probe-verified on mpv 0.41: a
 # second client reads back the identical object, the top level is not
-# writable, and there is no delete. The record dies with the process it
-# describes, which is exactly why it is not a file on disk.
+# writable, and `del_property` is not a command ("invalid parameter"). [The
+# `del` input command DOES remove a sub-path on mpv 0.41.0 -- `success`, then
+# `property not found`; `error running command` on an absent one -- measured
+# 2026-11-02 by lane-sk72; nothing here uses it.] The record dies with the
+# process it describes, which is exactly why it is not a file on disk.
 USER_DATA_STASH = "user-data/omarchy-iptv"
 USER_DATA_OWNER = "user-data/omarchy-iptv-owner"
 # M5-01 live rewind (M5-01-LIVE-REWIND.md 2.2, dev branch): the third sibling node,
