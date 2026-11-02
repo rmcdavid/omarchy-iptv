@@ -1036,8 +1036,8 @@ with `-I`, medians 24.95 and 23.1, at a load average of 2.2-3.0, so the lower
 end is the noise's, not a bound). Every run's reads ended in EACCES once
 shielded, 96 of 96. Readable by same-uid processes only in that
 window, as before. What remains: a player adopted after the upgrade keeps the
-tokens on its argv until it restarts **[2026-11-02, restart on adoption (ARCHITECTURE-PLAYER 4.5.2), on dev and
-unreleased: such a player is fed no channel. It is replaced at the first
+tokens on its argv until it restarts **[2026-11-02, restart on adoption (ARCHITECTURE-PLAYER 4.5.2), released in
+0.17.0: such a player is fed no channel. It is replaced at the first
 reattach after the update, or at the first channel change when the shell was
 not restarted. Where its
 channel cannot be re-established, it plays on, fed nothing, until the next

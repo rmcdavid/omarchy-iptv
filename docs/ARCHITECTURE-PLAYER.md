@@ -1618,8 +1618,8 @@ helper's own descriptors: nothing on the stderr pipe the launch reason is read
 from, the same lines on stdout when stdout is a pipe. Capturing the player's
 stdout for a better launch reason would open it, and needs the kept tokens'
 values scrubbed first. Residual: a player adopted after the upgrade keeps the
-tokens it was launched with on its argv until it restarts; on dev since
-2026-11-02 (unreleased) it is fed no channel and is replaced at the first
+tokens it was launched with on its argv until it restarts; since 0.17.0
+(2026-11-02) it is fed no channel and is replaced at the first
 reattach or channel change, or later where its channel cannot be put back
 (4.5.2).]**
 
@@ -2602,7 +2602,7 @@ whose fields were read on a real dump of the harness rig -- `COREDUMP_CMDLINE`
 is the launch argv, URL-free by S-03 **[2026-10-29, lane-p2a: and free of
 the user's mpvArgs tokens since D-SINK-47 -- they carried a proxy password or a
 header value into the journal before; a player adopted after the upgrade keeps
-its old argv until it restarts; on dev since 2026-11-02 (unreleased) it is
+its old argv until it restarts; since 0.17.0 (2026-11-02) it is
 fed no channel and is replaced at the first reattach or channel change, or
 later where its channel cannot be put back (4.5.2)]**; `COREDUMP_ENVIRON` is the shell's whole
 environment, which the player's helper Process never hands a URL (no

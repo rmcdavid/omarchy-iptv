@@ -4,9 +4,9 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.16.0 (2026-11-01: the whole-codebase security
-review's two phases, the P2/P3 sweep, D-A11Y-1's fix, D-HOST-9's qualification and
-D-SINK-69; `main` 103fa68, the GitHub Release marked Latest). Four of the last releases were cut for a finding
+Quickshell process. Released through v0.17.0 (2026-11-02: restart on adoption, so a
+player another build launched is replaced rather than fed, with D-SINK-70, D-SINK-71,
+D-SINK-72 and D-PLY-51's fixes; `main` 787a33b, the GitHub Release marked Latest). Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; until
@@ -51,8 +51,11 @@ verified snapshot until a maintainer actions it.
 0.16.0 (`main` 103fa68) was cut on 2026-11-01 on the owner's word with
 #12636 still pending, which makes #12636 stale; it stays open (F-M3-4), and
 0.16.0's own request was filed on the owner's word on 2026-11-01 as
-#13611 (validated, its automated baseline passed). 0.14.3 is still the
-verified snapshot.
+#13611 (validated, its automated baseline passed). 0.17.0 (`main` 787a33b)
+was cut on 2026-11-02 on the owner's word ("Push dev and cut 0.17.0") with
+#13611 and #12636 both still pending, which makes #13611 stale too; neither
+is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's
+word. 0.14.3 is still the verified snapshot.
 
 ## Branches: `dev` is the tree, `main` is the artifact
 
@@ -327,8 +330,8 @@ requests and raise the batch.
      six kinds that bypass it carry nothing private, held by a node check.
      mpvArgs tokens, source keys, `u:` ids and scopes are on no argv of a
      process this release starts (an older player adopted after the
-     upgrade keeps its own until it is replaced: on dev since 2026-11-02,
-     unreleased, it is fed no channel and is replaced at the first
+     upgrade keeps its own until it is replaced: since 0.17.0
+     (2026-11-02) it is fed no channel and is replaced at the first
      reattach or channel change, or later where its channel cannot be put
      back), and new sources get random keys.]**
      **[2026-11-01, D-SINK-69: one argv the shell starts still carried a key --
@@ -868,7 +871,7 @@ requests and raise the batch.
      the launch argv, URL-free by S-03 and, since D-SINK-47 (2026-10-31),
      free of the user's mpvArgs tokens, which mpv reads from a file -- a
      player started before that keeps them until it is replaced, which on
-     dev since 2026-11-02 (unreleased) is the first reattach or channel
+     0.17.0 (2026-11-02) is the first reattach or channel
      change, or later where its channel cannot be put back; `COREDUMP_ENVIRON` is the shell's
      whole environment, never handed a URL on the player's Process;
      `COREDUMP_OPEN_FDS` is sockets and pipes by inode, so a `file://`
@@ -876,8 +879,8 @@ requests and raise the batch.
      card and the agent, which then find no core; the cost, accepted by the
      owner on 2026-10-26, that a crashed player leaves no core for the
      user's own diagnosis either and no `mpvArgs` lever can restore it
-     [a `play` into a never-probed pre-upgrade player is closed on dev:
-     D-SINK-70, 2026-11-02, unreleased; the build gate refuses it and the
+     [a `play` into a never-probed pre-upgrade player is closed since
+     0.17.0: D-SINK-70, 2026-11-02; the build gate refuses it and the
      start that follows lowers its core limit before its ladder]; the helper's own pre-shield
      window, a dump window of the same 22.9-40.1 ms; and the SHELL, which
      holds every source URL in its heap, is host-owned and dumpable, and is
