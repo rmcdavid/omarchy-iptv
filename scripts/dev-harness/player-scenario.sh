@@ -1232,7 +1232,14 @@ ck "L1 one new player P1 holds the socket in its place" '[[ $L1_P1 =~ ^[0-9]+$ &
 is "L1 never two players on the socket at any 50 ms sample, and both were seen" "$(l_py verdict "$SCRATCH/l1.samples" "$L1_P0" "$L1_P1" | cut -d' ' -f2-4)" "max:1 p0:yes p1:yes"
 L1_FORM=$(l_py build "$PLUGIN_ROOT" "$SOCK" "$L1_P1")
 ck "L1 P1's argv is this tree's own composed launch, byte for byte, build marker included ($L1_FORM)" '[[ $L1_FORM == plain || $L1_FORM == include ]]'
-ck "L1 and the canary from v0.15.0's argv is on no player's command line" '[[ -n "$(cmdline_of "$L1_P1")" && "$(cmdline_of "$L1_P1")" != *"$L_CANARY"* ]]'
+# Every process that holds the socket token now, not P1 alone: on a tree that
+# kept P0 the canary is still on ITS argv, and that is what this reads
+# (rc-rao-b; the first version read only P1's, so on 202a7bc it went red for
+# want of a P1, never for the canary it names).
+L1_HOLDERS=$(l_py tokens "$SOCK")
+L1_CANARY_ON=""
+for p in $L1_HOLDERS; do [[ "$(cmdline_of "$p")" == *"$L_CANARY"* ]] && L1_CANARY_ON+="$p "; done
+ck "L1 and the canary from v0.15.0's argv is on no command line holding the socket (holders: ${L1_HOLDERS:-none}; with the canary: ${L1_CANARY_ON:-none})" '[[ -n $L1_HOLDERS && -z $L1_CANARY_ON ]]'
 is "L1 P1 dumps no core (its /proc limits)" "$(l_py core "$L1_P1")" "0 0"
 ck "L1 the private options file is gone once P1 answered" '[[ ! -e $SCRATCH/runtime/omarchy-iptv/mpv-args.conf ]]'
 is "L1 the shell still plays the channel P0 was playing" "$(np id)" "t:live1"
@@ -1330,16 +1337,34 @@ printf '   L3 / M8: after `quickshell kill`: %s (seconds); the player %s\n' "$L3
 ck "L3 premise: the dying shell spawned its orphan check and it ran out, so the player's survival is that check's answer ($L3_M8V)" \
    '[[ $L3_M8V != *"orphan-seen:NONE"* && $L3_M8V != *"orphan-gone:NONE"* && -z $(l_py orphans "$SOCK") ]]'
 is "L3 the player outlived its shell's orphan check (M8: the restart case, not orphan-stopped)" "$(l_py alive "$SOCK" "$L3_PID")" "alive"
+L3_TRS=$(l_py now)
 "$RUN" restart-shell >>"$LOG" 2>&1 || bad "L3 restart-shell failed (see $LOG)"
 wait_log 'service loaded' 20 || bad "L3 the shell did not start"
 until_eq true 10 svc "d['socketAttached']" || true
 sleep 3
 sampler_stop "$SCRATCH/l3.samples"
 L3_T1=$(l_py get "$SOCK" time-pos)
+L3_TREAD=$(l_py now)
+L3_START1=$(l_py starttime "$(l_py tokens "$SOCK")")
 ck "L3 premise: the player read before the stop is this tree's P1 of L2" '[[ $L3_PID =~ ^[0-9]+$ && $L3_PID == "$L2_P1" ]]'
-is "L3 the same pid holds the socket, alone, at every sample" "$(l_py verdict "$SCRATCH/l3.samples" "$L3_PID" "" | cut -d' ' -f2,6)" "max:1 p0all:yes"
-is "L3 the same process: /proc stat field 22 unchanged" "$(l_py starttime "$(l_py tokens "$SOCK")")" "$L3_START"
-ck "L3 time-pos is continuous across the restart ($L3_T0 -> $L3_T1)" 'python3 -I -c "import sys; sys.exit(0 if float(sys.argv[2]) > float(sys.argv[1]) else 1)" "$L3_T0" "$L3_T1" 2>/dev/null'
+# end:END as well: a sampler that died early would have judged only the
+# samples before the stop (rc-rao-b).
+is "L3 the same pid holds the socket, alone, at every sample" "$(l_py verdict "$SCRATCH/l3.samples" "$L3_PID" "" | cut -d' ' -f2,5,6)" "max:1 end:END p0all:yes"
+# A start time that could not be read is not a match: NOSTAT on both sides (no
+# holder before, none after) used to read as "unchanged" (rc-rao-b).
+ck "L3 the same process: /proc stat field 22 unchanged ($L3_START -> $L3_START1)" '[[ $L3_START =~ ^[0-9]+$ && $L3_START1 == "$L3_START" ]]'
+# Continuous, and not by chance: a replacement can only be spawned after the
+# new shell starts, so its time-pos is at most the seconds since then. The
+# player read here must be PAST that -- it was playing before the new shell
+# existed. `T1 > T0` alone passed any replacement that had played longer than
+# the old player had when T0 was read (rc-rao-b; under M-OLDER it read 3.18 ->
+# 1.85 only because T0 was small).
+L3_UP=$(python3 -I -c 'import sys
+try:
+    print("%.2f" % (float(sys.argv[2]) - float(sys.argv[1])))
+except ValueError:
+    print("NOCLOCK")' "$L3_TRS" "$L3_TREAD")
+ck "L3 time-pos is continuous across the restart ($L3_T0 -> $L3_T1 s, past the new shell's $L3_UP s)" 'python3 -I -c "import sys; t0, t1, up = map(float, sys.argv[1:4]); sys.exit(0 if t1 > t0 and t1 > up else 1)" "$L3_T0" "$L3_T1" "$L3_UP" 2>/dev/null'
 is "L3 no restart line and no replaced line" "$(log_count "$L_RESTART_TEXT") $(log_count "$L_REPLACED_TEXT")" "0 0"
 is "L3 the probe the shell runs reads it as this build's launch" "$(probe_launch)" "current"
 is "L3 the shell adopted it and plays its channel" "$(np id) $(svc "d['socketAttached']")" "t:live1 true"
@@ -1450,15 +1475,19 @@ except OSError:
 b = [float(l.split()[0]) for l in lines if " GET /l5b.ts " in l]
 ua = [float(l.split()[0]) for l in lines if l.endswith(" ua:yes")]
 if gone == "NONE":
-    print("requests:%d first:p0-never-gone header-before:NA" % len(b))
+    print("requests:%d first:p0-never-gone header-before:NA header-all:%d" % (len(b), len(ua)))
 else:
     g = float(gone)
     first = "none" if not b else ("after" if min(b) > g else "before")
-    print("requests:%d first:%s header-before:%d" % (len(b), first, len([t for t in ua if t <= g])))
+    print("requests:%d first:%s header-before:%d header-all:%d" % (len(b), first, len([t for t in ua if t <= g]), len(ua)))
 PY
 )
 printf '   L5 %s\n' "$L5_VERDICT"
 ck "L5 B was fetched at all, so a zero below is about P0 ($L5_VERDICT)" '[[ $L5_VERDICT =~ ^requests:[1-9] ]]'
+# And B's header was seen at all: the server recognises it, so the zero below
+# is about P0 and not a header nobody sends (rc-rao-b; the first version had
+# no control for the header half).
+ck "L5 B's provider header reached the server on some request, so the header count below can see one ($L5_VERDICT)" '[[ $L5_VERDICT =~ header-all:[1-9] ]]'
 is "L5 every request for B's path follows P0's exit, and none carrying B's header came before it" "$(cut -d' ' -f2-3 <<<"$L5_VERDICT")" "first:after header-before:0"
 "$RUN" reap >>"$LOG" 2>&1
 [[ -n $L5_PID ]] && kill -TERM "$L5_PID" 2>/dev/null && { wait "$L5_STARTED" 2>/dev/null; L5_PID=""; }
@@ -1489,7 +1518,8 @@ until_eq 0 8 player_count || true
 # check and the L segments' 56 (L1 16, L1b 4, L2 10, L3 9, L4 15 with L5's
 # server premise, L5 2; the two window checks SKIP under a nested compositor
 # and still count here).
-EXPECTED_CHECKS=142
+# 142 -> 143 (rc-rao-b, 2026-11-02): L5's control that B's header is seen at all.
+EXPECTED_CHECKS=143
 ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
