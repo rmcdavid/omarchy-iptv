@@ -86,6 +86,7 @@
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
       "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [],
+      "build": "0.16.0+0a1b2c3d",
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -104,6 +105,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -141,6 +143,7 @@
         "--screenshot-dir=/home/u/Pictures",
         "--gpu-shader-cache-dir=/home/u/.cache/shaders"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -159,6 +162,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -207,6 +211,7 @@
         "rm",
         "--hwdec=auto-safe"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [
         "--log-file=/tmp/mpv.log",
         "--no-log-file",
@@ -235,6 +240,7 @@
         "--icc-cache-dir=/tmp/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/tmp/mpv-args.conf",
         "--watch-later-dir=/tmp/watch-later",
         "--load-scripts=no",
@@ -288,6 +294,7 @@
         "--no-tls-verify",
         "--tls-ca-file=/etc/ssl/provider-ca.pem"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [
         "--tls-verify=no",
         "--no-tls-verify"
@@ -310,6 +317,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -364,6 +372,7 @@
         "--gpu-sw=no",
         "--no-gpu-sw"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [],
       "argv": [
         "mpv",
@@ -383,6 +392,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -439,6 +449,7 @@
         "--demuxer-lavf-o=external_sock=1",
         "--demuxer-lavf-o=live_start_index=-1,http_persistent=0"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [
         "--demuxer-lavf-o=tls_verify=0",
         "--demuxer-lavf-o-append=tls_verify=0",
@@ -468,6 +479,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -541,6 +553,7 @@
         "--vo-image-outdir=/home/u/f",
         "--hwdec=auto-safe"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [
         "--input-commands=\"run\"\"/usr/bin/touch\"\"/tmp/m\"",
         "--input-commands-pre=quit",
@@ -589,6 +602,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -638,6 +652,7 @@
         "--screenshot-dir=/home/u/Pictures",
         "--http-proxy=http://proxy.example:3128"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "rejected": [],
       "argv": [
         "mpv",
@@ -657,6 +672,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -710,6 +726,7 @@
         "--demuxer-lavf-o-append=protocol_blacklist=tcp",
         "--demuxer-lavf-o=live_start_index=-1"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -728,6 +745,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -782,6 +800,7 @@
         "--demuxer-lavf-o=extension_picky=0,seg_format_options=\"format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp\"",
         "--demuxer-lavf-o=live_start_index=-1"
       ],
+      "build": "0.16.0+0a1b2c3d",
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -800,6 +819,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
@@ -837,6 +857,58 @@
       "include": [
         "demuxer-lavf-o=%19%live_start_index=-1"
       ]
+    },
+    {
+      "name": "a build that is not one (a space, or longer than 64) is the word unknown in the marker, in both mirrors",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": [],
+      "build": "0.16.0 beta+0a1b2c3d",
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--load-scripts=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
+        "--tls-verify=yes",
+        "--script-opts-append=omarchy_iptv-build=unknown",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--load-scripts=no",
+        "--scripts-clr",
+        "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
+        "--load-auto-profiles=no",
+        "--player-operation-mode=cplayer",
+        "--load-select=no",
+        "--load-console=no",
+        "--load-stats-overlay=no",
+        "--prefetch-playlist=no",
+        "--load-unsafe-playlists=no",
+        "--save-watch-history=no",
+        "--log-file=",
+        "--reset-on-next-file-clr",
+        "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+        "--stream-lavf-o-clr",
+        "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+        "--demuxer-lavf-o-append=tls_verify=1",
+        "--tls-verify=yes"
+      ],
+      "include": []
     }
   ],
   "mpvHandoff": {
@@ -1877,5 +1949,12 @@
     "and `include` is that file's lines, one per kept token, `name` or `name=%N%value` with N the",
     "value's UTF-8 length (mpv's length-quoted form). No tokens, no --include and no file. Python",
     "alone writes the file (mpv_args_config); both mirrors compose the argv."
+  ],
+  "_mpvArgvBuildComment": [
+    "Restart on adoption (owner, 2026-10-31 and 2026-11-01): the base section ends with ONE token naming the build",
+    "that launched the player, `--script-opts-append=omarchy_iptv-build=<version>+<8 hex>`, version and checksum only.",
+    "The helper is its only producer (player_build, from HELPER_PARTS) and launch_verdict its only reader; each vector",
+    "carries a fixed `build` that both mirrors render (mpv_launch_argv(..., build=) and Model.buildMpvArgv({build})),",
+    "and a value outside [0-9A-Za-z.+_-]{1,64} is the word `unknown` in both."
   ]
 }

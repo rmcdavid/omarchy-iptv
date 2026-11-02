@@ -2673,11 +2673,28 @@ class ParityTest(unittest.TestCase):
         for vector in self.fixture["mpvArgv"]:
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
             dirs = helper.player_dirs(vector["socketPath"], vector["stateDir"])
-            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs), vector["argv"], vector["name"])
+            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs, build=vector["build"]),
+                             vector["argv"], vector["name"])
             # D-SINK-47: and the private file's lines, which only python writes.
             self.assertEqual(helper.mpv_args_config(args).splitlines(), vector["include"], vector["name"])
             if "rejected" in vector:
                 self.assertEqual(rejected, vector["rejected"], vector["name"])
+
+    def test_every_shared_vector_names_its_build_once_at_the_end_of_the_base_section(self):
+        """Restart on adoption: the marker is the base section's last element
+        (after layer 1 of TLS, ahead of the options file and the pin block),
+        once; a build that is not one is the word `unknown`. The node suite
+        asserts the same over the same vectors (N1)."""
+        unknown = False
+        for case in self.fixture["mpvArgv"]:
+            argv = case["argv"]
+            marker = helper.mpv_build_marker(case["build"])
+            self.assertEqual(argv.count(marker), 1, case["name"])
+            self.assertEqual(argv.index(marker), argv.index(helper.MPV_TLS_VERIFY) + 1, case["name"])
+            pins = helper.mpv_pin_block(helper.player_dirs(case["socketPath"], case["stateDir"]))
+            self.assertLess(argv.index(marker), len(argv) - len(pins), case["name"])
+            unknown = unknown or marker.endswith("=" + helper.PLAYER_BUILD_UNKNOWN)
+        self.assertTrue(unknown)
 
     def test_the_composed_argv_always_ends_with_the_tls_token(self):
         """D-SINK-13 layer 2, the layer that actually guarantees verification.

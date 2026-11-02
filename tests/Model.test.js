@@ -5014,7 +5014,9 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+// Restart on adoption: with no build given the marker names none -- the word
+// the helper uses for a build that is not one (mpv_build_marker).
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--script-opts-append=omarchy_iptv-build=unknown", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -6470,7 +6472,7 @@ check("player fixture has all four tables", [playerFixture.mpvArgv.length > 0, p
 check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
 for (const v of playerFixture.mpvArgv) {
   const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
-  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args }), v.argv)
+  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args, build: v.build }), v.argv)
   if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
 }
 // D-SINK-13. The exact-array checks above already catch a dropped trailing
@@ -6484,6 +6486,24 @@ check("fixture mpvArgv: every composed argv ends with the fixture's own trailing
     return a[a.length - 1] !== playerFixture.tlsTrailing
   }).map(function (v) { return v.name }) },
   { token: Model.MPV_TLS_VERIFY, offenders: [] })
+// Restart on adoption (N1): every vector names its build, and the marker is
+// in every composed argv exactly once, the last element of the base section
+// (right after layer 1 of TLS, before the options file and the pin block) --
+// the python mirror asserts the same over the same vectors -- and a build
+// that is not one renders as the word "unknown" in both.
+check("fixture mpvArgv: the build marker is in every composed argv once, right after layer 1 of TLS and ahead of the options file and the pin block; at least one vector's build renders as unknown",
+  { offenders: playerFixture.mpvArgv.filter(function (v) {
+    const user = Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args
+    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user, build: v.build })
+    const marker = Model.mpvBuildMarker(v.build)
+    const at = a.indexOf(marker)
+    const inc = a.findIndex(function (t) { return t.indexOf("--include=") === 0 })
+    return typeof v.build !== "string" || a.filter(function (t) { return t === marker }).length !== 1
+      || at !== a.indexOf(Model.MPV_TLS_VERIFY) + 1 || (inc !== -1 && inc < at)
+      || at >= a.length - Model.mpvPinBlock(Model.playerDirs(v.socketPath, v.stateDir)).length
+  }).map(function (v) { return v.name }),
+    unknown: playerFixture.mpvArgv.some(function (v) { return v.argv.indexOf("--script-opts-append=" + Model.PLAYER_BUILD_KEY + "=unknown") !== -1 }) },
+  { offenders: [], unknown: true })
 check("fixture mpvArgv: at least one vector passes user arguments, or the trailing token is invisible to the pinning",
   playerFixture.mpvArgv.filter(function (v) { return (v.mpvArgs || []).length > 0 && Model.splitMpvArgs(v.mpvArgs.join(" ")).args.length > 0 }).length > 0, true)
 // D-PLY-27. The exact-array checks above carry the software-renderer token by
