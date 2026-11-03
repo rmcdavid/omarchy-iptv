@@ -13753,7 +13753,7 @@ Floor: node 3295 -> 3298.
 
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.17.0; the CHANGELOG's top heading `## 0.17.0 (2026-11-02)` passes `changelog_problems` strictly for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.17.0 tag locally or on the remote.
 
-**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word. [Filed the same day at 23:54Z as #13709, on the owner's word; the verified snapshot was 0.15.0 throughout, F-M3-26.]
+**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word. [Filed the same day at 23:54Z as #13709, on the owner's word; the verified snapshot was 0.15.0 until 2026-11-03T01:31:53Z, when #13709 made it 0.17.0; F-M3-26.]
 
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 

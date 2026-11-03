@@ -6,7 +6,8 @@ favorites, source management, and mpv playback. One plugin id,
 `service`. It runs inside the single long-running `omarchy-shell`
 Quickshell process. Released through v0.17.0 (2026-11-02: restart on adoption, so a
 player another build launched is replaced rather than fed, with D-SINK-70, D-SINK-71,
-D-SINK-72 and D-PLY-51's fixes; `main` 787a33b, the GitHub Release marked Latest). Four of the last releases were cut for a finding
+D-SINK-72 and D-PLY-51's fixes; `main` 787a33b, the GitHub Release marked Latest, and
+since 2026-11-03T01:31:53Z the marketplace's verified snapshot, through #13709). Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; until
@@ -36,8 +37,15 @@ pre-cut review measured otherwise on 2026-10-12, and 0.13.6's first draft
 of release notes repeated it. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
-**Since 2026-10-26T02:15:38Z the verified snapshot is 0.15.0 (e710341)**, and
-this file said 0.14.3 for a week after it moved (F-M3-26). 0.14.3 (205ee12)
+**Since 2026-11-03T01:31:53Z (19:31 CST on 2026-11-02) the verified snapshot
+is 0.17.0 (787a33b)**: the maintainer labelled #13709 `approved-and-verified`
+at 01:31:22Z, and the marketplace's automated publication (its commit
+1d5c4370) promoted 787a33b and closed #13709 at 01:36:21Z. The catalog that
+publication wrote reads `verificationCoverage` `snapshot-verified` and
+`repositoryRelease` v0.17.0, the first Release it has shown since v0.7.0
+(F-M3-27). Before it the snapshot was 0.15.0 (e710341), from
+2026-10-26T02:15:38Z, and this file said 0.14.3 for a week after that move
+(F-M3-26). 0.14.3 (205ee12)
 was verified on 2026-10-22, when #12474 closed `approved-and-verified` by the
 marketplace's automated publication, the first approval since 0.12.0. On
 2026-10-25 at 17:56Z the maintainer edited our stale 0.14.2 request #11935,
@@ -50,7 +58,7 @@ its `main`, the entry under `sources` whose `repo` is ours, for
 `listingValidatedCommit`, `listingValidatedAt` and
 `automatedSecurityBaseline`; and `site/catalog.json`, the entry whose `id` is
 ours, which carries the `verificationCommit` and `verificationCheckedAt`
-cited above (today e710341 and 2026-10-26T02:15:38Z) and, beside them,
+cited above (read 2026-11-03T02:40Z: 787a33b and 2026-11-03T01:31:53Z) and, beside them,
 `verificationCoverage`, which reads `update-unverified` while the commit the
 catalog last observed on our `main` (`upstreamObservedCommit`) is not the
 snapshot, with `verificationStatus` then `unverified` beside
@@ -62,11 +70,12 @@ target is already the listing, and publication closes only the issue that
 was labelled. 0.16.0 (`main` 103fa68, 2026-11-01) and 0.17.0 (`main`
 787a33b, 2026-11-02) were cut on the owner's word, and their requests were
 filed on the owner's word: #13611 and #13709, each validated with its
-baseline passed. They stay open beside #12636, and we close none (F-M3-4). Of
-the three, only #13709 can be approved as filed, and only while `main` stays
-at 787a33b. #12636 and #13611 could be approved only if a Target commit were
-edited to the HEAD of that day, by a maintainer, as he edited #11935, or by
-us.
+baseline passed. #13709 is the one approved. #13611 and #12636 stay open, and
+we close none (F-M3-4). Neither can be approved as filed: neither Target
+commit is our HEAD, and one edited to 787a33b would be refused as already
+the listing. Once `main` moves, either could be approved only if its Target
+commit were edited to the HEAD of that day, by a maintainer, as he edited
+#11935, or by us.
 
 ## Branches: `dev` is the tree, `main` is the artifact
 
@@ -122,8 +131,9 @@ Consequences you must respect:
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
   GitHub's latest Release object, not the newest tag, and it read v0.7.0 for
   six weeks because the Releases stopped there (backfilled 2026-10-31; the
-  catalog re-reads it only when a request of ours is published, so it still
-  read v0.7.0 on 2026-11-02, F-M3-27).
+  catalog re-reads it only when a request of ours is published or our
+  repository is migrated, so it read v0.7.0 until #13709's publication
+  wrote v0.17.0 on 2026-11-03, F-M3-27).
   `build` refuses a heading that names another
   version or carries another day's date, which is how 0.8.0 came to ship
   release notes dated the day before it existed (D-REL-4).
