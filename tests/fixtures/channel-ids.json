@@ -2,7 +2,7 @@
   "comment": [
     "Channel id scheme 2 (ARCHITECTURE.md decision 6), run by BOTH readers:",
     "tests/test_channel_ids.py drives bin/omarchy-iptv, tests/Model.test.js",
-    "drives Model.js, and neither reimplements the rule. Every id here is a",
+    "drives Model.mjs, and neither reimplements the rule. Every id here is a",
     "literal, computed from the pinned fnv1a32 vectors, so a change to either",
     "implementation has to disagree with the file rather than with itself.",
     "",

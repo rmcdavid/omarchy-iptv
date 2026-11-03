@@ -1992,7 +1992,7 @@ predates both reviews -- and, where a review overturned part of it, dated
 amendments beneath saying what the code on this tree does instead; nothing is
 rewritten to read as though it always said this, and a reader comparing a row
 against `git show lane-key-docs:docs/ARCHITECTURE-SOURCES.md` finds the
-original as a prefix. D1, D3 and D4 above carry the same discipline. **[Round 11, 2026-10-13: the product owner withdrew the `omarchy bar set` URL route (R21, the last rulings in this file). SR37 is overturned, SR38 ends at a marker, SR39 cost 1 is replaced and SR40 reason (i) shortened, each by a dated amendment at the end of its row; R12, R17b, R18d, R19b, R19c, R20b and R20c are overturned and marked where they stand.]**
+original as a prefix. D1, D3 and D4 above carry the same discipline. **[Round 11, 2026-10-13: the product owner withdrew the `omarchy bar set` URL route (R21, the last rulings in this file). SR37 is overturned, SR38 ends at a marker, SR39 cost 1 is replaced and SR40 reason (i) shortened, each by a dated amendment at the end of its row; R12, R17b, R18d, R19b, R19c, R20b and R20c are overturned and marked where they stand.]** **[2026-11-03: the branch `lane-key-docs` is deleted, and 55502af is kept as the tag `archive/lane-key-docs`, so the comparison is now `git show archive/lane-key-docs:docs/ARCHITECTURE-SOURCES.md`. Neither the branch nor the tag was ever pushed, so it works only in the clone that holds them. Run that day, it finds SR35-SR40 as prefixes and D1, D3 and D4 not, and on `dev` they never were: 0bcf991 (2026-10-11) re-applied their D-SINK-19 amendments by hand, rewriting D3's, adding clauses to D1's, adding two to D4's and dropping one from it ("well enough that the answer is still here"), and redating D3's and D4's from 2026-10-09 to 2026-10-11, and 6dea855 (2026-10-12), which restored the SR rows' text and wrote the sentence above, left them so; D1 also differs earlier, in its D-SINK-18 amendment, edited in place by 041e0e6 on 2026-10-22. "The same discipline" has held for the SR rows only.]**
 
 Every row here belongs to D-SINK-19, which has a board row in `docs/STATUS.md`
 and is therefore an id the defect-ledger check can see; every `Model.*` name
@@ -2005,6 +2005,19 @@ citation did not. The SR numbers themselves are still joined to nothing -- 40
 of them, cited from 29 tracked files, and no script validates the register;
 that is rule 13's failure one register along from the defect ids, reported to
 the lead rather than given an id this lane cannot put a board row behind.
+**[2026-11-03: the symbol-scan gap above had no id until this day; it is
+F-GATE-19, open. Re-measured over the 56 tracked Markdown files: 37 names
+are cited as `Model.` only inside backticks that hold more than the name (31
+in spans that go on past it and six after other text), so they are never
+checked; with spans that wrap a line it is 38, adding `sourcesRowKind` below.
+The gap already hides wrong citations: one of `plainHttpLine`, which
+`Model.mjs` does not export, and, after other text inside the backticks, two
+of `entryWriteNeeded`, deleted on 2026-10-13 (one in docs/QA-SOURCES.md, one
+wrapped in this file under R18b), and one of `barGlyphAlpha`, never built.
+The SR register was filed as
+F-M3-20 and is closed: since 2026-10-24 `scripts/check-sr-register.py` (the
+checker in 02418c2, wired into the gate in 740811c) joins every SR citation
+to the register.]**
 
 | # | Replaces | Ruling |
 |---|---|---|

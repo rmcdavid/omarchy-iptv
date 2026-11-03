@@ -8,7 +8,7 @@ anything. Scheme 2 tries the channel NAME in between, and only when that name
 is unique in the playlist.
 
 tests/fixtures/channel-ids.json is the shared fixture: tests/Model.test.js runs
-the same vectors against Model.js, so the two implementations are pinned to one
+the same vectors against Model.mjs, so the two implementations are pinned to one
 file rather than to each other.
 """
 import json

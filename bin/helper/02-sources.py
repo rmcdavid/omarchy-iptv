@@ -1062,9 +1062,18 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
 def name_id_key(name: Any) -> str:
     """The `n:` base of a channel name, or "" when the name cannot key one.
 
-    Mirrors Model.nameIdKey. The name is normalized through the shared
-    normalize_text, so re-casing or re-punctuating a title does not move the
-    id. A name that normalizes to nothing cannot key anything, and neither can
+    Mirrors Model.nameIdKey, except where the two runtimes' own tables
+    differ: the regex whitespace class and lower-casing (D-ID-5, open). The
+    name is normalized through the id fold, normalize_id_text, so re-casing a
+    title (outside the hundred or so codepoints whose upper or title case
+    does not lower back to them, such as the fi ligature, the long s, the
+    micro sign, final sigma and the Greek letters with a subscript iota),
+    folding its Latin accents, or swapping one run
+    of ASCII punctuation and whitespace between words for another, neither
+    holding `+` or `*`, does not move the id. Not the search fold, normalize_text: it folds `+`
+    and `*` to a space, so `USA: AMC+` and `USA AMC` would share a name key,
+    and a playlist holding both would give neither an `n:` id.
+    A name that normalizes to nothing cannot key anything, and neither can
     make_channel's last-resort `Channel <n>`: that n is the row's POSITION in
     the file, so keying on it would move the id whenever the provider inserts
     a row above -- worse than the URL hash it would replace.
@@ -1093,9 +1102,12 @@ def channel_ids(channels: list[dict[str, Any]], scheme: int = CHANNEL_ID_SCHEME)
     `u:<fnv1a32(url)>`, with `#2`, `#3`... on a repeat.
 
     Scheme 2 is scheme 1 with ONE substitution: a row that would fall back to
-    the URL hash uses `n:<fnv1a32(normalize_text(name))>` instead, and only
-    when that name key is unique across the whole playlist. Every other row
-    keeps the exact id it already had.
+    the URL hash uses its name_id_key, `n:<fnv1a32(normalize_id_text(name))>`,
+    instead, only when the name keys one (it does not fold to nothing, and
+    does not fold to `channel <digits>`, the shape make_channel generates,
+    which a provider's own `Channel 4` also has) and that key is unique
+    across the whole playlist. Every other row keeps the exact id it already
+    had.
 
     Doing it as a substitution rather than as a third branch of the base rule
     is what makes the upgrade safe, and it took a failing test to find that

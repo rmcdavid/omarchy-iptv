@@ -2452,7 +2452,9 @@ Nothing channel-specific remains. The other three argv:
 - `python3 bin/omarchy-iptv player stop --socket S --seq 42`
 
 `--id` is `Model.channelId()` output: `t:<tvg-id>` or `u:<fnv1a32(url)>`
-(`Model.js:245-251`) - a hash or a provider-assigned id, never the URL. The URL
+(`Model.js:245-251`) **[2026-11-03: or `n:<fnv1a32(normalize_id_text(name))>`
+since id scheme 2 (482a21e, 2026-09-16, D-ID-1), a hash too; the function is
+in `model/text.mjs` since D-REL-5]** - a hash or a provider-assigned id, never the URL. The URL
 is resolved from `channels.json` (0600) **by the helper itself** and travels only
 over the 0600 socket, so it never crosses a process boundary in either
 direction. Residual, disclosed rather than hidden: `--id` on the helper's

@@ -1398,7 +1398,8 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # at most once per state file and never fails the fetch: a playlist
         # that parsed is a success whatever the state file turns out to be.
         #
-        # `--state-dir` is REQUIRED, with no default of any kind. An earlier
+        # `--state-dir` has no default of any kind: the remap runs only when
+        # the caller names a state directory. An earlier
         # version resolved it with `state_dir(getattr(args, "state_dir",
         # None))`, so every `playlist` run that did not name a state directory
         # reached into the live one: one `unittest discover` put 124 remap

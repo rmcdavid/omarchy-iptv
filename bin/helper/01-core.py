@@ -694,8 +694,8 @@ _PORT_END = re.compile(r"[;=&]")
 HOST_WITHHELD = "[host withheld]"
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
-# after normalize_text. Built from the same constant so the two cannot drift:
-# engineering rule 13 (dev branch), two things joined by a name rather than by a call.
+# after normalize_id_text. Built from the same constant so the two cannot drift:
+# engineering rule 13 (dev branch), two things joined by a call rather than by a name.
 GENERATED_NAME_WORD = "Channel"
 GENERATED_NAME_FORMAT = GENERATED_NAME_WORD + " %d"
 _GENERATED_NAME = re.compile(r"^" + GENERATED_NAME_WORD.lower() + r" [0-9]+$")
@@ -1237,7 +1237,10 @@ def log(message: str) -> None:
 
 
 # ------------------------------------------------------- normalization
-# Must match the model's normalizeText/searchKey/fnv1a32 byte for byte.
+# Must match the model's normalizeText/normalizeIdText/searchKey/fnv1a32
+# byte for byte. The folds do not, on the whitespace the two regex engines
+# classify differently and on the letters whose lower case the two runtimes'
+# Unicode tables disagree on (D-ID-5, open; D-SRC-12).
 
 FOLD_GROUPS = [
     ("\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u0101\u0103\u0105", "a"),
@@ -1270,7 +1273,8 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 # them takes the four lists from 75 colliding name groups / 155 rows to 65 /
 # 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#` and `@`
 # were measured the same way and change nothing on any of the four, so they
-# are not in the class. Mirrors ID_PUNCT_RE in the model.
+# are not in the class. Mirrors ID_PUNCT_RE in the model, except on the
+# whitespace the two engines' `\s` disagree on (D-ID-5).
 _ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
 
 
@@ -1530,7 +1534,10 @@ def normalize_text(value: Any) -> str:
     """Lower-case, fold Latin diacritics (precomposed via FOLD, decomposed via
     NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
     other script recomposes), ASCII punctuation to one space (D-QA-08).
-    Mirrors the model's decompose()/normalizeText byte for byte (NFD, not NFKD)."""
+    Mirrors the model's decompose()/normalizeText (NFD, not NFKD), except
+    where the two runtimes' own tables differ: the regex whitespace class and
+    lower-casing, whose gap moves with either runtime's Unicode version
+    (D-ID-5; D-SRC-12 measured 28 codepoints)."""
     return fold_text(value, _PUNCT)
 
 

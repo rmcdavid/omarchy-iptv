@@ -239,7 +239,7 @@ idFixture.states.forEach(function (one) {
     return { moved: twice.moved, same: JSON.stringify(twice.state) === JSON.stringify(once.state) }
   }, { moved: 0, same: true })
 })
-checkCall("nameIdKey folds case and punctuation the way searchKey does", function () {
+checkCall("nameIdKey folds case, Latin accents and the punctuation in US: ESPN and Tele-Quebec", function () {
   return [Model.nameIdKey("US: ESPN") === Model.nameIdKey("us espn"),
     Model.nameIdKey("Tele-Quebec") === Model.nameIdKey("T\u00e9l\u00e9 Qu\u00e9bec")]
 }, [true, true])

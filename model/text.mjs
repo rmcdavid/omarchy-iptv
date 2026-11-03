@@ -42,9 +42,10 @@ var FOLD = (function() {
   return map
 })()
 
-// ASCII whitespace and punctuation collapse to one space; every other
-// character (any script) is kept, so Cyrillic/Greek/Arabic names stay
-// searchable. Mirrors the helper's _PUNCT.
+// Whitespace (the engine's `\s`, which is not Python's: D-ID-5) and ASCII
+// punctuation collapse to one space; every other character (any script) is
+// kept, so Cyrillic/Greek/Arabic names stay searchable. Mirrors the helper's
+// _PUNCT, except on that whitespace.
 var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 
 // The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
@@ -58,7 +59,8 @@ var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 // Keeping them takes the four lists from 75 colliding groups / 155 rows to
 // 65 / 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#`
 // and `@` were measured the same way and change nothing on any of the four,
-// so they are not in the class. Mirrors the helper's _ID_PUNCT.
+// so they are not in the class. Mirrors the helper's _ID_PUNCT, except on the
+// whitespace the two engines' `\s` disagree on (D-ID-5).
 var ID_PUNCT_RE = /[\s!-\)\,-\/:-@\[-`{-~]+/g
 
 function str(value) {
@@ -226,8 +228,9 @@ function fnv1a32(value) {
 var CHANNEL_ID_SCHEME_LEGACY = 1
 var CHANNEL_ID_SCHEME = 2
 // The last-resort display name, `Channel <n>`, whose n is the row's POSITION.
-// Both the word and the pattern that recognises one after normalizeText come
-// from the same constant, and displayName() below builds the name from it --
+// Both the word and the pattern that recognises one after normalizeIdText come
+// from the same constant, and displayName() in model/channels.mjs builds the
+// name from it --
 // engineering rule 13 (dev branch), two things joined by a call rather than by a name. The
 // python mirror does the same with GENERATED_NAME_WORD.
 var GENERATED_NAME_WORD = "Channel"
@@ -398,16 +401,22 @@ function remapStateIds(state, remap) {
   return { state: st, moved: moved }
 }
 
-// The service's call site: the loaded state and the loaded channel list.
-// Write only when `moved` is non-zero -- after one pass it always is zero.
+// The one-call composition, used by the tests. The service does not call it:
+// it computes channelIdRemap once per parsed list and applies it with
+// remapStateIds (D-ID-3). Write only when `moved` is non-zero -- after one
+// pass it always is zero.
 function remapChannelIds(state, channels) {
   return remapStateIds(state, channelIdRemap(channels))
 }
 
-// The helper assigns `id` when it writes channels.json (channelIdBases
-// above). This mirrors the per-channel half of the rule for callers that
-// build channels in memory: the playlist-wide uniqueness tests cannot be
-// answered from one row, so a caller holding the whole list uses assignIds.
+// The helper assigns `id` when it writes channels.json (assign_ids over
+// channel_ids, which channelIds above mirrors but for D-ID-5's whitespace
+// and lower-casing gaps). This returns
+// that id when the row carries one, as every row from channels.json does, and
+// otherwise the per-row half of scheme 1, for callers that build channels in
+// memory: the playlist-wide uniqueness tests cannot be answered from one row,
+// so a caller that holds the whole list and needs scheme-2 ids calls
+// channelIds.
 function channelId(channel) {
   if (!channel) return ""
   if (typeof channel.id === "string" && channel.id !== "") return channel.id
