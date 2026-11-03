@@ -13327,7 +13327,7 @@ lead's ruling is in the decisions log.
 
 **Release preconditions**, read by a release-readiness critic (read-only) on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.16.0; the CHANGELOG's top heading `## 0.16.0 (2026-11-01)` passes `changelog_problems` for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.16.0 tag locally or on the remote; local and remote `main` both e710341, so the cut is a fast-forward; none of this round's new files is a runtime import.
 
-**#12636** (`[Verify]: IPTV 0.15.0`, e710341): OPEN, `validated` and `plugin-update`, unchanged since 2026-10-22T18:34:40Z. Moving `main` makes it stale; it stays open (F-M3-4), and 0.16.0's request is filed on the owner's word.
+**#12636** (`[Verify]: IPTV 0.15.0`, e710341): OPEN, `validated` and `plugin-update`, unchanged since 2026-10-22T18:34:40Z. Moving `main` makes it stale; it stays open (F-M3-4), and 0.16.0's request is filed on the owner's word. [Corrected 2026-11-02: e710341 had been the marketplace's verified snapshot since 2026-10-26, through #11935, so #12636 could no longer be approved as filed whatever `main` did; F-M3-26.]
 
 ### Restart on adoption, live: the L segments, S6 and M6-M8 (lane RB, 2026-11-02)
 
@@ -13753,7 +13753,7 @@ Floor: node 3295 -> 3298.
 
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.17.0; the CHANGELOG's top heading `## 0.17.0 (2026-11-02)` passes `changelog_problems` strictly for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.17.0 tag locally or on the remote.
 
-**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word.
+**#13611** (`[Verify]: IPTV 0.16.0`, 103fa68) and **#12636** (`[Verify]: IPTV 0.15.0`, e710341): both OPEN, `validated` and `plugin-update`, with no maintainer comment (read 2026-11-02). Moving `main` makes #13611 stale as well; neither is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's word. [Filed the same day at 23:54Z as #13709, on the owner's word; the verified snapshot was 0.15.0 throughout, F-M3-26.]
 
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 

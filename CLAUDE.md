@@ -36,26 +36,37 @@ pre-cut review measured otherwise on 2026-10-12, and 0.13.6's first draft
 of release notes repeated it. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
-**Since 2026-10-22T03:45:56Z the verified snapshot is 0.14.3 (205ee12):**
-#12474 closed `approved-and-verified` by the marketplace's automated
-publication ("Updated and verified IPTV ... Verification method:
-`automated`"), the first approval since 0.12.0. The catalog read at 06:50 CDT
-that day carries `listingValidatedCommit 205ee12…`, `listingValidatedAt
-2026-10-22T03:42:09Z`, `listingValidatedBranch main` and an
-`automatedSecurityBaseline` block at the same commit with `outcome passed`;
-the `verificationCommit` / `verificationCheckedAt` fields the paragraph above
-cites are no longer in the catalog's shape, so re-read it before quoting
-either name. The live install was already on 0.14.3. 0.15.0 (`main`
-e710341) followed the same day, filed as its own request; 0.14.3 stays the
-verified snapshot until a maintainer actions it.
-0.16.0 (`main` 103fa68) was cut on 2026-11-01 on the owner's word with
-#12636 still pending, which makes #12636 stale; it stays open (F-M3-4), and
-0.16.0's own request was filed on the owner's word on 2026-11-01 as
-#13611 (validated, its automated baseline passed). 0.17.0 (`main` 787a33b)
-was cut on 2026-11-02 on the owner's word ("Push dev and cut 0.17.0") with
-#13611 and #12636 both still pending, which makes #13611 stale too; neither
-is closed (F-M3-4), and 0.17.0's own request is filed only on the owner's
-word. 0.14.3 is still the verified snapshot.
+**Since 2026-10-26T02:15:38Z the verified snapshot is 0.15.0 (e710341)**, and
+this file said 0.14.3 for a week after it moved (F-M3-26). 0.14.3 (205ee12)
+was verified on 2026-10-22, when #12474 closed `approved-and-verified` by the
+marketplace's automated publication, the first approval since 0.12.0. On
+2026-10-25 at 17:56Z the maintainer edited our stale 0.14.2 request #11935,
+changing its Target commit to e710341, which was then our `main`, and
+approved it at 01:42Z on the 26th (20:42 CDT on the 25th). The publication
+promoted e710341 and closed #11935 with "Updated and verified IPTV", which
+names no commit, and it left #12636, 0.15.0's own request, open and never
+actioned. So read the marketplace's files, not its issues: `registry.json` on
+its `main`, the entry under `sources` whose `repo` is ours, for
+`listingValidatedCommit`, `listingValidatedAt` and
+`automatedSecurityBaseline`; and `site/catalog.json`, the entry whose `id` is
+ours, which carries the `verificationCommit` and `verificationCheckedAt`
+cited above (today e710341 and 2026-10-26T02:15:38Z) and, beside them,
+`verificationCoverage`, which reads `update-unverified` while the commit the
+catalog last observed on our `main` (`upstreamObservedCommit`) is not the
+snapshot, with `verificationStatus` then `unverified` beside
+`verificationSnapshotStatus` `verified`, so quote the snapshot field. The marketplace's code, read at its 5e0908ce (the approval
+scripts unchanged since 2026-10-01), publishes a request only while its
+Target commit equals our live default-branch HEAD, checked at validation and
+again at approval. It never re-points a request itself, it refuses one whose
+target is already the listing, and publication closes only the issue that
+was labelled. 0.16.0 (`main` 103fa68, 2026-11-01) and 0.17.0 (`main`
+787a33b, 2026-11-02) were cut on the owner's word, and their requests were
+filed on the owner's word: #13611 and #13709, each validated with its
+baseline passed. They stay open beside #12636, and we close none (F-M3-4). Of
+the three, only #13709 can be approved as filed, and only while `main` stays
+at 787a33b. #12636 and #13611 could be approved only if a Target commit were
+edited to the HEAD of that day, by a maintainer, as he edited #11935, or by
+us.
 
 ## Branches: `dev` is the tree, `main` is the artifact
 
@@ -110,7 +121,9 @@ Consequences you must respect:
   (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
   GitHub's latest Release object, not the newest tag, and it read v0.7.0 for
-  six weeks because the Releases stopped there (backfilled 2026-10-31).
+  six weeks because the Releases stopped there (backfilled 2026-10-31; the
+  catalog re-reads it only when a request of ours is published, so it still
+  read v0.7.0 on 2026-11-02, F-M3-27).
   `build` refuses a heading that names another
   version or carries another day's date, which is how 0.8.0 came to ship
   release notes dated the day before it existed (D-REL-4).
@@ -168,6 +181,10 @@ Consequences you must respect:
   **This hold ended on 2026-11-01**, when the owner lifted it to cut 0.16.0
   with #12636 still pending: moving `main` makes #12636 stale, we do not
   close it (F-M3-4), and 0.16.0 files its own request on the owner's word.
+  **[Its purpose was met on 2026-10-26** (UTC), unseen until 2026-11-02:
+  the maintainer re-pointed #11935 to e710341 and approved it, so 0.15.0
+  was the verified snapshot and #12636, though never actioned, could no
+  longer be approved as filed (F-M3-26).]
 - **No release while the D-A11Y-1 exception stands (product owner,
   2026-10-31).** The system update of that day fired the accessibility
   premise tripwire, and the installed Quickshell carries 916a0dd, so D-A11Y-1
