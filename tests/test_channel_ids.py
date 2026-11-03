@@ -61,9 +61,10 @@ class ChannelIdFixtureTest(unittest.TestCase):
 
     def test_fixture_is_not_empty(self):
         # A fixture that fails to load would make every case below vacuous.
-        self.assertGreaterEqual(len(self.fixture["vectors"]), 9)
-        self.assertGreaterEqual(len(self.fixture["states"]), 5)
-        self.assertGreaterEqual(len(self.fixture["folds"]), 14)
+        self.assertGreaterEqual(len(self.fixture["vectors"]), 11)
+        self.assertGreaterEqual(len(self.fixture["states"]), 6)
+        self.assertGreaterEqual(len(self.fixture["folds"]), 19)
+        self.assertEqual(len(self.fixture["foldSpace"]), 29)
 
     def test_the_two_folds(self):
         """Search folds punctuation away; the id fold keeps + and *.
@@ -79,6 +80,30 @@ class ChannelIdFixtureTest(unittest.TestCase):
             with self.subTest(row["name"]):
                 self.assertEqual(helper.normalize_id_text(row["name"]), row["id"])
                 self.assertEqual(helper.normalize_text(row["name"]), row["search"])
+
+    def test_fold_space_is_the_fixture_list(self):
+        """D-ID-5: both folds' whitespace is the fixture's list, at every BMP
+        code point (node: "both folds collapse exactly the fixture's
+        whitespace ..."), not this interpreter's `\\s`, which the model's
+        engine does not share and a later CPython may change under every
+        stored id. No astral code point is whitespace to either runtime,
+        measured. Punctuation is judged after canonical decomposition, as the
+        fold judges it: U+037E and U+1FEF decompose to `;` and a backquote.
+        """
+        import unicodedata
+        space = set(self.fixture["foldSpace"])
+        wrong = {"id": [], "search": []}
+        for cp in range(0x10000):
+            if 0xD800 <= cp <= 0xDFFF:
+                continue
+            base = unicodedata.normalize("NFD", chr(cp))
+            punct = len(base) == 1 and "!" <= base <= "~" and not base.isalnum()
+            text = "a" + chr(cp) + "b"
+            if (helper.normalize_id_text(text) == "a b") != (cp in space or (punct and base not in "+*")):
+                wrong["id"].append(cp)
+            if (helper.normalize_text(text) == "a b") != (cp in space or punct):
+                wrong["search"].append(cp)
+        self.assertEqual(wrong, {"id": [], "search": []})
 
     def test_scheme1_ids(self):
         for vector in self.fixture["vectors"]:

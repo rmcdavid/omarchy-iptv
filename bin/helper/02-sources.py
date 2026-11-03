@@ -1062,8 +1062,9 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
 def name_id_key(name: Any) -> str:
     """The `n:` base of a channel name, or "" when the name cannot key one.
 
-    Mirrors Model.nameIdKey, except where the two runtimes' own tables
-    differ: the regex whitespace class and lower-casing (D-ID-5, open). The
+    Mirrors Model.nameIdKey, except where the two runtimes' lower-casing
+    tables differ (D-SRC-12; the whitespace is one enumerated list in both
+    since D-ID-5). The
     name is normalized through the id fold, normalize_id_text, so re-casing a
     title (outside the hundred or so codepoints whose upper or title case
     does not lower back to them, such as the fi ligature, the long s, the

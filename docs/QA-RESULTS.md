@@ -17460,3 +17460,53 @@ to be this bug and already Closed / Fixed for 6.8.10, 6.12.1 and 6.13 with
 no 6.11.x fix version -- a comment asking for one and recording the
 memory-exhaustion half is drafted in `docs/ARCHITECTURE.md` section 6 and
 waits on a tracker login.
+
+## D-ID-5, 2026-11-03: the shell reads the helper's channel ids, and both folds' whitespace is enumerated
+
+The owner said "fix d-id-5". The defect is on the board, along with what was measured before the fix. This section is the evidence for the fix and for the sibling search.
+
+**The remap.** `Model.channelIdRemap` used to recompute the scheme-2 ids with the model's own fold. It now reads them off the rows: a row's scheme-1 id maps to `Model.channelId(row)`, the `id` the helper wrote into channels.json, when the first is `u:` and the second `n:`. Over 10,000 labelled rows in node it takes 20.5-31.9 ms, three runs. That cost is URL hashing, which the map still needs to know each row's scheme-1 id.
+
+**The fold classes, over every code point.** The whitespace is written out at the head of `_PUNCT` and `_ID_PUNCT` in the helper and `PUNCT_RE` and `ID_PUNCT_RE` in the model. HEAD's classes and the tree's were compared over U+0000-U+10FFFF, with surrogates skipped in node.
+
+| | id fold | search fold |
+|---|---|---|
+| helper, HEAD against the tree | no code point differs | no code point differs |
+| model, HEAD against the tree | U+001C, U+001D, U+001E, U+001F, U+0085, U+FEFF | the same six |
+
+CPython 3.14.8's `\s` is 29 code points. node 26.8.1's `\s` (with the `u` flag, over all planes) is 25, and so is Qt 6.12 V4's, as the review's sibling lens measured. Neither runtime has an astral whitespace code point. The 29 are the fixture's `foldSpace`. The review's fold lens also ran six helper functions at HEAD and on the tree over every code point and found 0 differences: `normalize_text`, `normalize_id_text`, `search_key`, `epg_name_key`, `bare_name_key` and `epg_name_text`.
+
+**The tests, against the code before the fix.** HEAD 70560ae was archived into a scratch tree, and the new tests and the two fixtures were copied over it.
+
+| suite | HEAD 70560ae | the tree |
+|---|---|---|
+| node, tests/Model.test.js | 24 failures of 3,337 | 0 of 3,337 |
+| QML spec, Qt 6.12.0 V4 | 1 failure of 85 (`test_foldSpaceIsTheHelpersInV4`) | 0 of 85 |
+| python, test_channel_ids and test_state | 0 failures | 0 |
+
+The python suites are green at HEAD by design, because the helper's fold did not change. These mutations were run on copies of the final tree:
+
+| mutation | red |
+|---|---|
+| U+0085 taken out of both helper classes | python 9 of 126 (test_channel_ids, test_state) |
+| U+0085 taken out of both model classes | node 6 of 3,337, spec 1 of 85 |
+| the model's remap recomputes, the old body over the new fold | node 12 of 3,337 |
+| the `u:` condition dropped | node 1 of 3,337 |
+| the `n:` condition replaced by `current !== old[i]` | node 4 of 3,337 (24 with the condition dropped outright) |
+
+Four of the checks are end-to-end symptom checks: "every remap target is a row's id in the index", "favourites saved today survive the apply", and the D-ID-5 vector's remap and state remap. They go red at HEAD, where both halves were missing, and stay green with either half reverted alone. Each half has its own checks above. The review's tests lens re-ran both columns of the first table independently and recomputed every new fixture literal with its own fnv1a32. It found the same counts.
+
+**What the fold change reaches.** The review's fold lens listed every consumer of the four classes in both mirrors. One persisted value moves: the shell's reading of a saved search, through `tokenize`. It now treats the six code points as the helper's reader always did, `normalize_state` through `saved_search_terms`: it folds the five that are whitespace, keeps U+FEFF, and de-duplicates on the folded terms. So the next shell save converges on the helper's answer. Everything else the model folds is transient search or display.
+
+**The sibling search (rule 15).** The review's sibling lens grepped two shapes across model/*.mjs, *.qml and bin/helper/*.py. The first was a JavaScript `\s`, `.trim()`, `isSpaceAt` or `trimEndSpace` that mirrors a Python `\s`, `strip()`, `split()` or `isspace()`. The second was the shell recomputing a value the helper already wrote. It ran both sides of every mirrored pair on the six code points. It measured that node's `String.prototype.trim` is the 25, and that V4's is those 25 plus U+0085. The review's skeptic re-ran each case it found before it was filed, and the claims check re-ran them again.
+
+- **Found:**
+  - D-STATE-2: the mirrored edge trims. The hidden groups are the persisted case. The rest are the active key, the logo survey, the listen warning and the name cleaner.
+  - D-STATE-3: the saved-search query cap, cut in UTF-16 units by the model and in code points by the helper.
+- **Closed by this fix:** the old remap ran `nameIdKey` over names `Model.cleanName` had already trimmed. For five rows, `<FEFF>News`, `News`, `<FEFF>`, `Sport<FEFF>-` and `Movies`, it made 2 entries where the helper made 5, one of them to an id no row carries. The fixed remap makes the helper's 5, none dangling.
+- **Cleared:** the id paths, which read the stored tvg-id, url and id verbatim; fnv1a32; channel play; the mpvArgs split, which is JavaScript only; the EPG and logo lookups by verbatim key; the explicit-set strips (`sanitizeInput`, labels); Python-only strips with no mirror; and display-only trims of helper replies.
+- **Left alone as a residual:** a channels.json holding a non-object row would shift the shell's `#n` suffixes against the helper's. The helper writes dict rows only, and the model's comment says so. The review's skeptic measured the mechanism and judged it unreachable from anything the system writes.
+
+**The owner's data, read-only, counts only.** One source, 1,495 rows. No name holds U+001C-U+001F, U+0085 or U+FEFF, or one of D-SRC-12's 28 code points, or any code point unassigned in Unicode 16.0.0. There are no favourites and no session record, and lastPlayed is a `t:` id a row carries. Of ten recents, one is carried by no cached row, and it is a `t:` id, which is not name-derived. So D-ID-5 did not reach this install.
+
+**F-GATE-20, found by the same review.** The model regex guard graded `new RegExp("^" + X + "...")` as its first literal alone. The fix's first draft built both classes that way, and `[` alone does not parse. `test_f_gate_20_a_literal_an_expression_goes_on_from_is_a_built_pattern` fails against the guard at 70560ae (1 of 12) and passes on the tree.

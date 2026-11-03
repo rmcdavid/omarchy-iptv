@@ -168,14 +168,29 @@ TestCase {
   }
 
   function test_channelIdRemapIsIdempotent() {
+    // Labelled as channels.json carries them: the remap reads each row's own
+    // id rather than refold its name (D-ID-5).
     var rows = [{ name: "US: ESPN", url: "http://line.test/u/p/1" }]
     var before = Model.cloneState(Model.emptyState(), { favorites: Model.channelIds(rows, Model.CHANNEL_ID_SCHEME_LEGACY) })
+    rows[0].id = Model.channelIds(rows)[0]
     var once = Model.remapChannelIds(before, rows)
     compare(once.moved, 1)
     compare(once.state.favorites, ["n:bc9e3e3d"])
     var twice = Model.remapChannelIds(once.state, rows)
     compare(twice.moved, 0)
     compare(twice.state.favorites, ["n:bc9e3e3d"])
+  }
+
+  // D-ID-5 in the shell's own engine: the folds' whitespace is the enumerated
+  // list (tests/fixtures/channel-ids.json, checked at every BMP code point by
+  // node and python), not V4's `\s`, which follows ECMAScript's. These are the
+  // six code points on which ECMAScript's `\s` and CPython's disagree.
+  function test_foldSpaceIsTheHelpersInV4() {
+    compare(Model.normalizeIdText("a\u001cb\u001dc\u001ed\u001fe"), "a b c d e")
+    compare(Model.normalizeIdText("News\u0085 HD"), "news hd")
+    compare(Model.normalizeText("News\u0085 HD"), "news hd")
+    compare(Model.normalizeIdText("News\ufeffHD"), "news\ufeffhd")
+    compare(Model.normalizeText("News\ufeffHD"), "news\ufeffhd")
   }
 
   function test_displayNameNeverUrl() {

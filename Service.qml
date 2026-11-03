@@ -2329,9 +2329,10 @@ Item {
                    chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta,
                    // D-ID-3. The scheme-1 -> scheme-2 map of THIS list, computed
                    // once here where the O(n) parse is already paid: it hashes
-                   // every URL and folds every name, tens of milliseconds on 10,000 rows in
-                   // node, which no LRU hit inside the 150 ms switch budget can
-                   // afford. The map depends on the channels alone; what it is
+                   // every URL, tens of milliseconds on 10,000 rows in node, which
+                   // no LRU hit inside the 150 ms switch budget can afford. It
+                   // reads each row's own id, the one the helper wrote, and folds
+                   // no name (D-ID-5). The map depends on the channels alone; what it is
                    // applied to (the state) is decided at apply time below.
                    idRemap: Model.channelIdRemap(channels) }
     }

@@ -51,7 +51,8 @@ member spelling of the constructor (`obj.RegExp(`, `this.RegExp(`), and a
 pattern reaching a RegExp through any other call (`Reflect.construct`, a
 wrapper function). The JavaScript pattern is read by Python's `re` parser after a
 small translation (named groups, `[^]`, `\\/`, `\\u{...}`, the `i`/`s`/`m`
-flags); the two engines' `\\s` differ by five code points, which cannot turn
+flags); the two engines' `\\s` differ by six code points (U+001C-U+001F and
+U+0085 in Python's only, U+FEFF in JavaScript's only), which cannot turn
 a non-overlap into an overlap for the classes the model uses, and a pattern
 the parser cannot read is a problem, not a pass. One sample character at a
 time is the only input a pattern is ever run on here.
@@ -187,6 +188,14 @@ def built_regexps(line):
         pattern, j = lit
         flags = ""
         rest = line[j:]
+        if rest.lstrip(" \t")[:1] not in (",", ")"):
+            # F-GATE-20: a literal that an expression goes on from
+            # (`"^" + X + "..."`) is not the pattern, the whole argument is.
+            # Grading the first literal alone graded GENERATED_NAME_RE as `^`
+            # and passed any pattern behind a prefix that parsed, so the
+            # argument goes to BUILT like any other expression.
+            out.append((None, "", argument_source(line, i)))
+            continue
         fm = re.match(r"\s*,\s*([\"'])([a-z]*)\1", rest)
         if fm:
             flags = fm.group(2)

@@ -23,6 +23,20 @@
     "written as \\u escapes: CLAUDE.md rule 8, ASCII only in .py and .js,",
     "and this file is read by both."
   ],
+  "foldSpaceComment": [
+    "D-ID-5. The whitespace both folds collapse, as code points: the 29 that",
+    "CPython 3.14's `\\s` matched when the class was enumerated, so no id the",
+    "helper had written moved. JavaScript's `\\s` is not this set (it matches",
+    "U+FEFF and not U+001C-U+001F or U+0085), so the model's folds read their",
+    "own `\\s` and keyed those names differently until both were enumerated.",
+    "Both readers check every BMP code point: a fold collapses `a<c>b` to",
+    "`a b` exactly when c is in this list or decomposes to ASCII punctuation",
+    "the fold drops. The astral planes were measured once, in both runtimes,",
+    "and hold no whitespace (docs/QA-RESULTS.md, D-ID-5)."
+  ],
+  "foldSpace": [9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 133, 160, 5760,
+                8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+                8232, 8233, 8239, 8287, 12288],
   "folds": [
     { "name": "USA  AMC", "id": "usa amc", "search": "usa amc" },
     { "name": "USA: AMC+", "id": "usa amc+", "search": "usa amc" },
@@ -37,7 +51,12 @@
     { "name": "+++", "id": "+++", "search": "" },
     { "name": "***", "id": "***", "search": "" },
     { "name": "Channel 11", "id": "channel 11", "search": "channel 11" },
-    { "name": "!@#$%^&()", "id": "", "search": "" }
+    { "name": "!@#$%^&()", "id": "", "search": "" },
+    { "name": "News\u0085HD", "id": "news hd", "search": "news hd" },
+    { "name": "News\u001f\u001c HD", "id": "news hd", "search": "news hd" },
+    { "name": "News\ufeffHD", "id": "news\ufeffhd", "search": "news\ufeffhd" },
+    { "name": "A\u001e+\u001dB", "id": "a + b", "search": "a b" },
+    { "name": "\u0085News\u3000", "id": "news", "search": "news" }
   ],
   "vectors": [
     {
@@ -195,6 +214,21 @@
       "remap": {},
       "survivesScheme1": 5,
       "survivesScheme2": 5
+    },
+    {
+      "name": "D-ID-5: a name holding whitespace only one engine's `\\s` knew keys the same in both",
+      "comment": ["The helper folds U+0085 and U+001F and not U+FEFF, so the first two names", "are one name and keep their URL ids, and the last two are unique. At", "70560ae the model's `\\s` did the opposite on all three: it kept the first", "name apart and moved its URL id to an `n:` id no row carries, folded the", "third into the second's name so the third's URL id was not moved to the", "id the helper gave it, and moved the fourth to an `n:` id no row carries."],
+      "channels": [
+        { "name": "News\u0085 HD", "url": "http://line.example.test/u5er/p4ssw0rd/201" },
+        { "name": "News HD", "url": "http://line.example.test/u5er/p4ssw0rd/202" },
+        { "name": "News\ufeffHD", "url": "http://line.example.test/u5er/p4ssw0rd/203" },
+        { "name": "Sport\u001f1", "url": "http://line.example.test/u5er/p4ssw0rd/204" }
+      ],
+      "scheme1": ["u:d28f81c1", "u:cf8f7d08", "u:d08f7e9b", "u:d58f867a"],
+      "scheme2": ["u:d28f81c1", "u:cf8f7d08", "n:0f836b71", "n:d696c6f2"],
+      "remap": { "u:d08f7e9b": "n:0f836b71", "u:d58f867a": "n:d696c6f2" },
+      "survivesScheme1": 0,
+      "survivesScheme2": 2
     }
   ],
   "states": [
@@ -306,6 +340,23 @@
         "session": null
       },
       "moved": 3
+    },
+    {
+      "name": "D-ID-5: favourites on the two rows whose names collide stay where they are",
+      "vector": 10,
+      "before": {
+        "favorites": ["u:d28f81c1", "u:cf8f7d08"],
+        "recents": [{ "id": "u:d08f7e9b", "name": "News\ufeffHD", "at": 60 }],
+        "lastPlayed": { "id": "u:d58f867a", "name": "Sport\u001f1", "at": 60 },
+        "session": null
+      },
+      "after": {
+        "favorites": ["u:d28f81c1", "u:cf8f7d08"],
+        "recents": [{ "id": "n:0f836b71", "name": "News\ufeffHD", "at": 60 }],
+        "lastPlayed": { "id": "n:d696c6f2", "name": "Sport\u001f1", "at": 60 },
+        "session": null
+      },
+      "moved": 2
     }
   ]
 }

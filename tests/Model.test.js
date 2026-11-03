@@ -170,7 +170,18 @@ check("channelId null", Model.channelId(null), "")
 // drives against bin/omarchy-iptv, so the two implementations are pinned to
 // one file rather than to each other.
 const idFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/channel-ids.json"), "utf8"))
-check("channel-ids fixture loaded", [idFixture.vectors.length >= 9, idFixture.states.length >= 5, idFixture.folds.length >= 14], [true, true, true])
+check("channel-ids fixture loaded", [idFixture.vectors.length >= 11, idFixture.states.length >= 6, idFixture.folds.length >= 19, idFixture.foldSpace.length], [true, true, true, 29])
+// The rows as channels.json carries them: the helper's ids written on, which
+// tests/test_channel_ids.py proves are each vector's scheme2. That is what the
+// shell's remap reads (D-ID-5), so it is what these checks hand it.
+function labelled(vector) {
+  return vector.channels.map(function (channel, i) {
+    const copy = {}
+    for (const key in channel) copy[key] = channel[key]
+    copy.id = vector.scheme2[i]
+    return copy
+  })
+}
 // Folding is two jobs. SEARCH drops punctuation, so a user typing "amc"
 // reaches "USA: AMC+"; the ID fold keeps `+` and `*`, because those are the
 // characters that tell two live streams apart. The first version of this
@@ -191,8 +202,22 @@ idFixture.vectors.forEach(function (vector) {
     return Model.channelIds(vector.channels)
   }, vector.scheme2)
   checkCall("remap: " + vector.name, function () {
-    return Model.channelIdRemap(vector.channels)
+    return Model.channelIdRemap(labelled(vector))
   }, vector.remap)
+  // D-ID-5: the target is the id a row answers to, so a row with no `id`
+  // (channelId's per-row id, never `n:`) moves nothing, and every target is
+  // an id the service's own index holds over the rows it prepared. The index
+  // check is true by construction of the new remap; it is the symptom, red at
+  // 70560ae on the D-ID-5 vector and green with either half alone reverted.
+  checkCall("remap of rows the helper did not label moves nothing: " + vector.name, function () {
+    return Model.channelIdRemap(vector.channels)
+  }, {})
+  checkCall("every remap target is a row's id in the index: " + vector.name, function () {
+    const rows = Model.prepareChannels(labelled(vector))
+    const index = Model.indexById(rows)
+    const remap = Model.channelIdRemap(rows)
+    return Object.keys(remap).filter(function (key) { return index[remap[key]] === undefined })
+  }, [])
   checkCall("a password rotation, both schemes: " + vector.name, function () {
     const after = vector.channels.map(function (channel) {
       const copy = {}
@@ -212,13 +237,13 @@ idFixture.vectors.forEach(function (vector) {
   // channel and a second pass has nothing to move.
   checkCall("no moved id is also a new id: " + vector.name, function () {
     const fresh = Model.channelIds(vector.channels)
-    return Object.keys(Model.channelIdRemap(vector.channels)).filter(function (key) { return fresh.indexOf(key) !== -1 })
+    return Object.keys(Model.channelIdRemap(labelled(vector))).filter(function (key) { return fresh.indexOf(key) !== -1 })
   }, [])
 })
 idFixture.states.forEach(function (one) {
   const vector = idFixture.vectors[one.vector]
   checkCall("state remap: " + one.name, function () {
-    const result = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), vector.channels)
+    const result = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), labelled(vector))
     return {
       moved: result.moved,
       favorites: result.state.favorites,
@@ -234,11 +259,67 @@ idFixture.states.forEach(function (one) {
     session: one.after.session
   })
   checkCall("state remap runs twice with no marker: " + one.name, function () {
-    const once = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), vector.channels)
-    const twice = Model.remapChannelIds(once.state, vector.channels)
+    const once = Model.remapChannelIds(Model.cloneState(Model.emptyState(), one.before), labelled(vector))
+    const twice = Model.remapChannelIds(once.state, labelled(vector))
     return { moved: twice.moved, same: JSON.stringify(twice.state) === JSON.stringify(once.state) }
   }, { moved: 0, same: true })
 })
+// D-ID-5: both folds' whitespace is the fixture's list, not the engine's
+// `\s`, checked at every BMP code point (python:
+// test_fold_space_is_the_fixture_list). No astral code point is whitespace
+// to either runtime's `\s`, measured, and a scan of all 1.1 million costs
+// seconds a run. Punctuation is judged after canonical decomposition, as the
+// fold judges it: U+037E and U+1FEF decompose to `;` and a backquote.
+checkCall("both folds collapse exactly the fixture's whitespace and the ASCII punctuation each drops", function () {
+  const space = new Set(idFixture.foldSpace)
+  const wrong = { id: [], search: [] }
+  for (let cp = 0; cp < 0x10000; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue
+    const ch = String.fromCharCode(cp)
+    const base = ch.normalize("NFD")
+    const punct = base.length === 1 && base >= "!" && base <= "~" && !/[0-9A-Za-z]/.test(base)
+    const id = Model.normalizeIdText("a" + ch + "b") === "a b"
+    const search = Model.normalizeText("a" + ch + "b") === "a b"
+    if (id !== (space.has(cp) || (punct && base !== "+" && base !== "*"))) wrong.id.push(cp)
+    if (search !== (space.has(cp) || punct)) wrong.search.push(cp)
+  }
+  return wrong
+}, { id: [], search: [] })
+// D-ID-5: the shell's remap reads the ids the helper wrote and never refolds
+// a name. These rows carry labels this side's own fold would not have made,
+// which is exactly what a disagreement between the two folds looks like.
+checkCall("D-ID-5: a row the helper left on its URL id is not moved, whatever this side's fold says", function () {
+  const rows = [{ name: "News HD", url: "http://h.test/1", id: "u:01794bed" },
+                { name: "Sport", url: "http://h.test/2", id: "u:fe794734" }]
+  return Model.channelIdRemap(Model.prepareChannels(rows))
+}, {})
+checkCall("D-ID-5: a row the helper keyed by name moves to the id it carries, not one computed here", function () {
+  return Model.channelIdRemap(Model.prepareChannels([{ name: "News HD", url: "http://h.test/1", id: "n:0000abcd" }]))
+}, { "u:01794bed": "n:0000abcd" })
+checkCall("D-ID-5: only scheme 2's own substitution, a URL id to a name id, is ever a move", function () {
+  // Labels no helper writes: a unique tvg-id row carrying a name id, a URL
+  // row carrying a tvg id, and one carrying another URL id. Each answers to
+  // the id it carries, but none is the substitution, so no reference moves.
+  const rows = [{ name: "A", tvgId: "a.tv", url: "http://h.test/1", id: "n:0000abcd" },
+                { name: "B", url: "http://h.test/2", id: "t:b.tv" },
+                { name: "C", url: "http://h.test/3", id: "u:00000003" }]
+  return Model.channelIdRemap(Model.prepareChannels(rows))
+}, {})
+// An end-to-end symptom check: it goes red at 70560ae, where both halves were
+// missing, and stays green with either half alone reverted, because the
+// enumerated fold then agrees with the labels or the remap reads them. The
+// three checks above isolate the remap; the fold rows, the property check and
+// the QML spec isolate the fold.
+checkCall("D-ID-5: favourites saved today survive the apply, read the way the service reads channels.json", function () {
+  const vector = idFixture.vectors.find(function (v) { return v.name.indexOf("D-ID-5:") === 0 })
+  if (!vector) return "the fixture's D-ID-5 vector is missing"
+  const text = JSON.stringify({ version: 1, generatedAt: 1, channels: labelled(vector) })
+  const rows = Model.prepareChannels(Model.parseChannels(text).channels)
+  const state = Model.cloneState(Model.emptyState(), { favorites: rows.map(function (r) { return r.id }) })
+  const out = Model.remapStateIds(state, Model.channelIdRemap(rows))
+  const index = Model.indexById(rows)
+  return { moved: out.moved, dangling: out.state.favorites.filter(function (id) { return index[id] === undefined }) }
+}, { moved: 0, dangling: [] })
 checkCall("nameIdKey folds case, Latin accents and the punctuation in US: ESPN and Tele-Quebec", function () {
   return [Model.nameIdKey("US: ESPN") === Model.nameIdKey("us espn"),
     Model.nameIdKey("Tele-Quebec") === Model.nameIdKey("T\u00e9l\u00e9 Qu\u00e9bec")]
@@ -1414,7 +1495,8 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
 // proves only that the two calls are spelled, with the loaded state as the
 // argument of the second and a write gated on `moved`. It is not
 // Model.remapChannelIds, the one-call composition, because that hashes every
-// URL and folds every name on each call (tens of milliseconds on 10,000 rows in node, paid on every LRU hit) and
+// URL on each call (tens of milliseconds on 10,000 rows in node, paid on every LRU hit; it also folded every name
+// until D-ID-5) and
 // applyChannels runs on every switch, LRU hits included, inside a 150 ms
 // budget; so the map is computed once per parsed list and applied per apply.
 // The observation that the join WORKS -- favourites resolving 7 rows not 4,

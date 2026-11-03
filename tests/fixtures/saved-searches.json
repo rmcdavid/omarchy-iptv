@@ -56,6 +56,26 @@
         "h"
       ],
       "why": "ten words, capped at MAX_SAVED_TERMS 8"
+    },
+    {
+      "query": "x\u001cy",
+      "terms": [
+        "x",
+        "y"
+      ],
+      "why": "D-ID-5: U+001C is whitespace to both folds since they were enumerated; the model's engine `\\s` did not know it"
+    },
+    {
+      "query": "\u0085",
+      "terms": [],
+      "why": "D-ID-5: U+0085 alone folds to nothing on both sides"
+    },
+    {
+      "query": "\ufeff",
+      "terms": [
+        "\ufeff"
+      ],
+      "why": "D-ID-5: U+FEFF is whitespace to neither fold, though the model's engine `\\s` matches it"
     }
   ],
   "recordComment": "savedSearchRecord / normalize_saved_search: a query that folds to nothing is not a saved search; `at` truncates toward zero on both sides.",
@@ -110,6 +130,33 @@
         "at": 5
       },
       "out": null
+    },
+    {
+      "in": {
+        "query": "\u0085",
+        "at": 5
+      },
+      "out": null
+    },
+    {
+      "in": {
+        "query": "x\u001cy",
+        "at": 5
+      },
+      "out": {
+        "query": "x\u001cy",
+        "at": 5
+      }
+    },
+    {
+      "in": {
+        "query": "\ufeff",
+        "at": 5
+      },
+      "out": {
+        "query": "\ufeff",
+        "at": 5
+      }
     }
   ],
   "channelsComment": "Playlist order is the order below. Counts are exact by construction. The LAST entry repeats the first: real playlists list the same channel twice, and without it the `seen` de-duplication in savedSearchChannels is unreachable -- one iteration per channel with a break on the first matching term already pushes each row once, so a mutation removing `seen` stayed green.",

@@ -42,11 +42,24 @@ var FOLD = (function() {
   return map
 })()
 
-// Whitespace (the engine's `\s`, which is not Python's: D-ID-5) and ASCII
-// punctuation collapse to one space; every other character (any script) is
-// kept, so Cyrillic/Greek/Arabic names stay searchable. Mirrors the helper's
-// _PUNCT, except on that whitespace.
-var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
+// The whitespace both folds collapse (D-ID-5), written out at the head of
+// both classes: ENUMERATED, the same 29 code points as the helper's _PUNCT
+// and _ID_PUNCT, the set CPython 3.14's `\s` matched when it was written
+// down. Not the engine's own `\s`: that matches U+FEFF and not U+001C-U+001F
+// or U+0085, so for a name holding one of those six the two mirrors folded
+// different text. Python's set rather than the union, because the helper's
+// fold is the one every `n:` id in channels.json was hashed from, so its ids stay where
+// they are and this side moves to meet them. Frozen in both, so no engine's or
+// interpreter's Unicode update can move the WHITESPACE a fold collapses;
+// lower-casing and canonical decomposition still follow each runtime's own
+// tables (D-SRC-12; D-ID-6 for the helper's). The channel-ids.json fixture
+// (dev branch) holds the list, and both suites check every BMP code point of
+// both folds against it.
+//
+// That whitespace and ASCII punctuation collapse to one space; every other
+// character (any script) is kept, so Cyrillic/Greek/Arabic names stay
+// searchable. Mirrors the helper's _PUNCT.
+var PUNCT_RE = /[\t\n\v\f\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-\/:-@\[-`{-~]+/g
 
 // The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
 // Folding is two jobs, not one. SEARCH wants punctuation gone: a user typing
@@ -59,9 +72,8 @@ var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 // Keeping them takes the four lists from 75 colliding groups / 155 rows to
 // 65 / 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#`
 // and `@` were measured the same way and change nothing on any of the four,
-// so they are not in the class. Mirrors the helper's _ID_PUNCT, except on the
-// whitespace the two engines' `\s` disagree on (D-ID-5).
-var ID_PUNCT_RE = /[\s!-\)\,-\/:-@\[-`{-~]+/g
+// so they are not in the class. Mirrors the helper's _ID_PUNCT.
+var ID_PUNCT_RE = /[\t\n\v\f\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-\)\,-\/:-@\[-`{-~]+/g
 
 function str(value) {
   return String(value === undefined || value === null ? "" : value)
@@ -334,19 +346,47 @@ function substituteNameIds(channels, legacy) {
   return out
 }
 
-// {scheme-1 id: scheme-2 id} for the rows the scheme change moves.
+// {scheme-1 id: scheme-2 id} for the rows the scheme change moved, read off
+// the rows themselves (D-ID-5): the target is the id the row ANSWERS to,
+// channelId(row), which is the `id` the helper wrote into channels.json, and
+// a row enters the map only when that id is an `n:` id and its scheme-1 id is
+// a `u:` id, the one substitution scheme 2 makes. Every target is therefore a
+// key of indexById over the same rows, and nothing here folds a name.
+//
+// It used to recompute the scheme-2 ids with this file's own fold, and the
+// two folds are not the same function on every name: whitespace and
+// lower-casing are each runtime's own tables (D-ID-5, D-SRC-12). Where they
+// differed the map moved a reference to an `n:` id no row carried, and the
+// service saved it. A row the helper left on its URL id, because under ITS
+// fold the name collides, was moved too, so a favourite saved today was lost
+// at the next apply. The helper's own remap (channel_id_remap, under
+// --state-dir) runs over the rows it labels in the same pass, so the TARGETS
+// of the two maps agree by construction. The KEYS are still this side's
+// scheme-1 rule, legacyChannelIds, a mirror of the helper's
+// legacy_channel_ids; it folds no name (a tvg-id compared as it is, fnv1a32
+// over the URL's UTF-8, a `#n` suffix by position), and the shared
+// fixture's scheme-1 vectors pin it. The keys are built over the rows the
+// service prepared, which are the file's rows unless channels.json holds a
+// non-object row, which the helper never writes (prepareChannels skips one,
+// and a `#n` suffix after it would then shift).
+//
+// A row with no `id` (one built in memory rather than read from
+// channels.json) answers to channelId's per-row id, which has no `#n` suffix
+// and is never an `n:` id, so it moves nothing.
 //
 // Idempotent with no marker anywhere in state.json, and no schema change of
-// any kind. Because scheme 2 is a substitution (channelIds), every key of
-// this map is the scheme-1 id of a row that now answers to an `n:` id, and an
-// `n:` id is never a key -- so after one pass nothing in the state holds a
-// key and a second pass moves nothing. The node and python suites both pin
-// that invariant rather than trusting this paragraph.
+// any kind: every key is a `u:` id and every target an `n:` id, so an `n:` id
+// is never a key, after one pass nothing in the state holds a key, and a
+// second pass moves nothing. The node and python suites both pin that
+// invariant rather than trusting this paragraph.
 function channelIdRemap(channels) {
-  var old = legacyChannelIds(channels)
-  var fresh = substituteNameIds(channels, old)
+  var list = asList(channels)
+  var old = legacyChannelIds(list)
   var remap = keyedMap()
-  for (var i = 0; i < old.length; i++) if (old[i] !== fresh[i]) remap[old[i]] = fresh[i]
+  for (var i = 0; i < old.length; i++) {
+    var current = channelId(list[i])
+    if (old[i].indexOf("u:") === 0 && current.indexOf("n:") === 0) remap[old[i]] = current
+  }
   return remap
 }
 
@@ -410,8 +450,10 @@ function remapChannelIds(state, channels) {
 }
 
 // The helper assigns `id` when it writes channels.json (assign_ids over
-// channel_ids, which channelIds above mirrors but for D-ID-5's whitespace
-// and lower-casing gaps). This returns
+// channel_ids, which channelIds above mirrors except where the two runtimes'
+// lower-casing tables differ, D-SRC-12; nothing the shell runs calls
+// channelIds, and channelIdRemap reads these ids rather than recompute them,
+// D-ID-5). This returns
 // that id when the row carries one, as every row from channels.json does, and
 // otherwise the per-row half of scheme 1, for callers that build channels in
 // memory: the playlist-wide uniqueness tests cannot be answered from one row,

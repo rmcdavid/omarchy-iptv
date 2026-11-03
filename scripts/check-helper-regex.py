@@ -134,10 +134,10 @@ REVIEWED = [
      "linear: anchored match, fixed-width digit groups; the only run is \\s*, which a digit cannot "
      "extend, so it backs off at most once over its length on each of at most 8 ways through the "
      "three optional groups (_XMLTV_TIME)"),
-    (r"[\s!-/:-@\[-`{-~]+", "provider",
-     "linear: one class run and nothing after it (_PUNCT, search_key)"),
-    (r"[\s!-)\,-/:-@\[-`{-~]+", "provider",
-     "linear: one class run and nothing after it (_ID_PUNCT, the id and EPG name keys)"),
+    (r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-/:-@\[-`{-~]+", "provider",
+     "linear: one class run and nothing after it (_PUNCT, search_key; its whitespace enumerated by D-ID-5)"),
+    (r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-)\,-/:-@\[-`{-~]+", "provider",
+     "linear: one class run and nothing after it (_ID_PUNCT, the id and EPG name keys; its whitespace enumerated by D-ID-5)"),
     (r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
      r"|\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]"
      r"|\[\s*geo[\s-]*blocked\s*\]", "provider",

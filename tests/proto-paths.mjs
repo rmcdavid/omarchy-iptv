@@ -82,7 +82,7 @@ export function runProtoPaths(Model) {
   step("names", function () { return channels.map(function (c) { return c.name }) })
   step("ids", function () { return Model.channelIds(raw) })
   step("schemeOneIds", function () { return Model.channelIds(raw, Model.CHANNEL_ID_SCHEME_LEGACY) })
-  step("remap", function () { return Object.keys(Model.channelIdRemap(raw)).length })
+  step("remap", function () { return Object.keys(Model.channelIdRemap(channels)).length })
   step("remapState", function () {
     var r = Model.remapStateIds(st, {})
     return [r.moved, r.state.favorites, r.state.recents.map(function (x) { return x.id })]

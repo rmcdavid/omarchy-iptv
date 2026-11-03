@@ -1238,9 +1238,10 @@ def log(message: str) -> None:
 
 # ------------------------------------------------------- normalization
 # Must match the model's normalizeText/normalizeIdText/searchKey/fnv1a32
-# byte for byte. The folds do not, on the whitespace the two regex engines
-# classify differently and on the letters whose lower case the two runtimes'
-# Unicode tables disagree on (D-ID-5, open; D-SRC-12).
+# byte for byte. The folds do, except on the letters whose lower case the two
+# runtimes' Unicode tables disagree on (D-SRC-12): the whitespace class is
+# enumerated in both since D-ID-5, and the shell takes the ids this helper
+# writes rather than recompute them.
 
 FOLD_GROUPS = [
     ("\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u0101\u0103\u0105", "a"),
@@ -1262,7 +1263,17 @@ FOLD_GROUPS = [
     ("\u0153", "oe"),
 ]
 FOLD = {ch: to for chars, to in FOLD_GROUPS for ch in chars}
-_PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
+# The whitespace both folds collapse (D-ID-5), written out at the head of
+# _PUNCT and _ID_PUNCT below: the 29 code points `\s` matched on CPython 3.14
+# when it was enumerated, so no stored `n:` id moved when it was. Not `\s`
+# itself: that is this interpreter's Unicode tables, which the model's engine
+# does not share (its `\s` matches U+FEFF and not U+001C-U+001F or U+0085, so
+# for a name holding one of those six the two mirrors folded different text),
+# and which a later interpreter may change under every id hashed from them.
+# The same list heads PUNCT_RE and ID_PUNCT_RE in the model; the
+# channel-ids.json fixture (dev branch) holds it, and both suites check every
+# BMP code point of both folds against it.
+_PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-/:-@\[-`{-~]+")
 # The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
 # Folding is two jobs, not one. SEARCH wants punctuation gone -- a user typing
 # "amc" must reach "USA: AMC+" -- so _PUNCT and search_key stay exactly as they
@@ -1273,9 +1284,8 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 # them takes the four lists from 75 colliding name groups / 155 rows to 65 /
 # 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#` and `@`
 # were measured the same way and change nothing on any of the four, so they
-# are not in the class. Mirrors ID_PUNCT_RE in the model, except on the
-# whitespace the two engines' `\s` disagree on (D-ID-5).
-_ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
+# are not in the class. Mirrors ID_PUNCT_RE in the model.
+_ID_PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-)\,-/:-@\[-`{-~]+")
 
 
 # A channel NAME as the EPG matcher compares it: normalize_id_text with the
@@ -1418,8 +1428,9 @@ def epg_name_text(value: Any) -> str:
     <display-name> through clean_field before keying (D-EPG-8), and the
     playlist side keyed the raw channels.json name, which the M3U parse
     leaves holding a DEL or a C0 control (sanitize_input runs on user
-    input, not on playlist text). _ID_PUNCT folds `\\s`, so a tab keyed
-    the same from either side, but `\\x7f` and `\\x00-\\x1b` are not `\\s`:
+    input, not on playlist text). _ID_PUNCT folds whitespace (`\\s` then,
+    an enumerated list since D-ID-5), so a tab keyed the same from either side, but
+    `\\x7f`, `\\x00-\\x08` and `\\x0e-\\x1b` are not in it:
     a row and a display-name that both carried U+007F keyed differently
     and did not match, and a DEL on one side only matched a name without
     it on the other. Folding inside the key functions, so every caller
@@ -1535,9 +1546,9 @@ def normalize_text(value: Any) -> str:
     NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
     other script recomposes), ASCII punctuation to one space (D-QA-08).
     Mirrors the model's decompose()/normalizeText (NFD, not NFKD), except
-    where the two runtimes' own tables differ: the regex whitespace class and
-    lower-casing, whose gap moves with either runtime's Unicode version
-    (D-ID-5; D-SRC-12 measured 28 codepoints)."""
+    where the two runtimes' lower-casing tables differ, a gap that moves with
+    either runtime's Unicode version (D-SRC-12 measured 28 codepoints). The
+    whitespace is one enumerated list in both (D-ID-5)."""
     return fold_text(value, _PUNCT)
 
 

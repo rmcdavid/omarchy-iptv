@@ -165,6 +165,17 @@ class ModelRegexGuardTest(unittest.TestCase):
         self.assertIn("builds a pattern this guard cannot read", done.stdout)
         self.assertIn('prefix + "[0-9]+"', done.stdout)
 
+    def test_f_gate_20_a_literal_an_expression_goes_on_from_is_a_built_pattern(self):
+        # The first literal used to be graded as the whole pattern, so this
+        # passed as `[a-z]` whatever `run` holds.
+        done = run(self.file_with('var r = new RegExp("[a-z]" + run + "[a-z]*x")\n'))
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("builds a pattern this guard cannot read", done.stdout)
+        self.assertIn('"[a-z]" + run + "[a-z]*x"', done.stdout)
+        # A literal followed by its flags, or alone, is still read as a literal.
+        done = run(self.file_with('var r = new RegExp("[a-z]+x", "g")\nvar q = new RegExp("^a$")\n'))
+        self.assertEqual(done.returncode, 0, done.stdout)
+
     def test_a_pattern_the_parser_cannot_read_is_a_problem_not_a_pass(self):
         done = run(self.file_with('var r = /(?z)/\n'))
         self.assertEqual(done.returncode, 1, done.stdout)
