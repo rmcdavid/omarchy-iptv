@@ -379,6 +379,67 @@
           "https": 3
         }
       }
+    },
+    {
+      "name": "D-STATE-2: the reader's whitespace at an authority's edge is stripped, so the survey counts b.test with a U+001C after it or a U+0085 before it as b.test, the busiest host (logo_host's answer; the fetch strips nothing and reaches neither, D-LOGO-26)",
+      "channels": [
+        {
+          "logo": "https://b.test\u001c/1.png"
+        },
+        {
+          "logo": "https://\u0085b.test/2.png"
+        },
+        {
+          "logo": "https://a.test/3.png"
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 3,
+        "wouldContact": 3,
+        "refused": 0,
+        "hostCount": 2,
+        "hosts": [
+          {
+            "host": "b.test",
+            "channels": 2
+          },
+          {
+            "host": "a.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 3
+        }
+      }
+    },
+    {
+      "name": "D-STATE-2: so is a U+FEFF, which only the shell's trim took until D-STATE-2, so the survey counts a host behind one as the host",
+      "channels": [
+        {
+          "logo": "https://\ufeffc.test/1.png"
+        },
+        {
+          "logo": "https://c.test/2.png"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 2,
+        "refused": 0,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "c.test",
+            "channels": 2
+          }
+        ],
+        "schemes": {
+          "https": 2
+        }
+      }
     }
   ]
 }

@@ -14,6 +14,9 @@ import {
   entryInputLast
 } from "./settings.mjs"
 import {
+  stripSpace
+} from "./privacy.mjs"
+import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, SOURCE_ORIGINS,
   FORM_LIMITS, CONTROL_RE, capLength, sanitizeInput, sanitizeUrlInput,
   capCodePoints, sourceErrorMessage, validateSourceUrl, isUrlField,
@@ -297,7 +300,9 @@ function withSourceStats(state, key, status, nowSec) {
 // by review.
 function activeKeyText(value) {
   if (typeof value !== "string") return ""
-  var key = value.trim()
+  // D-STATE-2: the reader's class (stripSpace), not the engine's trim, which
+  // read `<U+001C>` + a key as no key where normalize_active_key read the key.
+  var key = stripSpace(value)
   return isSourceKey(key) ? key : ""
 }
 

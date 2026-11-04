@@ -34,7 +34,7 @@ def normalize_active_key(raw: Any) -> str:
     above them; this one would have been visible."""
     if not isinstance(raw, str):
         return ""
-    key = raw.strip()
+    key = raw.strip(URL_SPACE_CHARS)  # D-STATE-2: Model.activeKeyText's class
     return key if SOURCE_KEY_RE.match(key) else ""
 
 
@@ -47,9 +47,12 @@ MAX_HIDDEN_GROUPS = 200
 
 
 def normalize_hidden_groups(raw: Any) -> list[str]:
-    """Mirror of Model.hiddenGroupList: strings only, stripped, non-empty,
-    first occurrence wins, capped at MAX_HIDDEN_GROUPS. Anything else --
-    a number, a dict, a non-list -- reads as nothing rather than failing."""
+    """Mirror of Model.hiddenGroupList: strings only, stripped of
+    URL_SPACE_CHARS, the reader's class (D-STATE-2: Model.stripSpace's, which
+    takes off what either engine's own strip ever took, so a name any earlier
+    writer stored reads as the group it hid), non-empty, first occurrence
+    wins, capped at MAX_HIDDEN_GROUPS. Anything else -- a number, a dict, a
+    non-list -- reads as nothing rather than failing."""
     out: list[str] = []
     if not isinstance(raw, list):
         return out
@@ -59,7 +62,7 @@ def normalize_hidden_groups(raw: Any) -> list[str]:
             break
         if not isinstance(item, str):
             continue
-        name = item.strip()
+        name = item.strip(URL_SPACE_CHARS)
         if not name or name in seen:
             continue
         seen.add(name)

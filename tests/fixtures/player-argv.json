@@ -1360,6 +1360,21 @@
           "mpvArg --demuxer-lavf-o hands the stream address to another program",
           "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
         ]
+      },
+      {
+        "name": "D-STATE-2: the reader's whitespace around an rtsp transport is stripped, so tcp and http behind U+001C, U+001F or U+0085 are silent",
+        "tokens": [
+          "--rtsp-transport=\u001ctcp\u001f",
+          "--rtsp-transport=\u0085http"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "D-STATE-2: so is a U+FEFF, which only the shell's trim took until D-STATE-2, so tcp behind one is silent on both sides",
+        "tokens": [
+          "--rtsp-transport=\ufefftcp"
+        ],
+        "warnings": []
       }
     ],
     "diskText": " writes the stream to disk while it plays",

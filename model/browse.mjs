@@ -16,7 +16,7 @@ import {
   browsableChannels
 } from "./state.mjs"
 import {
-  sinkText
+  stripSpace, sinkText
 } from "./privacy.mjs"
 import {
   formatCount, pluralChannels
@@ -405,7 +405,15 @@ function channelsForScope(channels, scopeId, state) {
     }
     return out
   }
-  var name = rawScopeName(id)
+  // D-STATE-2: the name is stripped of the reader's class, as primaryGroup
+  // strips a row's group. A scope id carries the group as the shell that made
+  // it read it, and a player's stash keeps the id across an upgrade: 0.17.0
+  // stashed `g:<U+001C>Sports` for the group-title `<FEFF><U+001C>Sports`,
+  // which this shell lists as `Sports`, so the ring was empty and channel up
+  // and down did nothing until a row was played from the guide. A name that
+  // strips to nothing is Ungrouped, which is what primaryGroup reads for the
+  // row it came from.
+  var name = stripSpace(rawScopeName(id)) || UNGROUPED
   for (i = 0; i < list.length; i++) if (list[i] && primaryGroup(list[i]) === name) out.push(list[i])
   return out
 }

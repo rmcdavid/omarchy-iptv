@@ -65,6 +65,7 @@ class ChannelIdFixtureTest(unittest.TestCase):
         self.assertGreaterEqual(len(self.fixture["states"]), 6)
         self.assertGreaterEqual(len(self.fixture["folds"]), 19)
         self.assertEqual(len(self.fixture["foldSpace"]), 29)
+        self.assertGreaterEqual(len(self.fixture["cleanName"]), 15)
 
     def test_the_two_folds(self):
         """Search folds punctuation away; the id fold keeps + and *.
@@ -104,6 +105,48 @@ class ChannelIdFixtureTest(unittest.TestCase):
             if (helper.normalize_text(text) == "a b") != (cp in space or punct):
                 wrong["search"].append(cp)
         self.assertEqual(wrong, {"id": [], "search": []})
+
+    def test_clean_name_space_is_the_fixture_list(self):
+        """D-STATE-2: clean_name takes CLEAN_NAME_SPACE, the fixture's list,
+        each member once, and it is exactly what str.isspace() holds, so the
+        parse's bare strip() calls take the same set (the gate's guard against
+        an interpreter that moves one). Every other strip the model mirrors
+        takes URL_SPACE_CHARS, which is this list and U+FEFF: the union
+        url-whitespace.json enumerates and test_helper holds over the whole
+        range (node: "stripSpace takes exactly url-whitespace.json's union")."""
+        self.assertEqual(sorted(map(ord, helper.CLEAN_NAME_SPACE)), self.fixture["foldSpace"])
+        self.assertEqual(len(set(helper.CLEAN_NAME_SPACE)), len(helper.CLEAN_NAME_SPACE))
+        self.assertEqual([cp for cp in range(0x110000) if chr(cp).isspace()], self.fixture["foldSpace"])
+        self.assertEqual(sorted(map(ord, helper.URL_SPACE_CHARS)), sorted(self.fixture["foldSpace"] + [0xFEFF]))
+
+    def test_clean_name_runs_the_shared_fixture(self):
+        """D-STATE-2: clean_name answers each cleanName row's `out`, and every
+        answer cleans to itself, so the name the `n:` id is hashed from is
+        stable. Model.cleanName answers `shell` where the row has one: it also
+        takes a U+FEFF, for what is shown."""
+        for row in self.fixture["cleanName"]:
+            with self.subTest(row["in"]):
+                self.assertEqual(helper.clean_name(row["in"]), row["out"])
+                self.assertEqual(helper.clean_name(row["out"]), row["out"])
+
+    def test_clean_name_takes_its_space_and_dashes_at_every_bmp_code_point(self):
+        """D-STATE-2: clean_name at every BMP code point in three shapes:
+        before a name, after one, and between two dashes before one, which is
+        the only shape a playlist title reaches the leading set in (the parse
+        strips the title first). The answer moves on exactly foldSpace, and on
+        the dash where a dash is taken, so a member lost or a code point added
+        moves an `n:` id and an S-04 name, and goes red here."""
+        space = set(self.fixture["foldSpace"])
+        wrong = []
+        for cp in range(0x10000):
+            ch = chr(cp)
+            lead = cp in space or cp == 0x2D
+            got = (helper.clean_name(ch + "Arena") == "Arena",
+                   helper.clean_name("Arena" + ch) == "Arena",
+                   helper.clean_name("-" + ch + "-Arena") == "Arena")
+            if got != (lead, cp in space, lead):
+                wrong.append(cp)
+        self.assertEqual(wrong, [])
 
     def test_scheme1_ids(self):
         for vector in self.fixture["vectors"]:

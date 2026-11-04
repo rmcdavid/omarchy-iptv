@@ -692,7 +692,16 @@ _PORT_END = re.compile(r"[;=&]")
 # The token a free-text redactor prints in place of a withheld host (R32a').
 # Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
 HOST_WITHHELD = "[host withheld]"
-_LEADING_DASHES = re.compile(r"^[\s\-]+")
+# D-STATE-2: the whitespace clean_name takes off a name, enumerated as the
+# folds' class below enumerates it (_PUNCT, D-ID-5): the 29 code points
+# CPython 3.14's str.isspace() holds, so it answers as the bare strip() did
+# and no `n:` id, which is hashed from clean_name's answer, moved. A U+FEFF
+# at a name's edge stays, as it always has here. Every other strip the model
+# mirrors takes URL_SPACE_CHARS, the reader's class above and
+# Model.stripSpace's, and so does Model.cleanName, for what is shown. The
+# channel-ids fixture's foldSpace pins this list.
+CLEAN_NAME_SPACE = "".join(map(chr, [*range(0x09, 0x0e), *range(0x1c, 0x21), 0x85, 0xa0, 0x1680,
+                                *range(0x2000, 0x200b), 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]))
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_id_text. Built from the same constant so the two cannot drift:
 # engineering rule 13 (dev branch), two things joined by a call rather than by a name.

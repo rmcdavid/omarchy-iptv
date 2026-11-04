@@ -693,6 +693,7 @@
         "URL_SPACE_CODES",
         "isUrlSpaceAt",
         "urlSpaceIndex",
+        "stripSpace",
         "URL_DELIMITER_CODES",
         "isUrlDelimiterAt",
         "urlDelimiterIndex",

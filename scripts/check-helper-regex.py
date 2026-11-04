@@ -107,8 +107,6 @@ REVIEWED = [
     (r"[;=&]", "provider",
      "linear: one character class, no quantifier (_PORT_END, run_host_parts: where the port after "
      "the host's `:` ends, for the non-numeric-port arm, R32a'')"),
-    (r"^[\s\-]+", "provider",
-     "linear: anchored at the start, one run and nothing after it (_LEADING_DASHES, clean_name)"),
     ("'^' + GENERATED_NAME_WORD.lower() + ' [0-9]+$'", "provider",
      "linear: anchored, literal prefix, one digit run then $ (_GENERATED_NAME)"),
     (r"[\s\x00-\x1f\x7f]+", "provider",

@@ -643,7 +643,8 @@ var URL_SPACE_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x2
   0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
   0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
 
-// The reader's class: what validateSourceUrl refuses.
+// The reader's class: what validateSourceUrl refuses, and what stripSpace
+// takes off a value's edges (D-STATE-2).
 function isUrlSpaceAt(s, i) {
   var c = s.charCodeAt(i)
   if (c === 0x20 || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f)) return true
@@ -657,6 +658,41 @@ function isUrlSpaceAt(s, i) {
 function urlSpaceIndex(s) {
   for (var i = 0; i < s.length; i++) if (isUrlSpaceAt(s, i)) return i
   return -1
+}
+
+// D-STATE-2. The reader's class off both ends of a value, and nothing else:
+// what the shell takes off a group, a hidden group's name, the active key, a
+// logo's host and an rtsp transport before it compares or stores one, and
+// what the helper takes off the same values (URL_SPACE_CHARS). Not the
+// engine's trim, whose set is JavaScript's -- U+FEFF in, U+001C-U+001F and
+// U+0085 out -- and which Qt 6.12's V4 widens by U+0085 (F-GATE-4), while
+// Python's strip() takes U+001C-U+001F and U+0085 and leaves U+FEFF. The
+// union takes off everything either engine ever took, so a value stored by
+// any earlier writer, the shell under node or V4 or the helper, reads as the
+// value it was stored from. Index walks, so linear (D-PERF-3).
+// A code unit strictly between U+0020 and U+0085 is never a member, and it
+// is the edge of nearly every name, group and key, so stripSpace answers
+// those with two reads and no call: it runs once per row on every browse
+// pass that reads a group, where V4's native trim cost no call at all.
+// Otherwise the engine's trim goes first. Its set lies inside the class in
+// both engines (25 code points in node, 26 in V4), so the answer does not
+// move, and a long run behind a U+FEFF is taken at native speed: walked a
+// code unit at a time it made every browse pass about six times slower.
+// What is left to walk is U+001C-U+001F, U+0085 in node, and whatever
+// stands behind one of them.
+function stripSpace(text) {
+  var s = typeof text === "string" ? text : str(text)
+  var b = s.length
+  if (b === 0) return s
+  var head = s.charCodeAt(0)
+  var tail = s.charCodeAt(b - 1)
+  if (head > 0x20 && head < 0x85 && tail > 0x20 && tail < 0x85) return s
+  s = s.trim()
+  b = s.length
+  var a = 0
+  while (a < b && isUrlSpaceAt(s, a)) a++
+  while (b > a && isUrlSpaceAt(s, b - 1)) b--
+  return a === 0 && b === s.length ? s : s.substring(a, b)
 }
 
 // The redactor's class (R32a'''): the six ASCII delimiters, and nothing
@@ -834,7 +870,7 @@ export {
   playerPauseArgv, notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS,
   notifyReplaceId, notifyReplyId, notifySlot, withNotifySlot, notifyPost,
   notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
-  isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  urlDelimiterIndex, trailingPunctuationLength, isSchemeRestCode,
-  isLetterCode, redactUrls, scrubUrls, sinkText
+  isUrlSpaceAt, urlSpaceIndex, stripSpace, URL_DELIMITER_CODES,
+  isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
+  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

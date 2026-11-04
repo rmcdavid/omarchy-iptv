@@ -6,6 +6,9 @@ import {
   str, asList, keyedMap, fnv1a32
 } from "./text.mjs"
 import {
+  stripSpace
+} from "./privacy.mjs"
+import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
@@ -138,7 +141,9 @@ function splitLogoUrl(raw) {
 // the WHOLE netloc first: `cdn.test;u=p@evil` is refused by fetch_logo, so
 // a cut that hid its `@` would count a host that is never contacted.
 function logoHost(netloc) {
-  var text = str(netloc).trim().toLowerCase()
+  // D-STATE-2: the reader's class (stripSpace), not the engine's trim, so the
+  // survey counts the hosts logo_host counts.
+  var text = stripSpace(netloc).toLowerCase()
   if (text.indexOf("@") !== -1) return ""
   text = cutHostParams(text)
   if (text.charAt(0) === "[") {

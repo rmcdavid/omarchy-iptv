@@ -13,7 +13,7 @@ import {
   PIP_CLASS
 } from "./pip.mjs"
 import {
-  redactUrls, scrubUrls
+  stripSpace, redactUrls, scrubUrls
 } from "./privacy.mjs"
 
 // ------------------------------------------------------------ mpv
@@ -148,7 +148,9 @@ function mpvListenName(token) {
   var base = mpvOptionBase(name)
   if (base === "--demuxer-lavf-o") return demuxerOpensPorts(name, value) ? name : ""
   if (MPV_LISTEN_WARN[base] !== true) return ""
-  return MPV_LISTEN_QUIET[value.trim().toLowerCase()] === true ? "" : name
+  // D-STATE-2: the reader's class (stripSpace), not the engine's trim, so the
+  // warning is mpv_arg_opens_ports'.
+  return MPV_LISTEN_QUIET[stripSpace(value).toLowerCase()] === true ? "" : name
 }
 
 // D-SINK-65: true when a `--demuxer-lavf-o*` token's value sets FFmpeg's

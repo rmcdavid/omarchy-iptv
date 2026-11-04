@@ -17510,3 +17510,139 @@ Four of the checks are end-to-end symptom checks: "every remap target is a row's
 **The owner's data, read-only, counts only.** One source, 1,495 rows. No name holds U+001C-U+001F, U+0085 or U+FEFF, or one of D-SRC-12's 28 code points, or any code point unassigned in Unicode 16.0.0. There are no favourites and no session record, and lastPlayed is a `t:` id a row carries. Of ten recents, one is carried by no cached row, and it is a `t:` id, which is not name-derived. So D-ID-5 did not reach this install.
 
 **F-GATE-20, found by the same review.** The model regex guard graded `new RegExp("^" + X + "...")` as its first literal alone. The fix's first draft built both classes that way, and `[` alone does not parse. `test_f_gate_20_a_literal_an_expression_goes_on_from_is_a_built_pattern` fails against the guard at 70560ae (1 of 12) and passes on the tree.
+
+## D-STATE-2, 2026-11-03: the five mirrored strips take the reader's class, except clean_name
+
+The owner said "fix d-state-2". The defect is on the board with what was measured before the fix. This section is the evidence for the fix. It also covers the first version's review, because that review changed the design.
+
+**The first version, and why it was replaced.** The first version moved the shell's mirrors to Python's 29 code points (CPython 3.14's `str.isspace()`, the channel-ids fixture's `foldSpace`) and left the helper as it was. It was green and its mutations were caught. The review (`wf_c2709b23-697`: the pairs, siblings, tests and regressions lenses, a skeptic per finding) confirmed five costs it brought to data the helper writes, each measured in node and in Qt's V4:
+
+- A name the helper wrote as `<FEFF>Arena` was shown with the U+FEFF. Its `nameKey` started with one, so `arena` ranked it tier 2, not tier 0. Behind 200 rows named `Sky Arena N` it was cut, and `arena sports` no longer found it.
+- A name of U+FEFF alone was shown as the name, in place of the tvg-name, and so was a track title of U+FEFF.
+- `<FEFF>--urgency=x` was shown as `--urgency=x`. S-04 still held on the argv (the toast body opens with U+201C).
+- A group 0.17.0 hid behind a U+FEFF was shown again, because 0.17.0 had stored it without the U+FEFF. Where the playlist also had a namesake without one, the hide fell on the namesake alone.
+- A zap scope 0.17.0 stashed for such a group named no row's group, so channel up and down did nothing.
+
+D-ID-5's reason for Python's set binds only the helper's `clean_name`, whose answer the `n:` id is hashed from. Of the strips the two sides mirror, nothing else feeds an id. The parse's own bare `strip()` of the tvg-id and of the URL line, which the `t:` and `u:` ids are made from, mirrors nothing and is untouched. And since D-ID-5 the shell reads the helper's ids.
+
+**The design.** The reader's class of R32a''' is the union of JavaScript's `\s`, Python's `\s` and U+FEFF: 30 code points. It is already enumerated as `Model.isUrlSpaceAt` (model/privacy.mjs) and the helper's `URL_SPACE_CHARS` (bin/helper/01-core.py), and held to tests/fixtures/url-whitespace.json over the whole Unicode range. Five pairs stripped a value both sides read with each engine's own whitespace. Four now take it on both sides, and the fifth, a channel name, takes it on the shell's side (below). The input sanitizers take an enumerated set of their own, the same on both sides, and are unchanged. The host mirrors read only validated URLs on the shell's side, and the helper's stream gate, which also reads them, has no shell mirror. The siblings below say which other trims were cleared, and why. The four:
+
+- `primaryGroup`, `hiddenGroupList` and `toggleHiddenGroup` against `normalize_hidden_groups`
+- `activeKeyText` against `normalize_active_key`
+- `logoHost` against `logo_host`
+- `mpvListenName` against `mpv_arg_opens_ports`
+
+The shell's side is `Model.stripSpace` (model/privacy.mjs), with a two-read fast path for a value whose first and last code units both lie strictly between U+0020 and U+0085, and otherwise the engine's trim before a walk (the cost below says why). `channelsForScope` strips a group scope's name with it as well (the second review, below). The helper strips `URL_SPACE_CHARS`. `clean_name` is the exception: it strips `CLEAN_NAME_SPACE`, the 29, enumerated in place of `_LEADING_DASHES` (`^[\s\-]+`) and `strip()`. `Model.cleanName` takes the union, U+FEFF included, so it differs from `clean_name` on U+FEFF alone, by design. A row whose shown name differs from the helper's gets its `searchKey` refolded from what is shown, as 0.17.0 did. `looksLikeUrl` is back to its 0.17.0 form, because `cleanName` takes a leading U+FEFF again. `primaryGroup` cuts the first group with `indexOf` in place of `split(";")[0]`, which answers alike and allocates no array (see the cost below).
+
+Because the union holds every member of either engine's trim, a name any earlier writer stored reads as the value it was stored from, unless it strips to nothing (the second review, below). That covers 0.17.0's shell in node (the 25) or in V4 (the 25 and U+0085), and the helper's `strip()` (the 29).
+
+**The helper moved on U+FEFF alone.** The helper at dc53dd1 and on the tree were loaded side by side and run over every one of 1,114,112 code points, each in two or three shapes. `normalize_hidden_groups`, `normalize_active_key`, `logo_host` and `mpv_arg_opens_ports` each differ on exactly U+FEFF, and `clean_name` on nothing. The parse is untouched (`split_groups` and `make_channel` call `clean_name` and bare `strip()`), so channels.json and every `n:` id are as they were.
+
+**The shell moved on U+001C-U+001F and U+0085.** The model at dc53dd1 and on the tree were compared in node over every BMP code point. `primaryGroup`, `hiddenGroupList`, `toggleHiddenGroup`, `activeKeyText`, `logoSurvey`, `mpvArgWarnings`, `cleanName` and `displayName` each differ on exactly U+001C-U+001F and U+0085. In V4, over U+0000-U+30FF and U+FE00-U+FFFF, all but `displayName` take exactly the 30 on the tree. At HEAD they took 26 (V4's trim) and `cleanName` 25 (`\s`), so in the shell's own engine they moved on U+001C-U+001F, and `cleanName` and `displayName` on U+0085 too.
+
+**The two sides agree.** On the tree, at every BMP code point and in two or three shapes each, node against the helper: hidden groups 0 differences, the active key 0, the rtsp warning 0. Logo hosts differ at 3 (U+A7CE, U+A7D2, U+A7D4: lower-casing, the same at HEAD, D-SRC-12). Names differ at U+FEFF alone, and `cleanName` of the helper's answer equals `cleanName` of the raw text at every code point, so a name the helper cleaned is shown as the raw name would be.
+
+**The second review.** `wf_4422a661-347` read the redesigned fix through three lenses, with a skeptic per finding: the pairs and the migration, regressions, and the tests. Of 15 findings, 14 were confirmed. What this change brought is now fixed or stated:
+
+- A long whitespace run behind a U+FEFF made every browse pass about six times slower in V4 (P3). Fixed: the cost below.
+- A zap scope 0.17.0 stashed for a group-title starting U+FEFF and then U+001C, as `g:<U+001C>Sports`, rang over nothing, because this shell lists the group as `Sports`. The player hands the scope back on the first reattach after the upgrade. The pairs lens and the regressions lens both found it. Fixed: `channelsForScope` strips a group scope's name as `primaryGroup` strips a row's group, and reads a name that strips to nothing as Ungrouped.
+- Groups 0.17.0 listed apart can list as one: `<FEFF><U+001C>Sports`, `Sports<U+001C><FEFF>` and `Sports` are all `Sports`, so a hide of one covers all three. A group that strips to nothing lists as Ungrouped, so the name 0.17.0 stored hiding it, such as `<U+001C>`, is dropped; the helper's next CLI write already dropped it. Both are stated, in the hidden-groups fixture's comment and on the board.
+- The tests held each site only at the fixture rows' code points, and nothing held that a dash, a `;` or a non-string comes through a strip as it went in. Every site on both sides is now held to the union at every BMP code point, `clean_name` to `foldSpace` and the dash, and `stripSpace` and `cleanName` in V4 as well as in node. The claims check of this text found `toggleHiddenGroup` and `channelsForScope`'s scope name outside the sweep (a `toggleHiddenGroup` keeping a leading U+2005 left node green), and both are now in it. The `;` and non-string cases are pinned. Four test texts misdescribed what they checked (three claimed more, one less), and a fixture row's name called two hosts the fetch never reaches `b.test`; each is corrected, and so is the corpus comment above test_proto_v4's whitespace body, which left out U+001C and U+001F and named every `\s` character, where the corpus skips U+2001-U+2009.
+
+The review also found one defect that predates this change, D-PLY-63: the player's title is the helper's name, not the name the row shows. Two more it found are already filed, D-LOGO-26 and D-SRC-77. One finding was refuted: that the node `hide` runner passes when the fixture's list is empty. It does, but python counts the cases and the gate runs both.
+
+**Red first.** The new tests and fixtures were copied over an export of dc53dd1:
+
+- node: 15 of 3,350 fail
+- the QML spec: 2 of 87 fail, `primaryGroup` in V4 answering `<U+001C>Sports` for `<FEFF><U+001C>Sports`, and the V4 sweep, which finds no `stripSpace`
+- test_proto_v4: 1 of 12 fails
+- python: 1 error (`CLEAN_NAME_SPACE` is absent) and 7 failures: test_state 5 (the active-key fixture, two `hide` cases, the hidden-groups parse case, and the per-site sweep), test_logos 1, test_player 1
+
+On the tree all are green. Four node checks pass at HEAD. Three pin what 0.17.0 already did: the U+FEFF-led name shown without it and refolded, and its tier for `arena`, both of which the first version broke, and the helper's key kept for a name shown as written. The fourth is the rtsp vector for `tcp` behind a U+FEFF, which the shell already left silent; its python twin fails at HEAD. The python `clean_name` sweep and fixture runner pin what the helper already did. All are proven by the mutations below.
+
+**Mutations, each caught.** The first round's 26 ran before the second review, each alone on a copy of the tree. Fourteen of its node mutations ran before the fast path was inlined and the first group cut with `indexOf`; the five on those lines (`primaryGroup`'s trim and its U+FEFF variant, and the fast path in three ways) were run again after it. Node failures, with the QML spec and test_proto_v4 where they also went red:
+
+- each trim put back: `primaryGroup` 3 (spec 1), `hiddenGroupList` 3 (spec 1), `toggleHiddenGroup` 1 (2 with the per-site sweep's toggle arm, added later), `activeKeyText` 2 (spec 1), `logoHost` 1 (spec 1), `mpvListenName` 1 (spec 1)
+- `cleanName`'s leading walk on JavaScript's `\s` 4, its trailing walk 4 (each also spec 1 and test_proto_v4 1)
+- `cleanName` keeping U+FEFF, the first version's design: 6 (spec 1, test_proto_v4 1)
+- `primaryGroup` keeping U+FEFF, the first version's design: 4 (spec 1)
+- the class without U+0085 11 (spec 2, test_proto_v4 1), without U+FEFF 16 (spec 2, test_proto_v4 1), without U+001C-U+001F 13 (spec 2, test_proto_v4 1), admitting `!` 3 (spec 1) (these also redden R32a''')
+- the fast path taking U+0020 3 (test_proto_v4 1), taking U+0085 2 (test_proto_v4 1), deciding on one edge 9 (spec 1, test_proto_v4 1)
+- `prepareChannels` always refolding 1, never refolding a changed name 3
+
+In python:
+
+- `normalize_hidden_groups` on bare `strip()` failed 3 tests
+- `normalize_active_key` on `strip()` 1
+- `logo_host` on `strip()` 1
+- `mpv_arg_opens_ports` on `strip()` 1
+- `CLEAN_NAME_SPACE` without U+0085 3
+- `clean_name` on the union, which would move ids, 6
+- `split_groups` stripping spaces only 2
+
+One mutation first survived, the toggle's trim put back, because the `hide` runner handed `toggleHiddenGroup` a name already stripped. The runner now also toggles the helper's raw group. Two others, the fast path taking U+0020 or U+0085, were first caught by other checks and not by the sweep that claims them. The sweep now also puts each code point at one edge with a plain `x` at the other.
+
+The second round's 19, and two more the claims check called for, ran on the final code, each alone on a copy of the tree. Node failures, with the QML spec and test_proto_v4 where they also went red:
+
+- `channelsForScope` comparing the scope's name unstripped: 1 (spec 1), measured before the per-site sweep held the scope name, which makes it 2. Reading a name that strips to nothing as nothing, not Ungrouped: 1
+- a dash stripped as well, at `hiddenGroupList`, `activeKeyText`, `logoHost` and `mpvListenName`: 1 each. At `primaryGroup`: 2
+- `stripSpace` handed a non-string as it came: 1. `primaryGroup` keeping a group that starts at its `;`: 1
+- the trim before the walk also taking U+200B, in `stripSpace`: 2 (spec 1). In `cleanName`: 1 (spec 1)
+- `cleanName`'s fast path passing a leading dash: 11 (spec 1, test_proto_v4 1)
+- `toggleHiddenGroup` keeping a leading U+2005, and `channelsForScope` keeping one in a scope's name: 1 each, the per-site sweep
+
+In python, each failed the one sweep that holds it:
+
+- `clean_name`'s leading set without U+2000, or with U+2010 as a dash: test_channel_ids's BMP sweep
+- `normalize_hidden_groups` stripping a dash, or without U+2005: test_state's per-site sweep
+- `normalize_active_key` without U+00A0, `logo_host` without U+3000, and `mpv_arg_opens_ports` without U+205F: the same sweep
+
+Six of the first round's mutations sit on lines the second round changed: `cleanName`'s two walks, `cleanName` keeping U+FEFF, and `stripSpace`'s fast path in three ways. They were run again on the final code, and each is still caught. Node failures:
+
+- `cleanName`'s leading walk on JavaScript's `\s`: 4 (spec 2, test_proto_v4 1). Its trailing walk: 4 (spec 2, test_proto_v4 1)
+- `cleanName` keeping U+FEFF: 2 (test_proto_v4 1)
+- the fast path taking U+0020: 3 (test_proto_v4 1). Taking U+0085: 2 (test_proto_v4 1). Deciding on one edge: 10 (spec 1, test_proto_v4 1)
+
+**Cost, in V4, on 10,000 rows.** In the first round, probes ran alternately against HEAD and the tree at a load average of about 2, and the tree was behind HEAD once browse passes had run. Inlining the fast path, and cutting the first group with `indexOf` in place of `split(";")`, which builds an array per row, made the tree faster than HEAD on ordinary rows:
+
+| Measure | HEAD | Tree |
+|---|---|---|
+| `prepareChannels`, run first | 387-389 ms | 374-377 ms |
+| `prepareChannels`, after the passes | 370-386 ms | 366-370 ms |
+| `browsableChannels` with one hidden group | 19.4-19.8 ms | 16.6-17.1 ms |
+| a group scope | 14.4-14.6 ms | 9.4 ms |
+
+Per 10,000 calls, `primaryGroup` went from 26-27 ms to 21-23 ms, `cleanName` from 27-31 ms to 18-19 ms, and `displayName` from 40-43 ms to 32-33 ms.
+
+The second review measured what those rows did not hold: groups of a U+FEFF and 120 spaces before the name, and names of a U+FEFF and 500 spaces. The walk took that run a code unit at a time, where V4's trim had taken it natively, so every browse pass was about six times slower. `stripSpace` and `cleanName` now run the engine's trim before the walk. Its set lies inside the class in both engines, 25 code points in node and 26 in V4, so no answer moves, and the sweeps hold that at every BMP code point in both. Re-measured with three arms in turn: HEAD, the walk alone, and the tree. Two runs each, each the median of nine, in ms:
+
+| Shape | Measure | HEAD | Walk alone | Tree |
+|---|---|---|---|---|
+| ordinary rows | browse, one group hidden | 19.6-20.2 | 16.6-17.2 | 16.8-17.0 |
+| ordinary rows | `scopeSurface` | 67.5-71.0 | 60.5-61.0 | 62.5 |
+| U+FEFF, then the run | browse | 19.8 | 124.4-129.0 | 23.6-24.0 |
+| U+FEFF, then the run | `scopeSurface` | 74.0 | 387.0-397.5 | 83.5-84.5 |
+| the run, then U+FEFF | browse | 21.2 | 127.0-135.4 | 24.6-25.4 |
+| the run, then U+FEFF | `scopeSurface` | 79.0-80.0 | 404.5-409.5 | 89.0-89.5 |
+| U+001C, then the run | browse | 20.4-21.0 | 123.6-158.0 | 131.2-138.2 |
+| U+001C, then the run | `scopeSurface` | 72.0-72.5 | 390.5-491.0 | 413.5-426.5 |
+
+HEAD's two figures for the U+FEFF-led shape come from one run under gdb with no address-space cap, because the probe died under its cap (next paragraph). The last shape is the cost that stays. V4's trim stops at U+001C-U+001F, so the walk takes the run behind one. HEAD was fast there because it stopped too, and read the group wrong. The cost is linear, bounded by `M3U_MAX_GROUP` (128), and filed as D-PERF-12 with its fix: the browse passes read the `primaryGroup` that `prepareChannels` already stores on each row and nothing reads. `prepareChannels` on the same shapes took 858-883 ms on the tree for both U+FEFF shapes, against HEAD's 1,132 (under gdb) and 1,596-1,633. On the U+001C shape it took 1,693-1,807 against 3,034-3,060.
+
+**The probe that died (F-HARNESS-95).** Both HEAD runs on the U+FEFF-led shape died with SIGSEGV. The coredump journal went from 81 to 83 entries, systemd-coredump stored two cores of about 107 MB holding the probe's synthetic rows, and the host will have posted a crash card for each. Under gdb, which stops the process before the kernel dumps it, the same probe ran to its end without the cap. HEAD's model peaked at 2,675 MB over the probe, which runs `prepareChannels` ten times (once to build the list, then nine timed) and browses the list, and the tree's at 545 MB. Under the probe's 2.5 GB `prlimit --as`, V4 faulted in `QV4::MemoryManager::allocData` once an allocation was refused. One `prepareChannels` of the same rows peaks at 546 MB at HEAD and 536 MB on the tree (119 and 115 MB on ordinary rows), so a shell that loads such a playlist once is not exposed by this. `run_qml` now passes `--core=0` as well, so a probe that dies stores no core. The journal entry and the card come whatever the limit (F-HARNESS-45). Every later run that could die went under gdb, and the journal stayed at 83.
+
+**The owner's data, read-only, counts only.** One source, 1,495 rows. No name, group, logo or tvg-id holds any of the six code points, and state.json has no hidden groups. So D-STATE-2 did not reach this install.
+
+**Not repaired, stated.** Groups 0.17.0 listed apart can list as one, and a group that strips to nothing lists as Ungrouped (the second review, above). A group whose edge run starts with one of U+001C-U+001F is walked on every browse pass (D-PERF-12). The search half of the board row belongs to D-ID-5: a U+FEFF inside a word breaks it in neither fold, so `sports` does not find `Live<FEFF>Sports`, and a query holding a U+FEFF misses every key without one.
+
+**Siblings the reviews found, filed, not fixed here.** Each was confirmed by a skeptic, and each predates this change:
+
+- D-LOGO-26: the two logo surveys split a URL differently, and both count hosts the fetch never contacts
+- D-STATE-4: `coerce_int` and an infinite number
+- D-SRC-76: `resolve_source` strips before validating
+- D-STATE-5: a hand-edited state.json with a BOM loads in the shell and is refused by the helper
+- D-SRC-77: `SOURCE_KEY_RE`'s `$` and a trailing line feed
+- D-QA-20: D-QA-02's start-anchored URL test
+- D-PLY-63: the player's title is the helper's name, not the name the row shows (the second review)
+
+Cleared by the review: the parse's own strips (`split_groups`, `parse_attrs`, `cut_text`), which the shell's union now covers whatever the interpreter's `isspace()` does, and which `str.isspace()` is held to `foldSpace` to guard. Also cleared: the host mirrors (`ipLiteral`, `hostClass`, `hostKey`), whose only inputs are validated URLs; the EPG trims, which have no helper mirror (a U+FEFF reaches them, and only the shell takes it off); and the mpv error-table and reply-line trims, which none of the six code points can reach.

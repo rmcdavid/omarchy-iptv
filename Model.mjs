@@ -169,8 +169,8 @@ export {
   playerRestartArgv, playerPauseArgv, notifyArgv, markupEscape,
   NOTIFY_POST_TIMEOUT_MS, notifyReplaceId, notifyReplyId, notifyPost,
   notifyAnswered, sourceLabel, hostOf, URL_SPACE_CODES, isUrlSpaceAt,
-  URL_DELIMITER_CODES, isUrlDelimiterAt, trailingPunctuationLength,
-  redactUrls, scrubUrls, sinkText
+  stripSpace, URL_DELIMITER_CODES, isUrlDelimiterAt,
+  trailingPunctuationLength, redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

@@ -32,7 +32,11 @@
     "Both readers check every BMP code point: a fold collapses `a<c>b` to",
     "`a b` exactly when c is in this list or decomposes to ASCII punctuation",
     "the fold drops. The astral planes were measured once, in both runtimes,",
-    "and hold no whitespace (docs/QA-RESULTS.md, D-ID-5)."
+    "and hold no whitespace (docs/QA-RESULTS.md, D-ID-5).",
+    "D-STATE-2: clean_name takes this list off a name's edges (the helper's",
+    "CLEAN_NAME_SPACE), so the name an `n:` id is hashed from keeps a U+FEFF",
+    "there. Every other edge strip the model mirrors takes url-whitespace.json's",
+    "union (Model.stripSpace, the helper's URL_SPACE_CHARS)."
   ],
   "foldSpace": [9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 133, 160, 5760,
                 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
@@ -57,6 +61,34 @@
     { "name": "News\ufeffHD", "id": "news\ufeffhd", "search": "news\ufeffhd" },
     { "name": "A\u001e+\u001dB", "id": "a + b", "search": "a b" },
     { "name": "\u0085News\u3000", "id": "news", "search": "news" }
+  ],
+  "cleanNameComment": [
+    "D-STATE-2. clean_name and Model.cleanName, the display-name candidate:",
+    "leading dashes and whitespace off the front, whitespace off the end",
+    "(S-04). The helper's whitespace is foldSpace, because its answer is the",
+    "name an `n:` id is hashed from, so a U+FEFF at an edge stays there. The",
+    "model's is url-whitespace.json's union, foldSpace and U+FEFF, for what is",
+    "shown. `out` is the helper's answer, and `shell` the model's where the",
+    "two differ, which is only at a U+FEFF. Each answer cleans to itself on",
+    "its own side, and the model reads the helper's answer as it reads the raw",
+    "text, so a name the helper cleaned is shown as the raw name would be."
+  ],
+  "cleanName": [
+    { "in": "--urgency=x", "out": "urgency=x" },
+    { "in": " - Sports ", "out": "Sports" },
+    { "in": "---", "out": "" },
+    { "in": "A-B", "out": "A-B" },
+    { "in": null, "out": "" },
+    { "in": "\u0085- News\u001c", "out": "News" },
+    { "in": "\ufeffArena", "out": "\ufeffArena", "shell": "Arena" },
+    { "in": "- \ufeff- x\u3000", "out": "\ufeff- x", "shell": "x" },
+    { "in": "\u001f\u001e--", "out": "" },
+    { "in": "Name\u0085 One\u001d", "out": "Name\u0085 One" },
+    { "in": "Sport\ufeff-", "out": "Sport\ufeff-" },
+    { "in": "\ufeff", "out": "\ufeff", "shell": "" },
+    { "in": "\ufeff--urgency=x", "out": "\ufeff--urgency=x", "shell": "urgency=x" },
+    { "in": "Arena\ufeff", "out": "Arena\ufeff", "shell": "Arena" },
+    { "in": "\ufeff\u001cArena\u0085", "out": "\ufeff\u001cArena", "shell": "Arena" }
   ],
   "vectors": [
     {

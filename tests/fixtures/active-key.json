@@ -57,6 +57,8 @@
     {"name": "a slash is not a key", "raw": "d990c2e4/x", "key": ""},
     {"name": "a key with an interior space is not a key", "raw": "d990c2 e4", "key": ""},
     {"name": "a URL is not a key, and this is the shape a hand-edited old file would carry", "raw": "http://provider.example.test/get.php?username=u&password=p", "key": ""},
+    {"name": "D-STATE-2: the reader's whitespace around a key is stripped, U+0085 and U+001C among it", "raw": "\u0085d990c2e4\u001c", "key": "d990c2e4"},
+    {"name": "D-STATE-2: so is a U+FEFF, which only the shell's trim took until D-STATE-2", "raw": "\ufeffd990c2e4\ufeff", "key": "d990c2e4"},
     {"name": "a number is not a key", "raw": 12345678, "key": ""},
     {"name": "a boolean is not a key", "raw": true, "key": ""},
     {"name": "a list is not a key", "raw": ["d990c2e4"], "key": ""},

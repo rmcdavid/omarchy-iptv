@@ -462,6 +462,48 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual(len(helper.normalize_hidden_groups(many)), fixture["cap"])
         self.assertEqual(helper.normalize_hidden_groups(many)[-1], "G%d" % (fixture["cap"] - 1))
 
+    def test_hidden_groups_hide_cases_run_the_shared_fixture(self):
+        """D-STATE-2: the `hide` section of tests/fixtures/hidden-groups.json.
+        The parse writes each groupTitle as `group`, and normalize_hidden_groups,
+        which every CLI state write runs, reads that group, the name hiding it
+        stores (Model.primaryGroup, Model.test.js) and the name 0.17.0's shell
+        stored for it all as the stored name. With the shell's old trim a
+        group-title `<FEFF><U+001C>Sports` was stored as `<U+001C>Sports`, this
+        reader rewrote it to `Sports`, and the shell showed the group again."""
+        import json as _json, os as _os
+        path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "fixtures", "hidden-groups.json")
+        with open(path, encoding="utf-8") as fh:
+            fixture = _json.load(fh)
+        self.assertGreaterEqual(len(fixture["hide"]), 6)
+        for case in fixture["hide"]:
+            with self.subTest(case["name"]):
+                text = '#EXTM3U\n#EXTINF:-1 group-title="%s",Alpha\nhttp://h.test/a\n' % case["groupTitle"]
+                self.assertEqual(helper.parse_m3u(text)["channels"][0]["group"], case["group"])
+                for raw in (case["group"], case["stored"], case["storedBefore"]):
+                    self.assertEqual(helper.normalize_hidden_groups([raw]), [case["stored"]])
+                self.assertEqual(helper.normalize_state({"hiddenGroups": [case["storedBefore"]]})["hiddenGroups"], [case["stored"]])
+
+    def test_every_helper_strip_takes_the_union_at_every_bmp_code_point(self):
+        """D-STATE-2: normalize_hidden_groups, normalize_active_key, logo_host
+        and mpv_arg_opens_ports each take a code point off a value's edges
+        exactly when url-whitespace.json lists it, and nothing else. Model.test.js
+        holds each mirror to the same list in the same shapes, so the two
+        runtimes cannot strip apart again with every fixture row green."""
+        with open(ROOT / "tests" / "fixtures" / "url-whitespace.json", encoding="utf-8") as fh:
+            union = {int(entry["code"][2:], 16) for entry in json.load(fh)["codePoints"]}
+        wrong = {"hidden": [], "active": [], "host": [], "mpv": []}
+        for cp in range(0x10000):
+            ch, member = chr(cp), cp in union
+            if (helper.normalize_hidden_groups([ch + "x" + ch]) == ["x"]) != member:
+                wrong["hidden"].append(cp)
+            if (helper.normalize_active_key(ch + "d990c2e4" + ch) == "d990c2e4") != member:
+                wrong["active"].append(cp)
+            if (helper.logo_host(ch + "b.test" + ch) == "b.test") != member:
+                wrong["host"].append(cp)
+            if (helper.mpv_arg_opens_ports("--rtsp-transport=" + ch + "tcp" + ch) == "") != member:
+                wrong["mpv"].append(cp)
+        self.assertEqual(wrong, {"hidden": [], "active": [], "host": [], "mpv": []})
+
     # ---- D-SINK-19: activeKey, the fifth additive key ----------------------
     #
     # The plugin used to identify the active source by the provider URL on the

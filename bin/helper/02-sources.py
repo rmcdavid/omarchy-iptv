@@ -670,8 +670,12 @@ def channel_number(attrs: dict[str, str]) -> str:
 def clean_name(value: str) -> str:
     """Display-name candidate: never starts with "-" (S-04). The name is an
     argv item for omarchy-notification-send, where "--urgency=x did not play"
-    would be parsed as an option. Mirrors Model.cleanName."""
-    return _LEADING_DASHES.sub("", value or "").strip()
+    would be parsed as an option. Leading dashes and CLEAN_NAME_SPACE off the
+    front, CLEAN_NAME_SPACE off the end (D-STATE-2; it was `^[\\s\\-]+` and
+    strip(), the same set on this CPython). Model.cleanName does the same with
+    the reader's class, which also takes a U+FEFF: the answer here is what the
+    `n:` id is hashed from, so a U+FEFF stays."""
+    return (value or "").lstrip(CLEAN_NAME_SPACE + "-").strip(CLEAN_NAME_SPACE)
 
 
 # D-M3U-1: the warning each length cap adds, once per kind and with a count,

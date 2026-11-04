@@ -249,7 +249,7 @@ def logo_host(netloc: str) -> str:
     `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
     would count a host that is never contacted.
     """
-    text = (netloc or "").strip().lower()
+    text = (netloc or "").strip(URL_SPACE_CHARS).lower()  # D-STATE-2: Model.stripSpace's class
     if "@" in text:
         return ""
     text = cut_host_params(text)

@@ -10,7 +10,30 @@
     "`browse` cases are JavaScript only: python has no scope logic. Each is a",
     "channel list, a hidden list, and what All / a group / search must return,",
     "asserted through channelsForScope and filterChannels -- the real path.",
-    "`groups` is the GROUPS section, which exists only when two or more groups are VISIBLE (GS3): a lone survivor lists no section."
+    "`groups` is the GROUPS section, which exists only when two or more groups are VISIBLE (GS3): a lone survivor lists no section.",
+    "",
+    "`hide` cases (D-STATE-2) join the two runtimes through what each WRITES:",
+    "the raw group-title, the group the helper's parse writes for it, the name",
+    "hiding that group stores, and `storedBefore`, the name 0.17.0's shell",
+    "stored hiding it (the engine's trim of the helper's group, as Qt's V4",
+    "reads it). Python parses the title, and reads the group, the stored name",
+    "and storedBefore back through normalize_hidden_groups, as every CLI state",
+    "write does; JavaScript takes the stored name from primaryGroup and",
+    "toggleHiddenGroup, reads the group and storedBefore through",
+    "hiddenGroupList, and hides the row with each. Both readers take",
+    "url-whitespace.json's union off a name's edges, which holds every member",
+    "of either engine's own whitespace, so a name any earlier writer stored",
+    "reads as the group it hid. Until D-STATE-2 the shell trimmed with the",
+    "engine's whitespace, so a group-title `<FEFF><U+001C>Sports` was stored as",
+    "`<U+001C>Sports`, the next CLI write stored `Sports`, and the group was",
+    "shown again.",
+    "",
+    "The union's cost, stated: groups 0.17.0 listed apart can list as one.",
+    "`<FEFF><U+001C>Sports`, `Sports<U+001C><FEFF>` and `Sports` are all",
+    "`Sports` now, so a name 0.17.0 stored for any of them hides all three; and",
+    "a group that strips to nothing, such as `<FEFF><U+001C><FEFF>`, lists as",
+    "Ungrouped, so the `<U+001C>` 0.17.0 stored hiding it is dropped (the",
+    "helper's next CLI write already dropped it)."
   ],
   "cap": 200,
   "parse": [
@@ -119,6 +142,21 @@
       ],
       "list": [
         "Ungrouped"
+      ]
+    },
+    {
+      "name": "D-STATE-2: the reader's whitespace comes off both ends, U+001C, U+0085 and U+FEFF among it, in any order",
+      "raw": [
+        "\u001cSports\u0085",
+        "\ufeffNews",
+        " \ufeff \u001fKids\u3000",
+        "\u001d\u001e",
+        "Sports"
+      ],
+      "list": [
+        "Sports",
+        "News",
+        "Kids"
       ]
     }
   ],
@@ -289,6 +327,81 @@
         1
       ],
       "sameArray": false
+    },
+    {
+      "name": "D-STATE-2: a group the helper wrote behind a U+FEFF is hidden by the name 0.17.0 stored for it, which reads as the name hiding it stores now",
+      "channels": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "group": "\ufeff\u001cSports",
+          "url": "http://h/a"
+        },
+        {
+          "id": "b",
+          "name": "Bravo",
+          "group": "News",
+          "url": "http://h/b"
+        }
+      ],
+      "hidden": [
+        "\u001cSports"
+      ],
+      "all": [
+        "b"
+      ],
+      "groups": [],
+      "hiddenEntries": [
+        "Sports"
+      ],
+      "hiddenCounts": [
+        1
+      ],
+      "sameArray": false
+    }
+  ],
+  "hide": [
+    {
+      "name": "D-STATE-2, the measured case: a group-title starting U+FEFF U+001C is written as it stands, and hiding it stores the name without either",
+      "groupTitle": "\ufeff\u001cSports",
+      "group": "\ufeff\u001cSports",
+      "stored": "Sports",
+      "storedBefore": "\u001cSports"
+    },
+    {
+      "name": "Python's whitespace at a group-title's edge is the helper's to strip, so the shell finds nothing left to strip",
+      "groupTitle": "\u001cNews\u0085",
+      "group": "News",
+      "stored": "News",
+      "storedBefore": "News"
+    },
+    {
+      "name": "the first of two groups is written with its U+FEFF, and both sides read it without",
+      "groupTitle": "\ufeffLive;\u001fKids",
+      "group": "\ufeffLive",
+      "stored": "Live",
+      "storedBefore": "Live"
+    },
+    {
+      "name": "ideographic space and medium mathematical space come off both ends",
+      "groupTitle": " \u3000Movies\u205f",
+      "group": "Movies",
+      "stored": "Movies",
+      "storedBefore": "Movies"
+    },
+    {
+      "name": "split_groups strips each group, so a U+0085 before the `;` is the helper's to take",
+      "groupTitle": "News\u0085;Kids",
+      "group": "News",
+      "stored": "News",
+      "storedBefore": "News"
+    },
+    {
+      "name": "and so is a tab",
+      "groupTitle": "Live\t;\u001fKids",
+      "group": "Live",
+      "stored": "Live",
+      "storedBefore": "Live"
     }
   ]
 }

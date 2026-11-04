@@ -22,7 +22,7 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  scrubUrls, sinkText
+  stripSpace, scrubUrls, sinkText
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
@@ -859,14 +859,16 @@ function withFavorites(state, favorites) {
 // (decision 1). The list is group NAMES, global across sources (decision 4).
 
 // The one reader both languages agree on (python: normalize_hidden_groups):
-// strings only, trimmed, non-empty, first occurrence wins, capped.
+// strings only, stripped of the reader's class (stripSpace, D-STATE-2: the
+// engine's trim took another set than the helper's strip, so the two readers
+// kept different names), non-empty, first occurrence wins, capped.
 function hiddenGroupList(raw) {
   var list = asList(raw)
   var out = []
   var seen = keyedMap()
   for (var i = 0; i < list.length && out.length < MAX_HIDDEN_GROUPS; i++) {
     if (typeof list[i] !== "string") continue
-    var name = list[i].trim()
+    var name = stripSpace(list[i])
     if (name === "" || seen[name] === true) continue
     seen[name] = true
     out.push(name)
@@ -895,7 +897,7 @@ function isGroupHidden(state, name) {
 // "nothing changed" from "changed" without a second call.
 function toggleHiddenGroup(state, name) {
   var st = state || emptyState()
-  var key = str(name).trim()
+  var key = stripSpace(name)
   if (key === "") return st
   var list = hiddenGroupList(st.hiddenGroups)
   var at = list.indexOf(key)

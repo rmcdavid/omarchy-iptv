@@ -193,6 +193,44 @@ TestCase {
     compare(Model.normalizeText("News\ufeffHD"), "news\ufeffhd")
   }
 
+  // D-STATE-2 in the shell's own engine: every strip the model mirrors takes
+  // the reader's class, url-whitespace.json's union (Model.stripSpace), not
+  // V4's trim, which takes U+FEFF and U+0085 and leaves U+001C-U+001F.
+  function test_stripSpaceIsTheReadersClassInV4() {
+    compare(Model.primaryGroup({ group: "\ufeff\u001cSports" }), "Sports")
+    compare(Model.hiddenGroupList(["\u001cSports\u0085", "\ufeffNews", "\u001cNews"]), ["Sports", "News"])
+    compare(Model.activeKeyText("\u001cd990c2e4"), "d990c2e4")
+    compare(Model.activeKeyText("\ufeffd990c2e4"), "d990c2e4")
+    compare(Model.cleanName("\ufeff\u001cArena"), "Arena")
+    compare(Model.cleanName("\u0085- News\u001c"), "News")
+    compare(Model.logoSurvey([{ logo: "https://b.test\u001c/1.png" }, { logo: "https://b.test/2.png" }]).hostCount, 1)
+    compare(Model.mpvArgWarnings(["--rtsp-transport=\u001ctcp"]).length, 0)
+    compare(Model.stripSpace("\u001c\u001dx\u001e\u001f"), "x")
+    compare(Model.stripSpace("\u0085x\u0085"), "x")
+    compare(Model.stripSpace("\ufeffx\ufeff"), "x")
+    compare(Model.stripSpace("\u3000!x!"), "!x!")
+    compare(Model.toggleHiddenGroup(Model.emptyState(), "\ufeff\u001cSports").hiddenGroups, ["Sports"])
+    var rows = Model.prepareChannels([{ id: "a", name: "A", group: "\ufeff\u001cSports", url: "http://h/a" }])
+    compare(Model.zapRing(rows, Model.emptyState(), { id: "a", launchedFrom: "g:\u001cSports" }).length, 1)
+  }
+
+  // D-STATE-2: stripSpace and cleanName run V4's own trim before their walk,
+  // which is exact only while that trim takes nothing outside the class (it
+  // takes 26 of its 30 code points here). So both are held to
+  // Model.isUrlSpaceAt, which node holds to url-whitespace.json's list, at
+  // every BMP code point, in this engine.
+  function test_stripSpaceAndCleanNameAtEveryBmpCodePointInV4() {
+    var wrong = []
+    for (var cp = 0; cp < 0x10000; cp++) {
+      var ch = String.fromCharCode(cp)
+      var m = Model.isUrlSpaceAt(ch, 0)
+      if (Model.stripSpace(ch + "x" + ch) !== (m ? "x" : ch + "x" + ch)
+          || Model.cleanName(ch + "Arena") !== (m || cp === 45 ? "Arena" : ch + "Arena")
+          || Model.cleanName("Arena" + ch) !== (m ? "Arena" : "Arena" + ch)) wrong.push(cp)
+    }
+    compare(wrong, [])
+  }
+
   function test_displayNameNeverUrl() {
     var rows = Model.prepareChannels([{ name: "http://h.test/x", tvgName: "Arte", url: "http://h.test/x" }, { name: "", url: "u2" }])
     compare(rows[0].name, "Arte")

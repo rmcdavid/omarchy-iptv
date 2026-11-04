@@ -17,6 +17,10 @@ file recorded if it does not end by itself:
     authority patterns (R30g) against the patterns they replaced, in V4, on
     ordinary strings: the same answer, character for character, and the ONE
     measured difference of the native trim (U+0085) stated rather than hidden.
+    Except cleanName, which since D-STATE-2 is held to the reader's class
+    (url-whitespace.json) and not to the leading whitespace-and-dash pattern
+    and the trailing whitespace pattern it replaced: it differs from them at
+    U+001C-U+001F and U+0085 by design.
 
 PROTO_V4_MODEL names another tree's Model.mjs (a red run against the code
 before the change); by default this tree's.
@@ -66,7 +70,11 @@ def run_qml(test, body):
            "XDG_CONFIG_HOME": home + "/.config", "XDG_DATA_HOME": home + "/.local/share",
            "XDG_RUNTIME_DIR": root, "LANG": "C.UTF-8", "QT_FORCE_STDERR_LOGGING": "1",
            "QT_QPA_PLATFORM": "offscreen"}
-    cap = ["prlimit", "--as=2500000000", "--"] if shutil.which("prlimit") else []
+    # F-HARNESS-95: the core limit too. A probe that dies under the address
+    # cap (V4 does when its heap meets it) left a 107 MB core of the probe in
+    # systemd-coredump's store; the journal entry, and the crash card the host
+    # draws from it, it posts whatever the limit says.
+    cap = ["prlimit", "--as=2500000000", "--core=0", "--"] if shutil.which("prlimit") else []
     out_path = os.path.join(root, "out.txt")
     with open(out_path, "wb") as out:
         proc = subprocess.Popen(cap + [QML_BIN, probe], env=env, stdout=out, stderr=subprocess.STDOUT,
@@ -132,19 +140,26 @@ class ProtoPathsV4Test(unittest.TestCase):
         self.assertEqual(entry, '{"id":"x","sourceKey":"k"}')
 
 
-# R30g's replacements against the patterns they replaced. Ordinary strings:
-# every whitespace character `\s` knows and U+0085, alone, doubled and around
+# R30g's replacements against the patterns they replaced (cleanName and
+# stripSpace against the reader's class instead, D-STATE-2). Ordinary strings:
+# the whitespace characters `\s` knows but U+2001-U+2009, and U+0085, U+001C and U+001F, alone, doubled and around
 # a word; the URL shapes validateSourceUrl and the file branch see. Nothing
 # here is long (the input rule: a bound is shown by arithmetic and by
 # equivalence, never by a long run).
 WHITESPACE_BODY = r"""
     var ws = ["\t", "\n", "\u000b", "\f", "\r", " ", "\u0085", "\u00a0", "\u1680", "\u2000", "\u200a",
-              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff", "x", "-", ""]
+              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff", "\x1c", "\x1f", "x", "-", ""]
     var inputs = []
     for (var i = 0; i < ws.length; i++) for (var j = 0; j < ws.length; j++) {
       inputs.push(ws[i] + "a" + ws[j]); inputs.push(ws[i] + ws[j] + "a b" + ws[j] + ws[i]); inputs.push(ws[i] + ws[j])
     }
-    var bad = { trimEnd: [], trim: [], trimWithoutNel: [], edge: [], cleanName: [] }
+    // D-STATE-2: the name and every strip the model mirrors take the reader's
+    // class, CODES (url-whitespace.json's union, put in front of this body
+    // by the test), not the engine's.
+    var STRIP = "[" + String.fromCharCode.apply(null, CODES) + "]"
+    var NAME_HEAD = new RegExp("^(?:" + STRIP + "|-)+"), TAIL = new RegExp(STRIP + "+$")
+    var EDGES = new RegExp("^" + STRIP + "+|" + STRIP + "+$", "g")
+    var bad = { trimEnd: [], trim: [], trimWithoutNel: [], edge: [], cleanName: [], strip: [] }
     for (var k = 0; k < inputs.length; k++) {
       var s = inputs[k]
       if (Model.trimEndSpace(s) !== s.replace(/\s+$/, "")) bad.trimEnd.push(s)
@@ -152,8 +167,9 @@ WHITESPACE_BODY = r"""
       var t = s.split("\u0085").join("")
       if (t.trim() !== t.replace(/^\s+|\s+$/g, "")) bad.trimWithoutNel.push(JSON.stringify(t))
       if (Model.trimEdgeSpace(s) !== s.replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")) bad.edge.push(s)
-      var oldClean = s.replace(/^[\s-]+/, "").replace(/\s+$/, "")
-      if (Model.displayName({ name: s }, 1) !== (oldClean !== "" ? oldClean : "Channel 1")) bad.cleanName.push(s)
+      var clean = s.replace(NAME_HEAD, "").replace(TAIL, "")
+      if (Model.displayName({ name: s }, 1) !== (clean !== "" ? clean : "Channel 1")) bad.cleanName.push(JSON.stringify(s))
+      if (typeof Model.stripSpace !== "function" || Model.stripSpace(s) !== s.replace(EDGES, "")) bad.strip.push(JSON.stringify(s))
     }
     var hosts = ["[::1]", "[2001:db8::1]", "[::]", "[1.2.3.4]", "[::ffff:1.2.3.4]", "[fe80::1%25eth0]",
                  "[fe80::1%eth0]", "[]", "[:]", "[x::1]", "[2001:db8::1", "2001:db8::1]", "[::1]x", "[::1]]"]
@@ -174,17 +190,25 @@ WHITESPACE_BODY = r"""
 @unittest.skipUnless(os.access(QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
 class WhitespaceV4Test(unittest.TestCase):
     """R30g in V4: the linear replacements answer what the quadratic patterns
-    answered, on the engine the shell runs."""
+    answered, on the engine the shell runs; cleanName and stripSpace answer
+    the reader's class (D-STATE-2)."""
 
     def setUp(self):
-        self.result = run_qml(self, WHITESPACE_BODY)
+        with open(os.path.join(ROOT, "tests", "fixtures", "url-whitespace.json"), encoding="utf-8") as handle:
+            codes = [int(entry["code"][2:], 16) for entry in json.load(handle)["codePoints"]]
+        self.result = run_qml(self, "    var CODES = %s\n" % json.dumps(codes) + WHITESPACE_BODY)
 
     def test_the_corpus_is_not_empty(self):
-        self.assertGreaterEqual(self.result["count"], 1200)
+        self.assertGreaterEqual(self.result["count"], 1400)
 
-    def test_trimEndSpace_and_the_names_built_on_it_answer_as_the_pattern_did(self):
+    def test_trimEndSpace_answers_as_the_pattern_did(self):
         self.assertEqual(self.result["bad"]["trimEnd"], [])
+
+    def test_cleanName_and_stripSpace_answer_with_the_readers_class(self):
+        # D-STATE-2, in the engine the shell runs: V4's trim and `\s` are not
+        # the reader's class, and these two answer url-whitespace.json's union.
         self.assertEqual(self.result["bad"]["cleanName"], [])
+        self.assertEqual(self.result["bad"]["strip"], [])
 
     def test_trimEdgeSpace_answers_as_the_edge_pattern_did(self):
         self.assertEqual(self.result["bad"]["edge"], [])

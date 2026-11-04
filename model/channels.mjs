@@ -4,11 +4,11 @@ import {
   MAX_CHNO_LABEL, CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHNO_FIELDS
 } from "./build.mjs"
 import {
-  str, asList, keyedMap, hasOwnKey, trimEndSpace, normalizeText, searchKey,
+  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey,
   GENERATED_NAME_WORD, channelId
 } from "./text.mjs"
 import {
-  sinkText
+  isUrlSpaceAt, stripSpace, sinkText
 } from "./privacy.mjs"
 
 // ------------------------------------------------------------ channels
@@ -16,15 +16,22 @@ import {
 // R5: a channel with `group-title="A;B;C"` is listed under its FIRST group.
 function primaryGroup(channel) {
   var raw = channel && channel.group !== undefined && channel.group !== null ? str(channel.group) : ""
-  // D-PERF-3 (R30g): the engine's own trim, which is linear. The pattern
-  // that was here, `/^\s+|\s+$/g`, tries `\s+$` from EVERY position of a
-  // whitespace run and backs out of the rest of it each time -- quadratic in
-  // the run, on every row, on every browse pass, on the shell's main thread.
-  // The helper keeps interior runs in a group verbatim. Same answer on every
-  // input in node; on Qt's V4 the native trim also drops U+0085, which `\s`
-  // does not match (measured; the helper strips C1 controls from the text it
-  // writes, so a group cannot carry one).
-  var first = raw.split(";")[0].trim()
+  // D-STATE-2: the reader's class (stripSpace), not the engine's trim. The
+  // helper strips each group it writes with Python's whitespace, which keeps
+  // a U+FEFF and whatever stands behind one, and the shell's trim took
+  // JavaScript's, which keeps U+001C-U+001F (and, in node, U+0085). The union
+  // takes off what either ever took, so a row lists under the name that
+  // hiding it stores, whichever runtime wrote the row or the stored name:
+  // with the engine's trim a group-title `<FEFF><U+001C>Sports` was hidden as
+  // `<U+001C>Sports`, the next CLI state write stored `Sports`, and the group
+  // was shown again. A name 0.17.0 stored reads as the group it hid. Linear,
+  // as the native trim was (D-PERF-3, R30g: the `/^\s+|\s+$/g` before it was
+  // quadratic in a whitespace run). The helper keeps interior runs in a group
+  // verbatim. The first group is cut at the first `;` without splitting the
+  // rest into an array, which buys back the call stripSpace costs over V4's
+  // native trim on every browse pass.
+  var cut = raw.indexOf(";")
+  var first = stripSpace(cut === -1 ? raw : raw.substring(0, cut))
   return first === "" ? UNGROUPED : first
 }
 
@@ -38,11 +45,33 @@ function looksLikeUrl(text) {
 // omarchy-notification-send as an argv item, and a body such as
 // "--urgency=x did not play" would be parsed as an option and suppress the
 // toast. Leading dashes and whitespace are dropped; an all-dash name falls
-// through to the next candidate. Mirrors the helper's clean_name.
+// through to the next candidate. The helper's clean_name does the same with
+// one difference (D-STATE-2, below).
 function cleanName(text) {
-  // D-PERF-3: `^[\s-]+` is anchored and linear; the trailing `\s+$` was the
-  // quadratic shape (see primaryGroup), so it is Model.trimEndSpace.
-  return trimEndSpace(str(text).replace(/^[\s-]+/, ""))
+  // D-STATE-2: the reader's class (isUrlSpaceAt), not JavaScript's `\s`. The
+  // helper's clean_name takes Python's whitespace and keeps a U+FEFF, because
+  // the `n:` id is hashed from its answer; this one takes the U+FEFF as well,
+  // for what is shown. So a name the helper wrote as `<FEFF>Arena` reads
+  // `Arena` and ranks as `arena`, a lone U+FEFF falls through to the next
+  // candidate, and a dash behind one is dropped. prepareChannels gives a
+  // name this changes the searchKey of what is shown, as 0.17.0 did; the id
+  // is still the helper's (D-ID-5). With `\s` a U+0085 or U+001C-U+001F
+  // behind an edge U+FEFF stayed. Index walks, so linear (D-PERF-3), after
+  // the engine's trim, which takes a subset of the class at native speed
+  // (stripSpace says why). A name with no dash and no member at its edges
+  // costs two reads.
+  var s = str(text)
+  var b = s.length
+  if (b === 0) return s
+  var head = s.charCodeAt(0)
+  var tail = s.charCodeAt(b - 1)
+  if (head > 0x20 && head < 0x85 && head !== 45 && tail > 0x20 && tail < 0x85) return s
+  s = s.trim()
+  b = s.length
+  var a = 0
+  while (a < b && (s.charCodeAt(a) === 45 || isUrlSpaceAt(s, a))) a++
+  while (b > a && isUrlSpaceAt(s, b - 1)) b--
+  return a === 0 && b === s.length ? s : s.substring(a, b)
 }
 
 function displayName(channel, position) {

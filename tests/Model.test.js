@@ -170,7 +170,7 @@ check("channelId null", Model.channelId(null), "")
 // drives against bin/omarchy-iptv, so the two implementations are pinned to
 // one file rather than to each other.
 const idFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/channel-ids.json"), "utf8"))
-check("channel-ids fixture loaded", [idFixture.vectors.length >= 11, idFixture.states.length >= 6, idFixture.folds.length >= 19, idFixture.foldSpace.length], [true, true, true, 29])
+check("channel-ids fixture loaded", [idFixture.vectors.length >= 11, idFixture.states.length >= 6, idFixture.folds.length >= 19, idFixture.foldSpace.length, idFixture.cleanName.length >= 15], [true, true, true, 29, true])
 // The rows as channels.json carries them: the helper's ids written on, which
 // tests/test_channel_ids.py proves are each vector's scheme2. That is what the
 // shell's remap reads (D-ID-5), so it is what these checks hand it.
@@ -285,6 +285,122 @@ checkCall("both folds collapse exactly the fixture's whitespace and the ASCII pu
   }
   return wrong
 }, { id: [], search: [] })
+// D-STATE-2: every model mirror of a helper strip takes url-whitespace.json's
+// union off a value's edges and nothing else (held per site below, and the
+// helper's sites the same way in tests/test_state.py): the reader's class
+// (Model.isUrlSpaceAt, held to the same list below under R32a'''), which the
+// helper strips as URL_SPACE_CHARS. The engine's trim took U+FEFF and left
+// U+001C-U+001F (and, in node, U+0085), the helper's strip() the reverse.
+const unionSpace = new Set(JSON.parse(require("fs").readFileSync(
+  require("path").join(__dirname, "fixtures/url-whitespace.json"), "utf8")).codePoints.map(function (e) { return parseInt(e.code.substring(2), 16) }))
+// Every BMP code point in seven shapes: alone, at both edges, around an
+// inner copy, at one edge with U+3000 at the other (which sends stripSpace
+// past its fast path for a code point the fast path would have answered),
+// and at one edge with a plain `x` at the other (which leaves the decision
+// to the fast path's test of that one edge).
+checkCall("D-STATE-2: stripSpace takes exactly url-whitespace.json's union off both ends", function () {
+  const I = "\u3000"
+  const wrong = []
+  for (let cp = 0; cp < 0x10000; cp++) {
+    const ch = String.fromCharCode(cp)
+    const want = unionSpace.has(cp) ? ["", "x", "x" + ch + "x", "x", "x", "x", "x"]
+      : [ch, ch + "x" + ch, ch + "x" + ch + "x" + ch, ch + "x", "x" + ch, ch + "x", "x" + ch]
+    const got = [Model.stripSpace(ch), Model.stripSpace(ch + "x" + ch), Model.stripSpace(ch + "x" + ch + "x" + ch),
+                 Model.stripSpace(ch + "x" + I), Model.stripSpace(I + "x" + ch), Model.stripSpace(ch + "x"), Model.stripSpace("x" + ch)]
+    if (JSON.stringify(got) !== JSON.stringify(want)) wrong.push(cp)
+  }
+  return wrong
+}, [])
+checkCall("D-STATE-2: cleanName takes the union and leading dashes off a name at every BMP code point", function () {
+  const wrong = []
+  for (let cp = 0; cp < 0x10000; cp++) {
+    const ch = String.fromCharCode(cp)
+    const want = [unionSpace.has(cp) || cp === 45 ? "Arena" : ch + "Arena", unionSpace.has(cp) ? "Arena" : "Arena" + ch]
+    const got = [Model.cleanName(ch + "Arena"), Model.cleanName("Arena" + ch)]
+    if (JSON.stringify(got) !== JSON.stringify(want)) wrong.push(cp)
+  }
+  return wrong
+}, [])
+checkCall("D-STATE-2: cleanName answers the shared fixture, cleans its answer to itself, and reads the helper's answer as it reads the raw text", function () {
+  return idFixture.cleanName.filter(function (v) {
+    const want = v.shell === undefined ? v.out : v.shell
+    return Model.cleanName(v.in) !== want || Model.cleanName(want) !== want || Model.cleanName(v.out) !== want
+  }).map(function (v) { return JSON.stringify(v.in) })
+}, [])
+checkCall("D-STATE-2: a name the helper wrote behind a U+FEFF is shown without it and searched as shown, under the helper's id", function () {
+  // The row as the helper's parse writes it (measured 2026-11-03). The
+  // helper's key starts with the U+FEFF, so it is refolded from what is
+  // shown, as 0.17.0 refolded it; the id is the one the helper wrote.
+  const row = { id: "n:8c7f7a7f", name: "\ufeffArena", group: "Live\ufeffSports", searchKey: "\ufeffarena live\ufeffsports", url: "http://h.test/1" }
+  const out = Model.prepareChannels([row])[0]
+  return [out.id, out.name, out.searchKey === Model.searchKey("Arena", row.group), out.nameKey]
+}, ["n:8c7f7a7f", "Arena", true, "arena"])
+checkCall("D-STATE-2: a name shown as the helper wrote it keeps the helper's searchKey, one this side would not have folded", function () {
+  return Model.prepareChannels([{ id: "n:1", name: "Arena", group: "Sports", searchKey: "helper only key", url: "http://h.test/1" }])[0].searchKey
+}, "helper only key")
+checkCall("D-STATE-2: a U+FEFF-led name ranks first for its first word, and its name and group together still find it", function () {
+  const rows = Model.prepareChannels([
+    { id: "n:1", name: "Sky Arena", group: "Sports", searchKey: "sky arena sports", url: "http://h.test/1" },
+    { id: "n:2", name: "\ufeffArena", group: "Sports", searchKey: "\ufeffarena sports", url: "http://h.test/2" }])
+  return [ids(Model.filterChannels(rows, "arena", 50, [], null).rows)[0],
+          ids(Model.filterChannels(rows, "arena sports", 50, [], null).rows).indexOf("n:2") !== -1]
+}, ["n:2", true])
+checkCall("D-STATE-2: a name of only U+FEFF, dashes and whitespace falls through, a dash behind a U+FEFF is not shown (S-04), a URL behind any of them is never the name (D-QA-02), and a track titled only U+FEFF is named by its language", function () {
+  return [Model.displayName({ name: "\ufeff", tvgName: "Fallback TV" }, 3),
+          Model.displayName({ name: "\ufeff-\ufeff " }, 3),
+          Model.displayName({ name: "\ufeff--urgency=x" }, 3),
+          Model.displayName({ name: "\ufeffhttp://u:p@h.test/x", tvgName: "Arte" }, 1),
+          Model.displayName({ name: "\ufeff- http://u:p@h.test/x", tvgName: "Arte" }, 1),
+          Model.displayName({ name: "\u0085udp://@239.0.0.1:1234" }, 4),
+          Model.displayName({ name: "\ufeff\u001cArena\u0085" }, 1),
+          Model.trackLabel({ id: 2, title: "\ufeff", lang: "eng" })]
+}, ["Fallback TV", "Channel 3", "urgency=x", "Arte", "Arte", "Channel 4", "Arena", "English"])
+checkCall("D-STATE-2: a group scope 0.17.0 stashed still rings over the group it named, whatever stood at the group's edges", function () {
+  // 0.17.0 built the scope from the engine's trim of the helper's group, and
+  // the player hands it back on the first reattach after the upgrade. The
+  // trim stopped at U+001C-U+001F, so it stashed `g:<U+001C>Sports` for a
+  // group this side lists as `Sports`, and `g:<U+001C>` for one it lists as
+  // Ungrouped. The ring is what channel up and down walk.
+  const rows = Model.prepareChannels([{ id: "a", name: "A", group: "\ufeffSports", url: "http://h/a" },
+    { id: "b", name: "B", group: "\ufeff\u001cSports", url: "http://h/b" },
+    { id: "c", name: "C", group: "Sports\u001f\ufeff", url: "http://h/c" },
+    { id: "d", name: "D", group: "\ufeff\u001c\ufeff", url: "http://h/d" },
+    { id: "e", name: "E", group: "", url: "http://h/e" }, { id: "f", name: "F", group: "News", url: "http://h/f" }])
+  const ring = function (from) { return ids(Model.zapRing(rows, Model.emptyState(), { id: "a", launchedFrom: from })).join("|") }
+  return [ring(Model.groupScopeId("Sports")), ring("g:\u001cSports"), ring("g:Sports\u001f"), ring("g:\u001c"), ring("g:News")]
+}, ["a|b|c", "a|b|c", "a|b|c", "d|e", "f"])
+checkCall("D-STATE-2: each model mirror takes a code point off a value's edges exactly when the union lists it, at every BMP code point", function () {
+  // The shapes the helper's sites are held to in tests/test_state.py, so a
+  // site on either side that strips a member less, or anything more (a dash,
+  // a `;`), goes red here or there. primaryGroup and hiddenGroupList are the
+  // group a row lists under and the name hiding it stores; activeKeyText the
+  // stored key; the survey's host is logoHost's; the warning is mpvListenName's.
+  // toggleHiddenGroup is the name hiding a group stores, and channelsForScope
+  // the group a stashed scope names (both strip with stripSpace themselves).
+  const wrong = { group: [], hidden: [], active: [], host: [], mpv: [], toggle: [], scope: [] }
+  const scopeRows = Model.prepareChannels([{ id: "a", name: "A", group: "G", url: "http://h/a" }])
+  for (let cp = 0; cp < 0x10000; cp++) {
+    const ch = String.fromCharCode(cp)
+    const m = unionSpace.has(cp)
+    if ((Model.primaryGroup({ group: ch + "x" + ch }) === "x") !== m) wrong.group.push(cp)
+    if ((JSON.stringify(Model.hiddenGroupList([ch + "x" + ch])) === '["x"]') !== m) wrong.hidden.push(cp)
+    if ((Model.activeKeyText(ch + "d990c2e4" + ch) === "d990c2e4") !== m) wrong.active.push(cp)
+    const survey = Model.logoSurvey([{ logo: "https://" + ch + "b.test" + ch + "/x.png" }])
+    if ((survey.hostCount === 1 && survey.hosts[0].host === "b.test") !== m) wrong.host.push(cp)
+    if ((Model.mpvArgWarnings(["--rtsp-transport=" + ch + "tcp" + ch]).length === 0) !== m) wrong.mpv.push(cp)
+    if ((JSON.stringify(Model.toggleHiddenGroup(Model.emptyState(), ch + "x" + ch).hiddenGroups) === '["x"]') !== m) wrong.toggle.push(cp)
+    if ((Model.channelsForScope(scopeRows, "g:" + ch + "G" + ch, Model.emptyState()).length === 1) !== m) wrong.scope.push(cp)
+  }
+  return wrong
+}, { group: [], hidden: [], active: [], host: [], mpv: [], toggle: [], scope: [] })
+checkCall("D-STATE-2: what the strips leave as they were -- a hidden group that is not a string, a group that starts at its separator", function () {
+  // stripSpace reads a non-string through str(), as the trim before it did
+  // through String(), and primaryGroup cuts at the first `;` without
+  // splitting, so a group that starts with one is still Ungrouped.
+  return [Model.toggleHiddenGroup(Model.emptyState(), null).hiddenGroups, Model.toggleHiddenGroup(Model.emptyState(), 7).hiddenGroups,
+          Model.primaryGroup({ group: ";Sports" }), Model.primaryGroup({ group: ";" }), Model.primaryGroup({ group: " ;x" }),
+          Model.stripSpace(null), Model.stripSpace(7), Model.stripSpace(undefined), Model.primaryGroup({ group: "Live ; Kids" })]
+}, [[], ["7"], "Ungrouped", "Ungrouped", "Ungrouped", "", "7", "", "Live"])
 // D-ID-5: the shell's remap reads the ids the helper wrote and never refolds
 // a name. These rows carry labels this side's own fold would not have made,
 // which is exactly what a disagreement between the two folds looks like.
@@ -2454,7 +2570,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [11, []])
+}, [13, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -11476,6 +11592,24 @@ checkCall("hidden groups: the shared fixture's browse cases, through channelsFor
     return out
   }).filter(function (r) { return r.bad.length > 0 })
 }, [])
+checkCall("D-STATE-2: the shared fixture's hide cases -- what hiding the helper's group stores, that it and the name 0.17.0 stored both hide the row, and that the raw group reads as the stored name", function () {
+  // python (test_state.py) parses each groupTitle into `group` and reads
+  // `group`, `stored` and `storedBefore` back through normalize_hidden_groups,
+  // as every CLI write does.
+  return hiddenFixture.hide.map(function (c) {
+    const row = { id: "a", name: "Alpha", group: c.group, url: "http://h/a" }
+    const other = { id: "b", name: "Bravo", group: "Other", url: "http://h/b" }
+    const primary = Model.primaryGroup(row)
+    const st = Model.toggleHiddenGroup(Model.emptyState(), primary)
+    const reread = Model.parseState(JSON.stringify(st)).hiddenGroups
+    const all = Model.channelsForScope([row, other], Model.SCOPE_ALL, hiddenState([c.stored]))
+    const before = Model.channelsForScope([row, other], Model.SCOPE_ALL, hiddenState([c.storedBefore]))
+    return [c.name, primary === c.stored, JSON.stringify(st.hiddenGroups) === JSON.stringify([c.stored]),
+            JSON.stringify(reread) === JSON.stringify([c.stored]), ids(all).join("|") === "b", ids(before).join("|") === "b",
+            JSON.stringify(Model.hiddenGroupList([c.storedBefore, c.group])) === JSON.stringify([c.stored]),
+            JSON.stringify(Model.toggleHiddenGroup(Model.emptyState(), c.group).hiddenGroups) === JSON.stringify([c.stored])]
+  }).filter(function (r) { return r.indexOf(false) !== -1 })
+}, [])
 checkCall("hidden groups: a star in a hidden group still shows in Favorites; a saved search does not see the group", function () {
   // Decision 1, both halves, on one state. The star is a thing the user did
   // by hand; the saved search is a search.
@@ -18611,7 +18745,7 @@ checkCall("D-SG-3: player entry owners and failure marks answer nothing for an i
 // pattern is the oracle, run beside the shipping function.
 ;(function () {
   const ws = ["\t", "\n", "\u000b", "\f", "\r", " ", "\u0085", "\u00a0", "\u1680", "\u2000", "\u200a",
-              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff", "x", "-", "", "ab", "a b"]
+              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff", "\x1c", "\x1f", "x", "-", "", "ab", "a b"]
   const inputs = []
   for (const a of ws) for (const b of ws) inputs.push(a + "a" + b, a + b + "a  b" + b + a, a + b, "  " + a + b + "\u00a0")
   checkCall("D-PERF-3: trimEndSpace is `replace(/\\s+$/, \"\")` on " + inputs.length + " ordinary strings", () =>
@@ -18622,12 +18756,18 @@ checkCall("D-SG-3: player entry owners and failure marks answer nothing for an i
       .map(JSON.stringify), [])
   checkCall("D-PERF-3: in node the native trim is `replace(/^\\s+|\\s+$/g, \"\")` exactly (V4 also takes U+0085: tests/test_proto_v4.py)", () =>
     inputs.filter(s => s.trim() !== s.replace(/^\s+|\s+$/g, "")).map(JSON.stringify), [])
-  checkCall("D-PERF-3: a channel's name, group and the guide's parsed files read as they did", () => {
+  // D-STATE-2 moved the name and the group from JavaScript's `\s` to the
+  // reader's class, url-whitespace.json's union, so that is the oracle's
+  // class now. None of its members is `]`, a backslash, `^` or `-`, so they
+  // stand in a class as they are.
+  const STRIP = "[" + String.fromCharCode.apply(null, Array.from(unionSpace)) + "]"
+  const NAME_HEAD = new RegExp("^(?:" + STRIP + "|-)+"), TAIL = new RegExp(STRIP + "+$"), EDGES = new RegExp("^" + STRIP + "+|" + STRIP + "+$", "g")
+  checkCall("D-PERF-3, D-STATE-2: a channel's name and group read as the reader's class reads them, and the guide's parsed files as they did", () => {
     const bad = []
     for (const s of inputs) {
-      const oldName = s.replace(/^[\s-]+/, "").replace(/\s+$/, "")
+      const oldName = s.replace(NAME_HEAD, "").replace(TAIL, "")
       if (Model.displayName({ name: s }, 3) !== (oldName !== "" && !/^[a-z][a-z0-9+.-]*:\/\//i.test(oldName) ? oldName : "Channel 3")) bad.push("name " + JSON.stringify(s))
-      const oldGroup = s.split(";")[0].replace(/^\s+|\s+$/g, "")
+      const oldGroup = s.split(";")[0].replace(EDGES, "")
       if (Model.primaryGroup({ group: s }) !== (oldGroup === "" ? Model.UNGROUPED : oldGroup)) bad.push("group " + JSON.stringify(s))
       const text = s + '{"a":1}' + s
       let old = null
