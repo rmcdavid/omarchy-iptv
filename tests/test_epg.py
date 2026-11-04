@@ -164,6 +164,71 @@ class EpgCommandTest(unittest.TestCase):
         for name in ("epg-now.json", "epg-status.json", helper.EPG_WINDOW_FILE):
             self.assertEqual(pathlib.Path(self.path(name)).stat().st_mode & 0o777, 0o600, name)
 
+    def damage_meta(self, key, token, original=None):
+        """Rewrite the cached window's meta line with `key` set to the raw JSON
+        `token`, which a fixture value may not be able to carry (1e400). From
+        `original`, the window's text before any damage, when given: each case
+        must carry its own damage alone, or an earlier case's 1e400 decides it."""
+        path = self.path(helper.EPG_WINDOW_FILE)
+        if original is None:
+            with open(path, encoding="utf-8") as fh:
+                original = fh.read()
+        head, _, body = original.partition("\n")
+        meta = json.loads(head)
+        meta[key] = "@TOKEN@"
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(meta).replace('"@TOKEN@"', token) + "\n" + body)
+        return path
+
+    def test_a_meta_line_holding_an_infinite_number_or_bad_warnings_is_a_window_to_refetch(self):
+        """D-STATE-4's sibling. The meta line's numbers went into epg-now.json's
+        head and the status as they were, and json.dumps wrote an infinite one
+        as `Infinity`, which neither engine's JSON.parse reads: the guide lost
+        every now/next when it was the `fetchedAt`, and the status read as
+        no_output when it was a count. An int past the double range is written
+        as its digits, which V4 refuses and node reads as Infinity, and a
+        nested number is copied with its object. A lone surrogate in a string
+        raised UnicodeEncodeError at the write. `warnings` went through list(),
+        which raised on a number. Such a window is damaged now: the recompute
+        answers no_cache and leaves epg-now.json as it was."""
+        code, _, stderr = self.epg()
+        self.assertEqual(code, 0, stderr)
+        with open(self.path("epg-now.json"), encoding="utf-8") as fh:
+            before = fh.read()
+        with open(self.path(helper.EPG_WINDOW_FILE), encoding="utf-8") as fh:
+            original = fh.read()
+        for key, token in (("fetchedAt", "1e400"), ("matched", "-1e400"), ("programmeCount", "NaN"),
+                           ("fetchedAt", "1" + "0" * 400), ("matched", '{"x": 1e400}'),
+                           ("sourceHost", '"' + chr(92) + 'ud800"'),
+                           ("warnings", "5"), ("warnings", '["ok", 7]')):
+            path = self.damage_meta(key, token, original)
+            self.assertIsNone(helper.load_window(path), (key, token))
+            code, status, _ = self.epg("--now-only")
+            self.assertEqual((code, status["error"]["code"]), (1, "no_cache"), (key, token))
+            with open(self.path("epg-now.json"), encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), before, (key, token))
+
+    def test_a_meta_fetched_at_spelled_as_text_reads_as_a_stored_integer(self):
+        """D-STATE-4's sibling: the status after a cached or now-only window
+        read the meta's fetchedAt with int(), which raised on a U+FEFF-led
+        string, so the recompute ended `internal`."""
+        code, _, stderr = self.epg()
+        self.assertEqual(code, 0, stderr)
+        self.damage_meta("fetchedAt", json.dumps(chr(0xFEFF) + str(NOW)))
+        code, status, stderr = self.epg("--now-only")
+        self.assertEqual((code, status["fetchedAt"]), (0, NOW), stderr)
+
+    def test_a_previous_status_with_an_infinite_fetched_at_is_not_copied(self):
+        """D-STATE-4's sibling: a failed run copies the previous status's
+        fetchedAt into its own, and json.dumps wrote 1e400 as `Infinity`."""
+        with open(self.path("epg-status.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"ok": true, "kind": "epg", "fetchedAt": 1e400}')
+        code, status, _ = self.epg(url=self.path("missing.xml"))
+        self.assertEqual(code, 1)
+        self.assertIsNone(status["fetchedAt"])
+        with open(self.path("epg-status.json"), encoding="utf-8") as fh:
+            self.assertNotIn("Infinity", fh.read())
+
     def test_window_keeps_only_the_window_and_unicode_titles(self):
         self.epg()
         window = helper.load_window(self.path(helper.EPG_WINDOW_FILE))
@@ -362,6 +427,22 @@ def generate_xmltv(path, channel_count, per_channel, first_start, detail=False):
                              % (time.strftime("%Y%m%d%H%M%S", time.gmtime(start)), time.strftime("%Y%m%d%H%M%S", time.gmtime(stop)), c, p, c, fields))
                 start = stop
         handle.write("</tv>\n")
+
+
+class WindowMetaNumbersTest(unittest.TestCase):
+    def test_a_damaged_meta_number_is_a_window_to_refetch_not_a_crash(self):
+        """D-STATE-4's sibling: needs_refetch read fetchedAt and windowEnd with
+        int(), which raised on "soon", on a list and on 1e400 (an infinite
+        float), so the verb ended `internal`, where load_window's rule is that
+        a damaged window is a cache to refetch (D-EPG-14)."""
+        url = "http://epg.example.test/x.xml"
+        cases = [({"fetchedAt": "soon"}, "cache older than ttl"),
+                 ({"fetchedAt": float("inf")}, "cache older than ttl"),
+                 ({"fetchedAt": NOW, "windowEnd": float("inf")}, "window nearly exhausted"),
+                 ({"fetchedAt": NOW, "windowEnd": [NOW + 86400]}, "window nearly exhausted")]
+        for meta, reason in cases:
+            window = dict({"version": 1, "sourceKey": helper.source_key(url)}, **meta)
+            self.assertEqual(helper.needs_refetch(window, url, NOW, 3600, "/nonexistent"), reason, meta)
 
 
 class EntityDeclarationTest(unittest.TestCase):

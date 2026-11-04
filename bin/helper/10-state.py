@@ -85,15 +85,8 @@ def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
     query = str(entry.get("query") or "")[:MAX_SAVED_QUERY]
     if not saved_search_terms(query):
         return None
-    # float() then int(), NOT int() alone, and the shared fixture is what
-    # forced it: the model does Math.trunc(Number(x)), which reads "12.9" as 12,
-    # while int("12.9") raises and this reader would have stored 0. The vector
-    # is in the fixture precisely so the two cannot drift apart again.
-    #
-    # normalize_played above still has the int()-alone form and therefore still
-    # disagrees with playedRecord on that input. Filed as D-STATE-1 rather than
-    # changed here: it is a pre-existing divergence on a different key and it
-    # is not this feature's to move.
+    # coerce_int, NOT int(): the shared fixture is what forced it, because the
+    # model reads "12.9" as 12 and int("12.9") raises.
     return {"query": query, "at": coerce_int(entry.get("at"))}
 
 
@@ -104,26 +97,57 @@ def normalize_played(entry: Any) -> dict[str, Any] | None:
             "at": coerce_int(entry.get("at"))}
 
 
+# D-STATE-4: the one spelling a stored integer's string may take, after the
+# reader's class is off its ends. The model's STORED_DECIMAL (model/state.mjs).
+_STORED_DECIMAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+# And no longer than this: the model's STORED_TEXT_MAX. V4's Number()
+# reads any string over 16,384 characters as NaN. Only ASCII passes the
+# grammar, so a length here is the same number in either runtime's units.
+_STORED_TEXT_MAX = 64
+
+
 def coerce_int(value: Any) -> int:
-    """D-STATE-1. Mirror the model's `Math.trunc(Number(x)) || 0` exactly.
+    """Mirror of storedInt (model/state.mjs): what a stored integer reads
+    as, on both sides, with one fixture (played-records.json).
 
-    This used to be `int(x)`, which accepts only a plain integer literal and
-    RAISES on everything else -- so `"12.9"` stored 0 where the guide read 12,
-    and `"1e3"` stored 0 where the guide read 1000. Same bytes, two answers, on
-    `recents[].at`, `lastPlayed.at` and `session.at`.
+    D-STATE-1: this used to be `int(x)`, which accepts only a plain integer
+    literal and RAISES on everything else -- so `"12.9"` stored 0 where the
+    guide read 12, and `"1e3"` stored 0 where the guide read 1000. Found by
+    the saved-search fixture, which carried `at: "12.9"` for its own key and
+    went red on a key it was not written for.
 
-    float() first is what buys the whole JavaScript numeric grammar: decimals,
-    exponents and surrounding whitespace all parse, a trailing tail does not
-    (`"7abc"` is 0 in both), and int() then truncates TOWARD ZERO rather than
-    down, which is what Math.trunc does and why `-3.7` is -3 and not -4.
-
-    Found by the saved-search fixture, which carried `at: "12.9"` for its own
-    key and went red on a key it was not written for.
+    D-STATE-4: the fix for that was float() and then int(), whose docstring
+    said float() bought the whole JavaScript numeric grammar. It bought Python's:
+    "1_000" and other scripts' digits parsed here and nowhere in the shell,
+    "0x10" and a one-element array parsed in the shell and not here, and an
+    infinite number (1e400, "Infinity", "inf"), which float() reads as an
+    infinite float, raised OverflowError in int(), which the except, for TypeError
+    and ValueError only, did not catch, so every `state` verb that reads the file, and the `failed`
+    verb, ended `internal`. Neither
+    engine's Number() is one grammar either (storedInt's comment says how), so
+    the two sides now share an explicit one. A JSON number is its value and a
+    boolean 1 or 0; a string is read only as a decimal literal of at most
+    _STORED_TEXT_MAX characters once URL_SPACE_CHARS is off its ends; the
+    answer is truncated TOWARD ZERO, as
+    Math.trunc does, so `-3.7` is -3 and not -4; and everything else, or
+    anything not finite, is 0. float() of an int is the double JSON.parse
+    reads the same digits as, so an int past 2**53 rounds alike on both sides.
     """
-    try:
-        return int(float(value or 0))
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        try:
+            number = float(value)
+        except OverflowError:
+            return 0
+    elif isinstance(value, str):
+        text = value.strip(URL_SPACE_CHARS)
+        if len(text) > _STORED_TEXT_MAX or not _STORED_DECIMAL.fullmatch(text):
+            return 0
+        number = float(text)
+    else:
         return 0
+    return int(number) if math.isfinite(number) else 0
 
 
 def non_negative_int(value: Any) -> int:
@@ -305,7 +329,9 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     pending = normalize_migration_pending(raw.get("migrationPending"))
     if pending is not None:
         state["migrationPending"] = pending
-    state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
+    # D-STATE-4: through coerce_int, as Model.parseState reads it through
+    # storedInt; `==` read the string "2" as no layout where the shell read 2.
+    state["cacheLayout"] = CACHE_LAYOUT if coerce_int(raw.get("cacheLayout")) == CACHE_LAYOUT else 0
     sources = raw.get("sources")
     if isinstance(sources, list):
         for item in sources:

@@ -79,6 +79,47 @@
           "at": 1790298000
         }
       ]
+    },
+    {
+      "name": "D-STATE-4: a mark's `at` reads through the stored-integer grammar, so the readers agree: a spelling only one of them took is dropped by both unless it is a decimal with the reader's class at its edge, which both keep",
+      "failed": [
+        {
+          "id": "t:a",
+          "at": "Infinity"
+        },
+        {
+          "id": "t:b",
+          "at": "0x6ab0c0e0"
+        },
+        {
+          "id": "t:c",
+          "at": [
+            1790300000
+          ]
+        },
+        {
+          "id": "t:d",
+          "at": "\u00851790300000"
+        },
+        {
+          "id": "t:e",
+          "at": "1_790_300_000"
+        },
+        {
+          "id": "t:f",
+          "at": 1790300000.9
+        }
+      ],
+      "expect": [
+        {
+          "id": "t:d",
+          "at": 1790300000
+        },
+        {
+          "id": "t:f",
+          "at": 1790300000
+        }
+      ]
     }
   ]
 }

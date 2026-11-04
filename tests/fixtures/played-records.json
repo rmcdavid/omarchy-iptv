@@ -17,7 +17,23 @@
     "The agreed answer is Model.js's, for two reasons. It is the reader the",
     "guide runs, so it is what the user's screen already reflects; and it is the",
     "more tolerant of the two, so adopting it cannot turn a value that used to",
-    "be read into one that is not."
+    "be read into one that is not.",
+    "",
+    "D-STATE-4. The fix for D-STATE-1 was float() then int(), which bought",
+    "Python's grammar, not JavaScript's, and raised OverflowError on an infinite",
+    "number, so every helper state verb that reads the file ended `internal`. Neither engine's",
+    "Number() is one grammar either (V4 reads \"inf\" as Infinity and node NaN;",
+    "V4 trims U+0085 and node U+FEFF). So both readers now share an explicit one",
+    "(storedInt in model/state.mjs, coerce_int). A JSON number is its value and a boolean 1",
+    "or 0. A string is read only as a decimal literal of at most 64 code units",
+    "once the reader's class (url-whitespace.json) is off its ends. The answer is truncated toward zero,",
+    "and anything else, or anything not finite, is 0. The D-STATE-4 vectors",
+    "below say which reader each one moved.",
+    "",
+    "`atText` holds JSON tokens a fixture value cannot carry. Each runner",
+    "splices the token into a document's text and parses that, as each reader",
+    "parses state.json. V4's JSON.parse refuses a number past the double range,",
+    "whole file and all (D-STATE-5), so these run in node and python only."
   ],
   "atComment": "Every vector is `at` on an otherwise valid record. `want` is what BOTH readers must return.",
   "at": [
@@ -90,6 +106,162 @@
       "in": true,
       "want": 1,
       "why": "boolean, agreed before this fix and pinned so it stays agreed"
+    },
+    {
+      "in": "Infinity",
+      "want": 0,
+      "why": "D-STATE-4: Infinity in any spelling is 0; both engines' Number read this as Infinity, and the helper raised OverflowError"
+    },
+    {
+      "in": "-Infinity",
+      "want": 0,
+      "why": "D-STATE-4: the same, negative"
+    },
+    {
+      "in": "inf",
+      "want": 0,
+      "why": "D-STATE-4: V4's Number reads Infinity, node's NaN, and the helper raised OverflowError"
+    },
+    {
+      "in": "nan",
+      "want": 0,
+      "why": "not a number in either reader"
+    },
+    {
+      "in": "1e400",
+      "want": 0,
+      "why": "D-STATE-4: a decimal past the double range is not finite"
+    },
+    {
+      "in": "1e-400",
+      "want": 0,
+      "why": "and one below it is 0"
+    },
+    {
+      "in": "0x10",
+      "want": 0,
+      "why": "D-STATE-4: a hex spelling is 0; both engines' Number read 16, and float() refused it"
+    },
+    {
+      "in": "0o17",
+      "want": 0,
+      "why": "D-STATE-4: so is an octal one"
+    },
+    {
+      "in": "0b101",
+      "want": 0,
+      "why": "D-STATE-4: and a binary one"
+    },
+    {
+      "in": "1_000",
+      "want": 0,
+      "why": "D-STATE-4: a digit separator; float() read 1000, both engines NaN"
+    },
+    {
+      "in": "\u0661\u0662",
+      "want": 0,
+      "why": "D-STATE-4: another script's digits; float() read 12, both engines NaN"
+    },
+    {
+      "in": "\ufeff7\u0085",
+      "want": 7,
+      "why": "D-STATE-4: the reader's class comes off the ends; V4's Number kept the U+FEFF, node's the U+0085, float() the U+FEFF"
+    },
+    {
+      "in": "\u001c7\u001f",
+      "want": 7,
+      "why": "D-STATE-4: U+001C-U+001F as well, which neither engine's Number took"
+    },
+    {
+      "in": "7\u200b",
+      "want": 0,
+      "why": "a zero-width space is not whitespace to either reader"
+    },
+    {
+      "in": "+7",
+      "want": 7,
+      "why": "a sign"
+    },
+    {
+      "in": "5.",
+      "want": 5,
+      "why": "a point with nothing after it"
+    },
+    {
+      "in": ".9",
+      "want": 0,
+      "why": "a point with nothing before it"
+    },
+    {
+      "in": "-0",
+      "want": 0,
+      "why": "negative zero is 0, not -0 (node compares with Object.is)"
+    },
+    {
+      "in": "9007199254740993",
+      "want": 9007199254740992,
+      "why": "past 2**53 both read the nearest double"
+    },
+    {
+      "in": [
+        7
+      ],
+      "want": 0,
+      "why": "D-STATE-4: an array is 0; both engines' Number read [7] as 7, float() refused it"
+    },
+    {
+      "in": [
+        "12.9"
+      ],
+      "want": 0,
+      "why": "D-STATE-4: whatever it holds"
+    },
+    {
+      "in": {
+        "a": 1
+      },
+      "want": 0,
+      "why": "an object is 0"
+    },
+    {
+      "in": false,
+      "want": 0,
+      "why": "false is 0"
+    },
+    {
+      "in": "1E3",
+      "want": 1000,
+      "why": "D-STATE-4: an uppercase exponent"
+    },
+    {
+      "in": "1e+3",
+      "want": 1000,
+      "why": "D-STATE-4: a signed exponent"
+    },
+    {
+      "in": ".5e1",
+      "want": 5,
+      "why": "D-STATE-4: a leading point, made whole by its exponent"
+    },
+    {
+      "in": "5.e1",
+      "want": 50,
+      "why": "D-STATE-4: a trailing point before an exponent"
+    },
+    {
+      "in": "0000000000000000000000000000000000000000000000000000000000000007",
+      "want": 7,
+      "why": "D-STATE-4: 64 code units, the longest text either reads once the reader's class is off"
+    },
+    {
+      "in": " 0000000000000000000000000000000000000000000000000000000000000007 ",
+      "want": 7,
+      "why": "D-STATE-4: the bound is on the text once the reader's class is off"
+    },
+    {
+      "in": "00000000000000000000000000000000000000000000000000000000000000007",
+      "want": 0,
+      "why": "D-STATE-4: 65 code units is 0; V4's Number reads a string over 16,384 as NaN"
     }
   ],
   "recordComment": "Whole-record vectors: a record without an id is not a record, on both sides.",
@@ -171,6 +343,101 @@
       "in": null,
       "want": 0,
       "why": "missing"
+    },
+    {
+      "in": "Infinity",
+      "want": 0,
+      "why": "D-STATE-4: the source-record keys read the same grammar"
+    },
+    {
+      "in": "0x10",
+      "want": 0,
+      "why": "D-STATE-4: and so read a hex spelling as 0"
+    },
+    {
+      "in": [
+        7
+      ],
+      "want": 0,
+      "why": "D-STATE-4: and an array"
+    },
+    {
+      "in": "\u00857",
+      "want": 7,
+      "why": "D-STATE-4: and take the reader's class off the ends"
+    }
+  ],
+  "atText": [
+    {
+      "text": "1e400",
+      "want": 0,
+      "why": "D-STATE-4: python reads infinity and coerce_int raised OverflowError in every state verb that reads the file; node reads Infinity"
+    },
+    {
+      "text": "-1e400",
+      "want": 0,
+      "why": "D-STATE-4: the same, negative"
+    },
+    {
+      "text": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "want": 0,
+      "why": "D-STATE-4: python reads this integer exactly and float() of it raised OverflowError; node reads Infinity"
+    },
+    {
+      "text": "9007199254740993",
+      "want": 9007199254740992,
+      "why": "JSON.parse reads the nearest double, and float() of python's exact integer rounds alike"
+    },
+    {
+      "text": "-0",
+      "want": 0,
+      "why": "negative zero is 0, not -0 (node compares with Object.is)"
+    },
+    {
+      "text": "12.9e0",
+      "want": 12,
+      "why": "an exponent on a JSON number"
+    }
+  ],
+  "cacheLayoutComment": "D-STATE-4: `cacheLayout` reads through the same grammar on both sides. The helper compared the raw value with `==`, so the string \"2\" was no layout to it and layout 2 to the shell.",
+  "cacheLayout": [
+    {
+      "in": 2,
+      "want": 2
+    },
+    {
+      "in": "2",
+      "want": 2
+    },
+    {
+      "in": " 2 ",
+      "want": 2
+    },
+    {
+      "in": "\ufeff2",
+      "want": 2
+    },
+    {
+      "in": "0x2",
+      "want": 0
+    },
+    {
+      "in": [
+        2
+      ],
+      "want": 0
+    },
+    {
+      "in": 1,
+      "want": 0
+    },
+    {
+      "in": "abc",
+      "want": 0
+    },
+    {
+      "in": null,
+      "want": 0
     }
   ]
 }

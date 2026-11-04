@@ -1937,7 +1937,7 @@ checkCall("D-STATE-1: every `at` vector reads the same here as it does in the he
   // both readers are handed. The helper runs the same file.
   return playedFixture.at.filter(function (row) {
     const got = Model.parseState(JSON.stringify({ lastPlayed: { id: "x", name: "X", at: row.in } })).lastPlayed
-    return !got || got.at !== row.want
+    return !got || !Object.is(got.at, row.want)
   }).map(function (row) {
     const got = Model.parseState(JSON.stringify({ lastPlayed: { id: "x", name: "X", at: row.in } })).lastPlayed
     return JSON.stringify(row.in) + " -> " + (got ? got.at : null) + ", wanted " + row.want
@@ -1948,14 +1948,25 @@ checkCall("D-STATE-1: and the whole-record vectors, including what is not a reco
     return JSON.stringify(Model.playedRecord(row.in)) !== JSON.stringify(row.want)
   }).map(function (row) { return JSON.stringify(row.in) })
 }, [])
+checkCall("D-STATE-4: a saved search's `at` reads every `at` vector as a played record's does, as the helper's does", function () {
+  return playedFixture.at.filter(function (row) {
+    const got = Model.parseState(JSON.stringify({ savedSearches: [{ query: "bbc", at: row.in }] })).savedSearches[0]
+    return !got || !Object.is(got.at, row.want)
+  }).map(function (row) { return JSON.stringify(row.in) })
+}, [])
+const sourceNumberKeys = ["addedAt", "lastUsed", "fetchedAt", "channelCount", "groupCount"]
 checkCall("D-STATE-1: the SOURCE record keys carry the same coercion, which is where it also lived", function () {
   // Filed against the played record; it was never only there. addedAt,
   // lastUsed, fetchedAt, channelCount and groupCount all read through the same
-  // rule, and the helper disagreed on all five.
+  // rule, and the helper disagreed on all five. Every key is driven
+  // (D-STATE-4: one key of five was, and the other four could drift alone).
   return playedFixture.nonNegative.filter(function (row) {
-    const parsed = Model.parseState(JSON.stringify({ version: 2, sources: [
-      { key: "11111111", url: "http://x.test/a.m3u", addedAt: row.in }] })).sources[0]
-    return !parsed || parsed.addedAt !== row.want
+    return sourceNumberKeys.some(function (k) {
+      const rec = { key: "11111111", url: "http://x.test/a.m3u" }
+      rec[k] = row.in
+      const parsed = Model.parseState(JSON.stringify({ version: 2, sources: [rec] })).sources[0]
+      return !parsed || !Object.is(parsed[k], row.want)
+    })
   }).map(function (row) { return JSON.stringify(row.in) })
 }, [])
 checkCall("D-STATE-1: truncation is toward ZERO, which is what python's int() does", function () {
@@ -1964,6 +1975,29 @@ checkCall("D-STATE-1: truncation is toward ZERO, which is what python's int() do
   const at = function (v) { return Model.playedRecord({ id: "x", at: v }).at }
   return [at(-3.7), at("-3.7"), at(3.7), at("3.7")]
 }, [-3, -3, 3, 3])
+checkCall("D-STATE-4: every `atText` token reads the same here as in the helper, as an `at`, a source record's count and a failed mark", function () {
+  // Tokens a fixture value cannot carry: 1e400 parses to Infinity, which
+  // JSON.stringify writes as null. So each is spliced into the text of the
+  // document, which is what both readers are handed. The helper raised
+  // OverflowError on the first three and ended every state verb that reads
+  // the file `internal`, and the `failed` verb.
+  return playedFixture.atText.filter(function (row) {
+    const played = Model.parseState('{"lastPlayed": {"id": "x", "name": "X", "at": ' + row.text + '}}').lastPlayed
+    const saved = Model.parseState('{"savedSearches": [{"query": "bbc", "at": ' + row.text + '}]}').savedSearches[0]
+    const keys = sourceNumberKeys.some(function (k) {
+      const source = Model.parseState('{"version": 2, "sources": [{"key": "11111111", "url": "http://x.test/a.m3u", "' + k + '": ' + row.text + '}]}').sources[0]
+      return !source || !Object.is(source[k], Math.max(0, row.want))
+    })
+    const failed = Model.parseFailed('{"failed": [{"id": "t:a", "at": ' + row.text + '}]}')
+    return !played || !Object.is(played.at, row.want) || !saved || !Object.is(saved.at, row.want) || keys
+      || JSON.stringify(failed) !== JSON.stringify(row.want > 0 ? [{ id: "t:a", at: row.want }] : [])
+  }).map(function (row) { return row.text.slice(0, 20) })
+}, [])
+checkCall("D-STATE-4: cacheLayout reads through the same grammar as the helper", function () {
+  return playedFixture.cacheLayout.filter(function (row) {
+    return Model.parseState(JSON.stringify({ cacheLayout: row.in })).cacheLayout !== row.want
+  }).map(function (row) { return JSON.stringify(row.in) })
+}, [])
 
 // ---- saved searches --------------------------------------------------------
 const savedFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/saved-searches.json"), "utf8"))
@@ -2385,7 +2419,7 @@ checkCall("dead channels: every shared normalize case matches the agreed answer"
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) bad.push(c.name)
   })
   return [failedFixture.cases.length, bad]
-}, [3, []])
+}, [4, []])
 
 checkCall("dead channels: the mark is DROPPED when its channel leaves the playlist", function () {
   // The whole reason this lives in the source cache rather than state.json.

@@ -46,6 +46,22 @@ class SharedFixtureTest(unittest.TestCase):
             self.assertEqual(helper.normalize_failed(case["failed"]), case["expect"], case["name"])
 
 
+class InfiniteMarkTest(unittest.TestCase):
+    def test_an_infinite_at_is_dropped_and_the_verb_answers(self):
+        """D-STATE-4: json.loads reads 1e400 as an infinite float, and
+        coerce_int raised OverflowError on it, so the `failed` verb ended
+        `internal` over the whole file. The mark reads 0 and is dropped."""
+        d = cache_with(["t:a", "t:b"])
+        with open(os.path.join(d, helper.FAILED_FILE), "w") as fh:
+            fh.write('{"version": 1, "failed": [{"id": "t:a", "at": 1e400}, {"id": "t:b", "at": 1790300000}]}')
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = helper.main(["failed", "list", "--cache-dir", d, "--now", "1790300100"])
+        got = json.loads(out.getvalue().strip().splitlines()[-1])
+        self.assertEqual((code, [r["id"] for r in got["failed"]]), (0, ["t:b"]), got)
+
+
 class SelfHealingTest(unittest.TestCase):
     def test_a_mark_whose_channel_left_the_playlist_is_dropped(self):
         d = cache_with(["t:here"], [{"id": "t:here", "at": 1790300000},

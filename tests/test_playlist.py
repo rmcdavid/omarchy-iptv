@@ -409,6 +409,21 @@ def run_main(*args):
     return code, json.loads(out.getvalue().strip().splitlines()[-1])
 
 
+class PreviousStatusNumberTest(unittest.TestCase):
+    def test_a_previous_status_with_an_infinite_fetched_at_is_not_copied(self):
+        """D-STATE-4's sibling: a failed run copies the previous status's
+        fetchedAt into its own, and json.dumps wrote 1e400 as `Infinity`,
+        which neither engine's JSON.parse reads."""
+        with tempfile.TemporaryDirectory() as cache:
+            with open(os.path.join(cache, "playlist-status.json"), "w", encoding="utf-8") as fh:
+                fh.write('{"ok": true, "kind": "playlist", "fetchedAt": 1e400}')
+            code, status = run_main("playlist", "--url", os.path.join(cache, "missing.m3u"), "--cache-dir", cache)
+            self.assertEqual(code, 1)
+            self.assertIsNone(status["fetchedAt"])
+            with open(os.path.join(cache, "playlist-status.json"), encoding="utf-8") as fh:
+                self.assertNotIn("Infinity", fh.read())
+
+
 class ChannelNumberTest(unittest.TestCase):
     """M2-03 (channel numbers), section 1.1 and ruling CN11: which attribute
     carries the number, and what reaches channels.json.

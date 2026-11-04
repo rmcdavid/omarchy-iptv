@@ -675,10 +675,14 @@ class SessionKeyTest(unittest.TestCase):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "played-records.json")
         with open(path, encoding="utf-8") as fh:
             fixture = json.load(fh)
+        keys = ("addedAt", "lastUsed", "fetchedAt", "channelCount", "groupCount")
         for row in fixture["at"]:
             got = helper.normalize_played({"id": "x", "name": "X", "at": row["in"]})
             self.assertIsNotNone(got, repr(row["in"]))
             self.assertEqual(got["at"], row["want"], "at=%r: %s" % (row["in"], row["why"]))
+            # D-STATE-4: the saved-search reader reads the same vectors.
+            saved = helper.normalize_state({"savedSearches": [{"query": "bbc", "at": row["in"]}]})["savedSearches"]
+            self.assertEqual(saved[0]["at"], row["want"], "saved search at=%r" % (row["in"],))
         for row in fixture["records"]:
             self.assertEqual(helper.normalize_played(row["in"]), row["want"], repr(row["in"]))
         # The same coercion on the source-record keys, which is where D-STATE-1
@@ -686,6 +690,27 @@ class SessionKeyTest(unittest.TestCase):
         for row in fixture["nonNegative"]:
             self.assertEqual(helper.non_negative_int(row["in"]), row["want"],
                              "non_negative_int(%r): %s" % (row["in"], row["why"]))
+            for key in keys:
+                record = {"key": "11111111", "url": "http://x.test/a.m3u", key: row["in"]}
+                sources = helper.normalize_state({"version": 2, "sources": [record]})["sources"]
+                self.assertEqual(sources[0][key], row["want"], "%s=%r" % (key, row["in"]))
+        # D-STATE-4: tokens a fixture value cannot carry, spliced into the text
+        # each reader is handed, and cacheLayout through the same grammar.
+        self.assertGreaterEqual(len(fixture["atText"]), 6)
+        for row in fixture["atText"]:
+            t = row["text"]
+            doc = json.loads('{"lastPlayed": {"id": "x", "name": "X", "at": %s}, "savedSearches": [{"query": "bbc", "at": %s}], '
+                             '"sources": [{"key": "11111111", "url": "http://x.test/a.m3u", "addedAt": %s, "lastUsed": %s, '
+                             '"fetchedAt": %s, "channelCount": %s, "groupCount": %s}]}' % ((t,) * 7))
+            state = helper.normalize_state(doc)
+            self.assertEqual(state["lastPlayed"]["at"], row["want"], "%s: %s" % (t[:20], row["why"]))
+            self.assertEqual(state["savedSearches"][0]["at"], row["want"], t[:20])
+            for key in keys:
+                self.assertEqual(state["sources"][0][key], max(0, row["want"]), "%s %s" % (key, t[:20]))
+            marks = helper.normalize_failed(json.loads('[{"id": "t:a", "at": %s}]' % row["text"]))
+            self.assertEqual(marks, [{"id": "t:a", "at": row["want"]}] if row["want"] > 0 else [], row["text"][:20])
+        for row in fixture["cacheLayout"]:
+            self.assertEqual(helper.normalize_state({"cacheLayout": row["in"]})["cacheLayout"], row["want"], repr(row["in"]))
 
     def test_one_coercion_serves_every_caller(self):
         """Three readers wrote `int()` independently and two of them were wrong.
@@ -701,11 +726,39 @@ class SessionKeyTest(unittest.TestCase):
         # The WHOLE helper, the stub and every part (D-REL-7): since the split
         # `inspect.getsource(helper)` is the stub alone, and this count read 0.
         source = helper_files.helper_source(str(ROOT))
-        self.assertEqual(source.count("int(float("), 1,
-                         "coerce_int should be the only place that parses a number this way")
-        for name in ("normalize_played", "non_negative_int", "normalize_saved_search"):
-            body = inspect.getsource(getattr(helper, name))
-            self.assertIn("coerce_int", body, "%s must route through coerce_int" % name)
+        # D-STATE-4: the stored-integer grammar is compiled once and read once,
+        # in coerce_int, and the idiom D-STATE-1 used, whose OverflowError
+        # nothing caught, is gone.
+        self.assertEqual(source.count("_STORED_DECIMAL.fullmatch("), 1)
+        self.assertEqual(source.count("int(float("), 0)
+        # A CALL, read from the syntax tree: a comment naming coerce_int above
+        # a reader that no longer calls it passed the substring this used to
+        # look for (D-STATE-4's review).
+        import ast
+        import textwrap
+        for name in ("normalize_played", "non_negative_int", "normalize_saved_search", "normalize_failed",
+                     "needs_refetch", "normalize_state"):
+            tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(helper, name))))
+            calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Name) and node.func.id == "coerce_int"]
+            self.assertTrue(calls, "%s must call coerce_int" % name)
+
+    def test_an_infinite_number_no_longer_ends_the_reading_state_verbs_internal(self):
+        """D-STATE-4: 1e400 in an `at` or a source record's count, which
+        json.loads reads as infinity, made coerce_int raise OverflowError, so
+        `state show`, `state init` and `state favorite add` all exited 1 with
+        `internal` and left the file as it was (`state mode` reads nothing).
+        They read it as 0, as the shell does in node, and the write heals the
+        file. V4's JSON.parse refuses such a file whole (D-STATE-5)."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text('{"version": 2, "lastPlayed": {"id": "t:x", "name": "X", "at": 1e400}, '
+                             '"recents": [{"id": "t:x", "name": "X", "at": -1e400}], "sources": [{"key": "11111111", '
+                             '"url": "http://x.test/a.m3u", "channelCount": 1e400}]}', encoding="utf-8")
+        for verb in (("show",), ("init",), ("favorite", "add", "t:y")):
+            code, payload, err = self.state(*verb)
+            self.assertEqual(code, 0, (verb, payload, err))
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual((stored["lastPlayed"]["at"], stored["recents"][0]["at"], stored["sources"][0]["channelCount"]), (0, 0, 0))
 
     def test_the_key_order_matches_the_document_the_service_writes(self):
         # Both sides emit version, cacheLayout, favorites, recents, lastPlayed,

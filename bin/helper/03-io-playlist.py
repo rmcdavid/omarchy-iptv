@@ -1422,7 +1422,8 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     status = error_payload(
         "playlist", error,
         sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
-        fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
+        # D-STATE-4's sibling: json.dumps wrote a previous 1e400 as `Infinity`.
+        fetchedAt=(coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None,
         stale=stale,
         durationMs=int((time.monotonic() - started) * 1000),
     )

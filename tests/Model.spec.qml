@@ -214,6 +214,20 @@ TestCase {
     compare(Model.zapRing(rows, Model.emptyState(), { id: "a", launchedFrom: "g:\u001cSports" }).length, 1)
   }
 
+  // D-STATE-4 in the shell's own engine, whose Number() reads "inf" as
+  // Infinity and a 70-digit binary spelling as NaN, and trims U+0085 but not
+  // U+FEFF, where node does neither and the reverse: the stored-integer
+  // grammar reads none of that through Number().
+  function test_storedIntegersReadOneGrammarInV4() {
+    function at(v) { return Model.parseState(JSON.stringify({ lastPlayed: { id: "x", at: v } })).lastPlayed.at }
+    compare([at("inf"), at("Infinity"), at("0x10"), at("0b" + Array(71).join("1")), at("1_000"), at([7])], [0, 0, 0, 0, 0, 0])
+    compare([at("\ufeff7"), at("\u00857"), at("\u001c7\u001f"), at(" 12.9 "), at("-3.7"), at("1e3"), at("9007199254740993")],
+            [7, 7, 7, 12, -3, 1000, 9007199254740992])
+    compare(Model.parseState(JSON.stringify({ cacheLayout: "\ufeff2" })).cacheLayout, 2)
+    compare(Model.parseFailed(JSON.stringify({ failed: [{ id: "t:a", at: "\u00851790300000" }, { id: "t:b", at: "inf" }] })),
+            [{ id: "t:a", at: 1790300000 }])
+  }
+
   // D-STATE-2: stripSpace and cleanName run V4's own trim before their walk,
   // which is exact only while that trim takes nothing outside the class (it
   // takes 26 of its 30 code points here). So both are held to

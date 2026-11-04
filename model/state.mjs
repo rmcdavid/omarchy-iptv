@@ -337,12 +337,45 @@ function withoutSavedSearch(state, query) {
   return cloneState(st, { savedSearches: kept })
 }
 
+// D-STATE-4: what a stored integer reads as -- every `at`, a source record's
+// counts and times, a failed mark's `at`, `cacheLayout` -- in either engine
+// and in the helper (python mirror: coerce_int; one fixture,
+// played-records.json). A JSON number is its value and a boolean 1 or 0. A
+// string is read only as a decimal literal (digits, one point, an exponent,
+// a sign), once the reader's class is off its ends (stripSpace). The answer
+// is truncated toward zero, and everything else, or anything not finite,
+// reads 0, and so does a string whose text is longer than 64 code units
+// once that class is off its ends: V4's Number() reads any string over
+// 16,384 as NaN, and no writer writes a stored integer as text at all. Each
+// of these readers went through Number() (under Math.trunc, Math.floor, or a
+// comparison with 2), and Number is not one grammar: V4 reads "inf" as Infinity and a hex, octal or binary spelling of
+// 2**63 or more as NaN where node reads NaN and the value, V4 trims U+0085
+// and not U+FEFF where node does the reverse, and both read "0x10" as 16,
+// "Infinity" as Infinity and [7] as 7. The helper read none of those three
+// as that number: float() refused "0x10" and [7], and read "Infinity" as an
+// infinite float, on which int() raised, so every state verb that reads the
+// file ended `internal`. Nothing either side writes is any of these: a hand
+// edit or another tool is.
+var STORED_DECIMAL = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/
+var STORED_TEXT_MAX = 64
+function storedInt(value) {
+  var n = 0
+  if (typeof value === "number") n = value
+  else if (typeof value === "boolean") n = value ? 1 : 0
+  else if (typeof value === "string") {
+    var text = stripSpace(value)
+    if (text.length <= STORED_TEXT_MAX && STORED_DECIMAL.test(text)) n = Number(text)
+  }
+  n = Math.trunc(n)
+  return isFinite(n) && n !== 0 ? n : 0
+}
+
 // One stored record. A query that tokenizes to nothing is not a saved search.
 function savedSearchRecord(entry) {
   if (!entry || typeof entry !== "object") return null
   var query = str(entry.query).slice(0, MAX_SAVED_QUERY)
   if (savedSearchTerms(query).length === 0) return null
-  return { query: query, at: Math.trunc(Number(entry.at)) || 0 }
+  return { query: query, at: storedInt(entry.at) }
 }
 
 function emptyState() {
@@ -442,9 +475,9 @@ function withMigrationPending(state, pending) {
 // before the key existed reads its missing `session` as null.
 function playedRecord(entry) {
   if (!entry || typeof entry !== "object" || !entry.id) return null
-  // Math.trunc, not Math.floor: python's int() truncates toward zero, and the
-  // shared fixture pins the two readers to the same answer on the same bytes.
-  return { id: String(entry.id), name: str(entry.name), at: Math.trunc(Number(entry.at)) || 0 }
+  // storedInt truncates toward zero, as python's int() does, and the shared
+  // fixture pins the two readers to the same answer on the same bytes.
+  return { id: String(entry.id), name: str(entry.name), at: storedInt(entry.at) }
 }
 
 // Every reducer builds its result here so `sources` and `cacheLayout` are
@@ -512,7 +545,7 @@ function parseState(text) {
   var state = emptyState()
   var parsed = parseJsonObject(text)
   if (!parsed) return state
-  state.cacheLayout = Number(parsed.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0
+  state.cacheLayout = storedInt(parsed.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0
   var srcs = asList(parsed.sources)
   // D-SG-3: a hand-edited or foreign state.json chooses these strings (the
   // JS reader keeps a record's url as written), and a url spelled
@@ -1014,8 +1047,8 @@ function normalizeFailed(list) {
     var r = rows[i]
     if (!r || typeof r !== "object") continue
     var id = str(r.id)
-    var at = Math.floor(Number(r.at))
-    if (id === "" || !isFinite(at) || at <= 0) continue
+    var at = storedInt(r.at)
+    if (id === "" || at <= 0) continue
     if (seen[id] === true) continue
     seen[id] = true
     out.push({ id: id, at: at })
@@ -2030,17 +2063,17 @@ export {
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
-  savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
-  withMigrationPending, playedRecord, cloneState, withCacheLayout, parseState,
-  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
-  recordPlayed, clearSession, stateSession, deadSessionVerdict,
-  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  savedSearchFooter, withSavedSearch, withoutSavedSearch, STORED_DECIMAL,
+  STORED_TEXT_MAX, storedInt, savedSearchRecord, emptyState, entryMigratedOf,
+  withEntryMigrated, migrationPendingOf, withMigrationPending, playedRecord,
+  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
+  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
+  stateSession, deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
+  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
+  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
+  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
+  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
   MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,

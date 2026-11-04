@@ -1145,6 +1145,38 @@ def write_window_lines(path: str, meta: dict[str, Any], lines: list[str]) -> Non
     write_text_atomic(path, "\n".join([head, *lines, ""]))
 
 
+def json_value_writable(value: Any) -> bool:
+    """True when a parsed JSON value, nested ones included, can be written
+    back as UTF-8 JSON that both engines' JSON.parse read: no infinite float
+    or NaN, which json.dumps writes as `Infinity` and `NaN`; no int float()
+    cannot hold, which JSON.parse rounds to Infinity (node) or refuses (V4);
+    and no string that does not encode as UTF-8 (a lone surrogate), which the
+    write refuses. An explicit stack, so no nesting depth recurses."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, bool) or item is None:
+            continue
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                return False
+        elif isinstance(item, int):
+            try:
+                float(item)
+            except OverflowError:
+                return False
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return True
+
+
 def load_window(path: str) -> dict[str, Any] | None:
     """-> the header keys plus "lines" (the raw channel lines), or None.
 
@@ -1161,6 +1193,21 @@ def load_window(path: str) -> dict[str, Any] | None:
     except ValueError:
         return None
     if not isinstance(meta, dict) or meta.get("version") != 1:
+        return None
+    # D-STATE-4's sibling. The meta line's values are copied as they are into
+    # epg-now.json's head (`fetchedAt`, `sourceHost`) and the status (the
+    # counts). json.dumps writes an infinite number (1e400 reads as one) or a
+    # NaN as `Infinity` or `NaN`, and an int float() cannot hold as digits V4
+    # refuses: in the head that lost every channel's now/next, in the status it
+    # made the status unreadable. A string holding a lone surrogate (`"\ud800"`
+    # reads as one) raised UnicodeEncodeError at the write, and the recompute
+    # ended `internal`. And `warnings` is copied with list(), which raised on a
+    # number. A meta line holding any of these is a window to refetch, like
+    # one that is not UTF-8.
+    if not json_value_writable(meta):
+        return None
+    warnings = meta.get("warnings", [])
+    if not isinstance(warnings, list) or not all(isinstance(item, str) for item in warnings):
         return None
     window = dict(meta)
     window["lines"] = body.split("\n")
@@ -1181,10 +1228,13 @@ def needs_refetch(window: dict[str, Any], url: str, now: int, ttl: float, channe
     """Empty string when the cached window is still good, else the reason."""
     if window.get("sourceKey") != source_key(url):
         return "source changed"
-    fetched_at = int(window.get("fetchedAt") or 0)
+    # D-STATE-4's sibling: coerce_int, because int() raised on a damaged meta
+    # line ("soon", or 1e400 read as infinite) and ended the verb `internal`
+    # where load_window's rule is that a damaged window is a cache to refetch.
+    fetched_at = coerce_int(window.get("fetchedAt"))
     if now - fetched_at >= ttl or fetched_at > now + 60:
         return "cache older than ttl"
-    if int(window.get("windowEnd") or 0) - now < EPG_REFETCH_MARGIN:
+    if coerce_int(window.get("windowEnd")) - now < EPG_REFETCH_MARGIN:
         return "window nearly exhausted"
     if window.get("channelsMtime") != channels_mtime(channels_path):
         return "playlist changed"
@@ -1521,7 +1571,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
         assert window is not None
         for sentence in epg_skipped_warnings(skipped):
             log("epg: %s" % sentence)
-        fetched_at = int(window.get("fetchedAt") or 0)
+        fetched_at = coerce_int(window.get("fetchedAt"))
         status = {
             "ok": True,
             "kind": "epg",
@@ -1575,7 +1625,9 @@ def cmd_epg(args: argparse.Namespace) -> int:
     status = error_payload(
         "epg", error,
         sourceHost=host,
-        fetchedAt=window.get("fetchedAt") if window else (previous.get("fetchedAt") if isinstance(previous, dict) else None),
+        # D-STATE-4's sibling: the previous status is a file, and its
+        # fetchedAt reads as a stored integer, 0 or a damaged one as none.
+        fetchedAt=window.get("fetchedAt") if window else ((coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None),
         stale=cached,
         matched=window.get("matched") if window else None,
         channelTotal=window.get("channelTotal") if window else None,

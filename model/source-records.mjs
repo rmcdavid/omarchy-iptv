@@ -6,8 +6,8 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
-  withMigrationPending, cloneState
+  storedInt, emptyState, entryMigratedOf, withEntryMigrated,
+  migrationPendingOf, withMigrationPending, cloneState
 } from "./state.mjs"
 import {
   clampSetting, entryInputForm, RETIRED_SETTINGS, entryInputSeen,
@@ -83,11 +83,11 @@ function normalizeSourceRecord(raw) {
     label: label,
     labelCustom: raw.labelCustom === true,
     origin: origin,
-    addedAt: Math.max(0, Math.floor(Number(raw.addedAt) || 0)),
-    lastUsed: Math.max(0, Math.floor(Number(raw.lastUsed) || 0)),
-    fetchedAt: Math.max(0, Math.floor(Number(raw.fetchedAt) || 0)),
-    channelCount: Math.max(0, Math.floor(Number(raw.channelCount) || 0)),
-    groupCount: Math.max(0, Math.floor(Number(raw.groupCount) || 0))
+    addedAt: Math.max(0, storedInt(raw.addedAt)),
+    lastUsed: Math.max(0, storedInt(raw.lastUsed)),
+    fetchedAt: Math.max(0, storedInt(raw.fetchedAt)),
+    channelCount: Math.max(0, storedInt(raw.channelCount)),
+    groupCount: Math.max(0, storedInt(raw.groupCount))
   }
   return out
 }

@@ -689,6 +689,14 @@ class LogoFailureMemoTest(LogoRunCase):
         self.assertEqual(entries["0000bbbb"]["reason"], "failed")
         self.assertLessEqual(entries["0000bbbb"]["at"], int(time.time()))
 
+    def test_an_infinite_at_is_skipped_not_raised(self):
+        """D-STATE-4's sibling: 1e400 reads as an infinite float, which passed
+        the `at != at` test and raised OverflowError in int(), so every logo
+        run over the memo ended `internal`."""
+        self.memo_path().write_text('{"version": 1, "failed": {"0000aaaa": {"at": 1e400, "reason": "r"}, '
+                                    '"0000bbbb": {"at": -1e400, "reason": "r"}}}', encoding="utf-8")
+        self.assertEqual(helper.load_logo_failed(str(self.memo_path()), time.time()), {})
+
     def test_the_memo_is_written_when_the_deadline_passes_not_only_at_the_end(self):
         # A run the shell SIGTERMs reaches no `finally`: the memo must be on
         # disk by the time the deadline is first seen past. The kill is

@@ -17646,3 +17646,84 @@ HEAD's two figures for the U+FEFF-led shape come from one run under gdb with no 
 - D-PLY-63: the player's title is the helper's name, not the name the row shows (the second review)
 
 Cleared by the review: the parse's own strips (`split_groups`, `parse_attrs`, `cut_text`), which the shell's union now covers whatever the interpreter's `isspace()` does, and which `str.isspace()` is held to `foldSpace` to guard. Also cleared: the host mirrors (`ipLiteral`, `hostClass`, `hostKey`), whose only inputs are validated URLs; the EPG trims, which have no helper mirror (a U+FEFF reaches them, and only the shell takes it off); and the mpv error-table and reply-line trims, which none of the six code points can reach.
+
+## D-STATE-4, 2026-11-03: one grammar for a stored integer, on both sides
+
+The owner said "fix d-state-4". The board row records the defect as the D-STATE-2 review measured it. This section is the evidence for the fix.
+
+**What each reader did.** The helper's `coerce_int` was `int(float(value or 0))`, catching TypeError and ValueError. An infinite float raises OverflowError, which neither caught, so 1e400 in any `at` or any source record's count or time ended every `state` verb that reads the file (all but `mode`) with `internal`, and in a failed mark it ended the `failed` verb the same way. The model's readers were `Math.trunc(Number(x)) || 0` and, for source records and failed marks, `Math.floor(Number(x))`. The two engines' `Number()` were measured over 146 spellings on Qt 6.12.0 and node 26.8.1. They disagree on 10 of them:
+
+- "inf" and "-inf": V4 reads Infinity, node reads NaN
+- a hex spelling of 300 digits and a binary one of 70: V4 reads NaN, node reads Infinity and 1.18e21
+- U+0085 at an edge: V4 trims it, node does not. U+FEFF at an edge: node trims it, V4 does not
+
+The review (below) measured two more in V4: a hex, octal or binary spelling of 2**63 or more reads NaN, and so does any string over 16,384 characters.
+
+Both engines read "0x10" as 16, "0o17" as 15, "0b101" as 5, "Infinity" as Infinity and [7] as 7. `float()` refused the hex, octal and binary spellings and [7], and read "Infinity" as an infinite float, on which `int()` raised. `float()` read "1_000" as 1000 and Arabic-Indic digits as numbers, which neither engine did. V4's `JSON.parse` refuses `1e400` and a 5,002-digit integer outright, where node reads Infinity. Python reads 1e400 as infinity and refuses the integer. So 1e400 is a whole file one reader parses and the other refuses, D-STATE-5's class, recorded on its row; the 5,002-digit integer is refused by both the shell's engine and the helper, and read by node alone.
+
+**The grammar.** `storedInt` (model/state.mjs, not exported from Model) and `coerce_int` (bin/helper/10-state.py):
+
+- a JSON number is its value, and a boolean is 1 or 0
+- a string is read only as a decimal literal (`STORED_DECIMAL`: a sign, ASCII digits, one point, an exponent) of at most 64 code units (`STORED_TEXT_MAX`), once the reader's class is off its ends (`stripSpace`, `URL_SPACE_CHARS`). Only ASCII passes the grammar, so 64 is the same count in either runtime's units, and the bound keeps V4's 16,384-character limit out of reach: no writer writes a stored integer as text at all
+- the answer is truncated toward zero; everything else, or anything not finite, is 0
+
+The decimal text that passes is read by `Number()` or `float()`, which agree on it because both round correctly: "9007199254740993" reads as 9007199254740992 on both sides. `float()` of a python int is the double `JSON.parse` reads for the same digits, and an int past the double range is 0 where it raised. Every caller routes through it: `playedRecord` and `normalize_played`, `savedSearchRecord` and `normalize_saved_search`, the five source-record keys (`non_negative_int`), `normalizeFailed` and `normalize_failed`, and `cacheLayout`, which the helper compared with `==`.
+
+**Siblings.** The search was for `int(` over a value read from a file, across every helper part, and for `Number(` over a stored value across the model. Two more raised, and the review found a third shape, a number copied out as it was read:
+
+- `load_logo_failed` (bin/helper/06-failed.py) skipped a NaN `at` with `at != at` and passed an infinite one to `int()`
+- `needs_refetch` and the status after a cached or now-only window (bin/helper/04-epg.py) read the window's `fetchedAt` and `windowEnd` with `int(x or 0)`, which raised on "soon", a list, a U+FEFF-led string or an infinite float. `load_window`'s own rule is that a damaged window is a cache to refetch (D-EPG-14). They read through `coerce_int` now.
+- the window's meta line went into epg-now.json's head and the status as it was read, and the epg and playlist verbs copied the previous status's `fetchedAt` into a failure's. `json.dumps` writes an infinite float as `Infinity` and a NaN as `NaN`, which neither engine's `JSON.parse` reads. In epg-now.json's head (its `fetchedAt`) that lost the guide every now/next. In the status (`matched` and the other copied counts, or a previous `fetchedAt`) it made the status unreadable, which `parseHelperStatus` answers as `no_output`. A string holding a lone surrogate raised UnicodeEncodeError at the write, and the recompute ended `internal` (the claims check's recheck found it). And a numeric `warnings` raised in `list()`. `load_window` now returns no window for a meta line holding a value that cannot be written back as UTF-8 JSON both engines read (an infinite float, a NaN, an integer `float()` cannot hold, which node reads as Infinity and V4 refuses, or a string holding a lone surrogate, at any depth: the claims check found the first version saw only top-level floats), or a `warnings` that is not a list of strings, and a previous `fetchedAt` reads as a stored integer, 0 or a damaged one as none.
+
+A fourth is filed, not fixed. `programme_json` (bin/helper/04-epg.py) pastes a record's tail, the title's JSON, into epg-now.json without checking it. A damaged start or stop does not get that far: called directly, `0abcdefghi` raises ValueError, `17903` raises IndexError and `abcdefghij` composes invalid JSON, but `compute_now_next` skips a record without its ten-digit start and stop (`_record_ok`, D-EPG-14), so the recompute exits 0 and skips them (measured by the claims check, which corrected the first draft of this paragraph). A damaged tail, the title `abc`, does reach it: the recompute exits 0 and writes one invalid fragment line. The shell's store still indexes it, so the guide counts the channel as covered (`epgCoverage`), while its entry reads as null and its row shows no programme (measured in node). The tail holds the detail members too, and a damaged one does the same. It is D-EPG-17.
+
+Cleared: the pid reads in bin/helper/07-player.py and 08-player-verbs.py (from `/proc` names, from the scan's own records, or checked `isdigit()` or `isinstance(int)` first), the EPG parse's own retained items (built in memory by the parse), `record_to_dict` (diagnostics and tests), `memory_refusal`'s limit (the helper's own number), and the model's in-memory `Number()` calls (counts, exit codes, clocks), which read no file.
+
+**The review.** `wf_6a587873-b25` read the change through four lenses, with a skeptic per finding: whether the two readers agree, what moved for real data, siblings, and the tests. Of 19 findings, 18 were confirmed; the one refuted, a SyntaxWarning in tests/test_proto_v4.py, was already fixed in D-STATE-2's commit. What this change brought, each now fixed:
+
+- An unforced full `epg` run on the window's own EPG URL, over a window whose meta `fetchedAt` was infinite, had ended `internal` in `needs_refetch` before anything was written. With `needs_refetch` reading it as 0, the run went on, and when the refetch failed it copied the value into epg-now.json and the status as `Infinity`. A run with `--force`, or one whose EPG URL is not the window's ("source changed"), skipped that `int()` and already wrote it when the refetch failed (measured at 9d9a523), the now-only recompute already wrote it before ending `internal`, and other meta numbers already reached the status. The siblings paragraph above says how that copy is closed, with the pre-existing copies beside it.
+- The tests reached no saved search and none of the grammar's uppercase exponent, signed exponent or leading point (and one source-record key of five, a gap inherited from D-STATE-1), and the one-coercion guard passed on a comment naming `coerce_int` above a reader that no longer called it. Every `at` vector now also runs through the saved-search reader on both sides, the source-record vectors through all five keys, the fixture gained those spellings, and the guard reads calls from the syntax tree. The node runner compares with `Object.is`, so a negative zero is held. Three comments overstated what they measured (`float()` refused "Infinity", V4's limit at 64 bits, every state verb), and are corrected.
+
+And one gap in the grammar that predates it: V4's `Number()` reads any string over 16,384 characters as NaN, so a long decimal the grammar accepts read 0 in the shell and its value in the helper. The 64-code-unit bound closes it.
+
+Filed, predating this change: D-STATE-6 (a number, boolean, array or object where the readers expect text turns into different text on each side, and a numeric source key is dropped by the helper, so a CLI write erases the record and its URL), D-STATE-7 (deeply nested JSON raises RecursionError, which no reader catches), and on D-STATE-5, V4's `JSON.parse` refusing an underflowing number and accepting `1.` and `.5`, which node and the helper refuse.
+
+**Red first.** The new tests and fixtures were copied over the D-STATE-2 commit, 9d9a523, which this fix builds on:
+
+- node: 6 of 3,353 fail
+- the QML spec: 1 of 88 fails, the new V4 test
+- python: 5 failures and 6 errors. test_state: the shared fixture raised OverflowError; `state show`, the first of the three verbs, ended `internal` (`init` and `favorite add` do too, run separately); and the one-coercion guard found no `_STORED_DECIMAL.fullmatch(`. test_failed_marks: the shared case raised, and `failed list` ended `internal`. test_logo_run: the memo's infinite `at` raised. test_epg: the damaged meta number and the U+FEFF-led `fetchedAt` raised, `load_window` returned a window whose meta held 1e400, and the previous status's 1e400 was copied as infinity. test_playlist: the same copy.
+
+On the tree all are green. Two timing tests, test_epg's 2,000-channel fetch and test_playlist's 10,000-entry parse, went red once in a run beside the review's agents (load average 4.75, 3.69, 2.56 on four CPUs, as the playlist test recorded) and passed alone; neither path changed. The new V4 test reads "inf", "Infinity", "0x10", a 70-digit binary spelling, "1_000", [7], U+FEFF and U+0085 at an edge, a `cacheLayout` of `<FEFF>2` and two failed marks through `parseState` and `parseFailed` in the shell's own engine.
+
+**Mutations, each caught.** 18 before the review, each applied alone to a copy of the tree. In node, with the QML spec where it also went red:
+
+- a string read by `Number()` without the grammar: 4 (spec 1). Read without `stripSpace`: 4 (spec 1). An array read through `Number()`: 4 (spec 1)
+- a non-finite answer kept: 2. The grammar without its exponent: 2 (spec 1). A boolean read as 0: 1
+- `cacheLayout` through `Number()`: 1 (spec 1). A failed mark through `Math.floor(Number())`: 1. A source record's count through `Math.floor(Number())`: 1
+
+In python:
+
+- an int past the double range raising: test_state's shared-fixture runner
+- a non-finite answer raising: that runner, the `main()` test of the three verbs, and test_epg's window test
+- a string stripped of Python's whitespace, or `cacheLayout` compared with `==`: the shared-fixture runner
+- the grammar matched as a prefix: the shared-fixture runner, the one-coercion guard, and test_failed_marks
+- a one-element list read through: the shared-fixture runner, test_failed_marks, and test_epg's window test
+- the logo memo's infinite `at`: test_logo_run's new test. The window's `fetchedAt` or `windowEnd` through `int()`: test_epg's new test
+
+After the review, 18 more, on the final code. In node:
+
+- `storedInt` without its 64-code-unit bound: 2. Keeping a negative zero: 3 (the `Object.is` runners)
+- `savedSearchRecord` back on `Math.trunc(Number())`: 2. `lastUsed` back on `Math.floor(Number())`: 2
+- the grammar's exponent lower case only: 2. Without its leading-point branch: 2
+
+In python:
+
+- `coerce_int` without the bound, or with an unsigned exponent: the shared-fixture runner
+- `normalize_saved_search` back on D-STATE-1's two-line reader catching TypeError and ValueError: that runner and the one-coercion guard, which now reads calls. `groupCount` back on `int(float())`: that runner and the guard's count of the old idiom
+- `load_window` without its value check, without its `warnings` check, without its integer branch, without its string branch, or descending one level only: test_epg's meta-line test, `test_a_meta_line_holding_an_infinite_number_or_bad_warnings_is_a_window_to_refetch` (the last three run after the claims checks widened the check)
+- the EPG status's `fetchedAt` back on `int()`: test_epg's U+FEFF-led meta test. The EPG and the playlist failures copying the previous `fetchedAt` raw: each verb's previous-status test
+
+The `warnings` check first survived. The meta-line test damaged each case on top of the last, so the first case's 1e400 was still in the meta line and the finite check refused every later one. Each case now starts from the window as it was written, and the mutation is caught.
+
+**The owner's data, read-only, counts only.** Every `at`, every source record's count and time, `cacheLayout`, the one failed mark and the EPG window's `fetchedAt` and `windowEnd` are plain integers. There is no logo memo (logos are off). So D-STATE-4 did not reach this install.

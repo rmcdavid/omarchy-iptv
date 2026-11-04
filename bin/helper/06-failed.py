@@ -385,7 +385,9 @@ def load_logo_failed(path: str, now: float) -> dict[str, tuple[int, str]]:
             continue
         at = entry.get("at")
         reason = entry.get("reason")
-        if isinstance(at, bool) or not isinstance(at, (int, float)) or at != at:
+        # D-STATE-4's sibling: not finite (1e400 reads as an infinite float)
+        # raised OverflowError in int() below, and the run ended `internal`.
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or (isinstance(at, float) and not math.isfinite(at)):
             continue
         at = min(int(at), int(now))
         if now - at >= LOGO_FAILED_TTL:

@@ -121,6 +121,10 @@ REVIEWED = [
      "run_host_parts' provider text, the end of a free-text URL's authority)"),
     (r"[:\[\]]", "user", "linear: one character class (_BARE_HOST_CHARS)"),
     (r"^[0-9]+$", "user", "linear: anchored, one run then $ (_ASCII_DIGITS)"),
+    (r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", "user",
+     "linear: fullmatch from one start; the branches part at the first character, a branch's two digit "
+     "runs are split by a `.` the first cannot hold, and the exponent's run by an e or E "
+     "(_STORED_DECIMAL, coerce_int over a hand-edited state.json)"),
     ("[\u200b-\u200d\u2060\ufeff]", "user", "linear: one character class (_ZERO_WIDTH)"),
     (r"^\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$", "user",
      "linear: fixed by lane-bounds-h (was two adjacent runs over one class, k*k): a lookahead over the "
