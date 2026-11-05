@@ -990,6 +990,51 @@ class TitleControlsTest(MpvTestCase):
         self.assertEqual(forced, ["News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
 
 
+class CutNameTitleTest(MpvTestCase):
+    """D-SINK-75 (2026-11-04): a name the playlist cap cut inside a URL does
+    not put the username in the window title. D-M3U-1 cuts a name at
+    M3U_MAX_NAME as written, and the title is the cut name through
+    redact_urls, so a cut between the URL's `//` and its `@` printed the
+    username as the host: `$>NNN... http://myuser`. Driven through the
+    shipping `playlist` and `play` verbs against FakeMpv, at cuts inside the
+    userinfo of three URL shapes tests/test_cut_urls.py sweeps; red on dev
+    756cedb."""
+
+    def test_a_cut_inside_the_userinfo_reaches_no_title(self):
+        cap = helper.M3U_MAX_NAME
+        names = []
+        # In the username, at its `:`, in the password; and on and either side
+        # of a tab inside the password, which this sink deletes before it
+        # redacts, so the runs on either side of it join here.
+        for url, cuts in (("http://qqqqqq:zzzzzz@cdn.test/live/1.ts", (8, 13, 17)),
+                          ("http://qqqqqq:zz/zz@cdn.test/x", (8, 13, 17)),
+                          ("http://qqqqqq:zz\tzz@cdn.test/x", (15, 16, 17, 18))):
+            for inside in cuts:
+                names.append("N" * (cap - inside - 1) + " " + url)
+        playlist = os.path.join(self.dir, "cut.m3u")
+        lines = ["#EXTM3U"]
+        for i, name in enumerate(names):
+            lines.append('#EXTINF:-1 tvg-id="cut%d.test",%s' % (i, name))
+            lines.append("http://stream.example.test/live/cut%d.m3u8" % i)
+        pathlib.Path(playlist).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        seen = []
+        for i in range(len(names)):
+            sock = os.path.join(self.dir, "c%d.sock" % i)
+            server = FakeMpv(sock)
+            self.addCleanup(server.close)
+            self.identity(sock)
+            code, _, _, stderr = run("play", "--id", "t:cut%d.test" % i, "--cache-dir", self.cache,
+                                     "--socket", sock, "--ipc-timeout", "1")
+            self.assertEqual(code, 0, stderr)
+            titles = [c[2] for c in server.commands if c[:2] in (["set_property", "title"],
+                                                                ["set_property", "force-media-title"])]
+            self.assertEqual(len(titles), 2)
+            seen.extend(t[-24:] for t in titles if "q" in t or "z" in t)
+        self.assertEqual(seen, [])
+
+
 class TlsVerificationTest(MpvTestCase):
     """D-SINK-16: apply_channel asserts the certificate properties, and REFUSES
     to load when it cannot make them safe.

@@ -1173,9 +1173,12 @@ def redact_urls(text: Any) -> str:
     `\\b` and printed the host. Now neither has it.
 
     This makes the caps in front of this sink cheap, not unnecessary:
-    clean_name, clean_field and clean_detail are still what keeps a 64 MiB
-    description out of a renderer, and clean_detail still drops a cut token
-    carrying "://" rather than hand the redactor half a URL.
+    cut_text, clean_title, clean_field and clean_detail are still what keeps
+    a 64 MiB description out of a renderer, and every cap cut before a
+    redaction -- on text stored as written, or, in clean_detail, redacted
+    just after -- cuts through cut_free_text, which drops a cut token
+    carrying "://" rather than hand a redactor half a URL (D-SINK-75; until
+    then clean_detail alone did).
     """
     s = "" if text is None else str(text)
     j = s.find("://")
@@ -1238,6 +1241,44 @@ def redact_urls(text: Any) -> str:
         j = s.find("://", resume)
     out.append(s[copied:])
     return "".join(out)
+
+
+def cut_free_text(text: str, limit: int, ends: str = " ") -> str:
+    """`text` cut to `limit` code points, and never through a URL (D-SINK-75).
+
+    F-M4-1's rule, which of the cuts made before a redaction only
+    clean_detail applied until then: REDACTION NEVER SEES A TRUNCATED URL. A URL cut between its
+    `//` and its `@` keeps a userinfo with no `@` after it, so run_host_parts
+    and Model.redactUrls read the username as the host and print it:
+    `... http://myuser:S3CRETpw` from `... http://myuser:S3CRETpw@cdn.test/x`.
+    So when the cut lands inside a run that an ASCII space ends, and the part
+    of that run before the cut carries "://" once its control characters are
+    deleted, the run is dropped, with the space before it. A run the cut does
+    not touch is kept whole, so a redactor sees all of it.
+
+    Why a space, and not the six delimiters that end a redactor's run: the
+    window title and the notification delete every control character before
+    they redact (F-SINK-16), so there a tab, VT, FF or CR inside a URL joins
+    the runs on either side of it, and a run read at the six kept
+    `http://myuser:zz<TAB>z`, which those sinks then read as `myuser`. A
+    space ends a run at every sink, so the run dropped is at least the run any
+    sink reads; and deleting the controls before looking for "://" (the class
+    both mirrors delete, _CONTROL_CHARS and Model's CONTROL_RE) finds a
+    `http:/<TAB>/` those sinks join into one. The costs: a cut URL loses its
+    host as well, a cut inside a run of several tab-joined words drops them
+    all, and a text that is one such run comes back "". `ends` adds what
+    splits the text before any sink sees it: the group text's `;`
+    (split_groups), so a cut drops only the last group's run.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if text[limit] in ends:
+        return cut
+    start = max(cut.rfind(c) for c in ends)
+    if "://" in _CONTROL_CHARS.sub("", cut[start + 1:]):
+        return cut[:max(start, 0)]
+    return cut
 
 
 def log(message: str) -> None:

@@ -17823,3 +17823,172 @@ In the shell, the counts are node failures:
 - starting at the letters that end at `://`: 3
 
 **The gate.** The first run of check.sh went red on one step: the clip preflight's P4, the read-only probe, grew 144 MB (before, peak and growth 151, 295 and 144 MB). That is F-HARNESS-66's open flake: `settle()` accepted a mid-startup plateau. The other two probes settled near 283 MB, and the run shared the machine with the review's agents. Run alone, the scenario passed all seven checks, with the read-only probe at 294, 294 and 0 MB. Nothing in this change touches QML or the clipboard.
+
+## D-SINK-75, 2026-11-04: no cap the helper puts on provider text cuts a URL
+
+The owner said "fix d-sink-75". The board row records the defect. It was found on 2026-11-04 by the review of D-SINK-74 and kept off the board and out of every commit until this fix, as a security row is. This section is the evidence for the fix.
+
+**What the caps did.** The helper stores provider text as written, cut to a cap, and every sink redacts it afterwards:
+
+- `cut_text` (bin/helper/02-sources.py), D-M3U-1's caps since v0.14.3: a channel's name and tvg-name at 512 code points, its group text (`group-title` or `#EXTGRP`) at 512, and each group after the `;` split at 128
+- `clean_title` (bin/helper/04-epg.py): a programme's title at 200, since v0.1.0
+
+A plain slice can land between a URL's `//` and its `@`. What is left, `http://myuser:S3CRETpw`, has no `@`, so both redactors read the username as the host and print it. A cut before a later `@` disarms R32a' the same way: `http://myuser:pa/ss@cdn.test/x` is withheld whole, but cut after `pa/s` it prints `myuser`. The helper's redaction carried it to the window title (`apply_channel`). The shell's `sinkText` carried it to the guide row, the bar, the accessibility bus, the scope header (`scopeName`), the now/next line (`epgFields`) and the notifications (`notifyArgv`). `clean_detail` has dropped such a cut token since 2026-10-03 (F-M4-1). The caps on text stored as written never did. The D-SINK-74 review's probe at 756cedb swept one URL after a space, every cut over each cap, and counted `myus`, `S3CR` or `myuser` in either redactor's output. It found 12 of 41 cuts leaking for names, 7 of 25 for groups and 12 of 41 for titles.
+
+**The fix.** One function, `cut_free_text` (bin/helper/01-core.py), is the rule for every cap on provider text stored as written. When the cut lands inside a run that an ASCII space ends, and the part of that run before the cut carries `://` once its control characters are deleted, the run is dropped, with the space before it. `cut_text` and `clean_title` call it. `clean_detail` calls it too. After its whitespace fold every delimiter is one space, so it answers what its own `rpartition` did, with one exception: the fold keeps the C1 controls other than U+0085, and `cut_free_text` deletes them before it looks for `://`, so a cut token with one inside its `://` (`http:<U+0080>//...`) is now dropped as well, where the old test kept it. Its existing tests, the every-offset sweep among them, pass unchanged.
+
+Why a space, and why the controls are deleted first. The window title (`apply_channel`) and the notification body (`notifyArgv`) delete every C0 and C1 control before they redact (F-SINK-16), so there a tab, VT, FF or CR inside a URL joins the runs on either side of it. The first version of this fix ended a run at the redactors' six delimiters. The review measured it still leaking at those two sinks: a cut after a tab inside a password kept `http://qqqqqq:zz<TAB>z`, which they read as `qqqqqq`. A space ends a run at every sink, so the run dropped is now at least the run any sink reads. Deleting the controls before looking for `://` catches `http:/<TAB>/`, which those sinks join into a URL. Both mirrors delete the same class (`_CONTROL_CHARS`, `CONTROL_RE`: C0, DEL and C1).
+
+A group text also ends a run at `;` (`GROUP_TEXT_ENDS`), because each group reaches the sinks on its own. Without it, a cut inside a glued last group dropped every group and left the channel Ungrouped, which the first run of the new tests showed.
+
+The title's composition, the name with its controls deleted and then redacted, is a function now, `player_title_text`, which `apply_channel` calls and the tests call (rule 12).
+
+The costs, stated:
+
+- a cut URL loses its host, as it did in `clean_detail`
+- a cut inside a run of words joined by tabs or other controls drops them all
+- a text that is one such run comes back empty. A name then falls back to its tvg-name, then its tvg-id, then `Channel <n>`; a group is dropped; and a programme with no title is not kept (counted under `noTitle`)
+- a row with no unique tvg-id takes an `n:` id, the hash of its name's folded form (`normalize_id_text`), only while no other row's name folds to the same key. So a name this shortens moves that row's id. It can also cost another row its `n:` id, one whose name folds to the same key as the shortened one: that row takes a `u:` id, and so does the shortened one, unless it has a unique tvg-id, whose `t:` id it keeps. Either way a favourite or recent kept under the old id no longer matches. Only a name over 512 characters cut inside a URL changes
+- a hidden group is matched by its name, so a hidden group whose name this shortens is shown again
+- names, groups and titles cached before the update keep their old cut until that source's next playlist or guide fetch; the helper does not re-cut what it already stored
+
+**Siblings.** The search was for every place either mirror cuts provider text to a length:
+
+- the helper's other caps on playlist text drop a value whole rather than cut it: the tvg-id, the channel number, the logo URL, the stream URL, the guide hint, and option keys and values
+- the helper's other cuts run after redaction: `clean_detail`'s final cut, `track_text`, `network_detail`, the first-load reason and its file error, the launch stderr buffer, and the CLI's `bounded_text`
+- `episode_ns_text` cuts with `clean_field` and then emits only `S<n> E<n>`, built from numbers
+- `epg_name_text` cuts a guide display name to 512, and its answer only becomes a match key; `addrNameConflicts` is a count
+- the model cuts no provider text before redacting it. `epgDetailText` redacts first. `epgHintVerdict` cuts the hint's display host to 253 after `hostOf` has taken off the userinfo, port and path. `elide` has no caller. `capLength` and `capCodePoints` take what the user typed. Every other leading slice in the model parses a value. The QML cuts none
+- the state readers cap how many groups are hidden, not how long a name is
+
+**The review.** `wf_a5ae7253-174` read the change through four lenses, with a skeptic per finding: whether the fix closes the leak, siblings, the tests, and the claims in the text. Its closure lens drove 29,727 cut cases through the shipping parsers to four sinks. Among its findings, each fixed here:
+
+- the first version's run end at the six delimiters still leaked at the two control-deleting sinks; three lenses found it
+- the tests' two URLs held only letters, `:` and `/` in their userinfo, so a rule that ended a run at a no-break space, read a URL by the old word boundary, ended runs at quotes, `<` and `>`, or treated `;` as a run end outside a group text, passed every test
+- the sweeps never checked what a cut kept, so three rules that dropped too much passed
+- the text: R32a' was cited as R32a; the rule was said to be `clean_detail`'s alone, when every cut after redaction keeps it too; the costs left out a second row's id, hidden groups, the whole fallback chain and cached groups; the review's counts were given without their probe; and `epgHintVerdict` was missing from the model's cleared sites
+
+**The recheck.** `wf_f2e82b19-d5e` attacked the corrected fix through three lenses, closure, tests and claims, with a skeptic per finding. Its closure lens compared each sink's output on every cut value with its output on the same text parsed with the caps out of reach. That was about 1.7 million comparisons over some 100 URL shapes, then a randomised million over seven seeds, and it found no case where the cut adds a leak. Its other findings, each fixed here:
+
+- the tests put only a tab inside the `://`, so a control class narrowed to the guide's fold, to C0 and DEL, or to the tab alone passed every test
+- the shapes sampled five password characters, so a run that also ended at a comma, or at any of eighteen punctuation characters, passed too
+- nothing tested the group text's space
+- only the name and group sweeps checked what a cut keeps, so each of these passed: a title trimmed after its cut, a detail folded after its cut, a name cleaned after its cut, and a run holding an `@` dropped too
+- the text:
+  - `clean_detail` was said to give the same answers, but it also drops a token with a C1 control inside its `://` now
+  - the `n:` id cost said "equals" where the join is by the folded key, and said both rows move, when a shortened row with a unique tvg-id keeps its `t:` id
+  - the red-first sentence said every test errored, where three passed
+  - the sweeps' coverage was overstated
+  - two mutation lines described a different change from the one that was run
+  - two docstrings called `clean_detail` a cap on text stored before redaction
+
+**The final check.** `wf_b1d23bf4-814` read the tests and the text after the recheck's fixes through three lenses, with a skeptic per finding. The lenses were fresh mutations, the shapes each sweep leaves out, and the claims. It applied 31 mutations that repeat none of those below, and 10 survived. It measured every left-out shape on every field's route against the same text parsed with the caps out of reach, and only one added a leak under a mutation (the `#EXTGRP` quote below). Its eighteen findings, fifteen once the lenses' duplicates are merged, were all in the tests or the text, and each skeptic's reproduction found the shipping code right. Each was fixed here:
+
+- no tvg-name sweep had a title that cleans to nothing, so a name that fell back to a raw-sliced tvg-name passed
+- no control came before the cut run, so control deletion over the whole cut, or a run start found in the deleted text, passed
+- the only C0 control inside a `://` was a tab, so a class narrowed to the delimiter controls passed
+- every scheme was a lowercase `http`, so a URL test keyed on the letter before `://`, or on a list of stream schemes, passed
+- nothing made a redaction lengthen a detail or cut a name just after a space, so `clean_detail` without its last cut and `cut_text` without its trim passed
+- nothing bounded the deleted class from above, so deleting every non-printable character passed
+- `#EXTGRP` was swept only with the group-title's shapes, without the `"` that line keeps, so a quote as a group's run end passed there
+- only the space form was held to what a cut keeps, so dropping any cut run that holds a control passed
+- the text:
+  - the C1 detail case did not go through the parser
+  - "one exact value per cut site" and "inside the `//`" were wrong, and the title's direction test read one redactor
+  - DEL was called not ASCII
+  - the `;` was said to split a group text before any cut
+  - `redact_urls`' docstring named `clean_name` as a cap
+  - a mutation line left out the `>`
+  - the board said the recheck's eleven survived the first tests
+
+**Tests.** tests/test_cut_urls.py is new.
+
+- `cut_free_text`'s edges:
+  - a text within the cap; a cut at a space; a cut just after the space that ends a URL
+  - a cut at a tab, LF, VT, FF or CR, which is a cut inside the run
+  - a cut inside a URL after a space, and after each control
+  - a run that reaches back past a no-break space
+  - a control from each part of the deleted class inside the `://`: NUL, SOH, a tab, U+001F, DEL, U+0080, U+0085, U+009B and U+009F
+  - a no-break space, U+200B or U+FEFF inside the `//`, which neither mirror deletes, so the run is no URL to any sink and the cut keeps it
+  - tab-joined words before the space, before a cut URL, and before a whole URL followed by a cut one, which neither the run's start nor its `://` test may count
+  - a text that is one cut URL; a cut before the `//`; a `//` with no `:`; a cut in a later run; a cut in a run holding `@` and `:` but no `://`
+  - the group separator, both dropping only the last group and keeping a URL group the cut stops at
+  - a group text's run ending at a space as well, for a cut in a word after a whole URL and for a cut at the space after it
+- every cut offset across each URL shape at every cap, in four forms: after a space, after a space behind words joined by C1 controls (which the guide's fold keeps), after a tab, and glued to the text before it.
+  - The shapes, 47 in all: a plain userinfo; five schemes (glued to a digit, `HTTP` in upper case, `s3` ending in a digit, `git+ssh` holding a `+`, and `smb`, which no stream uses); and one password for each printable ASCII character that is neither a letter nor a digit, for DEL, and for each of eight that are not ASCII (U+0085, U+009B, a no-break space, `é`, U+200B, U+2028, U+3000 and U+FEFF).
+  - Nine more have a control inside the URL: two inside the userinfo and seven inside the `://` (NUL, SOH, a tab, U+001F, DEL, U+0085 and U+009B).
+  - The sweeps run through the shipping `parse_m3u` and `parse_xmltv`. `parse_m3u` covers the name, the tvg-name, the name a title that cleans to nothing takes from the cut tvg-name, and each group and the group text, from `group-title` and from `#EXTGRP`. `parse_xmltv` covers the title, and the description, category and on-screen episode, which `clean_detail` cuts.
+  - Each sweep takes the shapes its field keeps as they are. Names take all 47. Tvg-names take 46, because an attribute ends at its `"`. Through `group-title`, each group and the group text take 45, without the `"` and the `;`. Through `#EXTGRP`, which is no attribute and keeps a `"`, they take 46. The `;` is left out of both, because the stored groups are split at it, after the group text's cut and before each group's. Titles and details take the 42 the guide's fold leaves as they are, since a title is cut after it.
+  - The parses that carry groups run in batches under `MAX_GROUPS`. Each guide channel takes 300 programmes a minute apart, inside the window.
+- everything they store is held to the cap and to four sinks.
+  - The sinks are `redact_urls`, `Model.sinkText`, and the two that delete controls first: `player_title_text`, and the body `Model.notifyArgv` posts. The shell's run in node over the helper's output.
+  - The nine shapes with controls inside are held to the last two only, for names and tvg-names. At the plain redactors a tab inside a password ends the run whether or not anything is cut (D-SINK-34's accepted cost), and a URL with a control inside its `://` is no URL at all.
+  - The credential is spelt in `q` and `z`, which nothing else in the tests holds, so any fragment of it is a leak, the username's first letter included.
+- every sweep is also held to what a cut keeps, in every form.
+  - While the cut is before the URL's `://`, all the cut text is kept. Past the URL, that is kept with the URL whole. In between, what comes before the URL's run is kept: the text before its space, or nothing when no space comes before the URL (the tab form, where a name then falls back, and the glued form). A guide field reads a tab as a space. For a description, category or episode, what is kept is as the helper redacts it, which is what `clean_detail` stores. For the group text, the check is on the group the cut lands in.
+  - Eight exact values, each through the shipping parser:
+    - a one-group text cut after a URL keeps its group
+    - a name is cleaned of its leading dashes before it is cut
+    - a name cut in a run holding `@` and `:` but no `://` keeps that run
+    - a name and a tvg-name cut just after a space store no trailing space
+    - a title is folded and trimmed before it is cut, so a URL ending on the cap stays
+    - a description is folded before it is cut, so a tab-joined word before a cut URL stays
+    - a description, category and episode that the redaction lengthens are cut again to their caps
+    - a description drops a cut URL with a C1 control between its `:` and its `//`, which the guide's fold keeps
+  - A URL the cut does not reach keeps its host through both redactors, for a name and for a title, so the sweep cannot be passed by a parser that drops every URL.
+
+tests/test_mpv.py's CutNameTitleTest drives the shipping `playlist` and `play` verbs against FakeMpv for ten names cut inside the userinfo, four of them on and around a tab inside the password, and reads `title` and `force-media-title` off the wire.
+
+**Red first.** The final tests, copied over 756cedb, give 2 failures and 22 errors across 34 tests.
+
+- The failures are the window title, and the C1 detail case, because 756cedb's `rpartition` kept that token.
+- The errors are the 22 tests that call `cut_free_text` or `player_title_text`, neither of which exists there: the seventeen unit tests and the five sweeps.
+- The other ten pass there, as they should: the group text cut at a separator, seven of the eight exact values, and the two URLs the cut does not reach.
+
+Run again with `player_title_text` supplied as 756cedb's own one-line composition (08-player-verbs.py:584 there), test_cut_urls gives 5 failures and 17 errors. Four sweeps fail (names and tvg-names, groups, group text, titles), and so does the C1 detail case. The seventeen unit tests error. The detail sweep passes there, as it should, because `clean_detail` already dropped a cut token.
+
+**Mutations, each caught.** Each was applied alone to a copy of the fixed tree and run against test_cut_urls, CutNameTitleTest and test_epg_match, four at a time. Every count is from the run after the final check's fixes.
+
+- the first version of this fix (six-delimiter runs at all three run ends, no control deletion): 6, among them the name sweep and the window title
+- `cut_text` back to a plain slice: 4
+- `clean_title` back to `clean_field`: 1
+- the six delimiters as run ends again, at `cut_free_text`'s and `cut_text`'s defaults: 5
+- `://` looked for anywhere in the cut rather than in its last run, controls still deleted: 13, among them the direction tests and two of test_epg_match's detail tests
+- the group text without `;`: 4
+- no exit when the cut lands on a run end: 10
+- keeping the space before the dropped run: 9
+- no control deletion before looking for `://`: 3
+- the exit also at a no-break space: 3
+- the URL read by the old word-boundary pattern: 5
+- quotes, `<` and `>` as run ends too, at `cut_free_text`'s default, which only the guide's caps take: 2
+- the name cut with the group text's run ends: 1
+- `clean_detail` with the group text's run ends: 1. It first survived, until the detail sweep was added
+- the exit at a space whatever the run ends are: 2
+- the run search starting one short of the cut: 6
+- `//` read as a URL without its `:`: 1
+
+And the eleven the recheck found surviving, each red now:
+
+- the control class narrowed to the guide's fold (`_CONTROL_WS`, which also deletes a no-break space): 4; to C0 and DEL, or to the tab alone: 3 each
+- a comma as a run end too: 2 at `cut_text`'s default, and 2 at `cut_free_text`'s
+- eighteen punctuation characters as run ends at all three: 5
+- the group text without its space: 3
+- `clean_title` trimming after the cut: 1
+- `clean_detail` folding after the cut: 2
+- the name cleaned after the cut: 1
+- a run holding `@` dropped too: 2
+
+And the thirteen the final check found surviving, each red now:
+
+- the name falling back to a raw-sliced tvg-name: 1
+- control deletion over the whole cut, sliced at the run's start: 6
+- the run's start found in the control-deleted cut and used on the cut as it is: 6
+- the deleted class narrowed to the delimiter controls, DEL and C1: 2
+- a URL read only after an ASCII letter, only after a lowercase letter, or only with one of nine stream schemes: 5 each
+- `clean_detail` without its cut after the redaction: 1
+- the deleted class widened to every character that is not printable: 1
+- `cut_text` without its trim: 1
+- a quote as a run end in the group text: 1, and in each group: 1
+- every cut run that holds a control dropped, URL or not: 5
+
+**The owner's data, read-only, counts only.** 1,494 channels: the longest name is 61 characters, and no name, tvg-name or group holds `://`. None of the 263 lines of the cached guide window does. So D-SINK-75 did not reach this install.

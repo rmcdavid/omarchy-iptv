@@ -61,7 +61,11 @@ def clean_field(text: str | None, limit: int) -> str:
 
 
 def clean_title(text: str | None) -> str:
-    return clean_field(text, EPG_MAX_TITLE)
+    """clean_field's fold and cap, cut by cut_free_text (D-SINK-75): a title
+    is stored as written and redacted only at its sinks, after this cut."""
+    if not text:
+        return ""
+    return cut_free_text(_CONTROL_WS.sub(" ", text).strip(), EPG_MAX_TITLE)
 
 
 def element_text(elem: Any) -> str:
@@ -124,27 +128,18 @@ def clean_detail(text: str | None, limit: int) -> str:
     cost never touched: the text is cut at `limit`, and when that cut lands
     inside a token carrying `://` the whole token is dropped rather than handed
     to the redactor, because half a URL is what published the username above.
-    A URL cannot contain whitespace (redact_urls' tail excludes it), so the
-    only token the cut can ever have truncated is the last one, and dropping it
-    costs a fragment that was unreadable anyway.
+    Every run of whitespace is one space by then, and a space ends a
+    redactor's run, so the only token the cut can ever have truncated is the
+    last one, and dropping it costs a fragment that was unreadable anyway. The
+    rule is cut_free_text's since D-SINK-75, which every cap in front of a
+    redacted sink now takes: the names and groups (cut_text) and the titles.
 
     What the caller sees: a value at most `limit` code points long -- at most,
     because redacting an unparseable URL GROWS the text ("[redacted]") and
     the final cut takes it back to the cap -- and usually shorter than the
     cap when the text carried URLs, by what the redaction removed.
     """
-    text = _CONTROL_WS.sub(" ", text or "").strip()
-    if len(text) > limit:
-        cut = text[:limit]
-        if text[limit] != " ":
-            # The cut landed inside a token. Every run of whitespace is one
-            # space by now, so rpartition finds the start of exactly that
-            # token, and a token carrying "://" is a URL the redactor must
-            # not be given half of.
-            head, _, tail = cut.rpartition(" ")
-            if "://" in tail:
-                cut = head
-        text = cut
+    text = cut_free_text(_CONTROL_WS.sub(" ", text or "").strip(), limit)
     if "://" not in text:
         # The common case, and the hot one. redact_urls cannot rewrite text
         # without "://", so this guard changes no answer. It was worth 2.7 s of

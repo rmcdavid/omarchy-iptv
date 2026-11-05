@@ -635,6 +635,12 @@ def clean_header_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
 
 
+# What ends a run for a group text's cut (cut_free_text, D-SINK-75): the
+# ASCII space that ends one at every sink, and split_groups' `;`, since each
+# group reaches the sinks on its own.
+GROUP_TEXT_ENDS = " ;"
+
+
 def split_groups(value: str) -> list[str]:
     """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
     first of each kept in order).
@@ -732,13 +738,17 @@ def bound_count(bounds: dict[str, int] | None, kind: str) -> None:
         bounds[kind] = bounds.get(kind, 0) + 1
 
 
-def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None) -> str:
+def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None,
+             ends: str = " ") -> str:
     """D-M3U-1: `value` cut to `limit` code points (a str slice never splits
-    one), trailing whitespace trimmed, counted under `kind` when it was cut."""
+    one), and never through a URL (cut_free_text, D-SINK-75: a name or a
+    group is redacted only at its sinks, after this cut), trailing whitespace
+    trimmed, counted under `kind` when it was cut. A group text passes
+    GROUP_TEXT_ENDS, so the cut drops at most its last group's run."""
     if len(value) <= limit:
         return value
     bound_count(bounds, kind)
-    return value[:limit].rstrip()
+    return cut_free_text(value, limit, ends).rstrip()
 
 
 def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
@@ -799,7 +809,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # arrives already cut (parse_m3u cuts it once, at its own line, and
     # counts it there); a group-title is this entry's own and is cut here.
     group_title = attrs.get("group-title", "").strip()
-    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds) if group_title else extgrp
+    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_TEXT_ENDS) if group_title else extgrp
     groups = bound_groups(split_groups(group_text), bounds) if group_text else []
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
@@ -980,7 +990,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             pending = parse_extinf(line)
             continue
         if line.startswith("#EXTGRP:"):
-            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds)
+            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_TEXT_ENDS)
             continue
         if line.startswith("#EXTVLCOPT:"):
             key, _, value = line[len("#EXTVLCOPT:"):].partition("=")

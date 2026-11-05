@@ -517,6 +517,15 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
     return peer
 
 
+def player_title_text(name: str) -> str:
+    """What apply_channel sets as the player's title and media title (after
+    the `$>` prefix on the title): the name with every control character
+    deleted, then redacted (F-SINK-14, F-SINK-16). A function so the tests
+    that hold a cut name to this sink call it rather than copy it
+    (D-SINK-75)."""
+    return redact_urls(_CONTROL_CHARS.sub("", name))
+
+
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
                   owner: dict[str, Any] | None = None, label: str = "play",
                   vouched_pid: int | None = None, paused: bool = False) -> int | None:
@@ -581,7 +590,7 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # a name never means anything by one, so none goes to the player. Dropped
     # BEFORE the redaction, so a tab or a line break inside a password no
     # longer splits the URL there (D-SINK-34's cost) on this sink.
-    shown = redact_urls(_CONTROL_CHARS.sub("", target["name"]))
+    shown = player_title_text(target["name"])
     for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
