@@ -57,6 +57,48 @@
       "js": "${path} cdn.test",
       "py": "${path} http://cdn.test",
       "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: a scheme glued to `_` -- the helper's redaction asked a word boundary of the scheme's start and set the whole URL as the window title",
+      "name": "Sports_http://u5er:S3CRET@cdn.test/x",
+      "js": "Sports_cdn.test",
+      "py": "Sports_http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: a CJK name glued to the scheme (the same word boundary)",
+      "name": "\u4f53\u80b2\u9891\u9053http://u5er:S3CRET@cdn.test/x",
+      "js": "\u4f53\u80b2\u9891\u9053cdn.test",
+      "py": "\u4f53\u80b2\u9891\u9053http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: a digit before the scheme's only letters (`1http`)",
+      "name": "News 1http://u5er:S3CRET@cdn.test/x",
+      "js": "News 1cdn.test",
+      "py": "News 1http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: a year glued to the scheme (`2024http`)",
+      "name": "News 2024http://u5er:S3CRET@cdn.test/x",
+      "js": "News 2024cdn.test",
+      "py": "News 2024http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: a glued scheme after an earlier URL in the same name",
+      "name": "Backup http://a.test/x then 1http://u5er:S3CRET@cdn.test/x",
+      "js": "Backup a.test then 1cdn.test",
+      "py": "Backup http://a.test then 1http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-74: an ASCII name before a CJK name glued to the scheme: the run starts after the CJK letters, and the name stays",
+      "name": "ESPN\u9891\u9053http://u5er:S3CRET@cdn.test/x",
+      "js": "ESPN\u9891\u9053cdn.test",
+      "py": "ESPN\u9891\u9053http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
     }
   ]
 }

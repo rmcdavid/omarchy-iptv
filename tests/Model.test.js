@@ -4191,6 +4191,47 @@ checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case th
           redactionVectors.vectors.some(function (v) { return v.text.indexOf("qa@pass") >= 0 })]
 }, [true, true])
 
+// D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL. The
+// helper's redact_urls asked a word boundary of the scheme's start, so
+// `1http://...`, `_http://...` and a scheme right after an accented or CJK
+// letter went out whole there; this mirror never asked it. Pinned here so it
+// never starts: every BMP code point, and a sample past it, in front of the
+// scheme, in front of a digit in front of it, in front of 23 scheme-legal
+// non-letters in front of it, and after an ASCII name in front of the
+// scheme; each alone and behind an earlier URL (so `resume` is past 0). Each
+// prints what precedes the run's first ASCII letter and then the host. The
+// helper's suite runs the same sweep (tests/test_redaction_cost.py), the
+// shared fixture carries the shapes (300-character runs among them), and the
+// next check crosses 20,000 characters.
+checkCall("D-SINK-74: no code point before the scheme keeps the credential -- alone, after an earlier URL, before a digit or 23 non-letters before the scheme, or after an ASCII name -- and the output is everything before the run's first ASCII letter, then the host", function () {
+  const cred = "http://u5er:p4ss@prov.test/live/1.ts"
+  const long = "0123456789+-.0123456789"
+  const points = []
+  for (let c = 0; c < 0x10000; c++) points.push(c)
+  points.push(0x10000, 0x1d400, 0x1d7ce, 0x20000, 0x1f600, 0x10ffff)
+  const bad = []
+  points.forEach(function (c) {
+    const ch = String.fromCodePoint(c)
+    const letter = /^[A-Za-z]$/.test(ch)
+    // Each prefix, and whether the scheme starts at its first character:
+    // behind `ESPN` it does whenever the code point is scheme-legal.
+    ;[[ch, letter], [ch + "1", letter], [ch + long, letter], ["ESPN" + ch, /^[A-Za-z0-9+.-]$/.test(ch)]].forEach(function (form) {
+      const shown = form[1] ? "prov.test" : form[0] + "prov.test"
+      ;[["", ""], ["see http://a.test/x ", "see a.test "]].forEach(function (ctx) {
+        const out = Model.redactUrls(ctx[0] + form[0] + cred)
+        if ((out !== ctx[1] + shown || out.indexOf("u5er") >= 0 || out.indexOf("p4ss") >= 0) && bad.length < 6)
+          bad.push("U+" + c.toString(16).toUpperCase() + " " + JSON.stringify(ctx[0] + form[0]) + " -> " + JSON.stringify(out))
+      })
+    })
+  })
+  return [points.length, bad]
+}, [65542, []])
+checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed, and a first letter 20,000 characters before `://` starts the scheme", function () {
+  const cred = "http://u5er:p4ss@prov.test/live/1.ts"
+  return [Model.redactUrls("9".repeat(20000) + cred) === "9".repeat(20000) + "prov.test",
+          Model.redactUrls("x A" + "0".repeat(20000) + cred.substring(4)) === "x prov.test"]
+}, [true, true])
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect

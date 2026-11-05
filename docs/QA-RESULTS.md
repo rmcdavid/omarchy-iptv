@@ -17727,3 +17727,99 @@ In python:
 The `warnings` check first survived. The meta-line test damaged each case on top of the last, so the first case's 1e400 was still in the meta line and the finite check refused every later one. Each case now starts from the window as it was written, and the mutation is caught.
 
 **The owner's data, read-only, counts only.** Every `at`, every source record's count and time, `cacheLayout`, the one failed mark and the EPG window's `fetchedAt` and `windowEnd` are plain integers. There is no logo memo (logos are off). So D-STATE-4 did not reach this install.
+
+## D-SINK-74, 2026-11-04: the helper's redaction finds a scheme wherever it starts
+
+The owner said "fix d-sink-74". The board row records the defect. It was found on 2026-11-03 and kept off the board and out of every commit until this fix, as a security row is. This section is the evidence for the fix.
+
+**What each redactor did.** Both find each `://` and walk back over the scheme-legal run in front of it: ASCII letters, digits, `+`, `.` and `-`. `Model.redactUrls` then walks forward to the run's first ASCII letter and redacts from there. The helper's `redact_urls` took a letter only where the pattern it replaced, `\b([A-Za-z][A-Za-z0-9+.-]*)://...`, could start a match. That is either the run's first character, when the character before the run is not a word character, or a letter right after a `+`, `.` or `-` inside the run. A run with neither had no start, and its text went out as written. Examples are `1http`, `2024http`, and `http` right after `_` or after any non-ASCII character Python counts as a word character: letters, digits and other numerals such as U+00BD. The schemes IPTV uses (http, https, rtmp, rtsp, udp and the rest) hold no `+`, `.` or `-` to offer a later start, so a run of that shape ending in one of them leaked every time. A run such as `1a.b` was redacted, from its `b`. Measured on the tree at 9cce189: `1http://u:p@h.test/x`, `_http://...`, and U+00E9, U+00BD or two CJK characters before `http://...` each kept the username and the password in the helper and printed the host in the shell. The boundary was in the helper's first redactor (v0.1.0). F-SINK-11 made the scan linear and kept its answer, boundary included.
+
+Every sink the helper redacts goes through this one function:
+
+- its stderr (`log`)
+- its error replies: the CLI's `error.message`, the network detail of a fetch error, the folder error, and an `internal` error's message and trace
+- what mpv said while starting (`drain_launch_stderr`), mpv's end-file error, and its error log lines during a first load
+- the media title the player status reports, and track titles
+- the EPG detail text (`clean_detail`)
+- the player's `title` and `force-media-title` (`apply_channel`, F-SINK-14), which the compositor shows as the window title
+
+What the shell passes on of these it redacts again with `Model.redactUrls`: its journal lines (`console.warn` over `Model.redactUrls`, and `statusReason`, whose fallback is `scrubUrls`), its notifications and its guide text. So those printed the host. The credential stayed where the helper's own output is the sink: the window title and media title, which the helper sets on mpv itself; its stdout and stderr when a person runs it from a terminal; and the EPG detail text cached on disk.
+
+**The fix.** The scheme starts at the run's first ASCII letter, whatever precedes it, which is the shell's rule. The boundary test is gone, and `_WORD_CHAR_RE` with it, along with its entry in the helper regex guard. The output's form does not change: the helper prints what precedes the scheme, then `scheme://host`, with the scheme lowercased from where it starts. The shell prints what precedes the scheme's first letter, then the host. So `Sports_http://u:p@h.test/x` is `Sports_http://h.test` in the helper and `Sports_h.test` in the shell. The scan's cost does not change either: the forward walk visits at most the run, as it did.
+
+**The oracle.** The redaction-cost suite checks the helper against a pattern, character for character, over the shared fixture and more than 18,000 generated strings. That pattern was a copy of the shipped one, so it pinned the leak. It is now the pattern as ruled today, without `\b`. Since `:` is not scheme-legal, that pattern's leftmost match for a given `://` begins at the first ASCII letter of the run ending there. The corpus's edges gain `_`, a digit and U+00E9 before an upper-case `HTTP`, a year before `http`, and a glued scheme after an earlier URL.
+
+**Siblings.** The search covered three things:
+
+- every `\b` and `\w` in the shipped helper parts, model parts and QML: the redactor's was the only one in code
+- every free-text URL finder: `redact_urls` in the helper (16 call sites, all through the one function), and `redactUrls` in the shell, the one finder there, which its sinks reach directly or through `sinkText` and `scrubUrls`
+- every scheme pattern that is not anchored at a value's start
+
+The model's other scheme patterns (`looksLikeUrl`, `sourceLabel`, `urlPortOf`, `hostPortOf`, `maskUrl` and `xtreamUrls`'s server check) are anchored at the value's start and read one value, not free text. A channel name with a glued scheme is not URL-shaped to `looksLikeUrl`, so it is shown, through `sinkText`, which redacts it. D-QA-20 is that anchored check's own row. The harness's `QA_URL_PAST_HOST_ERE` has no boundary and matches a glued scheme. The a11y bus checker calls `Model.redactUrls`.
+
+The harness's host printers have other defects, filed open:
+
+- F-HARNESS-96: run.sh's `source_label` cuts userinfo at its first at-sign, and its host stops at neither `@` nor a parameter. Measured: `http://u5er:p4@ss@prov.test/x` labels as `http://ss@prov.test`; a password holding `/`, `#` or `?` labels as `http://u5er`; `http://h.test;sid=SECRET/x` labels as `http://h.test;sid=SECRET`. The scenarios' `url_context` stops its match at `@`, so it prints `http://u5er:p4ss` on a red
+- F-HARNESS-97: the live-rewind spike's `redact` prints urllib's netloc, userinfo and all, through design_pass.py and sweep.py. Measured: `http://u5er:p4ss@prov.test/live/1.ts` prints as `http://u5er:p4ss@prov.test`
+- F-HARNESS-98: probe-provider-api.sh hands the subscription's username and password to python3 as arguments (read, not run)
+
+None of them ships. Every userinfo URL in the committed documents was checked, by host only. All are synthetic. Among them are loopback addresses, `.test` and `example` names, placeholders (`host`, `h`, `provider`, `nas`, `...`), the tail of a worked example of a password holding an at-sign, multicast addresses with an empty userinfo, and `a://@`.
+
+**The review.** `wf_369e792c-07d` read the change through four lenses, with a skeptic per finding: whether the two mirrors now agree, siblings, the tests, and the claims in the text.
+
+The mirrors lens compared what each mirror redacts, span for span, over 247,497 strings: glue characters of many scripts before many schemes, runs around the 64-character search window's doublings, and several `://` per string. It found no difference. The same comparison against 9cce189's helper reported 8,790.
+
+The findings about this change are fixed here:
+
+- the tests put at most two non-letters before the scheme's first letter, so a walk that gave up after four passed every test
+- every glued vector was the first URL in its text, so a boundary brought back for a later URL passed
+- the text said such runs were never URLs. It left out the non-ASCII numerals, said the journal carried the credential, called the `a1` control red, listed the shell's callers of `redactUrls` wrongly, and classified the documents' example hosts too narrowly. Two comments in the test file still described the old oracle and the old scan
+- the harness rows named too few shapes and callers, and missed `url_context` and the probe script
+
+**The recheck.** `wf_3bb73e17-777` re-measured the corrected text and tried fresh mutations, again with a skeptic per finding. Each finding was reproduced, and each is fixed here:
+
+- no test held a scheme with a digit or a `.` after its first letter, behind a non-letter (`1s3`, `_1A2HTTP`, `1A.HTTP`). So a start "after the run's last digit" survived in both mirrors
+- nothing pinned the run search's window past 256 characters, since every long run's only letters stood right before `://`
+- the shell was held to 24 leading non-letters and the helper to 200, so a walk that gave up after 25 (shell) or 210 (helper) survived
+- no test put an ASCII name before a non-ASCII glue character (`ESPN` and two CJK letters), so a run search that also crossed non-ASCII letters survived in both mirrors. It leaks nothing, but it swallows the name in the shell and changes its case in the helper
+- the text: the two "four characters" mutation counts came from mutations one position apart; the node check's name said "however many"; the ALPHABET comment and the module docstring misdescribed the scan and the oracle; the headline said more than the rule; and F-HARNESS-98's 20 s is a per-operation timeout, not a bound on a request
+
+Now:
+
+- the shared redaction fixture carries 18 new vectors. Among them are runs of 300 digits, a first letter 300 characters before `://`, the three schemes above, and `ESPN` with CJK and `CANAL` with U+00C9 before the scheme
+- both sweeps add `ESPN` before each code point
+- both suites cross a 20,000-digit run and a first letter 20,000 characters back
+- the shown-names fixture carries six new names
+
+**Red first.** The final tests and fixtures, copied over 9cce189: python 15 failures across 26 tests.
+
+- test_redaction_cost: both GluedSchemeTests tests, the new 20,000-digit test, the oracle corpus, and the shared fixture through the oracle. The first letter 20,000 characters back was redacted at 9cce189 too; it pins the window for the new rule
+- test_helper's shared vectors: the property test and the exact `py` test
+- test_mpv's ShownNamesTest: `redact_urls` against the fixture's `py`, and `play` against FakeMpv for each of the six new names, plus the count after them. The title went out as `$>Sports_http://u5er:S3CRET@cdn.test/x`, and `force-media-title` the same without the prefix
+
+Node passed all 3,355 checks there, and so did test_bar_shown_names, as they should: the shell never had the defect. Its new checks and the fixture's `js` pin the rule so that it does not start.
+
+**Mutations, each caught.** Each was applied alone to a copy of the fixed tree and run against the final tests. In the helper, the counts are failures across test_redaction_cost, test_helper's shared vectors and ShownNamesTest:
+
+- refusing a letter at the run's first character after a word character, alone: 3, all in test_redaction_cost: both GluedSchemeTests tests and the oracle corpus. It first survived. This side prints everything before the scheme as written and lowercases only from the start, so starting at a later letter changes the output only for an upper-case scheme. The sweep's scheme is upper case now, and fixed shapes and three corpus edges carry one
+- taking a letter only at the run's start or after `+`, `.` or `-`: 12
+- looking at only the run's first four positions: 10
+- the whole old rule, only for a URL after an earlier one: 9
+- starting after the run's last digit: 4
+- starting at the letters that end at `://`: 4
+- capping the run search's window at 256: 5
+- giving up after 210 positions: 4
+- letting the run cross non-ASCII letters and digits backwards: 7
+
+In the shell, the counts are node failures:
+
+- refusing a run that follows a letter, digit or `_`: 6
+- a letter only at the run's start or after `+`, `.` or `-`: 7
+- looking at only the run's first four positions: 7
+- the old rule, only after an earlier URL: 7
+- starting after the run's last digit: 3
+- giving up after 25 positions: 4
+- letting the run cross non-ASCII letters and digits backwards: 5
+- starting at the letters that end at `://`: 3
+
+**The gate.** The first run of check.sh went red on one step: the clip preflight's P4, the read-only probe, grew 144 MB (before, peak and growth 151, 295 and 144 MB). That is F-HARNESS-66's open flake: `settle()` accepted a mid-startup plateau. The other two probes settled near 283 MB, and the run shared the machine with the review's agents. Run alone, the scenario passed all seven checks, with the read-only probe at 294, 294 and 0 MB. Nothing in this change touches QML or the clipboard.

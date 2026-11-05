@@ -659,15 +659,14 @@ _URL_DELIMITER = re.compile("[" + URL_DELIMITER_CHARS + "]")
 # re-read from every word boundary; the scan is anchored on "://" now and these
 # are the parts of that pattern it still needs. The tail ends at the six
 # delimiters alone (R32a'''; it was that pattern's `[^\s'"<>]+` until
-# 2026-10-22, and the 30-point union for one round after that). `\w` is
-# asked rather than guessed, so the word-boundary rule stays Python's own
-# outside ASCII.
+# 2026-10-22, and the 30-point union for one round after that). The `\b`
+# is gone (D-SINK-74, 2026-11-04): a scheme glued to a word character is a
+# URL all the same, as it always was to Model.redactUrls.
 _URL_TAIL_RE = re.compile("[^" + URL_DELIMITER_CHARS + "]+")
 # The sentence punctuation redact_urls strips off a run's end and puts back
 # after the host; Model.trailingPunctuationLength has the same set. A `]` is
 # kept when the run holds a `[` (an IPv6 literal).
 _TRAILING_PUNCTUATION = ".,;:!?)]'\"<>"
-_WORD_CHAR_RE = re.compile(r"\w")
 # The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
 # was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
 # prefix, so the engine tried every start in the window and a failed start
@@ -1153,18 +1152,25 @@ def redact_urls(text: Any) -> str:
     either way. The trade is four orders of magnitude on the shape that was
     quadratic for a factor of two on the one that never was.
 
-    Why it is the same answer and not a narrower pattern. `:` and `/` are not
-    scheme-legal, so the old pattern's greedy scheme run always ended EXACTLY
-    at the `://` that followed it and there was never a shorter candidate to
-    backtrack to. So the leftmost start the engine took for a given `://` is
-    the first position in the scheme-legal run ending at it that holds an ASCII
-    letter AND satisfies `\\b`; inside the run the only non-word characters are
-    `+`, `.` and `-`, so that test is a character comparison everywhere except
-    the run's own first position, where `\\w` is asked (`_` and every non-ASCII
-    word character are why it has to be asked). The redaction-cost suite (dev
-    branch) drives the OLD pattern as an oracle over the shared fixture and
-    thousands of generated strings and asserts the two agree character for
-    character.
+    What it answers, as a pattern: `([A-Za-z][A-Za-z0-9+.-]*)://` and the
+    tail, leftmost first. `:` and `/` are not scheme-legal, so that greedy
+    scheme run always ends EXACTLY at the `://` that follows it and there is
+    never a shorter candidate to backtrack to. So the leftmost start for a
+    given `://` is the first ASCII letter in the scheme-legal run ending at
+    it. The redaction-cost suite (dev branch) drives that pattern as an oracle
+    over the shared fixture and thousands of generated strings and asserts
+    the two agree character for character.
+
+    D-SINK-74 (2026-11-04). The old pattern also asked `\\b` of that start,
+    and so did this scan, which was written to give the old pattern's answer.
+    So it found a start only at a letter that was the run's first character
+    with no word character before the run, or that followed a `+`, `.` or
+    `-` inside the run. A run with neither was no URL at all: `1http`, or
+    `http` right after `_` or any non-ASCII letter, digit or numeral, and the
+    schemes IPTV uses hold no `+`, `.` or `-` to offer a later start. So
+    `1http://user:pass@host/x` reached the player's window title, the
+    helper's stderr and the EPG text whole. Model.redactUrls never had the
+    `\\b` and printed the host. Now neither has it.
 
     This makes the caps in front of this sink cheap, not unnecessary:
     clean_name, clean_field and clean_detail are still what keeps a 64 MiB
@@ -1196,23 +1202,16 @@ def redact_urls(text: Any) -> str:
             if b > lo or lo == resume:
                 break
             window *= 2
-        # `\b` at a position whose character is a word character (a letter
-        # always is) means "position 0, or the character before is not a word
-        # character". Only the run's first position can be preceded by
-        # something outside the scheme-legal set, so only it needs `\w`.
-        boundary_at_b = b == 0 or _WORD_CHAR_RE.match(s, b - 1) is None
+        # The scheme starts at the run's first ASCII letter, whatever stands
+        # before it (D-SINK-74): a digit inside the run, or a `_`, an accented
+        # letter or any other word character outside it. Model.redactUrls
+        # walks forward from the run's start the same way.
         start = -1
         for p in range(b, j):
             c = s[p]
-            if not (("a" <= c <= "z") or ("A" <= c <= "Z")):
-                continue
-            if p == b:
-                if not boundary_at_b:
-                    continue
-            elif s[p - 1] not in "+.-":
-                continue
-            start = p
-            break
+            if ("a" <= c <= "z") or ("A" <= c <= "Z"):
+                start = p
+                break
         tail = _URL_TAIL_RE.match(s, j + 3)
         if start < 0 or tail is None:
             # No scheme, or nothing the tail `+` can consume: the old pattern

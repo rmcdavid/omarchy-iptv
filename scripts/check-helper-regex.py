@@ -91,8 +91,6 @@ REVIEWED = [
     ("'[' + URL_SPACE_CHARS + ']'", "provider",
      "linear: one character class, no quantifier; the enumerated URL whitespace union, R32a'' "
      "(_URL_SPACE: validate_source_url's user text, the class a READER refuses)"),
-    (r"\w", "provider",
-     "constant: one character at one given position (_WORD_CHAR_RE, redact_urls)"),
     (r"(?:.*[^A-Za-z0-9+.\-])?", "provider",
      "linear: D-PERF-6 (R32e), fixed by lane-bounds-s2. The old `[A-Za-z0-9+.\\-]*\\Z` under search() "
      "had no literal prefix, so it tried every start of redact_urls' window and a failed start cost "

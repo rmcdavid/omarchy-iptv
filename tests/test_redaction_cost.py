@@ -13,12 +13,17 @@ side read as cheap. It was not: `.`, `+` and `-` are scheme-legal and are NOT
 word characters, so "aaaa." repeated hands the engine a fresh start position
 every five characters for a run that reaches the end of the text.
 
-So the first class of test here runs the OLD pattern as an oracle and asserts
-the two agree character for character. A redactor that got fast by redacting
-less would pass any budget, and "the output is unchanged" is the claim that
-actually matters for rule 5. The oracle is a copy of the shipped pattern rather
-than an import, because the helper must not carry a second redactor for a
-test's benefit; a copy that drifts is caught the moment a vector disagrees.
+So the first class of test here runs a pattern as an oracle and asserts the
+two agree character for character. A redactor that got fast by redacting less
+would pass any budget, and "the output is unchanged" is the claim that
+actually matters for rule 5. The oracle is a copy of a pattern rather than an
+import, because the helper must not carry a second redactor for a test's
+benefit; a copy that drifts is caught the moment a vector disagrees. It is
+the pattern as ruled today (`_AS_RULED` below: the tail of R32a''', the host
+of R32a'), not the one quoted above, and since D-SINK-74 (2026-11-04) it has
+no `\\b`. It used to: the copy of the shipped pattern held the scan to the
+old answer, and the old answer let a scheme through whole when nothing in its
+run could start a match (`1http`, `_http`).
 
 The second class is the budget, best of three against a ceiling many times the
 measured cost, in the house style: a wall-clock assertion on a shared machine
@@ -34,7 +39,8 @@ from helper_loader import load_helper
 
 helper = load_helper()
 
-# The pattern as it shipped, kept here and ONLY here. The HOST it prints is
+# The pattern as ruled -- the shipped one without its `\b` (D-SINK-74) -- kept
+# here and ONLY here. The HOST it prints is
 # R32a' (2026-10-22, D-SINK-29), stated independently of the helper so a
 # drift in run_host_parts is caught: the RFC authority (up to the first '/',
 # '?', '#' or whitespace), its userinfo to the LAST '@' within it, the host
@@ -55,8 +61,12 @@ helper = load_helper()
 # redactor delimits at; under R32a'' it ended the run here and the helper
 # printed the username and the tail for U+FEFF where 0.14.3 printed the
 # host).
+# D-SINK-74 (2026-11-04): no `\b` in front of the scheme. The shipped pattern
+# had one, and this oracle copied it, so `1http://u:p@h/x`, `_http://...` and a
+# scheme right after an accented or CJK letter were no URL to either and the
+# suite pinned the leak; Model.redactUrls never had it and printed the host.
 _WS = "\t\n\x0b\x0c\r "
-_AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
+_AS_RULED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
 _PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
@@ -84,7 +94,7 @@ def host_as_ruled(raw):
     return host.lower()
 
 
-def redact_urls_as_shipped(text):
+def redact_urls_as_ruled(text):
     def replace(match):
         raw = match.group(0)
         bracket = "[" in raw
@@ -95,7 +105,7 @@ def redact_urls_as_shipped(text):
         host = host_as_ruled(raw)
         return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
 
-    return _AS_SHIPPED.sub(replace, "" if text is None else str(text))
+    return _AS_RULED.sub(replace, "" if text is None else str(text))
 
 
 # D-PERF-6 (R32e): the scheme-run search as it shipped before, kept as the
@@ -107,10 +117,10 @@ _SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 
 
 # Reaches every branch of the scan: scheme characters, the authority
-# delimiters, the `@` D-SINK-1 is about, the quote and angle brackets the tail
-# class excludes, several kinds of whitespace, and non-ASCII (`\w` and `\s` are
-# both Unicode-aware here, which is why the scan asks the engine rather than
-# guessing).
+# delimiters, the `@` D-SINK-1 is about, the quotes and angle brackets that are
+# trailing punctuation (R32a''), several kinds of whitespace, and non-ASCII.
+# Every class the scan asks the engine is ASCII-only -- no `\w` or `\s` is
+# left in it -- so non-ASCII is plain text to it.
 ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>"
 
 
@@ -126,10 +136,13 @@ def generated(length, seed):
 # Hand-picked edges the generator will not reach often enough to rely on.
 EDGES = [
     "", "a://", "a://h", "://h", ".://h", "-a://h", "123http://h",
-    # `_` is a word character and is not scheme-legal, so it kills the `\b`
-    # for every position in the run behind it. The only place the scan has to
-    # ask python what a word character is.
-    "_aaa://h", "\xe9aaa://h", "0aaa://h",
+    # `_` is a word character and is not scheme-legal, so the old `\b` refused
+    # the run's first position behind it; inside a run it took a letter only
+    # after `+`, `.` or `-`. Each of these offers neither, and is a URL since
+    # D-SINK-74.
+    "_aaa://h", "\xe9aaa://h", "0aaa://h", "_http://u:p@h.test/x", "1http://u:p@h.test/x",
+    "x 2024http://u:p@h.test/x", "see http://a.test/x 1http://u:p@h.test/x",
+    "_HTTP://u:p@h.test/x", "\xe9HTTP://u:p@h.test/x", "1HTTP://u:p@h.test/x",
     "http://u:p@h/x", "http://u:p@q@h/x", "aaahttp://h/x", "a://://b",
     "://://x", "HTTP://H.TEST/A", "ht+tp://h", "ht.tp://h", "1.2.3://h.test",
     "a.b-c+d://h.test/x", "http://h:8080/a?b#c", "http://@h/x", "http://h@/x",
@@ -179,7 +192,7 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         self.assertGreaterEqual(len(doc["vectors"]), 8)
         for vector in doc["vectors"]:
             out = helper.redact_urls(vector["text"])
-            self.assertEqual(out, redact_urls_as_shipped(vector["text"]), vector["why"])
+            self.assertEqual(out, redact_urls_as_ruled(vector["text"]), vector["why"])
             self.assertIn(vector["host"], out, vector["why"])
             for fragment in vector["mustNotAppear"]:
                 self.assertNotIn(fragment, out, vector["why"])
@@ -201,7 +214,7 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         # nothing, which is the shape rule 14 exists to stop.
         self.assertGreater(len(corpus), 18000)
         mismatches = [text for text in corpus
-                      if helper.redact_urls(text) != redact_urls_as_shipped(text)]
+                      if helper.redact_urls(text) != redact_urls_as_ruled(text)]
         self.assertEqual([repr(t) for t in mismatches[:4]], [])
 
     def test_d_perf_6_the_anchored_scheme_run_match_starts_where_the_old_search_did(self):
@@ -280,7 +293,102 @@ class RedactionIsUnchangedTests(unittest.TestCase):
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):
             self.assertEqual(helper.redact_urls(value),
-                             redact_urls_as_shipped(value), repr(value))
+                             redact_urls_as_ruled(value), repr(value))
+
+
+class GluedSchemeTests(unittest.TestCase):
+    """D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL,
+    whatever stands before its first letter.
+
+    redact_urls asked `\\b` of a scheme's start, as the pattern it replaced
+    did. So it found a start only at a letter that was the run's first
+    character with no word character before the run, or that followed a `+`,
+    `.` or `-` inside the run. A run with neither was no URL to it and went
+    out whole: `1http`, or `http` right after `_` or any non-ASCII character
+    Python counts as a word character (letters, digits and other numerals
+    such as U+00BD). The schemes IPTV uses hold no `+`, `.` or `-` to offer
+    a later start. The helper's own outputs carried it, the player's window
+    title among them. Model.redactUrls never asked it and printed the host.
+    Red on dev 9cce189: every shape below printed the username and the
+    password except four. The `a1` control and the two whose first letter
+    starts their 300-character run were redacted then too (those two pin the
+    run search's window), and `1A.HTTP` printed `1A.http://prov.test`."""
+
+    CRED = "http://u5er:p4ss@prov.test/live/1.ts"
+    # Scheme-legal non-letters, more of them than a scan that gives up after
+    # a few would cross.
+    LONG = "0123456789+-.0123456789"
+    # An earlier URL, so the glued one is scanned with `resume` past 0.
+    EARLIER = "see http://a.test/x "
+
+    def test_each_glued_shape_prints_the_scheme_and_the_host(self):
+        cases = [
+            ("1" + self.CRED, "1http://prov.test"),
+            ("12" + self.CRED, "12http://prov.test"),
+            ("x 2024" + self.CRED, "x 2024http://prov.test"),
+            ("1.2-3+4567890" + self.CRED, "1.2-3+4567890http://prov.test"),
+            # Long letterless runs: the forward walk crosses all of them.
+            ("9" * 70 + self.CRED, "9" * 70 + "http://prov.test"),
+            ("9" * 200 + self.CRED, "9" * 200 + "http://prov.test"),
+            # The first letter far before `://`: the run search has to look
+            # back past its 64-, 128- and 256-character windows to find it.
+            ("A" + "0" * 300 + self.CRED[4:], "a" + "0" * 300 + "://prov.test"),
+            ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x a" + "9" * 300 + "http://prov.test"),
+            # Digits or `+.-` inside the scheme, after its first letter.
+            ("1s3" + self.CRED[4:], "1s3://prov.test"),
+            ("_1A2HTTP" + self.CRED[4:], "_1a2http://prov.test"),
+            ("1A.HTTP" + self.CRED[4:], "1a.http://prov.test"),
+            # An ASCII name before the glue character: the run starts after it.
+            ("ESPN" + chr(0x9891) + chr(0x9053) + "HTTP" + self.CRED[4:], "ESPN" + chr(0x9891) + chr(0x9053) + "http://prov.test"),
+            ("CANAL" + chr(0xc9) + self.CRED, "CANAL" + chr(0xc9) + "http://prov.test"),
+            ("_" + self.CRED, "_http://prov.test"),
+            ("Sports_" + self.CRED, "Sports_http://prov.test"),
+            (chr(0xe9) + self.CRED, chr(0xe9) + "http://prov.test"),
+            (chr(0x9891) + chr(0x9053) + self.CRED, chr(0x9891) + chr(0x9053) + "http://prov.test"),
+            (chr(0x663) + self.CRED, chr(0x663) + "http://prov.test"),
+            (chr(0xbd) + self.CRED, chr(0xbd) + "http://prov.test"),
+            ("x 1" + self.CRED + ".", "x 1http://prov.test."),
+            (self.EARLIER + "1" + self.CRED, "see http://a.test 1http://prov.test"),
+            (self.EARLIER + "Sports_" + self.CRED, "see http://a.test Sports_http://prov.test"),
+            # A letter at the run's start was always a URL, and still is.
+            ("a1" + self.CRED, "a1http://prov.test"),
+            # The scheme is lowercased from where it starts, so a scan that
+            # started at a LATER letter would print `_Http`.
+            ("Sports_HTTP" + self.CRED[4:], "Sports_http://prov.test"),
+        ]
+        got = [(text, helper.redact_urls(text)) for text, _ in cases]
+        self.assertEqual(got, [(text, want) for text, want in cases])
+
+    def test_no_code_point_before_the_scheme_keeps_the_credential(self):
+        """Every BMP code point, and a sample past it, in front of the scheme,
+        in front of a digit in front of it, in front of LONG in front of it,
+        and after an upper-case ASCII name in front of the scheme; each alone
+        and behind an earlier URL. The credential never survives, and the
+        output is the scheme from the run's first ASCII letter. The scheme is
+        upper case on purpose: this side lowercases it from where it starts,
+        so a scan that started at a later letter, or an earlier one, shows
+        here."""
+        letters = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        legal = letters | set("0123456789+.-")
+        points = list(range(0x10000)) + [0x10000, 0x1d400, 0x1d7ce, 0x20000, 0x1f600, 0x10ffff]
+        upper = "HTTP" + self.CRED[4:]
+        bad = []
+        for c in points:
+            # Each prefix, and whether the scheme starts at its first character:
+            # behind `ESPN` it does whenever the code point is scheme-legal.
+            forms = ((chr(c), chr(c) in letters), (chr(c) + "1", chr(c) in letters),
+                     (chr(c) + self.LONG, chr(c) in letters), ("ESPN" + chr(c), chr(c) in legal))
+            for prefix, whole in forms:
+                if whole:
+                    shown = (prefix + "HTTP").lower() + "://prov.test"
+                else:
+                    shown = prefix + "http://prov.test"
+                for before, kept in (("", ""), (self.EARLIER, "see http://a.test ")):
+                    out = helper.redact_urls(before + prefix + upper)
+                    if out != kept + shown or "u5er" in out or "p4ss" in out:
+                        bad.append("U+%04X %r -> %r" % (c, before + prefix, out))
+        self.assertEqual(bad[:6], [])
+        self.assertEqual(len(points), 65542)
 
 
 class PathologicalOutputTests(unittest.TestCase):
@@ -319,6 +427,21 @@ class PathologicalOutputTests(unittest.TestCase):
         self.assertEqual(out, run_of(20000) + " http://prov.example.test")
         for fragment in ("u5er", "p4@ss", "1.ts"):
             self.assertNotIn(fragment, out)
+
+    def test_d_sink_74_a_long_run_with_no_letter_before_the_scheme_is_crossed(self):
+        # 20,000 digits before the scheme's only letters: the forward walk
+        # crosses them all, so no bound on it under 20,000 survives.
+        out = helper.redact_urls("9" * 20000 + CRED)
+        self.assertEqual(out, "9" * 20000 + "http://prov.example.test")
+
+    def test_d_sink_74_the_first_letter_20000_characters_back_starts_the_scheme(self):
+        # The run's only letter is its first character: the run search has to
+        # look back across all 20,000 digits to find it, so no cap on the
+        # window it doubles below 32,768 (the doubling that reaches 20,000)
+        # survives. A cap leaves a run with no letter, which is no URL, and the
+        # credential goes out whole.
+        out = helper.redact_urls("A" + "0" * 20000 + CRED[4:])
+        self.assertEqual(out, "a" + "0" * 20000 + "://prov.example.test")
 
 
 class RedactionBudgetTests(unittest.TestCase):
