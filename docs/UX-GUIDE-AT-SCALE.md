@@ -988,7 +988,7 @@ fixture, i.e. a different lane.
 fails, raise it as a separate lane rather than absorbing a data-format change
 into a UX lane. Note that the helper already computes a `groupCount` for its
 own notification (`Model.js:3732` reads it), by a different rule
-(`split_groups` splits `A;B;C`, `Model.primaryGroup` keeps the first), so
+(`split_groups` splits `A;B;C`, `Model.primaryGroup` keeps the first [2026-11-05, D-SINK-78: the helper keeps the first, and `primaryGroup` reads it whole]), so
 the two would have to be reconciled before either is trusted as a layout
 input.
 

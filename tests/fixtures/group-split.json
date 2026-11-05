@@ -1,0 +1,297 @@
+{
+  "note": [
+    "D-SINK-78: how a group text splits into groups, run by BOTH tests/test_group_split.py",
+    "(the helper's split_groups and parse_m3u, through a group-title and an #EXTGRP line) and",
+    "tests/Model.test.js (the shell reads the helper's group whole, and no sink it shows a group at shows the credential).",
+    "A `;` separates groups only when no `://`, read with the control characters both mirrors",
+    "delete taken out, stands between it and the last ASCII space before it. `groups` is the",
+    "split, in order, each trimmed, empties and repeats dropped; the helper stores the first as",
+    "`group` (Ungrouped when there is none) and the list as `groups` when it holds two or more.",
+    "No group of any case may show a `q` or a `z` at any sink: nothing but the credentials holds",
+    "either. `plain` false holds a case to the two sinks that delete control characters only (a",
+    "control inside the `://` is no URL to the redactors as they are, split or not)."
+  ],
+  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD; the username is spelt q and the password z so that any fragment of either is a leak.",
+  "secret": "qz",
+  "ungrouped": "Ungrouped",
+  "cases": [
+    {
+      "why": "the defect: a `;` in the password",
+      "text": "http://qqqqqq:zz;zz@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:zz;zz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a `;` in the username",
+      "text": "http://qq;qq:zzzzzz@cdn.test/x",
+      "groups": [
+        "http://qq;qq:zzzzzz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a `;` after the username",
+      "text": "http://qqqqqq;:zzzzzz@cdn.test/x",
+      "groups": [
+        "http://qqqqqq;:zzzzzz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a `;` before the password",
+      "text": "http://qqqqqq:;zzzzzz@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:;zzzzzz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a `;` just before the `@`",
+      "text": "http://qqqqqq:zzzzzz;@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:zzzzzz;@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a `;` just after the `://`",
+      "text": "http://;qqqqqq:zzzzzz@cdn.test/x",
+      "groups": [
+        "http://;qqqqqq:zzzzzz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "two `;` in the password",
+      "text": "http://qqqqqq:z;z;z@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:z;z;z@cdn.test/x"
+      ]
+    },
+    {
+      "why": "an `@` in the userinfo before the `;`",
+      "text": "http://qq@qq:zz;zz@cdn.test/x",
+      "groups": [
+        "http://qq@qq:zz;zz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "withheld whole (R32a'): a `/` and then a `;` in the password",
+      "text": "http://qqqqqq:zz/z;z@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:zz/z;z@cdn.test/x"
+      ]
+    },
+    {
+      "why": "withheld whole (R32a'): a `;` and then a `/` in the password",
+      "text": "http://qqqqqq:zz;z/z@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:zz;z/z@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a dotted username (R32a'')",
+      "text": "http://qqq.qqq:zz;zz/z@cdn.test/x",
+      "groups": [
+        "http://qqq.qqq:zz;zz/z@cdn.test/x"
+      ]
+    },
+    {
+      "why": "Xtream's path credentials, a `;` in the password",
+      "text": "http://cdn.test/live/qqqqqq/zz;zz/1.ts",
+      "groups": [
+        "http://cdn.test/live/qqqqqq/zz;zz/1.ts"
+      ]
+    },
+    {
+      "why": "Xtream's query credentials, a `;` in the password",
+      "text": "http://cdn.test/get.php?username=qqqqqq&password=zz;zz",
+      "groups": [
+        "http://cdn.test/get.php?username=qqqqqq&password=zz;zz"
+      ]
+    },
+    {
+      "why": "a `;` in the query between the two",
+      "text": "http://cdn.test/get.php?username=qqqqqq;password=zzzzzz",
+      "groups": [
+        "http://cdn.test/get.php?username=qqqqqq;password=zzzzzz"
+      ]
+    },
+    {
+      "why": "glued to a digit (D-SINK-74)",
+      "text": "1http://qqqqqq:zz;zz@cdn.test/x",
+      "groups": [
+        "1http://qqqqqq:zz;zz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "an upper-case scheme",
+      "text": "HTTP://qqqqqq:zz;zz@cdn.test/x",
+      "groups": [
+        "HTTP://qqqqqq:zz;zz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "another scheme",
+      "text": "rtsp://qqqqqq:zz;zz@cam.test/x",
+      "groups": [
+        "rtsp://qqqqqq:zz;zz@cam.test/x"
+      ]
+    },
+    {
+      "why": "a group before the URL separates; the `;`s after its `://` do not",
+      "text": "Sports;http://qqqqqq:zz;zz@cdn.test/x;News",
+      "groups": [
+        "Sports",
+        "http://qqqqqq:zz;zz@cdn.test/x;News"
+      ]
+    },
+    {
+      "why": "a space ends the URL's run, so the `;` after it separates",
+      "text": "News http://qqqqqq:zz;zz@cdn.test/x ;Kids",
+      "groups": [
+        "News http://qqqqqq:zz;zz@cdn.test/x",
+        "Kids"
+      ]
+    },
+    {
+      "why": "two URLs joined by a `;` are one group",
+      "text": "http://cdn.test/a;http://qqqqqq:zz;zz@cdn.test/y",
+      "groups": [
+        "http://cdn.test/a;http://qqqqqq:zz;zz@cdn.test/y"
+      ]
+    },
+    {
+      "why": "a tab inside the `://` still marks a URL, for the sinks that delete it",
+      "text": "http:/\t/qqqqqq:zz;zz@cdn.test/x",
+      "groups": [
+        "http:/\t/qqqqqq:zz;zz@cdn.test/x"
+      ],
+      "plain": false
+    },
+    {
+      "why": "a C1 control inside the `://` still marks a URL, for the sinks that delete it",
+      "text": "http:\u0085//qqqqqq:zz;zz@cdn.test/x",
+      "groups": [
+        "http:\u0085//qqqqqq:zz;zz@cdn.test/x"
+      ],
+      "plain": false
+    },
+    {
+      "why": "a `;` inside the scheme comes before any `://`, so it separates",
+      "text": "ht;tp://qqqqqq:zzzzzz@cdn.test/x",
+      "groups": [
+        "ht",
+        "tp://qqqqqq:zzzzzz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "a no-break space is URL text, so it does not end the URL's run",
+      "text": "http://cdn.test/x\u00a0;Kids",
+      "groups": [
+        "http://cdn.test/x\u00a0;Kids"
+      ]
+    },
+    {
+      "why": "a `;` that ends the text after a URL is the URL's",
+      "text": "http://cdn.test/live;",
+      "groups": [
+        "http://cdn.test/live;"
+      ]
+    },
+    {
+      "why": "a C0 control after the `://` is run text, as on a playlist line, so the `;` after it is the URL's",
+      "text": "http://qqqqqq:zz\u001f;zz@cdn.test/x",
+      "groups": [
+        "http://qqqqqq:zz\u001f;zz@cdn.test/x"
+      ]
+    },
+    {
+      "why": "three groups",
+      "text": "Animation;Kids;Religious",
+      "groups": [
+        "Animation",
+        "Kids",
+        "Religious"
+      ]
+    },
+    {
+      "why": "a leading `;`",
+      "text": ";Leading Semicolon",
+      "groups": [
+        "Leading Semicolon"
+      ]
+    },
+    {
+      "why": "spaces round the `;`",
+      "text": "Live ; Kids",
+      "groups": [
+        "Live",
+        "Kids"
+      ]
+    },
+    {
+      "why": "a repeat is dropped",
+      "text": "News;News;Kids",
+      "groups": [
+        "News",
+        "Kids"
+      ]
+    },
+    {
+      "why": "a `/` with no `://`",
+      "text": "News/Sports;Kids",
+      "groups": [
+        "News/Sports",
+        "Kids"
+      ]
+    },
+    {
+      "why": "a `:` with no `//`",
+      "text": "Live: Sports;Kids",
+      "groups": [
+        "Live: Sports",
+        "Kids"
+      ]
+    },
+    {
+      "why": "a `//` with no `:`",
+      "text": "Sky Sports 1//HD;Kids",
+      "groups": [
+        "Sky Sports 1//HD",
+        "Kids"
+      ]
+    },
+    {
+      "why": "a `:/` with one `/`",
+      "text": "a:/b;c",
+      "groups": [
+        "a:/b",
+        "c"
+      ]
+    },
+    {
+      "why": "only `;`",
+      "text": ";;",
+      "groups": []
+    },
+    {
+      "why": "the cost: a group glued after a URL is part of its group",
+      "text": "http://cdn.test/live;Sports",
+      "groups": [
+        "http://cdn.test/live;Sports"
+      ]
+    },
+    {
+      "why": "the cost: so is one after a space-free run that holds a URL",
+      "text": "News http://cdn.test/x;Kids",
+      "groups": [
+        "News http://cdn.test/x;Kids"
+      ]
+    },
+    {
+      "why": "a space before the `;` keeps it a separator",
+      "text": "http://cdn.test/live ;Sports",
+      "groups": [
+        "http://cdn.test/live",
+        "Sports"
+      ]
+    }
+  ]
+}

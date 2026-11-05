@@ -393,14 +393,15 @@ checkCall("D-STATE-2: each model mirror takes a code point off a value's edges e
   }
   return wrong
 }, { group: [], hidden: [], active: [], host: [], mpv: [], toggle: [], scope: [] })
-checkCall("D-STATE-2: what the strips leave as they were -- a hidden group that is not a string, a group that starts at its separator", function () {
+checkCall("D-STATE-2: what the strips leave as they were -- a hidden group that is not a string; D-SINK-78: a `;` in a stored group is the group's own", function () {
   // stripSpace reads a non-string through str(), as the trim before it did
-  // through String(), and primaryGroup cuts at the first `;` without
-  // splitting, so a group that starts with one is still Ungrouped.
+  // through String(). primaryGroup takes off the edges and nothing else
+  // (D-SINK-78): split_groups has already split the text, and a `;` it left
+  // in `group` belongs to a web address, so nothing here cuts at one.
   return [Model.toggleHiddenGroup(Model.emptyState(), null).hiddenGroups, Model.toggleHiddenGroup(Model.emptyState(), 7).hiddenGroups,
           Model.primaryGroup({ group: ";Sports" }), Model.primaryGroup({ group: ";" }), Model.primaryGroup({ group: " ;x" }),
           Model.stripSpace(null), Model.stripSpace(7), Model.stripSpace(undefined), Model.primaryGroup({ group: "Live ; Kids" })]
-}, [[], ["7"], "Ungrouped", "Ungrouped", "Ungrouped", "", "7", "", "Live"])
+}, [[], ["7"], ";Sports", ";", ";x", "", "7", "", "Live ; Kids"])
 // D-ID-5: the shell's remap reads the ids the helper wrote and never refolds
 // a name. These rows carry labels this side's own fold would not have made,
 // which is exactly what a disagreement between the two folds looks like.
@@ -498,13 +499,15 @@ check("favorites-first works with an array-like favorites list", Model.filterCha
 check("findByUrl miss", Model.findByUrl([{ id: "a", url: "http://x" }], "http://z"), null)
 
 // ---- channels / groups ----
-check("primaryGroup takes the first of A;B;C", Model.primaryGroup({ group: " Animation ; Kids " }), "Animation")
+// D-SINK-78: the helper splits `A;B;C` and stores the first as `group`, so
+// the shell reads `group` whole, and a `;` in it stays.
+check("primaryGroup reads the helper's group whole, a `;` in it included", [Model.primaryGroup({ group: " Animation " }), Model.primaryGroup({ group: " http://h.test/a;b " })], ["Animation", "http://h.test/a;b"])
 check("primaryGroup empty -> Ungrouped", Model.primaryGroup({ group: "" }), "Ungrouped")
 check("primaryGroup null", Model.primaryGroup(null), "Ungrouped")
 
 const prepared = Model.prepareChannels([
   { id: "1", name: "BBC One HD", group: "UK", url: "http://a", searchKey: "bbc one hd uk" },
-  { tvgId: "x.uk", name: "T\u00e9l\u00e9 Qu\u00e9bec", group: "CA;FR", url: "http://b" },
+  { tvgId: "x.uk", name: "T\u00e9l\u00e9 Qu\u00e9bec", group: "CA", groups: ["CA", "FR"], url: "http://b" },
   { name: "Plain", url: "http://c" },
   null,
   { id: "4", name: "UK", group: "UK", url: "http://d", searchKey: "uk uk" }
@@ -512,6 +515,64 @@ const prepared = Model.prepareChannels([
 check("prepareChannels drops null rows", prepared.length, 4)
 check("prepareChannels keeps helper searchKey and derives nameKey", [prepared[0].searchKey, prepared[0].nameKey], ["bbc one hd uk", "bbc one hd"])
 check("prepareChannels computes searchKey when missing", prepared[1].searchKey, "tele quebec ca fr")
+// D-SG-5: a row the shell renames has its key rebuilt, from every group the
+// helper keyed, the fold after the helper's nameKey, or, in a cache with no
+// nameKey, from `groups` (its make_channel joins them). The rebuild took the
+// first group alone, so `fr` found only the row whose name the shell kept.
+checkCall("D-SG-5: a renamed row is found by its second group, as a kept one is, with the helper's nameKey and without", function () {
+  const helper = [
+    { id: "a", name: "http://x.test/tele", tvgName: "Tele", group: "CA", groups: ["CA", "FR"], searchKey: "http x test tele ca fr", nameKey: "http x test tele" },
+    { id: "b", name: "\ufeffArena", group: "CA", groups: ["CA", "FR"], searchKey: "\ufeffarena ca fr", nameKey: "\ufeffarena" },
+    { id: "c", name: "Plain", group: "CA", groups: ["CA", "FR"], searchKey: "plain ca fr", nameKey: "plain" }
+  ]
+  const older = helper.map(function (r) { const o = Object.assign({}, r); delete o.nameKey; return o })
+  return [helper, older].map(function (list) {
+    const rows = Model.prepareChannels(list)
+    return [rows.map(function (r) { return r.searchKey }), rows.map(function (r) { return r.nameKey }),
+            ids(Model.filterChannels(rows, "fr", 50, [], null).rows)]
+  })
+}, [[["tele ca fr", "arena ca fr", "plain ca fr"], ["tele", "arena", "plain"], ["a", "b", "c"]],
+    [["tele ca fr", "arena ca fr", "plain ca fr"], ["tele", "arena", "plain"], ["a", "b", "c"]]])
+// D-SG-5's sibling: past MAX_GROUPS the parse moves a channel to Ungrouped,
+// and a channel in one group keeps that group only in the helper's key (no
+// `groups` for one). Renamed or kept, the row is found by it.
+checkCall("D-SG-5: a renamed row the parse moved to Ungrouped is found by its provider group, as a kept one is", function () {
+  const rows = Model.prepareChannels([
+    { id: "r", name: "http://x.test/z", tvgName: "Zed", group: "Ungrouped", searchKey: "http x test z zebra", nameKey: "http x test z" },
+    { id: "k", name: "Yak", group: "Ungrouped", searchKey: "yak walrus", nameKey: "yak" }
+  ])
+  return [rows.map(function (r) { return r.searchKey }), ids(Model.filterChannels(rows, "zebra", 50, [], null).rows),
+          ids(Model.filterChannels(rows, "walrus", 50, [], null).rows)]
+}, [["zed zebra", "yak walrus"], ["r"], ["k"]])
+// D-SG-6: a kept row's nameKey is the helper's own; the suffix test took
+// only the first group's fold off a key that ends with every group's, so a
+// group word ranked as a name match. Renamed, or kept in a cache with no
+// nameKey, the name's fold.
+checkCall("D-SG-6: a row in `Sports` and `UK Sports` ranks below a name holding `uk`, kept, renamed, or kept in a cache with no nameKey", function () {
+  const sky = { id: "s", name: "Sky News UK", group: "News", searchKey: "sky news uk news", nameKey: "sky news uk" }
+  const kept = { id: "a", name: "Arena", group: "Sports", groups: ["Sports", "UK Sports"], searchKey: "arena sports uk sports", nameKey: "arena" }
+  const renamed = { id: "a", name: "\ufeffArena", group: "Sports", groups: ["Sports", "UK Sports"], searchKey: "\ufeffarena sports uk sports", nameKey: "\ufeffarena" }
+  const older = Object.assign({}, kept)
+  delete older.nameKey
+  return [kept, renamed, older].map(function (arena) {
+    const rows = Model.prepareChannels([arena, sky])
+    return [rows[0].nameKey, ids(Model.filterChannels(rows, "uk", 50, [], null).rows)]
+  })
+}, [["arena", ["s", "a"]], ["arena", ["s", "a"]], ["arena", ["s", "a"]]])
+// The two fallbacks for a row with no key, which no prepared row reaches:
+// the filter's and the saved search's, each from every group too.
+checkCall("D-SG-5: a row with no key is found by its second group in the filter and in a saved search", function () {
+  const row = { id: "x", name: "Tele", group: "CA", groups: ["CA", "FR"] }
+  return [ids(Model.filterChannels([row], "fr", 50, [], null).rows), Model.savedSearchCount([row], "fr")]
+}, [["x"], 1])
+checkCall("D-SG-5: a key that does not start with its nameKey (a hand edit) is not read; the groups are folded instead", function () {
+  const rows = Model.prepareChannels([{ id: "h", name: "http://x.test/h", tvgName: "Tele", group: "CA", groups: ["CA", "FR"], searchKey: "something else entirely", nameKey: "zzz" }])
+  return [rows[0].searchKey, rows[0].nameKey]
+}, ["tele ca fr", "tele"])
+checkCall("D-SG-5: a `groups` element that is not a string counts as nothing, and does not throw", function () {
+  const rows = Model.prepareChannels([{ id: "t", name: "http://x.test/t", tvgName: "Tele", group: "CA", groups: ["CA", { toString: 1 }, 7, "FR"] }])
+  return rows[0].searchKey
+}, "tele ca fr")
 check("prepareChannels assigns id and primaryGroup", [prepared[1].id, prepared[1].primaryGroup], ["t:x.uk", "CA"])
 check("prepareChannels ungrouped", [prepared[2].group, prepared[2].primaryGroup, prepared[2].searchKey, prepared[2].nameKey], ["", "Ungrouped", "plain", "plain"])
 check("prepareChannels nameKey when name equals group", prepared[3].nameKey, "uk")
@@ -710,7 +771,7 @@ check("channelsForScope all", Model.channelsForScope(channels, "all", state).len
 check("channelsForScope favorites in favorited order, skips missing", Model.channelsForScope(channels, "favorites", state).map(c => c.id), ["5", "1"])
 check("channelsForScope recent", Model.channelsForScope(channels, "recent", state).map(c => c.id), ["4"])
 check("channelsForScope group", Model.channelsForScope(channels, "g:UK", state).map(c => c.id), ["1", "5", "6"])
-check("channelsForScope first group of multi-group", Model.channelsForScope(Model.prepareChannels([{ id: "m", name: "M", group: "A;B" }]), "g:B", null).length, 0)
+check("channelsForScope lists a row under its first group, not its second", [Model.channelsForScope(Model.prepareChannels([{ id: "m", name: "M", group: "A", groups: ["A", "B"] }]), "g:A", null).length, Model.channelsForScope(Model.prepareChannels([{ id: "m", name: "M", group: "A", groups: ["A", "B"] }]), "g:B", null).length], [1, 0])
 check("channelsInGroup legacy names", [Model.channelsInGroup(channels, "", state).length, Model.channelsInGroup(channels, "Favorites", state).length, Model.channelsInGroup(channels, "Recent", state).length, Model.channelsInGroup(channels, "UK", state).length], [7, 2, 1, 3])
 check("effectiveScope: query from Favorites/Recent searches All", [Model.effectiveScope("favorites", "sky"), Model.effectiveScope("recent", "sky"), Model.effectiveScope("all", "sky")], ["all", "all", "all"])
 check("effectiveScope: group stays a scope", Model.effectiveScope("g:UK", "sky"), "g:UK")
@@ -5151,7 +5212,7 @@ check("copy is defensive on garbage state", Model.withMode({ mode: "weird", quer
 check("launchScope from Favorites is Favorites", Model.launchScope("favorites", "", { group: "UK" }), "favorites")
 check("launchScope from Favorites with a query is the result's group", Model.launchScope("favorites", "sky", { group: "UK | SPORTS" }), "g:UK | SPORTS")
 check("launchScope from Recent uses the group", Model.launchScope("recent", "", { group: "UK" }), "g:UK")
-check("launchScope from All uses the group", Model.launchScope("all", "", { group: "A;B" }), "g:A")
+check("launchScope from All uses the group", Model.launchScope("all", "", { group: "A", groups: ["A", "B"] }), "g:A")
 check("launchScope from a group", Model.launchScope("g:UK", "", { group: "UK" }), "g:UK")
 check("zapRing favorites", Model.zapRing(channels, state, { id: "5", group: "UK", launchedFrom: "favorites" }).map(c => c.id), ["5", "1"])
 check("zapRing group", Model.zapRing(channels, state, { id: "1", group: "UK", launchedFrom: "g:UK" }).map(c => c.id), ["1", "5", "6"])
@@ -11685,6 +11746,59 @@ checkCall("D-STATE-2: the shared fixture's hide cases -- what hiding the helper'
             JSON.stringify(Model.toggleHiddenGroup(Model.emptyState(), c.group).hiddenGroups) === JSON.stringify([c.stored])]
   }).filter(function (r) { return r.indexOf(false) !== -1 })
 }, [])
+// D-SINK-78: tests/fixtures/group-split.json, which tests/test_group_split.py
+// runs through the helper's split and parse. Here: the row the helper writes
+// for each case lists under that group whole, and no sink the shell shows a
+// group at -- the column, its accessible names, the detail line, the scope
+// header, the channel list's and the wall's accessible names, the
+// empty-scope and no-matches titles, the no-matches hint, the hide notice
+// and IPC status -- shows a letter of the credential. The two cases with a
+// control inside the `://` are held to the notification body alone, which
+// deletes controls before it redacts: to the other sinks that text is no
+// URL, split or not.
+const groupSplit = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/group-split.json"), "utf8"))
+checkCall("D-SINK-78 (shared fixture): the shell lists each row under the group the helper wrote, whole, and no group sink shows a letter of a credential (a control inside the `://`: the notification body only)", function () {
+  const bad = []
+  const str = function (v) { return v === undefined || v === null ? "" : String(v) }
+  const leaks = function (text) { return groupSplit.secret.split("").some(function (ch) { return str(text).indexOf(ch) !== -1 }) }
+  groupSplit.cases.forEach(function (c) {
+    const stored = c.groups.length > 0 ? c.groups[0] : groupSplit.ungrouped
+    const row = { id: "a", name: "Alpha", group: stored, url: "http://h/a" }
+    if (c.groups.length > 1) row.groups = c.groups
+    const primary = Model.primaryGroup(row)
+    if (primary !== stored) bad.push([c.why, "primaryGroup", primary])
+    const rows = Model.prepareChannels([row, { id: "b", name: "Bravo", group: "Other", url: "http://h/b" }])
+    const scope = Model.launchScope("all", "", row)
+    if (scope !== Model.groupScopeId(stored)) bad.push([c.why, "launchScope", scope])
+    const shown = c.groups.map(function (g) {
+      const argv = Model.notifyArgv("streamFailed", { name: g, reason: "r" })
+      return ["notifyArgv", argv[argv.length - 1]]
+    })
+    if (c.plain !== false) {
+      c.groups.forEach(function (g) { shown.push(["sinkText", Model.sinkText(g)]) })
+      Model.scopeSurface(rows, Model.emptyState()).entries.forEach(function (e) {
+        shown.push(["scopeSurface", e.label], ["scopeEntryAccessibleName", Model.scopeEntryAccessibleName(e)])
+      })
+      // The no-matches prose offers a group's words (groupWordHint), from
+      // the one group off the axis and from a list of two.
+      const alone = Model.prepareChannels([row])
+      ;[alone, rows].forEach(function (list) {
+        const names = Model.groupNamesForHint(Model.scopeSurface(list, Model.emptyState()))
+        shown.push(["groupNamesForHint", names.join(" ")])
+        ;["q", "qq", "z", "zz"].forEach(function (q) { shown.push(["groupWordHint", Model.groupWordHint(q, names)]) })
+      })
+      const np = Model.ipcNowPlaying({ id: "a", name: "Alpha", group: primary, launchedFrom: scope })
+      shown.push(["scopeName", Model.scopeName(scope)],
+                 ["rowDetail", Model.rowDetail({ group: primary, showGroup: true })],
+                 ["hideNotice", Model.hideNotice(true, primary, 1)],
+                 ["scopeLabel", Model.scopeLabel(scope, "", 1)],
+                 ["noMatchesTitle", Model.noMatchesTitle("x", scope)],
+                 ["ipcNowPlaying", np.group + " " + np.launchedFrom])
+    }
+    shown.forEach(function (s) { if (leaks(s[1])) bad.push([c.why, s[0], s[1]]) })
+  })
+  return { cases: groupSplit.cases.length >= 38, bad: bad.slice(0, 4) }
+}, { cases: true, bad: [] })
 checkCall("hidden groups: a star in a hidden group still shows in Favorites; a saved search does not see the group", function () {
   // Decision 1, both halves, on one state. The star is a thing the user did
   // by hand; the saved search is a search.
@@ -12173,7 +12287,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   var queries = ["", MARKER]
   var empties = ["", "loading", "error", MARKER]
   var hidden = Model.toggleHiddenGroup(Model.emptyState(), MARKER)
-  var channel = { id: MARKER, name: MARKER, group: MARKER + ";" + MARKER, chno: MARKER }
+  // A group the helper writes: its split keeps a `;` after the marker's
+  // `://` inside the one group (D-SINK-78), so the second is listed apart.
+  var channel = { id: MARKER, name: MARKER, group: MARKER, groups: [MARKER, MARKER + "2"], chno: MARKER }
   // Every mode, with and without a query, in every empty state, in both views.
   modes.forEach(function (mode) { queries.forEach(function (query) { empties.forEach(function (empty) { [true, false].forEach(function (wall) {
     add({ mode: mode, query: query, empty: empty, wall: wall, cursorKind: MARKER, form: { kind: MARKER, origin: MARKER, focus: MARKER, values: { label: MARKER, playlist: MARKER, epg: MARKER, server: MARKER, username: MARKER, password: MARKER } },
@@ -18842,7 +18958,7 @@ checkCall("D-SG-3: player entry owners and failure marks answer nothing for an i
     for (const s of inputs) {
       const oldName = s.replace(NAME_HEAD, "").replace(TAIL, "")
       if (Model.displayName({ name: s }, 3) !== (oldName !== "" && !/^[a-z][a-z0-9+.-]*:\/\//i.test(oldName) ? oldName : "Channel 3")) bad.push("name " + JSON.stringify(s))
-      const oldGroup = s.split(";")[0].replace(EDGES, "")
+      const oldGroup = s.replace(EDGES, "")
       if (Model.primaryGroup({ group: s }) !== (oldGroup === "" ? Model.UNGROUPED : oldGroup)) bad.push("group " + JSON.stringify(s))
       const text = s + '{"a":1}' + s
       let old = null

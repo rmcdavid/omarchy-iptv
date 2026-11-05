@@ -111,6 +111,18 @@ REVIEWED = [
      "linear: one class run and nothing after it; sub resumes past each run (_CONTROL_WS)"),
     ("[\x00-\x1f\x7f-\x9f]", "user",
      "linear: one character class, no quantifier (_CONTROL_CHARS)"),
+    (":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/", "provider",
+     "linear: a literal `:` first, then two runs of one control class, each ended by a `/` the class "
+     "cannot hold, so an attempt backs off at most once over each run and a run is scanned only from "
+     "the `:` before it; cut_free_text and split_groups each search once a call (_URL_MARK; GROUP_PART is "
+     "built on it)"),
+    ("'(?:[^;:]+|' + _URL_MARK.pattern + '[^ ]*|:)+'", "provider",
+     "linear: nothing follows the outer repeat, so a match once begun never fails and is never backed "
+     "into; the branches part at their first character -- a run that cannot hold `;` or `:`, else a "
+     "`:`, tried as a `://` before alone -- so a match's iterations are fixed by the text; the `://` "
+     "branch failing at a `:` scans only the control runs after it, as _URL_MARK does, and its `[^ ]*` "
+     "has nothing after it; a start fails at its first character, a `;`, and findall resumes past "
+     "each match (GROUP_PART, split_groups)"),
     (r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", "user",
      "linear: anchored; the scheme run cannot hold ':' so it backs off at most once over its length, "
      "and (.*)$ under DOTALL reaches the end at once (_SCHEME_RE, _SOURCE_SCHEME_RE)"),

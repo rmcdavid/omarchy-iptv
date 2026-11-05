@@ -9,7 +9,8 @@ import {
   channelId, indexById
 } from "./text.mjs"
 import {
-  primaryGroup, parseChno, chnoOf, chnoEntryKey, isNumericQuery
+  primaryGroup, groupSearchText, parseChno, chnoOf, chnoEntryKey,
+  isNumericQuery
 } from "./channels.mjs"
 import {
   savedSearchChannels, emptyState, hiddenGroupSet, isGroupHidden,
@@ -174,7 +175,7 @@ function filterChannels(channels, query, limit, favorites, chnoIndex) {
   for (var i = 0; i < list.length; i++) {
     var channel = list[i]
     if (!channel) continue
-    var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, channel.group)
+    var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, groupSearchText(channel))
     var nameKey = typeof channel.nameKey === "string" ? channel.nameKey : normalizeText(channel.name)
     var rank = matchRank(key, tokens, nameKey)
     if (rank < 0) continue

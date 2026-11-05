@@ -7,7 +7,7 @@ import {
   channelId
 } from "./text.mjs"
 import {
-  primaryGroup
+  primaryGroup, groupSearchText
 } from "./channels.mjs"
 import {
   matchRank, channelsForScope, effectiveScope
@@ -73,7 +73,7 @@ function savedSearchTerms(query) {
 
 function savedSearchHit(channel, tokens) {
   if (!channel || tokens.length === 0) return false
-  var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, channel.group)
+  var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, groupSearchText(channel))
   var nameKey = typeof channel.nameKey === "string" ? channel.nameKey : normalizeText(channel.name)
   return matchRank(key, tokens, nameKey) >= 0
 }

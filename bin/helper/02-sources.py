@@ -635,23 +635,60 @@ def clean_header_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
 
 
-# What ends a run for a group text's cut (cut_free_text, D-SINK-75): the
-# ASCII space that ends one at every sink, and split_groups' `;`, since each
+# What splits a group text into groups (split_groups), and so what else
+# ends a run for its cut (cut_free_text, D-SINK-75), where it does: each
 # group reaches the sinks on its own.
-GROUP_TEXT_ENDS = " ;"
+GROUP_SEPARATOR = ";"
+# One group of a text that holds a `;` and a `://` (split_groups): text up to
+# a `;` that separates, where a `://` (_URL_MARK) takes the rest of its run,
+# to the next space, whole, `;`s and all, and a `:` that starts no `://` is
+# taken alone.
+GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
+# split_groups' last answer, by its text: a persistent #EXTGRP is split again
+# for every channel after it, the same text each time, and consecutive
+# entries often repeat one group-title. A dict changed in place (as
+# MEMORY_HELD is), holding one entry.
+SPLIT_GROUPS_LAST: dict[str, list[str]] = {}
 
 
 def split_groups(value: str) -> list[str]:
     """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
     first of each kept in order).
 
+    D-SINK-78: a `;` separates groups only when no `://` (_URL_MARK, read as
+    the sinks that delete control characters read one) stands between it
+    and the last ASCII space before it. Every redactor reads a `;` as URL
+    text, in a userinfo, a path or a query, so splitting there handed each
+    sink half a URL: `http://myuser:pa;ss@cdn.test/x` was listed under
+    `http://myuser:pa`, shown as the host `myuser`, and `ss@cdn.test/x`
+    went beside it as a group no redactor could touch. So from a `://` to
+    the space that ends its run every `;` stays in its group, and the URL
+    reaches the sinks whole. A space, because it ends a run at every sink,
+    as it does for cut_free_text. The cost: a group written straight after
+    a URL, with no space before its `;`, is part of the URL's group.
+
     Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
     per part scanned the list, k*k/2 comparisons for k parts, and a
     persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
     one-character parts -- is split again for every channel after it, so a
     50,000-channel list paid about 32,000 comparisons a channel. Same list,
-    one pass."""
-    return list(dict.fromkeys(name for name in (part.strip() for part in value.split(";")) if name))
+    one pass. The `://` test is one pass too, and native: GROUP_PART takes
+    each URL's run whole as it reaches it and never searches back from a
+    `;`, and a text that holds no `://` is split natively. A text split last
+    time is answered from SPLIT_GROUPS_LAST, as a new list."""
+    last = SPLIT_GROUPS_LAST.get(value)
+    if last is not None:
+        return list(last)
+    if GROUP_SEPARATOR in value and "/" in value and _URL_MARK.search(value) is not None:
+        parts = GROUP_PART.findall(value)
+    else:
+        # No `;`, or no `://`: every `;` separates, and the native split is
+        # the rule's answer at native cost.
+        parts = value.split(GROUP_SEPARATOR)
+    groups = list(dict.fromkeys(name for name in (part.strip() for part in parts) if name))
+    SPLIT_GROUPS_LAST.clear()
+    SPLIT_GROUPS_LAST[value] = groups
+    return list(groups)
 
 
 def channel_number(attrs: dict[str, str]) -> str:
@@ -739,16 +776,16 @@ def bound_count(bounds: dict[str, int] | None, kind: str) -> None:
 
 
 def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None,
-             ends: str = " ") -> str:
+             separator: str = "") -> str:
     """D-M3U-1: `value` cut to `limit` code points (a str slice never splits
     one), and never through a URL (cut_free_text, D-SINK-75: a name or a
     group is redacted only at its sinks, after this cut), trailing whitespace
     trimmed, counted under `kind` when it was cut. A group text passes
-    GROUP_TEXT_ENDS, so the cut drops at most its last group's run."""
+    GROUP_SEPARATOR, so the cut drops at most its last group's run."""
     if len(value) <= limit:
         return value
     bound_count(bounds, kind)
-    return cut_free_text(value, limit, ends).rstrip()
+    return cut_free_text(value, limit, separator).rstrip()
 
 
 def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
@@ -809,7 +846,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # arrives already cut (parse_m3u cuts it once, at its own line, and
     # counts it there); a group-title is this entry's own and is cut here.
     group_title = attrs.get("group-title", "").strip()
-    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_TEXT_ENDS) if group_title else extgrp
+    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR) if group_title else extgrp
     groups = bound_groups(split_groups(group_text), bounds) if group_text else []
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
@@ -916,7 +953,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     text, URLs without a host) are skipped and counted; an #EXTINF that is
     followed by another #EXTINF is counted as having no URL. Output is
     bounded by MAX_CHANNELS and MAX_GROUPS (S-07); a channel moved to
-    UNGROUPED keeps its provider group in `groups` and `searchKey`. And
+    UNGROUPED keeps its provider groups in `searchKey`, and in `groups` when
+    it has two or more. And
     each channel is bounded by a constant (D-M3U-1): every text it keeps is
     held to its M3U_MAX_* cap, so the whole output is at most MAX_CHANNELS
     times that constant, whatever the input repeats.
@@ -990,7 +1028,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             pending = parse_extinf(line)
             continue
         if line.startswith("#EXTGRP:"):
-            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_TEXT_ENDS)
+            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR)
             continue
         if line.startswith("#EXTVLCOPT:"):
             key, _, value = line[len("#EXTVLCOPT:"):].partition("=")

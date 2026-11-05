@@ -267,18 +267,26 @@
       "sameArray": false
     },
     {
-      "name": "the primary group decides: a second group after ; does not hide",
+      "name": "the primary group decides: a second group does not hide (the helper writes the first as group and the list as groups)",
       "channels": [
         {
           "id": "a",
           "name": "Alpha",
-          "group": "News;Religious",
+          "group": "News",
+          "groups": [
+            "News",
+            "Religious"
+          ],
           "url": "http://h/a"
         },
         {
           "id": "b",
           "name": "Bravo",
-          "group": "Religious;News",
+          "group": "Religious",
+          "groups": [
+            "Religious",
+            "News"
+          ],
           "url": "http://h/b"
         }
       ],

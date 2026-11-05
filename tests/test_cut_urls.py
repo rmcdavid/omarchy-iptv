@@ -47,7 +47,17 @@ PASSWORD_CHARS = ([c for c in map(chr, range(0x21, 0x7f)) if not c.isalnum()]
 SCHEMES = ["1http://qqqqqq:zzzzzz@cdn.test/x", "HTTP://qqqqqq:zzzzzz@cdn.test/x",
            "s3://qqqqqq:zzzzzz@bucket.test/x", "git+ssh://qqqqqq:zzzzzz@cdn.test/x",
            "smb://qqqqqq:zzzzzz@nas.test/x"]
-SHAPES = [PLAIN] + SCHEMES + ["http://qqqqqq:zz%szz@cdn.test/x" % c for c in PASSWORD_CHARS]
+# D-SINK-78: a `;` at every other place in a userinfo, and the credentials
+# a provider writes into a URL's path or query (Xtream's /live/<user>/<pass>/
+# and get.php?username=&password=), with a `;` and without. Every redactor
+# reads a `;` as URL text, and the group text's split now does too.
+PLACES = ["http://qq;qq:zzzzzz@cdn.test/x", "http://qqqqqq;:zzzzzz@cdn.test/x",
+          "http://qqqqqq:;zzzzzz@cdn.test/x", "http://qqqqqq:zzzzzz;@cdn.test/x",
+          "http://;qqqqqq:zzzzzz@cdn.test/x", "http://qqqqqq:z;z;z@cdn.test/x",
+          "http://cdn.test/live/qqqqqq/zzzzzz/1.ts", "http://cdn.test/live/qqqqqq/zz;zz/1.ts",
+          "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+          "http://cdn.test/get.php?username=qqqqqq&password=zz;zz"]
+SHAPES = [PLAIN] + SCHEMES + ["http://qqqqqq:zz%szz@cdn.test/x" % c for c in PASSWORD_CHARS] + PLACES
 # A control character inside the URL: the player's title and the notification
 # delete it and read one run, and there the cut is what decides. At the plain
 # redactors a tab, VT, FF or CR inside a password ends the run whether or not
@@ -69,13 +79,17 @@ JOINED_SHAPES = [
 ]
 # What each field's own parse splits: an attribute's value ends at its
 # closing `"` (the tvg-name, the group-title; an #EXTGRP line is no attribute
-# and keeps it), and the stored groups are split at `;` (split_groups), after
-# the group text's cut and before each group's. A title, description,
-# category or episode is cut after the guide's whitespace fold
-# (clean_field's). Each sweep takes the shapes its field keeps as they are.
+# and keeps it). A title, description, category or episode is cut after the
+# guide's whitespace fold (clean_field's). Each sweep takes the shapes its
+# field keeps as they are. The group sweeps left out every shape with a `;`
+# until D-SINK-78, because the stored groups were split at every `;`, and
+# that exclusion was the defect: a `;` after a `://` in its run splits
+# nothing now (split_groups), so a group keeps its URL whole and the group
+# sweeps take every shape their field keeps: 56 through a group-title, 57
+# through an #EXTGRP line.
 ATTR_SHAPES = [s for s in SHAPES if '"' not in s]
-GROUP_SHAPES = [s for s in ATTR_SHAPES if ";" not in s]
-EXTGRP_SHAPES = [s for s in SHAPES if ";" not in s]
+GROUP_SHAPES = ATTR_SHAPES
+EXTGRP_SHAPES = SHAPES
 TITLE_SHAPES = [s for s in SHAPES if helper.clean_field(s, len(s)) == s]
 SECRET = "qz"
 
@@ -238,20 +252,35 @@ class CutFreeTextTest(unittest.TestCase):
         # Each group reaches the sinks on its own (split_groups), so only the
         # last one is dropped, and the groups before it stay.
         text = "Sports;News;" + PLAIN
-        self.assertEqual(helper.cut_free_text(text, len(text) - 20, helper.GROUP_TEXT_ENDS), "Sports;News")
+        self.assertEqual(helper.cut_free_text(text, len(text) - 20, helper.GROUP_SEPARATOR), "Sports;News")
         self.assertEqual(helper.cut_free_text(text, len(text) - 20), "")
 
-    def test_a_group_text_cut_at_a_separator_keeps_the_url_group_before_it(self):
+    def test_a_group_text_cut_at_a_semicolon_inside_a_url_drops_its_run(self):
+        # D-SINK-78: the first version ended a run at every `;`, so a cut at
+        # the password's kept `http://qqqqqq:zz`. Only a `;` before the run's
+        # `://` separates, so the run goes back to that one, at every cut
+        # inside the URL.
+        text = "Sports;http://qqqqqq:zz;zz@cdn.test/x"
+        for limit in range(len("Sports;http://"), len(text)):
+            self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_SEPARATOR), "Sports", limit)
+
+    def test_a_group_text_cut_at_a_semicolon_after_a_url_drops_the_url_group(self):
+        # A `;` after a URL in its run is the URL's (split_groups keeps
+        # `<URL>;News` as one group), so a cut there is a cut inside the
+        # URL's group; with a space before the `;` it separates, and the cut
+        # keeps the URL.
         text = "Sports;" + PLAIN + ";News"
-        self.assertEqual(helper.cut_free_text(text, len("Sports;" + PLAIN), helper.GROUP_TEXT_ENDS),
-                         "Sports;" + PLAIN)
+        self.assertEqual(helper.cut_free_text(text, len("Sports;" + PLAIN), helper.GROUP_SEPARATOR), "Sports")
+        text = "Sports;" + PLAIN + " ;News"
+        for limit in (len("Sports;" + PLAIN), len("Sports;" + PLAIN + " ")):
+            self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_SEPARATOR), text[:limit])
 
     def test_a_group_text_run_also_ends_at_a_space(self):
         # A cut in a word after a whole URL, or at the space after it, keeps
         # the URL's group.
         text = "News " + PLAIN + " more;Kids"
         for limit in (len("News " + PLAIN + " mo"), len("News " + PLAIN)):
-            self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_TEXT_ENDS), text[:limit])
+            self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_SEPARATOR), text[:limit])
 
 
 class PlaylistCutTest(unittest.TestCase):
@@ -284,7 +313,7 @@ class PlaylistCutTest(unittest.TestCase):
             fallback = self.parse([(' tvg-name="%s"' % t, "-", None) for t, _ in cases])
             held_to_every_sink(self, [c["name"] for c in fallback], helper.M3U_MAX_NAME,
                                [k for _, k in cases], plain)
-        self.assertEqual((len(SHAPES), len(ATTR_SHAPES), len(JOINED_SHAPES)), (47, 46, 9))
+        self.assertEqual((len(SHAPES), len(ATTR_SHAPES), len(JOINED_SHAPES)), (57, 56, 9))
 
     def parse_groups(self, rows):
         """parse() in batches, each under MAX_GROUPS distinct groups, past
@@ -300,7 +329,7 @@ class PlaylistCutTest(unittest.TestCase):
             cases = forms(helper.M3U_MAX_GROUP, shapes)
             rows = self.parse_groups([row(t) for t, _ in cases])
             held_to_every_sink(self, [c["group"] for c in rows], helper.M3U_MAX_GROUP, [k for _, k in cases])
-        self.assertEqual((len(GROUP_SHAPES), len(EXTGRP_SHAPES)), (45, 46))
+        self.assertEqual((len(GROUP_SHAPES), len(EXTGRP_SHAPES)), (56, 57))
 
     def test_no_group_text_cut_keeps_a_credential(self):
         # Four groups of 100 first, so the 512 cut lands in a fifth group
@@ -322,11 +351,17 @@ class PlaylistCutTest(unittest.TestCase):
         for row in ((' group-title="%s"' % text, "G", None), ("", "G", text)):
             self.assertEqual(self.parse([row])[0]["group"], "News http://cdn.test/live " + "W" * 102)
 
-    def test_a_group_text_cut_at_a_separator_keeps_the_url_group(self):
+    def test_a_group_text_cut_at_a_separator_keeps_the_url_group_only_after_a_space(self):
+        # The cut lands on a `;` after the URL. With a space before the `;`
+        # the URL's run has ended there, so the `;` separates and the URL's
+        # group is kept; without one the `;` is the URL's (D-SINK-78), so the
+        # cut is inside that group and drops its run.
         head = ";".join(ch * 100 for ch in "abcd") + ";"
-        tail = "N" * (helper.M3U_MAX_GROUP_TEXT - len(head) - len(PLAIN) - 1) + " " + PLAIN
-        groups = self.parse([(' group-title="%s;more"' % (head + tail), "G", None)])[0]["groups"]
-        self.assertEqual(groups[-1], tail)
+        words = "N" * (helper.M3U_MAX_GROUP_TEXT - len(head) - len(PLAIN) - 1)
+        spaced_text, glued_text = head + words[:-1] + " " + PLAIN + " ;more", head + words + " " + PLAIN + ";more"
+        self.assertEqual((spaced_text[helper.M3U_MAX_GROUP_TEXT], glued_text[helper.M3U_MAX_GROUP_TEXT]), (";", ";"))
+        spaced, glued = self.parse([(' group-title="%s"' % spaced_text, "G", None), (' group-title="%s"' % glued_text, "G", None)])
+        self.assertEqual((spaced["groups"][-1], glued["groups"][-1]), (words[:-1] + " " + PLAIN, words))
 
     def test_a_name_is_cleaned_before_it_is_cut(self):
         name = "N" * 492 + " BBC One HD extra"
@@ -391,7 +426,7 @@ class TitleCutTest(unittest.TestCase):
         # not kept, so the glued forms whose cut lands in the URL are fewer.
         self.assertGreater(len([t for t in titles if t]), len(cases) * 2 // 3)
         held_to_every_sink(self, titles, helper.EPG_MAX_TITLE, [k for _, k in cases])
-        self.assertEqual(len(TITLE_SHAPES), 42)
+        self.assertEqual(len(TITLE_SHAPES), 52)
 
     def test_no_description_category_or_episode_cut_keeps_a_credential(self):
         """clean_detail's caps, through the same parse: it cuts by

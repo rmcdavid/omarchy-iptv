@@ -17586,7 +17586,7 @@ The second round's 19, and two more the claims check called for, ran on the fina
 
 - `channelsForScope` comparing the scope's name unstripped: 1 (spec 1), measured before the per-site sweep held the scope name, which makes it 2. Reading a name that strips to nothing as nothing, not Ungrouped: 1
 - a dash stripped as well, at `hiddenGroupList`, `activeKeyText`, `logoHost` and `mpvListenName`: 1 each. At `primaryGroup`: 2
-- `stripSpace` handed a non-string as it came: 1. `primaryGroup` keeping a group that starts at its `;`: 1
+- `stripSpace` handed a non-string as it came: 1. `primaryGroup` keeping a group that starts at its `;`: 1 [2026-11-05: that is the design since D-SINK-78, which reads the stored group whole; the helper never stores a separator in it]
 - the trim before the walk also taking U+200B, in `stripSpace`: 2 (spec 1). In `cleanName`: 1 (spec 1)
 - `cleanName`'s fast path passing a leading dash: 11 (spec 1, test_proto_v4 1)
 - `toggleHiddenGroup` keeping a leading U+2005, and `channelsForScope` keeping one in a scope's name: 1 each, the per-site sweep
@@ -17839,7 +17839,7 @@ A plain slice can land between a URL's `//` and its `@`. What is left, `http://m
 
 Why a space, and why the controls are deleted first. The window title (`apply_channel`) and the notification body (`notifyArgv`) delete every C0 and C1 control before they redact (F-SINK-16), so there a tab, VT, FF or CR inside a URL joins the runs on either side of it. The first version of this fix ended a run at the redactors' six delimiters. The review measured it still leaking at those two sinks: a cut after a tab inside a password kept `http://qqqqqq:zz<TAB>z`, which they read as `qqqqqq`. A space ends a run at every sink, so the run dropped is now at least the run any sink reads. Deleting the controls before looking for `://` catches `http:/<TAB>/`, which those sinks join into a URL. Both mirrors delete the same class (`_CONTROL_CHARS`, `CONTROL_RE`: C0, DEL and C1).
 
-A group text also ends a run at `;` (`GROUP_TEXT_ENDS`), because each group reaches the sinks on its own. Without it, a cut inside a glued last group dropped every group and left the channel Ungrouped, which the first run of the new tests showed.
+A group text also ends a run at `;` (`GROUP_TEXT_ENDS`), because each group reaches the sinks on its own. [2026-11-05, D-SINK-78: only at a `;` that `split_groups` splits at, one before the run's first `://`, and the constant is `GROUP_SEPARATOR`. Ending a run at every `;` kept `http://myuser:pa` of a cut at a password's `;`.] Without it, a cut inside a glued last group dropped every group and left the channel Ungrouped, which the first run of the new tests showed.
 
 The title's composition, the name with its controls deleted and then redacted, is a function now, `player_title_text`, which `apply_channel` calls and the tests call (rule 12).
 
@@ -17912,13 +17912,13 @@ The costs, stated:
   - a no-break space, U+200B or U+FEFF inside the `//`, which neither mirror deletes, so the run is no URL to any sink and the cut keeps it
   - tab-joined words before the space, before a cut URL, and before a whole URL followed by a cut one, which neither the run's start nor its `://` test may count
   - a text that is one cut URL; a cut before the `//`; a `//` with no `:`; a cut in a later run; a cut in a run holding `@` and `:` but no `://`
-  - the group separator, both dropping only the last group and keeping a URL group the cut stops at
+  - the group separator, both dropping only the last group and keeping a URL group the cut stops at [2026-11-05, D-SINK-78: a cut at a `;` after a URL in its run now drops that URL's group, since the `;` is the URL's; with a space before the `;` the group is kept]
   - a group text's run ending at a space as well, for a cut in a word after a whole URL and for a cut at the space after it
 - every cut offset across each URL shape at every cap, in four forms: after a space, after a space behind words joined by C1 controls (which the guide's fold keeps), after a tab, and glued to the text before it.
-  - The shapes, 47 in all: a plain userinfo; five schemes (glued to a digit, `HTTP` in upper case, `s3` ending in a digit, `git+ssh` holding a `+`, and `smb`, which no stream uses); and one password for each printable ASCII character that is neither a letter nor a digit, for DEL, and for each of eight that are not ASCII (U+0085, U+009B, a no-break space, `é`, U+200B, U+2028, U+3000 and U+FEFF).
+  - The shapes, 47 in all: a plain userinfo; five schemes (glued to a digit, `HTTP` in upper case, `s3` ending in a digit, `git+ssh` holding a `+`, and `smb`, which no stream uses); and one password for each printable ASCII character that is neither a letter nor a digit, for DEL, and for each of eight that are not ASCII (U+0085, U+009B, a no-break space, `é`, U+200B, U+2028, U+3000 and U+FEFF). [2026-11-05, D-SINK-78: 57 since, ten more, a `;` at each other place in a userinfo and Xtream's path and query credentials. Names take all 57, tvg-names 56, and titles and details 52.]
   - Nine more have a control inside the URL: two inside the userinfo and seven inside the `://` (NUL, SOH, a tab, U+001F, DEL, U+0085 and U+009B).
   - The sweeps run through the shipping `parse_m3u` and `parse_xmltv`. `parse_m3u` covers the name, the tvg-name, the name a title that cleans to nothing takes from the cut tvg-name, and each group and the group text, from `group-title` and from `#EXTGRP`. `parse_xmltv` covers the title, and the description, category and on-screen episode, which `clean_detail` cuts.
-  - Each sweep takes the shapes its field keeps as they are. Names take all 47. Tvg-names take 46, because an attribute ends at its `"`. Through `group-title`, each group and the group text take 45, without the `"` and the `;`. Through `#EXTGRP`, which is no attribute and keeps a `"`, they take 46. The `;` is left out of both, because the stored groups are split at it, after the group text's cut and before each group's. Titles and details take the 42 the guide's fold leaves as they are, since a title is cut after it.
+  - Each sweep takes the shapes its field keeps as they are. Names take all 47. Tvg-names take 46, because an attribute ends at its `"`. Through `group-title`, each group and the group text take 45, without the `"` and the `;`. Through `#EXTGRP`, which is no attribute and keeps a `"`, they take 46. The `;` is left out of both, because the stored groups are split at it, after the group text's cut and before each group's. [2026-11-05: that exclusion is where D-SINK-78 sat. The group sweeps take every shape their field keeps now, ten more among them: 56 of 57 through `group-title`, without the `"`, and 57 through `#EXTGRP`.] Titles and details take the 42 the guide's fold leaves as they are, since a title is cut after it.
   - The parses that carry groups run in batches under `MAX_GROUPS`. Each guide channel takes 300 programmes a minute apart, inside the window.
 - everything they store is held to the cap and to four sinks.
   - The sinks are `redact_urls`, `Model.sinkText`, and the two that delete controls first: `player_title_text`, and the body `Model.notifyArgv` posts. The shell's run in node over the helper's output.
@@ -17992,3 +17992,147 @@ And the thirteen the final check found surviving, each red now:
 - every cut run that holds a control dropped, URL or not: 5
 
 **The owner's data, read-only, counts only.** 1,494 channels: the longest name is 61 characters, and no name, tvg-name or group holds `://`. None of the 263 lines of the cached guide window does. So D-SINK-75 did not reach this install.
+
+## D-SINK-78, 2026-11-05: no group text is split inside a URL
+
+The owner said "commit and push, then fix d-sink-78". The board row records the defect. It was found on 2026-11-04 by the review of D-SINK-75 and kept off the board and out of every commit until this fix, as a security row is. This section is the evidence for the fix.
+
+**What the split did.** The helper stores a channel's groups as written, and the sinks redact them afterwards. `split_groups` (bin/helper/02-sources.py) split a `group-title` or an `#EXTGRP` line at every `;`, and every redactor reads a `;` as URL text: in a userinfo, in a path and in a query. So:
+
+- `http://myuser:pa;ss@cdn.test/x` was stored as the group `http://myuser:pa`, which `redact_urls` prints as `http://myuser` and `Model.sinkText` as `myuser`, and `ss@cdn.test/x` went into `groups` and `searchKey` beside it. That second piece is the password's tail and the host, with no scheme, so no redactor can touch it; no sink shows `groups` or `searchKey` today
+- `Model.primaryGroup` cut the stored group at its first `;` again, so a fixed helper alone would not have been enough
+- the group's sinks: the group column and its accessible names, the row's detail line, the scope header, the channel list's and the wall's accessible names (`Channels in <scope>`), the empty-scope and no-matches titles, the no-matches hint (`groupWordHint`, which offers a group's words, and the empty state's accessible name, which carries it), the hide notice, and the IPC `status` reply (`"group":"myuser","launchedFrom":"g:myuser"`). The bar, the notifications and the window title carry no group
+- measured at 669c666 by the map's redactor reader (`wf_b3368e55-b89`), with the username spelt `qqqqqq` and the password `zzzzzz`: of 29 URL shapes, the split made the primary group leak in 19 at the plain sinks and in 24 at the two that delete control characters first. A password fragment became the host (`http://qqqqqq:zz@zz` printed `zz`), and the R32a' shapes, which are withheld whole, printed the username, because the split took away the later `@`
+
+On `dev` it was worse, since D-SINK-75 (669c666, unreleased). That fix drops a group over 128 characters whose cut run holds a `://`, so where the old split had cut a long URL into pieces, the next piece became the channel's group, printed raw. Measured through the shipping `parse_m3u`:
+
+| group-title | 0.17.0 (787a33b) | 669c666 | the fix |
+|---|---|---|---|
+| `NNNN` + `http://cdn.test/` + 120 `a` + `/qqqqqq;zzzzzz/1.ts` | `nnnnhttp://cdn.test` | `zzzzzz/1.ts` | Ungrouped |
+| `http://cdn.test/get.php?x=` + 110 `a` + `&username=qqqqqq;password=zzzzzz` | `http://cdn.test` | `password=zzzzzz` | Ungrouped |
+| `http://qqqqqq:` + 130 `z` + `;zzz@cdn.test/x` | `http://qqqqqq` | `zzz@cdn.test/x` | Ungrouped |
+| `http://qqqqqq:zz;zz@cdn.test/x` | `http://qqqqqq` | `http://qqqqqq` | `http://cdn.test` |
+
+(The columns are `redact_urls` of the stored group. Ungrouped is D-SINK-75's stated cost: a group that is one cut URL is dropped.)
+
+**The fix.** A `;` separates groups only when no `://` stands between it and the last ASCII space before it, looked for once the control characters both mirrors delete (C0, DEL and C1) are taken out. So from a `://` to the space that ends its run, every `;` stays in its group, and the URL reaches the sinks whole: `redact_urls` prints `http://cdn.test` and `sinkText` `cdn.test`. The parts:
+
+- `_URL_MARK` (bin/helper/01-core.py) is that `://`, `:` and two `/` with any of the deleted class between them; `cut_free_text` looks for the same one, so the cut and the split agree on where a URL starts
+- `split_groups` takes each group with one native pattern, `GROUP_PART`, built on `_URL_MARK`: text up to a `;`, where a `://` takes the rest of its run, to the next space, whole, and a `:` that starts no `://` is taken alone. A text with no `;` or no `://` takes the plain split. A one-entry memo answers the text it split last, since a persistent `#EXTGRP` is split again for every channel after it. The first version walked each `://` in a Python loop, and the review measured what that cost (below)
+- the group text's 512 cut, `cut_free_text` with `GROUP_SEPARATOR`, ends a run at a space or at a `;` the split splits at, and nowhere else. D-SINK-75's version ended a run at every `;`, and once a `;` can sit inside a group that leaks: a cut at the password's `;` kept `http://myuser:pa`. The map's helper reader measured it: of 1,095 cut texts, the old cut with the new split leaked 52, and a cut that follows the split leaked none. For every text whose `;`s all separate, the answer is D-SINK-75's
+- each group's 128 cut needed nothing: it ends a run at a space only, and measured 0 leaks of 429 under the new split
+- `Model.primaryGroup` (model/channels.mjs) no longer cuts at all; it strips the edges, as it did. The helper is the only splitter
+
+Why the shell does not mirror the split. The shell's cut was written against the scaffold helper, which stored the whole `group-title`. The split arrived 23 minutes later, before any tag (a40cc5d, 42015dc, 3c392a2, all 2026-09-12), so no release's helper ever stored a separator in `group`, and the cut never changed a cached row. Under the fix it would have reopened the leak. A mirrored rule was measured by the map's shell reader and not taken: in V4 the column's build over 10,000 rows whose groups each hold a control character took about 330 ms against 42, and it is one more rule two runtimes must keep in step.
+
+The costs, stated:
+
+- a group written straight after a URL, with no space before its `;`, is part of the URL's group: `http://cdn.test/live;Sports` is one group, shown as `cdn.test`, and `http://cdn.test/live ;Sports` is still two
+- a group whose URL held a `;` lists under a new name: the whole URL, where it was the first piece. A hide stored for that piece no longer matches, so the group is shown again, and the stored piece stays in state.json, matching nothing, as D-SINK-75's shortened names do
+- a group the user hides from now on is stored in state.json (0600) as the whole URL, where it was a piece
+- a channel played or zapped from such a group carries the whole URL, where it carried a piece, as its scope `g:<group>`: the shell hands it to the helper in `OMARCHY_IPTV_ARGS` (D-SINK-47's channel, which same-uid processes can read in the stub's pre-shield window), and the player keeps it in its stash's `group` and `launchedFrom` for its life
+- caches written before the update keep their old split until that source's next playlist fetch, as D-SINK-75's keep their old cut
+- a player started from such a group before the update keeps its old scope until a channel is played from the guide: until then the IPC `status` reply names it as it did before the fix (`g:myuser`), and once the source has been fetched again, channel up and down find no channels in it
+- two URL groups on one host are listed apart, both under that host's name
+- the cut drops a URL group the 512 cut lands just after when a `;` with no space before it follows the URL, since that `;` is the URL's
+
+**Siblings.** The search was for every place either mirror splits or cuts provider text at a character before redacting it. Cleared:
+
+- the only two group splitters are `split_groups` and `primaryGroup` (a grep for `split(";")` and `indexOf(";")` over model/, the three QML files and bin/helper/); the helper's other `;` split reads a server's Content-Type
+- `#EXTVLCOPT` and `#KODIPROP` split at `=` into options and headers, which reach the stream server and no display; KODIPROP's headers and `stream_params` split at `&` and `=` into values no sink shows
+- nothing splits a stream URL at `|`, and no catch-up template is read
+- the guide keeps its first category whole; `episode_ns_text` emits only numbers; display names and the tvg-id's `@` become match keys
+- the launch stderr is split at line breaks after it is redacted; the compositor's reply that Service.qml splits is no provider's
+- the search tokenizer and `groupWordHint` split to match, and show names that went through `sinkText`; `trackAccessibleName` splits track text scrubbed before composition
+- the user's own source URLs, mpv tokens and saved searches are split, which carry no provider text
+- the window title and the notification body take the whole name
+- `scripts/gen-playlist.py` and test_playlist's band check take the first group of generated text, which holds no `://`
+- the 128 cut on each group, above
+
+Found by the review and by the check of its fixes, and all older than this fix:
+
+- the three places a `searchKey` is built from a name and a group took `group` alone, the first group, where the helper's key holds every group: `prepareChannels`' rebuild for a row the shell renames, and the fallbacks in `filterChannels` and saved searches for a row with no key. That is D-SG-5, fixed with this. The rebuild takes the groups' fold from the helper's own key, the part after its `nameKey`, and the fallbacks fold `groupSearchText`. This fix's first edit to the check on that rebuild had moved its row to the helper's shape and its expected key to the first group's, which pinned the gap
+- D-SG-5's sibling: past MAX_GROUPS the parse moves a channel to Ungrouped, and a channel in one group then keeps that group only in the helper's key, since `groups` is written for two or more. Renamed, it was keyed `ungrouped`. Reading the helper's key covers it, caches written before the update included
+- D-SG-6: a kept row's `nameKey` took the first group's fold off a key that ends with every group's, so a row in `Sports` and `UK Sports` read `arena sports uk` as its name. The helper has written the name's own fold beside the key since 74ad886; the shell reads it now, and in a cache without it folds the name of a row in two or more groups
+- the live-rewind spike prints and stores a channel's name and group raw. Under the fix a group with a `;` in its URL prints whole, where it printed a piece. It is dev tooling and nothing ships it; F-HARNESS-97 is widened to hold it
+
+**Tests.**
+
+- tests/fixtures/group-split.json, 38 cases, each with its split: a `;` at every place in a userinfo, two `;`s, an `@` in the userinfo, two R32a' shapes and a dotted username (R32a''), Xtream's path and query credentials, a scheme glued to a digit, in upper case and `rtsp`, a group before the URL, a space after it, two URLs joined by a `;`, a tab and a C1 control inside the `://`, a `;` inside the scheme, a no-break space, a `;` that ends the text, a C0 control after the `://`; the ordinary texts (`A;B;C`, a leading `;`, spaces round it, a repeat, a `/`, a `:`, a `//` and a `:/` without a URL, only `;`s); and the stated costs. The expected splits were generated from a definition of the rule, not from the shipping split
+- tests/test_group_split.py runs it through `split_groups`, through `parse_m3u` from a `group-title` and from an `#EXTGRP` line (the stored group and `groups`), and holds every stored group to `player_title_text`, and to `redact_urls` where no control is inside the `://`. Exact values keep each URL redacted whole, so a split that dropped every URL group would not pass. The split is held to the rule as stated over 40,000 random texts, and so is the group text's cut over 40,000 more. Their characters are the ones the rule tells apart, every class a playlist line can carry among them: tab, NUL, VT, FF, U+001F, DEL, two C1 controls, U+00A0, U+2028 and U+3000, since a line ends only at a line feed. The cut is also held to the property itself: when the kept text ends with a run holding a `://`, the text went on from there with a space or not at all. A test holds the split to linear time on seven shapes, one of them a list of distinct groups for the dedupe: four times the text costs at most eight times the thread's CPU time plus 2 ms, so a busy machine does not count. The 2 ms is the whole bound for the two shapes that are one match each and take microseconds. Another holds the memo to one text after a parse, and to handing out a copy both times, the split's own answer and the memo's; a third counts the splits of a repeated text, so a memo that is never read is red
+- tests/Model.test.js runs it too. For each case, the row the helper writes lists under that group whole through `primaryGroup` and `launchScope`, and no letter of the credential reaches `sinkText`, the column's entries and their accessible names, `scopeName`, `rowDetail`, `hideNotice`, `scopeLabel`, `noMatchesTitle`, the no-matches hint (`groupNamesForHint` and `groupWordHint`, from one group and from two), the IPC now-playing record or the notification body. The two cases with a control inside the `://` are held to the notification body alone, which deletes controls before it redacts: to the other sinks that text is no URL, split or not
+- tests/test_cut_urls.py's group sweeps take the shapes with a `;` that they left out, and every sweep but the three over the nine joined shapes takes ten more: a `;` at each other place in a userinfo, two `;`s, and Xtream's path and query credentials with and without a `;`. That is 57 shapes for names and `#EXTGRP`, 56 for tvg-names and `group-title`, and 52 for titles. Three exact tests hold the rule: a cut at the password's `;` drops the URL's run back to the group before it (new); a cut at a `;` after a URL drops the URL's group unless a space comes before the `;` (in place of the one that kept it); and the same through `parse_m3u`, where the cut lands on the `;` with a space before it and without one (rewritten: the spaced row's cut had landed on the space)
+- eight node checks pinned the shell's cut on groups no helper writes (`A;B;C` in `group`). Each now reads the helper's shape, or pins that a `;` in `group` is kept, and the D-PERF-3 oracle no longer cuts at one. Among them is the hidden-groups fixture's browse case for a second group, which now carries `group` and `groups` as the helper writes them, and F-TEXT-2's marker channel, whose `<img src="http://...">;<img ...>` group the fixed helper stores as one. The eighth, `channelsForScope`'s, passed with the cut and without it; the review found it, and it now pins a row to its first group and not its second
+- D-SG-5's checks key a renamed row, a row led by a U+FEFF and a kept row, each in two groups, from the helper's `nameKey` and from a cache without one, and find all three by the second. A renamed row the parse moved to Ungrouped is found by its provider group, as a kept one is. The filter's and the saved search's fallbacks find a row with no key by its second group. A key that does not start with its `nameKey` is not read, and a `groups` element that is not a string counts as nothing. D-SG-6's check ranks `Sky News UK` above a row in `Sports` and `UK Sports` for `uk`: kept, renamed, and kept in a cache with no `nameKey`. Beside the tests, the shell's keys were held to the helper's over 24,364 rows of random playlists through `parse_m3u`, with the helper's `nameKey` and without it: every `searchKey` was the shown name's fold and the fold of the group text the helper keyed, and every `nameKey` the name's fold
+
+**Red first.** The final tests, copied over 669c666 with `GROUP_TEXT_ENDS` given for `GROUP_SEPARATOR`, give 12 failures and 2 errors across 46 python tests, and 10 of 3,362 node checks fail. The python failures are seven in test_group_split and five in test_cut_urls (both group sweeps and the three exact group-cut tests); the errors are the two memo tests, which read `SPLIT_GROUPS_LAST` and `GROUP_PART`, absent there. Node fails on the shared fixture, on the two checks that pin a kept `;`, on the check of a row with no key, and on the five D-SG-5 checks and the D-SG-6 one. What passes there should: the fixture's own checks, the linear-time test (the old split was linear), and every sweep but the two for groups.
+
+**Mutations.** Thirty-eight, thirty-seven of them caught; the one left changes no answer. Each was applied alone to a copy of the final tree, sealed (or relinked), and run against test_group_split and test_cut_urls, or the node suite for the shell. The counts are failing tests, python's two files in that order, or failing node checks:
+
+- the split at every `;` again: 7 and 2
+- the plain split whenever the text holds no literal `://`, so a control inside one splits: 4 (the first version's plain split for a text with no `/`, which changes cost and no answer, passed as it should)
+- only the `://` itself kept, not the rest of its run: 6 and 2
+- a URL's run also ended at a tab: 1; at U+001F: 4; at U+2028: 1
+- no branch for a `:` that starts no `://`: 1
+- the pattern's plain run taking a `:`, so a `://` inside it is never seen: 6 and 2
+- a bare `:` tried before a `://`: 6 and 2
+- the memo handing out its own list: 1; never cleared: 1; answering the text it split last whatever it is given: 5 and 4; never read: 1
+- the dedupe scanning the list: 1, the linear-time test
+- each `;` searching back for a `://`: 2, the linear-time test and the split count
+- `_URL_MARK` without the control class: 6 and 3; without C1: 6 and 3
+- the cut ending a run at every `;` again: 2 and 4
+- the cut's run starting at the last `;` before the cut, not before its `://`: 2 and 2
+- the cut ignoring the separator: 1 and 4
+- the cut finding a `://` anywhere in the cut text: 1 and 12
+- the `group-title` cut without the separator: 1; the `#EXTGRP` cut without it: 1
+- the cut keeping a run that U+001F ends: 2
+- the shell cutting at the first `;` again: 3; at the last: 3
+- a rebuilt key taking the first group again: 6; `groupSearchText` ignoring `groups`: 5
+- the rebuild ignoring the helper's key: 1; reading any key past its `nameKey`: 1; the rebuild as first written, through `searchKey` and the suffix test: 3
+- a cache with no `nameKey` giving a row in two groups the suffix test: 1
+- a kept row ignoring the helper's `nameKey` survives: its name is then folded, as a cache with no `nameKey` folds it, which gives the same key and costs the time the helper's `nameKey` saves
+- the filter's fallback taking `group`: 1; the saved search's: 1
+- a `groups` element read through `String()`: 1
+- a row listed under its last group: 7
+- the no-matches hint's one group shown raw: 2
+
+**The parse's cost.** `parse_m3u` alone, 10,000 entries, best of 3, 669c666 and the fix interleaved twice, load 2.0-2.2:
+
+| entries | 669c666 | the fix |
+|---|---|---|
+| `group-title="Group <n>;Extra"`, the budget test's | 0.50-0.51 s | 0.52 s |
+| one 512-character `#EXTGRP` of `UK: Sports <n>` | 1.00 s | 0.86-0.87 s |
+| one of `News/Sport <n>` | 0.99-1.01 s | 0.86 s |
+| one of `News http://cdn.test/g<n> ` | 1.25-1.26 s | 1.15-1.16 s |
+| a 512-character group-title that differs on every entry: `<n>`, then `a:// ;` repeated | 0.71 s | 1.22 s |
+| the same with `a://; ` | 0.71 s | 0.96-0.97 s |
+| `<n> News `, then `http://cdn.test/g<k> ;` repeated | 1.19-1.20 s | 1.38-1.40 s |
+| `<n> `, then `http://qqqqqq:zz;zz@cdn.test/x ;` repeated | 0.69 s | 0.84 s |
+| `<n>/;`, then `a;` repeated, no URL | 0.80 s | 0.82-0.83 s |
+| `<n>`, then 510 `:`, then `;/`, no URL | 0.71-0.72 s | 0.87-0.88 s |
+
+The memo makes a repeated text cheaper than it was at 669c666. A text that differs on every entry gets nothing from it. There the pattern runs only on a text holding a `;` and a `://`, and costs more than a native split for every part: up to 1.7 times on these shapes, and the `a:// ;` shape crosses rule 7's second because of the fix. A text with a `;` and a `/` but no `://` is split natively after one search for a `://`, which tries each `:`: 1.03 times for `a;` parts, 1.2 times for a run of 510 colons. The first version split every text holding a `;` and a `/` with the pattern, which the second check measured at up to 2.0 times on texts with no URL (the `a;` shape: 0.84 s against 1.70-1.76 s). The first version's loop cost more: the review measured those two shapes at 1.77-1.90 s and 1.61-1.69 s. Ten thousand distinct `a:// ;` texts split in 182-191 ms of thread CPU time at 669c666, 1,108 ms with the loop and 606-615 ms with the pattern. Ten thousand splits of `Group <n>;Extra` take 16-17 ms against 13-14 ms, the memo's upkeep. The cost stays linear, which the linear-time test holds. The rows over the second are D-PERF-13's, and the gate's budget input sees none of them.
+
+**The review.** `wf_61e43fae-193` read the fix through five lenses, with a skeptic for each finding: whether any group sink shows more than the unsplit text would; the cut, the split and the memo; siblings; the tests; and the claims. It raised fourteen findings and the skeptics upheld all of them. The first lens found none: 28,000 fuzzed texts and 244,320 cut positions through both mirrors added no leak, where 669c666 leaked thousands of times. Fixed:
+
+- the cost of the split's loop on group-titles that differ per entry: replaced by `GROUP_PART`, and the shapes are in the table above and on D-PERF-13
+- D-SG-5 and the check that pinned it (Siblings, above)
+- `channelsForScope`'s check, which passed with or without the cut, rewritten on the helper's shape
+- the random texts held no control a playlist line carries but tab, NUL and two C1. A run end or a cut at U+001F, VT, FF, DEL or U+2028 survived, and leaked through `parse_m3u`. The texts take them now, and the fixture takes a case
+- the linear-time test timed the wall clock with a 2 ms floor and failed 15 of 20 runs on a shared core. It times the thread's CPU now, and passed 12 of 12 beside three busy loops pinned to its core
+- the dedupe's linear time and the memo's use had no test that could go red; a shape of distinct groups and a split count hold them
+- the no-matches hint was missing from the sink lists and from the shared check
+- a code comment still said a name 0.17.0 hid stays hidden. A test comment said a cut landed on a `;` where it landed on a space, and two shape counts said more than each sweep takes
+- the costs left out the scope, which now carries the whole URL
+- the live-rewind spike's raw print of a group: F-HARNESS-97 is widened
+
+**The check of those fixes.** `wf_8b6709a7-c5c` read what changed after the review through three lenses, with a skeptic for each: the new split, D-SG-5, and the text. Its split lens found no difference from the rule over 6,725,601 exhaustive and 323,000 random texts, and no added leak over 55,344 texts through both mirrors. Of thirteen findings, twelve were upheld. Fixed:
+
+- the plain split's test was a `/`, so every text with a `;` and a `/` went through the pattern, up to 2.0 times the cost on texts with no URL. It is a `://` now, and those texts are in the table above
+- D-SG-5's first fix rebuilt a renamed row's key with `searchKey` and kept the suffix test below it, so the row's `nameKey` took only the first group's fold off a key that now ends with every group's, and a group word ranked as a name match. It also folded each renamed row's whole group text, with no cache: in Qt's engine, 10,000 rows sharing one 16-group text took 3,618 ms against 584 ms. The rebuild now takes the groups' fold from the helper's key, and the `nameKey` is the name's fold. Measured in Qt's engine (`qml` offscreen under gdb, median of 7 passes, twice), 669c666 against the fix: 548-553 ms and 333-337 ms for that list; 466-484 ms and 380 ms when every row's text differs; 314 ms and 193-194 ms with the names kept
+- the same suffix test on a kept row, older than the fix: D-SG-6
+- a renamed channel the parse moved to Ungrouped, in one group, lost that group from its key: the rebuild reads it in the helper's key now
+- the two fallbacks had no test, and a `groups` element that is not a string threw
+- the text: the two cases with a control inside the `://` are held to the notification body alone, which the sink lists now say; the list's and the wall's accessible names were missing from them; the red-first count named a row with no key as a renamed one; the linear bound is eight times plus 2 ms; and D-SINK-75's section still said 47 shapes
+
+**The owner's data, read-only, counts only.** 1,495 channels in one cache, 88 of them in two or more groups. No group holds `://` or `;`, and no group is hidden, so D-SINK-78 did not reach this install, and the fix changes no group there.

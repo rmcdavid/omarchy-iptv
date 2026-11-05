@@ -710,6 +710,11 @@ _GENERATED_NAME = re.compile(r"^" + GENERATED_NAME_WORD.lower() + r" [0-9]+$")
 _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 # Mirrors Model.sanitizeInput: C0 controls, DEL and C1 controls are dropped.
 _CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
+# A URL's `://` as a sink that deletes _CONTROL_CHARS' class before it
+# redacts reads one (F-SINK-16): a `:` and two `/`, with any of that class
+# between them. cut_free_text (D-SINK-75) and split_groups (D-SINK-78) look
+# for it, so the two agree on where a URL starts.
+_URL_MARK = re.compile(":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/")
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
 # Model.validateSourceUrl's scheme match ([\s\S]* there): a line separator
 # after the scheme is caught by the whitespace rule (`invalid`, D-SRC-06),
@@ -1243,7 +1248,7 @@ def redact_urls(text: Any) -> str:
     return "".join(out)
 
 
-def cut_free_text(text: str, limit: int, ends: str = " ") -> str:
+def cut_free_text(text: str, limit: int, separator: str = "") -> str:
     """`text` cut to `limit` code points, and never through a URL (D-SINK-75).
 
     F-M4-1's rule, which of the cuts made before a redaction only
@@ -1266,19 +1271,29 @@ def cut_free_text(text: str, limit: int, ends: str = " ") -> str:
     both mirrors delete, _CONTROL_CHARS and Model's CONTROL_RE) finds a
     `http:/<TAB>/` those sinks join into one. The costs: a cut URL loses its
     host as well, a cut inside a run of several tab-joined words drops them
-    all, and a text that is one such run comes back "". `ends` adds what
-    splits the text before any sink sees it: the group text's `;`
-    (split_groups), so a cut drops only the last group's run.
+    all, and a text that is one such run comes back "".
+
+    `separator` is what splits the text before any sink sees it, the group
+    text's `;`, and it counts only where split_groups splits at it: before
+    the run's first `://` (D-SINK-78). So a cut inside a URL drops the run
+    back to the later of its space and that last `;`, keeping the groups
+    before it, and a `;` after the `://`, which split_groups keeps inside
+    the URL's group, is no end here either: the first version of this
+    function ended a run at every `;`, and a cut at the `;` of
+    `http://myuser:pa;ss@cdn.test/x` kept `http://myuser:pa`.
     """
     if len(text) <= limit:
         return text
     cut = text[:limit]
-    if text[limit] in ends:
+    if text[limit] == " ":
         return cut
-    start = max(cut.rfind(c) for c in ends)
-    if "://" in _CONTROL_CHARS.sub("", cut[start + 1:]):
-        return cut[:max(start, 0)]
-    return cut
+    start = cut.rfind(" ")
+    mark = _URL_MARK.search(cut, start + 1)
+    if mark is None:
+        return cut
+    if separator:
+        start = max(start, cut.rfind(separator, start + 1, mark.start()))
+    return cut[:max(start, 0)]
 
 
 def log(message: str) -> None:

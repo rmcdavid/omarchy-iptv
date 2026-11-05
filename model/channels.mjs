@@ -4,8 +4,8 @@ import {
   MAX_CHNO_LABEL, CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHNO_FIELDS
 } from "./build.mjs"
 import {
-  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey,
-  GENERATED_NAME_WORD, channelId
+  str, asList, keyedMap, hasOwnKey, normalizeText, GENERATED_NAME_WORD,
+  channelId
 } from "./text.mjs"
 import {
   isUrlSpaceAt, stripSpace, sinkText
@@ -13,7 +13,14 @@ import {
 
 // ------------------------------------------------------------ channels
 
-// R5: a channel with `group-title="A;B;C"` is listed under its FIRST group.
+// R5: a channel with `group-title="A;B;C"` is listed under its FIRST group,
+// which the helper splits off and stores as `group` (split_groups). This
+// reads that group whole (D-SINK-78): a `;` left in it is part of a web
+// address, which split_groups keeps in one group so that every sink redacts
+// the address whole, and the cut this made at the first `;` handed them
+// `http://myuser:pa` of `http://myuser:pa;ss@cdn.test/x`, the username as a
+// host. No release's helper stored a separator in `group`, so the cut had
+// never changed a cached row.
 function primaryGroup(channel) {
   var raw = channel && channel.group !== undefined && channel.group !== null ? str(channel.group) : ""
   // D-STATE-2: the reader's class (stripSpace), not the engine's trim. The
@@ -24,15 +31,48 @@ function primaryGroup(channel) {
   // hiding it stores, whichever runtime wrote the row or the stored name:
   // with the engine's trim a group-title `<FEFF><U+001C>Sports` was hidden as
   // `<U+001C>Sports`, the next CLI state write stored `Sports`, and the group
-  // was shown again. A name 0.17.0 stored reads as the group it hid. Linear,
-  // as the native trim was (D-PERF-3, R30g: the `/^\s+|\s+$/g` before it was
+  // was shown again. A name 0.17.0 stored reads as the group it hid, until
+  // a later helper names that group differently on the source's next fetch
+  // (D-SINK-75's cut, D-SINK-78's split of a URL at its `;`): then the
+  // stored name matches nothing and the group is shown again. Linear, as the
+  // native trim was (D-PERF-3, R30g: the `/^\s+|\s+$/g` before it was
   // quadratic in a whitespace run). The helper keeps interior runs in a group
-  // verbatim. The first group is cut at the first `;` without splitting the
-  // rest into an array, which buys back the call stripSpace costs over V4's
-  // native trim on every browse pass.
-  var cut = raw.indexOf(";")
-  var first = stripSpace(cut === -1 ? raw : raw.substring(0, cut))
+  // verbatim.
+  var first = stripSpace(raw)
   return first === "" ? UNGROUPED : first
+}
+
+// The group text a searchKey ends with: every group in `groups`, joined by a
+// space, as the helper's make_channel writes the key, else `group`, so the
+// whole group-title stays searchable (R4, R5). D-SG-5: a row the shell
+// renames (displayName) has its key rebuilt, and the rebuild took `group`
+// alone, the first group, so a channel was not found by its second. Only a
+// string element counts: the helper writes no other, and String() throws
+// on an object a hand-edited cache could hold.
+function groupSearchText(channel) {
+  var groups = channel ? channel.groups : null
+  if (Array.isArray(groups) && groups.length > 0) {
+    return groups.map(function (g) { return typeof g === "string" ? g : "" }).join(" ")
+  }
+  return channel ? str(channel.group) : ""
+}
+
+// The fold of a row's groups as the helper keyed them. Its searchKey is its
+// nameKey and that fold joined by a space (make_channel, search_key), so the
+// fold is what follows the nameKey, and it holds a group `groups` does not:
+// a channel the parse moves to Ungrouped past MAX_GROUPS keeps its one
+// provider group only there. null when the two keys do not read that way
+// (a cache older than the nameKey, or a hand edit).
+function helperGroupFold(src) {
+  var key = src.searchKey
+  var name = src.nameKey
+  if (typeof key !== "string" || typeof name !== "string") return null
+  if (name === "") return key
+  if (key === name) return ""
+  if (key.length > name.length + 1 && key.charAt(name.length) === " " && key.substring(0, name.length) === name) {
+    return key.substring(name.length + 1)
+  }
+  return null
 }
 
 // A channel name is never a URL (D-QA-02): an empty or URL-shaped name
@@ -91,6 +131,8 @@ function prepareChannels(channels) {
   // D-SG-3: keyed by the provider's group; on a plain `{}` a group named
   // `__proto__` read Object.prototype back as its normalized key.
   var groupKeys = keyedMap()
+  // The fold of each group text a rebuilt key ends with, by that text.
+  var groupFolds = keyedMap()
   for (var i = 0; i < list.length && out.length < MAX_CHANNELS; i++) {
     var src = list[i]
     if (!src || typeof src !== "object") continue
@@ -105,8 +147,30 @@ function prepareChannels(channels) {
     var grp = row.group
     if (groupKeys[grp] === undefined) groupKeys[grp] = normalizeText(grp)
     var groupKey = groupKeys[grp]
-    if (typeof row.searchKey !== "string" || row.searchKey === "" || row.name !== str(src.name)) row.searchKey = searchKey(row.name, grp)
-    if (groupKey !== "" && row.searchKey.length > groupKey.length && row.searchKey.substring(row.searchKey.length - groupKey.length - 1) === " " + groupKey) {
+    var groupFold = helperGroupFold(src)
+    if (typeof row.searchKey !== "string" || row.searchKey === "" || row.name !== str(src.name)) {
+      // D-SG-5: rebuilt from the name the shell shows and every group the
+      // helper keyed, the fold after its nameKey, or with no such key the
+      // fold of groupSearchText, once per text. The name's fold is the
+      // nameKey: a suffix test below would take only the first group off.
+      if (groupFold === null) {
+        var text = groupSearchText(src)
+        if (groupFolds[text] === undefined) groupFolds[text] = normalizeText(text)
+        groupFold = groupFolds[text]
+      }
+      row.nameKey = normalizeText(row.name)
+      row.searchKey = groupFold === "" ? row.nameKey : row.nameKey === "" ? groupFold : row.nameKey + " " + groupFold
+    } else if (groupFold !== null) {
+      // D-SG-6: the helper's own fold of the name, which its key starts
+      // with. The suffix test takes the FIRST group's fold off a key that
+      // ends with every group's, so a row in `Sports` and `UK Sports` read
+      // `arena sports uk` as its name and ranked `uk` as a name match.
+      row.nameKey = src.nameKey
+    } else if (Array.isArray(src.groups) && src.groups.length > 1) {
+      // A cache with no nameKey: the same suffix test is wrong for a row in
+      // two or more groups, so its name is folded.
+      row.nameKey = normalizeText(row.name)
+    } else if (groupKey !== "" && row.searchKey.length > groupKey.length && row.searchKey.substring(row.searchKey.length - groupKey.length - 1) === " " + groupKey) {
       row.nameKey = row.searchKey.substring(0, row.searchKey.length - groupKey.length - 1)
     } else if (groupKey !== "" && row.searchKey === groupKey) {
       row.nameKey = ""
@@ -785,14 +849,15 @@ function chnoStatus(kind, label, name, matches, ordinal, committed) {
   return out
 }
 export {
-  primaryGroup, looksLikeUrl, cleanName, displayName, prepareChannels,
-  CHNO_NONE, CHNO_NO_MATCH, CHNO_NO_NUMBERS_TEXT, chnoFail, chnoRawOf,
-  isAsciiDigit, parseChno, isChnoSpace, chnoOf, buildChnoIndex, chnoIdAt,
-  chnoEntryKey, resolveChno, chnoUnambiguous, channelByNumber, channelOrderOf,
-  orderChannels, NUMERIC_QUERY_RE, isNumericQuery, isNumberEntryKey,
-  numberEntry, normalizeNumberEntry, pushNumberKey, popNumberKey,
-  cancelNumberEntry, closeNumberEntry, numberKeyStep, numberPopStep,
-  chnoCommitLabel, numberCommitStep, chnoColumnUnits, QT_SHIFT_MODIFIER,
-  QT_CONTROL_MODIFIER, QT_ALT_MODIFIER, QT_META_MODIFIER, QT_KEYPAD_MODIFIER,
-  CHNO_CHORD_MASK, numberKeyAction, chnoCommitPlan, chnoStatus
+  primaryGroup, groupSearchText, helperGroupFold, looksLikeUrl, cleanName,
+  displayName, prepareChannels, CHNO_NONE, CHNO_NO_MATCH,
+  CHNO_NO_NUMBERS_TEXT, chnoFail, chnoRawOf, isAsciiDigit, parseChno,
+  isChnoSpace, chnoOf, buildChnoIndex, chnoIdAt, chnoEntryKey, resolveChno,
+  chnoUnambiguous, channelByNumber, channelOrderOf, orderChannels,
+  NUMERIC_QUERY_RE, isNumericQuery, isNumberEntryKey, numberEntry,
+  normalizeNumberEntry, pushNumberKey, popNumberKey, cancelNumberEntry,
+  closeNumberEntry, numberKeyStep, numberPopStep, chnoCommitLabel,
+  numberCommitStep, chnoColumnUnits, QT_SHIFT_MODIFIER, QT_CONTROL_MODIFIER,
+  QT_ALT_MODIFIER, QT_META_MODIFIER, QT_KEYPAD_MODIFIER, CHNO_CHORD_MASK,
+  numberKeyAction, chnoCommitPlan, chnoStatus
 }
