@@ -4,10 +4,12 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.17.0 (2026-11-02: restart on adoption, so a
-player another build launched is replaced rather than fed, with D-SINK-70, D-SINK-71,
-D-SINK-72 and D-PLY-51's fixes; `main` 787a33b, the GitHub Release marked Latest, and
-since 2026-11-03T01:31:53Z the marketplace's verified snapshot, through #13709). Four of the last releases were cut for a finding
+Quickshell process. Released through v0.18.0 (2026-11-07: Omarchy 4.5.0 -- notifications
+kept inert under its markup reader, its six bar sections, a player claim per Service, the
+guide's chord moved -- with the D-SINK-79, -80, -82 and -83 round and the rounds pushed
+since 0.17.0; `main` dc402e7, the GitHub Release marked Latest, `[Verify]` #14290 filed
+the same day). The marketplace's verified snapshot is still 0.17.0 (`main` 787a33b,
+2026-11-02: restart on adoption), since 2026-11-03T01:31:53Z through #13709. Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; until
@@ -71,7 +73,9 @@ was labelled. 0.16.0 (`main` 103fa68, 2026-11-01) and 0.17.0 (`main`
 787a33b, 2026-11-02) were cut on the owner's word, and their requests were
 filed on the owner's word: #13611 and #13709, each validated with its
 baseline passed. #13709 is the one approved. #13611 and #12636 stay open, and
-we close none (F-M3-4). Neither can be approved as filed: neither Target
+we close none (F-M3-4). **[2026-11-07: 0.18.0 (`main` dc402e7) was cut on the
+owner's word and its request filed on it as #14290; #13611 and #12636 stay
+open beside it, as filed.]** Neither can be approved as filed: neither Target
 commit is our HEAD, and one edited to 787a33b would be refused as already
 the listing. Once `main` moves, either could be approved only if its Target
 commit were edited to the HEAD of that day, by a maintainer, as he edited
