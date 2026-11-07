@@ -1274,6 +1274,19 @@ This project is built by role lanes running in separate git worktrees.
    other order is undone -- the settings change makes the service touch the
    source record and save its in-memory state over the copy you just wrote.
    Seen on 2026-09-21; the restore script was corrected mid-pass.
+   **[2026-11-07, F-HARNESS-103: on the owner's 4.5.0 shell, an atomic
+   restore of `shell.json` (a temporary file renamed over it) had not
+   reached the running shell 15 s later; the plugin still read the test's
+   setting, and the shell's next own write would have put it back (read in
+   shell.qml, not observed; the cause was not measured). So follow the
+   restore with `omarchy-shell shell reloadConfig`, the host's own reload,
+   which the host's own config writer also runs after its rename, and check
+   what the plugin reads, not only the hash. A running plugin re-reads
+   `state.json` before each of its own saves and keeps an unsaved change of
+   its own on top of what it reads, so restore it while the plugin is down
+   (its bar entry removed and `reloadConfig` run), then put the entry back
+   and reload. Stop any player first: a disable stops a playing player once
+   the 6 s grace passes.]**
 6. Check `pgrep -x hyprlock` before any keystroke. Typing into a lock prompt
    registers as failed unlock attempts. **[2026-10-31, F-HARNESS-85: on
    Omarchy 4 this check can never fire -- hyprlock is removed and the shell

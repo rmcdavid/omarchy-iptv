@@ -33,7 +33,10 @@ player's command line outlives the update. 0.18.0 is updated for Omarchy
 4.5.0 -- its notifications, its six bar sections and the keyboard shortcut
 it now takes from the guide (if you pasted the guide's keybinding, change
 its chord: see Install). This was checked against 4.5.0's own code and in a
-headless test session, not yet on a running 4.5.0 desktop. It also closes a
+headless test session. On a running 4.5.0 desktop it was checked for its
+notifications, for the plugin reading its settings in each bar section, and
+for which chords 4.5.0 takes; saving a setting from one of the new sections
+was not tried there. It also closes a
 set of ways a username or password in a playlist or a guide could be shown
 as a channel's name, group or programme text, or, from a playlist that
 names several guides, sent to another guide's server.

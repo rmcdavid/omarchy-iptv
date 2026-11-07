@@ -3014,7 +3014,10 @@ node, python, qmltestrunner. Node count should rise above today's 583 checks.
   the orphan-check stops the player within ~7 s (PO-2's acceptance).
   **[2026-11-06, D-PLY-64: re-run on Omarchy 4.5.0 with the token, and its
   twin: a Service destroyed and re-created in one shell while a channel plays
-  keeps playing past t+7 s.]**
+  keeps playing past t+7 s.]** **[2026-11-07: both run live on the owner's
+  4.5.0 desktop: the disable stopped the player in 6.46 s; the re-created
+  Service kept it playing past the grace under a new token (QA-RESULTS
+  "Live re-measures on Omarchy 4.5.0").]**
 - **PLAYER-LIVE-05**: SIGSTOP mpv, press stop - the window is gone within ~4.5 s,
   nothing survives, the socket is unlinked, `hyprctl clients -j | jq
   '[.[]|select(.class=="omarchy-iptv")]|length'` is 0.
