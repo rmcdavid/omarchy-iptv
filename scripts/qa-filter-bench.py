@@ -189,7 +189,7 @@ def main():
             fh.write(QML % {"count": len(channels), "iters": args.iterations,
                             "budget": args.budget, "queries": json.dumps(list(QUERIES))})
 
-        env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_FORCE_STDERR_LOGGING="1")
         out = subprocess.run(["/usr/lib/qt6/bin/qmltestrunner", "-input", "tst_filter.qml"],
                              cwd=bench, env=env, capture_output=True, text=True)
         for line in (out.stdout + out.stderr).splitlines():

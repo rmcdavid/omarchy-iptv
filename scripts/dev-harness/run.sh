@@ -65,6 +65,11 @@
 #   --host MODE         lag (default): the fake host publishes barConfig one write behind, as
 #                       every Omarchy through 4.0.4 does. echo: it publishes what it stores at
 #                       once, as omacom/omarchy#15082 does (D-HOST-4's lever; rule 9 names both)
+#   --section NAME      the bar section the fake host seeds the entry in: right (default, the
+#                       manifest's), or left, centerBegin, center, centerEnd, tray -- Omarchy
+#                       4.5.0's six (Util.barSections). The fake walks the real host's sections
+#                       (its Commons/, linked in), so on a 4.0.x host a 4.5.0 name is an entry
+#                       that host does not walk (F-HARNESS-100; D-HOST-11)
 #
 # Why `key` and `type` refuse (F-M3-1 half (a)). wtype types into whatever
 # surface holds the keyboard, which on a bad day is the terminal the scenario is
@@ -588,11 +593,12 @@ harness_env() {
   # private bus with this half of the lever withheld
   # (OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=0 and `--ao=null` as the caller's own
   # token), vo-configured true over the player's socket and the coredump
-  # journal +0. The lever STAYS, for two reasons: `--baseline <ref>` runs a
-  # scenario against an OLDER tree whose base argv lacks the token (every
-  # release through 0.15.0), and `--ao=null` is the lever's own job on every
+  # journal +0. The lever STAYS, for three reasons: `--baseline <ref>` runs
+  # a scenario against an OLDER tree whose base argv lacks the token (every
+  # release through 0.15.0); `--ao=null` is the lever's own job on every
   # tree -- the base argv does NOT carry it, because a user's player must
-  # have sound.
+  # have sound; and so is `--hwdec=no` since Omarchy 4.5.0 (F-HARNESS-102,
+  # below).
   if [[ -z ${OMARCHY_IPTV_HARNESS_SOFTWARE_GPU+x} && ${WLR_RENDERER:-} == pixman ]]; then
     export OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1
   fi
@@ -600,6 +606,18 @@ harness_env() {
     local args=${OMARCHY_IPTV_MPV_ARGS:-}
     if [[ " $args " != *" --gpu-sw"* && " $args " != *" --no-gpu-sw "* ]]; then args="${args:+$args }--gpu-sw=yes"; fi
     if [[ " $args " != *" --ao="* ]]; then args="${args:+$args }--ao=null"; fi
+    # F-HARNESS-102 (2026-11-06): Omarchy 4.5.0's /etc/mpv/mpv.conf holds
+    # hwdec=auto-safe, and the shipped argv does not hide the system layer
+    # (D-HOST-13: the owner accepted hardware decoding for users), so every
+    # caged player would try the real GPU's decoder under a pixman cage. The
+    # lever's evidence above predates the file; this keeps the cage's player
+    # on the path it was measured on. The harness's lever only, never the
+    # shipped argv.
+    # The option itself, never a sibling: `--hwdec-codecs=all` names which
+    # codecs, not whether, and leaves the system file's hwdec in force.
+    if [[ " $args " != *" --hwdec="* && " $args " != *" --hwdec "* && " $args " != *" --no-hwdec "* ]]; then
+      args="${args:+$args }--hwdec=no"
+    fi
     export OMARCHY_IPTV_MPV_ARGS="$args"
   fi
   # F-HARNESS-20, and this one is a SAFETY isolation, not a convenience. The
@@ -1091,7 +1109,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0 SEED_CACHE=""
-    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0 HOST_MODE=lag
+    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0 HOST_MODE=lag SECTION=right
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -1136,6 +1154,11 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         # string, so a typo would silently run the lagging host.
         --host) HOST_MODE=$2; shift
                  [[ $HOST_MODE == lag || $HOST_MODE == echo ]] || die "--host takes lag or echo, not '$HOST_MODE'" ;;
+        # F-HARNESS-100. Rejected here for the same reason: a typo would seed
+        # the entry under a key no host walks and every check after it would
+        # grade the plugin against an entry it is right not to find.
+        --section) SECTION=$2; shift
+                 [[ $SECTION =~ ^(left|centerBegin|center|centerEnd|right|tray)$ ]] || die "--section takes left, centerBegin, center, centerEnd, right or tray, not '$SECTION'" ;;
         --window) WINDOW=$2; shift
                  [[ $WINDOW == layer || $WINDOW == floating ]] || die "--window takes layer or floating, not '$WINDOW'" ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -1182,8 +1205,9 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     export OMARCHY_IPTV_SOURCE_KEY="$SOURCE_KEY"
     export OMARCHY_IPTV_SOURCE_KEY_SET="$SOURCE_KEY_SET"
     export OMARCHY_IPTV_HARNESS_HOST="$HOST_MODE"
+    export OMARCHY_IPTV_HARNESS_SECTION="$SECTION"
     # scheme://host only: the URL may carry provider credentials (S-08).
-    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW host=$HOST_MODE playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
+    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW host=$HOST_MODE section=$SECTION playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
     if (( DETACH )); then
       # Record the environment so `restart-shell` can bring the same shell
       # back without re-deriving anything (the fixture server, the cache and
@@ -1213,6 +1237,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         qa_env_line OMARCHY_IPTV_SOURCE_KEY     "$OMARCHY_IPTV_SOURCE_KEY"
         qa_env_line OMARCHY_IPTV_SOURCE_KEY_SET "$OMARCHY_IPTV_SOURCE_KEY_SET"
         qa_env_line OMARCHY_IPTV_HARNESS_HOST   "$OMARCHY_IPTV_HARNESS_HOST"
+        qa_env_line OMARCHY_IPTV_HARNESS_SECTION "$OMARCHY_IPTV_HARNESS_SECTION"
         qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell

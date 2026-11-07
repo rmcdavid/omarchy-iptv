@@ -123,7 +123,7 @@ lpid=$(listener_pid)
 SERVER_PID=$lpid
 echo "probe server: 127.0.0.1:$PORT pid $SERVER_PID (from ss, parent $$)"
 sed "s#__PORT__#$PORT#g" "$HERE/sweep.spec.qml" >"$WORK/sweep.run.spec.qml"
-QT_QPA_PLATFORM=offscreen timeout 30 "$RUNNER" -input "$WORK/sweep.run.spec.qml" >"$QMLOUT" 2>&1
+QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 timeout 30 "$RUNNER" -input "$WORK/sweep.run.spec.qml" >"$QMLOUT" 2>&1
 echo "qmltestrunner exit=$? ($(grep -c . "$QMLOUT") lines)"
 # Let a request that was in flight at the runner's exit reach the log.
 sleep 0.5

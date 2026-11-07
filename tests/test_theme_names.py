@@ -78,8 +78,17 @@ class ThemeNameGuard(unittest.TestCase):
         self.assertEqual(3, int(m.group(2)))
 
     def test_the_host_kit_and_the_imports_are_read_from_the_installed_files(self):
-        self.assertEqual({"Border": "qs.Commons", "Color": "qs.Commons", "Style": "qs.Commons", "Util": "qs.Commons"},
-                         {n: m for n, m in self.kit.items() if m == "qs.Commons"})
+        # omarchy 4.5.0-3's Commons/qmldir (2026-11-06, F-GATE-21): ten
+        # singletons and two plain types, eight more than 4.0.6's Border,
+        # Color, Style and Util. The plugin names four of them (Border, Color,
+        # Style, Util); the other eight collide with no Qt or Quickshell export
+        # (the guard reads 51 host-kit names, all clear). A tripwire: the next
+        # host that adds or drops a Commons name is red here, and is a
+        # re-measurement of the guard, not a plugin defect.
+        self.assertEqual({n: "qs.Commons" for n in (
+            "AudioNodes", "Border", "Color", "I18n", "InputDevices", "InputMethodState", "IpcRegistry",
+            "ShellIpc", "Style", "Translations", "UntypedInput", "Util")},
+            {n: m for n, m in self.kit.items() if m == "qs.Commons"})
         self.assertIn("BarWidget", self.kit)
         quick = guard.module_names("QtQuick", None, QML_DIR)
         # QtQuick's own, and what its qmldir imports (QtQml auto -> QML, Models)

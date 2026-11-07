@@ -98,7 +98,7 @@ probe() {
   # would make a refused allocation in the reporter the end of the
   # measurement.
   out=$(PEAKRUN_TIMEOUT=90 python3 "$HERE/peakrun.py" prlimit --as=$CAP_AS -- \
-          env QT_QPA_PLATFORM=offscreen ${alloc:+QT_IMAGEIO_MAXALLOC=$alloc} "$QML_BIN" "$qml" 2>&1)
+          env QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 ${alloc:+QT_IMAGEIO_MAXALLOC=$alloc} "$QML_BIN" "$qml" 2>&1)
   line=$(printf '%s\n' "$out" | grep -a '^PEAKRUN ' | tail -1)
   local rc kb ms
   rc=$(printf '%s' "$line" | sed -n 's/.*rc=\(-\{0,1\}[0-9]*\).*/\1/p')

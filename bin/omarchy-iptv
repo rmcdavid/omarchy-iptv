@@ -120,10 +120,10 @@ HELPER_PARTS = (
     ("05-ipc-logos.py", 54346, 0x03a400fb),
     ("06-failed.py", 50099, 0xa3873053),
     ("07-player.py", 93070, 0xc4c41727),
-    ("08-player-verbs.py", 115041, 0x12f180b0),
+    ("08-player-verbs.py", 119264, 0xf4d99514),
     ("09-cache.py", 26549, 0x60c9a9f1),
     ("10-state.py", 50350, 0xf9b4107a),
-    ("11-cli.py", 40379, 0x6bf97cbc),
+    ("11-cli.py", 41053, 0xb5f18ea5),
 )
 
 

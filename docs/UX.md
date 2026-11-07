@@ -505,8 +505,8 @@ IPC verbs the user may bind.
 
 | Gesture | Action |
 |---|---|
-| `SUPER + SHIFT + T` (user adds to `bindings.lua`) | Toggle the guide: `omarchy-shell shell toggle io.github.rmcdavid.iptv`. |
-| `SUPER + SHIFT + H` / `L` / `R` (suggested, commented in `contrib/bindings.lua`) | `back 10` / `forward 10` / `live` (M5-01). H and L are vim's left and right, R is return to live; all three are free on a stock Omarchy, checked against `/usr/share/omarchy/default/hypr/bindings/` on 2026-10-03, where only H I J K L Q R U V Z remain free of `SUPER + SHIFT + <letter>`. The same file's pause, picture-in-picture and channel up/down examples moved to Z, I, and J / K on the same day (F-RWD-6: the chords they used to suggest, C, P and COMMA, are Calendar, Google Photos and dismiss-notifications on a stock install). |
+| `SUPER + ALT + T` (user adds to `bindings.lua`) | Toggle the guide: `omarchy-shell shell toggle io.github.rmcdavid.iptv`. **[2026-11-06, D-DOC-35, the owner's decision: this was `SUPER + SHIFT + T` until Omarchy 4.5.0 bound that chord to Activity (btop, `utilities.lua`), and `o.bind` does not unbind first, so both binds sit on it. `SUPER + ALT + T` is free in the stock bindings of 4.0.4, 4.0.6 and 4.5.0. A user keeping `T` puts `hl.unbind("SUPER + SHIFT + T")` before the bind, which leaves stock Activity with no key; the README says so.]** |
+| `SUPER + SHIFT + H` / `L` / `R` (suggested, commented in `contrib/bindings.lua`) | `back 10` / `forward 10` / `live` (M5-01). H and L are vim's left and right, R is return to live; all three are free on a stock Omarchy, checked against `/usr/share/omarchy/default/hypr/bindings/` on 2026-10-03, where only H I J K L Q R U V Z remain free of `SUPER + SHIFT + <letter>`. The same file's pause, picture-in-picture and channel up/down examples moved to Z, I, and J / K on the same day (F-RWD-6: the chords they used to suggest, C, P and COMMA, are Calendar, Google Photos and dismiss-notifications on a stock install). **[2026-11-06, D-DOC-35: Omarchy 4.5.0 binds `SUPER + SHIFT + I` (switch input language back), `Q` (Calculator, behind the preinstalled bindings, on by default) and `T` (Activity), so the letters free of `SUPER + SHIFT + <letter>` on 4.0.4, 4.0.6 and 4.5.0 alike are H J K L R U V Z; H, L and R stand, and the picture-in-picture example moved to V.]** |
 | Left click | Open the guide overlay (never a small popup). If it is open, close it. |
 | Right click | Stop playback. |
 | Middle click | Refresh playlist and EPG. |
@@ -523,7 +523,7 @@ setting), and omitting it means the guide's ten. Each replies in JSON like
 `channel` and `pip`, so a clamp or a refusal is reported and never a false
 success (CN15). Rewinding is done with the guide CLOSED -- the pause lesson
 -- which is why the verbs, not the keys, are the surface a watcher actually
-uses. No default bindings beyond `SUPER + SHIFT + T`.
+uses. No default bindings beyond `SUPER + ALT + T` (`SUPER + SHIFT + T` until 2026-11-06, D-DOC-35).
 
 ### 3.4 The zap ring
 

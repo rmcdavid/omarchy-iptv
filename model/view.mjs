@@ -539,6 +539,10 @@ function formHints(form) {
 // the table above, because its MEANING is derived: in the list it reaches the
 // same hideAction call `x` does (removeAt), and in Sources it is the remove
 // action's twin, so it takes that verb rather than a second spelling of it.
+// [2026-11-06, D-DOC-36: on Omarchy 4.5.0 the host's PanelKeyCatcher turns
+// Delete into its deleteRequested signal and accepts the key, so the guide
+// sees it there and not as Qt.Key_Delete; the outcomes are the same ones,
+// by reading. The Qt.Key_Delete branches serve a 4.0.x host.]
 // Esc is fully derived: in list mode it dispatches on Model.onEscape, and
 // sameEscape() below proves list and search agree before the list borrows
 // search's wording.

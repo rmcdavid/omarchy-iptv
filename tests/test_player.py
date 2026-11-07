@@ -11,6 +11,7 @@ drifting apart.
 
 Run: python3 -m unittest discover -s tests
 """
+import argparse
 import contextlib
 import io
 import json
@@ -2798,6 +2799,274 @@ class OrphanCheckTest(PlayerTestCase):
         self.assertIsNone(idle.poll())
 
 
+
+# ---- D-PLY-64: the owner claim names the Service INSTANCE, not only the shell
+#
+# Omarchy 4.5.0's migrations replaced shell.json for a moment on 2026-11-06;
+# the host read its defaults, destroyed the plugin's Service and created a new
+# one inside the SAME shell process (measured in the shell's own log by the
+# map's skeptic-orphan lens). The new Service's probe re-claimed the player
+# with the same pid and start time, so the old one's orphan check read the
+# claim as its own with its shell alive -- "the plugin was disabled" -- and
+# stopped the channel ~6 s later. Each Service object now draws a token
+# (Model.playerOwnerToken) and passes it on every verb that writes the claim
+# and on its orphan check; a claim with another token is reassigned.
+#
+# Rule 15, every writer of USER_DATA_OWNER has a "no successor" case below
+# (a writer that dropped the token would turn a genuine disable into
+# "reassigned", the player left playing): `player probe`, `player start`
+# through apply_channel's owner, `player restart` (the same function), and
+# the start's stand-down branch (OrderingTest, which drives it). The one
+# reader is the orphan check. `play` writes no claim.
+
+OWNER_TOKENS = json.loads((ROOT / "tests" / "fixtures" / "owner-token.json").read_text(encoding="utf-8"))
+TOKEN_A = "0123456789abcdef0123456789abcdef"      # the Service being destroyed
+TOKEN_B = "fedcba9876543210fedcba9876543210"      # its successor in the same shell
+
+
+class OwnerTokenTest(PlayerTestCase):
+    def owned_player(self):
+        """A player this build launched (a sleeper and its FakeMpv), with no
+        claim on it yet."""
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        server = self.start_current()
+        return idle, server
+
+    def probe(self, token="", pid=None):
+        argv = ["player", "probe", "--socket", self.sock, "--ipc-timeout", "1",
+                "--owner-pid", str(pid or os.getpid())]
+        if token:
+            argv += ["--owner-token", token]
+        code, payload, _, stderr = run(*argv)
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["claimed"], stderr)
+        return payload
+
+    def orphan_check(self, token="", pid=None):
+        argv = ["player", "orphan-check", "--socket", self.sock, "--owner-pid", str(pid or os.getpid()),
+                "--grace", "0", "--ipc-timeout", "0.5"]
+        if token:
+            argv += ["--owner-token", token]
+        code, payload, _, stderr = run(*argv)
+        self.assertEqual(code, 0, stderr)
+        return payload
+
+    def claim(self):
+        client = helper.MpvIpc(self.sock, 1)
+        client.connect()
+        try:
+            ok, data = client.try_command("get_property", helper.USER_DATA_OWNER)
+            return data if ok else None
+        finally:
+            client.close()
+
+    # -- the defect: same shell, new instance
+
+    def test_d_ply_64_same_shell_new_instance_is_reassigned_and_the_channel_plays_on(self):
+        """The measured case: A claims, B (same pid, same start time) claims
+        after it, and A's check runs. Red before the fix: `stopped`,
+        `owner_alive` -- the channel ends while B lives."""
+        idle, server = self.owned_player()
+        self.probe(TOKEN_A)
+        self.probe(TOKEN_B)
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["pid"], os.getpid())
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["token"], TOKEN_B)
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "reassigned"))
+        self.assertIsNone(idle.poll(), "the successor's channel must still be playing")
+        # And the successor's OWN check, at a genuine disable later, still stops it.
+        payload = self.orphan_check(TOKEN_B)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertTrue(wait_gone(idle))
+
+    def test_d_ply_64_a_successor_that_claims_through_player_start_is_reassigned_too(self):
+        """The successor's claim written by apply_channel's owner (a zap that
+        started the session), not by a probe."""
+        idle, server = self.owned_player()
+        self.probe(TOKEN_A)
+        code, _, _, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                                 "--id", "t:bbc1.uk", "--seq", "2", "--ipc-timeout", "1", "--first-load-timeout", "0.2",
+                                 "--owner-pid", str(os.getpid()), "--owner-token", TOKEN_B)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["token"], TOKEN_B)
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "reassigned"))
+        self.assertIsNone(idle.poll())
+
+    # -- a genuine disable still stops, whichever writer made the claim
+
+    def test_d_ply_64_no_successor_still_stops_a_claim_the_probe_wrote(self):
+        idle, server = self.owned_player()
+        self.probe(TOKEN_A)
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["token"], TOKEN_A)
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertTrue(wait_gone(idle))
+
+    def test_d_ply_64_no_successor_still_stops_a_claim_player_start_wrote(self):
+        """apply_channel's owner, on a player the start spawned (the stub)."""
+        code, payload, _, stderr = self.player_start("--owner-pid", str(os.getpid()), "--owner-token", TOKEN_A)
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["spawned"])
+        self.assertEqual(self.claim()["token"], TOKEN_A)
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertEqual(helper.find_player(self.sock), [])
+
+    def test_d_ply_64_no_successor_still_stops_a_claim_player_restart_wrote(self):
+        code, _, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        code, payload, _, stderr = run("player", "restart", "--socket", self.sock, "--cache-dir", self.cache,
+                                       "--id", "t:espn.us", "--seq", "9", "--from", "term", "--ipc-timeout", "1",
+                                       "--spawn-timeout", "4", "--first-load-timeout", "1",
+                                       "--owner-pid", str(os.getpid()), "--owner-token", TOKEN_A)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["kind"], "player.restart")
+        self.assertEqual(self.claim()["token"], TOKEN_A)
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertEqual(helper.find_player(self.sock), [])
+
+    # -- another shell, and the shells and Services from before this release
+
+    def test_d_ply_64_another_shell_stays_reassigned_with_or_without_a_token(self):
+        idle, server = self.owned_player()
+        other = subprocess.Popen(["python3", "-c", "import time; time.sleep(30)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.reap_process, other)
+        for token in (TOKEN_B, ""):
+            with self.subTest(token=token or "none"):
+                self.probe(token, pid=other.pid)
+                payload = self.orphan_check(TOKEN_A)
+                self.assertEqual((payload["stopped"], payload["reason"]), (False, "reassigned"))
+                self.assertIsNone(idle.poll())
+
+    def test_d_ply_64_a_service_from_before_this_release_keeps_the_rule_it_had(self):
+        """No token on either side -- an older Service still loaded, writing
+        and checking through this helper: pid and start time decide, as they
+        always did, so its genuine disable still stops the player."""
+        idle, server = self.owned_player()
+        self.probe("")
+        self.assertNotIn("token", server.user_data["omarchy-iptv-owner"])
+        payload = self.orphan_check("")
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertTrue(wait_gone(idle))
+
+    def test_d_ply_64_a_token_on_one_side_only_is_another_instance(self):
+        """A claim with a token was written by a Service that has one, so a
+        check without one (an older Service) is not its owner's; and a claim
+        without one was written after this tokened instance's own by a
+        Service that has none. Either way the player has an owner that is
+        not the instance going away, and that owner's check decides."""
+        idle, server = self.owned_player()
+        self.probe(TOKEN_B)
+        payload = self.orphan_check("")
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "reassigned"))
+        self.probe("")
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "reassigned"))
+        self.assertIsNone(idle.poll())
+
+    def test_d_ply_64_a_token_that_is_not_a_string_reads_as_none(self):
+        """mpv's user-data holds whatever a client set: a claim whose token is
+        a number or a list is a claim with no token."""
+        idle, server = self.owned_player()
+        for token in (1, ["x"], None, {"t": TOKEN_A}):
+            with self.subTest(token=repr(token)):
+                server.user_data["omarchy-iptv-owner"] = {"schema": 1, "pid": os.getpid(), "token": token,
+                                                          "startTime": helper.proc_start_time(os.getpid()), "at": 1}
+                payload = self.orphan_check(TOKEN_A)
+                self.assertEqual(payload["reason"], "reassigned")
+        self.assertIsNone(idle.poll())
+
+    def test_d_ply_64_a_non_string_token_is_no_token_to_a_check_that_passes_none(self):
+        """What "reads as none" means under the uniform rule: a check that
+        passes no token (a Service from before this release) owns a claim
+        whose token is not a string, and stops the player on a genuine
+        disable. The check above cannot tell "none" from "some other token",
+        since TOKEN_A differs from both (the review of 2026-11-06)."""
+        idle, server = self.owned_player()
+        server.user_data["omarchy-iptv-owner"] = {"schema": 1, "pid": os.getpid(), "token": 1,
+                                                  "startTime": helper.proc_start_time(os.getpid()), "at": 1}
+        payload = self.orphan_check("")
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertTrue(wait_gone(idle))
+
+    def test_d_ply_64_the_owner_dead_branch_keeps_pid_and_start_time(self):
+        idle, server = self.owned_player()
+        dead = subprocess.Popen(["python3", "-c", "pass"])
+        dead.wait()
+        server.user_data["omarchy-iptv-owner"] = {"schema": 1, "pid": dead.pid, "startTime": "1", "at": 1, "token": TOKEN_A}
+        payload = self.orphan_check(TOKEN_A, pid=dead.pid)
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "owner_dead"))
+        # A live pid with another start time is a recycled pid: not the shell that claimed.
+        server.user_data["omarchy-iptv-owner"] = {"schema": 1, "pid": os.getpid(), "startTime": "1", "at": 1, "token": TOKEN_A}
+        payload = self.orphan_check(TOKEN_A)
+        self.assertEqual((payload["stopped"], payload["reason"]), (False, "owner_dead"))
+        self.assertIsNone(idle.poll())
+
+    # -- where the token goes and where it does not
+
+    def test_d_ply_64_the_token_arrives_through_the_private_channel(self):
+        """The private route: --args-from-env and OMARCHY_IPTV_ARGS
+        (Model.helperSpawn), which the shell uses for the probe, the start and
+        the restart; the variable is taken out of the environment. The orphan
+        check half proves only that the helper accepts the token that way: the
+        shell passes the orphan check's token on its argv, because
+        execDetached starts only a command list."""
+        idle, server = self.owned_player()
+        self.env(**{helper.ARGS_ENV: json.dumps(["--owner-token", TOKEN_A])})
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1",
+                                       "--owner-pid", str(os.getpid()), helper.ARGS_FLAG)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["token"], TOKEN_A)
+        self.assertNotIn(helper.ARGS_ENV, os.environ)
+        self.env(**{helper.ARGS_ENV: json.dumps(["--owner-token", TOKEN_A])})
+        code, payload, _, stderr = run("player", "orphan-check", "--socket", self.sock, "--owner-pid", str(os.getpid()),
+                                       "--grace", "0", "--ipc-timeout", "0.5", helper.ARGS_FLAG)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+
+    def test_d_ply_64_the_probe_reply_never_carries_the_token(self):
+        """The shell reads pid, start time and `at` (Model.playerOwner); the
+        token stays on the player -- in the reply of a probe that claims, and
+        of one that only reads a claim another instance wrote."""
+        idle, server = self.owned_player()
+        claimed = self.probe(TOKEN_A)
+        self.assertEqual(server.user_data["omarchy-iptv-owner"]["token"], TOKEN_A)
+        code, read, stdout, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        for payload in (claimed, read):
+            self.assertEqual(sorted(payload["owner"]), ["at", "pid", "schema", "startTime"])
+        self.assertNotIn(TOKEN_A, stdout + stderr)
+
+    def test_d_ply_64_the_shared_fixture_one_list_of_tokens_for_both_mirrors(self):
+        """tests/fixtures/owner-token.json, which Model.isOwnerToken runs too:
+        a valid token is accepted by the parser as given; an invalid one is
+        refused by is_owner_token, and on the command line by argparse,
+        without the value in the message ("" alone means no token)."""
+        for token in OWNER_TOKENS["valid"]:
+            self.assertTrue(helper.is_owner_token(token), token)
+            self.assertEqual(helper.owner_token_arg(token), token)
+        for token in OWNER_TOKENS["invalid"]:
+            with self.subTest(token=repr(token)):
+                self.assertFalse(helper.is_owner_token(token))
+                if not isinstance(token, str) or token == "":
+                    continue
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    helper.owner_token_arg(token)
+        self.assertEqual(helper.owner_token_arg(""), "")
+        bad = "0123456789ABCDEF0123456789ABCDEF"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            helper.main(["player", "orphan-check", "--socket", self.sock, "--owner-pid", "1", "--owner-token", bad])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("not an owner token", err.getvalue())
+        self.assertNotIn(bad, err.getvalue())
+
+
+
 class OrderingTest(PlayerTestCase):
     """D-PLY-11. Written as characterisation, kept as the repair's evidence.
 
@@ -2981,19 +3250,20 @@ class OrderingTest(PlayerTestCase):
         self.assertEqual(stash["seq"], 6)
         self.assertEqual(stash["verb"], "play")
 
-    def stand_down(self, zap_id, seq="9"):
+    def stand_down(self, zap_id, seq="9", *extra):
         """Drive one whole cold-start stand-down and return the reply and the
         helper's own stderr. Same gate as the defect test above: the stub
         binds its socket and then withholds the `mpv-version` reply
         `player start` waits for, so the zap provably reaches the player
-        inside the start's handshake."""
+        inside the start's handshake. `extra` is appended to the start's
+        argv (D-PLY-64: the owner pid and token)."""
         gate = os.path.join(self.dir, "release-the-handshake")
         self.env(STUB_MPV_GATE=gate)
         os.makedirs(self.runtime, 0o700, exist_ok=True)
         start = subprocess.Popen(["python3", str(ROOT / "bin" / "omarchy-iptv"), "player", "start",
                                   "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
                                   "--seq", seq, "--ipc-timeout", "5", "--lock-timeout", "5",
-                                  "--spawn-timeout", "8", "--first-load-timeout", "1"],
+                                  "--spawn-timeout", "8", "--first-load-timeout", "1", *extra],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.reap_process, start)
         deadline = time.monotonic() + 10.0
@@ -3042,6 +3312,24 @@ class OrderingTest(PlayerTestCase):
         # the line deserves revisiting.
         self.assertEqual(self.read(helper.USER_DATA_STASH)["seq"], payload["seq"])
         self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), payload["seq"])
+
+    def test_d_ply_64_a_start_that_stands_down_still_claims_for_its_instance(self):
+        """D-PLY-64, the claim's fourth writer: the stand-down branch writes
+        the owner claim itself (the claim is about who owns the player, not
+        what it plays), and with the token -- so this instance's genuine
+        disable still stops the player it started, and its successor's claim
+        would still read as reassigned. A stand-down that dropped the token
+        turns that disable into "reassigned": the channel left playing."""
+        token = "0123456789abcdef0123456789abcdef"
+        self.stand_down("t:espn.us", "9", "--owner-pid", str(os.getpid()), "--owner-token", token)
+        claim = self.read(helper.USER_DATA_OWNER)
+        self.assertEqual((claim["pid"], claim.get("token")), (os.getpid(), token))
+        code, payload, _, stderr = run("player", "orphan-check", "--socket", self.sock,
+                                       "--owner-pid", str(os.getpid()), "--owner-token", token,
+                                       "--grace", "0", "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["stopped"], payload["reason"]), (True, "owner_alive"))
+        self.assertEqual(helper.find_player(self.sock), [])
 
     def test_the_stand_down_line_says_so_when_the_newer_change_is_the_same_channel(self):
         # The other value the same field can take, driven the same way: a zap

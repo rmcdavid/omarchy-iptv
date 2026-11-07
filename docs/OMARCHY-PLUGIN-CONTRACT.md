@@ -7,7 +7,7 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 
 | Thing | Value |
 |---|---|
-| Omarchy | 4.0.6-1 (`pacman -Q omarchy`, 2026-10-31; 4.0.4-1 on 2026-10-11, 4.0.3 when this table was first written) |
+| Omarchy | 4.5.0-3, with `omarchy-settings` 4.5.0-3 (`pacman -Q`; upgraded 2026-11-06 06:26 from 4.0.6-1, which came 2026-10-31; 4.0.4-1 on 2026-10-11, 4.0.3 when this table was first written). Quickshell and Qt did not change with it. The live shell was still the 4.0.6 one in memory on 2026-11-06 (started 2026-11-02, never restarted), so a fact below marked 4.5.0 is read or measured on the installed FILES, not on a running 4.5.0 shell |
 | Quickshell | 0.3.2.r7.g2b4501a-1 (2026-10-31; 0.3.1 before) |
 | Qt | 6.12.0 (`qt6-declarative` 6.12.0-2, `qt6-base` 6.12.0-3, `qt6-wayland` 6.12.0-1 on 2026-10-31; all 6.11.2 on 2026-10-11, and a measurement below that names 6.11.2 was taken there and not repeated on 6.12.0) |
 | Hyprland | 0.56.2 |
@@ -20,8 +20,14 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 
 ## Paths
 
-- Shell source: `/usr/share/omarchy/shell/` → `shell.qml`, `Commons/` (Color,
-  Style, Util, Border singletons, module `qs.Commons`), `Ui/` (module `qs.Ui`),
+- Shell source: `/usr/share/omarchy/shell/` → `shell.qml`, `Commons/` (module
+  `qs.Commons`: on 4.5.0-3 ten singletons -- AudioNodes, Border, Color, I18n,
+  InputDevices, InputMethodState, IpcRegistry, Style, UntypedInput, Util -- and
+  two plain types, ShellIpc and Translations, READ in its qmldir; 4.0.6 had
+  Border, Color, Style and Util, the four the plugin uses. Importing
+  `qs.Commons` compiles every SINGLETON the qmldir names, used or not, so a copy
+  of the kit must hold a loadable file for each: MEASURED 2026-11-06,
+  F-HARNESS-99, `tests/a11y/make_tree.py`), `Ui/` (module `qs.Ui`),
   `services/PluginRegistry.qml` (manifest schema of record), `plugins/` (first-party).
 - Docs: `/usr/share/omarchy/shell/README.md`, `/usr/share/omarchy/shell/plugins/README.md`,
   `/usr/share/omarchy/shell/plugins/bar/README.md`.
@@ -30,9 +36,14 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 - Config: `~/.config/omarchy/shell.json`. Its mode is NOT a host constant
   (this line stated mode 0600 flatly until 2026-10-22, D-DOC-22, describing
   this machine after the plugin's own shield had run). Verified 2026-10-22 on
-  omarchy 4.0.4-1, and re-read 2026-10-31 on 4.0.6-1 (every script cited is
-  byte-identical; `shell.qml`'s FileView is unchanged, two lines further
-  down), by reading the scripts (every `script:line` below is under
+  omarchy 4.0.4-1, re-read 2026-10-31 on 4.0.6-1, and re-read 2026-11-06 on
+  4.5.0-3 (READ, F-GATE-21: `omarchy-refresh-config`, `omarchy-refresh-shell`,
+  `omarchy-reinstall-configs:19` and `omarchy-plugin-enable:85` are where
+  they were; `omarchy-upgrade-to-quattro`, `omarchy-shell-config`,
+  `omarchy-bar` and `shell.qml`'s FileView moved with their commands
+  unchanged; `omarchy bar transparent` became a wrapper over the new
+  `omarchy bar background`, and `omarchy-dock` is new), by reading the
+  scripts (every `script:line` below is under
   `/usr/share/omarchy/bin`, `shell.qml` under `/usr/share/omarchy/shell`) and
   re-running their copy lines on
   scratch files under umask 022 and 077: shipped and seeded at 0644
@@ -43,20 +54,27 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
   under 022, 0600 under 077; onto an existing file,
   `omarchy-refresh-config:33`, the file's own
   mode and inode are kept) and by the Omarchy 4 upgrade's `cp -P`
-  (`omarchy-upgrade-to-quattro:1731,1735`, `rm -f` then the copy;
-  `omarchy-upgrade-to-quattro:1750` for a
+  (`omarchy-upgrade-to-quattro:1798,1802`, `rm -f` then the copy;
+  `omarchy-upgrade-to-quattro:1819` for a
   missing file), so usually 0644; reset to 0644 IN PLACE by
   `omarchy-reinstall-configs` (`omarchy-reinstall-configs:19`,
   `cp -af /etc/skel/. ~/`: a 0600 file becomes 0644 on the same inode under
   either umask, with skel's contents); left 0600 by `omarchy-shell-config`'s
-  `commit()` (`omarchy-shell-config:57-59`, `mktemp` then `mv`: 0600 whatever
+  `commit()` (`omarchy-shell-config:60-62`, `mktemp` then `mv`: 0600 whatever
   the start mode or umask), which is what `omarchy bar defaults` and the
-  layout commands (`omarchy-bar:152,154,176,203,213,216`),
-  `omarchy-refresh-shell:9` and the upgrade's last step
-  (`omarchy-upgrade-to-quattro:2373`) run, and by this plugin's `config
-  shield`. The shell's FileView writer (`shell.qml:138-140`, `atomicWrites:
+  layout commands (`omarchy-bar:164,166,188,218`), `omarchy bar background`
+  and `omarchy bar transparent`, which since 4.5.0 calls it
+  (`omarchy-bar:250`, and `omarchy-bar:252` putting the previous background
+  back when the blur sync fails), `omarchy dock` (new in 4.5.0, which
+  sources it at `omarchy-dock:10` and commits at
+  `omarchy-dock:41,65,79,94,102`), `omarchy-refresh-shell:9` and the
+  upgrade's last step (`omarchy-upgrade-to-quattro:2454`) run, by the 4.5.0
+  layout migrations 1790528634, 1791968925 and 1791969355 (each `mktemp`,
+  then `mv` over the file, READ; 0600 under umask 022 and 077 measured by the
+  host-round map on scratch files), and by this plugin's `config
+  shield`. The shell's FileView writer (`shell.qml:149-151`, `atomicWrites:
   true`), the one behind plugin settings, `omarchy bar set`
-  (`omarchy-bar:361` -> `omarchy-shell shell setBarWidget`) and
+  (`omarchy-bar:453` -> `omarchy-shell shell setBarWidget`) and
   `omarchy-plugin-enable:85`, keeps whatever mode it finds (D-SINK-18,
   measured 2026-10-09; omacom/omarchy#14748). `tests/test_doc_host_mode.py`
   pins each script citation above to the command at that line on this
@@ -65,9 +83,29 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
   under `plugins[]`. Third-party enabled ⇔ id present in shell.json.
 - Menu extension: `~/.config/omarchy/extensions/omarchy-menu.jsonc` (hot reload).
 - Keybindings: `~/.config/hypr/bindings.lua`, e.g.
-  `o.bind("SUPER + SHIFT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdavid.iptv")`.
+  `o.bind("SUPER + ALT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdavid.iptv")`.
   Existing overlay bindings for reference: `SUPER CTRL + V` clipboard, `SUPER CTRL + E` emojis.
-  Verified: `SUPER SHIFT + T` is FREE; `SUPER CTRL + T` is taken (Activity); `SUPER + T` toggles floating.
+  READ on omarchy-settings 4.5.0-3 (2026-11-06, D-DOC-35), in
+  `/usr/share/omarchy/default/hypr/bindings/`: `SUPER + SHIFT + T` is stock
+  "Activity" (`utilities.lua:120`; on 4.0.6 Activity was `SUPER + CTRL + T`, which
+  is now "Theme menu", `utilities.lua:17`), `SUPER + SHIFT + I` is "Switch input
+  language back" (`input-method.lua:20`), `SUPER + SHIFT + Q` is "Calculator"
+  (`applications.lua:14`, inside `o.preinstalled_bindings_enabled()`, on by
+  default), and `SUPER + T` toggles floating. `o.bind` does not unbind first
+  (`default/hypr/helpers.lua:138`; `o.rebind` does, `:154`), so a chord stock also
+  binds is registered twice, and stock itself binds `ALT + TAB` twice
+  (`tiling.lua:56-59`) on the premise that one press runs every bind on a chord
+  (READ; not pressed here). The SUPER + SHIFT letters stock leaves free on
+  4.5.0-3 are H J K L R U V Z (4.0.6: H I J K L Q R T U V Z), and `SUPER + ALT + T`
+  is free on 4.0.4, 4.0.6 and 4.5.0. `tests/test_host_bindings.py` parses every
+  stock `o.bind`, `o.rebind`, `o.bind_toggle` and `o.bind_hold` chord, the
+  `code:NN` loops included, and is red when a chord `contrib/bindings.lua` binds,
+  suggests or calls free, or `README.md` names for the plugin, is stock-bound.
+  MEASURED with a read-only `hyprctl -j binds` on 2026-11-06: two binds on
+  `SUPER + SHIFT + T`, stock Activity and the owner's own IPTV line. 4.5.0 also
+  adds a `{ ipc = "target.method" }` dispatcher form (`helpers.lua:106-108`)
+  that splits at the FIRST dot, so it cannot name `io.github.rmcdavid.iptv`; the
+  `omarchy-shell` string form above is unaffected (READ).
   Check conflicts with `omarchy menu keybindings --print` (format is `SUPER CTRL + X`).
 - Installed third-party examples to copy patterns from:
   `~/.config/omarchy/plugins/no.koka.uptime-monitor/` (BarWidget.qml + Panel.qml + BarWidget.spec.qml),
@@ -86,7 +124,11 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 - Optional: `author`, `license`, `description`, `homepage`, `keepLoaded: true`
   (keeps an overlay/service mounted between summons and across hot-reload).
 - `barWidget` block: `displayName`, `description`, `category`, `allowMultiple`,
-  `defaultSection` (left|center|right), `defaults: {key: value}`, and
+  `defaultSection` (left|center|right on 4.0.x; on 4.5.0-3 any of
+  `Util.barSections`, `Commons/Util.qml:179`, the six sections left, centerBegin,
+  center, centerEnd, right, tray, `services/PluginRegistry.qml:75`, and a
+  manifest's `center` lands in centerEnd, beside the clock, `:194-200`; READ),
+  `defaults: {key: value}`, and
   `schema: [{key, type: string|integer|boolean, label, min, max, step, defaultValue}]`.
   Values are edited with `omarchy bar set <id> <key> <value> [--json]` and land inline
   on the shell.json entry; the widget reads them through `settings` / `setting(name, fallback)`.
@@ -216,6 +258,19 @@ Local install for QA on this machine: copy or `git clone` the repo to
 mpv 0.41 supports `--input-ipc-server=<path>`, `--force-window=immediate`,
 `--title=<s>`, `--force-media-title=<s>`, `--profile=<p>` (`low-latency`, `fast`),
 `--user-agent`, `--http-header-fields`, `--referrer`, `--hwdec=auto-safe`.
+**A system layer exists since omarchy-settings 4.5.0-3** (READ, 2026-11-06,
+D-HOST-13): `/etc/mpv/mpv.conf`, owned by `omarchy-settings` (`pacman -Qo`),
+absent from 4.0.6-1's file list, holds one option, `hwdec=auto-safe`. mpv
+0.41.0's sysconfdir is `/etc/mpv`, and the plugin passes neither `--no-config`
+nor `--hwdec`, so every player it starts on 4.5.0 decodes in hardware where
+mpv's own default was none; the owner accepted that. `hwdec` is "allowed" in
+`tests/fixtures/mpv-options.json`. `tests/test_system_mpv_conf.py` is red when
+that file sets an option the fixture does not classify "allowed", opens any
+profile section, or when `/etc/mpv` gains an entry beside `mpv.conf` and
+`scripts/` (which holds `mpris.so`, from before 4.5.0, kept out by the pinned
+`--load-scripts=no`). `omarchy-reinstall-configs` now also runs
+`omarchy-install-video-decode`, which writes a hwdec line into the USER's
+`~/.config/mpv/mpv.conf`, on Snapdragon machines only (READ).
 `--wayland-app-id=<s>` is available (verified; default "mpv"), use it for window rules / focus. JSON IPC over the socket: `{"command":["loadfile",url,"replace"]}`,
 `["stop"]`, `["quit"]`, `["get_property","media-title"]`, `["observe_property",1,"idle-active"]`.
 Drive the socket from the Python helper (stdlib `socket`); socat exists here but is not an omarchy dependency, so do not rely on it.
@@ -230,6 +285,11 @@ this.
 entry with the stored one and returns `false` WITHOUT persisting when nothing
 changed (line 1117). A `false` return therefore means "already stored", not
 "the write failed". Treating it as a failure produces a spurious error.
+[2026-11-06, omarchy 4.5.0-3, READ: the function is at `shell.qml:1107-1146`,
+its `return false` at 1143 and `persistShellConfig` at 118; it now walks
+`Util.barSections`, the six sections (`shell.qml:1114`), not left, center and
+right; `publicBarConfig()` still reads `shell.barConfig` (`:340`), so 4.5.0
+does not carry the upstream echo fix and is still one write behind.]
 
 On a real change it calls `persistShellConfig` (line 111), which assigns
 `shellConfig` and writes the file. `onShellConfigChanged` (line 69) emits
@@ -407,57 +467,181 @@ as the verified behaviour of every Omarchy up to and including 4.0.6
 (re-read 2026-10-31: the publish chain in `shell.qml` is unchanged from
 4.0.4-1).
 
-## Verified host renderers for the strings the plugin hands over (2026-10-02)
+## Verified host renderers for the strings the plugin hands over (2026-10-02; re-anchored on omarchy 4.5.0-3, 2026-11-06)
 
 The plugin hands the host five kinds of string, most of them carrying
 provider data (field labels are the plugin's own literals), and each is
 rendered by a host file the plugin cannot change. Read on omarchy 4.0.4 on
-2026-10-02 during D-TEXT-1 (the line numbers re-read on 4.0.6-1 on
-2026-10-31: every declaration unchanged, each one line further down and the
-tooltip fourteen), and pinned by `tests/test_host_text_format.py`,
-which goes red on this machine when a host update changes or removes the
-declaration on one of these elements -- each pin is anchored on the
-element, by id or by the property that binds the plugin's string. A moved
-line stays green: the line numbers below are for the reader, not the test.
-A red there is a re-measurement, not a failure of this plugin:
+2026-10-02 during D-TEXT-1, re-read on 4.0.6-1 on 2026-10-31, and re-read on
+4.5.0-3 on 2026-11-06 (F-GATE-21), which replaced the notification engine:
+four rows keep their declaration (the tooltip moved from `Bar.qml:1352` to
+`:1922`), and the toast is a different file with a different renderer in
+front of it. Pinned by `tests/test_host_text_format.py`, which goes red on
+this machine when a host update changes or removes the declaration on one
+of these elements -- each pin is anchored on the element, by id or by the
+property that binds the plugin's string -- and which also RUNS the toast's
+markup grammar below in Qt's own engine over the installed files
+(`tests/host_v4.py`) and holds every link opener under
+`plugins/notifications/` to a census. A moved line stays green: the line
+numbers below are for the reader, not the test. A red there is a
+re-measurement, not a failure of this plugin:
 
-| string | host file | format |
+| string | host file (omarchy 4.5.0-3) | format |
 |---|---|---|
 | group names, field labels, mpv track titles (`PanelSectionHeader`) | `Ui/PanelSectionHeader.qml:18` | `Text.PlainText` |
 | confirm-dialog message, and its button labels (`ConfirmDialog`) | `Ui/ConfirmDialog.qml:73` (message), `:110` (labels) | `Text.PlainText` |
-| the bar widget's tooltip | `plugins/bar/Bar.qml:1352` | `Text.PlainText` |
+| the bar widget's tooltip | `plugins/bar/Bar.qml:1922` | `Text.PlainText` |
 | mpv's window title, the channel name after the first zap | `plugins/bar/widgets/ActiveWindow.qml:33` | `Text.PlainText` |
-| a failure toast's summary / body (`omarchy-notification-send`) | `plugins/notifications/components/NotificationCard.qml:167` / `:185` | summary `Text.PlainText`; body `Text.StyledText` behind `NotificationLogic.js` `stripImageTags` |
+| a toast's summary (the plugin's titles are literals) | `plugins/notifications/Toast.qml:390`, `text:` at `:397` from `card.row.summary` | `Text.PlainText`; nothing decodes the summary |
+| a toast's body | `plugins/notifications/Toast.qml:506`, `text:` at `:507` from `card.row.bodyRich`, which `Store.js:120` sets to `Markup.render(body)` | `Text.StyledText`, AFTER the host's own markup grammar below |
 
-So a `<b>` in a channel name can restyle a failure toast's body and
-nothing else; no host renderer fetches an image out of a plugin string.
-The daemon that owns `org.freedesktop.Notifications` here is the shell
-itself (`busctl --user status org.freedesktop.Notifications` names the
-quickshell pid), not mako or dunst, so Pango markup rules do not apply.
+The body is the one markup-capable Text under `plugins/notifications/`
+(MEASURED 2026-11-06 by calling the plugin's own text-format guard,
+`scripts/check-text-format.py`, over the host's files: 9 Text blocks, every
+one declaring a format, one not PlainText), and the critic's parse of the
+whole 4.5.0 shell finds it the only StyledText there: 335 Text-like
+elements, 82 that declare no format (AutoText), all binding glyphs, gallery
+text or host I18n strings and none a notification, a window title or a
+plugin string. On 4.0.6 the toast was
+`plugins/notifications/components/NotificationCard.qml:167` / `:185`, the
+body StyledText behind `NotificationLogic.js` `stripImageTags`; both files
+are gone in 4.5.0. The daemon that owns `org.freedesktop.Notifications` here
+is the shell itself (`busctl --user status org.freedesktop.Notifications`
+names the quickshell pid), not mako or dunst, so Pango markup rules do not
+apply.
 
-[2026-10-29, D-SINK-49: the plugin no longer relies on "nothing else".
-The server advertises `bodyMarkupSupported` and `bodyHyperlinksSupported`
-(`plugins/notifications/Service.qml:936`), under which the Desktop
-Notifications spec leaves escaping to the client, and a provider's
-`<a href>`, `<font>` or `<br>` drew a link-styled run, recoloured and
-resized text and extra lines inside the plugin's own card. `notifyArgv`
-now escapes every body (`&`, `<`, `>`, `Model.markupEscape`), and
-StyledText decodes the three entities, so the body draws exactly as its
-plain text: measured on Qt 6.11.2 offscreen in the QML spec, equal width
-and height for every case, where an unescaped bare `&` drops what follows
-it (`Q&A` drew as `Q`). The summary is PlainText and is not escaped. Read
-on omarchy 4.0.4 on 2026-10-29, and still so on 4.0.6-1 on 2026-10-31:
-nothing under `plugins/notifications/`
-handles a link (no `onLinkActivated`, `linkActivated`, `linkAt`,
-`hoveredLink` or `openUrlExternally`; the one hit in the whole shell is
-`plugins/panels/dropbox/Service.qml`), pinned by
+**The 4.5.0 toast body grammar** (`plugins/notifications/Markup.js`, READ,
+and MEASURED in Qt 6.12.0's engine over the installed files by
+`tests/test_host_text_format.py`'s behaviour case, 2026-11-06):
+
+- `decodeEntities` (`Markup.js:13-37`) DECODES before anything is escaped:
+  up to three passes of `&#N;`, `&#xH;` and the six names of `ENTITIES`
+  (`:8`: `amp lt gt quot apos nbsp`, `nbsp` to a plain space). A sender's
+  own escaping is undone: `&amp;amp;lt;` decodes to `<`, a fourth level
+  stays `&lt;`, and `&copy;` and `&#0;` stay as written.
+- `escapeAll` (`:39-44`) then escapes `& < >`, and `unescapeAllowed`
+  (`:48-65`) puts back `b i u s em strong` (`ALLOWED`, `:6`; `render` draws
+  `em` as `i`), `br`, and an `<a href="...">` whose href
+  `Security.safeExternalUrl` accepts; a refused anchor keeps its label and
+  loses its click. Nothing else survives: `<img>`, `<font>` and `<script>`
+  draw as text, so no host renderer fetches an image out of a plugin string.
+- `linkify` (`:87-92`) makes every bare `https?://` run a link when the body
+  has no anchor of its own, gated on `Security.safeHttpUrl` of its DECODED
+  form, so `http&#58;//h.example/p` becomes a live link to
+  `http://h.example/p`.
+- `Security.safeExternalUrl` (`Security.js:40`) is `safeMailtoUrl` for a
+  `mailto:` (one address, no query, `:33-39`) and `safeHttpUrl` otherwise
+  (`:19-32`): http or https, no userinfo, no control character, quote or
+  angle bracket, no `%00-%1f`, `%7f`, `%25` or `%5c`, and a dotted host
+  whose last label is not numeric (so no IP literal and no `localhost`).
+- A click on a link in the body opens it: `onLinkActivated: function(url)
+  { card.linkOpened(); Security.openExternalUrl(url) }` (`Toast.qml:516`),
+  and `openExternalUrl` calls `Qt.openUrlExternally` only for what
+  `safeExternalUrl` returns (`Security.js:45-48`).
+- A click on the CARD runs `activate` (`Service.qml:1071-1094`): the sender's
+  own default action, else its window, else the source's site, else
+  `row.link`, the first URL `Detect.links` finds in the summary and the body
+  that `safeHttpUrl` accepts (`Detect.js:78-89`, taken by `Store.snapshot`),
+  else it focuses the app by name. `notifications.act` (SUPER + comma) runs
+  that click when it is the card's one offer (`Service.qml:859-869`). The
+  plugin posts as app `IPTV`, which is no dotted host, so its cards have no
+  source site (`Markup.hostname("IPTV")` is empty, measured).
+- The server still advertises `bodyMarkupSupported` and
+  `bodyHyperlinksSupported` (`Service.qml:1358-1359`).
+
+So on 4.5.0 escaping a body's entities no longer neutralises its markup.
+The host-round map measured it (Qt 6.12.0 offscreen, 45 adversarial bodies
+from 0.17.0's `notifyArgv`, laid out as `Toast.qml` declares the body and
+read with `Text.linkAt`): 4 live links on 4.5.0 and none on the 4.0.6 path
+-- an anchor whose scheme colon is a decimal entity, the same in hex, a
+`mailto:` anchor, and a bare URL with an entity-spelled colon -- and 17 of
+the 45 laid out differently from their plain text (bold, italic, extra
+lines). A literal `://` URL is cut to its host by the plugin's own
+redaction before it reaches the host, which breaks its anchor. The plugin's
+answer is the owner's (OD1); this section records the host.
+
+[2026-10-29, D-SINK-49, on omarchy 4.0.x: the plugin no longer relies on
+"nothing else". The server advertises `bodyMarkupSupported` and
+`bodyHyperlinksSupported` (`plugins/notifications/Service.qml:936` on
+4.0.6), under which the Desktop Notifications spec leaves escaping to the
+client, and a provider's `<a href>`, `<font>` or `<br>` drew a link-styled
+run, recoloured and resized text and extra lines inside the plugin's own
+card. `notifyArgv` now escapes every body (`&`, `<`, `>`,
+`Model.markupEscape`), and StyledText decodes the three entities, so the
+body draws exactly as its plain text: measured on Qt 6.11.2 offscreen in the
+QML spec, equal width and height for every case, where an unescaped bare
+`&` drops what follows it (`Q&A` drew as `Q`). The summary is PlainText and
+is not escaped. Read on omarchy 4.0.4 on 2026-10-29, and still so on 4.0.6-1
+on 2026-10-31: nothing under `plugins/notifications/` handles a link (no
+`onLinkActivated`, `linkActivated`, `linkAt`, `hoveredLink` or
+`openUrlExternally`; the one hit in the whole shell is
+`plugins/panels/dropbox/Service.qml`), pinned then by
 `tests/test_host_text_format.py`'s second test, proven red by adding
 `onLinkActivated: Qt.openUrlExternally(link)` to the body Text of a copy.
 `NotificationLogic.styledBody` also turns a line break in a body into
 `<br/>`, and the host keeps every body in its history files under
 `~/.local/state/omarchy/notifications/` as `JSON.stringify` writes it (DEL
 and C1 controls raw), which is why the name in a body is redacted as the
-guide row's is (F-SINK-14) and carries no control character (F-SINK-16).]
+guide row's is (F-SINK-14) and carries no control character (F-SINK-16).
+**[2026-11-06: on 4.5.0-3 "StyledText decodes the three entities, so the
+body draws exactly as its plain text" and "nothing under
+`plugins/notifications/` handles a link" are both FALSE -- see the grammar
+above; that test was replaced by the grammar pins and the opener census.]**]
+
+**Code detection (D-HOST-12, READ, and MEASURED in Qt 6.12.0's engine over
+the installed files by `tests/test_host_notify_codes.py`, 2026-11-06).**
+Since 4.5.0 every card's summary AND body are scanned for a verification
+code (`Detect.scan`, `Detect.js:93-102`, summary and body joined). A code
+word (`CODE_WORDS`, `Detect.js:8`: code, otp, one-time, verification,
+verify, passcode, pin, 2fa, two-factor, security key, confirm,
+confirmation) within 24 characters before or 72 after (`NEAR_BEFORE`,
+`NEAR_AFTER`, `:18-19`) a run of 4 to 8 digits, a two-part `24 365`, or an
+uppercase alphanumeric such as `S01E02` (`:11`, `:14`) makes the card a
+verification card; a year (`:63`) and a capitalised product name before
+`Code` ("Claude Code", `:23-29`) do not. Such a card passes Do Not Disturb
+(`Delivery.quietReason`, `Delivery.js:45-50`, an unconditional clause:
+migration `1792648436.sh:14` writes `"codesBypassQuiet":true` into
+`quiet.json` when it carries 4.0's DND over, and no file of the 4.5.0 shell
+reads that key, grep), gains a Copy code deed (`Delivery.deeds`, `:21-33`);
+`notifications.act` (SUPER + comma) with that one deed and no click target
+runs it (`Service.qml:866`), copying the digits with `wl-copy --sensitive`
+(`:1112-1118`, cleared after 60 s when the clipboard still holds them,
+`:1121-1137`) and closing the card 0.9 s later (`:1151-1153`); and its
+stored live and history rows read `Verification notification` /
+`[redacted]` with every other string field, the app name included, blanked
+(`Store.sanitiseForPersistence`, `Store.js:289-307`). So the plugin's own
+Stream failed card for a channel named `PIN 1234 Adult`, `Confirm 4567`,
+`2FA News 123456`, `Code Black S01E02` or `Pin Up Kids 24 365` behaves that
+way (ten names measured caught, seven left alone, among them `Code Black
+2017`, `Claude Code 2468` and `Verified Sports 5555`); 0 of the owner's
+1,496 channel names trigger it (the map). The lead accepted it with no
+plugin change (every plugin-side lever costs fidelity or information); the
+tripwire pins `CODE_WORDS`, the windows, the shapes, `quietReason`'s code
+clause, the copy deed and the persistence redaction, so a host change
+reopens the question.
+
+**Persistence (READ, 2026-11-06).** The host keeps three files in
+`~/.local/state/omarchy/notifications/`: `live.json` (the cards on screen,
+restored after a restart), `history.json` (closed cards, newest first) and
+`quiet.json` (Do Not Disturb), `Service.qml:1163-1170`. A once-only step
+makes the directory 0700 and each file 0600 before anything writes it, and
+the FileViews write atomically, keeping that mode (`Service.qml:1284-1330`).
+History keeps at most 100 rows and 24 hours (`HISTORY_LIMIT`,
+`RETENTION_HOURS`, `Store.js:149-151`), a history row cut to 4,096
+characters and a live row to 16,384 (`:154-155`). A row is stored as SENT
+(summary, body and the raw body), and a restore re-renders it through the
+grammar above (`Store.js:120`, `:126-138`), so a stored body draws its links
+again. A card sent with the freedesktop `transient` hint is kept out of all
+three files (`Service.qml:1179-1190`).
+
+**`omarchy-notification-send` (READ, the 4.5.0-3 package's `/usr/bin`,
+2026-11-06).** It is not byte-identical to 4.0.6's (211 lines then, 284
+now): it adds `--transient` (the `transient` hint above, `:54-55`,
+`:202-206`) and `--action <label> <program> [words...]` with `--with
+<args...>` (up to three buttons, the `omarchy-actions` hint, which
+`Security.parseExecActions` holds to the click's argv rules), and its
+`known_flag` (`:118`) covers them. The plugin uses none of them; a body
+that carries a name is always quoted, so it can never be read as a flag.
 
 [2026-10-29, F-SINK-14 and F-SINK-16: the window-title row above carries
 the SHOWN name -- control characters dropped, URLs redacted by the helper's
@@ -559,8 +743,9 @@ copies the existing file to `shell.json.bak.<epoch>` before replacing it
 `omarchy-refresh-config:36`, only when the file was already the default),
 and the upgrade's `backup_config_file`
 copies it to `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
-(`omarchy-upgrade-to-quattro:1654`, `cp -af`; the suffix is a `date
-+%Y%m%d%H%M%S` set at `omarchy-upgrade-to-quattro:390`) before `rm -f` and
+(`omarchy-upgrade-to-quattro:1721`, `cp -af`; the suffix is a `date
++%Y%m%d%H%M%S` set at `omarchy-upgrade-to-quattro:391`; 1654 and 390 on
+4.0.6-1) before `rm -f` and
 `cp -P`. Each holds the
 plugin's entry as it was, URLs included, and nothing rewrites it afterwards.
 Mode, measured on scratch copies under umask 022 and 077: `cp -f` gives the
@@ -666,8 +851,36 @@ here only when Arch ships a Qt built past 2026-09-15 on 6.11, or a 6.12.1;
 `test_readOnlyFieldPremises` keeps the plugin's own field read-only
 whatever it says.
 
+**[2026-11-06, omarchy 4.5.0-3, READ: the premise "no editable `TextInput`
+exists in the shell while the plugin's form is open" is no longer one the
+plugin can make true.** 4.5.0 adds `Ui/FilterInput.qml`, a raw `TextInput`
+(`:6`) with no `readOnly`, and the keepLoaded menu (`plugins/menu/manifest.json:12`)
+declares one inside its `OverlayWindow` with no Loader around it
+(`plugins/menu/Menu.qml:1273`, `:1403`), read-only only while a delete is being
+confirmed (`:1410`). So the read below happens in the shell from its start,
+whether or not this plugin is installed; the plugin's own fields stay
+read-only and its behaviour is unchanged. NOT measured: it needs a real
+Wayland clipboard offer. The table below is 4.0.6-1's; the fresh grep over
+the same shape on 4.5.0-3 (`TextField {`, `TextInput {`, `FilterInput {`)
+finds twenty-one declarations: `plugins/agents/Panel.qml:1262, 1330, 1887`,
+`plugins/dev-gallery/GalleryPanel.qml:1338, 1359`, `plugins/lock/LockView.qml:152`
+(`readOnly: root.authenticatingPassword`, `:166`), `plugins/menu/Menu.qml:1403`,
+`plugins/panels/clock/Panel.qml:402, 426`, `plugins/panels/elsewhen/CityRow.qml:254`,
+`plugins/panels/elsewhen/CitySearch.qml:102`, `plugins/panels/network/Panel.qml:2012, 2036`,
+`plugins/panels/tailscale/Panel.qml:736, 825`, `plugins/panels/weather/Panel.qml:671`,
+`plugins/polkit/PolkitAgent.qml:314` (`:328`), `Ui/MultiSelect.qml:418`,
+`Ui/SearchableDropdown.qml:210`, and the kit's own `Ui/FilterInput.qml:6` and
+`Ui/TextField.qml:19`. Also new since 4.5.0: CJK input-method engines
+(fcitx5-mozc, -hangul, -chinese-addons and -chewing; fcitx5 itself, with
+`QT_IM_MODULE=fcitx`, has been the session's compose service since
+omarchy-settings 4.0.4, and the dead-key half was measured on 2026-10-11),
+and stock binds `SUPER + I` / `SUPER + SHIFT + I` to cycle input languages
+(`input-method.lua:19-20`), so a CJK composed commit, the premise at the end
+of this section, can now be observed; it has not been (D-HOST-14).]**
+
 **The host fact.** `/usr/share/omarchy/shell/Ui/TextField.qml` (omarchy
-4.0.4, and 4.0.6-1 on 2026-10-31, where its one change is `Commons.Color`)
+4.0.4, and 4.0.6-1 on 2026-10-31, where its one change is `Commons.Color`;
+unchanged on 4.5.0-3)
 is `TextField { ... }` from `QtQuick.Controls` with the kit's chrome
 and `echoMode: password ? TextInput.Password : TextInput.Normal`; it never
 sets `readOnly`, so every instance is editable unless its caller says
@@ -789,6 +1002,13 @@ after checking the function still ends at line 1117):
   any supported command fills `plugins[]` is UNVERIFIED.
 - **C. Handing back exactly what is stored** returns `false` and persists
   nothing (the one-write-behind section above; `shell.qml:1114`).
+  [2026-11-06, 4.5.0-3, READ, sha256 prefix `d6d99af10ca020ca`: the same
+  three facts at `shell.qml:1107-1146`, `next` at 1121-1122, `if
+  (!foundInLayout)` at 1131, `if (!dirty) return false` at 1143; the
+  function walks `Util.barSections` (1114), so an entry in centerBegin,
+  centerEnd or tray is found and written by the host; `setBarWidget` is at
+  `services/PluginRegistry.qml:360-402` with `entry[String(key)] = value` at
+  397, and `var entry = { id: key }` at 558. Re-run with `sed -n 1107,1146p`.]
 
 [2026-10-31: the line numbers in this record are 4.0.4-1's, where it was
 measured. On omarchy 4.0.6-1 (sha256 prefix `1c390bb1703a8372`) the function
@@ -1256,6 +1476,75 @@ be written (error N)` on every failure and emits
 key scenario's F segment drives it with the state directory 0500 under a
 running shell (F4: logged with no `://` in the line, signalled exactly once;
 lane B on lane-key-t2, 2026-10-12).
+
+## Other omarchy 4.5.0-3 host facts the plugin depends on (2026-11-06)
+
+Read on the installed files (byte-identical to the 4.5.0-3 package
+extraction) unless marked MEASURED; the live shell was still the 4.0.6 one
+in memory that day, so none of these was observed on a running 4.5.0 shell.
+
+- **Six bar sections** (READ). `Commons/Util.qml:179`: `barSections` is
+  left, centerBegin, center, centerEnd, right, tray. The host enables, draws
+  and writes a widget in any of them (`shell.qml:1114`, `updateEntryInline`;
+  `services/PluginRegistry.qml:75` and `:200`; `omarchy bar` validates all
+  six and `omarchy plugin add` offers them), and migration
+  `1791969355.sh` (run on this machine on 2026-11-06 06:28:45) splits the old
+  center section around its `centerAnchor`, moving widgets before the clock
+  into centerBegin and after it into centerEnd. A plugin that walks only
+  left, center and right reads no settings for an entry in the other three
+  (the map MEASURED that on 0.17.0's model; the plugin side is another
+  lane's).
+- **Titlebars on floating workspaces** (READ). `default/hypr/workspace-modes.lua`
+  (new in 4.5.0) floats and tags every window on a floating workspace
+  (`:13-26`), and the `omarchy-hyprland-titlebars` 0.2.2-2 package, installed
+  by migration `1791403310.sh`, draws a titlebar over each such window with
+  its WINDOW TITLE (`titlebars.so`, `:26`). For the player that title is the
+  channel name, by design (CLAUDE.md rule 5, the MPRIS entry). It is drawn
+  by the compositor plugin, which imports no Pango (`nm -D`), so it cannot
+  fetch anything; whether it reads markup in a title is UNVERIFIED, and
+  picture in picture on such a workspace is unmeasured.
+- **The dock keys windows by `appId`** (READ). `plugins/dock/Dock.qml:63-74`
+  (a new service plugin) groups toplevels by their Wayland `appId` and never
+  draws a window title, so the player shows as `omarchy-iptv`; every Text it
+  declares is PlainText (the critic's parse).
+- **`IpcRegistry` and `ShellIpc`** (READ). `Commons/ShellIpc.qml` is an
+  `IpcHandler` that registers itself with the `Commons/IpcRegistry.qml`
+  singleton, so `omarchy-shell` can answer a handler over the shell's own
+  socket instead of starting a `qs ipc` client per call; it answers only a
+  live, enabled handler's DECLARED functions, by name. The plugin's own
+  `IpcHandler` is untouched: each of its verbs still goes to `qs ipc` after
+  the socket answers that it has no such handler. Adopting `ShellIpc` would
+  break 4.0.6, which has no such type (MEASURED in the 2026-11-06 session
+  log: the 4.5.0 dock and elsewhen failed to load into the running 4.0.6
+  shell with "ShellIpc is not a type").
+- **`I18n`** (READ). `Commons/I18n.qml` is the shell's string catalog: the
+  language named in `~/.config/omarchy/language` (English when absent)
+  layered over `default/i18n/en/shell.json`, read synchronously through four
+  FileViews, with `t(key, fallback)`, `tn` and `formatNumber`, and
+  `rightToLeft` from the locale registry. The kit's own defaults now come
+  from it (`Ui/ConfirmDialog.qml:10-11`: `cancelText` and `confirmText`;
+  the guide sets both); `Commons/Translations.qml` is the same for a
+  plugin's own catalogs, and the plugin uses neither.
+- **`UntypedInput` and `InputMethodState`** (READ). Two new singletons that
+  start processes at shell start: `UntypedInput` drives the default input's
+  volume through `wpctl` and watches `pactl subscribe` when Pipewire gives
+  that node no typed audio, and `InputMethodState` runs
+  `default/input-methods/indicator.py` for the keyboard widget's
+  input-method state. Neither reads anything of the plugin's. Their being
+  singletons is what made the a11y tree builder transform or stub them
+  (F-HARNESS-99): `UntypedInput` is stubbed in that tree, because it stands
+  on `Quickshell.Services.Pipewire`.
+- **The menu's filter is an always-present editable `TextInput`** (READ):
+  `Ui/FilterInput.qml:6`, used by the keepLoaded menu at
+  `plugins/menu/Menu.qml:1403`, with no Loader around it; see the TextField
+  section below for what that does to D-CLIP-1's premise.
+- **`Style.reduceMotion` and `Style.duration(ms)`** (READ). `Commons/Style.qml:363-367`;
+  set from `hyprctl -j getoption animations:enabled` (`:477-490`) and
+  refreshed on Hyprland's `configreloaded` event (`:494-499`). Neither
+  exists on 4.0.6, where `Style.duration` is undefined.
+- **The stock chords and the system mpv.conf**: see "Keybindings" under
+  Paths and "mpv facts" above.
+
 
 ## The host's load patch: `//@ pragma OmarchyLoadPatch` rewrites a plugin's `import QtQuick` (verified 2026-11-01)
 

@@ -38,7 +38,7 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | 5 | EPG | QML parses XMLTV; helper emits full schedule; helper emits now/next | **Helper parses XMLTV (plain or gzip) into `epg-now.json` (now/next per tvg-id); a 5-minute timer re-runs the cheap `epg --now-only` recompute from the cached programme window; downloads honor a TTL** | The overlay never touches XML (US6, "never blocks on EPG"). The file stays small: measured at about 190 bytes a channel with titles alone and about 650 with a description, category and episode on now and next (D-EPG-11, 2026-10-22), so 1.9-6.4 MB at 10k channels; the shell indexes it by line and parses one entry when a row asks, never the document whole. |
 | 6 | Favorites/recents identity | tvg-id; URL; name; hash of both | **`t:<tvg-id>` when that tvg-id is unique in the playlist, else `u:<fnv1a32(url)>`, `#n` suffix for exact duplicates** | tvg-id survives URL/token rotation (Xtream providers), but HD/SD variants often share one tvg-id, so uniqueness is checked per playlist and the URL hash is the fallback. Ids are assigned by the helper (it sees the whole list); `Model.channelId` mirrors the per-row rule. FNV-1a is trivial in both languages and pinned by shared test vectors. **[2026-11-03: this row states id scheme 1, and the code has cited it for scheme 2 since 482a21e (2026-09-16, D-ID-1), which this row never said: a row that would take `u:` takes `n:<fnv1a32(normalize_id_text(name))>` instead when its name keys one and that key is unique in the playlist, so a password change inside the URL no longer moves its id. D-ID-2 is the accepted limit of that, and D-ID-5 the shell's remap moving references across a gap between the two mirrors' folds, fixed on `dev` the same day: the remap reads the `id` the helper wrote on each row instead of refolding the name, and both folds' whitespace is enumerated (their lower-casing still differs, D-SRC-12, but the shell no longer derives an id from it). `Model.channelId` returns that `id` when the row carries one.]** |
 | 7 | Settings propagation | widget pushes `settings` into the service; service reads `shell.barConfig`; helper reads shell.json | **Service derives its settings from `shell.barConfig` (`Model.findBarEntry`)** | The host refreshes every scoped api's `barConfig` on each shell.json change (`syncPluginApis`, lines 875-881, triggered by `onShellConfigChanged`, lines 67-71), so `omarchy bar set` propagates without a widget instance and regardless of which bar hosts us. Bindings on `playlistUrl`/`epgUrl` re-run the helper (debounced); `refreshMinutes` re-arms the timer; `mpvArgs` applies on next launch. The widget reads only its view-side keys (`showChannelName`) from injected `settings`. |
-| 8 | `keepLoaded` | on / off | **on (manifest-wide flag)** | Overlay: window mounted between summons -> open under 150 ms (clipboard/emojis do this). Service: survives `rescanPlugins`, so installing another plugin does not kill playback. Cost: `Service.qml` edits need `omarchy restart shell` (README says so). |
+| 8 | `keepLoaded` | on / off | **on (manifest-wide flag)** | Overlay: window mounted between summons -> open under 150 ms (clipboard/emojis do this). Service: survives `rescanPlugins`, so installing another plugin does not kill playback. **[2026-11-06, D-PLY-64: it does not survive the host reading the plugin as disabled, even for a moment. Omarchy 4.5.0's migrations replaced `shell.json` while they ran, and the host destroyed the Service and created a new one in the same shell. The player's owner claim now names the Service object as well as the shell, so the new one keeps the channel (ARCHITECTURE-PLAYER 4.14).]** Cost: `Service.qml` edits need `omarchy restart shell` (README says so). |
 | 9 | Guide keyboard model | j/k as commands; modal; Ctrl-chords | **Letters always filter; arrows or Ctrl+J/K move; Ctrl+F favorite; Ctrl+R refresh; Tab cycles groups; Esc peels filter -> group -> close** | PRODUCT.md asks for both "type to search" and j/k. Search-as-you-type is the first-party overlay convention (clipboard/emojis); plain `f`/`r`/`j`/`k` would eat the first letter of "france 24". Final say is the UX designer's (see Open risks). |
 | 10 | Helper error shape | bare string; structured object | **`{"ok": false, "kind": "...", "error": {"code": "...", "message": "..."}}` everywhere** | The guide shows `error.message` verbatim (US1) and can switch on `code`. `Model.parseHelperStatus` upgrades a bare string to the object form, so the stub contract in the task brief still parses. |
 | 11 | `#EXTGRP` scope | next entry only; until next `#EXTGRP` | **Persists until the next `#EXTGRP`; `group-title` wins** | Matches VLC's m3u demuxer, which most playlist generators target. |
@@ -1431,8 +1431,8 @@ is 0644, and `omarchy-refresh-config` copies it with `cp -f`: reproduced into
 a scratch directory, reading the real source read-only, a fresh copy is 644
 under umask 022 and 600 under umask 077, while a copy onto an EXISTING file
 keeps that file's mode. A purpose-built Quickshell `FileView` probe with
-`atomicWrites: true`, the setting `shell.qml:140` uses (138 on omarchy
-4.0.4-1, when this was measured), left a 0644 file at
+`atomicWrites: true`, the setting `shell.qml:151` uses (140 on omarchy
+4.0.6-1, 138 on 4.0.4-1, when this was measured), left a 0644 file at
 0644 and a 0600 file at 0600, with the content changed both times: the atomic
 rename neither resets the mode to the writer's umask nor tightens it. On this
 machine the file is 0600, but `~/.config` and `~/.config/omarchy` are both
@@ -1585,9 +1585,9 @@ measurement this lane could take:
    that LOOSENS an existing file IN PLACE -- a 0600 file becomes 0644 on the
    same inode under either umask, because `-a` carries skel's mode -- with
    skel's contents; and the Omarchy 4 upgrade's `copy_config_default`
-   (`omarchy-upgrade-to-quattro:1727,1730,1731,1735`: `cmp`, a backup,
+   (`omarchy-upgrade-to-quattro:1794,1797,1798,1802`: `cmp`, a backup,
    `rm -f`, then `cp -P` at the umask, 0644 under 022), which then ends with
-   `omarchy-bar defaults` (`omarchy-upgrade-to-quattro:2373`), so its 0644 is
+   `omarchy-bar defaults` (`omarchy-upgrade-to-quattro:2454`), so its 0644 is
    an intermediate state and the upgrade ends at 0600 when that step
    succeeds -- as does `omarchy-refresh-shell`, which is refresh-config then
    `omarchy-bar defaults`; the paths that END at 0644 are the skel seed,
@@ -1595,11 +1595,15 @@ measurement this lane could take:
    omarchy/shell.json`. What remains
    is a mode changed by
    hand. The host's OTHER writer closes the loop from the other side:
-   `omarchy-shell-config commit()` (`omarchy-shell-config:57-59`, `mktemp`
+   `omarchy-shell-config commit()` (`omarchy-shell-config:60-62`, `mktemp`
    then `mv`) rewrites the file 0600 whatever it was and whatever the umask
    (measured, 0644 -> 0600 under 022 and 077, the temp file 0600 at
    creation), and it is what `omarchy bar defaults|use|reset|position|
-   transparent`, `omarchy-refresh-shell` and the upgrade's last step run; so
+   background` (and `transparent`, a wrapper over `background` since omarchy
+   4.5.0-3), `omarchy dock` (new in 4.5.0), `omarchy-refresh-shell` and the
+   upgrade's last step run, as do 4.5.0's layout migrations with their own
+   `mktemp` and `mv` (the script lines are cited in
+   docs/OMARCHY-PLUGIN-CONTRACT.md's Config line, re-read on 4.5.0-3); so
    "the host's writer keeps whatever mode it finds" is true of the shell's
    FileView writer alone (plugin settings, `omarchy bar set`, plugin enable),
    which is the writer that carries a URL. The
@@ -1637,8 +1641,8 @@ measurement this lane could take:
    `rm` after a `cmp -s`), and the Omarchy 4
    upgrade's `backup_config_file` writes
    `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
-   (`omarchy-upgrade-to-quattro:1654`, `cp -af`, the suffix a timestamp set
-   at `omarchy-upgrade-to-quattro:390`). Each holds the plugin's entry as it
+   (`omarchy-upgrade-to-quattro:1721`, `cp -af`, the suffix a timestamp set
+   at `omarchy-upgrade-to-quattro:391`). Each holds the plugin's entry as it
    was, URLs included, for
    ever, and the shield never opens either: it opens exactly
    `$HOME/.config/omarchy/shell.json` (the paragraph above). Their mode,
@@ -5015,7 +5019,7 @@ Manual QA on the live shell (QA role, machine of record):
    bar tooltip shows a channel count; set a bogus URL and confirm the guide
    status line shows the helper's error text.
 3. US2: `SUPER+SHIFT+T`, bar click and the menu entry all open the guide;
-   type, arrows, PgUp/PgDn, Tab groups, Esc.
+   type, arrows, PgUp/PgDn, Tab groups, Esc. **[2026-11-06, D-DOC-35: the guide's chord is now `SUPER + ALT + T`; Omarchy 4.5.0 binds `SUPER + SHIFT + T` to Activity.]**
 4. US3: Enter plays in mpv with the channel name as title; Enter on another
    channel reuses the window; a dead stream yields a critical notification
    naming the channel.

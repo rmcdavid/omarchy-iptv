@@ -1,0 +1,33 @@
+{
+ "_comment": [
+  "D-PLY-64 (2026-11-06): what an owner-claim instance token is. Each Service object draws one",
+  "(Model.playerOwnerToken) and passes it on every verb that claims the player (in OMARCHY_IPTV_ARGS)",
+  "and on its orphan check (on that check's argv: execDetached starts only a command list). Run by Model.isOwnerToken, which decides whether a builder passes",
+  "--owner-token at all (tests/Model.test.js), and by the helper's is_owner_token, behind",
+  "owner_token_arg, which refuses any other value on the command line (tests/test_player.py). The two",
+  "must agree, or a token the shell passes is refused and every start fails. `valid` are tokens;",
+  "`invalid` are not, and neither side may accept one. ASCII only."
+ ],
+ "valid": [
+  "0123456789abcdef0123456789abcdef",
+  "00000000000000000000000000000000",
+  "ffffffffffffffffffffffffffffffff",
+  "3d94c431fb6b19d72d03611d77dbc86b"
+ ],
+ "invalid": [
+  "",
+  "0123456789abcdef0123456789abcde",
+  "0123456789abcdef0123456789abcdef0",
+  "0123456789ABCDEF0123456789ABCDEF",
+  "0123456789abcdef0123456789abcdeg",
+  "0123456789abcdef 123456789abcdef",
+  "0123456789abcdef0123456789abcdef\n",
+  "\n0123456789abcdef0123456789abcdef",
+  "0x23456789abcdef0123456789abcdef",
+  "--owner-pid",
+  null,
+  12345678901234567890123456789012,
+  ["0123456789abcdef0123456789abcdef"],
+  {"token": "0123456789abcdef0123456789abcdef"}
+ ]
+}

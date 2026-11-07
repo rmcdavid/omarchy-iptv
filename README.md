@@ -104,9 +104,25 @@ Then add the keybinding and, optionally, the menu entry and window rules
 from `contrib/` (the Omarchy installer never runs plugin code, so these are
 one-line copies you make yourself):
 
-- `contrib/bindings.lua` -> `~/.config/hypr/bindings.lua` (`SUPER + SHIFT + T` opens the guide; commented examples bind rewind, forward and back-to-live on `SUPER + SHIFT + H` / `L` / `R`, and pause, picture in picture and channel up/down on chords that are free on a stock Omarchy)
+- `contrib/bindings.lua` -> `~/.config/hypr/bindings.lua` (`SUPER + ALT + T` opens the guide; commented examples bind rewind, forward and back-to-live on `SUPER + SHIFT + H` / `L` / `R`, and pause, picture in picture and channel up/down on chords that are free on a stock Omarchy)
 - `contrib/omarchy-menu.jsonc` -> `~/.config/omarchy/extensions/omarchy-menu.jsonc` (an `IPTV` row in the Omarchy menu)
-- `contrib/windows.lua` -> `~/.config/hypr/looknfeel.lua` (keep the player opaque, optionally float it)
+- `contrib/windows.lua` -> `~/.config/hypr/looknfeel.lua` (keep the player opaque on Omarchy 4.0, optionally float it)
+
+**If you pasted the keybinding from an earlier version**, your line binds
+`SUPER + SHIFT + T`, which stock Omarchy binds to Activity (btop) since
+Omarchy 4.5.0. Omarchy's `o.bind` does not remove a binding that is already
+on a chord, so on 4.5.0 both are on it, and a press is likely to run both.
+Change the chord in your line to `SUPER + ALT + T`, which is free on a stock
+Omarchy 4.0 and 4.5.0 alike. To keep `T` instead, put `hl.unbind("SUPER + SHIFT + T")`
+on the line before yours: that removes every binding on the chord, Activity's
+own included, so Activity is left with no key. If you uncommented the picture
+in picture example, the same applies: the file now suggests
+`SUPER + SHIFT + V` in place of `SUPER + SHIFT + I`, which stock Omarchy binds
+to switching the input language back since 4.5.0. The commands in these
+lines are `omarchy-shell` strings, which work on every Omarchy 4 release;
+the `{ ipc = "target.method" }` form that 4.5.0 adds cannot reach this
+plugin, because it splits at the first dot and the plugin's id has dots in
+it.
 
 ## Settings
 
@@ -387,7 +403,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a token that sets one of the on-screen controller's click or wheel commands (a `*_command`, `*_mbtn_*` or `*_wheel_*` key) or contains `${` is refused, because a command can draw your stream address or start a program and `${...}` puts a value such as the address into text on screen; every other key is kept. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller stays, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read; so is its console, because it shows the player's recent error messages, and those can carry your whole stream address; and so are its statistics (`i`, `I`, and the controller's title click), because their file line shows the stream's file name, which for some addresses is the whole address with its password. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries, the `Ctrl+V` key and drag-and-drop (neither adds an address to the player any more), the on-screen controller's title middle-click (it showed your whole stream address), the console, opening the next playlist entry early (it went out with your provider's headers), the statistics, the list of network protocols the media library may open beneath a stream and the list of stream formats it may read, and the certificate checks below; `--drag-and-drop`, `--prefetch-playlist`, `--load-console`, `--load-stats-overlay`, and a `--demuxer-lavf-o` protocol or format list or `seg_format_options` (settings for each HLS segment, which can carry those lists past this check) are refused for that reason. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers, and so is a `--demuxer-lavf-o` token that names `http_proxy`, for the same reason; `--rtsp-transport=udp` (or `udp_multicast` or `lavf`) is accepted with a warning that it opens ports on this computer that anyone can send to, because an `rtsp` channel then receives its stream on ports the player opens, and so is a `--demuxer-lavf-o` token that sets `rtsp_transport` to anything but `tcp`, `http` or `https`. None of your tokens is on a command line: the player reads them from a private file it is given once (below). The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting or a setting that makes the player listen (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts: measured on a software-only compositor, and a virtual machine, not tried, is expected to behave the same); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=no`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a token that sets one of the on-screen controller's click or wheel commands (a `*_command`, `*_mbtn_*` or `*_wheel_*` key) or contains `${` is refused, because a command can draw your stream address or start a program and `${...}` puts a value such as the address into text on screen; every other key is kept. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller stays, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read; so is its console, because it shows the player's recent error messages, and those can carry your whole stream address; and so are its statistics (`i`, `I`, and the controller's title click), because their file line shows the stream's file name, which for some addresses is the whole address with its password. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries, the `Ctrl+V` key and drag-and-drop (neither adds an address to the player any more), the on-screen controller's title middle-click (it showed your whole stream address), the console, opening the next playlist entry early (it went out with your provider's headers), the statistics, the list of network protocols the media library may open beneath a stream and the list of stream formats it may read, and the certificate checks below; `--drag-and-drop`, `--prefetch-playlist`, `--load-console`, `--load-stats-overlay`, and a `--demuxer-lavf-o` protocol or format list or `seg_format_options` (settings for each HLS segment, which can carry those lists past this check) are refused for that reason. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers, and so is a `--demuxer-lavf-o` token that names `http_proxy`, for the same reason; `--rtsp-transport=udp` (or `udp_multicast` or `lavf`) is accepted with a warning that it opens ports on this computer that anyone can send to, because an `rtsp` channel then receives its stream on ports the player opens, and so is a `--demuxer-lavf-o` token that sets `rtsp_transport` to anything but `tcp`, `http` or `https`. None of your tokens is on a command line: the player reads them from a private file it is given once (below). The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting or a setting that makes the player listen (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts: measured on a software-only compositor, and a virtual machine, not tried, is expected to behave the same); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -427,6 +443,23 @@ your own mpv config may say: an option the plugin does not set itself, such
 as a recording or an on-screen message you configured there, still applies
 in this player, because it is your configuration.
 
+**Omarchy 4.5.0 adds an mpv config of its own**, `/etc/mpv/mpv.conf`, which
+every mpv on the computer reads. It holds one setting, `hwdec=auto-safe`:
+decode video on the graphics hardware through mpv's list of reliable hardware
+decoders, and in software when none applies. The player reads it before your
+own mpv config, so since 4.5.0 it decodes in hardware wherever mpv finds a
+decoder it trusts; on Omarchy 4.0 it decoded in software unless you asked.
+If a channel plays badly with it, `--hwdec=no` in `mpvArgs` turns it off for
+this player, and `hwdec=no` in your own `~/.config/mpv/mpv.conf` for every mpv
+you run: both are read after Omarchy's file, and either one wins (measured).
+Everything above about your own config holds for this one too, including
+that the options the plugin sets itself come after it. Because an Omarchy
+update can change that file, the plugin's own test suite checks it on the
+developer's machine and fails when it sets anything but options already
+classified as harmless, or adds a profile, or when a new file appears beside
+it, so such a change is looked at before the next release rather than found
+after it.
+
 Your `mpvArgs` tokens are not on any command line. A program's command line
 can be read by every account on the computer, and a token is where a proxy
 password or a header value goes, so the plugin hands your tokens to its helper
@@ -438,9 +471,9 @@ replaced by one this version starts (below). Two things behave differently in th
 an option mpv cannot understand is skipped instead of stopping the player from
 starting (mpv says so only on its own output, which the plugin discards, so a
 typo now fails quietly), and `--no-config` no longer stops mpv
-reading your own mpv config (to keep a setting of that config out of this
-player, take it out of the config). The keys that name your sources and the
-ids of channels reach the helper the same private way: neither is on a
+reading your own mpv config, or Omarchy's (to keep a setting of your config
+out of this player, take it out of the config; for Omarchy's, see above).
+The keys that name your sources and the ids of channels reach the helper the same private way: neither is on a
 command line any more, and a source you add from now on gets a random key
 rather than one worked out from its address.
 
@@ -537,7 +570,7 @@ player.
 
 ## Using it
 
-Press `SUPER + SHIFT + T` (or click the TV glyph in the bar). The guide opens
+Press `SUPER + ALT + T` (or click the TV glyph in the bar). The guide opens
 in search mode: type part of a channel or group name, `Enter` plays it in mpv
 and closes the guide. Press `Tab` (or `/`) to switch to list mode, where the
 vim keys and single-letter commands are live.
@@ -659,8 +692,10 @@ including the exact rectangle if it was floating before.
 
 From outside the guide, `omarchy-shell io.github.rmcdavid.iptv pip toggle`
 (also `pip on` and `pip off`). `contrib/bindings.lua` has a commented line
-that binds it to `SUPER + SHIFT + I`; an earlier copy suggested
-`SUPER + SHIFT + P`, which stock Omarchy already uses for Google Photos.
+that binds it to `SUPER + SHIFT + V`. Earlier copies suggested
+`SUPER + SHIFT + P`, which stock Omarchy already uses for Google Photos, and
+`SUPER + SHIFT + I`, which stock Omarchy binds to switching the input
+language back since 4.5.0.
 
 Nothing goes into your Hyprland configuration for this. The plugin asks the
 compositor at runtime and writes no file at all.
@@ -818,10 +853,13 @@ carry channel ids — most do — are not affected at all.
   another plugin all leave what you are watching alone. The first restart after
   an update is the exception: it replaces the player window once, on the same
   channel. (Not yet measured
-  again on Omarchy 4.0.6, whose `omarchy-restart-shell` can take longer to
-  end the old shell than the plugin's check for an orphaned player allows;
-  if the player stops when you restart the shell, press `Enter` on the
-  channel.)
+  again on Omarchy 4.0.6 or 4.5.0. On both, `omarchy-restart-shell` can take
+  longer to end the old shell than the plugin's check for an orphaned player
+  allows; if the player stops when you restart the shell, press `Enter` on
+  the channel. On 4.5.0 the command also waits, once the new shell answers,
+  for the desktop's notification service to come back, and prints an error
+  if it has not within about two seconds; the shell has restarted all the
+  same.)
 - A stream that fails shows a desktop notification naming the channel, and
   the guide marks it until the channel plays again. A failure on this
   computer's side marks no channel and is told under its own title:
@@ -880,10 +918,14 @@ carry channel ids — most do — are not affected at all.
   window title), control characters are left out of the
   window title and notifications, and mpv property expansion is disabled
   for the window title.
-- The player window is rendered slightly translucent under the Omarchy
-  defaults. Omarchy exempts media players from its default opacity by class
-  name, and ours is `omarchy-iptv` rather than `mpv`, so the exemption misses
-  it. The first line of `contrib/windows.lua` fixes it.
+- On Omarchy 4.0 the player window is rendered slightly translucent under
+  the defaults. Omarchy 4.0 exempts media players from its default opacity by
+  class name, and ours is `omarchy-iptv` rather than `mpv`, so the exemption
+  misses it. The first rule in `contrib/windows.lua` fixes it. Omarchy 4.5.0
+  made transparency something a window opts in to, so there the player is
+  opaque unless you opt it in yourself (`SUPER + BACKSPACE`, which stock
+  Omarchy binds to toggling transparency on the focused window), and that
+  rule does nothing.
 - The player's own keys work. mpv's normal key bindings are live on the
   player window, and two of them write files. `s` saves a screenshot to
   `~/.local/state/omarchy-iptv/screenshots/`, and `Shift+Q` saves a resume

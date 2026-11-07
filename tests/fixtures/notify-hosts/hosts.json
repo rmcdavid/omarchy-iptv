@@ -1,0 +1,43 @@
+{
+  "why": [
+    "D-SINK-85 (owner, 2026-11-06). Byte copies of the code each Omarchy host runs over a notification body,",
+    "so the plugin's own bodies can be run through it in node (tests/Model.test.js) and in Qt's engine",
+    "(tests/Model.spec.qml). A copy is only evidence while it IS the host's file: every copy below is pinned",
+    "by sha256, the node loader (tests/Model.test.js) refuses a copy whose bytes are not its pin, and",
+    "tests/test_notify_hosts.py holds each pin to its source -- the member of the cached omarchy package it",
+    "was taken from, and for the host that is installed, the file under OMARCHY_SHELL_DIR",
+    "(/usr/share/omarchy/shell). The QML spec imports the copies as they are on disk (a TestCase cannot read",
+    "a file's bytes) and trusts those two checks, both of which the gate runs.",
+    "A red there after an Omarchy update is a re-measurement request: re-copy",
+    "the changed file, re-pin it, and see whether tests/fixtures/notify-hosts/cases.js still draws as",
+    "written on it.",
+    "4.0.6's NotificationLogic.js carries em dashes in its comments, so its copy sits under a directory",
+    "named nonascii, the ASCII gate's one exemption by tree; the 4.5.0 files are ASCII."
+  ],
+  "hosts": [
+    {
+      "version": "4.5.0",
+      "package": "omarchy-4.5.0-3-x86_64.pkg.tar.zst",
+      "installed": true,
+      "files": [
+        { "copy": "4.5.0/Security.js", "source": "usr/share/omarchy/shell/plugins/notifications/Security.js",
+          "sha256": "a36017c79810820a985dad06e38a2c9e547e8e650dec413b2f2cbecd063e5c95" },
+        { "copy": "4.5.0/Detect.js", "source": "usr/share/omarchy/shell/plugins/notifications/Detect.js",
+          "sha256": "42343e92c35c34b9421eb0d641b218188aff4512b0f1aa02439bdc09e3f419c6" },
+        { "copy": "4.5.0/Markup.js", "source": "usr/share/omarchy/shell/plugins/notifications/Markup.js",
+          "sha256": "97e37eb6e188a59df744aa135814c8cbb0257b01fa8c0ecb929f7c557aa77951" },
+        { "copy": "4.5.0/Store.js", "source": "usr/share/omarchy/shell/plugins/notifications/Store.js",
+          "sha256": "187240713ae27ee52f23d7b5516fb194456da9040845dc58c8a0434030c931a8" }
+      ]
+    },
+    {
+      "version": "4.0.6",
+      "package": "omarchy-4.0.6-1-x86_64.pkg.tar.zst",
+      "installed": false,
+      "files": [
+        { "copy": "4.0.6/nonascii/NotificationLogic.js", "source": "usr/share/omarchy/shell/plugins/notifications/NotificationLogic.js",
+          "sha256": "99e82df6524ee1ee1d52673b2a1496f62b14b220288f186c41fd8deed77a69bd" }
+      ]
+    }
+  ]
+}

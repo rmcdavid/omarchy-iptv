@@ -28,7 +28,12 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 QML = os.environ.get("QML_BIN", "/usr/lib/qt6/bin/qml")
-SHELL = "/usr/share/omarchy/shell"
+# The host kit the tree is built from: OMARCHY_PATH, as tests/a11y/make_tree.py
+# and fidelity.py read it, so the builder can be run against another
+# Omarchy (how F-HARNESS-99 was proven: red on 4.5.0-3 with the old builder,
+# green with the new one on 4.5.0-3 and on the 4.0.6 extract).
+OMARCHY = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")
+SHELL = OMARCHY + "/shell"
 
 # The fake bar and service are host_bar.qml's (tests/a11y), with the name
 # driven from the fixture. Every name is set in turn and read back at once:
@@ -119,7 +124,8 @@ class BarShownNamesTest(unittest.TestCase):
         tree = os.path.join(work, "tree")
         home = os.path.join(work, "home")
         os.makedirs(home, mode=0o700)
-        build = {"PATH": "/usr/bin:/bin", "HOME": home, "A11Y_TREE": tree, "A11Y_REPO": REPO, "LANG": "C.UTF-8"}
+        build = {"PATH": "/usr/bin:/bin", "HOME": home, "A11Y_TREE": tree, "A11Y_REPO": REPO, "LANG": "C.UTF-8",
+                 "OMARCHY_PATH": OMARCHY}
         for script in ("make_tree.py", "make_hosts.py"):
             done = subprocess.run([sys.executable, "-I", os.path.join(HERE, "a11y", script)], env=build,
                                   capture_output=True, text=True, timeout=120)

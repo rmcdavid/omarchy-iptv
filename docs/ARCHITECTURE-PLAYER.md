@@ -94,7 +94,7 @@ Every one of these closes a fatal that a judge found in at least one submission.
 | F3 | The event subscriber is not attached when the first channel loads, so a fast first-channel failure is silent | `player start` issues `request_log_messages "error"` before `loadfile` and observes `start-file`/`end-file` for `--first-load-timeout` (3 s) on its own connection, reporting the outcome in its reply. The QML socket is a second, independent observer |
 | F4 | `playlist_entry_id` sourced from a helper reply that loses the race to the event stream; a null id then gates out **every** failure after a restart | `entryId` comes from `loadfile`'s reply (verified to carry `data.playlist_entry_id`) and is confirmed by the following `start-file`. The QML gate **fails open**: a null or unknown entry id never suppresses a notification (section 4.8) |
 | F5 | Singleton by socket `connect()` alone: `connect()` succeeds through the listen backlog against a wedged mpv; mpv silently rebinds over a live socket leaving two windows; `flock` is defeated by unlinking the lock file; a socket that can never bind leaves an un-killable window that the next start multiplies | Three layers: **/proc scan** on the exact `--input-ipc-server=<abspath>` token plus uid is the authoritative existence and PID-discovery check (`connect()` only ever answers "responsive", never "exists"); `flock` with an **inode re-check** (`fstat(fd)` vs `stat(path)`) so an unlink-and-recreate is detected; and a spawn that does not produce a connectable socket within 5 s is reaped by the helper that created it, using the pid it read back over a pipe |
-| F6 | `Component.onDestruction` firing a stop - it fires on graceful shell exit (verified: `omarchy-restart-shell` uses `quickshell kill`, and the journal shows "Exiting due to IPC request"), so it kills the player on the very restart the milestone exists to fix | `onDestruction` fires `player orphan-check --owner-pid <Quickshell.processId> --grace 6`. The claim in `user-data/omarchy-iptv-owner` is keyed by shell pid + start time, so a *successor* shell has already overwritten it by t+6 s and the check is a no-op; only "the recorded owner pid is still alive and still owns the claim" means the service was destroyed while its shell lives, i.e. the plugin was disabled or removed |
+| F6 | `Component.onDestruction` firing a stop - it fires on graceful shell exit (verified: `omarchy-restart-shell` uses `quickshell kill`, and the journal shows "Exiting due to IPC request"), so it kills the player on the very restart the milestone exists to fix | `onDestruction` fires `player orphan-check --owner-pid <Quickshell.processId> --grace 6`. The claim in `user-data/omarchy-iptv-owner` is keyed by shell pid + start time, so a *successor* shell has already overwritten it by t+6 s and the check is a no-op; only "the recorded owner pid is still alive and still owns the claim" means the service was destroyed while its shell lives, i.e. the plugin was disabled or removed. **[2026-11-06, D-PLY-64: and by the destroyed Service's own token (`--owner-token`), because a successor Service in the same shell writes the same pid and start time; 4.14's fourth case]** |
 
 ### 2.3 One correction to the brief and to three of the four designs
 
@@ -244,6 +244,17 @@ player probe   --socket S [--owner-pid PID] [--ipc-timeout 2.0]
 player orphan-check --socket S --owner-pid PID [--grace 6.0]
 player tracks  --socket S [--audio ID|no] [--sub ID|no] [--ipc-timeout 2.0]
 ```
+
+**[Amended 2026-11-06, D-PLY-64: `player start`, `player restart` and
+`player probe` take `--owner-token T` beside `--owner-pid`, and
+`player orphan-check` takes it too. T is 32 lowercase hex digits
+(`Model.playerOwnerToken`, drawn once per Service object); the helper refuses
+any other shape with exit 2 and no reply, and the claim stores it. On start,
+restart and probe it is one of `HELPER_PRIVATE_VALUE`'s options, so it travels
+in `OMARCHY_IPTV_ARGS`; the orphan check carries it on its argv, because
+`execDetached` starts only a command list (4.14). It is no secret: it
+authorizes nothing, anything that reaches the 0600 socket reads the claim,
+and the probe's reply leaves it out.]**
 
 **[Amended 2026-10-28, D-PLY-35: the service passes NONE of the four timeout
 flags on any verb (Model.playerStartArgv, playerRestartArgv, playerProbeArgv;
@@ -1648,6 +1659,10 @@ decision is to keep reading mpv.conf and pin, after the user's tokens, every
 option a security layer depends on, because a plain line, a named profile, a
 profile-cond profile and a per-file profile in that file each undid a layer
 (measured, D-SINK-44).]**
+**[2026-11-06, D-HOST-13: and since Omarchy 4.5.0 there is a second
+mpv.conf, `/etc/mpv/mpv.conf`, system-wide and package-owned, read BEFORE
+the user's; 4.12.1 says what it holds, what wins over it, and the gate
+tripwire that watches it.]**
 
 The table above is the M2-02 round, not the whole of `MPV_RESERVED`. Later
 rounds added entries on the same reasoning for different sinks:
@@ -1728,6 +1743,35 @@ again, so the model changed. Three decisions, the owner's:
   is pinned; its cost is that the user's profile-cond auto-profiles stop
   applying inside this player only. Protocol and extension profiles still
   apply, but cannot replace a pinned option (measured below).
+  **[2026-11-06, D-HOST-13: "mpv.conf" is two files since Omarchy 4.5.0.**
+  omarchy-settings 4.5.0-3 ships `/etc/mpv/mpv.conf` (absent from 4.0.6-1's
+  file list), a package-owned layer that every mpv reads before the user's
+  own -- mpv 0.41.0's sysconfdir is `/etc/mpv` -- holding one line,
+  `hwdec=auto-safe`. Measured windowless the same day (mpv 0.41.0,
+  `--vo=null --ao=null`, a generated `lavfi` source, a decoy HOME and XDG
+  tree, core limit 0): the verbose log reads `/etc/mpv/mpv.conf` first and
+  sets `hwdec` to `auto-safe` from it, then reads the user's `mpv.conf`, then
+  a private `--include` file of the kind that carries the user's tokens;
+  `hwdec=no` in the user's `mpv.conf`, in that file or as a token wins over
+  the system line. With `--config-dir`, which is reserved, the system file is
+  not read at all, which is also why the five-way measurement below, run
+  with each case's own `--config-dir`, never saw it. The plugin passes
+  neither `--hwdec` nor `--no-config`, so on 4.5.0 the player's `hwdec`
+  reads `auto-safe` where on 4.0.x it was mpv's default, `no`; which
+  decoder a real stream then gets (`hwdec-current`) is NOT measured. The
+  owner accepted hardware decoding on 2026-11-06 rather than pin
+  `--hwdec=no`, and `hwdec` is `allowed` in the classification, so it opens
+  no sink. Everything this section says of the user's `mpv.conf` holds for
+  the system file -- a plain line loses to the command line, and a profile
+  there would take the routes D-SINK-44 measured -- except that nobody who
+  uses the plugin wrote it, and an Omarchy update can change it. So a gate
+  tripwire, `tests/test_system_mpv_conf.py`, reads it on the gate's machine
+  and goes red on any option there the classification does not call
+  `allowed` (an unclassified one included), on any profile section whatever
+  it holds, and on a new entry in `/etc/mpv` beside `mpv.conf` and
+  `scripts/` (or in `scripts/` beside `mpris.so`). A red there is a request
+  to re-measure the player against the new file, not a plugin defect. The
+  README names the file, the decoding change and the `--hwdec=no` lever.]**
 - **Turn off only the select menu**: `--load-select=no`, pinned and reserved.
   Stats, the console, the context menu, commands and positioning stay.
   **[2026-10-29, the owner's decision on D-SINK-61: the console goes too --
@@ -2226,23 +2270,84 @@ Quickshell 0.3.1 has no shutdown or `aboutToQuit` signal (verified absent from
 The discriminator is the **owner claim**, not the destruction event:
 
 ```qml
-Component.onDestruction: Quickshell.execDetached(
-    Model.playerOrphanCheckArgv(socketPath, Quickshell.processId, 6))
+Component.onDestruction: Quickshell.execDetached(Model.helperArgv(root.helperPath,
+    Model.playerOrphanCheckArgv(root.socketPath, Quickshell.processId,
+                                Model.PLAYER_ORPHAN_GRACE_SEC, root.ownerToken)))
 ```
 
-`player orphan-check --owner-pid P --grace 6` sleeps 6 s, then reads
-`user-data/omarchy-iptv-owner`:
+`player orphan-check --owner-pid P --owner-token T --grace 6` sleeps 6 s,
+then reads `user-data/omarchy-iptv-owner`. The claim is this check's own
+only when its pid is `P` AND its token is `T` (D-PLY-64, 2026-11-06):
 
-- The claim's `pid` is no longer `P` -> a successor service adopted the player.
-  **Do nothing.** (`omarchy-restart-shell` polls `omarchy-shell shell ping`
-  every 100 ms for up to 2 s after relaunch, so the successor has claimed well
-  inside the grace.)
-- The claim is still `P`, and pid `P` is alive with a matching `/proc/<pid>/stat`
-  start time -> the service object died while its shell lives: the plugin was
-  disabled or removed. **Run `player stop`.**
-- The claim is still `P` and pid `P` is dead -> the shell exited and nothing has
-  claimed the player within 6 s. **Do nothing** (`omarchy-launch-shell`
-  supervises and relaunches; a slow restart must not kill playback).
+- The claim names another pid, or `P` with another token -> a successor
+  service adopted the player: a new shell, or a new Service object in this
+  same shell. **Do nothing**; that owner's own check decides when it goes.
+- The claim is still `P` and `T`, and pid `P` is alive with a matching
+  `/proc/<pid>/stat` start time -> the service object died while its shell
+  lives and nothing took its place: the plugin was disabled or removed.
+  **Run `player stop`.**
+- The claim is still `P` and `T` and pid `P` is dead -> the shell exited and
+  nothing has claimed the player within 6 s. **Do nothing**
+  (`omarchy-launch-shell` supervises and relaunches; a slow restart must not
+  kill playback).
+
+The grace assumes nothing about how quickly a new shell comes back. A
+restart lands in the first case once the new shell has claimed, and in the
+third once the old shell has exited, whichever comes first. An old shell
+that outlives the 6 s grace before either is D-HOST-8, still open: on 4.0.6
+and later the script may take longer than that to kill it.
+`omarchy-restart-shell` waits up to 60 s for the new shell to answer its
+ping (4.0.6 and 4.5.0 alike; 4.5.0 then waits about 2 s more for the
+notifications bus name), and its own comment says a large bar answers past
+ten seconds. **[Corrected 2026-11-06: the first bullet used to say the
+script "polls `omarchy-shell shell ping` every 100 ms for up to 2 s after
+relaunch, so the successor has claimed well inside the grace". On 4.0.4 the
+script pinged 20 times 100 ms apart, each ping bounded at about 0.5 s (read
+in the 4.0.4-1 package), so about 2 s when the pings fail at once and up to
+about 12 s when they hang; 4.0.6 made it a 60 s deadline (D-HOST-8).]**
+
+**The fourth case: a successor Service in the same shell (D-PLY-64).**
+- What happened. Omarchy 4.5.0's update replaced `shell.json` for a moment
+  while its migrations ran. The host read the plugin as disabled, destroyed
+  its Service, read it as enabled again and created a new Service in the
+  SAME shell process. The new one's probe re-claimed the player with this
+  shell's pid and start time. Six seconds later the old instance's check
+  read the claim as its own, found its shell alive, and stopped the channel.
+- The fix. Each Service object draws a token (`Model.playerOwnerToken`,
+  `ownerToken` in Service.qml) and passes it on every verb that writes the
+  claim and on its orphan check.
+- The rule is uniform, and a missing token counts as `""`:
+  - two instances from before this release pass none, and keep the pid rule
+    as it was;
+  - a token on one side only means two different instances, read as
+    reassigned. That is a 0.17.0 Service still loaded beside a new one in
+    one shell, which the pid rule would stop.
+- The claim's `at` cannot do this job: it has one-second resolution, and the
+  successor's probe was measured running before the old instance's deferred
+  destroy.
+- What remains:
+  - An in-flight `player start` of the destroyed instance, whose helper
+    outlives the Service and writes its claim after the successor's probe,
+    would make the old check read the claim as its own. This is a narrow
+    race, and unmeasured: whether Quickshell's Process kills its child on
+    destruction is not known here.
+  - A successor that has not claimed by t+6 s while the shell lives reads
+    as a disable. The order was measured; it is not guaranteed.
+
+**The launch, measured (2026-11-06).** The check is started with
+`execDetached`'s command list. Quickshell 0.3.2 also declares a
+`ProcessContext` overload (`{ command, environment, ... }`), which the lane
+that wrote the fix used to hand the token in the environment. Called with a
+JavaScript object, that overload is refused: Quickshell warns `Could not
+convert argument 0 from [object Object] to qs::io::process::ProcessContext`,
+throws `TypeError: Passing incompatible arguments to C++ functions from
+JavaScript is not allowed`, and nothing starts. A genuine disable would then
+have left the channel playing. The command list, called from the same
+handler, started its child detached. Both were measured in a `quickshell -p`
+probe, offscreen, with a decoy home and runtime directory. So the token
+rides on the check's argv, where it is no secret (see the CLI contract's
+bracket). The node double's `execDetached` now refuses the object form, as
+the real one does (rule 10).
 
 Residual, stated plainly: a shell that is SIGKILLed and never comes back leaves
 a player running until logout. That is not a regression - `Process::~Process()`
@@ -2621,9 +2726,9 @@ plugin's reach, recorded for the owner.
 
 | Case | Designed behaviour |
 |---|---|
-| **Restart while playing** (`omarchy restart shell`, the headline case) | `quickshell kill -p ... --any-display` kills only the quickshell process; mpv is a `setsid`'d grandchild of `systemd --user`, so it is untouched and the stream does not glitch. The new service's `player probe` (about 130 ms after start) finds it by the `/proc` token, reads the stash, restores `nowPlaying` and claims ownership; the socket subscriber reconnects within 250 ms. The bar shows the channel again inside the 2 s acceptance bar. `playSeq` resumes from the lock record. The pending `orphan-check` from the dying shell finds the claim reassigned at t+6 s and does nothing |
+| **Restart while playing** (`omarchy restart shell`, the headline case) | `quickshell kill -p ... --any-display` kills only the quickshell process; mpv is a `setsid`'d grandchild of `systemd --user`, so it is untouched and the stream does not glitch. The new service's `player probe` (about 130 ms after start) finds it by the `/proc` token, reads the stash, restores `nowPlaying` and claims ownership; the socket subscriber reconnects within 250 ms. The bar shows the channel again inside the 2 s acceptance bar. `playSeq` resumes from the lock record. The pending `orphan-check` from the dying shell finds the claim reassigned at t+6 s and does nothing **[2026-11-06: or, when the new shell has not claimed yet, finds its own pid dead and does nothing; `omarchy-restart-shell` waits up to 60 s for the new shell (4.14)]** |
 | **Crash mid-zap** | The shell dies between `play`'s helper call and its reply. mpv either switched or did not; the stash was written before the `loadfile` with the new identity and rewritten after with the entry id. On reattach the stash is the truth: if `loadfile` landed, `idle-active` is false and the new channel shows; if it did not, mpv exited under `--idle=once`, the probe reports `running:false`, and `state.json.session` names the channel for a silent failed-mark (PO-3) |
-| **Overlapping shells** | The runtime directory is the ownership domain. Two services sharing one `XDG_RUNTIME_DIR` both adopt the same player, both zap it and both can stop it - last intent wins by `seq`, and **no second window is possible** because the `/proc` scan sees the existing process. The loser's `orphan-check` is a no-op because the claim names the other shell. The dev harness already exports its own `XDG_RUNTIME_DIR` (`run.sh:93`), so it can never signal the live player |
+| **Overlapping shells** | The runtime directory is the ownership domain. Two services sharing one `XDG_RUNTIME_DIR` both adopt the same player, both zap it and both can stop it - last intent wins by `seq`, and **no second window is possible** because the `/proc` scan sees the existing process. The loser's `orphan-check` is a no-op because the claim names the other shell. **[2026-11-06, D-PLY-64: two Service objects in ONE shell are told apart by the claim's token, 4.14's fourth case.]** The dev harness already exports its own `XDG_RUNTIME_DIR` (`run.sh:93`), so it can never signal the live player |
 | **Stale socket** (the live state right now: `srw------- mpv.sock`, no mpv) | `find_player()` returns empty, `connect()` gives ECONNREFUSED, `unlink_stale_socket()` removes it (S_ISSOCK only - a regular file at the path is left alone and reported as `socket_path_blocked` with no spawn), then the spawn proceeds. mpv never unlinks its own socket on **any** exit path - verified for `quit`, SIGTERM and SIGKILL - so unlinking is permanently ours, and the guard means a racing start's fresh socket is never deleted |
 | **Wedged process** (SIGSTOP, or the D-LIVE-17 mapped-but-never-answers case) | `connect()` succeeds through the listen backlog and then never replies - which is exactly why `connect()` is not the existence check. `find_player()` sees the process; the `get_property mpv-version` probe times out at 2 s; `status` reports `ok:false` with `process.found:true`; two strikes call `player restart --from term`, which SIGTERMs then SIGKILLs the pid from `/proc` and spawns fresh under the same lock. The equivalent path in an IPC-only design cannot obtain a pid at all |
 | **Suspend / resume** | mpv survives suspend and stays connected; a stalled stream after resume is not detected, exactly as today (no stall detection exists in v0.2.0). `status` reports healthy, the guide shows playing. Unchanged behaviour, documented; a future milestone could observe `demuxer-cache-time` |
@@ -2857,7 +2962,10 @@ requirement 2 or 7 is at risk. New `tests/test_player.py`:
 - `player probe` merges the `/proc` half and the socket half; `owner` is written
   only with `--owner-pid`; no raw `path` ever appears in the output.
 - `orphan-check`: claim reassigned -> no-op; claim intact and owner alive ->
-  stop; claim intact and owner dead -> no-op.
+  stop; claim intact and owner dead -> no-op. **[2026-11-06, D-PLY-64:
+  "intact" is the pid AND the token; a claim with this shell's pid and
+  another instance's token, or a token on one side only, is reassigned
+  (`tests/test_player.py` OwnerTokenTest, the node D-PLY-64 block).]**
 - Privacy sweep: run play -> failure -> stop against a channel whose URL embeds
   `user:pw@` and a token, then grep the whole runtime dir, every recorded argv
   and every emitted line for the password, the token and the path component.
@@ -2904,6 +3012,9 @@ node, python, qmltestrunner. Node count should rise above today's 583 checks.
   across a deliberately dead channel.
 - **PLAYER-LIVE-04**: disable the plugin from the settings panel while playing -
   the orphan-check stops the player within ~7 s (PO-2's acceptance).
+  **[2026-11-06, D-PLY-64: re-run on Omarchy 4.5.0 with the token, and its
+  twin: a Service destroyed and re-created in one shell while a channel plays
+  keeps playing past t+7 s.]**
 - **PLAYER-LIVE-05**: SIGSTOP mpv, press stop - the window is gone within ~4.5 s,
   nothing survives, the socket is unlinked, `hyprctl clients -j | jq
   '[.[]|select(.class=="omarchy-iptv")]|length'` is 0.

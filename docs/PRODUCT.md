@@ -70,8 +70,10 @@ ignore Hyprland/Omarchy conventions.
 - US1 Configure. Set playlist URL and optional EPG URL; the plugin fetches and
   caches; the bar shows a ready state. A failure shows a clear error inside the
   guide, not only on the console.
-- US2 Browse. Open the guide with a keybinding (`SUPER + SHIFT + T`, verified free on this
-  machine; `SUPER + CTRL + T` is already Activity) or by clicking the bar widget. Channels are
+- US2 Browse. Open the guide with a keybinding (`SUPER + ALT + T`; it was `SUPER + SHIFT + T`,
+  verified free on this machine on 4.0.x, until Omarchy 4.5.0 bound that chord to Activity --
+  D-DOC-35, the owner's decision of 2026-11-06; `SUPER + ALT + T` is free in the stock bindings
+  of 4.0.4, 4.0.6 and 4.5.0) or by clicking the bar widget. Channels are
   grouped; filter by group; type to search name and group; j/k and arrows;
   PgUp/PgDn; Esc closes.
 - US3 Watch. Enter plays the selected channel in mpv with the channel name as
@@ -164,6 +166,12 @@ Four open rungs, and the calibration that unblocked them is done:
 
 - **D-PIP-3 (P3)** the player window renders translucent because our app id
   misses the host's media-opacity exemption, which matches on class.
+  **[2026-11-06, D-DOC-36: on Omarchy 4.0.x only. 4.5.0 made window
+  transparency opt-in (`o.transparent_window` for terminals, a short app
+  list and the `transparent` tag; no `default-opacity` tag anywhere in
+  omarchy-settings 4.5.0-3) and dropped the media exemption list with it, so
+  there the player is opaque by default and `contrib/windows.lua`'s rule is a
+  no-op; on 4.0.x the rule is still the fix.]**
 - **The accessibility harness** needs the rest of its open items from
   `docs/QA-A11Y.md` section 9 before any filed run counts as evidence. Four
   acceptance criteria currently name it and none is satisfied.

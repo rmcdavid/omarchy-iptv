@@ -947,7 +947,7 @@ stat -c '%a %n' ~/.local/state/omarchy-iptv/state.json                          
 journalctl --user -t omarchy-shell --since "$(cat $E/started-at)" | grep omarchy-iptv   # cache migrate / prune lines with keys only; no playlist: line if the cache was fresh
 ```
 
-Open the guide (`SUPER + SHIFT + T`): the US list as before; `Tab`, `o`: one
+Open the guide (`SUPER + SHIFT + T`; **[2026-11-06, D-DOC-35: the guide's chord is now `SUPER + ALT + T`; Omarchy 4.5.0 binds `SUPER + SHIFT + T` to Activity.]**): the US list as before; `Tab`, `o`: one
 row `iptv-org.github.io`, `active - iptv-org.github.io - 1,475 channels in 28
 groups`, header `1 source`; footer without a label prefix.
 

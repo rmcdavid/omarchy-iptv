@@ -4772,20 +4772,24 @@ function redactUrlsBeforeDSink23(text) {
 // an entity it wrote, and decoding the three entities gives back exactly the
 // body as composed without escaping. Red on dev 2727179: the body carried the
 // tags verbatim. The TITLE is the host's PlainText and is not escaped.
+// D-SINK-85 (2026-11-06): the escape now puts U+034F after every `&` and `<`
+// first, so each `&amp;` and `&lt;` the plugin writes is followed by it and
+// the decode below drops it with the entity; the D-SINK-85 block after this
+// one runs the bodies through both hosts' own code.
 ;(function () {
   const MARKUP = ["<b>B</b>", "a &amp; b", "<a href=\"https://evil.test/login\">renew</a>",
                   "<br><font color=\"#ff0000\" size=\"+4\">X</font>", "AT&T > 5 < 6", "x &lt; y"]
   const EVENTS = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError",
                   "epgError", "mpvMissing", "entryInputRefused", "stateUnreadable"]
-  const decode = function (s) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") }
-  checkCall("D-SINK-49: every notification body, every event, markup in the name and the reason: no `<` or `>` reaches the StyledText body, every `&` opens one of the three entities, and decoding them gives back the composed body exactly", function () {
+  const decode = function (s) { return s.replace(/&lt;\u034f/g, "<").replace(/&gt;/g, ">").replace(/&amp;\u034f/g, "&") }
+  checkCall("D-SINK-49: every notification body, every event, markup in the name and the reason: no `<` or `>` reaches the StyledText body, every `&` opens one of the three entities -- `&amp;` and `&lt;` with the grapheme joiner after them (D-SINK-85) -- and decoding them gives back the composed body exactly", function () {
     const bad = []
     for (const ev of EVENTS) for (const m of MARKUP) {
       const argv = Model.notifyArgv(ev, { name: m, reason: m, output: "video", channelCount: 2, groupCount: 1, setting: "playlistUrl", path: "/p/state.json" })
       if (argv === null) { bad.push(ev + ": no argv"); continue }
       const body = argv[argv.length - 1]
       if (/[<>]/.test(body)) bad.push(ev + " " + m + " -> " + body)
-      if (/&(?!amp;|lt;|gt;)/.test(body)) bad.push(ev + " " + m + " (bare &) -> " + body)
+      if (/&(?!amp;\u034f|lt;\u034f|gt;)/.test(body)) bad.push(ev + " " + m + " (bare &) -> " + body)
     }
     return bad
   }, [])
@@ -4796,10 +4800,199 @@ function redactUrlsBeforeDSink23(text) {
               argv[argv.length - 2]]
     })
   }, MARKUP.map(function () { return [true, "Stream failed"] }))
-  checkCall("D-SINK-49: markupEscape escapes exactly `&`, `<` and `>` (the `&` first, so its own entities are not escaped twice), leaves quotes and every other character, and is the identity on text without them", function () {
+  checkCall("D-SINK-49, D-SINK-85: markupEscape follows every `&` and every `<` with U+034F COMBINING GRAPHEME JOINER and THEN escapes exactly `&`, `<` and `>` (the `&` first, so its own entities are not escaped twice), leaves quotes and every other character, is the identity on text without them, and leaves a provider's own joiners, either one, where they stand", function () {
     return [Model.markupEscape("<b>&amp;</b>"), Model.markupEscape("a \"b\" 'c' \u201cd\u201d"), Model.markupEscape(""), Model.markupEscape(null),
-            Model.markupEscape("plain \u00b7 text"), Model.markupEscape("&&<<>>")]
-  }, ["&lt;b&gt;&amp;amp;&lt;/b&gt;", "a \"b\" 'c' \u201cd\u201d", "", "", "plain \u00b7 text", "&amp;&amp;&lt;&lt;&gt;&gt;"])
+            Model.markupEscape("plain \u00b7 text"), Model.markupEscape("&&<<>>"), Model.markupEscape("\u2060&\u2060"),
+            Model.markupEscape("\u034f&\u034f<\u034f")]
+  }, ["&lt;\u034fb&gt;&amp;\u034famp;&lt;\u034f/b&gt;", "a \"b\" 'c' \u201cd\u201d", "", "", "plain \u00b7 text",
+      "&amp;\u034f&amp;\u034f&lt;\u034f&lt;\u034f&gt;&gt;", "\u2060&amp;\u034f\u2060",
+      "\u034f&amp;\u034f\u034f&lt;\u034f\u034f"])
+})()
+
+// ---- D-SINK-85 (owner, 2026-11-06): the body against BOTH hosts' own code.
+// Omarchy 4.5.0 reads a notification body with plugins/notifications/
+// Markup.js before StyledText sees it: it decodes entities first, up to three
+// passes, then escapes, then puts back b/i/u/s/em/strong/br and any anchor
+// Security.safeExternalUrl accepts, links a bare http(s) URL, and opens a
+// link on a click. 0.17.0's single escape was undone by the first pass, so a
+// name spelling a scheme's colon `&#58;` drew a live https link in the
+// plugin's own card (the map's N06, N07, N10, N20). Every case of
+// tests/fixtures/notify-hosts/cases.js, under every event, goes through the
+// host's REAL code -- byte copies, refused unless their sha256 is the pin
+// tests/test_notify_hosts.py holds to the installed host and the packages:
+// - 4.5.0: Store.snapshot (normalise -> Markup.render, Detect.scan) for the
+//   card, and the live-file and history round trips for its replay;
+// - 4.0.6: NotificationLogic.styledBody, what NotificationCard.qml drew.
+// What each must hold: no `<` in what StyledText is handed (so no tag, no
+// anchor, no line break of the provider's), no link a click or the card
+// could open (Toast.qml's onLinkActivated and the card's activate() both go
+// through Security.openExternalUrl, called here with Qt.openUrlExternally
+// recorded, never run), and the text drawn is the plugin's: the body read
+// once by StyledText, which for the stream failure is the fixture's
+// hand-checked `display` with the grapheme joiner after each `&` and `<`.
+// Red on dev 96b8496 (0.17.0's escape): 667 findings over 31 of the 36
+// cases, the 4.5.0 stream-failure card opening a link for 12 of them; with
+// the four D-SINK-49 format checks above, 5 of the suite's 3,366 checks.
+// With U+034F and H37 (2026-11-06), 0.17.0's escape put back: 668 findings
+// over 32 of the 37 cases, 5 of 3,404 checks; a joiner after `&` alone,
+// after `<` alone, or after the escape: 5 of 3,404 each.
+;(function () {
+  const fs = require("fs"), path = require("path"), vm = require("vm"), crypto = require("crypto")
+  const DIR = path.join(__dirname, "fixtures/notify-hosts")
+  const PINS = JSON.parse(fs.readFileSync(path.join(DIR, "hosts.json"), "utf8"))
+  const VEC = require("./fixtures/notify-hosts/cases.js")
+  const CGJ = "\u034f"
+  const pinned = {}
+  for (const host of PINS.hosts) for (const f of host.files) pinned[f.copy] = f.sha256
+  // A QML JavaScript library as node runs it. `.pragma library` and
+  // `.import "X.js" as X` are QML's lines, not JavaScript's: they become
+  // blank lines (so a stack trace's line is the host's) and each import is
+  // handed in by name, the one instance QML would share. Any other line that
+  // starts with a dot is refused, so a directive this loader does not know
+  // cannot be silently dropped.
+  function library(rel, deps) {
+    const buf = fs.readFileSync(path.join(DIR, rel))
+    const sha = crypto.createHash("sha256").update(buf).digest("hex")
+    if (sha !== pinned[rel]) throw new Error(rel + " is not its pinned byte copy (" + sha + ")")
+    const imports = []
+    const code = buf.toString("utf8").split("\n").map(function (line) {
+      if (line === ".pragma library") return ""
+      const m = /^\.import "([A-Za-z]+)\.js" as ([A-Za-z]+)$/.exec(line)
+      if (m && m[1] === m[2]) { imports.push(m[2]); return "" }
+      if (/^\.[a-z]/.test(line)) throw new Error(rel + ": a QML directive this loader does not know: " + line)
+      return line
+    }).join("\n")
+    const handed = Object.keys(deps).filter(function (k) { return k !== "Qt" }).sort()
+    if (JSON.stringify(imports.sort()) !== JSON.stringify(handed)) throw new Error(rel + " imports " + imports + ", handed " + handed)
+    const ctx = vm.createContext(Object.assign({}, deps))
+    vm.runInContext(code, ctx, { filename: rel })
+    return ctx
+  }
+  const opened = []
+  const Qt = { openUrlExternally: function (url) { opened.push(String(url)); return true } }
+  // Loaded inside the first check that needs them, so a copy refused for its
+  // bytes is a FAIL line for each check here and the rest of the suite runs.
+  let Security, Detect, Markup, Store, Old
+  function hosts() {
+    if (Store) return
+    Security = library("4.5.0/Security.js", { Qt: Qt })
+    Detect = library("4.5.0/Detect.js", { Security: Security })
+    Markup = library("4.5.0/Markup.js", { Security: Security })
+    Store = library("4.5.0/Store.js", { Security: Security, Markup: Markup, Detect: Detect })
+    Old = library("4.0.6/nonascii/NotificationLogic.js", {})
+  }
+  const URGENCY = { Low: 0, Normal: 1, Critical: 2 }
+
+  // What StyledText draws from a string that holds no tag: its text, with
+  // the entities StyledText decodes read once. null when the string is not
+  // plain text to StyledText -- a `<` opens a tag, and an `&` that does not
+  // open `&amp;`, `&lt;` or `&gt;` is one of the entities it decodes or
+  // drops -- so the string cannot be what the plugin meant either way.
+  function drawn(rich) {
+    const s = String(rich)
+    if (s.indexOf("<") !== -1 || /&(?!amp;|lt;|gt;)/.test(s)) return null
+    return s.replace(/&(amp|lt|gt);/g, function (whole, n) { return n === "amp" ? "&" : n === "lt" ? "<" : ">" })
+  }
+  // Every URL a click on the card could open: each anchor through Toast.qml's
+  // onLinkActivated, and through the card's own click (notifications
+  // Service.qml activate()) the source's host and the row's link -- both, so
+  // the order of activate's branches cannot hide one. test_notify_hosts.py
+  // goes red if activate() opens anything else.
+  function clicks(row) {
+    opened.length = 0
+    const re = /<a\s[^>]*href\s*=\s*"([^"]*)"/gi
+    let m
+    while ((m = re.exec(String(row.bodyRich))) !== null) Security.openExternalUrl(m[1])
+    if (Markup.hostname(row.source)) Security.openExternalUrl("https://" + Markup.hostname(row.source) + "/")
+    if (String(row.link || "")) Security.openExternalUrl(String(row.link))
+    return opened.slice()
+  }
+  // The notification as Quickshell's server hands it to the 4.5.0 host: what
+  // omarchy-notification-send sends (app, summary, body, the glyph and
+  // urgency hints; no icon, no actions, no exec), read back from the argv.
+  function delivered(argv) {
+    const glyph = argv[argv.indexOf("-g") + 1]
+    return { id: 7, appName: argv[argv.indexOf("--app-name") + 1], summary: argv[argv.length - 2], body: argv[argv.length - 1],
+             appIcon: "", desktopEntry: "", image: "", expireTimeout: -1, urgency: 1, hints: { urgency: 1, "omarchy-glyph": glyph } }
+  }
+  // The card, the card brought back from live.json after a restart, and the
+  // card brought back from history.json, each as the 4.5.0 host keeps it.
+  function cards(argv) {
+    const row = Store.snapshot(delivered(argv), "k1", URGENCY)
+    const live = Store.restored(Store.parseLive(Store.serialise([Store.persistable(row)]))[0])
+    const kept = Store.restored(Store.parseHistory(Store.serialise([Store.closedEntry(row, "expired", 1800000000)]))[0])
+    return [["card", row], ["live replay", live], ["history replay", kept]]
+  }
+  // The rendering checks for one argv; a list of what failed, [] for none.
+  function hostFindings(argv, label, want) {
+    const bad = []
+    const body = argv[argv.length - 1]
+    const read = drawn(body)
+    if (read === null) bad.push(label + ": the argv body is not plain text to StyledText: " + JSON.stringify(body))
+    if (want !== undefined && read !== want) bad.push(label + ": reads " + JSON.stringify(read) + ", meant " + JSON.stringify(want))
+    for (const pair of cards(argv)) {
+      const name = pair[0], row = pair[1]
+      if (!row) { bad.push(label + " 4.5.0 " + name + ": no row"); continue }
+      if (row.bodyRich.indexOf("<") !== -1) bad.push(label + " 4.5.0 " + name + ": markup in bodyRich: " + JSON.stringify(row.bodyRich))
+      const open = clicks(row)
+      if (open.length) bad.push(label + " 4.5.0 " + name + ": opens " + JSON.stringify(open))
+      if (drawn(row.bodyRich) !== read) bad.push(label + " 4.5.0 " + name + ": draws " + JSON.stringify(drawn(row.bodyRich)) + ", the plugin wrote " + JSON.stringify(read))
+      if (row.summary !== argv[argv.length - 2]) bad.push(label + " 4.5.0 " + name + ": summary " + JSON.stringify(row.summary))
+    }
+    const old = Old.styledBody(body, "IPTV", "")
+    if (old.indexOf("<") !== -1) bad.push(label + " 4.0.6: markup in the styled body: " + JSON.stringify(old))
+    if (drawn(old) !== read) bad.push(label + " 4.0.6: draws " + JSON.stringify(drawn(old)) + ", the plugin wrote " + JSON.stringify(read))
+    return bad
+  }
+
+  checkCall("D-SINK-85: the host loaders run the pinned byte copies -- 4.5.0's Markup.render decodes before it escapes (a tag escaped twice comes back a tag) and restores an anchor, 4.0.6's styledBody passes text through -- so the harness below reads what each host reads", function () {
+    hosts()
+    return [Markup.render("a &amp;lt;b&amp;gt;"), Markup.render('<a href="https://h.example/x">L</a>'),
+            Old.styledBody("a &amp; <b>b</b>", "IPTV", ""), Object.keys(pinned).length]
+  }, ["a <b>", '<a href="https://h.example/x">L</a>', "a &amp; <b>b</b>", 5])
+
+  checkCall("D-SINK-85: every fixture case under every event, through both hosts' own code -- no tag or anchor reaches StyledText on either host, no click on the 4.5.0 card or its live and history replays opens anything, and both draw exactly the text the plugin wrote; the stream failure's is the fixture's hand-checked display with U+034F COMBINING GRAPHEME JOINER after each `&` and `<`", function () {
+    hosts()
+    const bad = []
+    let runs = 0
+    for (const c of VEC.CASES) for (const ev of VEC.EVENTS) {
+      const argv = Model.notifyArgv(ev, VEC.params(c))
+      if (argv === null) { bad.push(c.id + " " + ev + ": no argv"); continue }
+      runs++
+      const want = ev === "streamFailed" ? c.display.replace(/[&<]/g, function (ch) { return ch + CGJ }) : undefined
+      Array.prototype.push.apply(bad, hostFindings(argv, c.id + " " + ev, want))
+    }
+    return [runs, bad]
+  }, [VEC.CASES.length * VEC.EVENTS.length, []])
+
+  checkCall("D-SINK-85: the TITLE carries no provider text on any event (both hosts draw it PlainText and decode nothing in it; tests/test_notify_hosts.py pins that), so it needs no joiner -- each event's title is the same for every fixture case", function () {
+    return VEC.EVENTS.filter(function (ev) {
+      const titles = VEC.CASES.map(function (c) { const a = Model.notifyArgv(ev, VEC.params(c)); return a[a.length - 2] })
+      return titles.some(function (t) { return t !== titles[0] }) || /[&<]/.test(titles[0])
+    })
+  }, [])
+
+  // Rule 10: the harness is the host's reader, never a kinder one. 0.17.0's
+  // escape, written out here, through the same harness: on 4.0.6 nothing
+  // leaks, which is why D-SINK-49 held there; on 4.5.0 exactly these cases
+  // fail, each with a link to open, a tag, or an entity read twice. The list
+  // is the measurement (2026-11-06), so a harness that stopped seeing any of
+  // them goes red here before it can call a broken escape green.
+  checkCall("D-SINK-85: 0.17.0's single escape through the same harness -- the 4.0.6 card draws every case as written, and the 4.5.0 card opens a link for 12 of the 37 (N06, N07, N10 and N20 among them) and misdraws 12 more: tags drawn as tags, entity words decoded, a refused anchor's label shown bare", function () {
+    hosts()
+    const once = function (t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    const links = [], misdrawn = [], old = []
+    for (const c of VEC.CASES) {
+      const plain = c.display
+      const argv = ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", "x", "-p", "-r", "1", "Stream failed", once(plain)]
+      const row = cards(argv)[0][1]
+      if (clicks(row).length) links.push(c.id)
+      else if (drawn(row.bodyRich) !== plain) misdrawn.push(c.id)
+      if (drawn(Old.styledBody(once(plain), "IPTV", "")) !== plain) old.push(c.id)
+    }
+    return [links, misdrawn, old]
+  }, [["H01", "H02", "H03", "H04", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"],
+      ["H11", "H12", "H13", "H14", "H15", "H16", "H17", "H18", "H22", "H24", "H26", "H28"], []])
 })()
 
 // ---- F-SINK-16 (2026-10-29): the IPC replies escape the C1 controls.
@@ -9789,7 +9982,8 @@ checkCall("R16 / R21 / R22a (structural): setShowLogos asks Model.ownedWriteMode
     healIsTheOldWrite: /\n    return root\.writeOwnedEntry\(\{ sourceKey: root\.activeSourceKey, showLogos: want \}, "logo setting", false\)\n  \}$/.test(fn),
     // R21: ONE keep decision for every owned write, over the landed marker; the
     // fourth argument no longer chooses it
-    funnelKeeps: funnel.indexOf("var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)") !== -1
+    // (D-HOST-11: over the host's own bar sections, the list the writable gate above it walks)
+    funnelKeeps: funnel.indexOf("var published = Model.findBarEntry(root.shell.barConfig, root.pluginId, Commons.Util.barSections)") !== -1
       && /\n    var keep = Model\.retiredInputsToKeep\(published, Model\.entryMigratedOf\(root\.landedState\), Model\.migrationPendingOf\(root\.landedState\)\)\n/.test(funnel)
       && funnel.indexOf("Model.entryWith(published, patch, { keep: keep })") !== -1
       && !/var keep = [^\n]*patchOnly/.test(funnel),
@@ -18342,7 +18536,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.root.notifiedFailureId = ""
       h.root.raiseOutputFailure({ id: "t:m", name: NAME }, "video", M.outputFailureSentence("video")); h.drain()
       const told = bodies(h)
-      return [told.length, told.filter(t => /[<>]/.test(t)), told.every(t => t.indexOf("&lt;a href=\"x\"&gt;Renew&lt;/a&gt;&lt;br&gt;&lt;b&gt;B&lt;/b&gt; &amp; co") !== -1)]
+      return [told.length, told.filter(t => /[<>]/.test(t)), told.every(t => t.indexOf("&lt;\u034fa href=\"x\"&gt;Renew&lt;\u034f/a&gt;&lt;\u034fbr&gt;&lt;\u034fb&gt;B&lt;\u034f/b&gt; &amp;\u034f co") !== -1)]
     }, [4, [], true])
 
     // F-SINK-16: the replies read off the shipping verbs (h.ipc), never
@@ -20204,17 +20398,30 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
              nul: lists.some(l => l.some(x => x.indexOf("\u0000") !== -1)), refused: code === "bad_arguments", replied: code !== "unreadable" }
   }, { scopes: ["g:Sp", "g:Sp"], id: "t:a", nul: false, refused: false, replied: true })
   // Rule 15 over the spawns that do not pass through Service.runHelper --
-  // the stop and the orphan check (Quickshell.execDetached, which is handed
-  // no environment), state init and state mode, the config shield and the
+  // the stop (Quickshell.execDetached with a bare argv, which is handed no
+  // environment), state init and state mode, the config shield and the
   // clipboard: each builds an argv with nothing for helperSpawn to move, so
   // nothing private rides a command line that bypasses it. A builder that
-  // grows a key, an id, a scope or a token goes red here.
-  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, orphan-check, state init and mode, config shield, clipboard -- carry nothing helperSpawn would move", () => {
+  // grows a key, an id, a scope or a token goes red here. The orphan check
+  // left this list on 2026-11-06 (D-PLY-64): it carries the Service's owner
+  // token on its argv, which helperSpawn would move on the other verbs and
+  // which is no secret there -- execDetached starts only a command list
+  // (the D-PLY-64 block below, and ARCHITECTURE-PLAYER 4.14).
+  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, state init and mode, config shield, clipboard -- carry nothing helperSpawn would move", () => {
     const P = "/p/bin/omarchy-iptv", S = "/run/user/1000/omarchy-iptv/mpv.sock"
-    const built = [M.helperArgv(P, M.playerStopArgv(S, 3)), M.helperArgv(P, M.playerOrphanCheckArgv(S, 301706, 6)),
+    const built = [M.helperArgv(P, M.playerStopArgv(S, 3)),
                    M.stateInitArgv(P, "/s"), M.stateModeArgv(P, "/s"), M.configShieldArgv(P), M.clipboardArgv(P)]
     return built.map(argv => { const sp = M.helperSpawn(argv, {}); return [JSON.stringify(sp.command) === JSON.stringify(argv), Object.keys(sp.environment)] })
-  }, Array(6).fill([true, []]))
+  }, Array(5).fill([true, []]))
+  // The sixth bypass, the orphan check, built WITH a token: what helperSpawn
+  // would move from it is exactly the token and nothing else, so a key, an
+  // id, a scope or a cache folder added to the argv it carries for its 6 s
+  // grace goes red here (the review of 2026-11-06).
+  checkCall("D-SINK-48 (rule 15), D-PLY-64: the orphan check bypasses runHelper with its owner token on its argv, and the token is the ONLY value helperSpawn would move from it", () => {
+    const P = "/p/bin/omarchy-iptv", S = "/run/user/1000/omarchy-iptv/mpv.sock", TOKEN = "0123456789abcdef0123456789abcdef"
+    const sp = M.helperSpawn(M.helperArgv(P, M.playerOrphanCheckArgv(S, 301706, 6, TOKEN)), {})
+    return JSON.parse(sp.environment.OMARCHY_IPTV_ARGS || "[]")
+  }, ["--owner-token", "0123456789abcdef0123456789abcdef"])
   // D-SINK-48 (a): a NEW source's key is a random draw, never the URL's
   // fnv1a32. The shared fixture with fixed draws, then the real generator.
   const SK = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-keys.json"), "utf8"))
@@ -20240,6 +20447,483 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [added.ok, dirKey, rec ? rec.key : null, h.cacheRuns.slice(before).filter(c => c.indexOf("remove") !== -1).length, h.compileErrors]
   }, [true, "aaaa0000", "aaaa0000", 0, []])
   fs.rmSync(scratch, { recursive: true, force: true })
+})()
+
+// ---- D-HOST-11 (P2, affects 0.17.0): the bar entry in every section the host has ----
+//
+// Omarchy 4.5.0 (2026-11-06) lays the bar out in six sections, its
+// Commons/Util.qml `barSections`, and its migration 1791969355 moves a widget
+// that sat beside the clock into centerBegin or centerEnd. findBarEntry and
+// barEntryWritable walked left, center and right, so with the entry in a new
+// section the service read every setting as its default and refused every
+// own write ("Could not save settings") while the host drew the widget and
+// would have stored the write. The list here is READ from the installed
+// host's Util.qml (rule 13: the join is a read of the host's file). With no
+// list the walkers walk 4.0.x's three, what a host that hands none walks, so
+// a section only 4.5.0 has reads as absent there. Red on 96b8496 (the
+// walkers' three-section literal, the host's list ignored); the in-suite
+// mutant below is that literal put back into this tree's model.
+// IPTV_SERVICE_QML and IPTV_MODEL point the block at another tree.
+//
+// F-HARNESS-100 beside it: the node double and the dev harness's fake shell
+// share one mirror of the host's updateEntryInline (harness-lib.js
+// hostUpdateEntry), and the agreement check runs the INSTALLED host's own
+// updateEntryInline text, with its own Util helpers, over the same layouts.
+;(function () {
+  const H = require("./service-harness.js")
+  const HL = require(path.join(__dirname, "../scripts/dev-harness/harness-lib.js"))
+  const os = require("os")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const PID = "io.github.rmcdavid.iptv"
+  const utilText = fs.readFileSync(path.join(H.HOST_SHELL, "Commons", "Util.qml"), "utf8")
+  const shellText = fs.readFileSync(path.join(H.HOST_SHELL, "shell.qml"), "utf8")
+  const installed = H.hostBarSections(utilText)
+  // Pinned exactly, as the other host tripwires pin host facts: a host that
+  // adds, drops or reorders a section goes red HERE, and D-HOST-11 is
+  // re-measured, rather than the checks below quietly covering another list.
+  checkCall("D-HOST-11: the installed host's Util.qml declares exactly omarchy 4.5.0-3's six bar sections, in its order", () =>
+    [Array.isArray(installed), installed], [true, ["left", "centerBegin", "center", "centerEnd", "right", "tray"]])
+  // The list the checks below cover is the HOST's, read from its file, never
+  // the double's (harness-lib's hostSections is under test further down; a
+  // wrong one must not shrink this block's coverage). On a host whose Util
+  // declares none (4.0.x) it is the three that host walks, and the check
+  // above is the red line that says so.
+  const sections = Array.isArray(installed) ? installed.slice() : ["left", "center", "right"]
+  const ENTRY = { showLogos: true, refreshMinutes: 60, mpvArgs: "--volume=40", channelOrder: "number", pipCorner: "bottom-left" }
+  // A layout as the host writes one: a neighbour first in every section, so
+  // the entry is never simply the first thing a walker meets.
+  const layoutWith = (section, entry) => {
+    const layout = {}
+    for (const s of sections) layout[s] = [{ id: "omarchy.neighbour-" + s }]
+    if (!layout[section]) layout[section] = []
+    layout[section].push(entry)
+    return { layout }
+  }
+  const read = (model, bar, list) => {
+    const found = model.findBarEntry(bar, PID, list)
+    const s = model.settingsFrom(found)
+    return { id: found.id === undefined ? "<none>" : found.id, writable: model.barEntryWritable(bar, PID, list),
+             settings: [s.showLogos, s.refreshMinutes, s.mpvArgs, s.channelOrder] }
+  }
+  const OBJECT = { id: PID, writable: true, settings: [true, 60, "--volume=40", "number"] }
+  // A bare-string entry is found (the defaults are the user's settings) and
+  // is not writable: updateEntryInline matches `arr[i].id`, which a string
+  // has none of.
+  const BARE = { id: PID, writable: false, settings: [false, 360, "", "playlist"] }
+  // Not found: the defaults, and nothing to write.
+  const NONE = { id: "<none>", writable: false, settings: [false, 360, "", "playlist"] }
+  const both = (model, section, list) => ({ object: read(model, layoutWith(section, Object.assign({ id: PID }, ENTRY)), list),
+                                           bare: read(model, layoutWith(section, PID), list) })
+  for (const section of sections) {
+    checkCall("D-HOST-11 (" + section + "): with the host's list (what Service.qml passes), an object entry is found, writable and read; a bare-string entry is found and not writable", () =>
+      both(M, section, installed), { object: OBJECT, bare: BARE })
+    checkCall("D-HOST-11 (" + section + ", fallback): with no list (4.0.x's Util has none) the walkers walk 4.0.x's left, center and right -- an entry in one of them is found as with the host's list, one in a section only 4.5.0 has is absent and unwritable, as 4.0.x's updateEntryInline would find it", () =>
+      both(M, section, undefined), ["left", "center", "right"].indexOf(section) !== -1 ? { object: OBJECT, bare: BARE } : { object: NONE, bare: NONE })
+  }
+  // Not "every array key": a key the host does not walk is one its
+  // updateEntryInline cannot find, so an entry there must read as absent and
+  // unwritable, or the host's `false` would read as "already stored" and the
+  // write would be lost in silence (rule 9).
+  checkCall("D-HOST-11: an entry under a key the host does not walk is not found and not writable, with the host's list and with the fallback", () =>
+    [both(M, "elsewhere", installed), both(M, "elsewhere", undefined)].map(r => [r.object.id, r.object.writable, r.bare.id]),
+    [["<none>", false, "<none>"], ["<none>", false, "<none>"]])
+  // The host's list WINS over the model's own, both ways: a section only it
+  // names is walked, and one the model names but it does not is not -- the
+  // promise barEntryWritable makes is about the host's walk, so a host with
+  // other sections than BAR_SECTIONS must get its own list walked, not ours.
+  checkCall("D-HOST-11: the host's list wins over the model's own -- with a host list of left, right and dock, an entry in dock is found and writable and one in center is neither", () => {
+    const host = ["left", "right", "dock"]
+    return [read(M, layoutWith("dock", Object.assign({ id: PID }, ENTRY)), host), read(M, layoutWith("center", Object.assign({ id: PID }, ENTRY)), host).writable,
+            read(M, layoutWith("center", Object.assign({ id: PID }, ENTRY)), host).id]
+  }, [OBJECT, false, "<none>"])
+  // The host's order decides which entry is read first, as its walk does.
+  checkCall("D-HOST-11: the walk is the host's order -- the first section in the list that holds the entry wins; with no list, 4.0.x walks neither", () => {
+    const bar = { layout: { tray: [{ id: PID, refreshMinutes: 90 }], centerBegin: [{ id: PID, refreshMinutes: 30 }] } }
+    return [M.findBarEntry(bar, PID, ["left", "centerBegin", "center", "centerEnd", "right", "tray"]).refreshMinutes,
+            M.findBarEntry(bar, PID, ["tray", "centerBegin"]).refreshMinutes, M.findBarEntry(bar, PID).id === undefined]
+  }, [30, 90, true])
+  // The layout 4.5.0's migration wrote on this machine's replay (the map's
+  // skeptic-sections probe, under a decoy HOME): the clock alone in center,
+  // the widgets that sat before it in centerBegin and after it in centerEnd.
+  checkCall("D-HOST-11: the layout migration 1791969355 leaves -- the entry in centerEnd beside the weather -- is read and writable through the service's call", () => {
+    const bar = { layout: { left: [{ id: "omarchy.workspaces" }], centerBegin: [{ id: "omarchy.indicators" }], center: [{ id: "omarchy.clock" }],
+                            centerEnd: [{ id: "omarchy.keyboard-layout" }, { id: "omarchy.weather" }, Object.assign({ id: PID }, ENTRY), { id: "omarchy.system-update" }],
+                            right: [{ id: "omarchy.tray" }], tray: [] } }
+    return read(M, bar, installed)
+  }, OBJECT)
+  // Rule 11, in the suite: the three-section walk put back into a copy of
+  // THIS tree's model, the host's list ignored, goes red for exactly the
+  // sections 4.5.0 added, and for nothing else.
+  checkCall("D-HOST-11 (mutant): a copy of this tree's model whose barSectionList ignores the host's list for the old three-section literal fails exactly the host's sections beyond left, center and right", () => {
+    const root = path.join(__dirname, "..")
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), "omarchy-iptv-dhost11-"))
+    try {
+      fs.mkdirSync(path.join(work, "model"))
+      fs.copyFileSync(path.join(root, "Model.mjs"), path.join(work, "Model.mjs"))
+      for (const f of fs.readdirSync(path.join(root, "model"))) fs.copyFileSync(path.join(root, "model", f), path.join(work, "model", f))
+      const file = path.join(work, "model", "settings.mjs")
+      const text = fs.readFileSync(file, "utf8")
+      const anchor = "function barSectionList(sections) {\n"
+      if (text.split(anchor).length !== 2) return "the mutation did not apply: no single " + JSON.stringify(anchor)
+      fs.writeFileSync(file, text.replace(anchor, anchor + "  return [\"left\", \"center\", \"right\"]\n"))
+      const mutant = require(path.join(work, "Model.mjs"))
+      const red = sections.filter(s => show(both(mutant, s, installed)) !== show({ object: OBJECT, bare: BARE }))
+      return red
+    } finally { fs.rmSync(work, { recursive: true, force: true }) }
+  }, ["centerBegin", "centerEnd", "tray"])
+
+  // F-HARNESS-100: the doubles' host (harness-lib.js) against the installed
+  // host's OWN code, over every section, a key it does not walk, and the
+  // shapes an entry takes (a change, already stored, a bare string, absent,
+  // absent with a plugins[] entry):
+  //   updateEntryInline   shell.qml's, vs HarnessLib.hostUpdateEntry
+  //   setBarWidget        PluginRegistry.qml's, through shell.qml's
+  //                       mutateShellConfig, vs HarnessLib.hostSetBarWidget
+  //   the widget settings BarModel.js entrySettings over Util.normalizeLayout,
+  //                       vs HarnessLib.hostWidgetSettings
+  // Each host function is compiled from its file with the host's own
+  // helpers (Util.qml's, PluginRegistry.qml's), never retyped here. Red on
+  // the double before this change, which walked `right` alone; red on
+  // HarnessLib.hostSections forced to three, on hostUpdateEntry without its
+  // plugins[] branch, and on a mirror that matches a bare string.
+  const hostFns = (text, names, scope, where) => {
+    for (const n of names) {
+      const m = new RegExp("\\n  function " + n + "\\(([^)]*)\\) \\{").exec(text)
+      if (!m) throw new Error(where + " has no function " + n)
+      const open = m.index + m[0].length - 1
+      const close = H.matchBrace(text, open)
+      scope[n] = new Function("scope", "with (scope) { return function " + n + "(" + m[1] + ") {" + text.slice(open + 1, close) + "\n} }")(scope)
+    }
+    return scope
+  }
+  const hostUtil = () => hostFns(utilText, ["isPlainObject", "canonicalWidgetId", "cloneJson", "normalizeLayoutEntry", "normalizeLayoutSection", "normalizeLayout"],
+                                 { barSections: installed }, "Util.qml")
+  const SET = { showLogos: false, sourceKey: "0123abcd" }
+  const hostCases = () => {
+    const shapes = {
+      change: s => layoutWith(s, Object.assign({ id: PID }, ENTRY)),
+      stored: s => layoutWith(s, Object.assign({ id: PID }, SET)),
+      bare: s => layoutWith(s, PID)
+    }
+    const cases = []
+    for (const s of sections.concat(["elsewhere"])) for (const k in shapes) cases.push([s + "/" + k, { bar: shapes[k](s), plugins: [] }])
+    cases.push(["absent", { bar: layoutWith("right", { id: "omarchy.other" }), plugins: [] }])
+    cases.push(["absent/plugins", { bar: layoutWith("right", { id: "omarchy.other" }), plugins: [{ id: PID, showLogos: true }] }])
+    return cases
+  }
+  // Every section of 4.5.0-3 and a key it does not walk, three shapes each,
+  // and the two absent ones: a literal, so a list that shrank cannot shrink
+  // the expected count with it.
+  const CASES = 23
+  checkCall("F-HARNESS-100: the doubles' updateEntryInline agrees with the installed host's own updateEntryInline on every section and entry shape", () => {
+    const Util = hostUtil()
+    const disagree = []
+    const cases = hostCases()
+    for (const [name, config] of cases) {
+      let persisted = null
+      const scope = hostFns(shellText, ["updateEntryInline"], { Util, shellConfig: config, builtinShellConfig: {}, persistShellConfig: c => { persisted = c } }, "shell.qml")
+      const answer = scope.updateEntryInline(PID, SET)
+      const mirror = HL.hostUpdateEntry(config, HL.hostSections(installed), PID, SET)
+      if (answer !== (mirror !== null) || show(persisted) !== show(mirror)) disagree.push(name)
+    }
+    return { cases: cases.length, disagree }
+  }, { cases: CASES, disagree: [] })
+  checkCall("F-HARNESS-100: the doubles' `omarchy bar set` agrees with the installed host's own setBarWidget through mutateShellConfig on every section and entry shape", () => {
+    const regText = fs.readFileSync(path.join(H.HOST_SHELL, "services", "PluginRegistry.qml"), "utf8")
+    const Util = hostUtil()
+    const disagree = []
+    const cases = hostCases()
+    for (const [name, config] of cases) {
+      let persisted = null
+      const scope = { Util, registryRevision: 0, pluginsChanged() {} }
+      // shell.qml mutateShellConfig: a clone, the mutator, persisted whatever it said.
+      hostFns(shellText, ["mutateShellConfig"], Object.assign(scope, { shellConfig: config, builtinShellConfig: {}, persistShellConfig: c => { persisted = c } }), "shell.qml")
+      scope.shellConfigMutator = (fn) => scope.mutateShellConfig(fn)
+      hostFns(regText, ["barEntryId", "findBarLocation", "ensureConfigShape", "setBarWidget"], scope, "PluginRegistry.qml")
+      const error = scope.setBarWidget(PID, "showLogos", false)
+      const mirror = HL.hostSetBarWidget(config, HL.hostSections(installed), PID, "showLogos", false)
+      if (error !== mirror.error || show(persisted) !== show(mirror.config)) disagree.push(name)
+    }
+    return { cases: cases.length, disagree }
+  }, { cases: CASES, disagree: [] })
+  // The harness's record of what the host stores (HarnessLib.hostEntryOf,
+  // every stored and published read in shell.qml) against the host's own
+  // findBarLocation, and observed blind-proof: the plugin's walker with no
+  // list (a baseline tree's) reads an entry in centerEnd as absent, the
+  // record does not (the recheck of the review's fix, 2026-11-06).
+  checkCall("F-HARNESS-100: the entry the dev harness records as stored (HarnessLib.hostEntryOf) is the one the installed host's own findBarLocation finds, on every section and entry shape -- and is not blinded where a three-section walk is", () => {
+    const regText = fs.readFileSync(path.join(H.HOST_SHELL, "services", "PluginRegistry.qml"), "utf8")
+    const scope = { Util: hostUtil() }
+    hostFns(regText, ["barEntryId", "findBarLocation"], scope, "PluginRegistry.qml")
+    const disagree = []
+    const cases = hostCases()
+    for (const [name, config] of cases) {
+      const at = scope.findBarLocation(config, PID)
+      const e = at.found ? config.bar.layout[at.section][at.index] : undefined
+      const want = !at.found ? {} : (e && typeof e === "object" ? e : { id: PID })
+      if (show(HL.hostEntryOf(config.bar, HL.hostSections(installed), PID)) !== show(want)) disagree.push(name)
+    }
+    const ce = layoutWith("centerEnd", Object.assign({ id: PID }, ENTRY))
+    return { cases: cases.length, disagree, blind: [M.findBarEntry(ce, PID).id === undefined, HL.hostEntryOf(ce, HL.hostSections(installed), PID).id === PID] }
+  }, { cases: CASES, disagree: [], blind: [true, true] })
+  checkCall("F-HARNESS-100: the settings the dev harness hands the bar widget agree with the installed host bar's (BarModel.js entrySettings over Util.normalizeLayout) on every section and entry shape", () => {
+    const BarModel = require(path.join(H.HOST_SHELL, "plugins", "bar", "BarModel.js"))
+    const Util = hostUtil()
+    const disagree = []
+    const cases = hostCases()
+    for (const [name, config] of cases) {
+      // The host's own sections, in its order: the keys its normalizeLayout writes.
+      const layout = Util.normalizeLayout(config.bar.layout)
+      let host = {}
+      for (const s of Object.keys(layout)) { const e = (layout[s] || []).find(x => BarModel.entryId(x) === PID); if (e) { host = BarModel.entrySettings(e); break } }
+      if (show(host) !== show(HL.hostWidgetSettings(config.bar, HL.hostSections(installed), PID))) disagree.push(name)
+    }
+    return { cases: cases.length, disagree }
+  }, { cases: CASES, disagree: [] })
+
+  // The service, through Service.qml's own functions (tests/service-harness.js),
+  // with the entry placed in each section of the installed host's kit: the
+  // settings it acts on and the logo toggle's own write.
+  const A = "http://a.example.test/list.m3u"
+  const KA = M.sourceKey(M.normalizeSourceUrl(A, { origin: "cli" }))
+  const rec = { key: KA, url: A, epgUrl: "", kind: "http", label: "a.example.test", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }
+  const stateText = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: KA, entryMigrated: true }) + "\n"
+  const serviceRun = (o) => {
+    const h = H.bootService(svcText, M, Object.assign({ entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag" }, o))
+    const r = h.root
+    const seen = { settings: [r.settings.showLogos, r.settings.refreshMinutes, r.settings.mpvArgs, r.settings.channelOrder], pip: r.pipConfig().pipCorner || "<none>" }
+    const ok = r.setShowLogos(false); h.drain()
+    const stored = h.storedEntry()
+    // mpvArgs is not an owned key: the write composes over the PUBLISHED
+    // entry (the funnel's findBarEntry), so a funnel that walked other
+    // sections than its gate would write the entry without it.
+    return { read: seen, toggle: [ok, r.showLogos, h.host.writes.length].concat(stored && typeof stored === "object" ? [stored.showLogos, stored.mpvArgs] : ["<bare>"]),
+             refused: h.signals.filter(s => s[0] === "sourcesPersistFailed").length + h.warnings.filter(w => /no writable bar entry/.test(w)).length,
+             compileErrors: h.compileErrors }
+  }
+  const SERVED = { read: { settings: [true, 60, "--volume=40", "number"], pip: "bottom-left" }, toggle: [true, false, 1, false, "--volume=40"], refused: 0, compileErrors: [] }
+  for (const section of sections) {
+    checkCall("D-HOST-11 (service, " + section + "): the entry's settings are the ones the service acts on, and the logo toggle's write lands on the stored entry with no refusal", () =>
+      serviceRun({ section }), SERVED)
+  }
+  // Every call site hands the walkers the HOST's list: a kit whose Util
+  // declares a section the model's own list lacks (dock), with the entry in
+  // it. A call site that fell back to the model's list would miss it -- the
+  // read (hostSettings), the PiP read (pipConfig), the gate
+  // (barEntryWritable) or the funnel's compose (findBarEntry, mpvArgs).
+  checkCall("D-HOST-11 (service, a host kit with a dock section): every walker call site reads the host's own list -- settings, PiP, the gate and the funnel's compose", () =>
+    serviceRun({ section: "dock", barSections: ["left", "center", "right", "dock"] }), SERVED)
+  // The 4.0.x kit: Util has no barSections, Service.qml hands undefined and
+  // the model's fallback walks; the host walks its three. An entry beside
+  // the clock there (center) is still read and written.
+  checkCall("D-HOST-11 (service, 4.0.x kit): Commons.Util.barSections undefined -- an entry in center is read and the toggle lands, as on 4.0.x", () =>
+    serviceRun({ section: "center", barSections: undefined }), SERVED)
+  // The 4.0.x kit with the entry where a 4.5.0 migration put it (a downgrade):
+  // that host's updateEntryInline walks its three and cannot find it, so the
+  // service reads the defaults and the toggle is REFUSED -- false to the
+  // guide, one journal line, nothing handed to the host -- rather than
+  // judged writable and lost to the host's `false` as "already stored".
+  checkCall("D-HOST-11 (service, 4.0.x kit, the entry in centerEnd): what that host cannot find is not read, and the logo toggle is refused, not lost: the defaults, false to the guide, one journal line, no write", () => {
+    const h = H.bootService(svcText, M, { entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag", section: "centerEnd", barSections: undefined })
+    const r = h.root
+    const seen = [r.settings.showLogos, r.settings.refreshMinutes, r.settings.mpvArgs, r.settings.channelOrder]
+    const ok = r.setShowLogos(true); h.drain()
+    return [seen, ok, h.host.writes.length, h.warnings.filter(w => /no writable bar entry for the logo setting/.test(w)).length, h.storedEntry().showLogos, h.compileErrors]
+  }, [[false, 360, "", "playlist"], false, 0, 1, true, []])
+  // A bare-string entry, in a section 4.5.0 added: read as the defaults,
+  // and the toggle is refused -- `false` to the guide, which says
+  // persist_failed's sentence (Guide.qml's logo key), and the journal line --
+  // because the host cannot store it; nothing is handed to the host.
+  checkCall("D-HOST-11 (service, bare string in centerEnd): the defaults are read and the logo toggle is refused, not lost: false to the guide, one journal line, no write", () => {
+    const h = H.bootService(svcText, M, { entry: {}, stateText, host: "lag", section: "centerEnd", bare: true })
+    const before = h.root.showLogos
+    const ok = h.root.setShowLogos(true); h.drain()
+    return [before, ok, h.host.writes.length, h.warnings.filter(w => /no writable bar entry for the logo setting/.test(w)).length, h.storedEntry()]
+  }, [false, false, 0, 1, PID])
+})()
+
+// ---- D-PLY-64 (2026-11-06): the owner claim names the Service INSTANCE ----
+//
+// Omarchy 4.5.0's migrations replaced shell.json for a moment; the host read
+// its defaults, destroyed the plugin's Service and made a new one in the SAME
+// shell process. The new one re-claimed the player with this shell's pid and
+// start time, and the old one's orphan check, six seconds later, read the
+// claim as its own and stopped the channel. So each Service object draws a
+// token (Model.playerOwnerToken, Service.qml's `ownerToken`) and passes it on
+// every verb that writes the claim and on its orphan check, and the helper
+// reads a claim with another token as reassigned (tests/test_player.py's
+// OwnerTokenTest has the helper's half). On the verbs Service.runHelper
+// starts the token is one of helperSpawn's private options; the orphan check,
+// launched detached from the destruction handler, carries it on its argv,
+// because execDetached's command list is the only form measured to start
+// there (a { command, environment } object is refused as a TypeError,
+// measured 2026-11-06, and the harness's double now refuses it too: rule 10).
+// The token authorizes nothing and is no private value.
+// Like the block above, the model, Service.qml and the helper are read
+// through IPTV_MODEL, IPTV_SERVICE_QML and IPTV_HELPER, so the same checks
+// run against dev 96b8496 for the red counts (rule 11).
+;(() => {
+  const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
+  const OT = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/owner-token.json"), "utf8"))
+  const TOK = "0123456789abcdef0123456789abcdef", PID = 4242
+  const S = "/run/user/1000/omarchy-iptv/mpv.sock", C = "/home/u/.cache/omarchy-iptv/sources/584a58e5", P = "/p/bin/omarchy-iptv"
+  const call = (name, ...a) => typeof M[name] === "function" ? M[name](...a) : "no " + name
+  const after = (list, flag) => { const i = list.indexOf(flag); return i === -1 ? null : list[i + 1] }
+  // The suite pins Math.random (DRAWN_KEY, at the top), so every Service it
+  // boots would draw the SAME token; the two-instance checks boot under the
+  // real generator.
+  const withRandom = (fn) => { const keep = Math.random; Math.random = REAL_RANDOM; try { return fn() } finally { Math.random = keep } }
+
+  checkCall("D-PLY-64: playerOwnerToken is four 32-bit draws as 32 lowercase hex digits, each zero-padded, a draw out of [0, 1) read as zero; with the real generator two hundred tokens are tokens and no two are equal", () => {
+    const seq = (values) => { let i = 0; return () => values[i++] }
+    const real = Array.from({ length: 200 }, () => call("playerOwnerToken", REAL_RANDOM))
+    return [call("playerOwnerToken", seq([0xdeadbeef / 4294967296, 1 / 4294967296, 0, 4294967295 / 4294967296])),
+            call("playerOwnerToken", seq([NaN, -1, 1, Infinity])),
+            real.every(t => call("isOwnerToken", t) === true), new Set(real).size]
+  }, ["deadbeef0000000100000000ffffffff", "00000000000000000000000000000000", true, 200])
+
+  checkCall("D-PLY-64 (shared fixture): isOwnerToken accepts every token of owner-token.json and refuses every non-token -- the helper's is_owner_token runs the same list", () =>
+    [OT.valid.map(t => call("isOwnerToken", t)), OT.invalid.map(t => call("isOwnerToken", t))],
+    [OT.valid.map(() => true), OT.invalid.map(() => false)])
+
+  checkCall("D-PLY-64: every builder that names an owner pid carries the token right after it -- probe, start, restart, orphan check; a non-token adds nothing; no pid, no token; the old arities build what they built", () => [
+    M.playerProbeArgv(S, PID, TOK), M.playerProbeArgv(S, PID, "nope"), M.playerProbeArgv(S, 0, TOK), M.playerProbeArgv(S, PID),
+    M.playerStartArgv(S, C, "t:x", 5, "", 0, [], PID, false, TOK).slice(2),
+    M.playerRestartArgv(S, C, "t:x", 5, "", 0, [], "term", PID, true, TOK).slice(2),
+    M.playerStartArgv(S, C, "t:x", 5, "", 0, [], 0, false, TOK).slice(2),
+    M.playerOrphanCheckArgv(S, PID, 6, TOK), M.playerOrphanCheckArgv(S, 0, 6, TOK), M.playerOrphanCheckArgv(S, PID, 6, TOK.toUpperCase()),
+    M.playerOrphanCheckArgv(S, PID, 6)
+  ], [
+    ["player", "probe", "--socket", S, "--owner-pid", "4242", "--owner-token", TOK], ["player", "probe", "--socket", S, "--owner-pid", "4242"],
+    ["player", "probe", "--socket", S], ["player", "probe", "--socket", S, "--owner-pid", "4242"],
+    ["--socket", S, "--cache-dir", C, "--id", "t:x", "--seq", "5", "--owner-pid", "4242", "--owner-token", TOK],
+    ["--socket", S, "--cache-dir", C, "--id", "t:x", "--seq", "5", "--owner-pid", "4242", "--owner-token", TOK, "--keep-pause", "--from", "term"],
+    ["--socket", S, "--cache-dir", C, "--id", "t:x", "--seq", "5"],
+    ["player", "orphan-check", "--socket", S, "--owner-pid", "4242", "--owner-token", TOK, "--grace", "6"],
+    ["player", "orphan-check", "--socket", S, "--owner-pid", "0", "--grace", "6"],
+    ["player", "orphan-check", "--socket", S, "--owner-pid", "4242", "--grace", "6"],
+    ["player", "orphan-check", "--socket", S, "--owner-pid", "4242", "--grace", "6"]
+  ])
+
+  checkCall("D-PLY-64: helperSpawn takes the token off every one of those commands -- spaced and attached -- into OMARCHY_IPTV_ARGS, and the harness's stand-in for the helper reads it back beside the pid", () => {
+    const built = [M.playerProbeArgv(S, PID, TOK), M.playerStartArgv(S, C, "t:x", 5, "", 0, ["--volume=5"], PID, false, TOK),
+                   M.playerRestartArgv(S, C, "t:x", 5, "", 0, [], "term", PID, false, TOK), M.playerOrphanCheckArgv(S, PID, 6, TOK),
+                   ["player", "probe", "--socket", S, "--owner-pid", "4242", "--owner-token=" + TOK]]
+    return built.map(args => {
+      const sp = M.helperSpawn(M.helperArgv(P, args), {})
+      const parsed = H.helperView(sp.command, sp.environment)
+      return [sp.command.some(a => a.indexOf(TOK) !== -1 || a.indexOf("--owner-token") === 0),
+              after(parsed, "--owner-token") || (parsed.indexOf("--owner-token=" + TOK) !== -1 ? TOK : null), after(parsed, "--owner-pid")]
+    })
+  }, Array(5).fill([false, TOK, "4242"]))
+
+  // The service's own paths, run by the harness (tests/service-harness.js):
+  // the probe at start, a zap's player start, the health verdict's restart,
+  // and the object's destruction (h.destroy, the shipping onDestruction).
+  // Each run is what /proc would show (`command`), what the helper parses
+  // (`parsed`) and the environment it was handed.
+  const sessions = (h) => {
+    h.ids.Quickshell.processId = PID
+    const runs = []
+    const p = h.ids.playerProc
+    let held = p.running
+    Object.defineProperty(p, "running", { get() { return held }, set(v) { held = v; if (v === true) runs.push({ command: p.command.slice(), parsed: H.helperView(p.command, p.environment), environment: Object.assign({}, p.environment) }) }, configurable: true })
+    p.running = false
+    h.root.runPlayerProbe()
+    p.running = false
+    h.root.issuePlayerSession("start", { id: "t:x", name: "X" }, "")
+    p.running = false
+    h.root.issuePlayerSession("restart", { id: "t:x", name: "X" }, "term")
+    p.running = false
+    const before = h.detachedRuns.length
+    h.destroy()
+    return runs.concat(h.detachedRuns.slice(before))
+  }
+  const verbOf = (command) => command[command.indexOf("player") + 1]
+  checkCall("D-PLY-64 (service): one Service object passes ONE token, its own, on the probe, the start, the restart and its orphan check, beside this shell's pid, on no command but the orphan check's; a second Service object in the same shell draws another", () => {
+    const h1 = withRandom(() => H.bootService(svcText, M, { host: "lag" }))
+    const h2 = withRandom(() => H.bootService(svcText, M, { host: "lag" }))
+    const one = sessions(h1), two = sessions(h2)
+    const mine = String(h1.root.ownerToken), theirs = String(h2.root.ownerToken)
+    return { verbs: one.map(r => verbOf(r.command)),
+             onCommand: one.concat(two).filter(r => r.command.some(a => a.indexOf(mine) !== -1 || a.indexOf(theirs) !== -1 || a.indexOf("--owner-token") === 0)).map(r => verbOf(r.command)),
+             passed: one.map(r => after(r.parsed, "--owner-token") === mine), pids: one.map(r => after(r.parsed, "--owner-pid")),
+             secondPassed: two.map(r => after(r.parsed, "--owner-token") === theirs),
+             tokens: [call("isOwnerToken", mine), call("isOwnerToken", theirs), mine !== theirs, String(h1.root.ownerToken) === mine],
+             compileErrors: h1.compileErrors.concat(h2.compileErrors) }
+  }, { verbs: ["probe", "start", "restart", "orphan-check"], onCommand: ["orphan-check", "orphan-check"], passed: [true, true, true, true], pids: ["4242", "4242", "4242", "4242"],
+       secondPassed: [true, true, true, true], tokens: [true, true, true, true], compileErrors: [] })
+
+  checkCall("D-PLY-64 (service): the orphan check is launched as a plain command list -- the one execDetached form measured to start -- carrying the object's own token on it, with no private value and no environment: of what it carries, helperSpawn would move the token alone", () => {
+    const h = H.bootService(svcText, M, { host: "lag" })
+    const runs = sessions(h)
+    const orphan = runs[runs.length - 1]
+    return { verb: verbOf(orphan.command), flag: orphan.command.filter(a => a === "--args-from-env").length,
+             env: Object.keys(orphan.environment), token: after(orphan.command, "--owner-token") === String(h.root.ownerToken),
+             interpreter: orphan.command.slice(0, 2), grace: after(orphan.command, "--grace"),
+             movable: JSON.parse(M.helperSpawn(orphan.command, {}).environment.OMARCHY_IPTV_ARGS || "[]").map(a => a === String(h.root.ownerToken) ? "<token>" : a) }
+  }, { verb: "orphan-check", flag: 0, env: [], token: true, interpreter: ["python3", "-I"], grace: "6", movable: ["--owner-token", "<token>"] })
+
+  // Join by call, not by name (rule 13): the helper this tree ships accepts a
+  // token the model drew, through the private channel, on the verbs the
+  // service runs -- against a scratch socket with no player, never the
+  // default one -- and refuses, without echoing it, one the model would not
+  // pass.
+  checkCall("D-PLY-64 (join by call): the shipping helper takes a model-drawn token on the orphan check's command line and through OMARCHY_IPTV_ARGS on the probe, and refuses a non-token on the command line without printing it", () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-ply64-"))
+    fs.chmodSync(scratch, 0o700)
+    try {
+      const sock = path.join(scratch, "mpv.sock")
+      const token = call("playerOwnerToken")
+      const base = Object.assign({}, process.env, { HOME: scratch, XDG_CACHE_HOME: scratch, XDG_STATE_HOME: scratch, XDG_RUNTIME_DIR: scratch })
+      const runSpawn = (sp) => {
+        const done = cp.spawnSync(sp.command[0], sp.command.slice(1), { env: Object.assign({}, base, sp.environment), encoding: "utf8", timeout: 30000 })
+        let reply = null
+        try { reply = JSON.parse(String(done.stdout || "").trim().split("\n").pop()) } catch (e) {}
+        return { status: done.status, reply, stderr: String(done.stderr || "") }
+      }
+      const orphan = runSpawn({ command: M.helperArgv(HELPER, M.playerOrphanCheckArgv(sock, process.pid, 0.01, token)), environment: {} })
+      const probe = runSpawn(M.helperSpawn(M.helperArgv(HELPER, M.playerProbeArgv(sock, process.pid, token)), {}))
+      const bad = "0123456789ABCDEF0123456789ABCDEF"
+      const refused = runSpawn({ command: M.helperArgv(HELPER, ["player", "orphan-check", "--socket", sock, "--owner-pid", "1", "--owner-token", bad, "--grace", "0.01"]), environment: {} })
+      return { orphan: [orphan.status, orphan.reply && orphan.reply.reason], probe: [probe.status, probe.reply && probe.reply.ok, probe.reply && probe.reply.running],
+               refused: [refused.status, /not an owner token/.test(refused.stderr), refused.stderr.indexOf(bad) === -1] }
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true })
+    }
+  }, { orphan: [0, "no_player"], probe: [0, true, false], refused: [2, true, true] })
+
+  // Rule 15 over Service.qml, by shape: every call of a builder that writes
+  // or checks the claim passes the object's token, nothing reassigns it, and
+  // it is declared once. A future call site that forgets it is a claim no
+  // orphan check of this object reads as its own -- a genuine disable that
+  // leaves the channel playing. The behaviour is the service check above;
+  // this is the sweep for the next call site.
+  checkCall("D-PLY-64 (rule 15, Service.qml): every call of playerProbeArgv, playerStartArgv, playerRestartArgv and playerOrphanCheckArgv passes root.ownerToken; ownerToken is declared once and never assigned", () => {
+    const calls = {}
+    for (const name of ["playerProbeArgv", "playerStartArgv", "playerRestartArgv", "playerOrphanCheckArgv"]) {
+      const re = new RegExp("Model\\." + name + "\\(", "g")
+      const found = []
+      let m
+      while ((m = re.exec(svcText)) !== null) {
+        // The call's own parentheses, counted (no string in these calls holds one).
+        let depth = 0, end = m.index + m[0].length - 1
+        for (; end < svcText.length; end++) {
+          if (svcText[end] === "(") depth++
+          else if (svcText[end] === ")" && --depth === 0) break
+        }
+        found.push(svcText.slice(m.index, end + 1).indexOf("root.ownerToken") !== -1)
+      }
+      calls[name] = found
+    }
+    return { calls, declared: (svcText.match(/^  property string ownerToken: Model\.playerOwnerToken\(\)$/gm) || []).length,
+             assigned: (svcText.match(/\bownerToken\s*=(?!=)/g) || []).length }
+  }, { calls: { playerProbeArgv: [true], playerStartArgv: [true], playerRestartArgv: [true], playerOrphanCheckArgv: [true] }, declared: 1, assigned: 0 })
 })()
 
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----

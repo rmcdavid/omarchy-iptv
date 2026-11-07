@@ -3,6 +3,59 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.17.1 (unreleased)
+
+### Changed
+
+- **The guide's suggested keybinding is now `SUPER + ALT + T`.** Omarchy
+  4.5.0 binds `SUPER + SHIFT + T`, the chord `contrib/bindings.lua` used
+  until now, to Activity (btop), and `o.bind` adds a binding beside one
+  already on a chord rather than replacing it, so after the upgrade both are
+  on it. `SUPER + ALT + T` is free on a stock Omarchy 4.0 and 4.5.0. If you
+  pasted the old line and run 4.5.0, change its chord; or keep `T` by putting
+  `hl.unbind("SUPER + SHIFT + T")` on the line before it, which leaves stock
+  Activity with no key. The commented picture in picture example moves from
+  `SUPER + SHIFT + I`, which 4.5.0 binds to switching the input language
+  back, to `SUPER + SHIFT + V`. (D-DOC-35)
+
+### Fixed
+
+- **On Omarchy 4.5.0, a channel name in a notification is shown as the
+  provider wrote it, and nothing in it is a link.** 4.5.0's notifications
+  decode entities before they read tags, so the plugin's escaping no longer
+  held there: a name spelling a web address's colon as `&#58;` drew a
+  working link in the plugin's own `Stream failed` card, which a click
+  opened, and a name could bold or break up the card's text. The plugin now
+  puts an invisible joiner (U+034F) after every `&` and `<` it escapes, so
+  nothing in a name can start a tag, an entity or a link for that reader. The
+  card looks the same; the joiner is in the text the host keeps in its
+  history and in anything you copy from the card. (D-SINK-85)
+- **The plugin's settings work in every section of an Omarchy 4.5.0 bar.**
+  With the widget in one of the sections 4.5.0 adds (`centerBegin`,
+  `centerEnd`, `tray`), the plugin ignored the settings its background
+  service reads -- `mpvArgs`, `refreshMinutes`, `channelOrder`, `showLogos`,
+  the picture in picture settings and the rest -- and could save none of its
+  own, so turning logos on said `Could not save settings`. They are now read
+  and saved wherever the widget sits. (D-HOST-11)
+- **A playing channel is no longer stopped when the shell re-creates the
+  plugin without restarting**, as Omarchy 4.5.0's update did while it
+  rewrote the shell's settings file: the outgoing background service took
+  the new one's hold on the player for its own and stopped the channel a
+  few seconds later. The fix takes effect once the shell has been restarted
+  on this version. (D-PLY-64)
+
+### Worth knowing
+
+- **Omarchy 4.5.0 installs a system-wide mpv config**, `/etc/mpv/mpv.conf`,
+  holding `hwdec=auto-safe`, and the player reads it like any mpv: it now
+  decodes video in hardware wherever mpv trusts the decoder, where on
+  Omarchy 4.0 it decoded in software unless your own mpv config said
+  otherwise. `--hwdec=no` in `mpvArgs` turns that off for the player.
+  (D-HOST-13)
+- **On Omarchy 4.5.0 the player window is opaque by default**, so the
+  opacity rule in `contrib/windows.lua` does nothing there; on 4.0 it is
+  still what keeps the player opaque. (D-DOC-36)
+
 ## 0.17.0 (2026-11-02)
 
 **A player another version of the plugin started is replaced instead, and

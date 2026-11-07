@@ -1117,8 +1117,9 @@ function findSourceByUrl(sources, url) {
 // handed out for this record (the add or edit form's probe folder), kept when
 // it is still free so the probe's cache becomes the source's; `draw` is the
 // random source, Math.random unless a test hands one in (QV4's Math.random
-// draws from the system generator; a key needs to be unrelated to the URL,
-// not secret). Mirror of allocate_source_key in the helper, pinned to it by
+// reads Qt's global generator, QRandomGenerator::global, a Mersenne Twister
+// securely seeded from the system generator; a key needs to be unrelated to
+// the URL, not secret). Mirror of allocate_source_key in the helper, pinned to it by
 // the shared source-keys fixture (dev branch).
 function allocateSourceKey(sources, url, preferred, draw) {
   var existing = findSourceByUrl(sources, url)

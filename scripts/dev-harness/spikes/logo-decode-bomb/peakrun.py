@@ -19,7 +19,7 @@ the reporter would end the measurement rather than report it. So the shape
 is always
 
     python3 peakrun.py prlimit --as=2500000000 -- \\
-        env QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qml probe.qml
+        env QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 /usr/lib/qt6/bin/qml probe.qml
 
 RLIMIT_AS rather than a service-manager memory scope, for the two reasons
 run.sh gives: the marketplace capability scan reads the scope tool's name as

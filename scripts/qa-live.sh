@@ -113,20 +113,22 @@ phase_preflight() {
   show pacman -Q omarchy quickshell hyprland mpv python
   show omarchy theme current
   show hyprctl monitors -j
-  printf '$ omarchy menu keybindings --print | grep -E "SUPER (SHIFT|CTRL) \\+ T( |$)"\n'
+  printf '$ omarchy menu keybindings --print | grep -E "SUPER (ALT|SHIFT) \\+ T( |$)"\n'
   # F7: a missing or failing `omarchy` yields the same non-zero pipeline as a
   # no-match, so "SUPER SHIFT + T is free" was printed both when it was free
   # and when nothing had been asked.
+  # D-DOC-35 (2026-11-06): the guide's chord is SUPER ALT + T. Omarchy 4.5.0
+  # binds SUPER SHIFT + T, which this used to ask about, to Activity.
   local binds bind_st
   binds=$(omarchy menu keybindings --print 2>/dev/null); bind_st=$?
   if (( bind_st != 0 )) || [[ -z $binds ]]; then
-    void_ "could not read the keybindings (omarchy exit $bind_st): nothing is known about SUPER SHIFT + T"
-  elif grep -E 'SUPER SHIFT \+ T( |$)' <<<"$binds" | sed 's/^/    TAKEN: /'; then
-    bad_ "SUPER SHIFT + T is already bound; pick another key for the runbook"
+    void_ "could not read the keybindings (omarchy exit $bind_st): nothing is known about SUPER ALT + T"
+  elif grep -E 'SUPER ALT \+ T( |$)' <<<"$binds" | sed 's/^/    TAKEN: /'; then
+    bad_ "SUPER ALT + T is already bound; pick another key for the runbook"
   else
-    ok_ "SUPER SHIFT + T is free"
+    ok_ "SUPER ALT + T is free"
   fi
-  [[ -n $binds ]] && grep -E 'SUPER CTRL \+ T( |$)' <<<"$binds" | sed 's/^/    (expected, Activity) /'
+  [[ -n $binds ]] && grep -E 'SUPER SHIFT \+ T( |$)' <<<"$binds" | sed 's/^/    (expected on Omarchy 4.5, Activity) /'
   printf '$ grep -n iptv ~/.config/hypr/bindings.lua ~/.config/omarchy/extensions/omarchy-menu.jsonc\n'
   grep -n -i iptv "$HOME/.config/hypr/bindings.lua" "$HOME/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null | sed 's/^/    /' || echo "    (no iptv lines yet; add them per README when the runbook says so)"
   printf '$ ls -d %s %s %s %s\n' "$PLUGIN_DIR" "$CACHE_DIR" "$STATE_DIR" "$RUNTIME_DIR"

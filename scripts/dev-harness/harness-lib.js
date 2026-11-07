@@ -328,7 +328,149 @@ function openDrawnSettle(frames, tailMs) {
   return out
 }
 
+// ---- F-HARNESS-100 (2026-11-06): the host's bar layout, for BOTH doubles ----
+//
+// Omarchy 4.5.0 lays the bar out in six sections (Commons/Util.qml
+// `barSections`: left, centerBegin, center, centerEnd, right, tray) and walks
+// them in updateEntryInline, setBarWidget and the bar itself; 4.0.x walked
+// left, center and right. Both doubles walked three and wrote `right` only,
+// and the dev harness handed the bar widget its settings through the
+// plugin's own Model.findBarEntry -- so neither could see D-HOST-11, the
+// plugin's walkers missing the three new sections: the fakes shared the
+// defect instead of modelling the host (rules 10 and 12). These are the
+// host's rules, once, for the fake shell (shell.qml) and the node double
+// (tests/service-harness.js); tests/Model.test.js runs the installed host's
+// own updateEntryInline text beside hostUpdateEntry and goes red where the
+// two disagree, so this mirror is held to the host by a call, not by this
+// comment.
+
+// The sections the host walks: its Util.barSections when it declares one
+// (4.5.0), else the three 4.0.x wrote out in updateEntryInline (4.0.6
+// shell.qml:1088), findBarLocation and BarModel.js.
+function hostSections(barSections) {
+  return Array.isArray(barSections) ? barSections.slice() : ["left", "center", "right"]
+}
+
+function hostPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+// shell.qml updateEntryInline (4.0.6 :1081-1120, 4.5.0 :1107-1146), over
+// `sections`: every OBJECT entry in those sections whose id is `id` becomes
+// { id, ...settings } (a bare-string entry has no `.id` and is never
+// matched); when none is found there, a top-level `plugins[]` entry with
+// that id is rewritten instead; nothing is persisted when nothing changed.
+// -> the config the host persists, or null for its `false` (the !dirty
+// branch, "already stored" when the entry is found -- rule 9).
+function hostUpdateEntry(shellConfig, sections, id, settings) {
+  var key = String(id || "")
+  var copy = JSON.parse(JSON.stringify(shellConfig || {}))
+  // A missing bar or layout is seeded in 4.5.0's shape, `{ layout: {} }`;
+  // 4.0.6 (:1084-1085) seeds three empty arrays. No walker here or in the
+  // plugin can tell the two apart.
+  if (!hostPlainObject(copy.bar)) copy.bar = { layout: {} }
+  if (!hostPlainObject(copy.bar.layout)) copy.bar.layout = {}
+  if (!Array.isArray(copy.plugins)) copy.plugins = []
+  var list = Array.isArray(sections) ? sections : []
+  var found = false, dirty = false, k
+  for (var s = 0; s < list.length; s++) {
+    var arr = copy.bar.layout[list[s]] || []
+    for (var i = 0; i < arr.length; i++) {
+      if (!arr[i] || String(arr[i].id || "") !== key) continue
+      var next = { id: key }
+      for (k in settings) if (k !== "id") next[k] = settings[k]
+      if (JSON.stringify(arr[i]) !== JSON.stringify(next)) { arr[i] = next; dirty = true }
+      found = true
+    }
+  }
+  if (!found) {
+    for (var j = 0; j < copy.plugins.length; j++) {
+      if (!copy.plugins[j] || copy.plugins[j].id !== key) continue
+      var pnext = { id: key }
+      for (k in settings) if (k !== "id") pnext[k] = settings[k]
+      if (JSON.stringify(copy.plugins[j]) !== JSON.stringify(pnext)) { copy.plugins[j] = pnext; dirty = true }
+    }
+  }
+  return dirty ? copy : null
+}
+
+// PluginRegistry.findBarLocation over `sections`: the first entry, bare
+// string or object, whose id is `id`. -> { section, index } or null.
+function hostLocate(shellConfig, sections, id) {
+  var key = String(id || "")
+  var layout = shellConfig && hostPlainObject(shellConfig.bar) && hostPlainObject(shellConfig.bar.layout) ? shellConfig.bar.layout : null
+  if (!layout) return null
+  var list = Array.isArray(sections) ? sections : []
+  for (var s = 0; s < list.length; s++) {
+    var entries = layout[list[s]]
+    if (!Array.isArray(entries)) continue
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i]
+      var eid = hostPlainObject(e) ? String(e.id || "") : String(e || "")
+      if (eid === key) return { section: list[s], index: i }
+    }
+  }
+  return null
+}
+
+// The entry as the HOST finds it (hostLocate's walk over `sections`), in
+// findBarEntry's shape: the object, { id } for a bare string, {} for none.
+// The harness's record of what the fake host stores and publishes reads
+// through this, never through the plugin's own findBarEntry, so a baseline
+// tree staged for a rule-11 run cannot blind the instrument that grades it:
+// a walker that misses a section would otherwise read an entry the host
+// stored there as absent (F-HARNESS-100, the review of 2026-11-06).
+function hostEntryOf(barConfig, sections, id) {
+  var at = hostLocate({ bar: barConfig }, sections, id)
+  if (!at) return {}
+  var e = barConfig.layout[at.section][at.index]
+  return hostPlainObject(e) ? e : { id: String(id || "") }
+}
+
+// PluginRegistry.setBarWidget through shell.qml mutateShellConfig, which
+// is `omarchy bar set <id> <key> <value>`: on a copy shaped by
+// ensureConfigShape (every section the host walks an array, `plugins` an
+// array), the first entry with our id takes the key -- refused, with the
+// host's own words, when there is none or it is a bare string -- and the
+// copy is persisted EITHER WAY (mutateShellConfig does not look at the
+// mutator's error). `value` undefined removes the key (a hand edit; the
+// CLI cannot). -> { config, error }.
+function hostSetBarWidget(shellConfig, sections, id, key, value) {
+  var copy = JSON.parse(JSON.stringify(shellConfig || {}))
+  if (!hostPlainObject(copy.bar)) copy.bar = { layout: {} }
+  if (!hostPlainObject(copy.bar.layout)) copy.bar.layout = {}
+  var list = Array.isArray(sections) ? sections : []
+  for (var s = 0; s < list.length; s++) if (!Array.isArray(copy.bar.layout[list[s]])) copy.bar.layout[list[s]] = []
+  if (!Array.isArray(copy.plugins)) copy.plugins = []
+  var at = hostLocate(copy, list, id)
+  if (!at) return { config: copy, error: "could not find widget " + String(id) }
+  var entry = copy.bar.layout[at.section][at.index]
+  if (!hostPlainObject(entry)) return { config: copy, error: "widget entry must be an object" }
+  if (value === undefined) delete entry[String(key)]
+  else entry[String(key)] = value
+  return { config: copy, error: "" }
+}
+
+// What the host's bar hands the widget it draws for `id` as `settings`:
+// BarModel.js entrySettings over the slot's normalized entry -- every key
+// but `id`, and {} for a bare-string entry. {} too when no section the bar
+// draws holds the entry; the real bar then draws no widget at all, which
+// the fake strip cannot show.
+function hostWidgetSettings(barConfig, sections, id) {
+  var loc = hostLocate(barConfig ? { bar: barConfig } : null, sections, id)
+  if (!loc) return {}
+  var entry = barConfig.layout[loc.section][loc.index]
+  var out = {}
+  if (!hostPlainObject(entry)) return out
+  // Util.normalizeLayoutEntry's cloneJson, then entrySettings' copy.
+  var copy = JSON.parse(JSON.stringify(entry))
+  for (var k in copy) if (k !== "id") out[k] = copy[k]
+  return out
+}
+
 if (typeof module !== "undefined") {
   module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue,
-                     openDrawnSet: openDrawnSet, openDrawnSettle: openDrawnSettle, sourceKeysByUrl: sourceKeysByUrl, newKeyKind: newKeyKind }
+                     openDrawnSet: openDrawnSet, openDrawnSettle: openDrawnSettle, sourceKeysByUrl: sourceKeysByUrl, newKeyKind: newKeyKind,
+                     hostSections: hostSections, hostUpdateEntry: hostUpdateEntry, hostLocate: hostLocate, hostEntryOf: hostEntryOf, hostSetBarWidget: hostSetBarWidget,
+                     hostWidgetSettings: hostWidgetSettings }
 }

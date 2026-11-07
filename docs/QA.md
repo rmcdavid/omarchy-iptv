@@ -22,6 +22,12 @@ console is in the user journal), `SUPER SHIFT + T` free, `SUPER CTRL + T` =
 Activity, no `omarchy-iptv` directories present, `~/.config/omarchy/shell.json`
 mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 `plugins: []`.
+**[2026-11-06, D-DOC-35: on Omarchy 4.5.0 (omarchy-settings 4.5.0-3) stock
+binds `SUPER SHIFT + T` to Activity and `SUPER CTRL + T` to the Theme menu,
+and `SUPER SHIFT + I` to switching the input language back. The plan's
+chord is now `SUPER ALT + T`, free in the stock bindings of 4.0.4, 4.0.6 and
+4.5.0 (read from the three packages), and the picture-in-picture example is
+`SUPER SHIFT + V`. The record above stays as it was measured.]**
 
 ## 0. How to read and execute this plan
 
@@ -139,7 +145,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-BRW-01 | open with `SUPER + SHIFT + T` | M 5.3 (binding added by hand), 5.4 US2 | guide opens on the focused monitor; second press closes |
+| TC-BRW-01 | open with `SUPER + ALT + T` (`SUPER + SHIFT + T` before 2026-11-06, D-DOC-35) | M 5.3 (binding added by hand), 5.4 US2 | guide opens on the focused monitor; second press closes |
 | TC-BRW-02 | open with bar left click; click again closes | M 5.4 US2 | same |
 | TC-BRW-03 | open with `omarchy-shell shell toggle io.github.rmcdavid.iptv` | M 5.4 US2 | same; `hide`/`summon` also work |
 | TC-BRW-04 | menu entry (optional) | M 5.3 | `omarchy-menu.jsonc` snippet from README opens the guide |
@@ -385,7 +391,7 @@ the reading under test.
 | 3.2 | Backspace, Ctrl+Backspace, Ctrl+U | TC-BRW-07 (step 3 includes them) |
 | 3.2 | Down/Up, Right/Left, PgDn/PgUp/Home/End | TC-BRW-10, TC-BRW-11 |
 | 3.2 | Enter, Tab, Esc | TC-PLAY-01, TC-BRW-13, TC-BRW-12 |
-| 3.3 | `SUPER + SHIFT + T`, left/right/middle click, scroll, hover | TC-BRW-01, TC-BAR-06, TC-BAR-07, TC-BAR-08, TC-BAR-09, TC-BAR-01..05 |
+| 3.3 | `SUPER + ALT + T`, left/right/middle click, scroll, hover | TC-BRW-01, TC-BAR-06, TC-BAR-07, TC-BAR-08, TC-BAR-09, TC-BAR-01..05 |
 | 3.4 | zap ring by launch list | TC-BAR-09 |
 | 4.1 | default guide | TC-BRW-05, TC-BRW-06, TC-EPG-02 |
 | 4.2 | searching, scope jumped to All | TC-BRW-11, TC-UI-10 |
@@ -1431,7 +1437,7 @@ leaves room for the now/next projection.
 | PERF-03 | keystroke to redraw < 30 ms, no dropped keys, 40 ms coalescing allowed | with the guide open on the 10k cache: `wtype -d 20 'alpha news channel'` then `wtype -d 0 'zzzzzzzzzzzzzzzzzzzz'` (20 keys, no delay); every character must appear in the header in order and the scope label must settle on the right count; no `WARN` in the journal. Micro-benchmark of the pure filter: `node -e 'const M=require("./Model.js");const c=JSON.parse(require("fs").readFileSync(process.env.HOME+"/.cache/omarchy-iptv/channels.json")).channels;for(const q of ["a","news","alpha news","zz"]){const t=process.hrtime.bigint();for(let i=0;i<50;i++)M.filterChannels(c,q,200);console.log(q,Number(process.hrtime.bigint()-t)/50/1e6,"ms")}'` (run from the plugin dir after the merge; the node file must expose `filterChannels`) | ms per query, dropped keys yes/no |
 | PERF-04 | helper `epg` < 4 s for a 50 MB XMLTV, RSS < 300 MB | `python3 - <<'EOF'` wrapper (GNU `time` is not installed): `import resource,subprocess,time;t=time.monotonic();p=subprocess.run(["python3","<plugindir>/bin/omarchy-iptv","epg","--url","/tmp/omarchy-iptv-qa/gen-10k.xml.gz","--cache-dir","/tmp/omarchy-iptv-qa/cache"]);print("exit",p.returncode,"wall %.2fs"%(time.monotonic()-t),"maxrss MB",resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss/1024)`; then `ls -l /tmp/omarchy-iptv-qa/cache/epg-now.json` (< 1 MB at 10k) and `time ... epg --now-only ...` (recompute, expected well under 1 s); repeat with the Pluto gz (955,717 bytes) | wall, RSS, file size |
 | PERF-05 | shell memory | `ps -o rss= -p $(pgrep -f 'quickshell -n -p /usr/share/omarchy/shell')` before enabling, after the 10k cache loads, after 20 guide opens | three RSS values (informational, no budget) |
-| PERF-06 | zap under 2 s of interaction | stopwatch from `SUPER + SHIFT + T` to the first mpv frame on a live channel (`us.m3u`) after typing three letters and Enter; try three channels | seconds, channel used |
+| PERF-06 | zap under 2 s of interaction | stopwatch from `SUPER + ALT + T` to the first mpv frame on a live channel (`us.m3u`) after typing three letters and Enter; try three channels | seconds, channel used |
 | PERF-07 | refresh does not stall the shell | while the 10k helper runs (`r`), move the cursor and type; the bar clock keeps ticking | pass/fail |
 
 Record all numbers in `docs/STATUS.md` (M1.1-03 evidence) with the commit id
@@ -1477,6 +1483,10 @@ scripts/qa-live.sh preflight
 ```
 
 Expect: versions as in the header of this file; `SUPER SHIFT + T is free`;
+**[2026-11-06, D-DOC-35: the plan's chord is now `SUPER ALT + T`, and
+`scripts/qa-live.sh preflight` asks about it: expect `SUPER ALT + T is free`
+until the binding is added. On Omarchy 4.5.0 it also prints stock Activity
+on `SUPER SHIFT + T` as an `(expected on Omarchy 4.5, Activity)` line.]**
 no `omarchy-iptv` directories; `entries in bar.layout: 0`; playlist HEAD
 `HTTP/2 200`; EPG resolves through two 302s to `raw.githubusercontent.com`
 with `content-length: 955717` (the helper must follow redirects; `urllib`
@@ -1532,7 +1542,7 @@ them in 5.10):
 
 ```
 # ~/.config/hypr/bindings.lua
-o.bind("SUPER + SHIFT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdavid.iptv")
+o.bind("SUPER + ALT + T", "IPTV", "omarchy-shell shell toggle io.github.rmcdavid.iptv")
 # ~/.config/omarchy/extensions/omarchy-menu.jsonc (hot reload)
 "iptv": {"icon":"<U+F0567>","label":"IPTV","aliases":["tv","iptv"],"action":"omarchy-shell shell toggle io.github.rmcdavid.iptv"},
 ```
@@ -1614,7 +1624,7 @@ codepoints for `...`, quotes and the middle dot).
 
 #### US2 Browse (TC-BRW-*, TC-UI-08..10)
 
-1. Open with `SUPER + SHIFT + T`; close with the same key. Open with a left
+1. Open with `SUPER + ALT + T`; close with the same key. Open with a left
    click on the widget; close with a click. `omarchy-shell shell toggle
    io.github.rmcdavid.iptv` twice. No fade in or out [TC-BRW-01..03, TC-UI-08].
 2. On open: header `Search channels...`, scope label `All - 1,475 channels`
@@ -1695,6 +1705,11 @@ codepoints for `...`, quotes and the middle dot).
    stop and play again; `ps -o args= -p $(pgrep -f 'wayland-app-id=omarchy-iptv')`
    shows `--profile=fast --hwdec=auto-safe`, none of the reserved ones, the
    URL last after `--`; journal has one warning naming the three dropped tokens.
+   **[2026-11-06, D-HOST-13: on Omarchy 4.5.0 `hwdec=auto-safe` is also the
+   system default (`/etc/mpv/mpv.conf`), so a player whose `hwdec` reads
+   `auto-safe` no longer shows that the token arrived; use `--hwdec=no` to
+   tell the two apart. And since D-SINK-47 the kept tokens reach mpv in its
+   private `--include` file, not on `ps -o args=`.]**
    With `gen-dead.m3u` entries that carry `#EXTVLCOPT`, argv shows
    `--user-agent=Mozilla/5.0 (X11; Linux x86_64) gen-playlist/1.0` as one item
    [TC-CFG-08, TC-PLAY-08, SEC-06]. Reset: `omarchy bar set io.github.rmcdavid.iptv mpvArgs ''`.
@@ -1886,7 +1901,7 @@ or `tokyo-night` (it lowercases and dash-joins). Run at least three themes
 
 - This machine has one monitor (`eDP-1`, PLAN A7), so TC-A11Y-04 is recorded
   `not run`. On a two-monitor machine: focus a window on monitor 2, press
-  `SUPER + SHIFT + T`: the guide appears on monitor 2 only (no `screen` set,
+  `SUPER + ALT + T`: the guide appears on monitor 2 only (no `screen` set,
   R13); each monitor shows one bar widget with the same state; scroll over
   either widget zaps once (ARCH risk 9); `pgrep -fc wayland-app-id=omarchy-iptv`
   is 1.

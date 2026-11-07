@@ -4,6 +4,9 @@ import "../Model.mjs" as Model
 import "fixtures/chno-cases.js" as ChnoCases
 import "fixtures/pip-cases.js" as PipCases
 import "fixtures/form-edit.js" as FormEdit
+import "fixtures/notify-hosts/cases.js" as NotifyHosts
+import "fixtures/notify-hosts/4.5.0/Store.js" as HostStore
+import "fixtures/notify-hosts/4.0.6/nonascii/NotificationLogic.js" as HostLogic406
 
 // Proves the model -- Model.mjs and the parts under model/ it re-exports, ES
 // modules since D-REL-5 -- loads inside the Qt QML engine (no node-only
@@ -2447,44 +2450,154 @@ TestCase {
   // rests on, an editable one for what Qt deletes and inserts, which is the
   // only way to see it. tests/fixtures/form-edit.js is the transcript these
   // produced, and node holds the model to the same rows.
-  // ---- D-SINK-49 (2026-10-29): the toast body's renderer, observed. The host
-  // draws a notification body as Text.StyledText (NotificationCard.qml; the
-  // host text-format test pins it), so these two Texts are the body's
-  // declaration and the plain reading it should match. Measured here, not
-  // reasoned: escaped, every case lays out exactly as its plain text does
-  // (the same width and height), and UNescaped every markup case does not --
-  // `<br><font size="+4">` grows the card a line and a size, and a bare `&`
-  // swallows what follows it (`Q&A` draws as `Q`, `Sky&Co` as `Sky`). Quotes
-  // need no escape: they draw as quotes either way. Red on dev 2727179:
-  // Model.markupEscape did not exist.
-  Text { id: bodyPlain; textFormat: Text.PlainText; font.pixelSize: 20 }
-  // Not shipped: a test double of the host's body, so StyledText is the point.
-  Text { id: bodyStyled; textFormat: Text.StyledText; font.pixelSize: 20 }
+  // ---- D-SINK-49 (2026-10-29) and D-SINK-85 (2026-11-06): the toast body's
+  // renderers, observed through each host's OWN code. 4.0.6 handed a body to
+  // Text.StyledText through NotificationLogic.styledBody, an image-tag
+  // stripper (NotificationCard.qml). 4.5.0 hands it Store.normalise's
+  // `bodyRich`, which is Markup.render's reading -- entities decoded up to
+  // three passes, then escaped, then b/i/u/s/em/strong/br and a vouched-for
+  // anchor put back, a bare http(s) URL linked -- as Text.StyledText with a
+  // click on a link opening it (Toast.qml bodyBox). The host code is the byte
+  // copy under fixtures/notify-hosts, refused by node unless its sha256 is
+  // the pin tests/test_notify_hosts.py holds to the installed host; these
+  // Texts are bodyBox's declaration (Liberation Sans, Style.font.title 14,
+  // Text.Wrap) and the plain readings each must match, at no width and at a
+  // card's. Measured here, not reasoned: through either host, the plugin's
+  // escape lays out exactly as the text with no joiner in PlainText -- as
+  // wide, as tall, and in as many lines at a card's width; no point of it is
+  // a link. Rule 10, in both directions: through 4.0.6 the RAW text is
+  // read as markup, and through 4.5.0 so is 0.17.0's single escape (inline
+  // below), so these doubles are no kinder than the hosts. Red on dev
+  // 96b8496: the 4.5.0 side drew tags and links (counts in the commit).
+  // The joiner is U+034F, which Liberation Sans carries: U+2060, the first
+  // choice, is not in the face, and Qt drew it in a fallback face (Noto Sans
+  // here), a line that carried one 20 px tall instead of 16 (2026-11-06). So
+  // the comparison is with the text with no joiner, exactly, height and all.
+  Text { id: bodyPlain; textFormat: Text.PlainText; font.family: "Liberation Sans"; font.pixelSize: 14 }
+  // Not shipped: test doubles of the hosts' body Text, so StyledText is the point.
+  Text { id: bodyStyled; textFormat: Text.StyledText; font.family: "Liberation Sans"; font.pixelSize: 14 }
+  Text { id: cardPlain; width: 300; textFormat: Text.PlainText; font.family: "Liberation Sans"; font.pixelSize: 14; wrapMode: Text.Wrap }
+  Text { id: cardStyled; width: 300; textFormat: Text.StyledText; font.family: "Liberation Sans"; font.pixelSize: 14; wrapMode: Text.Wrap }
+
+  // The 4.5.0 card for a body, as Quickshell's server hands omarchy-
+  // notification-send's post to the host, and the same card replayed from
+  // history.json.
+  function hostCard(summary, body) {
+    return HostStore.snapshot({ id: 7, appName: "IPTV", summary: summary, body: body, appIcon: "", desktopEntry: "", image: "",
+                                expireTimeout: -1, urgency: 1, hints: { urgency: 1 } }, "k1", { Low: 0, Normal: 1, Critical: 2 })
+  }
+  function hostReplay(row) {
+    return HostStore.restored(HostStore.parseHistory(HostStore.serialise([HostStore.closedEntry(row, "expired", 1800000000)]))[0])
+  }
+  // What each host hands StyledText for one body.
+  function hostRenderings(body) {
+    var card = hostCard("Stream failed", body)
+    return [["4.5.0 card", card.bodyRich], ["4.5.0 history replay", hostReplay(card).bodyRich],
+            ["4.0.6 card", HostLogic406.styledBody(body, "IPTV", "")]]
+  }
+  // Every link a point of the card would follow, read off the laid-out text.
+  function linksIn(rich) {
+    cardStyled.text = rich
+    var seen = {}, out = []
+    for (var y = 1; y < Math.max(2, cardStyled.height); y += 2)
+      for (var x = 1; x < cardStyled.width; x += 2) {
+        var l = cardStyled.linkAt(x, y)
+        if (l && !seen[l]) { seen[l] = true; out.push(l) }
+      }
+    return out
+  }
+  function sizes(unwrapped, wrapped, text) {
+    unwrapped.text = text
+    wrapped.text = text
+    return [unwrapped.implicitWidth, unwrapped.implicitHeight, wrapped.lineCount, wrapped.height]
+  }
+  // Where a rendering differs from what it should read as: drawn exactly as
+  // `plain` is in PlainText, its size unwrapped and its line count and height
+  // at a card's width.
+  function layoutDiff(rich, plain) {
+    var got = sizes(bodyStyled, cardStyled, rich)
+    var want = sizes(bodyPlain, cardPlain, plain)
+    return JSON.stringify(got) === JSON.stringify(want) ? "" : JSON.stringify(got) + " vs " + JSON.stringify(want)
+  }
+  // 0.17.0's markupEscape, written out: the escape D-SINK-85 replaced.
+  function escapeOnce(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  }
 
   function test_notificationBodyEscapingRendersTheTextAsWritten() {
     var markup = ["<b>B</b>", "a &amp; b", "<a href=\"https://evil.test/login\">renew</a>",
                   "<br><font color=\"#ff0000\" size=\"+4\">X</font>", "AT&T > 5 < 6", "x &lt; y", "Sky&Co", "Q&A"]
     var plainCases = ["it's \"quoted\"", "“Name” did not play · r", "UK: Sky Sports 1 FHD"]
     var all = markup.concat(plainCases)
+    var bad = []
     for (var i = 0; i < all.length; i++) {
-      bodyPlain.text = all[i]
-      bodyStyled.text = Model.markupEscape(all[i])
-      compare(JSON.stringify([bodyStyled.implicitWidth, bodyStyled.implicitHeight]),
-              JSON.stringify([bodyPlain.implicitWidth, bodyPlain.implicitHeight]), "escaped, " + all[i] + " lays out as its plain text")
+      var sides = hostRenderings(Model.markupEscape(all[i]))
+      for (var s = 0; s < sides.length; s++) {
+        var d = layoutDiff(sides[s][1], all[i])
+        if (d) bad.push(sides[s][0] + " " + all[i] + ": " + d)
+        var links = linksIn(sides[s][1])
+        if (links.length) bad.push(sides[s][0] + " " + all[i] + ": links " + JSON.stringify(links))
+      }
     }
-    // The double is the markup reader the host's is: unescaped, each markup
-    // case renders as something else (rule 10, never more forgiving).
-    var differs = []
+    compare(JSON.stringify(bad), "[]", "escaped, every case lays out as its plain text on both hosts, with no link")
+    // The doubles are the markup readers the hosts' are (rule 10, never more
+    // forgiving): through 4.0.6 every markup case unescaped renders as
+    // something else; through 4.5.0, 0.17.0's escape still renders the tags,
+    // the entities and the anchor as markup, and the anchor is a live link.
+    var differs = [], once = [], linked = []
     for (var j = 0; j < markup.length; j++) {
-      bodyPlain.text = markup[j]
-      bodyStyled.text = markup[j]
-      if (bodyStyled.implicitWidth !== bodyPlain.implicitWidth || bodyStyled.implicitHeight !== bodyPlain.implicitHeight) differs.push(markup[j])
+      if (layoutDiff(HostLogic406.styledBody(markup[j], "IPTV", ""), markup[j])) differs.push(markup[j])
+      var rich = hostCard("Stream failed", escapeOnce(markup[j])).bodyRich
+      if (layoutDiff(rich, markup[j])) once.push(markup[j])
+      if (linksIn(rich).length) linked.push(markup[j])
     }
-    compare(differs.length, markup.length, "unescaped, every markup case is read as markup: " + JSON.stringify(differs))
-    bodyStyled.text = "<br><font size=\"+4\">X</font>"
+    compare(differs.length, markup.length, "unescaped, every markup case is read as markup by 4.0.6: " + JSON.stringify(differs))
+    compare(JSON.stringify(once), JSON.stringify([markup[0], markup[1], markup[2], markup[3], markup[5]]),
+            "escaped once, 4.5.0 still reads the tags, the anchor and the entities as markup")
+    compare(JSON.stringify(linked), JSON.stringify([markup[2]]), "escaped once, 4.5.0 draws the anchor as a live link")
+    bodyStyled.text = HostLogic406.styledBody("<br><font size=\"+4\">X</font>", "IPTV", "")
     var tall = bodyStyled.implicitHeight
-    bodyStyled.text = Model.markupEscape("<br><font size=\"+4\">X</font>")
-    verify(tall > bodyStyled.implicitHeight, "the raw tag grows the card; escaped it is one line")
+    bodyStyled.text = hostCard("Stream failed", Model.markupEscape("<br><font size=\"+4\">X</font>")).bodyRich
+    verify(tall > bodyStyled.implicitHeight, "the raw tag grows the card; escaped it is one line on 4.5.0")
+  }
+
+  // D-SINK-85: the shared fixture (fixtures/notify-hosts/cases.js, node runs
+  // the same cases under every event) through V4 and Qt's own StyledText:
+  // the stream-failure body Model.notifyArgv posts for each case lays out as
+  // the case's hand-checked `display` on the 4.5.0 card, its history replay
+  // and the 4.0.6 card, and no point of any of them is a link. For every
+  // event, V4's reading of the 4.5.0 code hands StyledText no `<` and the
+  // card no link to open (V4's regular expressions are not node's, so the
+  // node check alone does not prove this engine reads it the same). And the
+  // same cases escaped once, as 0.17.0 posted them, are links here exactly
+  // where node finds them: the double sees what the host shows.
+  function test_notificationBodiesDrawAsWrittenOnBothHosts() {
+    var bad = [], runs = 0
+    for (var i = 0; i < NotifyHosts.CASES.length; i++) {
+      var c = NotifyHosts.CASES[i]
+      for (var e = 0; e < NotifyHosts.EVENTS.length; e++) {
+        var argv = Model.notifyArgv(NotifyHosts.EVENTS[e], NotifyHosts.params(c))
+        var row = hostCard(argv[argv.length - 2], argv[argv.length - 1])
+        runs++
+        if (row.bodyRich.indexOf("<") !== -1) bad.push(c.id + " " + NotifyHosts.EVENTS[e] + ": markup " + row.bodyRich)
+        if (row.link !== "") bad.push(c.id + " " + NotifyHosts.EVENTS[e] + ": card link " + row.link)
+      }
+      var body = Model.notifyArgv("streamFailed", NotifyHosts.params(c))
+      var sides = hostRenderings(body[body.length - 1])
+      for (var s = 0; s < sides.length; s++) {
+        var d = layoutDiff(sides[s][1], c.display)
+        if (d) bad.push(c.id + " " + sides[s][0] + ": " + d)
+        var links = linksIn(sides[s][1])
+        if (links.length) bad.push(c.id + " " + sides[s][0] + ": links " + JSON.stringify(links))
+      }
+    }
+    compare(runs, NotifyHosts.CASES.length * NotifyHosts.EVENTS.length)
+    compare(JSON.stringify(bad), "[]", "every case draws as written on both hosts, with no link")
+    var linked = []
+    for (var k = 0; k < NotifyHosts.CASES.length; k++)
+      if (linksIn(hostCard("Stream failed", escapeOnce(NotifyHosts.CASES[k].display)).bodyRich).length) linked.push(NotifyHosts.CASES[k].id)
+    compare(JSON.stringify(linked), JSON.stringify(["H01", "H02", "H03", "H04", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"]),
+            "0.17.0's escape: the 4.5.0 card draws a live link for these cases, as node measures")
   }
 
   TextInput { id: roInput; readOnly: true; width: 300 }

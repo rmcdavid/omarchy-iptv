@@ -289,7 +289,7 @@ class TheRealSources(unittest.TestCase):
         cases = (('Guide.qml', 'Model.captionAlpha(', 'Model.captionAlpah('),
                  ('Service.qml', 'Model.redactUrls(', 'Model.redactUrl('),
                  ('tests/Model.spec.qml', 'Model.searchKey(', 'Model.serachKey('),
-                 ('scripts/dev-harness/shell.qml', 'Model.findBarEntry(', 'Model.findBarEntyr('))
+                 ('scripts/dev-harness/shell.qml', 'Model.primaryGroup(', 'Model.primaryGropu('))
         for rel, needle, typo in cases:
             problems, _ = self.mistyped(rel, needle, typo)
             self.assertEqual(1, len(problems), (rel, problems))

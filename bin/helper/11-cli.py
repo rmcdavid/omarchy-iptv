@@ -431,6 +431,10 @@ def build_parser() -> argparse.ArgumentParser:
     player_session.add_argument("--scope", default="", help="zap-ring scope stashed inside mpv (UI intent no mpv property could report)")
     player_session.add_argument("--since", type=int, default=0, help="epoch seconds the channel started playing")
     player_session.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid (see orphan-check)")
+    # D-PLY-64: which service instance of that shell the claim is for. The
+    # shell hands it over in OMARCHY_IPTV_ARGS (Model.helperSpawn), never on
+    # argv; omitted, the claim names the shell only, as it always did.
+    player_session.add_argument("--owner-token", type=owner_token_arg, default="", help="the claiming service instance's token (see orphan-check)")
     player_session.add_argument("--mpv-arg", action="append", default=[], help="one user mpv token; repeat for more (never joined)")
     player_session.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
     player_session.add_argument("--spawn-timeout", type=float, default=DEFAULT_SPAWN_TIMEOUT, help="seconds to wait for mpv to bind its socket (default %.1f)" % DEFAULT_SPAWN_TIMEOUT)
@@ -450,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     stop_player.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
     probe = player_actions.add_parser("probe", parents=[player_socket], help="report the player without touching it (the reattach read)")
     probe.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid")
+    probe.add_argument("--owner-token", type=owner_token_arg, default="", help="the claiming service instance's token (see orphan-check)")
     pause = player_actions.add_parser("pause", parents=[player_socket],
                                       help="pause, resume or toggle the live stream; resuming continues from the pause (to go further back: seek)")
     pause.add_argument("--state", choices=("on", "off", "toggle"), default="toggle")
@@ -468,6 +473,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
+    orphan.add_argument("--owner-token", type=owner_token_arg, default="", help="the destroyed service instance's token: a claim carrying any other is reassigned")
     orphan.add_argument("--grace", type=float, default=DEFAULT_ORPHAN_GRACE, help="seconds to let a successor shell claim the player (default %.1f)" % DEFAULT_ORPHAN_GRACE)
     player.set_defaults(func=cmd_player)
 

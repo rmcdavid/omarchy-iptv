@@ -6,11 +6,17 @@
 -- Picture in picture does NOT need any of this. The plugin drives the window
 -- at runtime with hyprctl and writes nothing to your configuration.
 
--- Keep video fully opaque. Omarchy tags every window `default-opacity` and
--- renders it at 0.985 / 0.96; its own exemption list for media players
--- matches on class, and ours is `omarchy-iptv`, not `mpv` -- the app id that
--- gives the plugin its window identity is the same one that costs it the
--- exemption. Confirmed on Hyprland 0.56.2, not inferred.
+-- Keep video fully opaque on Omarchy 4.0. Omarchy 4.0 tags every window
+-- `default-opacity` and renders it at 0.985 / 0.96; its own exemption list
+-- for media players matches on class, and ours is `omarchy-iptv`, not `mpv`
+-- -- the app id that gives the plugin its window identity is the same one
+-- that costs it the exemption. Confirmed on Omarchy 4.0 with Hyprland
+-- 0.56.2, not inferred.
+-- Omarchy 4.5.0 dropped that tag: windows are opaque unless they opt in to
+-- transparency (terminals and a few apps do, and SUPER + BACKSPACE opts the
+-- focused window in), so the player is opaque there without this line, and
+-- the line does nothing. Keep it if you still run 4.0; it is harmless on
+-- 4.5.0.
 o.window("omarchy-iptv", { tag = "-default-opacity" })
 
 -- Optional: always float the player at a fixed size, centered.

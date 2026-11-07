@@ -2405,6 +2405,13 @@ caller's tokens, never over a caller that already named `--gpu-sw` or
 inherits it; no live session carries it) or the caller says
 `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`, which every scenario `h()` that
 points `run.sh` at `$NESTED` now sets (key, logo, open, clip, first-open).
+**[2026-11-06, F-HARNESS-102: the lever also appends `--hwdec=no`, never
+over a caller that named `--hwdec` itself (a sibling such as
+`--hwdec-codecs` is not it), and player-scenario's own lever for the older
+players it starts carries the same token. Omarchy 4.5.0's
+`/etc/mpv/mpv.conf` turns hardware decoding on for every player, the cage's
+included, and nothing here was measured with it; this keeps the cage's
+players on the path that was.]**
 A caller that sets it to anything but 1 has said no. A gles2 cage gets
 nothing: it serves hardware contexts (the chno-mutations spike plays under
 one). `private-bus.sh` sets a soft `RLIMIT_CORE` of 0 for everything

@@ -1334,7 +1334,7 @@ if [[ -x "$QT_BIN/qmltestrunner" ]]; then
   mkdir -p -m 700 "$qml_home"
   if env -u MPV_HOME -u XCOMPOSEFILE HOME="$qml_home" XDG_CONFIG_HOME="$qml_home/.config" \
        XDG_CACHE_HOME="$qml_home/.cache" XDG_DATA_HOME="$qml_home/.local/share" \
-       XDG_STATE_HOME="$qml_home/.local/state" QT_QPA_PLATFORM=offscreen \
+       XDG_STATE_HOME="$qml_home/.local/state" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
        "$QT_BIN/qmltestrunner" -input "$ROOT/tests/Model.spec.qml" >"$qml_log" 2>&1; then
     # E1: this used to be `ok "qml spec ($(grep -c '^PASS' ...) passed)"` - the
     # count interpolated into a message, the grep's status discarded inside

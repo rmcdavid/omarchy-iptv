@@ -376,13 +376,73 @@ function sessionIntentRepair(status, nowPlaying) {
   return left.id === np ? "" : np
 }
 
-function playerOrphanCheckArgv(socket, ownerPid, graceSec) {
+// ---- D-PLY-64: which Service instance holds the owner claim (4.14) ----
+//
+// The owner claim named the SHELL (pid and start time), and Omarchy 4.5.0's
+// migrations showed the shell is not the unit that dies: they replaced
+// shell.json for a moment, the host read its defaults, destroyed the plugin's
+// Service and created a new one inside the same shell process. The new one's
+// probe re-claimed the player with the same pid and start time; the old one's
+// orphan check, six seconds later, read the claim as still its own with its
+// shell alive -- "the plugin was disabled" -- and stopped the channel.
+//
+// So each Service object draws one token when it is created (Service.qml's
+// `ownerToken`) and passes it on every verb that writes the claim (probe,
+// start, restart) and on its orphan check, which reads a claim carrying any
+// other token as reassigned. `--owner-token` is one of helperSpawn's private
+// options, so on the verbs Service.runHelper starts it travels in
+// OMARCHY_IPTV_ARGS; the orphan check alone carries it on its argv, because
+// it is launched detached from a destruction handler and execDetached's
+// command list is the only form measured to start there (an object is
+// refused, Service.qml). Not a secret either way: it authorizes nothing,
+// anything that can reach the player's socket reads the claim, and it names
+// nothing outside the user's own 0700 runtime directory. 32 lowercase hex
+// digits, four 32-bit draws: unrelated to anything, and two instances of one
+// shell share one only by a 128-bit coincidence (QV4's Math.random reads
+// Qt's global generator, QRandomGenerator::global, a Mersenne Twister
+// securely seeded from the system generator). Measured under
+// Qt 6.12's own engine (offscreen, 2026-11-06): the property Service.qml
+// declares reads the same token across fifty changes to its object, and a
+// hundred objects drew a hundred tokens. `draw` is the random source,
+// Math.random unless a test hands one in (as randomSourceKey's). The
+// helper's is_owner_token is the mirror, held to this one by the shared
+// owner-token fixture (dev branch); a token this does not accept is never
+// passed, so the claim then names the shell only, which is the rule as it
+// was.
+var OWNER_TOKEN_RE = /^[0-9a-f]{32}$/
+
+function isOwnerToken(token) {
+  return typeof token === "string" && OWNER_TOKEN_RE.test(token)
+}
+
+function playerOwnerToken(draw) {
+  var d = typeof draw === "function" ? draw : Math.random
+  var out = ""
+  for (var i = 0; i < 4; i++) {
+    var n = Math.floor(Number(d()) * 4294967296)
+    if (!isFinite(n) || n < 0) n = 0
+    var hex = (n % 4294967296).toString(16)
+    while (hex.length < 8) hex = "0" + hex
+    out += hex
+  }
+  return out
+}
+
+// `--owner-token <token>` for a verb that names an owner pid; nothing for a
+// token isOwnerToken refuses.
+function ownerTokenArgv(ownerToken) {
+  return isOwnerToken(ownerToken) ? ["--owner-token", ownerToken] : []
+}
+
+function playerOrphanCheckArgv(socket, ownerPid, graceSec, ownerToken) {
   var pid = Math.floor(Number(ownerPid))
   var grace = Number(graceSec)
   if (!isFinite(grace) || grace <= 0) grace = PLAYER_ORPHAN_GRACE_SEC
+  var owned = isFinite(pid) && pid > 0
   return ["player", "orphan-check", "--socket", str(socket),
-          "--owner-pid", String(isFinite(pid) && pid > 0 ? pid : 0),
-          "--grace", String(grace)]
+          "--owner-pid", String(owned ? pid : 0)]
+    .concat(owned ? ownerTokenArgv(ownerToken) : [])
+    .concat(["--grace", String(grace)])
 }
 
 // The now-playing record that lives inside the mpv process, never on disk
@@ -1201,7 +1261,8 @@ export {
   playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
   helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
-  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
+  reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
+  playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
   playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
   OLDER_RESTART_LINE, OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS,
   probeLaunchOlder, adoptedSourceMatches, adoptedChannelReach,

@@ -454,7 +454,7 @@ PROBE_RESULT=""
 probe() {
   local name=$1 before
   PROBE_PID=""
-  WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland "$QML_BIN" "$SPIKE/$name.qml" >"$WORK/$name.log" 2>&1 &
+  WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 "$QML_BIN" "$SPIKE/$name.qml" >"$WORK/$name.log" 2>&1 &
   PROBE_PID=$!
   settle "$PROBE_PID"
   before=$(rss_kb "$PROBE_PID")
@@ -496,10 +496,12 @@ probes() {
 
 # ------------------------------------------------------------- the shell arm
 # F-HARNESS-45: the nested cage renders with pixman, so a player started toward
-# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
-# --ao=null to the mpvArgs). Since D-PLY-27 the base argv carries --gpu-sw=yes
-# itself, so on this tree the lever's job is --ao=null (the cage's player stays
-# off the user's sound server); on an older tree, such as a --baseline ref
+# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes,
+# --ao=null and, since F-HARNESS-102, --hwdec=no to the mpvArgs). Since
+# D-PLY-27 the base argv carries --gpu-sw=yes itself, so on this tree the
+# lever's job is --ao=null and --hwdec=no (the cage's player stays off the
+# user's sound server and off Omarchy 4.5.0's hardware decoding); on an
+# older tree, such as a --baseline ref
 # through 0.15.0, mpv 0.41.0 aborts in its VO probe without it.
 h()   { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 ipc() { h ipc "$@" 2>/dev/null; }

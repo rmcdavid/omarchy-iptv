@@ -574,7 +574,7 @@ probe() {
   local file=$1 qml="$WORK/probe-$RANDOM.qml" out line rc kb
   sed -e "s|__PATH__|$file|" -e "s|__SOURCE_SIZE__|44|" "$SPIKE/probe-tmpl.qml" >"$qml"
   out=$(PEAKRUN_TIMEOUT=90 python3 "$SPIKE/peakrun.py" prlimit --as=$CAP_AS -- \
-          env QT_QPA_PLATFORM=offscreen "$QML_BIN" "$qml" 2>&1)
+          env QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 "$QML_BIN" "$qml" 2>&1)
   line=$(printf '%s\n' "$out" | grep -a '^PEAKRUN ' | tail -1)
   rc=$(printf '%s' "$line" | sed -n 's/.*rc=\(-\{0,1\}[0-9]*\).*/\1/p')
   kb=$(printf '%s' "$line" | sed -n 's/.*peak_rss_kb=\([0-9]*\).*/\1/p')
@@ -621,10 +621,12 @@ ck "K2 $SINK_BOMB at the sink" "$k2" "withheld-and-gone"
 # needs. Every value asserted is read off the running shell (`ipc state`:
 # the guide's `logoCount`, `logoHaveDir`, `logoDir`), never off a file.
 # F-HARNESS-45: the nested cage renders with pixman, so a player started toward
-# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
-# --ao=null to the mpvArgs). Since D-PLY-27 the base argv carries --gpu-sw=yes
-# itself, so on this tree the lever's job is --ao=null (the cage's player stays
-# off the user's sound server); on an older tree, such as a --baseline ref
+# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes,
+# --ao=null and, since F-HARNESS-102, --hwdec=no to the mpvArgs). Since
+# D-PLY-27 the base argv carries --gpu-sw=yes itself, so on this tree the
+# lever's job is --ao=null and --hwdec=no (the cage's player stays off the
+# user's sound server and off Omarchy 4.5.0's hardware decoding); on an
+# older tree, such as a --baseline ref
 # through 0.15.0, mpv 0.41.0 aborts in its VO probe without it.
 h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 ipc()  { h ipc "$@" 2>/dev/null; }

@@ -9,7 +9,9 @@ import re
 import shutil
 import sys
 
-SHELL = "/usr/share/omarchy/shell"
+# The kit is read from where fidelity.py grades it (OMARCHY_PATH), so a tree
+# built against another Omarchy is graded against the same one.
+SHELL = os.environ.get("OMARCHY_PATH", "/usr/share/omarchy") + "/shell"
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The generated tree is a BUILD ARTIFACT, not source: it holds a copy of the
 # host UI kit and a transformed copy of Guide.qml, both regenerated on every
@@ -28,11 +30,14 @@ def log(tag, msg):
 
 
 def strip_blocks(text, starts):
-    """Delete each brace-balanced QML block whose first line matches a regex."""
+    """Delete each brace-balanced QML block whose first line matches a regex.
+    Returns the text, the (first, last) line of each removed block, and each
+    removed block's own text."""
     lines = text.split("\n")
     out = []
     i = 0
     removed = []
+    blocks = []
     while i < len(lines):
         line = lines[i]
         if any(re.search(p, line) for p in starts):
@@ -44,54 +49,194 @@ def strip_blocks(text, starts):
                 if depth <= 0:
                     break
             removed.append((start + 1, i))
+            blocks.append("\n".join(lines[start:i]))
             continue
         out.append(line)
         i += 1
-    return "\n".join(out), removed
+    return "\n".join(out), removed, blocks
+
+
+# What the tree holds of the host's qs.Commons, decided FILE BY FILE
+# (F-HARNESS-99, 2026-11-06). Importing a QML module compiles every SINGLETON
+# its qmldir names, for each file that imports the module, used or not
+# (measured on omarchy 4.5.0-3: an unused singleton whose file is missing, or
+# one that imports Quickshell.Hyprland, breaks every importer); a plain type
+# is compiled only where it is used. 4.5.0 named eight more types than 4.0.6,
+# and a builder that copied four by name turned test_bar_shown_names and the
+# whole accessibility harness red with "Type AudioNodes unavailable".
+#
+#   copy       byte-identical: the module file, every .js helper, a singleton
+#              that imports no Quickshell, and a PLAIN type (compiled only
+#              where used; no probe uses ShellIpc or Translations, and a probe
+#              that ever does fails loudly at load, which is the right
+#              failure: the unchanged file is the faithful one)
+#   transform  a singleton whose Quickshell use is I/O alone: its Process,
+#              FileView, Connections and IpcHandler blocks and its Quickshell
+#              imports are removed, what the removed ids answered reads as
+#              empty, a Quickshell `Singleton` root becomes an Item, the
+#              QtQuick type that holds child objects (a QtObject cannot: a
+#              default property a document declares is not the default of
+#              its own root, measured), and Quickshell.env reads "" (PROBE
+#              SHIM)
+#   stub       a singleton whose LOGIC stands on a Quickshell service, which
+#              no transform can remove without inventing an answer
+#
+# A host file in no row stops the build with its name, so the next host
+# update is a decision here rather than a load error in an unrelated test.
+# Every file this changes must be declared, with its reason, in
+# fidelity.KIT_PATCHED, and every Commons declaration there must be a file
+# this changes: the build checks both, by calling, so the builder and the
+# guard cannot drift (rule 13).
+COMMONS = {
+    "qmldir": "copy",
+    "Border.qml": "copy",
+    "BorderGeometry.js": "copy",
+    "AudioNodesModel.js": "copy",
+    "Numbers.js": "copy",
+    "Plural.js": "copy",
+    "ShellIpc.qml": "copy",
+    "Translations.qml": "copy",
+    "Color.qml": "transform",
+    "Style.qml": "transform",
+    "Util.qml": "transform",
+    "I18n.qml": "transform",
+    "AudioNodes.qml": "transform",
+    "InputDevices.qml": "transform",
+    "InputMethodState.qml": "transform",
+    "IpcRegistry.qml": "transform",
+    "UntypedInput.qml": "stub",
+}
+
+QS_BLOCKS = ("Process", "FileView", "Connections", "IpcHandler")
+BLOCK_STARTS = [r"^\s*property (?:%s) \w+\s*:" % "|".join(QS_BLOCKS),
+                r"^\s*(?:%s)\s*\{" % "|".join(QS_BLOCKS)]
+# Quickshell-only names that must not survive a transform in code.
+QS_ONLY = r"\b(?:Quickshell|Singleton|Process|FileView|Connections|IpcHandler|SplitParser|StdioCollector|Pipewire|PwNode|Hyprland)\b"
+
+
+def code_only(text):
+    """The text with // comments removed (a // after a space or at a line's
+    start; a URL's // inside a string is preceded by a colon)."""
+    return "\n".join(re.sub(r"(^|\s)//.*$", r"\1", line) for line in text.split("\n"))
+
+
+def qmldir_types(path):
+    """{file: is_singleton} for every type a qmldir names."""
+    out = {}
+    for line in open(path).read().split("\n"):
+        words = line.split()
+        singleton = bool(words) and words[0] == "singleton"
+        if singleton:
+            words = words[1:]
+        if len(words) >= 2 and re.match(r"^[A-Z]\w*$", words[0]) and words[-1].endswith((".qml", ".js")):
+            out[words[-1]] = singleton
+    return out
+
+
+def transform_commons(name, text):
+    """One Commons singleton, its Quickshell I/O removed (see COMMONS)."""
+    before = len(text.split("\n"))
+    text, removed, blocks = strip_blocks(text, BLOCK_STARTS)
+    gone = []
+    for block in blocks:
+        m = re.match(r"^\s*property \w+ (\w+)\s*:", block)
+        if m:
+            gone.append(m.group(1))
+        gone.extend(re.findall(r"^\s*id:\s*(\w+)", block, re.M))
+    gone = sorted(set(gone))
+    text = re.sub(r"^import Quickshell(?:\.\w+)*[ \t]*\n", "", text, flags=re.M)
+    holder = bool(re.search(r"^Singleton \{", text, re.M))
+    text = re.sub(r"^Singleton \{", "Item {", text, count=1, flags=re.M)
+    # Quickshell.env -> the real environment, same answer, no Quickshell.
+    text = re.sub(r'Quickshell\.env\((\s*"[^"]*"\s*)\)', r"shimEnv(\1)", text)
+    text = re.sub(r"Quickshell\.execDetached\([^\n]*\)", "void(0)", text)
+    # The deleted blocks leave their ids behind: starting one is a no-op, a
+    # file one read reads as empty, one that ran reads as not running, and
+    # one passed as a value is null. Any other use stops the build.
+    for dead in gone:
+        text = re.sub(r"\b%s\.(?:running|command)\s*=\s*[^\n;}]+" % dead, "void(0)", text)
+        text = re.sub(r"\b%s\.text\(\)" % dead, '""', text)
+        text = re.sub(r"\b%s\.(?:reload|restart|start|write)\([^()\n]*\)" % dead, "void(0)", text)
+        text = re.sub(r"\b%s\.running\b" % dead, "false", text)
+        text = re.sub(r"\(%s\)" % dead, "(null)", text)
+        if re.search(r"\b%s\b" % dead, code_only(text)):
+            raise SystemExit("make_tree: Commons/%s still names %s, a block the transform removed; "
+                             "decide what it reads as here" % (name, dead))
+    left = re.search(QS_ONLY, re.sub(r"^pragma Singleton[ \t]*$", "", code_only(text), flags=re.M))
+    if left:
+        raise SystemExit("make_tree: Commons/%s still uses %s after the transform; "
+                         "stub it or extend the transform" % (name, left.group(0)))
+    marker = ("Item" if holder else "QtObject") + " {\n  id: root\n"
+    if marker not in text:
+        raise SystemExit("make_tree: Commons/%s has no `%s` root to shim" % (name, marker.split("\n")[0]))
+    text = text.replace(marker, marker + """
+  // PROBE SHIM: the only substitute in this tree. Supplies the values the
+  // deleted Quickshell.Io blocks would have loaded. Affects colours and
+  // metrics only; it declares no Accessible property of any kind.
+  function shimEnv(key) { return "" }
+""" + ("""  // PROBE SHIM: the host's root was Quickshell's Singleton; this Item
+  // stands in for it, holds the same children, and is never drawn.
+""" if holder else ""), 1)
+    return text, before, removed, gone
 
 
 def commons():
     src = os.path.join(SHELL, "Commons")
     dst = os.path.join(TREE, "qs", "Commons")
     os.makedirs(dst, exist_ok=True)
-    shutil.copy(os.path.join(src, "BorderGeometry.js"), dst)
-    shutil.copy(os.path.join(src, "Border.qml"), dst)
-    shutil.copy(os.path.join(src, "qmldir"), dst)
-    log("commons", "Border.qml and BorderGeometry.js copied unchanged")
-
-    for name, block_pats in (
-        ("Color.qml", [r"property FileView "]),
-        ("Style.qml", [r"property Process ", r"property FileView "]),
-        ("Util.qml", []),
-    ):
-        text = open(os.path.join(src, name)).read()
-        before = len(text.split("\n"))
-        text, removed = strip_blocks(text, block_pats)
-        text = text.replace("import Quickshell.Io\n", "")
-        text = text.replace("import Quickshell\n", "")
-        # Quickshell.env -> the real environment, same answer, no Quickshell.
-        text = re.sub(r'Quickshell\.env\((\s*"[^"]*"\s*)\)', r"shimEnv(\1)", text)
-        text = re.sub(r"Quickshell\.execDetached\([^\n]*\)", "void(0)", text)
-        # the deleted Process blocks leave dangling ids behind
-        for dangling in ("hyprctlProc", "gapsOutProc", "fcMatchProc"):
-            text = text.replace(dangling + ".running = true", "void(0)")
-        marker = "QtObject {\n  id: root\n"
-        assert marker in text, name
-        text = text.replace(marker, marker + """
-  // PROBE SHIM: the only substitute in this tree. Supplies the values the
-  // deleted Quickshell.Io blocks would have loaded. Affects colours and
-  // metrics only; it declares no Accessible property of any kind.
-  function shimEnv(key) { return "" }
-""", 1)
-        open(os.path.join(dst, name), "w").write(text)
-        log("commons", "%s: %d lines -> %d; removed I/O blocks at %s"
-            % (name, before, len(text.split("\n")), removed or "none"))
+    present = sorted(os.listdir(src))
+    unknown = [f for f in present if f not in COMMONS]
+    if unknown:
+        raise SystemExit("make_tree: the host's Commons/ holds %s, which this tree neither copies, "
+                         "transforms nor stubs; decide which in make_tree.COMMONS (F-HARNESS-99)"
+                         % ", ".join(unknown))
+    types = qmldir_types(os.path.join(src, "qmldir"))
+    absent = sorted(f for f in types if f not in present)
+    if absent:
+        raise SystemExit("make_tree: the host's Commons/qmldir names %s, which is not in Commons/"
+                         % ", ".join(absent))
+    sys.path.insert(0, HERE)
+    import fidelity
+    changed = []
+    for name in present:
+        how = COMMONS[name]
+        path = os.path.join(src, name)
+        text = open(path).read()
+        imports_qs = bool(re.search(r"^import Quickshell", text, re.M))
+        if how == "copy":
+            if types.get(name) and imports_qs:
+                raise SystemExit("make_tree: Commons/%s is a singleton that imports Quickshell; "
+                                 "copied unchanged it breaks every importer" % name)
+            shutil.copy(path, dst)
+            log("commons", "%s copied unchanged" % name)
+        elif how == "transform":
+            out, before, removed, gone = transform_commons(name, text)
+            open(os.path.join(dst, name), "w").write(out)
+            changed.append(name)
+            log("commons", "%s: %d lines -> %d; removed I/O blocks at %s; dangling ids %s"
+                % (name, before, len(out.split("\n")), removed or "none", ", ".join(gone) or "none"))
+        else:
+            open(os.path.join(dst, name), "w").write(
+                ("pragma Singleton\n" if types.get(name) else "") + "import QtQuick\n\n"
+                "// PROBE STUB: the host's %s stands on a Quickshell service that\n"
+                "// plain qml cannot load. No probe runs it; it is here because\n"
+                "// importing qs.Commons compiles every singleton the qmldir names.\n"
+                "QtObject {}\n" % name)
+            changed.append(name)
+            log("commons", "%s: PROBE STUB (compiled, never run)" % name)
+    declared = sorted(k.split("/", 1)[1] for k in fidelity.KIT_PATCHED if k.startswith("Commons/"))
+    undeclared = sorted(set(changed) - set(declared))
+    stale = sorted(n for n in set(declared) - set(changed) if n in present)
+    if undeclared or stale:
+        raise SystemExit("make_tree: fidelity.KIT_PATCHED does not match what this builds: changed but "
+                         "undeclared %s; declared but unchanged %s" % (undeclared or "none", stale or "none"))
 
 
 def ui():
     """Copy the host kit and patch ONLY the files that import Quickshell and
-    are actually instantiated. 6 of 33 import it; the guide's closure uses
-    none of them, the bar widget uses exactly one."""
+    are actually instantiated. 7 of 39 import it on omarchy 4.5.0-3 (6 of 33
+    on 4.0.6; the log line below counts them on every build); the guide's
+    closure uses none of them, the bar widget uses exactly one."""
     src = os.path.join(SHELL, "Ui")
     dst = os.path.join(TREE, "qs", "Ui")
     shutil.copytree(src, dst)

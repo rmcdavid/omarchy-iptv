@@ -156,7 +156,7 @@
    ]
   },
   {
-   "name": "player probe, stop, pause, tracks and orphan-check carry nothing private: no flag, no variable",
+   "name": "player probe, stop, pause, tracks and orphan-check carry nothing private without an owner token: no flag, no variable",
    "argv": [
     "python3",
     "-I",
@@ -765,6 +765,287 @@
     "--state-dir",
     "/home/u/.local/state/omarchy-iptv",
     "mode"
+   ]
+  },
+  {
+   "name": "D-PLY-64: the reattach probe's owner token moves; the socket and the owner pid stay",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--args-from-env"
+   ],
+   "private": [
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ]
+  },
+  {
+   "name": "D-PLY-64: player start's owner token moves with the cache folder, the id and the user token; the keep-pause flag stays",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/r/mpv.sock",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--seq",
+    "3",
+    "--owner-pid",
+    "4242",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b",
+    "--keep-pause",
+    "--mpv-arg=--volume=50"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "3",
+    "--owner-pid",
+    "4242",
+    "--keep-pause",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b",
+    "--mpv-arg=--volume=50"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "3",
+    "--owner-pid",
+    "4242",
+    "--keep-pause",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b",
+    "--mpv-arg=--volume=50"
+   ]
+  },
+  {
+   "name": "D-PLY-64: player restart's owner token moves; --from stays",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b",
+    "--from",
+    "term"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--from",
+    "term",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--from",
+    "term",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ]
+  },
+  {
+   "name": "D-PLY-64: helperSpawn moves an orphan check's owner token (its mechanics; the shell launches the orphan check as a plain command list); the socket, the owner pid and the grace stay",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "orphan-check",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b",
+    "--grace",
+    "6"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "orphan-check",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--grace",
+    "6",
+    "--args-from-env"
+   ],
+   "private": [
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "orphan-check",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--grace",
+    "6",
+    "--owner-token",
+    "3d94c431fb6b19d72d03611d77dbc86b"
+   ]
+  },
+  {
+   "name": "D-PLY-64: the attached spelling of the owner token moves too",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--owner-token=3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--args-from-env"
+   ],
+   "private": [
+    "--owner-token=3d94c431fb6b19d72d03611d77dbc86b"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242",
+    "--owner-token=3d94c431fb6b19d72d03611d77dbc86b"
    ]
   }
  ]

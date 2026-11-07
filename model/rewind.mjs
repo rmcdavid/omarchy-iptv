@@ -9,6 +9,9 @@ import {
   statusReason
 } from "./settings.mjs"
 import {
+  ownerTokenArgv
+} from "./player.mjs"
+import {
   pipStatusText
 } from "./pip.mjs"
 import {
@@ -647,11 +650,12 @@ function seekQueueStep(state, event) {
 }
 
 // `ownerPid` claims the surviving player for this shell (4.14). Omitted, the
-// probe is read-only.
-function playerProbeArgv(socket, ownerPid) {
+// probe is read-only. `ownerToken` (D-PLY-64) names the Service instance
+// claiming it; helperSpawn moves it off the argv (Model.ownerTokenArgv).
+function playerProbeArgv(socket, ownerPid, ownerToken) {
   var argv = ["player", "probe", "--socket", str(socket)]
   var pid = Math.floor(Number(ownerPid))
-  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
+  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)]).concat(ownerTokenArgv(ownerToken))
   return argv
 }
 export {

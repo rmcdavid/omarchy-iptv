@@ -447,15 +447,38 @@ UNGRADED_ACCEPTED = {
         "which is tracked as an open item, not accepted forever.",
 }
 
+# Every kit file the tree changes, with why (tests/a11y/make_tree.py COMMONS
+# decides them, and refuses to build when this list and what it changes
+# differ, F-HARNESS-99). A declaration for a file the host does not have
+# (the 4.5.0 names on a 4.0.6 kit) is simply unused.
 KIT_PATCHED = {
     "Ui/BarIconButton.qml":
         "a debug env flag read through Quickshell.env",
     "Commons/Color.qml":
         "the FileView block that loads the theme",
     "Commons/Style.qml":
-        "the Process and FileView blocks that read gaps and fonts",
+        "the Process and FileView blocks that read gaps and fonts, and on "
+        "4.5.0 the animations Process and the Quickshell.Hyprland "
+        "Connections that re-poll on configreloaded",
     "Commons/Util.qml":
         "Quickshell.env and Quickshell.execDetached",
+    "Commons/I18n.qml":
+        "the four FileView blocks that read the language and its catalogs "
+        "(t() then answers the caller's fallback or the key) and "
+        "Quickshell.env",
+    "Commons/AudioNodes.qml":
+        "the FileView that reads the platform audio hints, and the "
+        "Quickshell Singleton root",
+    "Commons/InputDevices.qml":
+        "the inotifywait Process, and the Quickshell Singleton root",
+    "Commons/InputMethodState.qml":
+        "the input-method indicator Process, and the Quickshell Singleton root",
+    "Commons/IpcRegistry.qml":
+        "the bare IpcHandler it reads builtins from, and the Quickshell "
+        "Singleton root",
+    "Commons/UntypedInput.qml":
+        "a PROBE STUB: it stands on Quickshell.Services.Pipewire, which no "
+        "transform can remove",
 }
 
 

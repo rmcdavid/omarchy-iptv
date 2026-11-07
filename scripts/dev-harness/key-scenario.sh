@@ -114,7 +114,7 @@
 #   I5  a malformed mirror (uppercase) beside a URL answers the URL's hash
 #   I6  an absent entry answers "" and does not throw
 #   I7  the key-NAMES reader lists names sorted, `id` excluded, no value
-#   S1  shell.qml's entryKey is HarnessLib.entryKey over findBarEntry   (seam)
+#   S1  shell.qml's entryKey is HarnessLib.entryKey over the host walk (seam)
 #   S2  hostEntry reads BOTH sides through entryKey                     (seam)
 #   S3  run.sh stages harness-lib.js beside the model and proves the copy (seam)
 #
@@ -1024,9 +1024,9 @@ JS
   fi
   # The seams: the live arm observes the call; this is what keeps a copy of
   # the function from being pasted back into shell.qml beside the import.
-  seams=$(qa_count '^ *return HarnessLib\.entryKey\(Model, Model\.findBarEntry\(barConfig, harness\.pluginId\)\)$' "$HERE/shell.qml")
-  ck "S1 shell.qml's entryKey is HarnessLib.entryKey over findBarEntry" "$seams" "1"
-  seams="$(qa_count 'stored: harness\.entryKey\(fakeHost\.barConfig\), published: harness\.entryKey\(fakeShell\.barConfig\)' "$HERE/shell.qml") $(qa_count 'storedKeys: HarnessLib\.entryKeyNames\(Model\.findBarEntry\(fakeHost\.barConfig' "$HERE/shell.qml")"
+  seams=$(qa_count '^ *return HarnessLib\.entryKey\(Model, HarnessLib\.hostEntryOf\(barConfig, harness\.hostSections, harness\.pluginId\)\)$' "$HERE/shell.qml")
+  ck "S1 shell.qml's entryKey is HarnessLib.entryKey over the host's walk (hostEntryOf)" "$seams" "1"
+  seams="$(qa_count 'stored: harness\.entryKey\(fakeHost\.barConfig\), published: harness\.entryKey\(fakeShell\.barConfig\)' "$HERE/shell.qml") $(qa_count 'storedKeys: HarnessLib\.entryKeyNames\(HarnessLib\.hostEntryOf\(fakeHost\.barConfig' "$HERE/shell.qml")"
   ck "S2 hostEntry reads both sides through entryKey and the names through entryKeyNames" "$seams" "1 1"
   seams="$(qa_count '^ *cp "\$HERE/harness-lib\.js" "\$root/harness-lib\.js" \|\| die' "$RUN") $(qa_count '^ *qa_same_file "\$HERE/harness-lib\.js" "\$root/harness-lib\.js"' "$RUN") $(qa_count '^import "harness-lib\.js" as HarnessLib$' "$HERE/shell.qml")"
   ck "S3 run.sh stages harness-lib.js beside the model and proves the copy; shell.qml imports it" "$seams" "1 1 1"
@@ -1069,10 +1069,12 @@ JS
 
 # ------------------------------------------------------------ the shell arm
 # F-HARNESS-45: the nested cage renders with pixman, so a player started toward
-# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
-# --ao=null to the mpvArgs). Since D-PLY-27 the base argv carries --gpu-sw=yes
-# itself, so on this tree the lever's job is --ao=null (the cage's player stays
-# off the user's sound server); on an older tree, such as a --baseline ref
+# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes,
+# --ao=null and, since F-HARNESS-102, --hwdec=no to the mpvArgs). Since
+# D-PLY-27 the base argv carries --gpu-sw=yes itself, so on this tree the
+# lever's job is --ao=null and --hwdec=no (the cage's player stays off the
+# user's sound server and off Omarchy 4.5.0's hardware decoding); on an
+# older tree, such as a --baseline ref
 # through 0.15.0, mpv 0.41.0 aborts in its VO probe without it.
 h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 ipc()  { h ipc "$@" 2>/dev/null; }

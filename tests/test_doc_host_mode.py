@@ -22,9 +22,16 @@ omarchy-reinstall-configs); OMARCHY_IPTV_DOC_ROOT points the document half at
 another tree, which is how the three document pins were proven red against
 fe40b2c, the tree before the sentences were written. A red after an Omarchy
 update is a re-measurement request (the citations are this machine's,
-omarchy 4.0.6-1 since 2026-10-31; 4.0.4-1 before, when shell.qml's three
-FileView pins sat two lines higher, at 136-138, and every script pin was on
-the line it is on now), not a plugin defect.
+omarchy 4.5.0-3 since 2026-11-06, F-GATE-21: nineteen pins moved with their
+commands unchanged -- omarchy-upgrade-to-quattro eight, omarchy-bar five,
+omarchy-shell-config three, shell.qml's FileView three, 138-140 -> 149-151 --
+and omarchy-bar's two `transparent` commits, 213 and 216, are gone:
+`transparent` is a wrapper over the new `background` command, whose commit
+and rollback are 250 and 252; omarchy-dock, new in 4.5.0, is a fifth
+`commit()` caller. 4.0.6-1 from 2026-10-31 and 4.0.4-1 before, when
+shell.qml's pins sat at 136-138; each EXPECT row below was proven red
+against the 4.0.6-1 package's own scripts and shell, the tree it replaced),
+not a plugin defect.
 """
 import io
 import os
@@ -46,29 +53,37 @@ EXPECT = {
     ("omarchy-refresh-config", 36): r'rm "\$backup_config_file"',
     ("omarchy-refresh-config", 42): r'cp -f "\$default_config_file" "\$user_config_file"',
     ("omarchy-reinstall-configs", 19): r"^cp -af /etc/skel/\. ~/$",
-    ("omarchy-upgrade-to-quattro", 390): r"backup_suffix=\$\(date \+%Y%m%d%H%M%S\)",
-    ("omarchy-upgrade-to-quattro", 1654): r'cp -af "\$file" "\$file\.omarchy-upgrade-to-quattro\.\$BACKUP_SUFFIX\.bak"',
-    ("omarchy-upgrade-to-quattro", 1727): r'cmp -s "\$source" "\$target"',
-    ("omarchy-upgrade-to-quattro", 1730): r'backup_config_file "\$target"',
-    ("omarchy-upgrade-to-quattro", 1731): r'rm -f "\$target"',
-    ("omarchy-upgrade-to-quattro", 1735): r'cp -P "\$source" "\$target"',
-    ("omarchy-upgrade-to-quattro", 1750): r'cp -P "\$source_path" "\$target_path"',
-    ("omarchy-upgrade-to-quattro", 2373): r"run_as_user_omarchy omarchy-bar defaults",
-    ("omarchy-shell-config", 57): r"_SHELL_CONFIG_TMP=\$\(mktemp\)",
-    ("omarchy-shell-config", 58): r"jq .* >\"\$_SHELL_CONFIG_TMP\"",
-    ("omarchy-shell-config", 59): r'mv "\$_SHELL_CONFIG_TMP" "\$CONFIG_FILE"',
-    ("omarchy-bar", 152): r"^\s*commit ",
-    ("omarchy-bar", 154): r"^\s*commit ",
-    ("omarchy-bar", 176): r"^\s*commit ",
-    ("omarchy-bar", 203): r"^\s*commit ",
-    ("omarchy-bar", 213): r"^\s*commit ",
-    ("omarchy-bar", 216): r"^\s*commit ",
-    ("omarchy-bar", 361): r"omarchy-shell shell setBarWidget",
+    ("omarchy-upgrade-to-quattro", 391): r"backup_suffix=\$\(date \+%Y%m%d%H%M%S\)",
+    ("omarchy-upgrade-to-quattro", 1721): r'cp -af "\$file" "\$file\.omarchy-upgrade-to-quattro\.\$BACKUP_SUFFIX\.bak"',
+    ("omarchy-upgrade-to-quattro", 1794): r'cmp -s "\$source" "\$target"',
+    ("omarchy-upgrade-to-quattro", 1797): r'backup_config_file "\$target"',
+    ("omarchy-upgrade-to-quattro", 1798): r'rm -f "\$target"',
+    ("omarchy-upgrade-to-quattro", 1802): r'cp -P "\$source" "\$target"',
+    ("omarchy-upgrade-to-quattro", 1819): r'cp -P "\$source_path" "\$target_path"',
+    ("omarchy-upgrade-to-quattro", 2454): r"run_as_user_omarchy omarchy-bar defaults",
+    ("omarchy-shell-config", 60): r"_SHELL_CONFIG_TMP=\$\(mktemp\)",
+    ("omarchy-shell-config", 61): r"jq .* >\"\$_SHELL_CONFIG_TMP\"",
+    ("omarchy-shell-config", 62): r'mv "\$_SHELL_CONFIG_TMP" "\$CONFIG_FILE"',
+    ("omarchy-bar", 164): r"^\s*commit ",
+    ("omarchy-bar", 166): r"^\s*commit ",
+    ("omarchy-bar", 188): r"^\s*commit ",
+    ("omarchy-bar", 218): r"^\s*commit ",
+    # `background` (4.5.0), which `transparent` now wraps: the commit, then
+    # the rollback when the blur sync fails.
+    ("omarchy-bar", 250): r"^\s*commit .*\.bar\.background = ",
+    ("omarchy-bar", 252): r"^\s*commit .*\.bar\.background = .*--arg background \"\$previous\"",
+    ("omarchy-bar", 453): r"omarchy-shell shell setBarWidget",
+    ("omarchy-dock", 10): r"^source omarchy-shell-config$",
+    ("omarchy-dock", 41): r"^\s*commit ",
+    ("omarchy-dock", 65): r"^\s*commit ",
+    ("omarchy-dock", 79): r"^\s*commit ",
+    ("omarchy-dock", 94): r"^\s*commit ",
+    ("omarchy-dock", 102): r"^\s*commit ",
     ("omarchy-refresh-shell", 9): r"^omarchy-bar defaults$",
     ("omarchy-plugin-enable", 85): r"omarchy-shell shell enablePlugin",
-    ("shell.qml", 138): r"path: shell\.userConfigPath",
-    ("shell.qml", 139): r"watchChanges: true",
-    ("shell.qml", 140): r"atomicWrites: true",
+    ("shell.qml", 149): r"path: shell\.userConfigPath",
+    ("shell.qml", 150): r"watchChanges: true",
+    ("shell.qml", 151): r"atomicWrites: true",
 }
 
 # Citations the Config line must make, whatever else it says: the four
@@ -76,15 +91,15 @@ EXPECT = {
 REQUIRED_CONFIG_CITATIONS = {
     ("omarchy-refresh-config", 42),
     ("omarchy-reinstall-configs", 19),
-    ("omarchy-upgrade-to-quattro", 1735),
-    ("omarchy-shell-config", 57),
-    ("omarchy-shell-config", 59),
-    ("omarchy-bar", 361),
-    ("shell.qml", 140),
+    ("omarchy-upgrade-to-quattro", 1802),
+    ("omarchy-shell-config", 60),
+    ("omarchy-shell-config", 62),
+    ("omarchy-bar", 453),
+    ("shell.qml", 151),
 }
 REQUIRED_BACKUP_CITATIONS = {
     ("omarchy-refresh-config", 32),
-    ("omarchy-upgrade-to-quattro", 1654),
+    ("omarchy-upgrade-to-quattro", 1721),
 }
 
 SCRIPTS = sorted(set(name for name, _ in EXPECT))
@@ -178,7 +193,7 @@ class HostCitationCase(unittest.TestCase):
         text = passage(doc("docs/ARCHITECTURE.md"),
                        "2. *Loosened after a write.*", "**The siblings, asked before closing (engineering rule 15).** What else does",
                        "ARCHITECTURE.md D-SINK-18 residuals 2-4")
-        self.check_passage(text, REQUIRED_BACKUP_CITATIONS | {("omarchy-reinstall-configs", 19), ("omarchy-shell-config", 57)},
+        self.check_passage(text, REQUIRED_BACKUP_CITATIONS | {("omarchy-reinstall-configs", 19), ("omarchy-shell-config", 60)},
                            "ARCHITECTURE.md D-SINK-18 residuals 2-4")
 
 

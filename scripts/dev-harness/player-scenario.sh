@@ -711,8 +711,11 @@ L_REPLACED_TEXT='replaced a player another build of this plugin started'
 L_CANARY='--osd-duration=4321'
 # The tokens every older player here is launched with, as run.sh's lever adds
 # them to the shell's (F-HARNESS-45): a software context mpv's VO probe accepts
-# under a pixman cage, and no sound on the user's own server.
-L_LEVER=(--mpv-arg=--gpu-sw=yes --mpv-arg=--ao=null)
+# under a pixman cage, no sound on the user's own server, and (F-HARNESS-102,
+# 2026-11-06) software decoding, because Omarchy 4.5.0's /etc/mpv/mpv.conf
+# turns hardware decoding on for these players too. No release's filter
+# reserves --hwdec (read in v0.15.0 and v0.16.0), so the older trees keep it.
+L_LEVER=(--mpv-arg=--gpu-sw=yes --mpv-arg=--ao=null --mpv-arg=--hwdec=no)
 L5_PORT=8769
 L5_UA="RaoNeverFedAgent/1.0"
 L_NESTED=0

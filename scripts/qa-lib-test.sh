@@ -1561,7 +1561,7 @@ process.stdout.write(r.join(" "))' "$(qa_model_files "$ROOT" | head -n 1)" "$ROO
 is "the instrument reads sourceKey first, the URL hash second, named candidates only (driven)" \
    "$k_probe" "key-first url-second named-only"
 is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
-   "$(qa_count '^ *return HarnessLib\.entryKey\(Model, Model\.findBarEntry\(barConfig, harness\.pluginId\)\)$' "$ROOT/scripts/dev-harness/shell.qml")" "1"
+   "$(qa_count '^ *return HarnessLib\.entryKey\(Model, HarnessLib\.hostEntryOf\(barConfig, harness\.hostSections, harness\.pluginId\)\)$' "$ROOT/scripts/dev-harness/shell.qml")" "1"
 # INT and TERM trapped into an exit, beside the EXIT trap, in every scenario
 # that detaches a shell and has been PROVEN to clean up on a signal (clip:
 # `timeout -s TERM` after L3 and in the probe arm, and `-s INT`, measured

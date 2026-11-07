@@ -168,6 +168,10 @@ function makeIds(h) {
     olderRestartTimer: timer("olderRestartTimer"),
     hyprPeekProc: proc("hyprPeekProc"),
     pipPeekWatchdog: timer("pipPeekWatchdog"),
+    // D-HOST-11: `import qs.Commons as Commons`, the one member Service.qml
+    // reads -- the host kit's Util.barSections, as the double's host declares
+    // it (undefined on the 4.0.x kit, as Util has no such property there).
+    Commons: { Util: { get barSections() { return h.host.barSections } } },
     playerSocketComponent: {
       createObject() {
         h.socketsMade = (h.socketsMade || 0) + 1
@@ -238,7 +242,22 @@ function makeIds(h) {
     // notification posted this way still reaches h.notifyServer when a test
     // set one -- detached is how it was sent, not whether it arrived -- and
     // its stdout goes nowhere, so nothing reads the id it was given.
-    Quickshell: { env() { return "" }, execDetached(argv) {
+    // D-PLY-64 (2026-11-06): ONLY the command list. Quickshell 0.3.2's
+    // execDetached also declares a ProcessContext overload, but a plain JS
+    // object { command, environment } handed to it is refused -- "Could not
+    // convert argument 0 from [object Object] to qs::io::process::
+    // ProcessContext", a TypeError, and nothing runs (measured 2026-11-06 in
+    // an offscreen quickshell) -- so this double refuses it the same way
+    // (rule 10: a double that ran it hid an orphan check that never starts).
+    // h.detached keeps the command -- what /proc shows -- and h.detachedRuns
+    // each run's command and what the helper parses (helperView, which throws
+    // on a flag with no list, as the helper refuses one).
+    Quickshell: { env() { return "" }, execDetached(context) {
+      if (!Array.isArray(context) || context.length === 0) throw new TypeError("Passing incompatible arguments to C++ functions from JavaScript is not allowed (execDetached takes a command list; a { command, environment } object is refused, measured on Quickshell 0.3.2)")
+      const ctx = { command: context, environment: {} }
+      const argv = ctx.command.map(String)
+      const environment = Object.assign({}, ctx.environment || {})
+      h.detachedRuns.push({ command: argv.slice(), environment, parsed: helperView(argv, environment) })
       h.detached.push(argv.slice())
       if (argv[0] !== "omarchy-notification-send") return
       if (h.notifyServer) h.notifyServer.post(argv.slice())
@@ -444,19 +463,62 @@ function defaultOf(type) {
 const PID = "io.github.rmcdavid.iptv"
 const clone = x => JSON.parse(JSON.stringify(x))
 
+// F-HARNESS-100 / D-HOST-11 (2026-11-06). The host's bar sections, read
+// from the INSTALLED host's own Commons/Util.qml -- the array literal on its
+// `readonly property var barSections:` line -- so the double's kit is the
+// machine's and a host that adds a section changes it here too (rule 13: the
+// join is a read of the host's file, not a copy of its list). undefined for
+// a Util.qml that declares none, which is 4.0.x.
+const fs = require("fs")
+const path = require("path")
+const HarnessLib = require(path.join(__dirname, "../scripts/dev-harness/harness-lib.js"))
+const HOST_SHELL = "/usr/share/omarchy/shell"
+function hostBarSections(utilText) {
+  const m = /^\s*readonly property var barSections:\s*(\[[^\]\n]*\])\s*$/m.exec(String(utilText || ""))
+  if (!m) return undefined
+  const list = JSON.parse(m[1])
+  if (!Array.isArray(list) || list.some(s => typeof s !== "string")) throw new Error("service-harness: Util.qml's barSections is not a list of names: " + m[1])
+  return list
+}
+const INSTALLED_BAR_SECTIONS = hostBarSections(fs.readFileSync(path.join(HOST_SHELL, "Commons", "Util.qml"), "utf8"))
+
 // The host, both shapes rule 9 names: "lag" publishes the bar one write
 // behind (through 4.0.4), "echo" at once (omacom/omarchy#15082).
+//
+// F-HARNESS-100: and both host KITS. `kit.barSections` is what the plugin
+// reads as Commons.Util.barSections (default: the installed host's list;
+// pass undefined for 4.0.x), and the host walks HarnessLib.hostSections of
+// it -- the list, or 4.0.x's three. `kit.section` is where the entry sits
+// (default "right", where every earlier test put it), `kit.bare` makes it the
+// bare-string entry a hand-written shell.json can hold (`omarchy plugin
+// enable` writes an `{id}` object). updateEntryInline is
+// HarnessLib.hostUpdateEntry, the mirror the dev harness's fake shell runs
+// too, held to the installed host's own text by tests/Model.test.js. The
+// double used to write `right[0]` and nothing else.
 class Host {
-  constructor(entry, mode) {
+  constructor(entry, mode, kit) {
+    const k = kit || {}
     this.mode = mode
-    this.stored = { bar: { layout: { left: [], center: [], right: [Object.assign({ id: PID }, entry || {})] } } }
+    this.barSections = Object.prototype.hasOwnProperty.call(k, "barSections") ? k.barSections : INSTALLED_BAR_SECTIONS
+    this.sections = HarnessLib.hostSections(this.barSections)
+    this.section = k.section || "right"
+    const layout = {}
+    for (const s of this.sections) layout[s] = []
+    if (!layout[this.section]) layout[this.section] = []
+    layout[this.section].push(k.bare === true ? PID : Object.assign({ id: PID }, entry || {}))
+    this.stored = { bar: { layout }, plugins: [] }
     this.published = clone(this.stored.bar)
     this.onPublish = null
     this.writes = []
     this.answers = []
   }
   get barConfig() { return this.published }
-  storedEntry() { return this.stored.bar.layout.right[0] }
+  // The entry as stored, wherever it was placed -- also in a section this
+  // host does not walk (an entry 4.5.0's migration moved, on 4.0.x).
+  storedEntry() {
+    const arr = this.stored.bar.layout[this.section] || []
+    return arr.find(e => e === PID || (e && typeof e === "object" && e.id === PID))
+  }
   assign(next) {
     const prev = clone(this.stored)
     this.stored = clone(next)
@@ -472,20 +534,24 @@ class Host {
     const next = { id }
     for (const k in settings) if (k !== "id") next[k] = settings[k]
     this.writes.push(clone(next))
-    const copy = clone(this.stored)
-    if (JSON.stringify(copy.bar.layout.right[0]) === JSON.stringify(next)) { this.answers.push(false); return false }
-    copy.bar.layout.right[0] = next
+    const copy = HarnessLib.hostUpdateEntry(this.stored, this.sections, id, settings)
+    if (copy === null) { this.answers.push(false); return false }
     this.answers.push(true)
     this.assign(copy)
     return true
   }
   // `omarchy bar set`: a foreign write, which the lagging host flushes with
   // the write after it -- modelled, as the driver does, by publishing twice.
+  // F-HARNESS-100: PluginRegistry.setBarWidget through mutateShellConfig
+  // (HarnessLib.hostSetBarWidget): the first entry in the host's sections
+  // with our id takes the key, an object entry only, and the shaped copy is
+  // persisted either way. `null` removes the key (a hand edit). -> whether
+  // the widget took it.
   externalSet(key, value) {
-    const copy = clone(this.stored)
-    if (value === null) delete copy.bar.layout.right[0][key]; else copy.bar.layout.right[0][key] = value
-    this.assign(copy)
-    if (this.mode === "lag") this.assign(copy)
+    const r = HarnessLib.hostSetBarWidget(this.stored, this.sections, PID, key, value === null ? undefined : value)
+    this.assign(r.config)
+    if (this.mode === "lag") this.assign(r.config)
+    return r.error === ""
   }
 }
 
@@ -702,9 +768,13 @@ function helperInit(file, code, empty) {
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0, cacheHang: false,
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], detachedRuns: [], turns: 0, cacheHang: false,
               notifyRuns: [], notifyServer: null, notifyHang: false, allowDetachedNotice: 0 }
-  h.host = new Host(opts.entry, opts.host || "lag")
+  // F-HARNESS-100: `section`, `bare` and `barSections` (own key, undefined
+  // allowed: the 4.0.x kit) place the entry and choose the host's kit.
+  const kit = { section: opts.section, bare: opts.bare }
+  if (Object.prototype.hasOwnProperty.call(opts, "barSections")) kit.barSections = opts.barSections
+  h.host = new Host(opts.entry, opts.host || "lag", kit)
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says
@@ -798,6 +868,11 @@ function bootService(serviceText, Model, o) {
   // shield's run, to see its watchdog armed) installs the shipping text of
   // it; the stub stays for every other test.
   h.unstub = (name) => { if (!(name in fns)) throw new Error("service-harness: no function " + name); root[name] = compile(fns[name].args, fns[name].body, name) }
+  // D-PLY-64: the Service object's destruction, from the shipping text of
+  // its `Component.onDestruction` block -- what the host's destroy() runs.
+  // A tree without the block destroys nothing.
+  const destructionText = handlerBlock(serviceText, "  Component.onDestruction: {")
+  h.destroy = destructionText ? compile("", destructionText, "onDestruction") : () => {}
   // F-SINK-16: the IPC verbs, from their own text (ipcFunctions above), run
   // in the root's scope as the handler's `root.` and `Model.` resolve there.
   h.ipc = {}
@@ -1226,8 +1301,13 @@ function notificationServer() {
 // A shell restart over what the last one left: the host's stored entry and
 // the state file's bytes, the clock running on.
 function restartService(serviceText, Model, h, o) {
-  return bootService(serviceText, Model, Object.assign({ entry: (() => { const e = clone(h.host.storedEntry()); delete e.id; return e })(),
-                                                          stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
+  // F-HARNESS-100: on the same kit, with the entry where it was.
+  const stored = h.host.storedEntry()
+  const bare = typeof stored === "string"
+  return bootService(serviceText, Model, Object.assign({ entry: bare ? {} : (() => { const e = clone(stored); delete e.id; return e })(),
+                                                          stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000,
+                                                          section: h.host.section, bare, barSections: h.host.barSections }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, ipcFunctions, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, ipcFunctions, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView,
+                   hostBarSections, INSTALLED_BAR_SECTIONS, HOST_SHELL }

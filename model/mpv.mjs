@@ -669,7 +669,14 @@ function helperArgv(helperPath, args) {
 // together.
 var HELPER_ARGS_ENV = "OMARCHY_IPTV_ARGS"
 var HELPER_ARGS_FLAG = "--args-from-env"
-var HELPER_PRIVATE_VALUE = { "--cache-dir": true, "--id": true, "--scope": true, "--key": true, "--active": true }
+// `--owner-token` (D-PLY-64, 2026-11-06): the claiming Service instance's
+// token (Model.playerOwnerToken), moved here on probe, start and restart. The
+// orphan check carries it on its argv and is NOT handed this function's
+// result: it is started by Quickshell.execDetached, whose
+// { command, environment } form throws a TypeError and starts nothing
+// (measured), so a genuine disable would play on. Keep that launch a plain
+// command list; the token is no secret there.
+var HELPER_PRIVATE_VALUE = { "--cache-dir": true, "--id": true, "--scope": true, "--key": true, "--active": true, "--owner-token": true }
 var HELPER_PRIVATE_LIST = { "--keep": true }
 var HELPER_PRIVATE_ATTACHED = "--mpv-arg="
 

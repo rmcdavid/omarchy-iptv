@@ -355,6 +355,13 @@ requests and raise the batch.
      a private value goes through `Service.runHelper`, which assigns
      `Model.helperSpawn`'s command and environment and then running; the
      six kinds that bypass it carry nothing private, held by a node check.
+     **[2026-11-06, D-PLY-64: five now. The sixth, the orphan check, carries
+     the Service object's owner token (`--owner-token`) on its argv, where
+     helperSpawn moves it on probe, start and restart. That is on purpose:
+     `Quickshell.execDetached` starts only a command list -- its
+     `{ command, environment }` form throws a TypeError and starts nothing,
+     measured -- and the token is no secret. It authorizes nothing, and
+     anything that reaches the 0600 socket reads the claim.]**
      mpvArgs tokens, source keys, `u:` ids and scopes are on no argv of a
      process this release starts (an older player adopted after the
      upgrade keeps its own until it is replaced: since 0.17.0
@@ -470,7 +477,21 @@ requests and raise the batch.
      section headers, the confirm dialog, the bar tooltip, the active-window
      title, and a failure toast's body -- are rendered by host files under
      `/usr/share/omarchy/shell`, PlainText except the toast body, which is
-     StyledText behind the host's own image-tag stripper. Those five files
+     StyledText behind the host's own image-tag stripper.
+     **[2026-11-06, D-SINK-85: on Omarchy 4.5.0 the toast body is
+     StyledText behind the host's own markup READER, `Markup.render`. It
+     decodes entities first, up to three passes, then escapes, then puts back
+     b/i/u/s/em/strong/br and an anchor `Security.safeExternalUrl` accepts,
+     links a bare http(s) URL, and opens a link on a click. So 0.17.0's single
+     escape was undone by the first pass: a channel name holding `&#58;` drew
+     a live link in the plugin's own Stream failed card. `Model.markupEscape`
+     now puts U+034F COMBINING GRAPHEME JOINER after every `&` and `<` before
+     it escapes, so no entity, tag or anchor that reader knows can start
+     there. The owner chose U+034F over U+2060, which Liberation Sans lacks
+     and which made a line 4 px taller. Both hosts' readers run in node over
+     byte copies pinned by sha256 (`tests/fixtures/notify-hosts/`), and the
+     QML spec measures the layout: exactly the text's.]**
+     Those five files
      are recorded in `docs/OMARCHY-PLUGIN-CONTRACT.md` and pinned by
      `tests/test_host_text_format.py`, which goes red on this machine when
      a host update changes or removes the declaration on one of those
@@ -795,7 +816,13 @@ requests and raise the batch.
      calendar days.
      `readOnly` is the one switch on the slot in every version, so the
      rule is: **while the plugin's form is open, no editable `TextInput`
-     exists in the shell.** The form's fields are `readOnly: true`
+     exists in the shell.** **[2026-11-06, D-DOC-36: on Omarchy 4.5.0 that
+     half is no longer the plugin's to keep. The host's own keepLoaded menu
+     mounts an editable `Ui/FilterInput` from shell start, so the shell reads
+     every foreign clipboard offer whether or not this plugin is installed
+     (the contract's D-CLIP-1 section; read in the host and in the Qt 6.12.0
+     source, not measured on 6.12.0). The plugin's half stands unchanged:
+     its own fields are never editable.]** The form's fields are `readOnly: true`
      unconditionally; the plugin does the editing itself in
      `handleFormKey` over the model value (`Model.editInsert` and
      `Model.editDelete`, node-tested), and paste is the out-of-process path

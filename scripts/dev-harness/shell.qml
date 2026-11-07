@@ -107,9 +107,29 @@ ShellRoot {
     if (Quickshell.env("OMARCHY_IPTV_SOURCE_KEY_SET") === "1") entry.sourceKey = Quickshell.env("OMARCHY_IPTV_SOURCE_KEY") || ""
     return entry
   }
+  // F-HARNESS-100 (2026-11-06). The sections the fake host walks are the
+  // REAL host's: Util.barSections from the Commons/ run.sh links in from
+  // /usr/share/omarchy/shell (six on 4.5.0), or 4.0.x's three where Util
+  // declares none (HarnessLib.hostSections). Every layout walk of the fake
+  // -- updateEntryInline, `set`/`setStored`, the bar's settings -- goes
+  // through it, where each wrote or read `right` alone.
+  readonly property var hostSections: HarnessLib.hostSections(Util.barSections)
+  // Where the seed entry sits (run.sh --section; "right", the manifest's
+  // defaultSection, by default). A name the host does not walk is allowed on
+  // purpose: it is an entry 4.5.0's migration moved, on a 4.0.x host.
+  readonly property string seedSection: Quickshell.env("OMARCHY_IPTV_HARNESS_SECTION") || "right"
+  // The layout shell.json starts with: every section the host walks, empty,
+  // and the seed entry in seedSection.
+  function seedLayout(entry) {
+    var layout = {}
+    for (var i = 0; i < harness.hostSections.length; i++) layout[harness.hostSections[i]] = []
+    if (!Array.isArray(layout[harness.seedSection])) layout[harness.seedSection] = []
+    layout[harness.seedSection].push(entry)
+    return layout
+  }
   // What the host has actually stored (the shell.json truth), as opposed to
   // what it has published to the plugin, which can lag it by one write.
-  readonly property var barEntry: Model.findBarEntry(fakeHost.barConfig, harness.pluginId)
+  readonly property var barEntry: HarnessLib.hostEntryOf(fakeHost.barConfig, harness.hostSections, harness.pluginId)
   readonly property var manifest: ({
     id: harness.pluginId,
     name: "IPTV",
@@ -889,10 +909,16 @@ ShellRoot {
   // again; the plugin must apply its own writes itself.
   QtObject {
     id: fakeHost
-    property var shellConfig: ({ version: 1, bar: { layout: { left: [], center: [], right: [harness.seedBarEntry] } } })
+    property var shellConfig: ({ version: 1, bar: { layout: harness.seedLayout(harness.seedBarEntry) }, plugins: [] })
     onShellConfigChanged: harness.syncPluginApis()
     readonly property var barConfig: fakeHost.shellConfig && fakeHost.shellConfig.bar
-      ? fakeHost.shellConfig.bar : ({ layout: { left: [], center: [], right: [] } })
+      ? fakeHost.shellConfig.bar : ({ layout: {} })
+    // F-HARNESS-100: the host's OWN bar is handed the CURRENT bar from this
+    // binding's change handler (shell.qml:130-133 on 4.5.0, :119-122 on
+    // 4.0.6: `bar.barConfig = barConfigFor(...)`, which is `shell.barConfig`
+    // itself for the first-party bar), not the one-write-behind copy a
+    // plugin's shell api gets. The fake handed the widget that lagging copy.
+    onBarConfigChanged: harness.syncBarWidget()
   }
 
   // shell.qml persistShellConfig (109-114): a deep copy becomes shellConfig.
@@ -908,7 +934,20 @@ ShellRoot {
     // echoing host (#15082) reads shellConfig itself: the bar just stored.
     var bar = harness.hostEchoes && fakeHost.shellConfig && fakeHost.shellConfig.bar ? fakeHost.shellConfig.bar : fakeHost.barConfig
     fakeShell.barConfig = JSON.parse(JSON.stringify(bar))
-    if (barLoader.item) barLoader.item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
+  }
+
+  // F-HARNESS-100: the settings the host's bar hands the widget it draws
+  // for our entry -- BarModel.js entrySettings over the entry in whichever
+  // section the bar draws (HarnessLib.hostWidgetSettings), from the CURRENT
+  // bar. It used to be the plugin's own Model.findBarEntry over the
+  // published copy, which shared the plugin's three-section walk (D-HOST-11)
+  // and its one-write lag, neither of which the host's bar has.
+  function syncBarWidget() {
+    if (barLoader.item) barLoader.item.settings = HarnessLib.hostWidgetSettings(fakeHost.barConfig, harness.hostSections, harness.pluginId)
+  }
+  function storedSection() {
+    var at = HarnessLib.hostLocate(fakeHost.shellConfig, harness.hostSections, harness.pluginId)
+    return at ? at.section : ""
   }
 
   // The active source of a bar config as its 8-hex key (or "" when unset):
@@ -921,7 +960,7 @@ ShellRoot {
   // so `hostEntry` read "" on both sides and every scenario check grading
   // through it was blind (the D-SINK-19 review's harness P2).
   function entryKey(barConfig) {
-    return HarnessLib.entryKey(Model, Model.findBarEntry(barConfig, harness.pluginId))
+    return HarnessLib.entryKey(Model, HarnessLib.hostEntryOf(barConfig, harness.hostSections, harness.pluginId))
   }
 
   // shell.qml applyShellConfig (76-89) driven by the user config FileView:
@@ -946,13 +985,16 @@ ShellRoot {
   // is the state in which the host already stores a value the plugin has
   // not seen -- where updateEntryInline answers `!dirty` / false for a
   // change that is in fact already saved.
+  //
+  // F-HARNESS-100: PluginRegistry.setBarWidget's own walk
+  // (HarnessLib.hostSetBarWidget) -- the first entry with our id in the
+  // host's sections, an object entry only -- and mutateShellConfig, which
+  // persists the shaped copy whether or not the widget took the key. It
+  // wrote every match in `right`.
   function storeSetting(key, value) {
-    var copy = JSON.parse(JSON.stringify(fakeHost.shellConfig))
-    var arr = copy.bar.layout.right
-    for (var i = 0; i < arr.length; i++) {
-      if (arr[i] && typeof arr[i] === "object" && String(arr[i].id) === harness.pluginId) arr[i][key] = value
-    }
-    harness.persistShellConfig(copy)
+    var r = HarnessLib.hostSetBarWidget(fakeHost.shellConfig, harness.hostSections, harness.pluginId, key, value)
+    if (r.error !== "") harness.log("setBarWidget refused:", r.error)
+    harness.persistShellConfig(r.config)
   }
 
   // Change a setting at runtime the way `omarchy bar set` would: the IPC
@@ -966,7 +1008,11 @@ ShellRoot {
   // ---- fake PluginShellApi (services/PluginShellApi.qml surface)
   QtObject {
     id: fakeShell
-    property var barConfig: ({ layout: { left: [], center: [], right: [harness.seedBarEntry] } })
+    // The stored layout, as the host's publicBarConfig() hands a plugin its
+    // copy. syncPluginApis replaces it from fakeHost's initial change signal
+    // during creation (measured on Qt 6.12 by the review of 2026-11-06), so
+    // this seed is a second layer: it was `right` alone, whatever --section.
+    property var barConfig: ({ layout: harness.seedLayout(harness.seedBarEntry) })
     property var bar: fakeBar
     function serviceFor(id) { return String(id) === harness.pluginId ? serviceLoader.item : null }
     function summon(id, payloadJson) {
@@ -983,32 +1029,25 @@ ShellRoot {
     }
     function toggle(id, payloadJson) { return isPluginOpen(id) ? hide(id) : summon(id, payloadJson) }
     function isPluginOpen(id) { return guideLoader.item ? guideLoader.item.opened === true : false }
-    // shell.qml updateEntryInline (1078-1116) exactly: rewrite the layout
-    // entry in a clone, compare with JSON.stringify, return false WITHOUT
-    // persisting when nothing changed (1114), otherwise persistShellConfig
-    // and return true. The echo back to the plugin is whatever
-    // persistShellConfig's assignment produces -- which, by the ordering
-    // reproduced in fakeHost, is the PREVIOUS bar. Nothing here hands the
-    // plugin its own write; the plugin applies that itself.
+    // shell.qml updateEntryInline (4.0.6 1081-1120, 4.5.0 1107-1146)
+    // exactly, as HarnessLib.hostUpdateEntry (F-HARNESS-100; held to the
+    // installed host's own text by tests/Model.test.js): rewrite every
+    // object entry with our id in the host's sections in a clone (a
+    // plugins[] entry when none is), compare with JSON.stringify, return
+    // false WITHOUT persisting when nothing changed, otherwise
+    // persistShellConfig and return true. It walked left, center and right
+    // where 4.5.0 walks Util.barSections. The echo back to the plugin is
+    // whatever persistShellConfig's assignment produces -- which, by the
+    // ordering reproduced in fakeHost, is the PREVIOUS bar. Nothing here
+    // hands the plugin its own write; the plugin applies that itself.
     // Keys only in the log: the entry carries playlistUrl / epgUrl, which
     // may embed credentials and must not reach the terminal (S-08).
     property var updateEntryInline: harness.persistFails ? undefined : (function updateEntryInline(id, entry) {
       var e = entry || {}
       harness.log("updateEntryInline", id, "keys:", Object.keys(e).join(","), "playlist", e.playlistUrl ? "(set)" : "(none)", "epg", e.epgUrl ? "(set)" : "(none)")
       if (String(id) !== harness.pluginId || typeof e !== "object") return false
-      var copy = JSON.parse(JSON.stringify(fakeHost.shellConfig))
-      var sections = ["left", "center", "right"]
-      var dirty = false
-      for (var s = 0; s < sections.length; s++) {
-        var arr = copy.bar.layout[sections[s]] || []
-        for (var i = 0; i < arr.length; i++) {
-          if (!arr[i] || typeof arr[i] !== "object" || String(arr[i].id) !== harness.pluginId) continue
-          var next = { id: harness.pluginId }
-          for (var k in e) if (k !== "id") next[k] = e[k]
-          if (JSON.stringify(arr[i]) !== JSON.stringify(next)) { arr[i] = next; dirty = true }
-        }
-      }
-      if (!dirty) { harness.log("updateEntryInline: nothing changed (already stored)"); return false }
+      var copy = HarnessLib.hostUpdateEntry(fakeHost.shellConfig, harness.hostSections, harness.pluginId, e)
+      if (copy === null) { harness.log("updateEntryInline: nothing changed (already stored, or no entry in", harness.hostSections.join(","), ")"); return false }
       // persistShellConfig republishes fakeShell.barConfig through
       // syncPluginApis -- one write behind, exactly like the real host.
       harness.persistShellConfig(copy)
@@ -1073,6 +1112,15 @@ ShellRoot {
 
   Loader {
     id: guideLoader
+    // F-HARNESS-100: loaded ONCE and never rebuilt, which is 4.5.0's
+    // in-place panel sync (shell.qml:1326-1361: a ListModel kept in step by
+    // syncPanelEntries, so a pluginsChanged -- every shell.json write, our
+    // own settings writes included -- leaves a keepLoaded overlay standing;
+    // only a full plugin reload rebuilds it). 4.0.x handed its Instantiator
+    // a fresh array on every pluginsChanged (4.0.6 shell.qml:1322) and so
+    // rebuilt the guide on each of them; this fake never modelled that
+    // rebuild, so on 4.0.x it was the more forgiving of the two, and on
+    // 4.5.0 it is the host's shape. Nothing here models the full reload.
     // The initial property is passed only in floating mode: a pre-change tree
     // (OMARCHY_IPTV_PLUGIN_ROOT at a baseline) has no such property and must
     // still load in the default mode for a rule-11 comparison.
@@ -1117,7 +1165,7 @@ ShellRoot {
       source: "file://" + harness.repoRoot + "/BarWidget.qml"
       onLoaded: {
         item.bar = fakeBar
-        item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
+        harness.syncBarWidget()
         harness.log("bar widget loaded")
       }
       onStatusChanged: if (status === Loader.Error) console.warn("[harness] BarWidget.qml failed to load")
@@ -1510,12 +1558,15 @@ ShellRoot {
     // credentialed URLs this reply must never carry.
     function hostEntry(): string {
       return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig),
-                              storedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeHost.barConfig, harness.pluginId)),
-                              publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)),
+                              storedKeys: HarnessLib.entryKeyNames(HarnessLib.hostEntryOf(fakeHost.barConfig, harness.hostSections, harness.pluginId)),
+                              publishedKeys: HarnessLib.entryKeyNames(HarnessLib.hostEntryOf(fakeShell.barConfig, harness.hostSections, harness.pluginId)),
                               // R20d (round 10): the one owned VALUE a check reads off the stored
                               // entry, as stored -- the plugin writes a boolean there, never a URL --
                               // and null when the key is absent (key-scenario Y4)
-                              storedShowLogos: HarnessLib.storedOwnedValue(Model.findBarEntry(fakeHost.barConfig, harness.pluginId), "showLogos"),
+                              storedShowLogos: HarnessLib.storedOwnedValue(HarnessLib.hostEntryOf(fakeHost.barConfig, harness.hostSections, harness.pluginId), "showLogos"),
+                              // F-HARNESS-100: the section the host's walk finds the entry in
+                              // ("" when none of its sections holds it), and the kit's sections
+                              section: harness.storedSection(), hostSections: harness.hostSections,
                               host: harness.hostEchoes ? "echo" : "lag" })
     }
     // D-SINK-19, R5: where the two writes of a pointer change stand. The

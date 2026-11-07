@@ -18,11 +18,14 @@ zero-size wl_viewport destination, and the compositor disconnects it).
 
 Three things are pinned here, each DRIVEN rather than grepped (rule 14):
 
-1. run.sh's `harness_env` appends `--gpu-sw=yes --ao=null` to the mpvArgs
-   lever (OMARCHY_IPTV_MPV_ARGS) when the environment says pixman
+1. run.sh's `harness_env` appends `--gpu-sw=yes --ao=null --hwdec=no` to the
+   mpvArgs lever (OMARCHY_IPTV_MPV_ARGS) when the environment says pixman
    (WLR_RENDERER, inherited inside a cage's child) or the caller says so
    (OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1), BEHIND the caller's own tokens,
-   never over a caller that already named `--gpu-sw` or `--ao`, never when
+   never over a caller that already named `--gpu-sw`, `--ao` or `--hwdec`
+   (`--hwdec=no` since 2026-11-06, F-HARNESS-102: Omarchy 4.5.0's
+   /etc/mpv/mpv.conf turns hardware decoding on for every player, the
+   cage's included, and the lever's evidence predates it), never when
    the caller said no, and never for a live session; and the shipped
    helper's filter passes the result with `--tls-verify=yes` still the last
    token (D-SINK-13's trailing re-assertion).
@@ -115,24 +118,32 @@ class HarnessEnvSoftwareGpu(unittest.TestCase):
 
     def test_pixman_in_the_environment_appends_both_tokens_and_sets_the_flag(self):
         args, flag = self.harness_env(WLR_RENDERER="pixman", WLR_BACKENDS="headless")
-        self.assertEqual(args, "--gpu-sw=yes --ao=null")
+        self.assertEqual(args, "--gpu-sw=yes --ao=null --hwdec=no")
         self.assertEqual(flag, "1")
 
     def test_the_tokens_go_behind_the_callers_own(self):
         args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--tls-ca-file=/x --demuxer-max-bytes=4MiB")
-        self.assertEqual(args, "--tls-ca-file=/x --demuxer-max-bytes=4MiB --gpu-sw=yes --ao=null")
+        self.assertEqual(args, "--tls-ca-file=/x --demuxer-max-bytes=4MiB --gpu-sw=yes --ao=null --hwdec=no")
 
     def test_a_caller_that_named_either_option_keeps_its_word(self):
         args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--gpu-sw=no --ao=pipewire")
-        self.assertEqual(args, "--gpu-sw=no --ao=pipewire")
+        self.assertEqual(args, "--gpu-sw=no --ao=pipewire --hwdec=no")
         args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--no-gpu-sw")
-        self.assertEqual(args, "--no-gpu-sw --ao=null")
+        self.assertEqual(args, "--no-gpu-sw --ao=null --hwdec=no")
         args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--ao=alsa")
-        self.assertEqual(args, "--ao=alsa --gpu-sw=yes")
+        self.assertEqual(args, "--ao=alsa --gpu-sw=yes --hwdec=no")
+        args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--hwdec=vaapi")
+        self.assertEqual(args, "--hwdec=vaapi --gpu-sw=yes --ao=null")
+        # A sibling option is not the option: --hwdec-codecs names which
+        # codecs, not whether (the recheck of 2026-11-06).
+        args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--hwdec-codecs=all")
+        self.assertEqual(args, "--hwdec-codecs=all --gpu-sw=yes --ao=null --hwdec=no")
+        args, _ = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_MPV_ARGS="--no-hwdec")
+        self.assertEqual(args, "--no-hwdec --gpu-sw=yes --ao=null")
 
     def test_the_callers_explicit_word_decides_either_way(self):
         args, flag = self.harness_env(OMARCHY_IPTV_HARNESS_SOFTWARE_GPU="1")
-        self.assertEqual((args, flag), ("--gpu-sw=yes --ao=null", "1"))
+        self.assertEqual((args, flag), ("--gpu-sw=yes --ao=null --hwdec=no", "1"))
         args, flag = self.harness_env(WLR_RENDERER="pixman", OMARCHY_IPTV_HARNESS_SOFTWARE_GPU="0")
         self.assertEqual((args, flag), ("<unset>", "0"))
 
@@ -155,14 +166,14 @@ class HarnessEnvSoftwareGpu(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout.strip().splitlines()[-1])
         self.assertEqual(out["rejected"], [])
-        self.assertEqual(out["kept"], ["--tls-ca-file=/x", "--gpu-sw=yes", "--ao=null"])
+        self.assertEqual(out["kept"], ["--tls-ca-file=/x", "--gpu-sw=yes", "--ao=null", "--hwdec=no"])
         # Since 2026-10-29 the user's tokens are followed by the whole pin
         # block (D-SINK-43..46), which still ends with --tls-verify=yes. And
         # (D-SINK-47, lane-p2a) they reach mpv through the private options
         # file named where they stood, which mpv parses at that position.
         pins = out["pins"]
         self.assertEqual(out["argv"][-pins - 1], "--include=/r/mpv-args.conf")
-        self.assertEqual(out["include"], "tls-ca-file=%2%/x\ngpu-sw=%3%yes\nao=%4%null\n")
+        self.assertEqual(out["include"], "tls-ca-file=%2%/x\ngpu-sw=%3%yes\nao=%4%null\nhwdec=%2%no\n")
         self.assertEqual(out["argv"][-1], "--tls-verify=yes")
         self.assertEqual(out["argv"][0], "mpv")
 
