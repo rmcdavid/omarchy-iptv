@@ -7,6 +7,10 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+// D-HOST-11: the host's bar sections (Commons.Util.barSections), handed to
+// the bar-entry walkers, and nothing else of the kit. Qualified only, as the
+// host names its own; nothing here names a theme singleton unqualified.
+import qs.Commons as Commons
 import "Model.mjs" as Model
 
 // Service.qml -- headless state owner for io.github.rmcdavid.iptv
@@ -142,7 +146,7 @@ Item {
   // catches up or somebody else writes (Model.settingsWithOwnWrite).
   // Model.settingsFrom carries the three M2-03 keys (7.1) alongside the seven
   // shipped ones, clamped through the same SETTING_RANGES ladder.
-  readonly property var hostSettings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId))
+  readonly property var hostSettings: Model.settingsFrom(Model.findBarEntry(shell ? shell.barConfig : null, pluginId, Commons.Util.barSections))
   property var ownWrite: null                          // { base, value }: our write, applied locally
   // `lastEntryWrite` USED TO BE HERE (round 8, R18b): this service's record of
   // its own last entry write, from which the funnel ESTIMATED what the host
@@ -861,6 +865,17 @@ Item {
   // two detached helpers out of order still execute in the order the user
   // issued them. It survives a restart through `player probe`'s reply.
   property int playSeq: 0
+  // D-PLY-64 (4.14): THIS Service object's half of the owner claim, beside
+  // the shell's pid. The host can destroy the Service and create another in
+  // the same shell (Omarchy 4.5.0's migrations did), and the pid cannot tell
+  // the two apart, so each object draws its own token once, here, and passes
+  // it on every verb that claims the player and on its orphan check: in
+  // OMARCHY_IPTV_ARGS on the probe, the start and the restart, and on the
+  // orphan check's argv, the one form execDetached starts (onDestruction
+  // below). A plain property with an initializer
+  // that reads nothing notifiable: evaluated once, at creation, and nothing
+  // assigns it.
+  property string ownerToken: Model.playerOwnerToken()
   // `stopping` keeps its name and its four read sites; what changed is its
   // source. It is true from the keystroke until socket EOF confirms the
   // death (or the 5 s backstop), and while it is true a play() always
@@ -1925,7 +1940,7 @@ Item {
   // `pipOptions` is the clamp for these three keys and running a value
   // through two different clamps is how they drift apart.
   function pipConfig() {
-    return Model.findBarEntry(root.shell ? root.shell.barConfig : null, root.pluginId) || ({})
+    return Model.findBarEntry(root.shell ? root.shell.barConfig : null, root.pluginId, Commons.Util.barSections) || ({})
   }
 
   // Debounced: settings changes, timers and the bar's middle click all funnel
@@ -2329,9 +2344,10 @@ Item {
                    chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta,
                    // D-ID-3. The scheme-1 -> scheme-2 map of THIS list, computed
                    // once here where the O(n) parse is already paid: it hashes
-                   // every URL and folds every name, tens of milliseconds on 10,000 rows in
-                   // node, which no LRU hit inside the 150 ms switch budget can
-                   // afford. The map depends on the channels alone; what it is
+                   // every URL, tens of milliseconds on 10,000 rows in node, which
+                   // no LRU hit inside the 150 ms switch budget can afford. It
+                   // reads each row's own id, the one the helper wrote, and folds
+                   // no name (D-ID-5). The map depends on the channels alone; what it is
                    // applied to (the state) is decided at apply time below.
                    idRemap: Model.channelIdRemap(channels) }
     }
@@ -3339,7 +3355,8 @@ Item {
 
   // `player start` / `player restart`: one helper call carrying the channel
   // id (never the URL), the intent seq, the zap-ring scope for the stash and
-  // this shell's pid as the owner claim (4.14).
+  // this shell's pid and this object's token as the owner claim (4.14,
+  // D-PLY-64).
   function issuePlayerSession(verb, channel, fromRung) {
     var extra = Model.splitMpvArgs(root.mpvArgs)
     // D-SINK-24: option names only, redacted -- never the refused token whole.
@@ -3354,8 +3371,8 @@ Item {
     // moves playSeq, never does (Model.olderRestartKeepsPause).
     var keepPause = Model.olderRestartKeepsPause(root.olderRestart, root.playSeq)
     var argv = verb === "restart"
-      ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId, keepPause)
-      : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId, keepPause)
+      ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId, keepPause, root.ownerToken)
+      : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId, keepPause, root.ownerToken)
     root.sessionSocket = root.socketAttached() ? root.playerSocket : null
     root.playerPending = true
     root.playerWanted = true
@@ -3378,7 +3395,7 @@ Item {
   function runPlayerProbe() {
     if (playerProc.running) return false
     root.probeSeq = root.playSeq
-    return root.runPlayer("probe", Model.playerProbeArgv(root.socketPath, Quickshell.processId))
+    return root.runPlayer("probe", Model.playerProbeArgv(root.socketPath, Quickshell.processId, root.ownerToken))
   }
 
   function handlePlayerResult(text) {
@@ -4702,7 +4719,7 @@ Item {
       return false
     }
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
-        || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
+        || !Model.barEntryWritable(root.shell.barConfig, root.pluginId, Commons.Util.barSections)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
       if (announce !== false) root.sourcesPersistFailed("persist_failed")
       return false
@@ -4719,7 +4736,7 @@ Item {
     // D-SRC-64: and a retired key whose value the LANDED state holds as a
     // held migration's parked pair is redundant and stripped too, so the
     // entry carries a URL only until the hold's own state write lands.
-    var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
+    var published = Model.findBarEntry(root.shell.barConfig, root.pluginId, Commons.Util.barSections)
     var keep = Model.retiredInputsToKeep(published, Model.entryMigratedOf(root.landedState), Model.migrationPendingOf(root.landedState))
     var entry = Model.entryWith(published, patch, { keep: keep })
     // R19a (round 9): NO SKIP ON AN ESTIMATE. Every owned write is handed to
@@ -5807,8 +5824,10 @@ Item {
     root.pendingFreshness = false
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
-    // D-SINK-41: a cache written before the destination rules is refreshed
-    // once, whatever its age (Model.cacheBeforeDestinationRules).
+    // D-SINK-41, D-SINK-80: a cache written before the destination rules
+    // or the attribute grammar is refreshed once, whatever its age
+    // (Model.cacheBeforeDestinationRules). A guide window written before
+    // D-SINK-79's fold is refetched by the helper's own stamp (GUIDE_RULES).
     if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)
         || Model.cacheBeforeDestinationRules(root.playlistStatus)) root.refreshPlaylist(true)
     if (root.epgFetchUrl !== "" && !epgProc.running) root.refreshEpg(true)
@@ -6046,8 +6065,9 @@ Item {
     root.runPipProbe()
     // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
     // idle rather than guessing. `--owner-pid` claims a surviving player for
-    // this shell, which is what tells the previous shell's orphan-check to
-    // do nothing.
+    // this shell, and `--owner-token` for this Service object (D-PLY-64),
+    // which is what tells the previous shell's -- or the previous Service's
+    // -- orphan-check to do nothing.
     root.runPlayerProbe()
   }
 
@@ -6056,10 +6076,26 @@ Item {
   // tell them apart at this point - so we must NOT stop the player here.
   // That would kill playback on the very restart this milestone exists to
   // survive. The discriminator is the owner claim, read 6 s later by a
-  // detached helper: a successor shell has re-claimed the player well
-  // inside the grace (omarchy-restart-shell pings every 100 ms for 2 s), so
+  // detached helper: a successor that has claimed the player by then names
+  // another pid, and a restart that has not is a dead pid once the old
+  // shell has exited (an old shell that outlives the grace is D-HOST-8), so
   // only "the claim still names a pid that is still alive" means the plugin
-  // was disabled or removed (4.14).
+  // was disabled or removed (4.14). Nothing here assumes the new shell is
+  // quick: omarchy-restart-shell waits up to 60 s for it to answer (4.0.6 and
+  // 4.5.0 alike), and a large bar answers past ten seconds.
+  //
+  // D-PLY-64: "a successor shell" includes a successor SERVICE in this same
+  // shell, which the host creates when it reads the plugin as disabled for a
+  // moment and enabled again (Omarchy 4.5.0's migrations replaced shell.json
+  // under it). Its claim has this pid, so the check also carries this
+  // object's `ownerToken` and reads a claim with another token as
+  // reassigned. The token rides on this run's argv: execDetached's command
+  // list is the one form measured to start here -- a { command, environment }
+  // object is refused as a TypeError and nothing runs (measured 2026-11-06,
+  // an offscreen quickshell 0.3.2), which would read as a genuine disable
+  // that leaves the channel playing -- and the token is no private value: it
+  // authorizes nothing, and names nothing outside the user's own 0700 runtime
+  // directory (Model.playerOwnerToken).
   Component.onDestruction: {
     // R15 (DQ-B9): an entry mirror still HELD at exit never got its save
     // landed (a parked save never issued, a write still in flight). The entry
@@ -6068,7 +6104,7 @@ Item {
     // "", never a URL, and is not logged either way.
     if (root.pendingEntryKey !== null) console.warn("omarchy-iptv: exiting with a bar-entry mirror still held (state save not landed); the entry is left as it is and the next start re-adopts it")
     Quickshell.execDetached(Model.helperArgv(root.helperPath,
-      Model.playerOrphanCheckArgv(root.socketPath, Quickshell.processId, Model.PLAYER_ORPHAN_GRACE_SEC)))
+      Model.playerOrphanCheckArgv(root.socketPath, Quickshell.processId, Model.PLAYER_ORPHAN_GRACE_SEC, root.ownerToken)))
   }
 
   // ------------------------------------------------------------ files

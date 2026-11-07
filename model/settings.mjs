@@ -579,12 +579,53 @@ function footerWarning(playlistWarnings, epgWarnings) {
 
 // ------------------------------------------------------------ settings
 
+// D-HOST-11 (Omarchy 4.5.0, 2026-11-06). The bar's sections, in the host's
+// order: 4.5.0's Commons/Util.qml `barSections`, which its updateEntryInline,
+// its setBarWidget and its bar all walk. 4.0.x walked left, center and right
+// alone, and so did both walkers below until this list, so after 4.5.0's
+// migration 1791969355 moved a widget beside the clock into centerBegin or
+// centerEnd, the service read every setting as its default and refused
+// every own write as "no writable bar entry" while the host still drew the
+// widget, found the entry and wrote it.
+//
+// This is the FALLBACK, and it is 4.0.x's own walk. Service.qml hands both
+// walkers the host's own list (Commons.Util.barSections) and that list wins:
+// the walkers' answer is a promise about what the host's updateEntryInline
+// will find, and only the host's list keeps it. A host that hands none is
+// 4.0.x, whose updateEntryInline walks left, center and right and nothing
+// else (4.0.6 shell.qml:1088), so the fallback is exactly those three. An
+// entry a 4.5.0 migration moved into centerBegin or centerEnd (or that the
+// user put in tray), after a downgrade to 4.0.x, then reads as absent and its write is refused
+// (persist_failed), where a six-name fallback read it, judged it writable,
+// and lost the write to that host's `false` in silence (measured on 4.0.6's
+// own text, and the node suite's 4.0.x-kit service check). It is
+// deliberately NOT "every array under bar.layout", for the same reason: an
+// entry under a key the host does not walk would read as writable, the host
+// would answer `false`, and writeOwnedEntry takes `false` from a writable
+// entry as "already stored" (rule 9) -- the write lost in silence. So every
+// caller on a 4.5.0 host must hand the list, and Service.qml's four call
+// sites do. The dev harness does not call these walkers: its record of the
+// stored entry walks the host's sections itself (HarnessLib.hostEntryOf), so
+// a baseline model cannot blind it.
+var BAR_SECTIONS = ["left", "center", "right"]
+
+// The sections both walkers walk: the host's list when it hands one (its
+// string names, in its order), else BAR_SECTIONS, 4.0.x's. One function, so the two
+// walkers cannot be handed two different lists by their callers' defaults.
+function barSectionList(sections) {
+  if (!Array.isArray(sections)) return BAR_SECTIONS
+  var out = []
+  for (var i = 0; i < sections.length; i++) if (typeof sections[i] === "string") out.push(sections[i])
+  return out
+}
+
 // Our inline settings live on the bar layout entry (shell.json bar.layout.*).
 // Returns the entry object or {} so callers can read keys with fallbacks.
-function findBarEntry(barConfig, pluginId) {
+// `sections` is the host's Util.barSections (barSectionList above).
+function findBarEntry(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return {}
-  var sections = ["left", "center", "right"]
+  sections = barSectionList(sections)
   for (var s = 0; s < sections.length; s++) {
     var entries = barConfig.layout[sections[s]]
     if (!Array.isArray(entries)) continue
@@ -987,10 +1028,12 @@ function ownedEntryPatch(effective, overrides) {
 // return false without persisting, and that is a real persist failure. A
 // false return with a writable entry means "nothing to change" instead,
 // which is success (the host already stores what we asked for).
-function barEntryWritable(barConfig, pluginId) {
+// D-HOST-11: over the same `sections` as findBarEntry, from the same
+// barSectionList; a caller passes both walkers the one list it holds.
+function barEntryWritable(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return false
-  var sections = ["left", "center", "right"]
+  sections = barSectionList(sections)
   for (var s = 0; s < sections.length; s++) {
     var entries = barConfig.layout[sections[s]]
     if (!Array.isArray(entries)) continue
@@ -1220,11 +1263,12 @@ export {
   HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS, playerVerbKind,
   playerVerbReason, statusReason, lastErrorAfterStatus, statusHost,
   statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
-  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
-  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
-  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
-  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
-  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
-  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  labelWarning, labelWarnings, warningLine, footerWarning, BAR_SECTIONS,
+  barSectionList, findBarEntry, settingOf, boolSetting, clampInt,
+  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
+  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
+  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
+  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
+  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
+  retiredInputsToKeep, sameOwnWrite
 }

@@ -191,11 +191,28 @@ ORIGIN_PLAYLIST = "playlist"
 # address's class, only a proxied target this machine could not look up.
 ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
                    "unspecified", "multicast", "reserved")
-# The version of the destination rules a cache was written under
-# (playlist-status.json `destinationRules`). A cache without it predates
-# them, holds channels nothing checked, and is refreshed at the next start
-# (Model.cacheBeforeDestinationRules).
-DESTINATION_RULES = 1
+# The version of the rules a cache was WRITTEN under (playlist-status.json
+# `destinationRules`; Model.DESTINATION_RULES is the same number). 1 is the
+# destination rules (D-SINK-41: a cache before them holds channels nothing
+# checked); 2 is the attribute grammar (D-SINK-80: a cache before it can hold
+# a name, a group or a guide hint cut inside a URL, and the credential's tail
+# as a title). A cache written under an older version, or carrying none, is
+# refetched once, whatever its age, when its source is the active one: the
+# active source's at the next start, each other source's at its next swap,
+# and each shows its old cache until that refetch lands -- or, if it fails,
+# until a later one succeeds (Model.cacheBeforeDestinationRules, read by
+# Service.qml's applyFreshness for the active cache only).
+DESTINATION_RULES = 2
+# The same for a guide window (its meta line's `guideRules`): 1 is the fold
+# that keeps a URL's run whole (D-SINK-79: a window written before it can hold
+# a title or a detail split inside a URL, which every sink prints as the
+# username and the password's tail). A window written under an older
+# version, or carrying none, is refetched at the source's next fetch run,
+# whatever its age (needs_refetch): the playlist's stamp above refetches the
+# playlist, and the guide run beside it read the old window as fresh. A
+# refetch that fails leaves the old window in use, stale and reported as a
+# failure, until one succeeds; `--now-only` never refetches.
+GUIDE_RULES = 1
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
@@ -659,15 +676,14 @@ _URL_DELIMITER = re.compile("[" + URL_DELIMITER_CHARS + "]")
 # re-read from every word boundary; the scan is anchored on "://" now and these
 # are the parts of that pattern it still needs. The tail ends at the six
 # delimiters alone (R32a'''; it was that pattern's `[^\s'"<>]+` until
-# 2026-10-22, and the 30-point union for one round after that). `\w` is
-# asked rather than guessed, so the word-boundary rule stays Python's own
-# outside ASCII.
+# 2026-10-22, and the 30-point union for one round after that). The `\b`
+# is gone (D-SINK-74, 2026-11-04): a scheme glued to a word character is a
+# URL all the same, as it always was to Model.redactUrls.
 _URL_TAIL_RE = re.compile("[^" + URL_DELIMITER_CHARS + "]+")
 # The sentence punctuation redact_urls strips off a run's end and puts back
 # after the host; Model.trailingPunctuationLength has the same set. A `]` is
 # kept when the run holds a `[` (an IPv6 literal).
 _TRAILING_PUNCTUATION = ".,;:!?)]'\"<>"
-_WORD_CHAR_RE = re.compile(r"\w")
 # The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
 # was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
 # prefix, so the engine tried every start in the window and a failed start
@@ -692,16 +708,159 @@ _PORT_END = re.compile(r"[;=&]")
 # The token a free-text redactor prints in place of a withheld host (R32a').
 # Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
 HOST_WITHHELD = "[host withheld]"
-_LEADING_DASHES = re.compile(r"^[\s\-]+")
+# D-STATE-2: the whitespace clean_name takes off a name, enumerated as the
+# folds' class below enumerates it (_PUNCT, D-ID-5): the 29 code points
+# CPython 3.14's str.isspace() holds, so it answers as the bare strip() did
+# and no `n:` id, which is hashed from clean_name's answer, moved. A U+FEFF
+# at a name's edge stays, as it always has here. Every other strip the model
+# mirrors takes URL_SPACE_CHARS, the reader's class above and
+# Model.stripSpace's, and so does Model.cleanName, for what is shown. The
+# channel-ids fixture's foldSpace pins this list.
+CLEAN_NAME_SPACE = "".join(map(chr, [*range(0x09, 0x0e), *range(0x1c, 0x21), 0x85, 0xa0, 0x1680,
+                                *range(0x2000, 0x200b), 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]))
 # make_channel's last-resort display name, and the pattern that recognises one
-# after normalize_text. Built from the same constant so the two cannot drift:
-# engineering rule 13 (dev branch), two things joined by a name rather than by a call.
+# after normalize_id_text. Built from the same constant so the two cannot drift:
+# engineering rule 13 (dev branch), two things joined by a call rather than by a name.
 GENERATED_NAME_WORD = "Channel"
 GENERATED_NAME_FORMAT = GENERATED_NAME_WORD + " %d"
 _GENERATED_NAME = re.compile(r"^" + GENERATED_NAME_WORD.lower() + r" [0-9]+$")
 _CONTROL_WS = re.compile(r"[\s\x00-\x1f\x7f]+")
 # Mirrors Model.sanitizeInput: C0 controls, DEL and C1 controls are dropped.
 _CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
+# A URL's `://` as a sink that deletes _CONTROL_CHARS' class before it
+# redacts reads one (F-SINK-16): a `:` and two `/`, with any of that class
+# between them. cut_free_text (D-SINK-75) and split_groups (D-SINK-78) look
+# for it, so the two agree on where a URL starts.
+_URL_MARK = re.compile(":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/")
+
+
+# fold_space's class inside a URL's run, after its mark: the controls the
+# plain fold turns into a space (C0, DEL and U+0085, _CONTROL_WS's controls)
+# and the line and paragraph separators (U+2028, U+2029), each of which
+# fold_space replaces there with U+FFFD (RUN_REPLACEMENT, D-SINK-79).
+_RUN_CONTROLS = re.compile("[\x00-\x1f\x7f\x85\u2028\u2029]")
+RUN_REPLACEMENT = "\ufffd"
+
+
+def fold_space(text: str) -> str:
+    """`text` with every run of whitespace and control characters folded to
+    one space (_CONTROL_WS), except inside a URL's run, which is never
+    folded (D-SINK-79, 2026-11-05).
+
+    The guide's cleaners (clean_title, clean_detail, retain_programme) used
+    to fold the whole text with _CONTROL_WS before any redactor saw it. A
+    redactor ends a URL's run at the six ASCII delimiters ALONE
+    (URL_DELIMITER_CHARS, R32a'''), so every other whitespace or control code
+    point is URL text, and a password holding one redacts to the host. The
+    fold turned exactly those into a space, which ends a run at every sink:
+    `http://qqqqqq:zz<U+00A0>zz@cdn.test/x` was stored as
+    `http://qqqqqq:zz zz@cdn.test/x`, both redactors then read `qqqqqq` as
+    the host and printed it, and the password's tail after it carried no
+    scheme for anything to redact. Measured through parse_xmltv on 20 code
+    points XML allows (U+007F, U+0085, U+00A0, U+1680, U+2000..U+200A,
+    U+2028, U+2029, U+202F, U+205F, U+3000), in a title, a description, a
+    category and an episode, in the userinfo and in Xtream's path and query.
+
+    A URL's run starts where a _URL_MARK match starts that a redactor reads
+    as a URL's -- an ASCII letter in the scheme-legal run right before its
+    `:` (scheme_letter_before; redact_urls starts a scheme at that run's
+    first letter, and so does Model.redactUrls) -- and ends at the first of
+    URL_DELIMITER_CHARS at or after the mark's end, else at the end of the
+    text: where a redactor's run ends, from the `://` it reads once the
+    mark's controls are gone. A mark with no letter before it (`1://`,
+    ` ://`) is no URL to any redactor, so it starts no run and its text takes
+    the plain fold; a URL behind it then starts its own (`1://a?u=http:<DEL>
+    //...`, which a run from `1://` kept with its mark unwritten, the review's
+    F9 recheck). Inside a run:
+    - the mark is written `://`: every control in it (_CONTROL_CHARS, a tab
+      among them) is deleted, as the player's title and the notification
+      delete them before they redact, so a mark spelt `:<DEL>//` or
+      `:/<TAB>/` is a URL to the plain redactors too, the one URL a deleting
+      sink reads, where the plain fold made it `: //` and no sink's;
+    - after the mark, every control the plain fold turns into a space (C0,
+      DEL and U+0085) and the line and paragraph separators (U+2028,
+      U+2029) -- _RUN_CONTROLS -- each become U+FFFD (RUN_REPLACEMENT),
+      which both redactors read as URL text, so it splits nothing; which is
+      also what keeps NUL, U+001F and DEL out of every cleaned text, as the
+      guide's records need (the first two separate retain_programme's
+      fields, and DEL separates a channel's records, EPG_RECORD_SEP, which
+      json.dumps does not escape), and keeps a line break out of every row
+      a stored title is drawn in. REPLACED, not deleted (the review's F9):
+      deleting one could make a port of digits out of `:<DEL>/` or
+      `:12<DEL>34/`, and a dotted username before a digits-only password
+      prefix is the one userinfo both redactors print (R32a'', D-SINK-35),
+      where the raw text's non-numeric port has them withhold the host;
+    - every other character is kept as it is: the other non-ASCII spaces,
+      which both redactors read as URL text, and the C1 controls the plain
+      fold never touched, which they read as URL text too and the deleting
+      sinks delete.
+    Outside a run the fold is _CONTROL_WS's, byte for byte.
+
+    Costs, stated: a control or a line separator inside a URL is drawn as
+    U+FFFD where it used to become a space, in the host a redactor prints
+    too; and a non-ASCII space glued after a URL keeps the word behind it
+    inside the run, so a redactor drops that word with the URL's path,
+    exactly as it reads the raw text. A control between a scheme and its
+    `:` (`http<DEL>://`) is outside the run and still folds to a space,
+    which no plain redactor reads as a URL; it never was one to them, raw
+    or folded. And because the mark's controls are deleted -- a tab, a line
+    feed and a carriage return among them -- prose with a word's `:` at the
+    end of a line and `//` at the start of the next (`Featuring:<LF>// The
+    Band`) is stored as `Featuring:// The Band`, which the shell's sinks
+    read as a URL and draw as `[url] The Band` (the recheck, 2026-11-06);
+    the price of `http:<LF>//user:pw@host` being redacted, where the raw
+    text and the old fold printed it whole.
+
+    Linear: the text is read once by the mark searches, once by the
+    delimiter searches and once by the subs, each resuming past what the
+    one before it read. A text with no `:` or no `/` holds no mark, so it
+    takes the plain fold at the cost of two `in` tests, which is every
+    programme title without a URL.
+    """
+    if ":" not in text or "/" not in text:
+        return _CONTROL_WS.sub(" ", text)
+    mark = _URL_MARK.search(text)
+    while mark is not None and not scheme_letter_before(text, mark.start()):
+        mark = _URL_MARK.search(text, mark.end())
+    if mark is None:
+        return _CONTROL_WS.sub(" ", text)
+    out: list[str] = []
+    pos = 0
+    while mark is not None:
+        delimiter = _URL_DELIMITER.search(text, mark.end())
+        end = len(text) if delimiter is None else delimiter.start()
+        out.append(_CONTROL_WS.sub(" ", text[pos:mark.start()]))
+        # The mark with its controls deleted is always these three.
+        out.append("://")
+        out.append(_RUN_CONTROLS.sub(RUN_REPLACEMENT, text[mark.end():end]))
+        pos = end
+        mark = None if delimiter is None else _URL_MARK.search(text, end)
+        while mark is not None and not scheme_letter_before(text, mark.start()):
+            mark = _URL_MARK.search(text, mark.end())
+    out.append(_CONTROL_WS.sub(" ", text[pos:]))
+    return "".join(out)
+
+
+def scheme_letter_before(text: str, at: int) -> bool:
+    """Does the scheme-legal run ending at `at` (ASCII letters, digits,
+    `+`, `.`, `-`) hold an ASCII letter -- is a `://` at `at` a URL's to
+    the redactors, which start a scheme at that run's first letter
+    (redact_urls, Model.redactUrls)? Walks back from `at` and stops at the
+    first letter or at the first character outside the run. Linear over a
+    text's marks: the run before one mark ends at a character no run holds
+    (the `/` that ends an earlier mark, or the delimiter that ends a run),
+    so no character is walked twice."""
+    i = at - 1
+    while i >= 0:
+        c = text[i]
+        if "a" <= c <= "z" or "A" <= c <= "Z":
+            return True
+        if not ("0" <= c <= "9" or c == "+" or c == "." or c == "-"):
+            return False
+        i -= 1
+    return False
+
+
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.S)
 # Model.validateSourceUrl's scheme match ([\s\S]* there): a line separator
 # after the scheme is caught by the whitespace rule (`invalid`, D-SRC-06),
@@ -1144,23 +1303,33 @@ def redact_urls(text: Any) -> str:
     either way. The trade is four orders of magnitude on the shape that was
     quadratic for a factor of two on the one that never was.
 
-    Why it is the same answer and not a narrower pattern. `:` and `/` are not
-    scheme-legal, so the old pattern's greedy scheme run always ended EXACTLY
-    at the `://` that followed it and there was never a shorter candidate to
-    backtrack to. So the leftmost start the engine took for a given `://` is
-    the first position in the scheme-legal run ending at it that holds an ASCII
-    letter AND satisfies `\\b`; inside the run the only non-word characters are
-    `+`, `.` and `-`, so that test is a character comparison everywhere except
-    the run's own first position, where `\\w` is asked (`_` and every non-ASCII
-    word character are why it has to be asked). The redaction-cost suite (dev
-    branch) drives the OLD pattern as an oracle over the shared fixture and
-    thousands of generated strings and asserts the two agree character for
-    character.
+    What it answers, as a pattern: `([A-Za-z][A-Za-z0-9+.-]*)://` and the
+    tail, leftmost first. `:` and `/` are not scheme-legal, so that greedy
+    scheme run always ends EXACTLY at the `://` that follows it and there is
+    never a shorter candidate to backtrack to. So the leftmost start for a
+    given `://` is the first ASCII letter in the scheme-legal run ending at
+    it. The redaction-cost suite (dev branch) drives that pattern as an oracle
+    over the shared fixture and thousands of generated strings and asserts
+    the two agree character for character.
+
+    D-SINK-74 (2026-11-04). The old pattern also asked `\\b` of that start,
+    and so did this scan, which was written to give the old pattern's answer.
+    So it found a start only at a letter that was the run's first character
+    with no word character before the run, or that followed a `+`, `.` or
+    `-` inside the run. A run with neither was no URL at all: `1http`, or
+    `http` right after `_` or any non-ASCII letter, digit or numeral, and the
+    schemes IPTV uses hold no `+`, `.` or `-` to offer a later start. So
+    `1http://user:pass@host/x` reached the player's window title, the
+    helper's stderr and the EPG text whole. Model.redactUrls never had the
+    `\\b` and printed the host. Now neither has it.
 
     This makes the caps in front of this sink cheap, not unnecessary:
-    clean_name, clean_field and clean_detail are still what keeps a 64 MiB
-    description out of a renderer, and clean_detail still drops a cut token
-    carrying "://" rather than hand the redactor half a URL.
+    cut_text, clean_title, clean_field and clean_detail are still what keeps
+    a 64 MiB description out of a renderer, and every cap cut before a
+    redaction -- on text stored as written, or, in clean_detail, redacted
+    just after -- cuts through cut_free_text, which drops a cut token
+    carrying "://" rather than hand a redactor half a URL (D-SINK-75; until
+    then clean_detail alone did).
     """
     s = "" if text is None else str(text)
     j = s.find("://")
@@ -1187,23 +1356,16 @@ def redact_urls(text: Any) -> str:
             if b > lo or lo == resume:
                 break
             window *= 2
-        # `\b` at a position whose character is a word character (a letter
-        # always is) means "position 0, or the character before is not a word
-        # character". Only the run's first position can be preceded by
-        # something outside the scheme-legal set, so only it needs `\w`.
-        boundary_at_b = b == 0 or _WORD_CHAR_RE.match(s, b - 1) is None
+        # The scheme starts at the run's first ASCII letter, whatever stands
+        # before it (D-SINK-74): a digit inside the run, or a `_`, an accented
+        # letter or any other word character outside it. Model.redactUrls
+        # walks forward from the run's start the same way.
         start = -1
         for p in range(b, j):
             c = s[p]
-            if not (("a" <= c <= "z") or ("A" <= c <= "Z")):
-                continue
-            if p == b:
-                if not boundary_at_b:
-                    continue
-            elif s[p - 1] not in "+.-":
-                continue
-            start = p
-            break
+            if ("a" <= c <= "z") or ("A" <= c <= "Z"):
+                start = p
+                break
         tail = _URL_TAIL_RE.match(s, j + 3)
         if start < 0 or tail is None:
             # No scheme, or nothing the tail `+` can consume: the old pattern
@@ -1232,12 +1394,72 @@ def redact_urls(text: Any) -> str:
     return "".join(out)
 
 
+def cut_free_text(text: str, limit: int, separator: str = "") -> str:
+    """`text` cut to `limit` code points, and never through a URL (D-SINK-75).
+
+    F-M4-1's rule, which of the cuts made before a redaction only
+    clean_detail applied until then: REDACTION NEVER SEES A TRUNCATED URL. A URL cut between its
+    `//` and its `@` keeps a userinfo with no `@` after it, so run_host_parts
+    and Model.redactUrls read the username as the host and print it:
+    `... http://myuser:S3CRETpw` from `... http://myuser:S3CRETpw@cdn.test/x`.
+    So when the cut lands inside a run that an ASCII space ends, and the part
+    of that run before the cut carries "://" once its control characters are
+    deleted, the run is dropped, with the space before it. A run the cut does
+    not touch is kept whole, so a redactor sees all of it.
+
+    Why a space, and not the six delimiters that end a redactor's run: the
+    window title and the notification delete every control character before
+    they redact (F-SINK-16), so there a tab, VT, FF or CR inside a URL joins
+    the runs on either side of it, and a run read at the six kept
+    `http://myuser:zz<TAB>z`, which those sinks then read as `myuser`. A
+    space ends a run at every sink, so the run dropped is at least the run any
+    sink reads; and deleting the controls before looking for "://" (the class
+    both mirrors delete, _CONTROL_CHARS and Model's CONTROL_RE) finds a
+    `http:/<TAB>/` those sinks join into one. The costs: a cut URL loses its
+    host as well, a cut inside a run of several tab-joined words drops them
+    all, and a text that is one such run comes back "".
+
+    `separator` is what splits the text before any sink sees it, the group
+    text's `;`, and it counts only where split_groups splits at it: before
+    the run's first `://` (D-SINK-78). So a cut inside a URL drops the run
+    back to the later of its space and that last `;`, keeping the groups
+    before it, and a `;` after the `://`, which split_groups keeps inside
+    the URL's group, is no end here either: the first version of this
+    function ended a run at every `;`, and a cut at the `;` of
+    `http://myuser:pa;ss@cdn.test/x` kept `http://myuser:pa`.
+
+    The helper holds two definitions of a URL's run, and they differ on
+    purpose. This function and split_groups end a run at an ASCII space, for
+    the reason above. parse_attrs (D-SINK-80) and fold_space (D-SINK-79) end
+    it at the six delimiters, so an attribute a TAB separates from a URL value
+    is still read, and a TAB after a URL in a guide text still ends it. The
+    two differ only for a URL that holds a TAB, VT, FF or CR, which is
+    D-SINK-34's accepted class.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if text[limit] == " ":
+        return cut
+    start = cut.rfind(" ")
+    mark = _URL_MARK.search(cut, start + 1)
+    if mark is None:
+        return cut
+    if separator:
+        start = max(start, cut.rfind(separator, start + 1, mark.start()))
+    return cut[:max(start, 0)]
+
+
 def log(message: str) -> None:
     sys.stderr.write("omarchy-iptv: %s\n" % redact_urls(message))
 
 
 # ------------------------------------------------------- normalization
-# Must match the model's normalizeText/searchKey/fnv1a32 byte for byte.
+# Must match the model's normalizeText/normalizeIdText/searchKey/fnv1a32
+# byte for byte. The folds do, except on the letters whose lower case the two
+# runtimes' Unicode tables disagree on (D-SRC-12): the whitespace class is
+# enumerated in both since D-ID-5, and the shell takes the ids this helper
+# writes rather than recompute them.
 
 FOLD_GROUPS = [
     ("\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u0101\u0103\u0105", "a"),
@@ -1259,7 +1481,17 @@ FOLD_GROUPS = [
     ("\u0153", "oe"),
 ]
 FOLD = {ch: to for chars, to in FOLD_GROUPS for ch in chars}
-_PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
+# The whitespace both folds collapse (D-ID-5), written out at the head of
+# _PUNCT and _ID_PUNCT below: the 29 code points `\s` matched on CPython 3.14
+# when it was enumerated, so no stored `n:` id moved when it was. Not `\s`
+# itself: that is this interpreter's Unicode tables, which the model's engine
+# does not share (its `\s` matches U+FEFF and not U+001C-U+001F or U+0085, so
+# for a name holding one of those six the two mirrors folded different text),
+# and which a later interpreter may change under every id hashed from them.
+# The same list heads PUNCT_RE and ID_PUNCT_RE in the model; the
+# channel-ids.json fixture (dev branch) holds it, and both suites check every
+# BMP code point of both folds against it.
+_PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-/:-@\[-`{-~]+")
 # The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
 # Folding is two jobs, not one. SEARCH wants punctuation gone -- a user typing
 # "amc" must reach "USA: AMC+" -- so _PUNCT and search_key stay exactly as they
@@ -1271,7 +1503,7 @@ _PUNCT = re.compile(r"[\s!-/:-@\[-`{-~]+")
 # 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#` and `@`
 # were measured the same way and change nothing on any of the four, so they
 # are not in the class. Mirrors ID_PUNCT_RE in the model.
-_ID_PUNCT = re.compile(r"[\s!-)\,-/:-@\[-`{-~]+")
+_ID_PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-)\,-/:-@\[-`{-~]+")
 
 
 # A channel NAME as the EPG matcher compares it: normalize_id_text with the
@@ -1414,8 +1646,9 @@ def epg_name_text(value: Any) -> str:
     <display-name> through clean_field before keying (D-EPG-8), and the
     playlist side keyed the raw channels.json name, which the M3U parse
     leaves holding a DEL or a C0 control (sanitize_input runs on user
-    input, not on playlist text). _ID_PUNCT folds `\\s`, so a tab keyed
-    the same from either side, but `\\x7f` and `\\x00-\\x1b` are not `\\s`:
+    input, not on playlist text). _ID_PUNCT folds whitespace (`\\s` then,
+    an enumerated list since D-ID-5), so a tab keyed the same from either side, but
+    `\\x7f`, `\\x00-\\x08` and `\\x0e-\\x1b` are not in it:
     a row and a display-name that both carried U+007F keyed differently
     and did not match, and a DEL on one side only matched a name without
     it on the other. Folding inside the key functions, so every caller
@@ -1530,7 +1763,10 @@ def normalize_text(value: Any) -> str:
     """Lower-case, fold Latin diacritics (precomposed via FOLD, decomposed via
     NFD + dropping U+0300-U+036F after an ASCII letter, then NFC so every
     other script recomposes), ASCII punctuation to one space (D-QA-08).
-    Mirrors the model's decompose()/normalizeText byte for byte (NFD, not NFKD)."""
+    Mirrors the model's decompose()/normalizeText (NFD, not NFKD), except
+    where the two runtimes' lower-casing tables differ, a gap that moves with
+    either runtime's Unicode version (D-SRC-12 measured 28 codepoints). The
+    whitespace is one enumerated list in both (D-ID-5)."""
     return fold_text(value, _PUNCT)
 
 
@@ -1820,3 +2056,127 @@ def host_key(host: Any) -> str:
     if text.startswith("[") and text.endswith("]"):
         text = text[1:-1]
     return text[:-1] if text.endswith(".") else text
+
+
+# D-SINK-82 (owner, 2026-11-05): a playlist's guide hint that is a LIST.
+# `url-tvg="https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?
+# username=U&password=P"` is several guides to Kodi's pvr.iptvsimple and to
+# the apps that follow it, and it was ONE URL to Model.epgHintVerdict: the
+# first URL's host, with `,http://prov.test/...` in its path, so the second
+# URL's credential went to the first URL's host on every guide refresh, with
+# no click (D-SINK-40's userinfo test reads only the text before the first
+# `/`). The list's separator is a `,` followed -- after any run of the six
+# ASCII delimiters (URL_DELIMITER_CHARS, R32a''') -- by a scheme and a URL's
+# `://` as _URL_MARK reads one (controls allowed between the `:` and the
+# `//`, as a control-deleting sink reads it); a `,` anywhere else is URL text
+# (`?ids=1,2` is a legal query). Only the FIRST entry is adopted
+# (Model.hintFirstEntry, before every D-SINK-40 check), and the guide fetch
+# of a URL the playlist chose refuses one that is not its own first entry
+# (fetch_bytes, 03-io-playlist.py), so a 0.16.0 or 0.17.0 shell that still
+# hands over the whole list -- one loaded before an update, D-SINK-70's
+# shape -- sends nothing; that fetch also refuses a host holding a `,`,
+# because those shells normalize the list first (the review's F10). A shell
+# before 0.16.0 sets no origin, so its fetch reads as the user's and keeps
+# the defect until it restarts (F4). The shared provider-hosts fixture (dev
+# branch) runs both mirrors.
+# Linear: a literal `,` first, then runs over three classes that are each
+# ended by a character the run cannot hold (check-helper-regex.py).
+_HINT_LIST_COMMA = re.compile(",[" + URL_DELIMITER_CHARS + "]*[A-Za-z][A-Za-z0-9+.\\-]*" + _URL_MARK.pattern)
+
+
+def hint_first_entry(text: Any) -> str:
+    """The first entry of a guide hint that may be a comma-joined list
+    (D-SINK-82): the text before the first `,` that opens another URL
+    (_HINT_LIST_COMMA), the six ASCII delimiters taken off both its ends;
+    the text itself, untouched, when no `,` opens one -- so
+    `hint_first_entry(url) != url` reads "url is a list". An empty first
+    entry (`,http://...`) is "", never the second. Mirror of
+    Model.hintFirstEntry, both held to the provider-hosts fixture."""
+    value = text if isinstance(text, str) else str(text or "")
+    found = _HINT_LIST_COMMA.search(value)
+    if found is None:
+        return value
+    return value[:found.start()].strip(URL_DELIMITER_CHARS)
+
+
+# D-SINK-80's cost, the review's F1 (2026-11-06): a URL's run takes the rest
+# of its run (parse_attrs), so a quoted attribute glued after a URL value
+# (`tvg-logo="https://l.test/a.png"catchup-source="http://p.test/U/P/..."`),
+# a quoted list (`url-tvg="A","B"`) or a bare attribute glued by a comma
+# (`url-tvg=A,x-tvg-url=B`) is stored INSIDE the first URL -- whole, which is
+# what keeps every redactor's reading right, and wrong as an address: the
+# guide fetch and the logo fetch sent the second URL's credential to the
+# first URL's host, in the request line. The parse now stores no hint and no
+# logo from a value that ran past where every earlier release ended it
+# (own_value, 02-sources.py; the recheck found that a bare value takes
+# ANY text glued after its comma, not only an attribute), so this is the
+# fetches' BACKSTOP, for an address stored or handed over before that rule:
+# a raw `"` is in no component of a URL (RFC 3986), and a `,` followed by an
+# attribute key, a `=` and a URL's `://` (_URL_MARK) is a glued attribute
+# holding a URL. It is not the whole class: other text glued after a bare
+# value's comma passes here, and only the parse's rule stops it. A `,` in a
+# QUOTED value is the provider's own text (`?ids=1,2`, Cloudinary's
+# `w_100,h_100/https://...`), as is a `key=https://` after `?` or `&` (an
+# image proxy's `?url=`), and passes. Linear: a literal `,` first, then runs
+# over classes that are each ended by a character the run cannot hold, `,`
+# among them (check-helper-regex.py).
+_ABSORBED_URL = re.compile(",[A-Za-z0-9_.\\-]+=[A-Za-z][A-Za-z0-9+.\\-]*" + _URL_MARK.pattern)
+
+
+def absorbed_attribute(text: Any) -> bool:
+    """Does an address the PLAYLIST chose hold one of two shapes of what a
+    URL's run absorbed from beyond its own attribute -- a raw `"`, or a `,`
+    that opens an attribute holding a URL (_ABSORBED_URL)? Such an address
+    is never fetched: the guide fetch refuses it (fetch_bytes, origin
+    `playlist`), a logo with it has no host (logo_survey_host) and is
+    refused (fetch_logo, `logo_url`), and the shell adopts no such hint and
+    counts no such logo (Model.absorbedAttribute, both held to the
+    provider-hosts fixture). The backstop behind the parse's own rule
+    (own_value), for a cache or a shell from before it; never asked of
+    a URL the user typed. The cost, stated: a quoted hint or logo holding
+    one of the shapes is not used, where 0.17.0 used it whole (a quoted
+    `?a=1,url=https://...`); no writer is known to produce one."""
+    value = text if isinstance(text, str) else str(text or "")
+    return '"' in value or _ABSORBED_URL.search(value) is not None
+
+
+def dotless_host(host: Any) -> bool:
+    """Is this host ONE DNS label -- a host the provider chose that is
+    refused before any lookup (D-SINK-83, the owner's ruling of
+    2026-11-05)? Lower-cased and with ONE trailing `.` removed, it holds no
+    `.`, is not empty, and is not an IPv6 literal, bracketed (as a URL
+    writes one) or not (as http.client hands one to the connect).
+
+    Why: a URL holding an ASCII space or tab in its userinfo is cut there by
+    every redactor, and at a space by every tokenizer (D-SINK-34's accepted
+    class, which no grammar can close), and the piece left is
+    `http://USER:...`, whose host is the USERNAME -- one label, no dot,
+    unless the username holds one: a dotted or encoded e-mail username
+    reads as a dotted host and is looked up and named as before, since no
+    test can tell it from a host (D-SINK-35's class; the review's F12, and
+    the provider-hosts fixture pins it). Refusing it keeps the username
+    away from the resolver (and through it the search domains' servers) and
+    out of the Sources row and the logo consent dialog. Applied to a guide
+    hint (Model.epgHintVerdict: no hint at all, the playlist's own host
+    excepted), to a logo (logo_host, fetch_logo: never excepted), and on
+    every hop of a fetch whose URL the provider chose
+    (DestinationPolicy.refuses_name). Never to a URL the user typed.
+
+    The cost, stated: a single-label name that would resolve to a GLOBAL
+    address through a DNS search domain -- a non-global answer is already
+    refused at connect (D-SINK-41) -- is refused for a guide hint off the
+    playlist's host and for every logo (public CAs issue no certificate for
+    a single-label name, and logos are https only); and so is an all-digit
+    or `0x` host, `2130706433` among them, whatever it names, and
+    `localhost`. Mirror of Model.dotlessHost, both held to the
+    provider-hosts fixture."""
+    text = str(host or "").lower()
+    if text.endswith("."):
+        text = text[:-1]
+    if text == "" or "." in text:
+        return False
+    if ":" in text or text.startswith("["):
+        address = parse_ip_literal(text)
+        if address is not None and address.version == 6:
+            return False
+    return True

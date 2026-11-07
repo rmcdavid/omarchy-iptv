@@ -15,7 +15,7 @@ import {
   parseHelperStatus, entryInputNotice
 } from "./settings.mjs"
 import {
-  outputFailureSentence
+  ownerTokenArgv, outputFailureSentence
 } from "./player.mjs"
 import {
   helperArgv
@@ -192,13 +192,15 @@ function mpvArgArgv(mpvArgs) {
 // `--keep-pause`, the automatic restart's request to keep a replaced player's
 // pause on the new one (Model.olderRestartKeepsPause decides when); anything
 // else adds nothing, so a zap never carries it.
-function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause) {
+// `ownerToken` (D-PLY-64): the Service instance's own, beside its pid;
+// helperSpawn moves it off the argv (Model.ownerTokenArgv says why).
+function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause, ownerToken) {
   var argv = ["--socket", str(socket), "--cache-dir", str(cacheDir), "--id", str(id), "--seq", seqArg(seq)]
   if (str(scope) !== "") argv = argv.concat(["--scope", str(scope)])
   var when = Math.floor(Number(since))
   if (isFinite(when) && when > 0) argv = argv.concat(["--since", String(when)])
   var pid = Math.floor(Number(ownerPid))
-  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)])
+  if (isFinite(pid) && pid > 0) argv = argv.concat(["--owner-pid", String(pid)]).concat(ownerTokenArgv(ownerToken))
   if (keepPause === true) argv = argv.concat(["--keep-pause"])
   return argv.concat(mpvArgArgv(mpvArgs))
 }
@@ -207,8 +209,8 @@ function playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, own
 // claims the player for this shell at the same moment it starts playing, so
 // the plugin-removal case (PO-2 / PLAYER-LIVE-04) has a claim to check even
 // when the service never ran a probe that found anything.
-function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause) {
-  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause))
+function playerStartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause, ownerToken) {
+  return ["player", "start"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause, ownerToken))
 }
 
 // `from` picks the first rung: "" or "quit" starts at `quit` over IPC,
@@ -221,8 +223,8 @@ function playerStopArgv(socket, seq, from) {
   return argv
 }
 
-function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid, keepPause) {
-  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause))
+function playerRestartArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, from, ownerPid, keepPause, ownerToken) {
+  var argv = ["player", "restart"].concat(playerSessionArgv(socket, cacheDir, id, seq, scope, since, mpvArgs, ownerPid, keepPause, ownerToken))
   var rung = str(from)
   if (rung === "quit" || rung === "term" || rung === "kill") argv = argv.concat(["--from", rung])
   return argv
@@ -286,6 +288,23 @@ function playerPauseArgv(socket, state) {
 // provider wrote it (an `&` included, which unescaped could swallow the
 // text after it). The TITLE is not escaped: the host draws it PlainText
 // (pinned the same way), where an entity would show as written.
+//
+// D-SINK-85 (owner, 2026-11-06). Omarchy 4.5.0 put a markup reader in front
+// of that renderer (plugins/notifications/Markup.js render(), run by
+// Store.js normalise() on every card and again on every history replay):
+// it DECODES entities first, up to three passes over amp, lt, gt, quot,
+// apos, nbsp and decimal and hex numbers, then escapes, then puts back
+// b/i/u/s/em/strong/br and any `<a href>` Security.safeExternalUrl accepts,
+// links a bare http(s) URL when no anchor is left, and draws the result
+// StyledText with a click that opens the link. One escape is undone by its
+// first pass, so a name spelling a scheme's colon `&#58;` drew a live https
+// or mailto link in this plugin's own failure card, with the provider's
+// label, and a `<b>` or a `<br>` restyled it again. Entity escaping alone
+// is no longer a guard on this host; markupEscape below now defeats the
+// host's GRAMMAR, on both hosts, held on the dev branch by a shared fixture
+// that node and the QML spec run through byte copies of each host's own
+// code. The title is unchanged: both hosts draw the summary PlainText and
+// decode nothing in it.
 //
 // F-SINK-16 (2026-10-29). And the body carries no control character. The
 // playlist parse keeps a provider's C0 and C1 controls in a name (measured:
@@ -378,13 +397,41 @@ function notifyArgv(event, params, replaceId) {
           "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(str(spec.body).replace(CONTROL_RE, ""))]
 }
 
-// D-SINK-49: text on its way into a StyledText renderer, shown as written.
-// `&` first, so the entities written for `<` and `>` are not escaped again.
-// Quotes are left alone: with no `<` left there is no tag for an attribute
-// to sit in, and StyledText draws a quote as a quote (measured, the QML
-// spec's "D-SINK-49" case). Three single-character global replaces, linear.
+// D-SINK-49, D-SINK-85: text on its way into a host's markup reader, shown
+// as written. Every `&` and every `<` is first followed by U+034F COMBINING
+// GRAPHEME JOINER, and then `&`, `<` and `>` are escaped, `&` first so the
+// entities written for `<` and `>` are not escaped again.
+// - On the 4.0.6 host, StyledText decodes the three entities once and draws
+//   the joiner, which has no width (measured, the QML spec's "D-SINK-85").
+// - On the 4.5.0 host, Markup.js decodes before it reads tags. The plugin's
+//   own `&amp;` and `&lt;` decode to `&` and `<`, each still followed by the
+//   joiner, and then nothing decodes again: every entity that reader knows
+//   needs a letter or `#` directly after its `&`, every tag it restores and
+//   the anchor it accepts need the tag's name directly after the `&lt;`, and
+//   its linker needs a literal `://`, which only a decoded `&#58;` or
+//   `&#47;` could have made. So a provider's `&#58;`, `&lt;a href=` and
+//   `<b>` all reach the card as the characters they are written in.
+// - BEFORE the escape, not after: after it, the joiner would split the
+//   plugin's own entities, and `&amp;` would draw as `&`, joiner, `amp;`.
+// - This joiner and not U+2060 WORD JOINER (the owner, 2026-11-06).
+//   Liberation Sans, the face both hosts draw the body in, carries U+034F
+//   and has no U+2060, which Qt drew in a fallback face: a line that carried
+//   one was 20 px tall instead of 16 at the toast's 14 px. A combining
+//   mark, U+034F joins the `&` or `<` before it into one character for the
+//   cursor and a selection. Measured (the QML spec's "D-SINK-85" cases):
+//   the body lays out exactly as the text with no joiner -- its width, its
+//   height, and its lines at a card's width.
+// Quotes are left alone: with no `<` that opens a tag there is no attribute
+// for one to sit in, and StyledText draws a quote as a quote.
+// The cost, the owner's to accept: the joiner is in the body the host keeps
+// in its history and in anything copied from the card.
+// It only ever follows a `&` or a `<`, and none of the three is a word
+// character or a space to the host's readers, so its verification-code
+// detector finds the same word boundaries and the same digit runs, at most
+// one character further apart for each `&` or `<` between them. One class
+// replace and three single-character replaces, linear.
 function markupEscape(text) {
-  return str(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  return str(text).replace(/[&<]/g, "$&\u034f").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 // ---- D-HOST-5 (owner, 2026-10-28): one card per notice kind, refreshed in place.
@@ -643,7 +690,8 @@ var URL_SPACE_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x2
   0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
   0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
 
-// The reader's class: what validateSourceUrl refuses.
+// The reader's class: what validateSourceUrl refuses, and what stripSpace
+// takes off a value's edges (D-STATE-2).
 function isUrlSpaceAt(s, i) {
   var c = s.charCodeAt(i)
   if (c === 0x20 || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f)) return true
@@ -657,6 +705,41 @@ function isUrlSpaceAt(s, i) {
 function urlSpaceIndex(s) {
   for (var i = 0; i < s.length; i++) if (isUrlSpaceAt(s, i)) return i
   return -1
+}
+
+// D-STATE-2. The reader's class off both ends of a value, and nothing else:
+// what the shell takes off a group, a hidden group's name, the active key, a
+// logo's host and an rtsp transport before it compares or stores one, and
+// what the helper takes off the same values (URL_SPACE_CHARS). Not the
+// engine's trim, whose set is JavaScript's -- U+FEFF in, U+001C-U+001F and
+// U+0085 out -- and which Qt 6.12's V4 widens by U+0085 (F-GATE-4), while
+// Python's strip() takes U+001C-U+001F and U+0085 and leaves U+FEFF. The
+// union takes off everything either engine ever took, so a value stored by
+// any earlier writer, the shell under node or V4 or the helper, reads as the
+// value it was stored from. Index walks, so linear (D-PERF-3).
+// A code unit strictly between U+0020 and U+0085 is never a member, and it
+// is the edge of nearly every name, group and key, so stripSpace answers
+// those with two reads and no call: it runs once per row on every browse
+// pass that reads a group, where V4's native trim cost no call at all.
+// Otherwise the engine's trim goes first. Its set lies inside the class in
+// both engines (25 code points in node, 26 in V4), so the answer does not
+// move, and a long run behind a U+FEFF is taken at native speed: walked a
+// code unit at a time it made every browse pass about six times slower.
+// What is left to walk is U+001C-U+001F, U+0085 in node, and whatever
+// stands behind one of them.
+function stripSpace(text) {
+  var s = typeof text === "string" ? text : str(text)
+  var b = s.length
+  if (b === 0) return s
+  var head = s.charCodeAt(0)
+  var tail = s.charCodeAt(b - 1)
+  if (head > 0x20 && head < 0x85 && tail > 0x20 && tail < 0x85) return s
+  s = s.trim()
+  b = s.length
+  var a = 0
+  while (a < b && isUrlSpaceAt(s, a)) a++
+  while (b > a && isUrlSpaceAt(s, b - 1)) b--
+  return a === 0 && b === s.length ? s : s.substring(a, b)
 }
 
 // The redactor's class (R32a'''): the six ASCII delimiters, and nothing
@@ -834,7 +917,7 @@ export {
   playerPauseArgv, notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS,
   notifyReplaceId, notifyReplyId, notifySlot, withNotifySlot, notifyPost,
   notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
-  isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  urlDelimiterIndex, trailingPunctuationLength, isSchemeRestCode,
-  isLetterCode, redactUrls, scrubUrls, sinkText
+  isUrlSpaceAt, urlSpaceIndex, stripSpace, URL_DELIMITER_CODES,
+  isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
+  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

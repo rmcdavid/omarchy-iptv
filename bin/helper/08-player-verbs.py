@@ -517,6 +517,15 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
     return peer
 
 
+def player_title_text(name: str) -> str:
+    """What apply_channel sets as the player's title and media title (after
+    the `$>` prefix on the title): the name with every control character
+    deleted, then redacted (F-SINK-14, F-SINK-16). A function so the tests
+    that hold a cut name to this sink call it rather than copy it
+    (D-SINK-75)."""
+    return redact_urls(_CONTROL_CHARS.sub("", name))
+
+
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
                   owner: dict[str, Any] | None = None, label: str = "play",
                   vouched_pid: int | None = None, paused: bool = False) -> int | None:
@@ -581,7 +590,7 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # a name never means anything by one, so none goes to the player. Dropped
     # BEFORE the redaction, so a tab or a line break inside a password no
     # longer splits the URL there (D-SINK-34's cost) on this sink.
-    shown = redact_urls(_CONTROL_CHARS.sub("", target["name"]))
+    shown = player_title_text(target["name"])
     for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
@@ -770,13 +779,70 @@ def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> 
             % (intent, where))
 
 
-def owner_claim(owner_pid: int) -> dict[str, Any] | None:
+def owner_claim(owner_pid: int, token: str = "") -> dict[str, Any] | None:
     """The claim that tells a successor shell the player is already adopted
-    (4.14). Keyed by pid AND start time so a recycled pid cannot inherit it."""
+    (4.14). Keyed by pid AND start time so a recycled pid cannot inherit it.
+
+    D-PLY-64 (2026-11-06): and by the SERVICE INSTANCE that wrote it, when the
+    shell says which one (`token`, Model.playerOwnerToken, one per Service
+    object, handed over in OMARCHY_IPTV_ARGS by the claiming verbs and on
+    the orphan check's argv, the one form execDetached starts). Omarchy
+    4.5.0's migrations replaced shell.json for a moment, the host read the
+    defaults, destroyed the plugin's Service and created a new one inside the
+    SAME shell process: the successor re-claimed with the same pid and start
+    time, so the destroyed instance's orphan check read the claim as its own
+    and stopped the channel. pid and start time name the shell; only the
+    token names the instance. A shell that passes none (a Service from before
+    this release, still loaded) writes the claim it always wrote."""
     if not owner_pid or owner_pid <= 0:
         return None
-    return {"schema": PLAYER_STASH_SCHEMA, "pid": int(owner_pid),
-            "startTime": proc_start_time(int(owner_pid)), "at": int(time.time())}
+    claim: dict[str, Any] = {"schema": PLAYER_STASH_SCHEMA, "pid": int(owner_pid),
+                             "startTime": proc_start_time(int(owner_pid)), "at": int(time.time())}
+    if token:
+        claim["token"] = token
+    return claim
+
+
+# D-PLY-64: what an instance token is -- 32 lowercase hex digits, exactly what
+# Model.playerOwnerToken draws and Model.isOwnerToken accepts; the shared
+# owner-token fixture (dev branch) holds the two to one list. Checked by
+# characters, not by a pattern (no regex to grade, check-helper-regex.py).
+OWNER_TOKEN_LENGTH = 32
+OWNER_TOKEN_DIGITS = frozenset("0123456789abcdef")
+
+
+def is_owner_token(text: Any) -> bool:
+    return (isinstance(text, str) and len(text) == OWNER_TOKEN_LENGTH
+            and all(char in OWNER_TOKEN_DIGITS for char in text))
+
+
+def owner_token_arg(text: str) -> str:
+    """argparse's `type` for --owner-token. The shell's builders pass only a
+    token Model.isOwnerToken accepts, so anything else was typed by a human,
+    and is refused (without echoing it) rather than written into a claim that
+    no orphan check the shell starts would ever read as its own. "" is no
+    token (argparse runs the default through this too)."""
+    if text != "" and not is_owner_token(text):
+        raise argparse.ArgumentTypeError("not an owner token (%d lowercase hex digits)" % OWNER_TOKEN_LENGTH)
+    return text
+
+
+def claim_token(claim: Any) -> str:
+    """The instance token a claim read off the player carries; "" for a claim
+    an older helper or a token-less shell wrote, and for anything that is not
+    a string (mpv's user-data holds whatever a client set)."""
+    token = claim.get("token") if isinstance(claim, dict) else None
+    return token if isinstance(token, str) else ""
+
+
+def claim_reply(claim: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A claim as the probe REPLIES it: without the instance token, which the
+    shell never reads (Model.playerOwner reads pid, start time and `at`), so
+    the token stays on the player (D-PLY-64). Every other key passes through
+    as written."""
+    if not isinstance(claim, dict):
+        return None
+    return {key: value for key, value in claim.items() if key != "token"}
 
 
 # D-SRC-13's rule 15 sweep (2026-10-21): the reason a first load failed is
@@ -1161,11 +1227,12 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         # and re-applies its own intent when this reply disagrees with it.
         newer = applied_by_another_client(client) if outcome["spawned"] else None
         if newer is None:
-            entry_id = apply_channel(client, target, stash=stash, owner=owner_claim(args.owner_pid),
+            entry_id = apply_channel(client, target, stash=stash,
+                                     owner=owner_claim(args.owner_pid, args.owner_token),
                                      label="player %s" % verb, vouched_pid=outcome["vouched"], paused=paused)
         else:
             entry_id = newer["entryId"]
-            claim = owner_claim(args.owner_pid)
+            claim = owner_claim(args.owner_pid, args.owner_token)
             if claim is not None:
                 # The claim is about which shell owns the player, not about
                 # which channel is on it, so it is still ours to write.
@@ -1317,18 +1384,18 @@ def player_probe(args: argparse.Namespace) -> int:
             ok, stash = client.try_command("get_property", USER_DATA_STASH)
             payload["stash"] = stash if ok and isinstance(stash, dict) and stash.get("id") else None
             ok, owner = client.try_command("get_property", USER_DATA_OWNER)
-            payload["owner"] = owner if ok and isinstance(owner, dict) else None
+            payload["owner"] = claim_reply(owner) if ok else None
             # M5-01: the reattach read recovers "behind live" from the zero
             # point the player carries. Read only -- the probe writes nothing
             # but the owner claim, and a zero point taken here would be one
             # taken by a verb that is documented as side-effect-free.
             payload["rewind"] = read_rewind(client, payload["stash"], write=False)
-            claim = owner_claim(args.owner_pid)
+            claim = owner_claim(args.owner_pid, args.owner_token)
             if claim is not None:
                 written, _ = client.try_command("set_property", USER_DATA_OWNER, claim)
                 payload["claimed"] = bool(written)
                 if written:
-                    payload["owner"] = claim
+                    payload["owner"] = claim_reply(claim)
         finally:
             client.close()
         emit(payload)
@@ -1342,9 +1409,27 @@ def player_probe(args: argparse.Namespace) -> int:
 def player_orphan_check(args: argparse.Namespace) -> int:
     """PO-2: the service object being destroyed cannot tell a shell restart
     from a plugin removal, so the claim decides, not the destruction event.
-    A successor shell overwrites the claim well inside the grace."""
+    A restart reads as reassigned once the successor shell has claimed, and
+    as owner_dead once the old shell has exited, whichever comes first;
+    nothing assumes the claim lands inside the grace (an old shell that
+    outlives it is D-HOST-8).
+
+    D-PLY-64 (2026-11-06): and so does a successor SERVICE in the same shell,
+    which the host creates when it reads the plugin as disabled for a moment
+    and then as enabled again (Omarchy 4.5.0's migrations did, replacing
+    shell.json). Its claim carries the same pid and start time, so those two
+    cannot see it; the instance token can. The claim is this check's own only
+    when its pid is the destroyed shell's AND its token is the destroyed
+    instance's (`--owner-token`; "" on both sides for a Service from before
+    this release, which keeps the rule as it was). Any other token -- a
+    successor's, or one where this instance passed none -- is "reassigned":
+    the player has an owner that is not the instance being destroyed, and
+    that owner's own check decides when IT goes. The claim's `at` cannot do
+    this: one-second resolution, and the successor's probe was measured
+    running before the old instance's deferred destroy."""
     sock = socket_path(args.socket)
     owner_pid = int(args.owner_pid or 0)
+    mine = str(args.owner_token or "")
     _sleep(max(0.0, float(args.grace)))
     try:
         found = find_player(sock)
@@ -1359,7 +1444,8 @@ def player_orphan_check(args: argparse.Namespace) -> int:
                 claim = data if ok and isinstance(data, dict) else None
             finally:
                 client.close()
-        if not isinstance(claim, dict) or int(claim.get("pid") or 0) != owner_pid or owner_pid <= 0:
+        if (not isinstance(claim, dict) or int(claim.get("pid") or 0) != owner_pid or owner_pid <= 0
+                or claim_token(claim) != mine):
             emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "reassigned"})
             return EXIT_OK
         alive = False

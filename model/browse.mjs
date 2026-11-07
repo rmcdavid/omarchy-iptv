@@ -9,14 +9,15 @@ import {
   channelId, indexById
 } from "./text.mjs"
 import {
-  primaryGroup, parseChno, chnoOf, chnoEntryKey, isNumericQuery
+  primaryGroup, groupSearchText, parseChno, chnoOf, chnoEntryKey,
+  isNumericQuery
 } from "./channels.mjs"
 import {
   savedSearchChannels, emptyState, hiddenGroupSet, isGroupHidden,
   browsableChannels
 } from "./state.mjs"
 import {
-  sinkText
+  stripSpace, sinkText
 } from "./privacy.mjs"
 import {
   formatCount, pluralChannels
@@ -174,7 +175,7 @@ function filterChannels(channels, query, limit, favorites, chnoIndex) {
   for (var i = 0; i < list.length; i++) {
     var channel = list[i]
     if (!channel) continue
-    var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, channel.group)
+    var key = typeof channel.searchKey === "string" ? channel.searchKey : searchKey(channel.name, groupSearchText(channel))
     var nameKey = typeof channel.nameKey === "string" ? channel.nameKey : normalizeText(channel.name)
     var rank = matchRank(key, tokens, nameKey)
     if (rank < 0) continue
@@ -405,7 +406,15 @@ function channelsForScope(channels, scopeId, state) {
     }
     return out
   }
-  var name = rawScopeName(id)
+  // D-STATE-2: the name is stripped of the reader's class, as primaryGroup
+  // strips a row's group. A scope id carries the group as the shell that made
+  // it read it, and a player's stash keeps the id across an upgrade: 0.17.0
+  // stashed `g:<U+001C>Sports` for the group-title `<FEFF><U+001C>Sports`,
+  // which this shell lists as `Sports`, so the ring was empty and channel up
+  // and down did nothing until a row was played from the guide. A name that
+  // strips to nothing is Ungrouped, which is what primaryGroup reads for the
+  // row it came from.
+  var name = stripSpace(rawScopeName(id)) || UNGROUPED
   for (i = 0; i < list.length; i++) if (list[i] && primaryGroup(list[i]) === name) out.push(list[i])
   return out
 }

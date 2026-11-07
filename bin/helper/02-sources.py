@@ -368,36 +368,208 @@ _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
 CHNO_ATTRS = ("tvg-chno", "tvg-channel-number", "channel-number")
 
 
-def parse_attrs(text: str) -> tuple[dict[str, str], str]:
+def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> tuple[dict[str, str], str]:
     """Parse `key="value" key2=value ...` from the start of `text`.
 
     Returns (attrs, remainder). Attribute values may contain commas; the
     remainder starts at the first character that is not an attribute.
     Keys are lower-cased; when a key repeats, the last non-empty value wins.
-    """
+
+    `past`, when given, receives the key of every stored value that runs
+    PAST where every release before D-SINK-80 ended it -- a quoted value
+    past its first `"`, a bare one past its first `,`, `"` or Python
+    whitespace -- mapped to (that old end's offset in the stored value,
+    whether a comma-joined guide list opens there in the line, which only a
+    bare value's old end can be) (own_value, the recheck of the review's F1
+    and the check of its fixes, 2026-11-06).
+
+    D-SINK-80: a URL's run is opaque to this grammar. A quoted value used to
+    end at its first `"` and a bare one at its first `,`, `"` or Python
+    whitespace, before any redactor saw it, and every redactor reads a `"`,
+    a `,` and every whitespace but the six ASCII delimiters as URL text
+    (R32a'''). So `group-title="http://myuser:pa"ss@h/x"`
+    stored `http://myuser:pa`, which both redactors print as the host
+    `myuser`, and the rest of the line -- `ss@h/x"`, every attribute after
+    it and the real title -- became the channel's NAME, with no scheme for
+    any redactor to find, in the window title, the guide, the bus and the
+    notifications. For ANY attribute, read or not (`catchup-source`), and on
+    #EXTM3U a cut guide hint was adopted with the username as its host.
+
+    The rule, for each attribute, after today's match (_ATTR_QUOTED, else
+    _ATTR_BARE), which decides everything outside a URL's run byte for byte:
+
+      Quoted. The value starts at `vs` and today ends at `q`, its first `"`.
+      That quote is INSIDE A URL'S RUN when a `://` (_URL_MARK, as the sinks
+      that delete control characters read one) stands in the value between
+      the last ASCII space before `q` and `q` -- cut_free_text's membership
+      test. Then the run ends at `e`, the first of the six ASCII delimiters
+      (URL_DELIMITER_CHARS) at or after `q`, or the text's end, and the value
+      closes at the LAST `"` before `e` that a delimiter, a `,`, the end, or
+      a run of Python whitespace reaching `e` follows (the last because a
+      non-ASCII space after the closing quote ends nothing: `"URL"<NBSP>
+      next="v"` reads as 0.17.0 read it, the final check of 2026-11-06); the
+      walk goes on after it. With no such `"` the value is
+      unterminated, as an unterminated quote is today: the walk ends at the
+      attribute's start, and the rest of the line, URL whole, is the title.
+
+      Bare. The value today is [vs, ve), ending at whitespace, `,` or `"`.
+      It is inside a URL's run when a `://` STARTS in it (a mark may run
+      past `ve`, through controls Python calls whitespace); then it takes
+      the rest of the run, to the first delimiter at or after the later of
+      `ve` and the end of the mark that runs past it, when one does.
+
+    Why: a URL takes the rest of its run (split_groups' shape, D-SINK-78),
+    and that is what both redactors read as one URL: they end it only at the
+    six delimiters, so a URL stored whole redacts to its host whatever `"`,
+    `,` or non-ASCII whitespace it holds. A value with no URL parses as it
+    always has. Membership looks back to an ASCII SPACE, not to the six, so
+    a tab between a `://` and the quote does not end it: the window title
+    and the notification delete the tab and read one run. The run's END is
+    the six, so an attribute a TAB separates from a URL value is still read
+    (qa-attrs.m3u holds a TAB separator). That makes two run definitions in
+    the helper: cut_free_text and split_groups end a run at a space only,
+    and this grammar ends it at the six. They differ only for a URL holding
+    a tab, VT, FF or CR, which is D-SINK-34's accepted class: no grammar can
+    keep such a URL whole for the redactors, which split it there.
+
+    The costs: an attribute glued straight after a URL value, or separated
+    from it by non-ASCII whitespace only, is absorbed into the URL, and so is
+    a title glued after one that holds `",` or ends in `"`; a bare URL value
+    glued to the title's comma takes the title's first word. A value that
+    ran past where every earlier release ended it is never stored as a guide
+    hint or a logo (`past`, own_value; the review's F1 and its recheck):
+    kept whole, a hint or a logo that took whatever followed it sent that
+    text's credential to its own host. And a URL that itself holds `",`,
+    whose own closing quote is glued to what follows it, separated from it
+    by non-ASCII whitespace only, or missing, is still cut at that `",`, as
+    in every release (F3): the line reads exactly as `attr="URL",<title>`
+    does, and the fallback to the last `",` is what keeps that line
+    whole. Linear: each
+    test reads only the value the match already scanned (the quoted one from
+    the last `:` before the run's first `/`; the bare one in one bounded
+    search, and once more at its last `:` when a control ends it), the
+    run's end is found once, and the walk resumes past it or stops."""
     attrs: dict[str, str] = {}
     pos = 0
-    while pos < len(text):
-        match = _ATTR_QUOTED.match(text, pos) or _ATTR_BARE.match(text, pos)
-        if not match:
-            break
+    size = len(text)
+    old = -1
+    opens = False
+    # A line with no `/` holds no `://`, and parses as it always has.
+    urls = "/" in text
+    while pos < size:
+        match = _ATTR_QUOTED.match(text, pos)
+        if match is not None:
+            start, quote = match.span(2)
+            end = match.end()
+            value = match.group(2)
+            # The run before the quote, from the last space. A `://` in it
+            # needs a `/`, and none can start before the last `:` ahead of the
+            # run's first `/` (only controls stand between a mark's `:` and
+            # its `/`), so the search starts there: a run of colons costs one
+            # attempt, not one each (D-PERF-13's shape).
+            low = max(start, text.rfind(" ", start, quote) + 1)
+            slash = text.find("/", low, quote) if urls else -1
+            if slash != -1 and _URL_MARK.search(text, max(low, text.rfind(":", low, slash)), quote) is not None:
+                run = _URL_DELIMITER.search(text, quote)
+                run_end = run.start() if run is not None else size
+                # The run's last character that is not Python whitespace (a
+                # run holds none of the six, so only the non-ASCII spaces,
+                # U+001C..U+001F and U+0085): each run is walked once.
+                tail = run_end
+                while tail > quote + 1 and text[tail - 1].isspace():
+                    tail -= 1
+                close = tail - 1 if text[tail - 1] == '"' else text.rfind('",', quote, run_end)
+                if close < 0:
+                    break
+                value = text[start:close]
+                end = close + 1
+                if close != quote:
+                    # In the stored value's coordinates: the value is stripped
+                    # below, so its leading whitespace is taken off.
+                    old = quote - start - (len(value) - len(value.lstrip()))
+        else:
+            match = _ATTR_BARE.match(text, pos)
+            if match is None:
+                break
+            start, end = match.span(2)
+            # A `://` that starts in the value either ends in it, which one
+            # bounded search finds, or runs past its end. That one passes the
+            # character that ended the value, so that character is a control
+            # (whitespace to Python, a mark's filler to _URL_MARK), and it
+            # starts at the value's LAST `:`, since a mark holds no other.
+            last = None
+            if urls and end < size and (text[end] < " " or "\x7f" <= text[end] <= "\x9f"):
+                colon = text.rfind(":", start, end)
+                last = _URL_MARK.match(text, colon) if colon != -1 else None
+            if urls and (last is not None or _URL_MARK.search(text, start, end) is not None):
+                run = _URL_DELIMITER.search(text, max(end, last.end()) if last is not None else end)
+                grown = run.start() if run is not None else size
+                if grown != end:
+                    # A bare value starts with no whitespace, so this is its
+                    # offset in the stored value. A list opening is judged in
+                    # the LINE at the old end, delimiters after the comma
+                    # allowed, as hint_first_entry reads one (`A, B`).
+                    old = end - start
+                    opens = _HINT_LIST_COMMA.match(text, end) is not None
+                end = grown
+            value = text[start:end]
         key = match.group(1).lower()
-        value = match.group(2).strip()
-        if value or key not in attrs:
-            attrs[key] = value
-        pos = match.end()
+        stripped = value.strip()
+        if stripped or key not in attrs:
+            attrs[key] = stripped
+            if past is not None:
+                if old >= 0:
+                    past[key] = (old, opens)
+                else:
+                    past.pop(key, None)
+        old = -1
+        opens = False
+        pos = end
     return attrs, text[pos:]
 
 
-def parse_extinf(line: str) -> tuple[dict[str, str], str]:
+def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:
+    """The part of a stored attribute value that is its OWN, for a value that
+    ran past its old end (`entry`, parse_attrs' `past`: the old end's offset
+    and whether a guide list opens there) -- or "" when it absorbed what
+    came after it, so it is no address to fetch. The recheck of the review's
+    F1 and the check of its fixes (2026-11-06): keeping a URL value whole to
+    its run's end (D-SINK-80) let a bare `url-tvg=A,<anything>` or
+    `tvg-logo=A,<anything>` take whatever the provider glued after the
+    comma, and only the shapes absorbed_attribute reads (a raw `"`,
+    `,key=scheme://`) were refused, so `,x-tvg-url='B'`, `,=B`,
+    `,username=U,password=P` and a bare logo list sent their text,
+    credentials and all, to the first URL's host, which no release before
+    D-SINK-80 did: a bare value ended at its first `,`.
+    Decided where the absorption happens, not by the shape of the text. The
+    value is its old end's piece, exactly what 0.17.0 stored, when it ran
+    past by its trailing comma alone (`A,` before a delimiter: nothing after
+    the comma was taken), or, for a hint (`listed`), when a comma-joined
+    list opens at that end (`A,https://B`, `A, https://B`), read as its
+    first entry (D-SINK-82): so no later entry is ever stored, and no shell,
+    however old, fetches one. Anything else is "": a quoted value's old end
+    is its `"`, which neither case allows. The value stays whole for the
+    redactors in every other attribute.
+    The cost, stated: a bare hint or logo holding a `,` or a non-ASCII space
+    in its own text (`?ch=1,2`, `w_100,h_100/...`), or glued to the title's
+    comma, is not used; 0.17.0 cut it there and fetched the piece before
+    it, which for a credential holding one was the username as the host."""
+    old, opens = entry
+    if value[old:] == "," or (listed and opens):
+        return value[:old]
+    return ""
+
+
+def parse_extinf(line: str, past: dict[str, tuple[int, bool]] | None = None) -> tuple[dict[str, str], str]:
     """#EXTINF:<duration> [attrs],<title> -> (attrs, title).
 
     The comma is optional: `#EXTINF:-1 tvg-id="x" Name` yields title "Name".
+    `past` is parse_attrs'.
     """
     body = line[len("#EXTINF:"):]
     match = re.match(r"\s*(-?\d+(?:\.\d+)?)?", body)
     body = body[match.end():] if match else body
-    attrs, rest = parse_attrs(body)
+    attrs, rest = parse_attrs(body, past)
     rest = rest.lstrip()
     if rest.startswith(","):
         rest = rest[1:]
@@ -635,17 +807,60 @@ def clean_header_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
 
 
+# What splits a group text into groups (split_groups), and so what else
+# ends a run for its cut (cut_free_text, D-SINK-75), where it does: each
+# group reaches the sinks on its own.
+GROUP_SEPARATOR = ";"
+# One group of a text that holds a `;` and a `://` (split_groups): text up to
+# a `;` that separates, where a `://` (_URL_MARK) takes the rest of its run,
+# to the next space, whole, `;`s and all, and a `:` that starts no `://` is
+# taken alone.
+GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
+# split_groups' last answer, by its text: a persistent #EXTGRP is split again
+# for every channel after it, the same text each time, and consecutive
+# entries often repeat one group-title. A dict changed in place (as
+# MEMORY_HELD is), holding one entry.
+SPLIT_GROUPS_LAST: dict[str, list[str]] = {}
+
+
 def split_groups(value: str) -> list[str]:
     """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
     first of each kept in order).
+
+    D-SINK-78: a `;` separates groups only when no `://` (_URL_MARK, read as
+    the sinks that delete control characters read one) stands between it
+    and the last ASCII space before it. Every redactor reads a `;` as URL
+    text, in a userinfo, a path or a query, so splitting there handed each
+    sink half a URL: `http://myuser:pa;ss@cdn.test/x` was listed under
+    `http://myuser:pa`, shown as the host `myuser`, and `ss@cdn.test/x`
+    went beside it as a group no redactor could touch. So from a `://` to
+    the space that ends its run every `;` stays in its group, and the URL
+    reaches the sinks whole. A space, because it ends a run at every sink,
+    as it does for cut_free_text. The cost: a group written straight after
+    a URL, with no space before its `;`, is part of the URL's group.
 
     Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
     per part scanned the list, k*k/2 comparisons for k parts, and a
     persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
     one-character parts -- is split again for every channel after it, so a
     50,000-channel list paid about 32,000 comparisons a channel. Same list,
-    one pass."""
-    return list(dict.fromkeys(name for name in (part.strip() for part in value.split(";")) if name))
+    one pass. The `://` test is one pass too, and native: GROUP_PART takes
+    each URL's run whole as it reaches it and never searches back from a
+    `;`, and a text that holds no `://` is split natively. A text split last
+    time is answered from SPLIT_GROUPS_LAST, as a new list."""
+    last = SPLIT_GROUPS_LAST.get(value)
+    if last is not None:
+        return list(last)
+    if GROUP_SEPARATOR in value and "/" in value and _URL_MARK.search(value) is not None:
+        parts = GROUP_PART.findall(value)
+    else:
+        # No `;`, or no `://`: every `;` separates, and the native split is
+        # the rule's answer at native cost.
+        parts = value.split(GROUP_SEPARATOR)
+    groups = list(dict.fromkeys(name for name in (part.strip() for part in parts) if name))
+    SPLIT_GROUPS_LAST.clear()
+    SPLIT_GROUPS_LAST[value] = groups
+    return list(groups)
 
 
 def channel_number(attrs: dict[str, str]) -> str:
@@ -670,8 +885,12 @@ def channel_number(attrs: dict[str, str]) -> str:
 def clean_name(value: str) -> str:
     """Display-name candidate: never starts with "-" (S-04). The name is an
     argv item for omarchy-notification-send, where "--urgency=x did not play"
-    would be parsed as an option. Mirrors Model.cleanName."""
-    return _LEADING_DASHES.sub("", value or "").strip()
+    would be parsed as an option. Leading dashes and CLEAN_NAME_SPACE off the
+    front, CLEAN_NAME_SPACE off the end (D-STATE-2; it was `^[\\s\\-]+` and
+    strip(), the same set on this CPython). Model.cleanName does the same with
+    the reader's class, which also takes a U+FEFF: the answer here is what the
+    `n:` id is hashed from, so a U+FEFF stays."""
+    return (value or "").lstrip(CLEAN_NAME_SPACE + "-").strip(CLEAN_NAME_SPACE)
 
 
 # D-M3U-1: the warning each length cap adds, once per kind and with a count,
@@ -728,13 +947,17 @@ def bound_count(bounds: dict[str, int] | None, kind: str) -> None:
         bounds[kind] = bounds.get(kind, 0) + 1
 
 
-def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None) -> str:
+def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None,
+             separator: str = "") -> str:
     """D-M3U-1: `value` cut to `limit` code points (a str slice never splits
-    one), trailing whitespace trimmed, counted under `kind` when it was cut."""
+    one), and never through a URL (cut_free_text, D-SINK-75: a name or a
+    group is redacted only at its sinks, after this cut), trailing whitespace
+    trimmed, counted under `kind` when it was cut. A group text passes
+    GROUP_SEPARATOR, so the cut drops at most its last group's run."""
     if len(value) <= limit:
         return value
     bound_count(bounds, kind)
-    return value[:limit].rstrip()
+    return cut_free_text(value, limit, separator).rstrip()
 
 
 def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
@@ -788,6 +1011,20 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     if len(tvg_id) > M3U_MAX_TVG_ID:
         bound_count(bounds, "tvgId")
         tvg_id = ""
+    # D-SINK-80 (owner, 2026-11-05): a tvg-id holding a `://` (_URL_MARK) is
+    # read as absent, so the row takes an `n:` or `u:` id and joins no guide
+    # at all: every guide match, by name too, publishes under the row's
+    # tvg-id (match_xmltv_channel), so a row the guide matched by name before
+    # loses its guide -- the stated cost (the review's F15). No playlist
+    # writer read puts a URL in a tvg-id; kept, the raw `t:` id would carry
+    # the WHOLE credential
+    # (now that parse_attrs stores a URL value whole) to the IPC status and
+    # channel replies, state.json, the player's stash and OMARCHY_IPTV_ARGS,
+    # none of which redacts an id, since an id is what `play` takes back. An
+    # `@` alone (`CNN.us@HD`) is no URL and is kept. The group scope stays
+    # raw (D-SINK-78): hidden groups and saved scopes match on it.
+    if _URL_MARK.search(tvg_id) is not None:
+        tvg_id = ""
     tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
     name = cut_text(clean_name(title), M3U_MAX_NAME, "name", bounds) or clean_name(tvg_name) or clean_name(tvg_id) or GENERATED_NAME_FORMAT % index
@@ -795,7 +1032,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # arrives already cut (parse_m3u cuts it once, at its own line, and
     # counts it there); a group-title is this entry's own and is cut here.
     group_title = attrs.get("group-title", "").strip()
-    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds) if group_title else extgrp
+    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR) if group_title else extgrp
     groups = bound_groups(split_groups(group_text), bounds) if group_text else []
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
@@ -902,7 +1139,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     text, URLs without a host) are skipped and counted; an #EXTINF that is
     followed by another #EXTINF is counted as having no URL. Output is
     bounded by MAX_CHANNELS and MAX_GROUPS (S-07); a channel moved to
-    UNGROUPED keeps its provider group in `groups` and `searchKey`. And
+    UNGROUPED keeps its provider groups in `searchKey`, and in `groups` when
+    it has two or more. And
     each channel is bounded by a constant (D-M3U-1): every text it keeps is
     held to its M3U_MAX_* cap, so the whole output is at most MAX_CHANNELS
     times that constant, whatever the input repeats.
@@ -962,8 +1200,18 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             continue
         if line.startswith("#EXTM3U"):
             is_playlist = True
-            attrs, _ = parse_attrs(line[len("#EXTM3U"):])
-            hint = attrs.get("url-tvg") or attrs.get("x-tvg-url") or ""
+            past: dict[str, tuple[int, bool]] = {}
+            attrs, _ = parse_attrs(line[len("#EXTM3U"):], past)
+            # A hint whose value ran past its old end keeps only its own
+            # piece (own_value), "" when it absorbed what followed it; the
+            # other key may still name one.
+            for key in ("url-tvg", "x-tvg-url"):
+                if key in past:
+                    attrs[key] = own_value(attrs.get(key, ""), past[key], True)
+            # Only a list's FIRST entry is stored (D-SINK-82, the check of
+            # the review's fixes): the shell reads no other, and a shell
+            # before the rule then has no later entry to fetch.
+            hint = hint_first_entry(attrs.get("url-tvg") or attrs.get("x-tvg-url") or "")
             if len(hint) > M3U_MAX_EPG_HINT:
                 bound_count(bounds, "epgHint")
             elif hint:
@@ -973,10 +1221,15 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             is_playlist = True
             if pending is not None:
                 skipped_no_url += 1
-            pending = parse_extinf(line)
+            past = {}
+            pending = parse_extinf(line, past)
+            # A logo whose value ran past its old end keeps only its own
+            # piece (own_value): it has no list reading.
+            if "tvg-logo" in past:
+                pending[0]["tvg-logo"] = own_value(pending[0].get("tvg-logo", ""), past["tvg-logo"], False)
             continue
         if line.startswith("#EXTGRP:"):
-            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds)
+            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR)
             continue
         if line.startswith("#EXTVLCOPT:"):
             key, _, value = line[len("#EXTVLCOPT:"):].partition("=")
@@ -1062,9 +1315,19 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
 def name_id_key(name: Any) -> str:
     """The `n:` base of a channel name, or "" when the name cannot key one.
 
-    Mirrors Model.nameIdKey. The name is normalized through the shared
-    normalize_text, so re-casing or re-punctuating a title does not move the
-    id. A name that normalizes to nothing cannot key anything, and neither can
+    Mirrors Model.nameIdKey, except where the two runtimes' lower-casing
+    tables differ (D-SRC-12; the whitespace is one enumerated list in both
+    since D-ID-5). The
+    name is normalized through the id fold, normalize_id_text, so re-casing a
+    title (outside the hundred or so codepoints whose upper or title case
+    does not lower back to them, such as the fi ligature, the long s, the
+    micro sign, final sigma and the Greek letters with a subscript iota),
+    folding its Latin accents, or swapping one run
+    of ASCII punctuation and whitespace between words for another, neither
+    holding `+` or `*`, does not move the id. Not the search fold, normalize_text: it folds `+`
+    and `*` to a space, so `USA: AMC+` and `USA AMC` would share a name key,
+    and a playlist holding both would give neither an `n:` id.
+    A name that normalizes to nothing cannot key anything, and neither can
     make_channel's last-resort `Channel <n>`: that n is the row's POSITION in
     the file, so keying on it would move the id whenever the provider inserts
     a row above -- worse than the URL hash it would replace.
@@ -1093,9 +1356,12 @@ def channel_ids(channels: list[dict[str, Any]], scheme: int = CHANNEL_ID_SCHEME)
     `u:<fnv1a32(url)>`, with `#2`, `#3`... on a repeat.
 
     Scheme 2 is scheme 1 with ONE substitution: a row that would fall back to
-    the URL hash uses `n:<fnv1a32(normalize_text(name))>` instead, and only
-    when that name key is unique across the whole playlist. Every other row
-    keeps the exact id it already had.
+    the URL hash uses its name_id_key, `n:<fnv1a32(normalize_id_text(name))>`,
+    instead, only when the name keys one (it does not fold to nothing, and
+    does not fold to `channel <digits>`, the shape make_channel generates,
+    which a provider's own `Channel 4` also has) and that key is unique
+    across the whole playlist. Every other row keeps the exact id it already
+    had.
 
     Doing it as a substitution rather than as a third branch of the base rule
     is what makes the upgrade safe, and it took a failing test to find that

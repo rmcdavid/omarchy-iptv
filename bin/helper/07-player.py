@@ -611,7 +611,8 @@ def mpv_arg_opens_ports(token: str) -> str:
         return name if demuxer_opens_ports(name, value) else ""
     if base not in MPV_LISTEN_WARN:
         return ""
-    return "" if value.strip().lower() in MPV_LISTEN_QUIET else name
+    # D-STATE-2: the reader's class, Model.stripSpace's, so the warning is mpvListenName's.
+    return "" if value.strip(URL_SPACE_CHARS).lower() in MPV_LISTEN_QUIET else name
 
 
 def demuxer_opens_ports(name: str, value: str) -> bool:

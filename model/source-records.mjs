@@ -6,13 +6,16 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
-  withMigrationPending, cloneState
+  storedInt, emptyState, entryMigratedOf, withEntryMigrated,
+  migrationPendingOf, withMigrationPending, cloneState
 } from "./state.mjs"
 import {
   clampSetting, entryInputForm, RETIRED_SETTINGS, entryInputSeen,
   entryInputLast
 } from "./settings.mjs"
+import {
+  stripSpace
+} from "./privacy.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, SOURCE_ORIGINS,
   FORM_LIMITS, CONTROL_RE, capLength, sanitizeInput, sanitizeUrlInput,
@@ -80,11 +83,11 @@ function normalizeSourceRecord(raw) {
     label: label,
     labelCustom: raw.labelCustom === true,
     origin: origin,
-    addedAt: Math.max(0, Math.floor(Number(raw.addedAt) || 0)),
-    lastUsed: Math.max(0, Math.floor(Number(raw.lastUsed) || 0)),
-    fetchedAt: Math.max(0, Math.floor(Number(raw.fetchedAt) || 0)),
-    channelCount: Math.max(0, Math.floor(Number(raw.channelCount) || 0)),
-    groupCount: Math.max(0, Math.floor(Number(raw.groupCount) || 0))
+    addedAt: Math.max(0, storedInt(raw.addedAt)),
+    lastUsed: Math.max(0, storedInt(raw.lastUsed)),
+    fetchedAt: Math.max(0, storedInt(raw.fetchedAt)),
+    channelCount: Math.max(0, storedInt(raw.channelCount)),
+    groupCount: Math.max(0, storedInt(raw.groupCount))
   }
   return out
 }
@@ -297,7 +300,9 @@ function withSourceStats(state, key, status, nowSec) {
 // by review.
 function activeKeyText(value) {
   if (typeof value !== "string") return ""
-  var key = value.trim()
+  // D-STATE-2: the reader's class (stripSpace), not the engine's trim, which
+  // read `<U+001C>` + a key as no key where normalize_active_key read the key.
+  var key = stripSpace(value)
   return isSourceKey(key) ? key : ""
 }
 
@@ -1100,14 +1105,17 @@ function entryWith(entry, patch, opts) {
 
 // A cache is stale when its status is not ok, has no fetchedAt, or is older
 // than refreshMinutes.
-// D-SINK-41 (2026-10-29): a playlist cache written before the helper's
-// destination rules (its status carries no `destinationRules` at or above
-// this) holds channels nothing checked -- a LAN literal from a public list,
-// a sign-in header for another host -- and lacks the `sourceClass` a guide
-// hint on the playlist's own host is matched by. The service refreshes such
-// a cache at the next start or swap, once, whatever its age. The helper's
+// DESTINATION_RULES is the version of the helper's rules a playlist cache
+// was WRITTEN under (its status's `destinationRules`). 1 is the destination
+// rules (D-SINK-41, 2026-10-29): a cache before them holds channels nothing
+// checked -- a LAN literal from a public list, a sign-in header for another
+// host -- and lacks the `sourceClass` a guide hint on the playlist's own host
+// is matched by. 2 is the attribute grammar (D-SINK-80, 2026-11-05): a cache
+// before it can hold a name, a group or a guide hint cut inside a URL. The
+// service refetches a cache written under an older version, or carrying
+// none, at the next start or swap, once, whatever its age. The helper's
 // DESTINATION_RULES; joined by the destinations fixture.
-var DESTINATION_RULES = 1
+var DESTINATION_RULES = 2
 
 function cacheBeforeDestinationRules(status) {
   return !!(status && status.ok === true && !(Number(status.destinationRules) >= DESTINATION_RULES))

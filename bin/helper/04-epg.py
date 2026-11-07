@@ -54,14 +54,31 @@ def _xmltv_time_value(raw: str) -> int | None:
 def clean_field(text: str | None, limit: int) -> str:
     """Fold every run of whitespace and control characters to one space, trim,
     and cut at `limit` code points. A str is cut on a code-point boundary,
-    never inside one, so the result is always encodable."""
+    never inside one, so the result is always encodable.
+
+    The plain fold, URL runs and all, so it is for text no redactor reads a
+    credential in any more (D-SINK-79): clean_detail's last step, after its
+    own redaction, and the xmltv_ns episode, which keeps digits alone. Text
+    on its way TO a redactor takes fold_space, which never folds inside a
+    URL's run."""
     if not text:
         return ""
     return _CONTROL_WS.sub(" ", text).strip()[:limit]
 
 
 def clean_title(text: str | None) -> str:
-    return clean_field(text, EPG_MAX_TITLE)
+    """fold_space, trimmed, cut by cut_free_text (D-SINK-75): a title is
+    stored as written and redacted only at its sinks, after this cut.
+
+    D-SINK-79: fold_space and not clean_field's plain fold, because the
+    title reaches every sink unredacted and the plain fold split a URL whose
+    password held a non-ASCII space, U+0085 or DEL, so every sink printed
+    its username. With the run whole, the cut's own rule holds too: a cap
+    inside such a URL now lands inside a run carrying `://`, which
+    cut_free_text drops, where the split left a run with no `://` to keep."""
+    if not text:
+        return ""
+    return cut_free_text(fold_space(text).strip(), EPG_MAX_TITLE)
 
 
 def element_text(elem: Any) -> str:
@@ -124,27 +141,26 @@ def clean_detail(text: str | None, limit: int) -> str:
     cost never touched: the text is cut at `limit`, and when that cut lands
     inside a token carrying `://` the whole token is dropped rather than handed
     to the redactor, because half a URL is what published the username above.
-    A URL cannot contain whitespace (redact_urls' tail excludes it), so the
-    only token the cut can ever have truncated is the last one, and dropping it
-    costs a fragment that was unreadable anyway.
+    Every ASCII delimiter is one space by then (fold_space; a non-ASCII space
+    inside a URL's run is kept, as URL text, D-SINK-79), and a space ends a
+    redactor's run, so the only token the cut can ever have truncated is the
+    last one, and dropping it costs a fragment that was unreadable anyway. The
+    rule is cut_free_text's since D-SINK-75, which every cap in front of a
+    redacted sink now takes: the names and groups (cut_text) and the titles.
 
     What the caller sees: a value at most `limit` code points long -- at most,
     because redacting an unparseable URL GROWS the text ("[redacted]") and
     the final cut takes it back to the cap -- and usually shorter than the
     cap when the text carried URLs, by what the redaction removed.
     """
-    text = _CONTROL_WS.sub(" ", text or "").strip()
-    if len(text) > limit:
-        cut = text[:limit]
-        if text[limit] != " ":
-            # The cut landed inside a token. Every run of whitespace is one
-            # space by now, so rpartition finds the start of exactly that
-            # token, and a token carrying "://" is a URL the redactor must
-            # not be given half of.
-            head, _, tail = cut.rpartition(" ")
-            if "://" in tail:
-                cut = head
-        text = cut
+    # D-SINK-79: the fold before the cut and the redaction is fold_space,
+    # which keeps a URL's run whole (see it), and NOT the plain fold: that
+    # split a URL whose password held a non-ASCII space, U+0085 or DEL, and
+    # this function then redacted two pieces, storing the username as the
+    # host and the password's tail as text. The final clean_field after the
+    # redaction keeps the plain fold, since no credential is left for it to
+    # split.
+    text = cut_free_text(fold_space(text or "").strip(), limit)
     if "://" not in text:
         # The common case, and the hot one. redact_urls cannot rewrite text
         # without "://", so this guard changes no answer. It was worth 2.7 s of
@@ -593,12 +609,15 @@ def _format_record(start: int, stop: int, body: str) -> str:
 # as JSON, so a programme costs its own characters and nothing an escape adds
 # (a title of 200 double quotes is 400 bytes of JSON and 200 here); the JSON
 # is made by record_body for the records actually written, as it always was.
-# The separators are safe: every text has been through _CONTROL_WS, which
-# folds \x00-\x1f to a space, so neither NUL nor \x1f can occur in one -- and
-# should a later cleaner ever let one through, it is folded here rather than
-# allowed to move a field boundary. An absent detail value and an empty one
-# are the same (record_body omits both), and programme_detail never stores an
-# empty one, so (title, detail) and this payload are one-to-one.
+# The separators are safe: every text has been through fold_space, which
+# folds \x00-\x1f to a space outside a URL's run and deletes it inside one
+# (D-SINK-79), so neither NUL nor \x1f can occur in one -- and should a later
+# cleaner ever let one through, it is folded here the same way, rather than
+# allowed to move a field boundary or, through the plain fold, to split a URL
+# that the record then hands a sink in two pieces. An absent detail value and
+# an empty one are the same (record_body omits both), and programme_detail
+# never stores an empty one, so (title, detail) and this payload are
+# one-to-one.
 #
 # What it costs, measured on an ordinary small guide (2,000 vs 4,000
 # programmes over 50 channels with a 120-character description, category and
@@ -642,7 +661,7 @@ _FIELD_SEP = "\x1f"
 def retain_programme(start: int, stop: int | None, title: str, detail: dict[str, str] | None) -> bytes:
     detail = detail or {}
     fields = [title] + [detail.get(key) or "" for key in EPG_DETAIL_KEYS]
-    payload = _FIELD_SEP.join(_CONTROL_WS.sub(" ", text) if (_FIELD_SEP in text or "\x00" in text) else text
+    payload = _FIELD_SEP.join(fold_space(text) if (_FIELD_SEP in text or "\x00" in text) else text
                               for text in fields)
     head = "%d %s\x00" % (start, "" if stop is None else "%d" % stop)
     return (head + payload).encode("utf-8", "surrogatepass")
@@ -1145,6 +1164,38 @@ def write_window_lines(path: str, meta: dict[str, Any], lines: list[str]) -> Non
     write_text_atomic(path, "\n".join([head, *lines, ""]))
 
 
+def json_value_writable(value: Any) -> bool:
+    """True when a parsed JSON value, nested ones included, can be written
+    back as UTF-8 JSON that both engines' JSON.parse read: no infinite float
+    or NaN, which json.dumps writes as `Infinity` and `NaN`; no int float()
+    cannot hold, which JSON.parse rounds to Infinity (node) or refuses (V4);
+    and no string that does not encode as UTF-8 (a lone surrogate), which the
+    write refuses. An explicit stack, so no nesting depth recurses."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, bool) or item is None:
+            continue
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                return False
+        elif isinstance(item, int):
+            try:
+                float(item)
+            except OverflowError:
+                return False
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return True
+
+
 def load_window(path: str) -> dict[str, Any] | None:
     """-> the header keys plus "lines" (the raw channel lines), or None.
 
@@ -1161,6 +1212,21 @@ def load_window(path: str) -> dict[str, Any] | None:
     except ValueError:
         return None
     if not isinstance(meta, dict) or meta.get("version") != 1:
+        return None
+    # D-STATE-4's sibling. The meta line's values are copied as they are into
+    # epg-now.json's head (`fetchedAt`, `sourceHost`) and the status (the
+    # counts). json.dumps writes an infinite number (1e400 reads as one) or a
+    # NaN as `Infinity` or `NaN`, and an int float() cannot hold as digits V4
+    # refuses: in the head that lost every channel's now/next, in the status it
+    # made the status unreadable. A string holding a lone surrogate (`"\ud800"`
+    # reads as one) raised UnicodeEncodeError at the write, and the recompute
+    # ended `internal`. And `warnings` is copied with list(), which raised on a
+    # number. A meta line holding any of these is a window to refetch, like
+    # one that is not UTF-8.
+    if not json_value_writable(meta):
+        return None
+    warnings = meta.get("warnings", [])
+    if not isinstance(warnings, list) or not all(isinstance(item, str) for item in warnings):
         return None
     window = dict(meta)
     window["lines"] = body.split("\n")
@@ -1181,11 +1247,16 @@ def needs_refetch(window: dict[str, Any], url: str, now: int, ttl: float, channe
     """Empty string when the cached window is still good, else the reason."""
     if window.get("sourceKey") != source_key(url):
         return "source changed"
-    fetched_at = int(window.get("fetchedAt") or 0)
+    # D-STATE-4's sibling: coerce_int, because int() raised on a damaged meta
+    # line ("soon", or 1e400 read as infinite) and ended the verb `internal`
+    # where load_window's rule is that a damaged window is a cache to refetch.
+    fetched_at = coerce_int(window.get("fetchedAt"))
     if now - fetched_at >= ttl or fetched_at > now + 60:
         return "cache older than ttl"
-    if int(window.get("windowEnd") or 0) - now < EPG_REFETCH_MARGIN:
+    if coerce_int(window.get("windowEnd")) - now < EPG_REFETCH_MARGIN:
         return "window nearly exhausted"
+    if coerce_int(window.get("guideRules")) < GUIDE_RULES:
+        return "written under older rules"
     if window.get("channelsMtime") != channels_mtime(channels_path):
         return "playlist changed"
     return ""
@@ -1222,6 +1293,8 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         "sourceHost": source_host(url),
         "sourceKey": source_key(url),
         "channelsMtime": mtime,
+        # D-SINK-79: the version of the rules this window was written under.
+        "guideRules": GUIDE_RULES,
         "windowStart": parsed["windowStart"],
         "windowEnd": parsed["windowEnd"],
         "restricted": index is not None,
@@ -1521,7 +1594,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
         assert window is not None
         for sentence in epg_skipped_warnings(skipped):
             log("epg: %s" % sentence)
-        fetched_at = int(window.get("fetchedAt") or 0)
+        fetched_at = coerce_int(window.get("fetchedAt"))
         status = {
             "ok": True,
             "kind": "epg",
@@ -1572,10 +1645,19 @@ def cmd_epg(args: argparse.Namespace) -> int:
     if refresh_error is not None:
         log("could not refresh %s: %s" % (EPG_NOW_FILE, refresh_error))
     host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
+    # D-SINK-83: a one-label host the playlist chose was refused before any
+    # lookup (DestinationPolicy.refuses_name), and the status -- the reply
+    # and epg-status.json -- names it no more than the refusal does. Only a
+    # shell loaded before the rule hands one over, and the name is the
+    # username of a URL its space cut (D-SINK-34's class).
+    if url and DestinationPolicy.from_environment("EPG").refuses_name(host):
+        host = ""
     status = error_payload(
         "epg", error,
         sourceHost=host,
-        fetchedAt=window.get("fetchedAt") if window else (previous.get("fetchedAt") if isinstance(previous, dict) else None),
+        # D-STATE-4's sibling: the previous status is a file, and its
+        # fetchedAt reads as a stored integer, 0 or a damaged one as none.
+        fetchedAt=window.get("fetchedAt") if window else ((coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None),
         stale=cached,
         matched=window.get("matched") if window else None,
         channelTotal=window.get("channelTotal") if window else None,

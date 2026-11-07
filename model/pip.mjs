@@ -251,9 +251,12 @@ function pipPair(value) {
   return a === null || b === null ? null : [a, b]
 }
 
-// 4.2 rule 5: a rule-applied tag reads back with a trailing `*`
-// (`default-opacity*` on this machine), a dispatched one does not. Confirmed
-// live by G-11.
+// 4.2 rule 5: a rule-applied tag reads back with a trailing `*`, a
+// dispatched one does not. Confirmed live by G-11, where the rule-applied
+// tag was Omarchy 4.0's `default-opacity*`, which it put on every window.
+// Omarchy 4.5.0 puts no tag on every window (transparency became opt-in,
+// D-DOC-36), so there a starred tag on the player comes only from some other
+// rule that matches it; the strip below is the same either way.
 function pipTagsOf(entry) {
   var raw = asList(entry ? entry.tags : null)
   var out = []

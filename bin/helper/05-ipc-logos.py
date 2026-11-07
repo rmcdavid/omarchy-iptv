@@ -248,8 +248,32 @@ def logo_host(netloc: str) -> str:
     `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
     `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
     would count a host that is never contacted.
+
+    D-SINK-83 (the owner, 2026-11-05): and "" for a host of ONE
+    DNS label (dotless_host), which fetch_logo refuses before any lookup.
+    A logo URL cut at a space in its userinfo (D-SINK-34's class) leaves
+    `https://USER:...`, whose host is the username: the survey counted it
+    as a host to contact and the consent dialog named it as the busiest.
+    Never excepted for the playlist's own host, as a guide hint is.
     """
-    text = (netloc or "").strip().lower()
+    host = logo_host_part(netloc)
+    return "" if dotless_host(host) else host
+
+
+def logo_survey_host(raw: str, netloc: str) -> str:
+    """The host logo_survey counts for the logo URL `raw`, whose authority
+    is `netloc`: logo_host's, or "" for a URL whose run took a glued
+    attribute holding another URL (absorbed_attribute, the review's F1),
+    which fetch_logo refuses, so the consent text counts it refused and
+    names nothing. Mirrored by Model.splitLogoUrl."""
+    return "" if absorbed_attribute(raw) else logo_host(netloc)
+
+
+def logo_host_part(netloc: str) -> str:
+    """logo_host's host before the one-label rule: the authority after its
+    whitespace, lower-cased, "" for userinfo, cut at the parameter
+    delimiters, without its port (see logo_host)."""
+    text = (netloc or "").strip(URL_SPACE_CHARS).lower()  # D-STATE-2: Model.stripSpace's class
     if "@" in text:
         return ""
     text = cut_host_params(text)
@@ -284,9 +308,9 @@ def logo_survey(channels: Any) -> dict[str, Any]:
             # Counted, never contacted: rule 3 of the ruling is https only.
             refused += 1
             continue
-        host = logo_host(parsed.netloc or "")
+        host = logo_survey_host(raw, parsed.netloc or "")
         if not host:
-            # No host at all, or userinfo. fetch_logo refuses a URL carrying
+            # No host at all, userinfo, or an absorbed attribute. fetch_logo refuses a URL carrying
             # userinfo rather than stripping it, so a survey that counted one
             # as contactable would promise a fetch that cannot happen -- and
             # would print `user:pass@provider.test` into the consent text the
@@ -512,6 +536,19 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
         raise HelperError("logo_scheme", "refused a non-https logo host")
     if "@" in parsed.netloc:
         raise HelperError("logo_userinfo", "refused a logo URL carrying userinfo")
+    if dotless_host(logo_host_part(parsed.netloc)):
+        # D-SINK-83: a host of one DNS label (logo_host's ""),
+        # refused before the opener runs, so nothing looks it up; the
+        # message names no host, because the host may be a username. The
+        # connect-time policy refuses the same on every redirect hop
+        # (DestinationPolicy.refuses_name).
+        raise HelperError("logo_host", "refused a logo whose host is a name of one label, which is not looked up")
+    if absorbed_attribute(url):
+        # The review's F1 (2026-11-06): a logo URL whose run took a glued
+        # attribute holding another URL (D-SINK-80's cost) would carry that
+        # URL's credential in this request's path. Refused before the
+        # opener runs, naming no host and no URL.
+        raise HelperError("logo_url", "refused a logo URL that runs into another attribute of the playlist")
     host = parsed.netloc.lower()
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:

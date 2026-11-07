@@ -338,7 +338,10 @@ class DestinationPolicy:
       * never for a logo (`logos`), on any hop.
     Everything else -- a hint's host, a redirect into the LAN from a public
     host, a second LAN host -- is refused before a byte is sent, `local_address`
-    naming the host only (rule 5).
+    naming the host only (rule 5). And a host of ONE DNS label that the
+    provider chose is refused before it is even looked up, the playlist's
+    own host excepted and a logo never (refuses_name,
+    D-SINK-83), `local_address` naming no host.
 
     D-SINK-57 (owner, 2026-10-29): on LOOPBACK "the same host" is host AND
     port (own_host_match). A typed http://127.0.0.1:8080/ that redirects to
@@ -430,8 +433,41 @@ class DestinationPolicy:
             how = "is an address on this machine or a local network that a redirect chose"
         return HelperError("local_address", "%s: %s %s; not contacted" % (where, host or "the host", how))
 
+    def refuses_name(self, host: str) -> bool:
+        """D-SINK-83 (the owner, 2026-11-05): is `host` one DNS
+        label (dotless_host) that this fetch must not look up? On EVERY hop
+        of a fetch whose URL the provider chose -- origin `playlist`, the
+        guide hint, and every logo -- except, for origin `playlist`, the
+        playlist's own host (host_key equal to `home`; the port is not
+        compared here, permits() compares it where it matters). A logo is
+        never excepted, and a URL the user typed is never affected, on any
+        hop. Asked BEFORE resolve_within, by bounded_create_connection and by
+        check_proxied (through a proxy the proxy would make the lookup, so
+        the check must precede the request): the name is the USERNAME of a
+        URL cut at a space in its userinfo (D-SINK-34's class), and asking
+        the resolver about it is the disclosure."""
+        if self.origin == ORIGIN_USER and not self.logos:
+            return False
+        if not dotless_host(host):
+            return False
+        return self.logos or self.home == "" or host_key(host) != self.home
+
+    def name_refusal(self, first: bool) -> HelperError:
+        """refuses_name's refusal, naming NO host (rule 5): the host may be a
+        username. `local_address`, because a name of one label is a local
+        network's by DNS convention (the resolver completes it from its
+        search list), so the shell's sentence ("Refused a local address")
+        and the logo run's count of policy refusals take it as they take the
+        address check's."""
+        where = "a logo" if self.logos else self.label
+        who = "the playlist" if first else "a redirect"
+        return HelperError("local_address", "%s: a host name of one label that %s chose is not looked up; not contacted"
+                           % (where, who))
+
     def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
         """The TARGET of a proxied request, looked up here (see the class)."""
+        if self.refuses_name(host):
+            raise self.name_refusal(first)
         try:
             kinds = {address_class(found[4][0]) for found in resolve_within(host, port, timeout)}
         except (OSError, TimeoutError):
@@ -469,6 +505,10 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
     error: OSError | None = None
     refused = False
+    if policy is not None and not proxied and policy.refuses_name(host):
+        # D-SINK-83: before the lookup, not after it -- the
+        # lookup is what discloses the name (DestinationPolicy.refuses_name).
+        raise policy.name_refusal(first)
     for family, kind, proto, _, sockaddr in resolve_within(host, port, bound):
         verdict = "global"
         if policy is not None and not proxied:
@@ -865,6 +905,35 @@ def read_http_response(opener: Any, request: Any, timeout: float, label: str, ho
 
 def fetch_bytes(url: str, timeout: float, label: str = "playlist",
                 policy: DestinationPolicy | None = None) -> bytes:
+    # D-SINK-82: the policy is the environment's when none is given, read
+    # here (read_http_source read it itself until now; the same values), so
+    # the list rule below can ask where the URL came from.
+    if policy is None:
+        policy = DestinationPolicy.from_environment(label)
+    if policy.origin == ORIGIN_PLAYLIST and hint_first_entry(url) != url:
+        # D-SINK-82: a URL the PROVIDER chose that is a comma-joined list
+        # (hint_first_entry). The shell adopts the first entry alone
+        # (Model.epgHintVerdict); a shell loaded before that rule hands over
+        # the whole list, whose later entries' credentials would go to the
+        # first entry's host -- so it is refused here, as read, before this
+        # helper normalizes the URL and before any lookup. A 0.16.0 or 0.17.0
+        # shell has normalized it already, which loses the later entry's
+        # `:` (`https://epg.test,http//prov.test/...`), so this test finds no
+        # list in it and the `,`-in-host test below refuses it (the review's
+        # F10); a shell before 0.16.0 sets no origin, and neither runs (F4).
+        # The message names no host and no URL (rule 5). A URL the user
+        # typed is theirs, list or not.
+        raise HelperError("bad_url", "%s address the playlist chose lists more than one URL; not used" % label)
+    if policy.origin == ORIGIN_PLAYLIST and (absorbed_attribute(url) or "," in url_host(url)):
+        # The review's F1 and F10 (2026-11-06). absorbed_attribute: a URL's
+        # run that took a glued or listed attribute holding another URL
+        # (D-SINK-80's cost), which would send that URL's credential to this
+        # one's host. A `,` in the host: a shell before D-SINK-82 normalizes
+        # a list before handing it over (`https://epg.test,http//prov.test/
+        # x?...`, host `epg.test,http`), so the test above finds no list in
+        # it, and no DNS name or address literal holds a `,`. Refused as
+        # read, before any lookup, naming no host and no URL (rule 5).
+        raise HelperError("bad_url", "%s address the playlist chose is not one URL; not used" % label)
     kind, target = resolve_source(url, label)
     if kind == "file":
         return read_local_source(target, label)
@@ -1376,7 +1445,9 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             "warnings": parsed["warnings"],
             "stale": False,
             "error": None,
-            # Written under the destination rules (Model.cacheBeforeDestinationRules).
+            # The version of the rules this cache was written under: the
+            # destination rules and the attribute grammar (DESTINATION_RULES,
+            # Model.cacheBeforeDestinationRules).
             "destinationRules": DESTINATION_RULES,
         }
         # D-SRC-69, the same refusal for the second file: channels.json is
@@ -1398,7 +1469,8 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # at most once per state file and never fails the fetch: a playlist
         # that parsed is a success whatever the state file turns out to be.
         #
-        # `--state-dir` is REQUIRED, with no default of any kind. An earlier
+        # `--state-dir` has no default of any kind: the remap runs only when
+        # the caller names a state directory. An earlier
         # version resolved it with `state_dir(getattr(args, "state_dir",
         # None))`, so every `playlist` run that did not name a state directory
         # reached into the live one: one `unittest discover` put 124 remap
@@ -1421,7 +1493,8 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     status = error_payload(
         "playlist", error,
         sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
-        fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
+        # D-STATE-4's sibling: json.dumps wrote a previous 1e400 as `Infinity`.
+        fetchedAt=(coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None,
         stale=stale,
         durationMs=int((time.monotonic() - started) * 1000),
     )
