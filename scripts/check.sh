@@ -222,7 +222,7 @@ fail=0
 # test_olderRestartReprobeUnderQtsEngine, a re-probe of the same older
 # player keeping its episode under Qt's own engine, red on c510985 (no such
 # model names) and under three named mutants; the spec runs 84.
-QML_SPEC_MIN=${QML_SPEC_MIN:-84}
+QML_SPEC_MIN=${QML_SPEC_MIN:-89}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -502,7 +502,7 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-84}
 # c510985: the lane's tip had dropped it), a deferred player re-probed unsafe
 # stopped at once, and path 6 on the automatic restart itself (both red on
 # c510985); the suite runs 3298.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3298}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3428}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -839,7 +839,7 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3298}
 # `player start` that adopts a marked player clears it too; red on the
 # mutant that clears it only for `play`). The five launch vectors it added
 # are one test; the suite runs 1952.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1952}
+PY_TESTS_MIN=${PY_TESTS_MIN:-2130}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

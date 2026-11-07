@@ -18543,3 +18543,17 @@ Over the 38,142 ordinary lines, both the attribute parse and the stored logo and
 | the list opening not reset between attributes | AbsorbedTest (1) |
 
 The second and the last first survived; each is held by a case added for it (`url-tvg=" A","`, and a bare list-opening value before a quoted hint whose credential holds a `"`).
+
+### 0.18.0 pre-cut record (2026-11-07): the gate and the release recipe's live run on the final tree
+
+**Tree.** `dev` 649c44c (pushed): the Omarchy 4.5.0 host round (eab9c24) and the D-SINK-79/80/82/83 round on top, plus the version bump with the release notes (manifest, `Model.PLUGIN_VERSION`, the CHANGELOG's 0.18.0 section, the README Status paragraph, the floors node 3298 -> 3428, python 1952 -> 2130, spec 84 -> 89), uncommitted while measured.
+
+**The notes.** A claims check (`wf_60cdcfdf-2ec`: a reader of the notes and one of the README and the preconditions, each with a skeptic) raised 18 sentences, all confirmed or plausible, none refuted, the highest P2: the README's live-run count still rested on 0.17.0's tree. Every one was rewritten as the skeptics put it -- among them the D-SINK-80 costs a user sees after the refetch (a `tvg-id` that is a web address drops the channel's guide data and its star), a password-change hint for D-SINK-82, a playlist's own one-word guide server still used (D-SINK-83), "loading a playlist is also faster" dropped (the helper's parse is 8-10 % slower on the budget inputs), the restart limitation said for 4.5.0 as well, and the README's notification and guide-matching sentences brought up to 4.5.0 and D-SINK-80.
+
+**Gate.** `scripts/check.sh` under the shared heavy lock, quiet (load 1.47 at the start): **all green**, rc 0. node 3428 checks (both echo modes), python 2130 tests, qml spec 89, harness predicates 609, theme name guard 279 uses, release allowlist 42 files (largest Service.qml 398,503 of 458,752 bytes), helper split 11 parts. Crash journal 83 before and after.
+
+**key-scenario live** (the release recipe's step; `scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, under the heavy lock), on the same tree: **139 passed, 0 failed** (138 lettered checks and the floor line) in 540.4 s, 08:33:59 to 08:42:59 CST, load 2.08 at the start and 1.70 at the end. Crash journal 83 before and after. Transcript `/run/user/1000/omarchy-iptv-key/transcripts/key-20261107-083359-1203090.out` (0600; 139 PASS lines, 0 FAIL). The README's "(139 checks, 2026-11-07)" rests on this run.
+
+**Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.18.0; the CHANGELOG's top heading `## 0.18.0 (2026-11-07)` passes `changelog_problems` strictly for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.18.0 tag locally or on the remote.
+
+**The open requests.** #12636 (`[Verify]: IPTV 0.15.0`) and #13611 (`[Verify]: IPTV 0.16.0`) are OPEN, `validated` and `plugin-update` (read 2026-11-07); #13709 (0.17.0) is closed `approved-and-verified`, and 0.17.0 (787a33b) is the verified snapshot. Moving `main` leaves the two open ones as they were, unapprovable as filed; neither is closed (F-M3-4). The owner asked for 0.18.0's own request with the cut (2026-11-07).

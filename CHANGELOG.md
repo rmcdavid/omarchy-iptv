@@ -3,7 +3,19 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.17.1 (unreleased)
+## 0.18.0 (2026-11-07)
+
+**Works on Omarchy 4.5.0, and keeps a web address whole in more of the
+places the plugin reads a provider's text.** Omarchy 4.5.0 reads
+notification text in a new way, lays the bar out in six sections and takes
+the guide's suggested keyboard shortcut for itself; this release follows it.
+It also closes a set of ways a username or password in a playlist or a guide
+could be shown as a channel's name, group or programme text, or, from a
+playlist that names several guides, sent to another guide's server. What to
+do: **restart the shell** (`omarchy-restart-shell`). If a channel was
+playing when you updated, expect it to reopen once in a new player window,
+as after 0.17.0. If you pasted the guide's keybinding from
+`contrib/bindings.lua`, change its chord (see Changed).
 
 ### Changed
 
@@ -17,6 +29,10 @@ version lives in `manifest.json`.
   Activity with no key. The commented picture in picture example moves from
   `SUPER + SHIFT + I`, which 4.5.0 binds to switching the input language
   back, to `SUPER + SHIFT + V`. (D-DOC-35)
+- **Each source's playlist and guide are fetched again once after the
+  update**, when that source is next loaded, even when it is not due, so
+  that what is stored is read by this version's rules. (D-SINK-80,
+  D-SINK-79)
 
 ### Fixed
 
@@ -30,6 +46,60 @@ version lives in `manifest.json`.
   nothing in a name can start a tag, an entity or a link for that reader. The
   card looks the same; the joiner is in the text the host keeps in its
   history and in anything you copy from the card. (D-SINK-85)
+- **In a playlist line written the usual way, a web address whose username
+  or password held a `"`, a `,` or a no-break or similar space no longer
+  shows part of the password as the channel's name.** The playlist reader ended the attribute there, so the
+  rest of the line, the password's tail among it, became the channel's name
+  wherever a name is shown, and the username was shown as the address's
+  host. A value holding a web address now runs to the end of that address,
+  and a channel ID (`tvg-id`) that is itself a web address is dropped.
+  (D-SINK-80)
+- **A web address in a programme's title, description, category or episode
+  is now hidden whole** when its username or password holds a no-break or
+  other unusual space: the guide split it at that space before hiding it,
+  and showed the username and the password's tail. (D-SINK-79)
+- **A playlist that names several guides in one `url-tvg`, separated by
+  commas, now uses the first.** Read as one address, the list sent the
+  second guide's username and password to the first guide's server on every
+  guide refresh, whenever the source had no guide address of its own. If
+  that was your case, and that first server is not your provider's,
+  consider changing that password with your provider. (D-SINK-82)
+- **A one-word server name a playlist gives for a channel logo, or for a
+  guide on a server other than the playlist's own, is no longer looked
+  up**, nor named on the Sources row or in the logo dialog. Such a name is
+  usually what a web address cut at a space in its username leaves: the
+  username itself. A guide on the playlist's own one-word server is still
+  used. To use another such guide, type its address into the source's guide
+  field. (D-SINK-83)
+- **A channel name, error line or programme text holding a web address with
+  a username and password whose scheme is glued to a digit, `_` or a
+  non-ASCII letter** (`1http://user:pass@...`) no longer reaches the
+  player's window title or the helper's output with them in it. (D-SINK-74)
+- **A long channel name, group or programme title holding a web address
+  with a username and password no longer shows the username as the
+  address's host anywhere when the helper cut the text to its length limit
+  inside that address.** A name that was nothing but such an address now
+  shows the channel's other name or ID, or `Channel <n>`. (D-SINK-75)
+- **A group whose web address held a `;` in its username or password no
+  longer shows the username, or part of it, as the group's name**; such a
+  group is now listed under its host. (D-SINK-78)
+- **A channel whose name the guide replaces is found by every group it is
+  in, and a channel in two groups no longer ranks a group word as a name
+  match.** (D-SG-5, D-SG-6)
+- **Favourites no longer silently vanish from channels whose names hold
+  some invisible characters, or from a channel of the same name without
+  them.** A favourite that has already vanished does not come back: add it
+  again. (D-ID-5)
+- **A hidden group whose name the provider wrote with invisible whitespace
+  at its edge no longer reappears after a change made from the command
+  line**, and channel up and down keep working for such a group after an
+  update. (D-STATE-2)
+- **A hand-edited state file holding an out-of-range or oddly spelled number
+  no longer makes every helper command that reads the state fail**, and a
+  number written in quotes now reads the same in the shell and the helper.
+  A bare number too large for the shell to read, such as `1e400`, still
+  keeps the shell from reading or saving the file until it is fixed.
+  (D-STATE-4)
 - **The plugin's settings work in every section of an Omarchy 4.5.0 bar.**
   With the widget in one of the sections 4.5.0 adds (`centerBegin`,
   `centerEnd`, `tray`), the plugin ignored the settings its background
@@ -46,6 +116,11 @@ version lives in `manifest.json`.
 
 ### Worth knowing
 
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration). The new
+  player window is black until its stream opens, and is not put back where
+  the old one was. The channel comes back at live, paused if you had paused
+  it, and picture in picture is not carried over: press `p` again.
 - **Omarchy 4.5.0 installs a system-wide mpv config**, `/etc/mpv/mpv.conf`,
   holding `hwdec=auto-safe`, and the player reads it like any mpv: it now
   decodes video in hardware wherever mpv trusts the decoder, where on
@@ -55,6 +130,59 @@ version lives in `manifest.json`.
 - **On Omarchy 4.5.0 the player window is opaque by default**, so the
   opacity rule in `contrib/windows.lua` does nothing there; on 4.0 it is
   still what keeps the player opaque. (D-DOC-36)
+- **Omarchy 4.5.0 can read a channel name as a verification code**: a
+  `Stream failed` card whose channel name holds a word such as `PIN` or
+  `Code` near four to eight digits shows even during Do Not Disturb, offers
+  a Copy code button, and is kept in the notification history as
+  `Verification notification`. That is Omarchy's own reading of every
+  notification; the plugin cannot change it without changing the name it
+  shows. (D-HOST-12)
+- **Some channels read differently after the first refresh.** A channel
+  whose `tvg-id` is a web address no longer gets programme information, and
+  favourites or recent channels saved on it no longer match it: add them
+  again. An attribute written straight after a quoted web address, with no
+  space or only a no-break space between them
+  (`tvg-logo="https://..."group-title="News"`), is now read as part of that
+  address, so the channel loses that logo and that group. An unquoted logo
+  address written straight before the title's comma
+  (`tvg-logo=http://.../a.png,News HD`) takes the title's first word with
+  it and is no longer used as a logo. (D-SINK-80)
+- **A group's name can change after this update.** A group written straight
+  after a web address, with no space before its `;`, now joins the address's
+  group, and a group whose address held a `;` is listed under its host, so a
+  hide you stored for its old name no longer matches. A group that is
+  nothing but a web address cut at its length limit is now Ungrouped.
+  (D-SINK-78, D-SINK-75)
+- **Checked against Omarchy 4.5.0's own code**, copied into the test suite,
+  and in a headless test session; not yet watched on a running 4.5.0
+  desktop.
+- For anyone scripting the plugin or running the helper by hand: `player
+  start`, `player restart`, `player probe` and `player orphan-check` accept
+  `--owner-token`. Its value is either 32 lowercase hex digits naming one
+  instance of the shell's background service, or empty for none; any other
+  value is refused. `player orphan-check` now stops the player only when
+  both the pid and the token match the claim on it, so without the token it
+  answers `reassigned` for a player this version's shell has claimed.
+
+### Known limitations
+
+- **The limitations listed under 0.17.0 still apply.** The one about
+  restarting the shell holds on Omarchy 4.5.0 as well as 4.0.6:
+  `omarchy-restart-shell` can take longer to end the old shell than the
+  plugin waits before stopping a player it takes to be left behind. If the
+  player stops when you restart the shell, press `Enter` on the channel.
+- **The plugin's animations ignore Omarchy 4.5.0's reduce-motion setting**
+  (`omarchy toggle animations`): with animations off, the host's own
+  animations snap and the bar label still slides. (D-A11Y-11)
+- **Picture in picture on an Omarchy 4.5.0 floating workspace has not been
+  tried**, where 4.5.0 gives every window a titlebar. (D-PIP-7)
+- **When the plugin cannot save its settings, the message still suggests
+  `omarchy bar set`**, which fails in the same cases: an entry that is a
+  bare name rather than an object, or no entry at all. (D-HOST-11)
+- **Typing Chinese, Japanese or Korean through an input method has not been
+  tried.** In the Sources form it is not expected to work, because no input
+  method reaches its fields: paste such text instead. Whether it reaches the
+  guide's search is not known. (D-HOST-14)
 
 ## 0.17.0 (2026-11-02)
 
