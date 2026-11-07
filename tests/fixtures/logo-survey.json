@@ -440,6 +440,94 @@
           "https": 2
         }
       }
+    },
+    {
+      "name": "D-SINK-83: a logo host of one DNS label is refused and never named -- the cut `https://qqqqqq:` of a URL with a space in its userinfo, with a port, in upper case with a trailing dot, and localhost -- beside a dotted host that is counted",
+      "channels": [
+        {
+          "logo": "https://qqqqqq:"
+        },
+        {
+          "logo": "https://qqqqqq:443/a.png"
+        },
+        {
+          "logo": "https://QQ./b.png"
+        },
+        {
+          "logo": "https://localhost/c.png"
+        },
+        {
+          "logo": "https://cdn.test/d.png"
+        }
+      ],
+      "expect": {
+        "channels": 5,
+        "withLogo": 5,
+        "wouldContact": 1,
+        "refused": 4,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "cdn.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 5
+        }
+      }
+    },
+    {
+      "name": "D-SINK-83: when every logo host is one label, nothing is contacted and nothing is named",
+      "channels": [
+        {
+          "logo": "https://qqqqqq:"
+        },
+        {
+          "logo": "https://qqqqqq:8443/x.png"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 0,
+        "refused": 2,
+        "hostCount": 0,
+        "hosts": [],
+        "schemes": {
+          "https": 2
+        }
+      }
+    },
+    {
+      "name": "The review's F1: a logo whose run took a glued attribute holding a credentialed URL is counted refused and names no host",
+      "channels": [
+        {
+          "logo": "https://logos.test/news.png\"catchup-source=\"http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts"
+        },
+        {
+          "logo": "https://logos.test/a.png,catchup-source=http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts"
+        },
+        {
+          "logo": "https://images.test/?url=https://cdn.test/logo.png"
+        }
+      ],
+      "expect": {
+        "channels": 3,
+        "withLogo": 3,
+        "wouldContact": 1,
+        "refused": 2,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "images.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 3
+        }
+      }
     }
   ]
 }

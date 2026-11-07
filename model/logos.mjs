@@ -12,7 +12,7 @@ import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  cutHostParams
+  absorbedAttribute, dotlessHost, cutHostParams
 } from "./sources.mjs"
 
 // ------------------------------------------------------------ logos (M2-04)
@@ -109,6 +109,9 @@ function splitLogoUrl(raw) {
   var mark = text.indexOf("://")
   if (mark <= 0) return { scheme: "", host: "" }
   var scheme = text.substring(0, mark).toLowerCase()
+  // The review's F1: a logo that absorbed another attribute is no host,
+  // as the helper's logo_survey reads it and fetch_logo refuses it.
+  if (absorbedAttribute(text)) return { scheme: scheme, host: "" }
   var rest = text.substring(mark + 3)
   var cut = rest.length
   var stops = ["/", "?", "#"]
@@ -140,18 +143,28 @@ function splitLogoUrl(raw) {
 // (over "authority after its last `@`") did not see. The `@` test runs over
 // the WHOLE netloc first: `cdn.test;u=p@evil` is refused by fetch_logo, so
 // a cut that hid its `@` would count a host that is never contacted.
+//
+// D-SINK-83 (owner, 2026-11-05): and "" for a host of ONE DNS
+// label (dotlessHost), which fetch_logo refuses before any lookup. A logo
+// URL cut at a space in its userinfo (D-SINK-34's class) leaves
+// `https://USER:...`, whose host is the username: the survey counted it as
+// a host to contact and the consent dialog named it the busiest. A logo is
+// never excepted for the playlist's own host, as a guide hint is.
 function logoHost(netloc) {
   // D-STATE-2: the reader's class (stripSpace), not the engine's trim, so the
   // survey counts the hosts logo_host counts.
   var text = stripSpace(netloc).toLowerCase()
   if (text.indexOf("@") !== -1) return ""
   text = cutHostParams(text)
+  var host
   if (text.charAt(0) === "[") {
     var close = text.indexOf("]")
-    return close === -1 ? "" : text.substring(0, close + 1)
+    host = close === -1 ? "" : text.substring(0, close + 1)
+  } else {
+    var colon = text.indexOf(":")
+    host = colon === -1 ? text : text.substring(0, colon)
   }
-  var colon = text.indexOf(":")
-  return colon === -1 ? text : text.substring(0, colon)
+  return dotlessHost(host) ? "" : host
 }
 
 // The sentence the user consents to (ruling rule 6). A generic "logos may

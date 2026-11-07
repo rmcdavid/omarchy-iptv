@@ -306,6 +306,31 @@ class ConnectPolicyTest(unittest.TestCase):
         self.assertEqual((code, status["ok"]), (0, True), err)
         self.assertEqual(a.seen, [("/xmltv", None)])
 
+    def test_a_hinted_guide_list_sends_the_first_host_nothing_and_names_no_host(self):
+        """D-SINK-82: a shell loaded before the first-entry rule hands the
+        whole comma-joined list with origin `playlist`. Before the fix the
+        first host received `GET /epg.xml,http://<host>/xmltv.php?username=
+        ...&password=...` -- the second entry's credential; now the verb
+        refuses the list before any connection, and neither its reply nor
+        its stderr carries the credential. On the playlist's own loopback
+        host and port, the one place a hinted first hop may connect here."""
+        a = self.serve({"/epg.xml": (200, (), XMLTV)})
+        url = a.url("/epg.xml") + "," + a.url("/xmltv.php?username=qqqqqq&password=zzzzzz")
+        code, status, err = self.epg(url, OMARCHY_IPTV_ORIGIN="playlist", OMARCHY_IPTV_PLAYLIST_HOST="127.0.0.1",
+                                     OMARCHY_IPTV_PLAYLIST_CLASS="loopback", OMARCHY_IPTV_PLAYLIST_PORT=str(a.port))
+        self.assertEqual((code, status["error"]["code"], a.seen), (1, "bad_url", []), err)
+        for leak in ("qqqqqq", "zzzzzz", "xmltv.php"):
+            self.assertNotIn(leak, json.dumps(status) + err)
+        self.assertEqual(status["error"]["message"], "EPG address the playlist chose lists more than one URL; not used")
+
+    def test_the_same_list_typed_by_the_user_is_fetched_as_typed(self):
+        """The control: a URL the user typed is theirs, comma or not."""
+        a = self.serve({"/epg.xml": (200, (), XMLTV)})
+        url = a.url("/epg.xml") + "," + a.url("/xmltv.php?u=1")
+        code, status, err = self.epg(url, OMARCHY_IPTV_ORIGIN="user")
+        self.assertEqual((code, status["error"]["code"], a.seen),
+                         (1, "http_404", [("/epg.xml," + a.url("/xmltv.php?u=1"), None)]), err)
+
     def test_a_hinted_guide_on_another_port_of_a_loopback_playlist_host_is_refused(self):
         """D-SINK-57: the playlist's own LOOPBACK host is its port too, so a
         hint naming the same address on another port -- or with the shell

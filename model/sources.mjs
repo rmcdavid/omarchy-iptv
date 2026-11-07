@@ -15,7 +15,7 @@ import {
   FETCH_URL_ENV, fetchEnvironment
 } from "./mpv.mjs"
 import {
-  hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
+  hostOf, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -858,6 +858,88 @@ function hostKey(host) {
   return text.charAt(text.length - 1) === "." ? text.substring(0, text.length - 1) : text
 }
 
+// D-SINK-82 (owner, 2026-11-05): a guide hint that is a comma-joined LIST
+// (`url-tvg="https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?
+// username=U&password=P"`, several guides to Kodi's pvr.iptvsimple) was
+// adopted as ONE URL -- the first URL's host with `,http://prov.test/...`
+// in its path, so the second URL's credential went to the first URL's host
+// with no click. The separator is a `,` followed, after any run of the six
+// ASCII delimiters (URL_DELIMITER_CODES), by a scheme and a URL's `://`
+// with controls allowed between the `:` and the `//` (the helper's
+// _URL_MARK); any other `,` is URL text (`?ids=1,2`). Mirror of the
+// helper's _HINT_LIST_COMMA and hint_first_entry; the shared provider-hosts
+// fixture (dev branch) runs both. Linear: a literal `,` first, then runs
+// that are each ended by a character the run cannot hold.
+var HINT_LIST_RE = /,[\t\n\x0b\x0c\r ]*[A-Za-z][A-Za-z0-9+.\-]*:[\x00-\x1f\x7f-\x9f]*\/[\x00-\x1f\x7f-\x9f]*\//
+
+// The first entry of a hint that may be a list: the text before the first
+// `,` that opens another URL, the six ASCII delimiters off both its ends;
+// the text itself, untouched, when no `,` opens one. An empty first entry
+// (`,http://...`) is "", never the second: every D-SINK-40 check then runs
+// on what this answers (epgHintVerdict), so a list whose first entry is
+// refused is refused, not read from its next entry.
+function hintFirstEntry(text) {
+  var s = str(text)
+  var at = s.search(HINT_LIST_RE)
+  if (at === -1) return s
+  var a = 0
+  var b = at
+  while (a < b && URL_DELIMITER_CODES.indexOf(s.charCodeAt(a)) !== -1) a++
+  while (b > a && URL_DELIMITER_CODES.indexOf(s.charCodeAt(b - 1)) !== -1) b--
+  return s.substring(a, b)
+}
+
+// D-SINK-80's cost, the review's F1 (2026-11-06): does an address the
+// PLAYLIST chose hold what a URL's run absorbed from beyond its own
+// attribute -- a raw `"`, which RFC 3986 allows in no component of a URL, or
+// a `,` that opens an attribute holding a URL (`,key=` and a scheme's `://`,
+// the helper's _URL_MARK)? The attribute grammar keeps a URL value whole to
+// the end of its run, for the redactors, so a quoted attribute glued after
+// it (`"A"catchup-source="B"`), a quoted list (`"A","B"`) or a bare
+// attribute glued by a comma (`A,x-tvg-url=B`) is stored inside the first
+// URL, and the guide fetch and the logo fetch sent the second URL's
+// credential to the first URL's host. Such an address is no hint
+// (epgHintVerdict) and no logo host (splitLogoUrl). The helper's parse now
+// stores no hint and no logo that ran past where every earlier release ended
+// it (own_value), which covers ANY text a bare value took after its
+// comma; this is the backstop, for a cache or a helper from before that
+// rule, and it reads only these two shapes. A `,` in a quoted value is the
+// provider's text (`?ids=1,2`, `w_100,h_100/https://...`), as is
+// `?url=https://`.
+// Mirror of the helper's _ABSORBED_URL and absorbed_attribute; the
+// provider-hosts fixture runs both. Linear: a literal `,` first, then runs
+// that are each ended by a character the run cannot hold, `,` among them.
+var ABSORBED_URL_RE = /,[A-Za-z0-9_.\-]+=[A-Za-z][A-Za-z0-9+.\-]*:[\x00-\x1f\x7f-\x9f]*\/[\x00-\x1f\x7f-\x9f]*\//
+
+function absorbedAttribute(text) {
+  var s = str(text)
+  return s.indexOf("\"") !== -1 || ABSORBED_URL_RE.test(s)
+}
+
+// D-SINK-83 (owner, 2026-11-05): is this host ONE DNS label --
+// lower-cased and with one trailing `.` removed it holds no `.`, is not
+// empty and is not an IPv6 literal (bracketed or not)? A URL whose userinfo
+// holds an ASCII space or tab is cut there by every redactor, and at a space
+// by every tokenizer (D-SINK-34's accepted class), and the piece left is
+// `http://USER:...`, whose host is the USERNAME; a dotted username reads as
+// a dotted host and is looked up and named as before (the review's F12). A guide hint on such a host is no hint at all (epgHintVerdict,
+// the playlist's own host excepted) and a logo on one is no host
+// (logoHost), so the username reaches neither the resolver nor the Sources
+// row nor the consent dialog. The cost, stated: a single-label guide host
+// off the playlist's host and every single-label logo host are refused,
+// `localhost` and an all-digit or `0x` host (`2130706433`) among them.
+// Mirror of the helper's dotless_host; the provider-hosts fixture runs both.
+function dotlessHost(host) {
+  var text = str(host).toLowerCase()
+  if (text.charAt(text.length - 1) === ".") text = text.substring(0, text.length - 1)
+  if (text === "" || text.indexOf(".") !== -1) return false
+  if (text.indexOf(":") !== -1 || text.charAt(0) === "[") {
+    var lit = ipLiteral(text)
+    if (lit !== null && lit.v === 6) return false
+  }
+  return true
+}
+
 // D-SINK-57 (owner, 2026-10-29). The port a URL names, or its scheme's
 // default when it names none (http 80 = no port), null when neither is known.
 // Mirror of url_port in the helper; the shared destinations fixture runs both.
@@ -999,14 +1081,40 @@ var EPG_HINT_HOST_MAX = 253
 function epgHintVerdict(meta, playlistUrl) {
   var m = meta && typeof meta === "object" ? meta : {}
   var none = { url: "", refused: "", host: "", plainHttp: false }
-  var raw = str(m.epgUrlHint)
+  // D-SINK-82: a comma-joined list is read as its FIRST entry, and every
+  // check below runs on that entry alone -- so a cache written before the
+  // rule, holding the whole list, is read right too, and a list whose first
+  // entry is refused is refused rather than read from its next one.
+  var raw = hintFirstEntry(str(m.epgUrlHint))
   if (raw === "") return none
+  // The review's F1: an entry that absorbed another attribute is no hint
+  // (absorbedAttribute), judged as stored, before validateSourceUrl
+  // rewrites any of it.
+  if (absorbedAttribute(raw)) return none
   var v = validateSourceUrl(raw, { kind: "epg" })
   // `kind: "epg"` passes an EMPTY value as ok with kind "", so `v.ok` alone
   // would accept nonsense that sanitized away to nothing; and `kind !==
   // "http"` is decision 2 above, not a formality -- that branch is the one
   // that refuses `/etc/passwd` and `file:///...` from a provider.
   if (!v.ok || v.kind !== "http" || v.url === "") return none
+  // F10: no DNS name or address literal holds a `,`; the helper refuses
+  // one before any lookup (fetch_bytes), so the shell never adopts one.
+  if (v.host.indexOf(",") !== -1) return none
+  var home = typedHttpHost(playlistUrl)
+  // D-SINK-83: a host of one DNS label (dotlessHost) is no hint
+  // at all unless it is the playlist's own host (hostKey equal; the port is
+  // not compared here). NOT a refusal, and that is the choice: the refusal
+  // sentences print this host (epgHintRowText: "... not used: <host> is a
+  // local address", "... its address for <host> carries a password"), and
+  // a one-label host is most likely the USERNAME of a URL cut at a space in
+  // its userinfo, so the row says nothing of the hint rather than naming
+  // it. First, before the userinfo test, for the same reason: a cut that
+  // leaves `http://a@b:12` would name the password fragment `b`. The
+  // helper refuses the same host before any lookup on every hop
+  // (DestinationPolicy.refuses_name), for a 0.16.0 or 0.17.0 shell that
+  // hands one over; a shell before 0.16.0 sets no origin, so its fetch
+  // reads as the user's (the review's F4).
+  if (dotlessHost(v.host) && (home === "" || hostKey(v.host) !== hostKey(home))) return none
   // Provider text on the Sources row: cut at a DNS name's longest.
   var shown = hostOf(v.url)
   if (shown.length > EPG_HINT_HOST_MAX) shown = shown.substring(0, EPG_HINT_HOST_MAX) + ELLIPSIS
@@ -1017,7 +1125,6 @@ function epgHintVerdict(meta, playlistUrl) {
   var kind = hostClass(v.host)
   if (kind !== "" && kind !== "global") {
     // D-SINK-57: the playlist's own host, and on loopback its own PORT.
-    var home = typedHttpHost(playlistUrl)
     var own = { host: home === "" ? "" : hostKey(home), port: urlPortOf(validateSourceUrl(playlistUrl).url),
                 loopback: hostClass(home) === "loopback" }
     if (!ownHostMatch(v.host, urlPortOf(v.url), own))
@@ -1817,10 +1924,11 @@ export {
   plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
   normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
   IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
-  ipv4Class, ipv6Class, hostClass, hostKey, URL_DEFAULT_PORTS, urlPortOf,
-  ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV,
-  FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV, fetchEnvironmentFor,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  ipv4Class, ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
+  ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
+  urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
+  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,
+  fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
   EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
   epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,

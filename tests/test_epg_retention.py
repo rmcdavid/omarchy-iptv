@@ -264,6 +264,9 @@ class RetentionDifferentialTest(unittest.TestCase):
                     window = handle.read()
                 if mine:
                     window = baseline_wording(window.decode("utf-8")).encode("utf-8")
+                    # And the meta line's `guideRules`, the stamp the old
+                    # helper never wrote (D-SINK-79).
+                    window = window.replace(b'"guideRules":%d,' % helper.GUIDE_RULES, b"", 1)
                 with open(os.path.join(cache, "epg-now.json"), "rb") as handle:
                     now_doc = handle.read()
                 outputs.append((window, now_doc, status))

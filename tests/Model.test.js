@@ -2665,7 +2665,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [13, []])
+}, [16, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -11993,6 +11993,57 @@ checkCall("D-SINK-78 (shared fixture): the shell lists each row under the group 
   })
   return { cases: groupSplit.cases.length >= 38, bad: bad.slice(0, 4) }
 }, { cases: true, bad: [] })
+
+// D-SINK-80: tests/fixtures/attr-grammar.json, which tests/test_attr_grammar.py
+// runs through the helper's parse_attrs, parse_extinf and parse_m3u. The
+// shell has no M3U parser, so here the rows the helper writes for the cases
+// that carry them (`stored`) go through the shell's sinks: no letter of the
+// credential reaches sinkText of the name, the guide row's name
+// (displayName), a group, the tvg-name, the logo or the guide hint; the
+// notification body; the logo consent text; the guide hint's host, adopted
+// or refused; or the IPC now-playing record, whose id is not redacted. A
+// case D-SINK-34 accepts (an ASCII delimiter inside the URL) is left out:
+// there every redactor ends the run, whatever the grammar does. The rows are
+// the fixture's, written by hand: this block holds the SHELL's sinks to what
+// the fixed helper stores, so it passes against the helper that shipped the
+// defect too (the review's F17). The join to the parse -- that the shipping
+// parse_m3u stores exactly these rows, a dropped URL tvg-id among them -- is
+// tests/test_attr_grammar.py's, which is red against 96b8496.
+const attrGrammar = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/attr-grammar.json"), "utf8"))
+checkCall("D-SINK-80 (shared fixture): no row the helper writes for an attribute line shows a letter of a credential at a shell sink", function () {
+  const bad = []
+  const str = function (v) { return v === undefined || v === null ? "" : String(v) }
+  const leaks = function (text) { return attrGrammar.secret.split("").some(function (ch) { return str(text).indexOf(ch) !== -1 }) }
+  let held = 0
+  attrGrammar.cases.forEach(function (c) {
+    const s = c.stored
+    if (!s || c.accepted) return
+    held++
+    const shown = []
+    if (s.name !== undefined) {
+      const row = { id: str(s.id), name: s.name, tvgName: s.tvgName || "", group: s.group || "Ungrouped", url: "http://h/a" }
+      const argv = Model.notifyArgv("streamFailed", { name: s.name, reason: "r" })
+      const np = Model.ipcNowPlaying({ id: row.id, name: s.name, group: row.group, launchedFrom: "all" })
+      shown.push(["sinkText(name)", Model.sinkText(s.name)], ["displayName", Model.sinkText(Model.displayName(row, 1))],
+                 ["notifyArgv", argv[argv.length - 1]], ["ipcNowPlaying", JSON.stringify(np)])
+      ;(s.groups || [row.group]).forEach(function (g) { shown.push(["sinkText(group)", Model.sinkText(g)]) })
+    }
+    if (s.tvgName) shown.push(["sinkText(tvgName)", Model.sinkText(s.tvgName)])
+    if (s.logo) {
+      const survey = Model.logoSurvey([{ logo: s.logo }])
+      // "request" is the consent text's own closing word, which holds a q.
+      shown.push(["sinkText(logo)", Model.sinkText(s.logo)],
+                 ["logoConsentLines", Model.logoConsentLines(survey).join(" ").split(" request.").join(" ")])
+    }
+    if (s.epgUrlHint) {
+      const h = Model.epgHintVerdict({ epgUrlHint: s.epgUrlHint }, "https://prov.test/get.php")
+      shown.push(["sinkText(epgUrlHint)", Model.sinkText(s.epgUrlHint)],
+                 ["epgHintVerdict", h.host + " " + (h.url ? h.url.split("/")[2] : "")])
+    }
+    shown.forEach(function (x) { if (leaks(x[1])) bad.push([c.why, x[0], x[1]]) })
+  })
+  return { held: held >= 30, bad: bad.slice(0, 4) }
+}, { held: true, bad: [] })
 checkCall("hidden groups: a star in a hidden group still shows in Favorites; a saved search does not see the group", function () {
   // Decision 1, both halves, on one state. The star is a thing the user did
   // by hand; the saved search is a search.
@@ -12695,7 +12746,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
          Model.epgEpisodeText({ episode: 5 }), Model.epgEpisodeText({}), Model.epgEpisodeText({ season: 0, episode: 0 }),
          Model.epgEpisodeText(true), Model.epgEpisodeText(null), Model.epgEpisodeText(undefined),
          Model.epgEpisodeText(NaN), Model.epgEpisodeText("  two   words  ")],
-        ["S01E02", "7", "7", "S2 E5", "S2", "E5", "", "", "", "", "", "", "two words"])
+        // D-SINK-79: a string is trimmed and nothing else; the panel folds it
+        // after its redaction (epgDetailText), never before.
+        ["S01E02", "7", "7", "S2 E5", "S2", "E5", "", "", "", "", "", "", "two   words"])
 
   check("M4-02: the time range is formatClock at both ends, and the start alone when there is no end",
         [Model.formatTimeRange(local(2026, 10, 2, 19, 30), local(2026, 10, 2, 20, 0)),
@@ -20132,11 +20185,12 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
 
-  checkCall("D-SINK-41: a playlist cache whose status predates the destination rules is refreshed once whatever its age; one written under them is not", () =>
-    [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
-     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 2 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
-     Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null)],
-    [true, false, false, true, false, false])
+  checkCall("D-SINK-41, D-SINK-80: a playlist cache whose status predates the current rules (none, the destination rules' 1) is refreshed once whatever its age; one written under them (2, the attribute grammar) or later is not", () =>
+    [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }),
+     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 3 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
+     Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null),
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }), Model.DESTINATION_RULES],
+    [true, false, false, true, false, false, true, 2])
 
   // Service.qml's own functions (tests/service-harness.js): every URL-carrying
   // spawn says where its URL came from, through the one assignment, reset
@@ -20187,7 +20241,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
-  checkCall("D-SINK-41 (service): applyFreshness refreshes a fresh cache written before the destination rules, and leaves one written under them", () => {
+  checkCall("D-SINK-41, D-SINK-80 (service): applyFreshness refreshes a fresh cache written before the current rules (none, or the destination rules' 1), and leaves one written under them", () => {
     const runs = status => {
       const h = boot([rec(LAN)])
       h.root.playlistStatus = status
@@ -20197,8 +20251,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       return (h.ids.refreshDebounce ? h.ids.refreshDebounce.restarts : 0) - before
     }
     const now = Math.floor(Date.now() / 1000)
-    return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 })]
-  }, [1, 0])
+    return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 }),
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 })]
+  }, [1, 1, 0])
 })()
 
 // ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----
@@ -20924,6 +20979,209 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return { calls, declared: (svcText.match(/^  property string ownerToken: Model\.playerOwnerToken\(\)$/gm) || []).length,
              assigned: (svcText.match(/\bownerToken\s*=(?!=)/g) || []).length }
   }, { calls: { playerProbeArgv: [true], playerStartArgv: [true], playerRestartArgv: [true], playerOrphanCheckArgv: [true] }, declared: 1, assigned: 0 })
+})()
+
+// ---- D-SINK-79: the guide's whitespace fold never splits a URL before its redaction ----
+//
+// tests/fixtures/epg-fold.json, which tests/test_epg_fold.py runs through the
+// helper's parse_xmltv: what the helper stores for a programme's title,
+// description, category and episode when a URL in it holds one of the 20
+// code points the guide's old fold turned into a space (U+00A0, U+2028,
+// U+0085, DEL and the rest), and ordinary texts that fold as they always
+// did. Here: every stored text through each sink the shell shows a guide
+// text at -- sinkText, epgFields, formatEpgLine, the row's detail line
+// (rowDetail), its accessible name on the bus (rowAccessibleName) and the
+// panel (programmeDetail) -- shows no letter of the credential and shows
+// exactly the host. And the panel over a RAW record, a cache this helper did
+// not write: epgEpisodeText folded its description and category with JS `\s`
+// (U+00A0, U+FEFF, U+2028 ...) BEFORE epgDetailText's sinkText, and printed
+// the username; it trims now, and the fold comes after the redaction.
+;(function () {
+  const foldFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/epg-fold.json"), "utf8"))
+  const leaks = function (text) {
+    return foldFixture.secret.split("").some(function (ch) { return String(text).indexOf(ch) !== -1 })
+  }
+  const codeOf = function (u) { return parseInt(u.slice(2), 16) }
+  const panelKey = { desc: "description", category: "category", episode: "episode" }
+  // What the shell's old fold split at, read from the engine: every code
+  // point JS `\s` holds, less the six ASCII delimiters that end a URL's run.
+  const jsSpaces = []
+  for (let c = 0; c <= 0xffff; c++) if (Model.URL_DELIMITER_CODES.indexOf(c) === -1 && /\s/.test(String.fromCharCode(c))) jsSpaces.push(c)
+  checkCall("D-SINK-79 (shared fixture): the code points the raw panel is held to are every one JS `\\s` holds past the six ASCII delimiters, and U+0085 and DEL", function () {
+    const listed = foldFixture.shellCodePoints.map(codeOf)
+    return [listed.filter(function (c) { return c !== 0x7f && c !== 0x85 }).sort(function (x, y) { return x - y }),
+            foldFixture.codePoints.length, listed.length, jsSpaces.length]
+  }, [jsSpaces, 20, 21, 19])
+  checkCall("D-SINK-79 (shared fixture): every text the helper stores reads at Model.sinkText exactly as the fixture says", function () {
+    return foldFixture.cases.filter(function (c) { return Model.sinkText(c.stored) !== c.shell }).map(function (c) { return [c.why, Model.sinkText(c.stored)] })
+  }, [])
+  checkCall("D-SINK-79 (shared fixture): no sink a stored title reaches -- the row, its detail line, the bus, the panel, now and next -- shows a letter of the credential, and each shows the title as sinkText reads it", function () {
+    const bad = []
+    foldFixture.cases.filter(function (c) { return c.field === "title" }).forEach(function (c) {
+      const now = { now: { title: c.stored, start: 1, stop: 0 } }
+      const next = { next: { title: c.stored, start: 1, stop: 0 } }
+      const f = Model.epgFields(now, 0)
+      const g = Model.epgFields(next, 0)
+      const panel = Model.programmeDetail({ entry: now, nowSec: 0, name: "A" })
+      const panelNext = Model.programmeDetail({ entry: next, nowSec: 0, name: "A" })
+      const shown = [
+        ["epgFields", f.nowTitle], ["epgFields next", g.nextTitle],
+        ["formatEpgLine", Model.formatEpgLine(now, 0).now], ["formatEpgLine next", Model.formatEpgLine(next, 0).next],
+        ["rowDetail", Model.rowDetail({ showGroup: false, group: "", failedAt: "", nowTitle: f.nowTitle, nextTitle: g.nextTitle })],
+        ["rowAccessibleName", Model.rowAccessibleName({ name: "A", chno: "", favorite: false, playing: false, nowTitle: f.nowTitle, until: "", failedAt: "" })],
+        ["programmeDetail", panel ? panel.title : ""], ["programmeDetail next", panelNext ? panelNext.title : ""]
+      ]
+      shown.forEach(function (s) {
+        if (leaks(s[1])) bad.push([c.why, s[0], s[1]])
+        else if (String(s[1]).indexOf(c.shell) === -1) bad.push([c.why, s[0], "not the title", s[1]])
+      })
+    })
+    return bad.slice(0, 6)
+  }, [])
+  checkCall("D-SINK-79 (shared fixture): the panel shows each stored description, category and episode exactly as sinkText reads it, and no letter of the credential", function () {
+    const bad = []
+    foldFixture.cases.filter(function (c) { return c.field !== "title" }).forEach(function (c) {
+      const record = { title: "T", start: 1, stop: 0 }
+      record[c.field] = c.stored
+      const panel = Model.programmeDetail({ entry: { now: record }, nowSec: 0 }) || {}
+      const shown = panel[panelKey[c.field]]
+      if (shown !== c.shell || leaks(shown)) bad.push([c.why, shown])
+    })
+    return bad.slice(0, 6)
+  }, [])
+  checkCall("D-SINK-79 (shared fixture): each URL the helper keeps reads as exactly its host at the shell, so no fix that drops the text passes", function () {
+    const kept = foldFixture.cases.filter(function (c) {
+      return c.stored.indexOf("://") !== -1 && c.stored.indexOf("http ://") === -1 && c.helper.indexOf("withheld") === -1 && c.raw.indexOf(foldFixture.host) !== -1
+    })
+    return [kept.length >= 180, kept.filter(function (c) { return Model.sinkText(c.stored).indexOf(foldFixture.host) === -1 }).map(function (c) { return c.why })]
+  }, [true, []])
+  checkCall("D-SINK-79 (shared fixture): the panel over a RAW description or category -- a cache this helper did not write -- folds only after it redacts, so no code point JS `\\s` holds splits a URL there", function () {
+    const bad = []
+    foldFixture.rawDetail.forEach(function (c) {
+      const record = { title: "T", start: 1, stop: 0 }
+      record[c.key] = c.raw
+      const panel = Model.programmeDetail({ entry: { now: record }, nowSec: 0 }) || {}
+      const shown = panel[panelKey[c.key]]
+      const want = c.panel === null ? undefined : c.panel
+      if (shown !== want || leaks(shown === undefined ? "" : shown)) bad.push([c.why, shown === undefined ? "<absent>" : shown])
+    })
+    return [foldFixture.rawDetail.length >= 132, bad.slice(0, 6)]
+  }, [true, []])
+  checkCall("D-SINK-79: epgEpisodeText trims a string and folds nothing inside it, so the panel's fold is the one after its redaction", function () {
+    const nb = String.fromCharCode(0xa0)
+    const bom = String.fromCharCode(0xfeff)
+    const url = "http://qqqqqq:zz" + bom + "zz@cdn.test/x"
+    return [Model.epgEpisodeText("  " + url + nb + " "), Model.epgEpisodeText(nb + bom + " \t"),
+            Model.programmeFieldText({ desc: ["  ", "a" + nb + nb + "b"] }, ["desc"]),
+            Model.programmeDetail({ entry: { now: { title: "T", desc: "a" + nb + nb + "b  c" } }, nowSec: 0 }).description]
+  }, (function () {
+    const nb = String.fromCharCode(0xa0)
+    return ["http://qqqqqq:zz" + String.fromCharCode(0xfeff) + "zz@cdn.test/x", "", "a" + nb + nb + "b", "a b c"]
+  })())
+})()
+
+// ---- D-SINK-82 and D-SINK-83 (owner, 2026-11-05): the host a playlist chose ----
+//
+// Two rules, one shared fixture: tests/fixtures/provider-hosts.json, which
+// tests/test_provider_hosts.py runs against the helper. (1) A guide hint
+// that is a comma-joined list (`url-tvg="https://epg.test/guide.xml.gz,
+// http://prov.test/xmltv.php?username=U&password=P"`) is read as its FIRST
+// entry -- epgHintVerdict read it as one URL, the first host with the second
+// URL in its path, so the second URL's credential went to the first host on
+// every guide refresh, with no click. (2) A host of ONE DNS label that the
+// playlist chose for a guide hint or a logo is no hint and no logo host --
+// the hint's playlist host excepted, a logo never -- because a URL cut at a
+// space in its userinfo leaves `http://USER:...`, whose host is the
+// username. Observed through the shipping composers: the verdict, the
+// resolution, the fetch environment, the Sources row and its accessible
+// name, the logo survey and the consent message the host draws.
+;(function () {
+  const P = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/provider-hosts.json"), "utf8"))
+  const SECRET = /q{2,}|z{2,}/i
+  checkCall("D-SINK-82: the first entry of every hint in the shared provider-hosts fixture", () =>
+    P.firstEntry.map(c => [c.hint, Model.hintFirstEntry(c.hint)]), P.firstEntry.map(c => [c.hint, c.first]))
+  checkCall("F1 (the review, 2026-11-06): every address the playlist chose absorbed another attribute or not, as the shared fixture says", () =>
+    P.absorbed.map(c => [c.text, Model.absorbedAttribute(c.text)]), P.absorbed.map(c => [c.text, c.absorbed]))
+  checkCall("F1: a logo that absorbed a credentialed attribute is counted refused, and neither the consent lines nor the message the host draws names its host or the credential", () => {
+    const survey = Model.logoSurvey(P.logoHosts.filter(c => c.fetch && c.fetch.code === "logo_url").map(c => ({ logo: c.url })).concat([{ logo: "https://cdn.test/a.png" }]))
+    const text = Model.logoConsentLines(survey).join(" ") + " | " + Model.confirmLogosMessage(survey)
+    return [survey.refused, survey.wouldContact, survey.hosts, SECRET.test(text), /logos\.test|prov\.test/.test(text)]
+  }, [2, 1, [{ host: "cdn.test", channels: 1 }], false, false])
+  checkCall("D-SINK-83: every host is one DNS label or not as the shared fixture says", () =>
+    P.noDot.map(c => [c.host, Model.dotlessHost(c.host)]), P.noDot.map(c => [c.host, c.refused]))
+  checkCall("D-SINK-82 and -83: every hand-off is a list, and its host one label, exactly where the helper's side says (the helper refuses those before any lookup)", () =>
+    P.handOffs.map(c => [c.url, Model.hintFirstEntry(c.url) !== c.url, Model.dotlessHost(Model.validateSourceUrl(c.url, { kind: "epg" }).host)]),
+    P.handOffs.map(c => [c.url, c.listed, c.oneLabel]))
+  checkCall("D-SINK-82 and -83, F1, F10: the guide-hint verdict of every case: a list's first entry alone, a one-label host no hint at all unless it is the playlist's own, an absorbed entry or a `,` in the host no hint", () =>
+    P.hintVerdicts.map(c => [c.hint, c.playlistUrl, Model.epgHintVerdict({ epgUrlHint: c.hint }, c.playlistUrl)]),
+    P.hintVerdicts.map(c => [c.hint, c.playlistUrl, c.expected]))
+  checkCall("D-SINK-82: resolveEpgUrl adopts exactly the verdict's URL, and the fetch environment sends the playlist host the helper's side was asked with", () =>
+    P.hintVerdicts.map(c => {
+      const r = Model.resolveEpgUrl({ userUrl: "", hint: c.hint, playlistUrl: c.playlistUrl })
+      const env = Model.fetchEnvironmentFor("http://x.example.test/", { origin: "playlist", playlistUrl: c.playlistUrl })
+      return [c.hint, r.url, r.origin, String(env[Model.FETCH_HOME_HOST_ENV] || "")]
+    }),
+    P.hintVerdicts.map(c => [c.hint, c.expected.url, c.expected.url === "" ? Model.EPG_ORIGIN_NONE : Model.EPG_ORIGIN_PLAYLIST, c.playlistHost]))
+  checkCall("D-SINK-82 and -83: no Sources row and no accessible name names a username or password for any case, and a one-label host draws no refusal sentence", () => {
+    const bad = []
+    P.hintVerdicts.forEach(c => {
+      const o = { userUrl: "", hint: c.hint, playlistUrl: c.playlistUrl }
+      const source = { key: "k1", url: c.playlistUrl, epgUrl: "", label: "L", fetchedAt: 1, channelCount: 1, groupCount: 1, lastUsed: 0 }
+      const view = Model.sourceView(source, "k1", 2, "", Model.resolveEpgUrl(o).fromPlaylist, Model.epgHintRowState(o))
+      const text = Model.sourceDetail(view) + " | " + Model.sourceAccessibleName(view)
+      if (SECRET.test(text)) bad.push(c.hint + " -> " + text)
+      if (c.helperRefusesName === true && /not used/.test(text)) bad.push(c.hint + " (one label) -> " + text)
+    })
+    return bad
+  }, [])
+  checkCall("D-SINK-83, F1: the logo host of every case: one label or an absorbed attribute is no host, so the survey refuses it and nothing names it", () =>
+    P.logoHosts.map(c => [c.url, Model.splitLogoUrl(c.url).host]), P.logoHosts.map(c => [c.url, c.host]))
+  checkCall("D-SINK-83: the cut logo `https://qqqqqq:` is counted refused, and neither the consent lines nor the message the host draws names it", () => {
+    const survey = Model.logoSurvey([{ logo: "https://qqqqqq:" }, { logo: "https://qqqqqq:443/a.png" }, { logo: "https://cdn.test/a.png" }])
+    const text = Model.logoConsentLines(survey).join(" ") + " | " + Model.confirmLogosMessage(survey)
+    return [survey.refused, survey.wouldContact, survey.hosts, SECRET.test(text), text.indexOf("cdn.test (1 channel)") !== -1]
+  }, [2, 1, [{ host: "cdn.test", channels: 1 }], false, true])
+  checkCall("D-SINK-82: an old cache holding the measured list is read as its first entry: the credential is in no URL the shell hands the helper", () => {
+    const hint = P.firstEntry[0].hint
+    const r = Model.resolveEpgUrl({ userUrl: "", hint: hint, playlistUrl: "https://prov.test/get.php" })
+    const env = Model.fetchEnvironmentFor(r.url, { origin: r.origin, playlistUrl: "https://prov.test/get.php" })
+    return [r.url, r.host, env[Model.FETCH_ORIGIN_ENV], SECRET.test(JSON.stringify(env)), /prov\.test\/xmltv/.test(JSON.stringify(env))]
+  }, ["https://epg.test/guide.xml.gz", "epg.test", "playlist", false, false])
+  // Best of 5 against a loose ceiling: a shared machine's wall clock has to
+  // be loose to be useful. One native search, so linear in every shape that
+  // could make it back off; a hint is dropped at parse past 2,048 characters.
+  checkCall("F1: the absorbed test is linear: each shape at 32,000 characters costs under 8 times its cost at 8,000 plus 2 ms", () => {
+    const shapes = [n => ",".repeat(n), n => ",a".repeat(n / 2), n => ",a=".repeat(Math.floor(n / 3)), n => ",a=b".repeat(n / 4),
+                    n => "," + "a".repeat(n), n => ",a=" + "b".repeat(n), n => ",a=b:" + "\x00".repeat(n),
+                    n => ",a=b:/" + "\x1f".repeat(n), n => ",a=b:".repeat(Math.floor(n / 5))]
+    const best = s => {
+      let least = Infinity
+      for (let i = 0; i < 5; i++) {
+        const t0 = process.hrtime.bigint()
+        Model.absorbedAttribute(s)
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6
+        if (ms < least) least = ms
+      }
+      return least
+    }
+    return shapes.filter(f => best(f(32000)) >= 8 * best(f(8000)) + 2).map(f => f(16).slice(0, 16))
+  }, [])
+  checkCall("D-SINK-82: the first-entry cut is linear: each shape at 32,000 characters costs under 8 times its cost at 8,000 plus 2 ms", () => {
+    const shapes = [n => ",".repeat(n), n => ",a".repeat(n / 2), n => "," + "a".repeat(n), n => ", ".repeat(n / 2),
+                    n => "," + " ".repeat(n), n => ",a:" + "\x00".repeat(n), n => ",a:/" + "\x1f".repeat(n),
+                    n => ",a:".repeat(Math.floor(n / 3)), n => "http://a.test/x?" + "1,".repeat(n / 2)]
+    const best = s => {
+      let least = Infinity
+      for (let i = 0; i < 5; i++) {
+        const t0 = process.hrtime.bigint()
+        Model.hintFirstEntry(s)
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6
+        if (ms < least) least = ms
+      }
+      return least
+    }
+    return shapes.map(f => best(f(32000)) < 8 * best(f(8000)) + 2)
+  }, [true, true, true, true, true, true, true, true, true])
 })()
 
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----

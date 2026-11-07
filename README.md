@@ -815,8 +815,16 @@ network and is not the playlist's own server, or carries a user name or
 password: then it is not used, nothing is fetched from it, and the Sources
 row says `EPG from playlist not used: ...` with the reason. (One given by a
 host name that leads there is used, and its download stops at the
-connection with `Refused a local address`, as under Limits.) Type it into
-the source's EPG field to use it anyway. A guide the playlist names over
+connection with `Refused a local address`, as under Limits.) A guide address
+whose host is a single name with no dot in it -- `localhost`, `tvh`, a bare
+number -- is not used either, unless it is the playlist's own server, and
+the Sources row then says nothing about it; nor is one that runs straight
+into what follows it in the playlist's header: the next attribute, a second
+quoted address joined to it by a comma with no space (`"A","B"`), or,
+unquoted, anything but another address glued straight after a comma. Type it into
+the source's EPG field to use it anyway. If the playlist lists several
+guide addresses separated by commas -- inside one pair of quotes, unquoted,
+or quoted each with a space after the comma -- the first is used. A guide the playlist names over
 plain `http://` while the playlist itself is `https://` reads
 `EPG from playlist over plain http`.
 Channels are matched to the guide by id and, when the ids do not agree, by

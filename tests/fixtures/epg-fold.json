@@ -1,0 +1,3769 @@
+{
+ "comment": [
+  "D-SINK-79 (2026-11-05): the guide's whitespace fold never folds inside a URL's run, and the shell",
+  "folds a detail only after it redacts it. tests/test_epg_fold.py runs `cases` through the helper's",
+  "parse_xmltv and its sinks, and `fold` through fold_space; tests/Model.test.js runs `cases` through",
+  "the shell's sinks, and `rawDetail` through programmeDetail. Every expected value is written from",
+  "the rule, by hand, in the generator (the review's F9 and F11 of 2026-11-06 among them). `kind` is",
+  "`sweep` (the 20 code points `codePoints` names, in",
+  "three URL forms and four fields), `ordinary`, or `cut` (D-SINK-75's cap). `stored` is what the",
+  "helper stores for the field, `helper` is redact_urls of it, `shell` Model.sinkText of it, and",
+  "`panel` what programmeDetail shows (null: absent). The credential is spelt in letters nothing",
+  "else here holds: any of `secret` in a sink is a leak. ASCII only: every other character is a",
+  "JSON escape."
+ ],
+ "secret": "qz",
+ "host": "cdn.test",
+ "codePoints": [
+  "U+007F",
+  "U+0085",
+  "U+00A0",
+  "U+1680",
+  "U+2000",
+  "U+2001",
+  "U+2002",
+  "U+2003",
+  "U+2004",
+  "U+2005",
+  "U+2006",
+  "U+2007",
+  "U+2008",
+  "U+2009",
+  "U+200A",
+  "U+2028",
+  "U+2029",
+  "U+202F",
+  "U+205F",
+  "U+3000"
+ ],
+ "shellCodePoints": [
+  "U+007F",
+  "U+0085",
+  "U+00A0",
+  "U+1680",
+  "U+2000",
+  "U+2001",
+  "U+2002",
+  "U+2003",
+  "U+2004",
+  "U+2005",
+  "U+2006",
+  "U+2007",
+  "U+2008",
+  "U+2009",
+  "U+200A",
+  "U+2028",
+  "U+2029",
+  "U+202F",
+  "U+205F",
+  "U+3000",
+  "U+FEFF"
+ ],
+ "cases": [
+  {
+   "kind": "sweep",
+   "why": "U+007F in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\ufffdzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\ufffdzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufffdzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+007F in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\ufffdzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\ufffdzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufffdzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+0085 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+00A0 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+1680 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2000 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2001 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2002 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2003 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2004 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2005 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2006 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2007 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2008 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2009 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+200A in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\ufffdzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\ufffdzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufffdzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2028 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\ufffdzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\ufffdzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufffdzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+2029 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+202F in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+205F in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the userinfo: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the userinfo: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the userinfo: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the userinfo: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-path: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "stored": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-path: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-path: the category redacts the whole URL to its host",
+   "field": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-path: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-query: the title keeps the URL whole",
+   "field": "title",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "stored": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-query: the description redacts the whole URL to its host",
+   "field": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-query: the category's cap lands inside the URL, which is dropped",
+   "field": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "sweep",
+   "why": "U+3000 in the xtream-query: the episode's cap lands inside the URL, which is dropped",
+   "field": "episode",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "stored": "News",
+   "helper": "News",
+   "shell": "News"
+  },
+  {
+   "kind": "ordinary",
+   "why": "double spaces fold as they always did (title)",
+   "field": "title",
+   "raw": "Double  spaces  and   more",
+   "stored": "Double spaces and more",
+   "helper": "Double spaces and more",
+   "shell": "Double spaces and more"
+  },
+  {
+   "kind": "ordinary",
+   "why": "tabs between words fold (title)",
+   "field": "title",
+   "raw": "Tabs\tbetween\twords",
+   "stored": "Tabs between words",
+   "helper": "Tabs between words",
+   "shell": "Tabs between words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+00A0 between words, in a text with no URL, folds (title)",
+   "field": "title",
+   "raw": "NBSP\u00a0between\u00a0words",
+   "stored": "NBSP between words",
+   "helper": "NBSP between words",
+   "shell": "NBSP between words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "line feeds fold (title)",
+   "field": "title",
+   "raw": "Line one\nLine two\nthree",
+   "stored": "Line one Line two three",
+   "helper": "Line one Line two three",
+   "shell": "Line one Line two three"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a tab after a URL ends its run and folds (title)",
+   "field": "title",
+   "raw": "Watch http://cdn.test/live/1.m3u8\tthen more words",
+   "stored": "Watch http://cdn.test/live/1.m3u8 then more words",
+   "helper": "Watch http://cdn.test then more words",
+   "shell": "Watch cdn.test then more words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a URL at the end keeps its U+00A0, and the spaces before it fold (title)",
+   "field": "title",
+   "raw": "Details at  http://qqqqqq:zz\u00a0zz@cdn.test/x",
+   "stored": "Details at http://qqqqqq:zz\u00a0zz@cdn.test/x",
+   "helper": "Details at http://cdn.test",
+   "shell": "Details at cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a plain URL at the end (title)",
+   "field": "title",
+   "raw": "More at http://cdn.test/x",
+   "stored": "More at http://cdn.test/x",
+   "helper": "More at http://cdn.test",
+   "shell": "More at cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "two URLs, each whole, and the spaces between them fold (title)",
+   "field": "title",
+   "raw": "See http://qqqqqq:zz\u00a0zz@cdn.test/x and  http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts  now",
+   "stored": "See http://qqqqqq:zz\u00a0zz@cdn.test/x and http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts now",
+   "helper": "See http://cdn.test and http://cdn.test now",
+   "shell": "See cdn.test and cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a `:` and a `/` that are no URL: the U+00A0 folds (title)",
+   "field": "title",
+   "raw": "Time: 10/12\u00a0\u00a0news",
+   "stored": "Time: 10/12 news",
+   "helper": "Time: 10/12 news",
+   "shell": "Time: 10/12 news"
+  },
+  {
+   "kind": "ordinary",
+   "why": "DEL inside the `://` is deleted, so every redactor reads the URL (title)",
+   "field": "title",
+   "raw": "Watch http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://qqqqqq:zzzzzz@cdn.test/x now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a tab inside the `://` is deleted too (title)",
+   "field": "title",
+   "raw": "Watch http:/\t/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://qqqqqq:zzzzzz@cdn.test/x now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+0085 inside the `://` is deleted (title)",
+   "field": "title",
+   "raw": "Watch http:/\u0085/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://qqqqqq:zzzzzz@cdn.test/x now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+009B inside the `://` is deleted (title)",
+   "field": "title",
+   "raw": "Watch http:/\u009b/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://qqqqqq:zzzzzz@cdn.test/x now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a C1 control the plain fold never touched stays, outside a URL and after its `://` (title)",
+   "field": "title",
+   "raw": "A\u009bB http://qqqqqq:zz\u009bzz@cdn.test/x tail",
+   "stored": "A\u009bB http://qqqqqq:zz\u009bzz@cdn.test/x tail",
+   "helper": "A\u009bB http://cdn.test tail",
+   "shell": "A\u009bB cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the ends are trimmed, U+00A0 among them (title)",
+   "field": "title",
+   "raw": "  \u00a0Title\u00a0  ",
+   "stored": "Title",
+   "helper": "Title",
+   "shell": "Title"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the stated cost: a U+00A0 glued after a URL keeps the next word in its run (title)",
+   "field": "title",
+   "raw": "Watch http://cdn.test/x\u00a0now",
+   "stored": "Watch http://cdn.test/x\u00a0now",
+   "helper": "Watch http://cdn.test",
+   "shell": "Watch cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+2028 outside a URL folds (title)",
+   "field": "title",
+   "raw": "Breaking\u2028news http://cdn.test/x",
+   "stored": "Breaking news http://cdn.test/x",
+   "helper": "Breaking news http://cdn.test",
+   "shell": "Breaking news cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the stated residual: DEL between a scheme and its `:` folds, and no redactor reads a URL there (title)",
+   "field": "title",
+   "raw": "Watch http\u007f://cdn.test/x now",
+   "stored": "Watch http ://cdn.test/x now",
+   "helper": "Watch http ://cdn.test/x now",
+   "shell": "Watch http ://cdn.test/x now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "DEL and U+0085 outside a URL fold (title)",
+   "field": "title",
+   "raw": "A\u007fB\u0085C",
+   "stored": "A B C",
+   "helper": "A B C",
+   "shell": "A B C"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+FEFF in a password: no fold touched it, then or now (title)",
+   "field": "title",
+   "raw": "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL in the port after a dotted username keeps the host withheld (title)",
+   "field": "title",
+   "raw": "News http://qqqqqq.qq:\u007f/zzzzzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq.qq:\ufffd/zzzzzz@cdn.test/x tail",
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL between digits in the port after a dotted username keeps the host withheld (title)",
+   "field": "title",
+   "raw": "News http://qqqqqq.qq:12\u007f34/zzzzzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq.qq:12\ufffd34/zzzzzz@cdn.test/x tail",
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: U+0085 in the port after a dotted username keeps the host withheld (title)",
+   "field": "title",
+   "raw": "News http://qqqqqq.qq:\u0085?zzzzzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq.qq:\ufffd?zzzzzz@cdn.test/x tail",
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL in a second `://` in the port after a dotted username keeps the host withheld (title)",
+   "field": "title",
+   "raw": "News http://qqqqqq.qq:\u007f//zzzzzz@cdn.test/x tail",
+   "stored": "News http://qqqqqq.qq:\ufffd//zzzzzz@cdn.test/x tail",
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F11: a `://` with no scheme letter starts no run, so its U+2028 and U+2029 fold (title)",
+   "field": "title",
+   "raw": "Ratio 1://a\u2028b\u2029c tail",
+   "stored": "Ratio 1://a b c tail",
+   "helper": "Ratio 1://a b c tail",
+   "shell": "Ratio 1://a b c tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F11: U+2028 in a URL's host becomes U+FFFD, so no row breaks a line (title)",
+   "field": "title",
+   "raw": "Show http://a\u2028b tail",
+   "stored": "Show http://a\ufffdb tail",
+   "helper": "Show http://a\ufffdb tail",
+   "shell": "Show a\ufffdb tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (title)",
+   "field": "title",
+   "raw": "News \u00e9://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
+   "stored": "News \u00e9://a?u=http://qqqqqq:zzzzzz@cdn.test/x tail",
+   "helper": "News \u00e9://a?u=http://cdn.test tail",
+   "shell": "News \u00e9://a?u=cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: a non-ASCII digit after a letter before a `://` is no scheme letter, so the URL behind it starts its own run (title)",
+   "field": "title",
+   "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
+   "stored": "News x\u0661://a?u=http://qqqqqq:zzzzzz@cdn.test/x tail",
+   "helper": "News x\u0661://a?u=http://cdn.test tail",
+   "shell": "News x\u0661://a?u=cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: an upper-case scheme starts a run (title)",
+   "field": "title",
+   "raw": "News HTTP://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News HTTP://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (title)",
+   "field": "title",
+   "raw": "Featuring:\n// The Band",
+   "stored": "Featuring:// The Band",
+   "helper": "Featuring:// The Band",
+   "shell": "[url] The Band"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (title)",
+   "field": "title",
+   "raw": "Go 1://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Go 1://a?u=http://qqqqqq:zzzzzz@cdn.test/x now",
+   "helper": "Go 1://a?u=http://cdn.test now",
+   "shell": "Go 1://a?u=cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "double spaces fold as they always did (description)",
+   "field": "desc",
+   "raw": "Double  spaces  and   more",
+   "stored": "Double spaces and more",
+   "helper": "Double spaces and more",
+   "shell": "Double spaces and more"
+  },
+  {
+   "kind": "ordinary",
+   "why": "tabs between words fold (description)",
+   "field": "desc",
+   "raw": "Tabs\tbetween\twords",
+   "stored": "Tabs between words",
+   "helper": "Tabs between words",
+   "shell": "Tabs between words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+00A0 between words, in a text with no URL, folds (description)",
+   "field": "desc",
+   "raw": "NBSP\u00a0between\u00a0words",
+   "stored": "NBSP between words",
+   "helper": "NBSP between words",
+   "shell": "NBSP between words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "line feeds fold (description)",
+   "field": "desc",
+   "raw": "Line one\nLine two\nthree",
+   "stored": "Line one Line two three",
+   "helper": "Line one Line two three",
+   "shell": "Line one Line two three"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a tab after a URL ends its run and folds (description)",
+   "field": "desc",
+   "raw": "Watch http://cdn.test/live/1.m3u8\tthen more words",
+   "stored": "Watch http://cdn.test then more words",
+   "helper": "Watch http://cdn.test then more words",
+   "shell": "Watch cdn.test then more words"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a URL at the end keeps its U+00A0, and the spaces before it fold (description)",
+   "field": "desc",
+   "raw": "Details at  http://qqqqqq:zz\u00a0zz@cdn.test/x",
+   "stored": "Details at http://cdn.test",
+   "helper": "Details at http://cdn.test",
+   "shell": "Details at cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a plain URL at the end (description)",
+   "field": "desc",
+   "raw": "More at http://cdn.test/x",
+   "stored": "More at http://cdn.test",
+   "helper": "More at http://cdn.test",
+   "shell": "More at cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "two URLs, each whole, and the spaces between them fold (description)",
+   "field": "desc",
+   "raw": "See http://qqqqqq:zz\u00a0zz@cdn.test/x and  http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts  now",
+   "stored": "See http://cdn.test and http://cdn.test now",
+   "helper": "See http://cdn.test and http://cdn.test now",
+   "shell": "See cdn.test and cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a `:` and a `/` that are no URL: the U+00A0 folds (description)",
+   "field": "desc",
+   "raw": "Time: 10/12\u00a0\u00a0news",
+   "stored": "Time: 10/12 news",
+   "helper": "Time: 10/12 news",
+   "shell": "Time: 10/12 news"
+  },
+  {
+   "kind": "ordinary",
+   "why": "DEL inside the `://` is deleted, so every redactor reads the URL (description)",
+   "field": "desc",
+   "raw": "Watch http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://cdn.test now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a tab inside the `://` is deleted too (description)",
+   "field": "desc",
+   "raw": "Watch http:/\t/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://cdn.test now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+0085 inside the `://` is deleted (description)",
+   "field": "desc",
+   "raw": "Watch http:/\u0085/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://cdn.test now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+009B inside the `://` is deleted (description)",
+   "field": "desc",
+   "raw": "Watch http:/\u009b/qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Watch http://cdn.test now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "a C1 control the plain fold never touched stays, outside a URL and after its `://` (description)",
+   "field": "desc",
+   "raw": "A\u009bB http://qqqqqq:zz\u009bzz@cdn.test/x tail",
+   "stored": "A\u009bB http://cdn.test tail",
+   "helper": "A\u009bB http://cdn.test tail",
+   "shell": "A\u009bB cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the ends are trimmed, U+00A0 among them (description)",
+   "field": "desc",
+   "raw": "  \u00a0Title\u00a0  ",
+   "stored": "Title",
+   "helper": "Title",
+   "shell": "Title"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the stated cost: a U+00A0 glued after a URL keeps the next word in its run (description)",
+   "field": "desc",
+   "raw": "Watch http://cdn.test/x\u00a0now",
+   "stored": "Watch http://cdn.test",
+   "helper": "Watch http://cdn.test",
+   "shell": "Watch cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+2028 outside a URL folds (description)",
+   "field": "desc",
+   "raw": "Breaking\u2028news http://cdn.test/x",
+   "stored": "Breaking news http://cdn.test",
+   "helper": "Breaking news http://cdn.test",
+   "shell": "Breaking news cdn.test"
+  },
+  {
+   "kind": "ordinary",
+   "why": "the stated residual: DEL between a scheme and its `:` folds, and no redactor reads a URL there (description)",
+   "field": "desc",
+   "raw": "Watch http\u007f://cdn.test/x now",
+   "stored": "Watch http ://cdn.test/x now",
+   "helper": "Watch http ://cdn.test/x now",
+   "shell": "Watch http ://cdn.test/x now"
+  },
+  {
+   "kind": "ordinary",
+   "why": "DEL and U+0085 outside a URL fold (description)",
+   "field": "desc",
+   "raw": "A\u007fB\u0085C",
+   "stored": "A B C",
+   "helper": "A B C",
+   "shell": "A B C"
+  },
+  {
+   "kind": "ordinary",
+   "why": "U+FEFF in a password: no fold touched it, then or now (description)",
+   "field": "desc",
+   "raw": "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL in the port after a dotted username keeps the host withheld (description)",
+   "field": "desc",
+   "raw": "News http://qqqqqq.qq:\u007f/zzzzzz@cdn.test/x tail",
+   "stored": "News http://[host withheld] tail",
+   "helper": "News http://[redacted] withheld] tail",
+   "shell": "News [url] withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL between digits in the port after a dotted username keeps the host withheld (description)",
+   "field": "desc",
+   "raw": "News http://qqqqqq.qq:12\u007f34/zzzzzz@cdn.test/x tail",
+   "stored": "News http://[host withheld] tail",
+   "helper": "News http://[redacted] withheld] tail",
+   "shell": "News [url] withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: U+0085 in the port after a dotted username keeps the host withheld (description)",
+   "field": "desc",
+   "raw": "News http://qqqqqq.qq:\u0085?zzzzzz@cdn.test/x tail",
+   "stored": "News http://[host withheld] tail",
+   "helper": "News http://[redacted] withheld] tail",
+   "shell": "News [url] withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9: DEL in a second `://` in the port after a dotted username keeps the host withheld (description)",
+   "field": "desc",
+   "raw": "News http://qqqqqq.qq:\u007f//zzzzzz@cdn.test/x tail",
+   "stored": "News http://[host withheld] tail",
+   "helper": "News http://[redacted] withheld] tail",
+   "shell": "News [url] withheld] tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F11: a `://` with no scheme letter starts no run, so its U+2028 and U+2029 fold (description)",
+   "field": "desc",
+   "raw": "Ratio 1://a\u2028b\u2029c tail",
+   "stored": "Ratio 1://a b c tail",
+   "helper": "Ratio 1://a b c tail",
+   "shell": "Ratio 1://a b c tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F11: U+2028 in a URL's host becomes U+FFFD, so no row breaks a line (description)",
+   "field": "desc",
+   "raw": "Show http://a\u2028b tail",
+   "stored": "Show http://a\ufffdb tail",
+   "helper": "Show http://a\ufffdb tail",
+   "shell": "Show a\ufffdb tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (description)",
+   "field": "desc",
+   "raw": "News \u00e9://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
+   "stored": "News \u00e9://a?u=http://cdn.test tail",
+   "helper": "News \u00e9://a?u=http://cdn.test tail",
+   "shell": "News \u00e9://a?u=cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: a non-ASCII digit after a letter before a `://` is no scheme letter, so the URL behind it starts its own run (description)",
+   "field": "desc",
+   "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
+   "stored": "News x\u0661://a?u=http://cdn.test tail",
+   "helper": "News x\u0661://a?u=http://cdn.test tail",
+   "shell": "News x\u0661://a?u=cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck: an upper-case scheme starts a run (description)",
+   "field": "desc",
+   "raw": "News HTTP://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "News http://cdn.test tail",
+   "helper": "News http://cdn.test tail",
+   "shell": "News cdn.test tail"
+  },
+  {
+   "kind": "ordinary",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (description)",
+   "field": "desc",
+   "raw": "Featuring:\n// The Band",
+   "stored": "Featuring:// The Band",
+   "helper": "Featuring:// The Band",
+   "shell": "[url] The Band"
+  },
+  {
+   "kind": "ordinary",
+   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (description)",
+   "field": "desc",
+   "raw": "Go 1://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
+   "stored": "Go 1://a?u=http://cdn.test now",
+   "helper": "Go 1://a?u=http://cdn.test now",
+   "shell": "Go 1://a?u=cdn.test now"
+  },
+  {
+   "kind": "cut",
+   "why": "a title's cap inside a URL holding U+00A0 drops the URL",
+   "field": "title",
+   "raw": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "helper": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "shell": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+  },
+  {
+   "kind": "cut",
+   "why": "a description's cap inside a URL holding U+00A0 drops the URL",
+   "field": "desc",
+   "raw": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "stored": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+   "helper": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+   "shell": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  },
+  {
+   "kind": "cut",
+   "why": "a title's cap past a URL holding U+00A0 keeps it whole",
+   "field": "title",
+   "raw": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN http://qqqqqq:zz\u00a0zz@cdn.test/x TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+   "stored": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN http://qqqqqq:zz\u00a0zz@cdn.test/x TTTTTTTTTTTTTTTTTT",
+   "helper": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN http://cdn.test TTTTTTTTTTTTTTTTTT",
+   "shell": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN cdn.test TTTTTTTTTTTTTTTTTT"
+  }
+ ],
+ "rawDetail": [
+  {
+   "why": "U+007F in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+007F in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u007fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+007F in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+007F in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u007fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+007F in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+007F in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u007fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u0085zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u0085zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+0085 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u0085zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u00a0zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u00a0zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+00A0 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u00a0zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u1680zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u1680zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+1680 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u1680zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2000zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2000zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2000 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2000zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2001zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2001zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2001 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2001zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2002zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2002zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2002 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2002zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2003zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2003zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2003 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2003zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2004zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2004zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2004 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2004zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2005zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2005zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2005 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2005zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2006zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2006zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2006 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2006zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2007zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2007zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2007 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2007zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2008zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2008zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2008 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2008zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2009zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2009zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2009 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2009zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u200azz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u200azz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+200A in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u200azz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2028zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2028zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2028 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2028zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u2029zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u2029zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+2029 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u2029zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u202fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u202fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+202F in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u202fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u205fzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u205fzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+205F in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u205fzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\u3000zz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\u3000zz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+3000 in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\u3000zz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the userinfo, raw desc",
+   "key": "desc",
+   "raw": "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the userinfo, raw category",
+   "key": "category",
+   "raw": "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the xtream-path, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\ufeffzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the xtream-path, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/live/qqqqqq/zz\ufeffzz/1.ts tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the xtream-query, raw desc",
+   "key": "desc",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufeffzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "U+FEFF in the xtream-query, raw category",
+   "key": "category",
+   "raw": "News http://cdn.test/get.php?username=qqqqqq&password=zz\ufeffzz tail",
+   "panel": "News cdn.test tail"
+  },
+  {
+   "why": "a raw description still folds, after its redaction",
+   "key": "desc",
+   "raw": "  two   words  ",
+   "panel": "two words"
+  },
+  {
+   "why": "a raw description's line feed folds",
+   "key": "desc",
+   "raw": "Line\none",
+   "panel": "Line one"
+  },
+  {
+   "why": "a raw description's U+00A0 between words folds",
+   "key": "desc",
+   "raw": "A\u00a0B",
+   "panel": "A B"
+  },
+  {
+   "why": "a raw category of whitespace alone is absent",
+   "key": "category",
+   "raw": " \t\u00a0\ufeff ",
+   "panel": null
+  },
+  {
+   "why": "a raw description with a tab after a URL",
+   "key": "desc",
+   "raw": "Watch http://cdn.test/live/1.m3u8\tthen",
+   "panel": "Watch cdn.test then"
+  },
+  {
+   "why": "a raw category list takes its first entry that is not empty",
+   "key": "category",
+   "raw": [
+    "  ",
+    "News http://qqqqqq:zz\ufeffzz@cdn.test/x tail",
+    "Drama"
+   ],
+   "panel": "News cdn.test tail"
+  }
+ ],
+ "fold": [
+  {
+   "text": "",
+   "folded": "",
+   "why": "empty"
+  },
+  {
+   "text": "plain",
+   "folded": "plain",
+   "why": "nothing to fold"
+  },
+  {
+   "text": "a  b\t\tc",
+   "folded": "a b c",
+   "why": "runs fold to one space"
+  },
+  {
+   "text": "a\u00a0b",
+   "folded": "a b",
+   "why": "no `:` and `/`: the plain fold"
+  },
+  {
+   "text": "a:\u00a0//b",
+   "folded": "a: //b",
+   "why": "U+00A0 is no control, so `:<U+00A0>//` is no mark"
+  },
+  {
+   "text": "x://a\u00a0b c",
+   "folded": "x://a\u00a0b c",
+   "why": "U+00A0 inside a run is kept"
+  },
+  {
+   "text": "x://a b",
+   "folded": "x://a b",
+   "why": "a space ends the run"
+  },
+  {
+   "text": "x://a\tb",
+   "folded": "x://a b",
+   "why": "a tab ends the run"
+  },
+  {
+   "text": "x://a\nb",
+   "folded": "x://a b",
+   "why": "a line feed ends the run"
+  },
+  {
+   "text": "x://a\u000bb",
+   "folded": "x://a b",
+   "why": "a VT ends the run"
+  },
+  {
+   "text": "x://a\fb",
+   "folded": "x://a b",
+   "why": "an FF ends the run"
+  },
+  {
+   "text": "x://a\rb",
+   "folded": "x://a b",
+   "why": "a CR ends the run"
+  },
+  {
+   "text": "x://a \t\n b",
+   "folded": "x://a b",
+   "why": "the delimiters after a run fold together"
+  },
+  {
+   "text": "x:\u0000/\u001f/a b",
+   "folded": "x://a b",
+   "why": "C0 inside the mark is deleted"
+  },
+  {
+   "text": "x:\u007f\u0085\u009b//a",
+   "folded": "x://a",
+   "why": "DEL and C1 inside the mark are deleted"
+  },
+  {
+   "text": "x://a\u0000b\u001fc\u007fd\u0085e f",
+   "folded": "x://a\ufffdb\ufffdc\ufffdd\ufffde f",
+   "why": "C0, DEL and U+0085 after the mark become U+FFFD"
+  },
+  {
+   "text": "x://a\u2028b\u2029c",
+   "folded": "x://a\ufffdb\ufffdc",
+   "why": "U+2028 and U+2029 after the mark become U+FFFD"
+  },
+  {
+   "text": "1://a\u00a0b",
+   "folded": "1://a b",
+   "why": "a mark with no scheme letter before it starts no run"
+  },
+  {
+   "text": "+.-1://a\u2028b",
+   "folded": "+.-1://a b",
+   "why": "a scheme-legal run of no letter starts none"
+  },
+  {
+   "text": "1x://a\u00a0b",
+   "folded": "1x://a\u00a0b",
+   "why": "a letter anywhere in the scheme-legal run starts one"
+  },
+  {
+   "text": "_://a\u00a0b",
+   "folded": "_://a b",
+   "why": "a character outside the scheme-legal run ends it"
+  },
+  {
+   "text": "1://a?u=http:\u007f//b\u00a0c d",
+   "folded": "1://a?u=http://b\u00a0c d",
+   "why": "a URL behind a mark that starts no run starts its own"
+  },
+  {
+   "text": "x://a\u009bb",
+   "folded": "x://a\u009bb",
+   "why": "another C1 after the mark is kept, as the plain fold kept it"
+  },
+  {
+   "text": "x://a\u00a0",
+   "folded": "x://a\u00a0",
+   "why": "a run reaching the end keeps its U+00A0 (the caller trims)"
+  },
+  {
+   "text": "x://a?u=y:\u007f//b\u00a0c d",
+   "folded": "x://a?u=y:\ufffd//b\u00a0c d",
+   "why": "a mark inside a run is the run's text, its controls U+FFFD"
+  },
+  {
+   "text": "a\ufeffb x://c\ufeffd",
+   "folded": "a\ufeffb x://c\ufeffd",
+   "why": "U+FEFF is neither space nor control"
+  },
+  {
+   "text": "a\u009bb",
+   "folded": "a\u009bb",
+   "why": "a C1 control outside a run stays, as it always did"
+  },
+  {
+   "text": "a\u007fb",
+   "folded": "a b",
+   "why": "DEL outside a run folds"
+  },
+  {
+   "text": "a:b/c",
+   "folded": "a:b/c",
+   "why": "a `:` and a `/` that are no mark"
+  },
+  {
+   "text": ":/:/:/ x",
+   "folded": ":/:/:/ x",
+   "why": "`:/` repeated is no mark"
+  },
+  {
+   "text": "a x://b  y://c\u00a0d  e",
+   "folded": "a x://b y://c\u00a0d e",
+   "why": "two runs, each whole"
+  },
+  {
+   "text": "  x://a  ",
+   "folded": " x://a ",
+   "why": "the edges fold, and are not trimmed here"
+  }
+ ]
+}

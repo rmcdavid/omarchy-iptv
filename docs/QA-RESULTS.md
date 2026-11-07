@@ -17918,7 +17918,7 @@ The costs, stated:
   - The shapes, 47 in all: a plain userinfo; five schemes (glued to a digit, `HTTP` in upper case, `s3` ending in a digit, `git+ssh` holding a `+`, and `smb`, which no stream uses); and one password for each printable ASCII character that is neither a letter nor a digit, for DEL, and for each of eight that are not ASCII (U+0085, U+009B, a no-break space, `é`, U+200B, U+2028, U+3000 and U+FEFF). [2026-11-05, D-SINK-78: 57 since, ten more, a `;` at each other place in a userinfo and Xtream's path and query credentials. Names take all 57, tvg-names 56, and titles and details 52.]
   - Nine more have a control inside the URL: two inside the userinfo and seven inside the `://` (NUL, SOH, a tab, U+001F, DEL, U+0085 and U+009B).
   - The sweeps run through the shipping `parse_m3u` and `parse_xmltv`. `parse_m3u` covers the name, the tvg-name, the name a title that cleans to nothing takes from the cut tvg-name, and each group and the group text, from `group-title` and from `#EXTGRP`. `parse_xmltv` covers the title, and the description, category and on-screen episode, which `clean_detail` cuts.
-  - Each sweep takes the shapes its field keeps as they are. Names take all 47. Tvg-names take 46, because an attribute ends at its `"`. Through `group-title`, each group and the group text take 45, without the `"` and the `;`. Through `#EXTGRP`, which is no attribute and keeps a `"`, they take 46. The `;` is left out of both, because the stored groups are split at it, after the group text's cut and before each group's. [2026-11-05: that exclusion is where D-SINK-78 sat. The group sweeps take every shape their field keeps now, ten more among them: 56 of 57 through `group-title`, without the `"`, and 57 through `#EXTGRP`.] Titles and details take the 42 the guide's fold leaves as they are, since a title is cut after it.
+  - Each sweep takes the shapes its field keeps as they are. Names take all 47. Tvg-names take 46, because an attribute ends at its `"`. Through `group-title`, each group and the group text take 45, without the `"` and the `;`. Through `#EXTGRP`, which is no attribute and keeps a `"`, they take 46. The `;` is left out of both, because the stored groups are split at it, after the group text's cut and before each group's. [2026-11-05: that exclusion is where D-SINK-78 sat. The group sweeps take every shape their field keeps now, ten more among them: 56 of 57 through `group-title`, without the `"`, and 57 through `#EXTGRP`.] Titles and details take the 42 the guide's fold leaves as they are, since a title is cut after it. [2026-11-05: the attribute sweeps' `"` exclusion is where D-SINK-80 sat, and the titles' is where D-SINK-79 sat; every sweep takes all 57 shapes now.]
   - The parses that carry groups run in batches under `MAX_GROUPS`. Each guide channel takes 300 programmes a minute apart, inside the window.
 - everything they store is held to the cap and to four sinks.
   - The sinks are `redact_urls`, `Model.sinkText`, and the two that delete controls first: `player_title_text`, and the body `Model.notifyArgv` posts. The shell's run in node over the helper's output.
@@ -18203,3 +18203,343 @@ The critic's two gaps, filed: F-HARNESS-102, caged players reading the system mp
 **Waiting for the owner's shell restart** (the live shell runs the 4.0.6 core): D-SINK-85 on the real toast; the bar in all six sections, the logo toggle's write included; the old and new chords; the a11y bus probe; key-scenario live; the orphan check end to end (PLAYER-LIVE-04 and the same-shell twin); the player under the system mpv.conf's hwdec.
 
 **Upstream reports, drafted for the owner and not posted:** Markup.js decodes before it escapes; Detect.js reads provider text as codes and bypasses Do Not Disturb unconditionally; the `{ ipc = "target.method" }` bind form splits at the first dot; the migrations replace `shell.json` for a moment, so the host reads every plugin as disabled.
+
+## D-SINK-79, -80, -82 and -83, 2026-11-05: a web address stays whole wherever provider text is parsed, folded or listed
+
+The owner picked D-SINK-80 after D-SINK-78 shipped. A map (`wf_5994aa27-c38`: a grammar reader, a sinks reader, a siblings reader, a reader of how other players parse playlists, and a critic) measured it and found D-SINK-82 and D-SINK-83 beside it. The owner then answered four questions: the address stays whole, a tvg-id that is a URL is dropped, every source's cache is refetched once, and this round fixes D-SINK-79, D-SINK-82 and D-SINK-83 as well (STATUS decisions log, 2026-11-05). Three lanes implemented it in their own worktrees (`wf_5ef3038f-034`), each red first and mutation-proven, and the lead integrated them. The board rows record the defects. Each was kept off the board and out of every commit until this fix, as a security row is. Credentials are spelt `qqqqqq` (user) and `zzzzzz` (password), hosts sit under `.test`, and a leak is any `q` or `z` at a sink.
+
+### D-SINK-80: the attribute grammar
+
+**What it did.** `parse_attrs` (bin/helper/02-sources.py) ended a quoted value at its first `"` (`_ATTR_QUOTED`) and a bare one at a `,`, a `"` or Python whitespace (`_ATTR_BARE`). Every redactor reads all three as URL text. The cut value kept the username, and the walk stopped at the stray character. Then `parse_extinf` made the rest of the line the channel's name: the password's tail with no scheme in front of it, which no redactor can touch. `tvg-name="http://qqqqqq:zz"zz@cdn.test/x" tvg-id="ID.1",Plain Title` stored the tvg-name `http://qqqqqq:zz` and the name `zz@cdn.test/x" tvg-id="ID.1",Plain Title`. A bare hint cut inside its username, `url-tvg=http://qq<U+2028>qqqq:zzzzzz@prov.test/x.xml`, was stored as `http://qq` and adopted with the host `qq`, and fetched with no click. (This read `url-tvg="http://qqqqqq:zz,zz@prov.test/x.xml"` adopted as `http://qqqqqq:zz` until the review's F8: a quoted value was never cut at a comma, and the shell never adopted a host with a non-numeric port.) A tvg-id holding a URL became a raw `t:` id.
+
+The sweep (`tests/test_attr_grammar.py` SweepTest, the critic's grid widened) builds 8,680 lines from:
+- 5 URL forms: userinfo user, userinfo password, Xtream path, Xtream query, and a cut right after `://`;
+- 31 cut characters: `"`, `",`, `,`, 19 non-ASCII and control code points (the fold's 20 less DEL), U+001C..U+001F, and D-SINK-34's five delimiters;
+- 7 attributes: group-title, tvg-name, tvg-logo, tvg-id and catchup-source on `#EXTINF`, url-tvg and x-tvg-url on `#EXTM3U`;
+- quoted or bare, first or last, with or without the title comma.
+
+| | the fix | 96b8496 | 0.17.0 |
+|---|---|---|---|
+| lines outside D-SINK-34's class leaking at a helper sink (of 7,280) | 0 | 3,728 | 3,728 |
+| of which the name, at `redact_urls` and `player_title_text` | 0 | 2,800 | 2,800 |
+| the raw id | 0 | 928 | 928 |
+| the hint | 0 | 448 | 448 |
+| lines leaking at a shell sink (of 7,280) | 0 | 3,248 | 3,248 |
+| hints adopted / refused for userinfo / none | 96 / 144 / 1,840 | 688 / 24 / 1,368 | the same |
+| D-SINK-34's class, any leak (of 1,400) | 1,080 | 1,180 | 1,180 |
+
+The fix's column is the grammar lane's commit (ecf5d41), before D-SINK-83 was merged. The shell's sinks were `sinkText` of every stored field, `displayName`, the `notifyArgv` body, `logoSurvey` with `logoConsentLines`, and the host of an adopted or refused hint. Within D-SINK-34's class the helper's count falls by 100, the cut URL tvg-ids the drop removes. 40 hints there were still adopted with the username as the host, and D-SINK-83 refuses those.
+
+**The fix** (the owner's rule, `parse_attrs`):
+- A value with no URL in it parses exactly as before, byte for byte.
+- A quoted value is inside a URL's run when a `://`, as `_URL_MARK` reads one (controls allowed between the `:` and the `//`), stands between the last ASCII space before its first `"` and that quote. The run then ends at the first of the six ASCII delimiters at or after the quote, or at the end of the line. The value closes at the run's last character when that is a `"`, otherwise at the run's last `",`. With neither, the value is unterminated: the walk stops at the attribute, and the rest of the line, URL whole, is the title.
+- A bare value in which a `://` starts runs to the next of the six delimiters, counted from the end of the one mark that runs past the value's end when one does.
+- The rule looks back to an ASCII SPACE, so a TAB between the mark and the quote does not end it; the control-deleting sinks join across a TAB. Its run END is the six, so an attribute a TAB separates from a URL value is still read (tests/fixtures/qa-attrs.m3u keeps that line).
+- Speed shortcuts that change no answer: a line with no `/` takes none of the tests; the quoted search starts at the last `:` before the run's first `/`; the bare test is one bounded search, plus one match when a control ends the value.
+
+`make_channel` drops a tvg-id that holds a `://`, as `_URL_MARK` reads it: no writer read puts a URL there, and the raw `t:` id would carry the whole credential to the IPC replies, state.json, the player's stash and `OMARCHY_IPTV_ARGS`. An `@` alone (`CNN.us@HD`) is kept, and so are `news:sports`, `a:/b` and `a//b`. The group scope stays raw (D-SINK-78). The row then joins no guide at all, by name either: every match strategy publishes under the row's tvg-id (`match_xmltv_channel`), so a row 96b8496 matched by name loses its guide, and so does one whose tvg-id a glued URL value absorbed (the review's F15). `DESTINATION_RULES` is 2 in both mirrors and the destinations fixture: 1 marked the destination rules, and 2 the grammar.
+
+**Ordinary lines.** 38,142 distinct `#EXTINF` and `#EXTM3U` lines were compared between 96b8496 and the fix: every playlist under tests/fixtures, every JSON fixture string holding one, and gen-playlist output (synthetic and realistic profiles, several seeds, multi-group, dense numbering and headers, the two 10,000-channel budget files). 0 parse differently. The only changes are the stated costs, which the fixture pins.
+
+**Tests.**
+- tests/fixtures/attr-grammar.json has 102 cases, every expected value hand-written: 59 leak shapes, 8 stated costs, 9 cases in D-SINK-34's class and 26 ordinary lines; 36 of them, across those groups, carry a stored row.
+- tests/test_attr_grammar.py (17 tests) runs it through `parse_attrs`, `parse_extinf` and `parse_m3u`, and holds every stored field to the helper's sinks.
+- It also runs the sweep, with each URL-bearing value held to redacting to exactly `<scheme>://cdn.test`, so a fix that drops values cannot pass. It checks that the attribute after a URL value is read and that the name is exactly `Plain Title`.
+- A character-loop reference written from the rule text is held to the shipping function over 40,000 seeded random lines, with each branch counted so the comparison is not vacuous: quoted-inside 6,020, bare-inside 4,162, unterminated 1,590.
+- TvgIdTest covers the drop. LinearTest runs 14 shapes, each 3.4 to 4.3 times the cost for 4 times the text.
+- tests/Model.test.js runs the stored rows through the shell's sinks and the IPC now-playing record.
+- test_cut_urls' attribute sweeps take the `"` shape they left out "because an attribute ends at its `"`". That exclusion was the defect, as D-SINK-78's `;` was. They now hold every row's name too: 210 unterminated names through the tvg-name routes, 105 through group-title and 105 through the group text.
+
+**Red first.** The round's final tests over a git archive of 96b8496 (re-measured on 2026-11-06 with the integrated files; the lanes' counts were for their own versions, F20) give:
+- 17 of the 101 tests in test_attr_grammar, test_cut_urls and test_destinations fail, 14 of them D-SINK-80's: test_attr_grammar 10 of 17, test_cut_urls' 3 lifted attribute sweeps (of its 5; the other 2 are D-SINK-79's title sweeps) and test_destinations' stamp (of its 2; the other is D-SINK-82's list case);
+- 22 of 3,383 node checks fail, 3 of them D-SINK-80's: the stamp twice and the shared names.
+
+The old test_cut_urls with only the exclusion lifted goes red at every sink: `player_title_text` and `redact_urls` print `http://qqqqqq`, and `sinkText` and the `notifyArgv` body print `qqqqqq`. Over 787a33b (0.17.0), test_attr_grammar fails the same 10. The committed node block holds the shell's sinks to the rows the FIXED helper stores, so it passes against 96b8496 as well (the review's F17; its tvg-id clause, which read only the fixture, is gone); the join to the parse is test_attr_grammar's. Run instead over the rows 96b8496 and 0.17.0 write, in a scratch harness, the same sinks print `zzzz@cdn.test/x" tvg-id="ID.1",Plain Title` at `sinkText(name)` and the group `qqqqqq` at `ipcNowPlaying`.
+
+**Mutations.** 27, each on an archive of the lane's commit, sealed. 24 are red. The three left change no answer:
+- the bare run end searched from that mark's end alone, since a bare value holds no delimiter;
+- the quoted pre-check removed, speed only;
+- the no-`/` shortcut off, speed only.
+
+Two survivors of earlier rounds were missing tests, and each got a case: a C1 control ending a bare value (`tvg-logo=http:\x85//...`), and a mark searched past the value (`tvg-chno=12,ESPN http://cdn.test/live`).
+
+**The parse's cost.** `parse_m3u` alone, 10,000 entries, best of 5 of process CPU, interleaved twice, load 1.8-2.6:
+
+| entries | 96b8496 | the fix |
+|---|---|---|
+| the budget test's line | 0.69-0.71 s | 0.76-0.77 s |
+| gen-playlist realistic | 0.75 s | 0.81-0.82 s |
+| gen-playlist synthetic, with tvg-ids | 0.70-0.71 s | 0.76-0.77 s |
+| D-PERF-13's 512-character `a:// ;` group-title | 1.25-1.27 s | 1.31 s |
+| D-PERF-13's 510 `:` then `;/` | 0.91-0.92 s | 0.95 s |
+| five URL attributes a line | 0.56 s | 0.67-0.68 s |
+| a 512-character quoted URL value holding 100 quotes | 3.98-3.99 s | 0.59 s |
+| 40 bare attributes a line, each holding a colon (constructed) | 0.99-1.00 s | 1.00-1.01 s |
+
+Rule 7 holds on the budget inputs. The 4-second row is 96b8496 building a 500-character name out of the cut's remainder, which the fix no longer makes.
+
+**Siblings.**
+- `parse_attrs` is the helper's only attribute parser, with two callers. The shell has none.
+- The other line grammars cut nothing inside a URL: `#EXTGRP` takes the rest of its line, `#EXTVLCOPT` and `#KODIPROP` split once at `=`, and the location line is taken whole. `parse_extinf`'s duration and title (one `,`, then strip) are the same.
+- The `#EXTM3U` remainder is discarded, so the header's cut leaked only through the hint, which is stored whole now.
+- D-SINK-75's caps (tvg-id 256, chno 32, logo and hint 2,048) now receive the whole value, so they drop a whole URL, never a cut one.
+- The raw values that become ids: `t:` (fixed, the drop), `g:` (raw by D-SINK-78's decision), and `n:`/`u:`, which are hashes. The guide's `@` split makes match keys only.
+- The helper now holds two definitions of a URL's run. `cut_free_text` and `split_groups` end it at an ASCII space; the grammar and the fold end it at the six. They differ only for a URL holding a TAB, VT, FF or CR, which is D-SINK-34's class. Both docstrings say so.
+
+### D-SINK-79: the guide's fold
+
+**What it did.** `clean_title` and `clean_detail` (bin/helper/04-epg.py) folded every run of `_CONTROL_WS` to a space before the cut and the redaction. Twenty code points XML allows were folded, and each is URL text to both redactors: U+007F, U+0085, U+00A0, U+1680, U+2000..U+200A, U+2028, U+2029, U+202F, U+205F and U+3000. A URL holding one was split before any redactor read it. Through the shipping `parse_xmltv`, 96b8496 stores 217 of the fixture's 305 cases differently from the fix, and 211 of them show a letter of the credential at `redact_urls` or `player_title_text` (measured on 2026-11-06; the recheck measured 0.17.0 the same as 96b8496 over the 297 cases the fixture held before it, 209 and 205, and the lane 197 and 195 over its 283). Per field (stored differently / leaking):
+
+| case kind | field | 96b8496 and 0.17.0 |
+|---|---|---|
+| sweep | title | 60 / 60 |
+| sweep | description | 60 / 60 |
+| sweep | category | 40 / 40 |
+| sweep | episode | 20 / 20 |
+| ordinary | title | 17 / 14 |
+| ordinary | description | 17 / 14 |
+| cut | title | 2 / 2 |
+| cut | description | 1 / 1 |
+
+The shell's panel did it again over a record it did not clean: `epgEpisodeText` (model/epg.mjs) folded with JS `\s` ahead of `epgDetailText`'s redaction. 115 of 132 raw panel cases leaked on both trees: 19 code points times 3 URL forms times 2 fields, plus the list case.
+
+**The fix.** `fold_space` (bin/helper/01-core.py):
+- A text with no `:` or no `/` takes the old fold, byte for byte.
+- Otherwise each URL's run is found left to right. A run starts at a `_URL_MARK` match with an ASCII letter in the scheme-legal run before its `:` (`scheme_letter_before`: where both redactors start a scheme), and ends at the first of the six delimiters at or after the mark's end. A mark with no such letter (`1://`) starts no run (the review's F11 and F9's recheck, below).
+- Outside every run, the old fold applies. Inside a run:
+  - the mark is written `://`, every control in it deleted, a tab included;
+  - after the mark, C0, DEL, U+0085, U+2028 and U+2029 each become U+FFFD: the controls the old fold made spaces, DEL, which separates a channel's records and which `json.dumps` does not escape, and the two separators, which break a guide row's line. The lane's fix deleted the three controls; the review's F9 replaced that (below);
+  - everything else is kept.
+
+`clean_title`, `clean_detail`'s first fold and `retain_programme`'s defensive refold use it. `clean_field` keeps the plain fold: its callers hand it text already redacted, and the xmltv_ns episode, which is digits. The shell's `epgEpisodeText` only trims now, and every caller behaves as before except for the order.
+
+The brief said to delete every C0 and C1 control inside the run. The lane kept the C1 controls other than U+0085 after the mark, as the old fold kept them, and the lead took that: both plain redactors read a kept C1 control as URL text, so it splits nothing, while deleting one could make a port of digits and print a dotted username, F9's mechanism (`http://my.user:12<U+009B>34/pw@cdn.test/x` redacts to `http://[host withheld]` with it kept and to `http://my.user` with it deleted, in both mirrors; the recheck). So keeping is the safe choice of the two. test_cut_urls and test_epg_fold pin the kept form (decisions log). Inside the mark, C1 IS deleted, because there it decides whether a plain redactor sees a URL at all.
+
+**The cached guide.** The shell never forces the `epg` verb, so `needs_refetch` decides. It refetches when:
+- the window is 6 hours old;
+- the window's end is under 2 hours away;
+- the source changed;
+- channels.json's mtime changed.
+
+The playlist's stamp refetches the playlist at the next start. But the guide run that starts beside it reads channels.json's mtime before that fetch writes it, so a guide the old fold cleaned stayed fresh until the next refresh, up to `refreshMinutes` (6 hours by default, 24 at most). So the lead gave the window a stamp of its own: its meta line carries `guideRules` (`GUIDE_RULES` 1), and `needs_refetch` refetches a window written under older rules or none, whatever its age. A guide the old fold cleaned is refetched at its source's first guide run after the update: the active source's at once, each other source's when a swap makes it active. If that refetch fails, the run reports the guide as failed and the shell posts its guide-failed notice, where 0.17.0 served the same cache silently, and the old window, its old titles included, stays in use, stale, re-derived into epg-now.json by every failed run and every five-minute recompute, until a refetch succeeds; `--now-only` never refetches, and nothing loops (the review's F13 and F14). The playlist's stamp has the same shape.
+
+**Tests.**
+- tests/fixtures/epg-fold.json, ASCII only, every expected value hand-written, holds:
+  - 240 sweep cases: the 20 code points, three URL forms, four fields;
+  - 62 ordinary texts, 14 of them the review's (a control in a dotted username's port, a mark with no scheme letter, a separator in a host, a URL behind a mark with no scheme letter) and 8 the recheck's (a non-ASCII letter, and a letter and a non-ASCII digit, before a mark; an upper-case scheme; prose joined across a line break);
+  - 3 cuts at D-SINK-75's caps;
+  - 132 raw panel details;
+  - 32 fold vectors.
+- tests/test_epg_fold.py (17 tests) checks:
+  - the parse stores exactly what the fixture says;
+  - neither helper sink shows a credential letter, and each kept URL redacts to `http://cdn.test`;
+  - the old fold's counterfactual;
+  - `fold_space` against a character-at-a-time reference over 40,000 random texts;
+  - the record format: no cleaner lets NUL, U+001F, DEL, U+2028 or U+2029 through, for 84 code points at four positions, and again with the URL's mark intact, which is the only text where a line separator sits inside a run (the recheck);
+  - `fold_space` against the reference over an alphabet holding a non-ASCII letter and digit, `.`, `-` and an upper-case letter, so a scheme-letter test that reads any Unicode letter or digit goes red (the recheck);
+  - linear time on 11 shapes, three of them runs of digits before a mark;
+  - the guide stamp, through the shipping verb: a fresh window is read from the cache, the same window without `guideRules`, or with it at `GUIDE_RULES - 1`, 0, -1, `"x"`, null, a list or 1e400, is refetched once, and the window after that is read again (the review's F19).
+- tests/Model.test.js runs every stored text through `sinkText`, `epgFields`, `formatEpgLine`, `rowDetail`, `rowAccessibleName` and `programmeDetail`, and the raw panel.
+- One existing node check pinned the old fold in `epgEpisodeText` (`"two words"`), and it now reads `"two   words"`.
+- test_cut_urls' title sweeps took only the shapes the old fold left as they were (52 of 57), "since a title is cut after it". That exclusion was the defect a third time. They now take all 57. The fold's expected URL is the URL with U+FFFD for its DEL, U+0085 and U+2028, and the 57 shapes take the sweeps from 7,648 to 8,348 cases for the title and the description, 7,564 to 8,264 for the category, and 6,864 to 7,524 for the episode. On 96b8496 the lifted sweeps fail 2 of TitleCutTest's 7, the title sweep and the detail sweep; on the fix they pass.
+
+**Red first.** The lane measured its 15 tests: on 96b8496 7 failed and 4 errored, the errors because `fold_space` is missing; on 0.17.0 6 and 6. The node block's 7 checks: 2 failed on both. Re-measured on 2026-11-06 with the final files over 96b8496: 13 of test_epg_fold's 17 fail or error (7 and 6), test_cut_urls' title sweeps fail 2 of TitleCutTest's 7, and 3 node checks fail (the raw panel, `epgEpisodeText`, and M4-02's episode shapes). The node checks that pass on old code hold the shell's sinks to texts the fixed helper stores, and the shell was right for a whole URL. The stamp tests were red by mutation (below).
+
+**Mutations.** The lane's 22, 20 red, the review's four, all red, and the recheck's three, all red (below). The two left change no answer:
+- the run starting at the scheme's first character, since scheme characters are neither folded nor deleted;
+- the cheap exit testing `:` alone, since a text with no `/` holds no mark.
+
+Red, among others:
+- folding inside the run again;
+- the run ending at a space only;
+- controls kept after the mark, or inside it;
+- U+0085 or DEL kept (DEL kept breaks the record split);
+- each cleaner back on the plain fold;
+- `clean_field` taking `fold_space`;
+- a quadratic restart, caught by the linear test;
+- the shell folding before its redaction, folding NBSP only, or not trimming.
+
+**The parse's cost.** `parse_xmltv` over 48,000 programmes, best of five, interleaved, load 2.0-2.3. On a guide of words: 2.67-2.73 s against 2.72-2.81 s, +2-3%. With a URL holding U+00A0 in every title: 2.86-2.88 s against 3.10-3.13 s, +8-9%. `fold_space` alone grows 2.9 to 4.1 times from 8,000 to 32,000 characters on all 8 shapes. The adversarial bound, measured by the recheck: the costliest shape is titles of `a:// ` or ` ://`, about 0.4 microseconds a byte, so a guide at the 64 MiB cap parses in about 22 s on the final tree against about 21 s on the tree before the review, inside the service's 180 s watchdog; the run-start check's own shapes (`1://` repeated, a long digit run before a mark) cost about 0.26 microseconds a byte.
+
+**Siblings.** The search was for a fold, strip, split or replacement of provider text that maps a URL character to a space before a redactor reads it: the helper's `split()`, `join`, `\s` patterns, `_CONTROL_WS`, `translate`, `textwrap` and `isspace()`, and every `replace`, `split`, `match`, `trim` and strip in model/ and the three QML files.
+- Fixed: the three cleaners and `epgEpisodeText`.
+- Cleared as keys only: `clean_field`; the programme's `channel` and the channel's `id`; `epg_name_text`; `fold_text`'s punctuation folds; the search tokenizer.
+- Cleared because they delete controls rather than fold them: `player_title_text` and `notifyArgv`.
+- Cleared because they redact first: `network_detail`, the settings and player trims, `ipcJson`, and every guide-title sink.
+- Cleared as edges only, or not provider text: the remaining `trim`, `split` and `replace` calls.
+
+**The residual.** A control between a scheme and its `:` (`http<DEL>://user:pw@host`) is outside the run and folds to `http ://`, where no plain redactor reads a URL, raw or folded. It is pinned in the fixture without a credential. **And the cost of the mark's deletion** (the recheck): the mark deletes every control, a tab, a line feed and a carriage return among them, so prose with a word's `:` at the end of a line and `//` after it is stored as `Featuring:// The Band`, which the shell's sinks read as a URL and draw as `[url] The Band` (96b8496 drew `Featuring: // The Band`). That is the price of `http:<LF>//user:pw@host` being redacted, where the raw text and 96b8496 print it whole; a fixture case pins it. Narrowing the mark to exclude the delimiters was measured and refused: it puts the whole credential back.
+
+### D-SINK-82 and D-SINK-83: the host a playlist chose
+
+**What they did.** D-SINK-82: a comma-joined hint was one URL to `Model.epgHintVerdict`, so the second URL's credential went to the first URL's host on every guide refresh, in the request line. Through the shipping `epg` verb with origin `playlist`, a loopback server received `GET /epg.xml,http://127.0.0.1:<port>/xmltv.php?username=qqqqqq&password=zzzzzz`; on the fix the verb answers `bad_url` and the server sees nothing.
+
+D-SINK-83: a one-label host the playlist chose was looked up, and printed. On 96b8496:
+- `http://qqqqqq:/` was looked up as a hint host, through a proxy, on a redirect, and as a logo host;
+- `check_proxied` said `could not resolve qqqqqq to check where it leads through the proxy`;
+- the logo error said `could not fetch a logo from qqqqqq:`;
+- the survey and the consent text named `qqqqqq` as the busiest host;
+- the Sources row read `EPG from playlist not used: its address for b carries a password` for `http://a@b:12/`.
+
+**The fix.**
+- D-SINK-82, the first entry. The hint is cut at the first `,` followed by any run of the six delimiters, a scheme that starts with a letter, and `_URL_MARK`'s shape. The part before it, trimmed of the six, is the hint; with no such comma the text is returned untouched. This is `hint_first_entry` and `Model.hintFirstEntry`. `epgHintVerdict` runs every check on the first entry. The helper's `fetch_bytes` refuses, for origin `playlist`, a URL that is not its own first entry, judged as received, before the helper normalises it. A 0.16.0 or 0.17.0 shell has normalised it already, to `https://epg.test,http//prov.test/x?...` with the host `epg.test,http`, in which that test finds no list; so `fetch_bytes` also refuses a URL whose host holds a `,` (the review's F10). A shell before 0.16.0 sets no origin, so neither test runs for it until it restarts (F4); since the final check the parse stores a hint's first entry alone, so that holds only for a cache an earlier helper wrote.
+- D-SINK-83, the one-label host. `dotless_host` and `Model.dotlessHost`: lower-cased, one trailing `.` removed, no `.`, not empty, not an IPv6 literal, bracketed or not.
+  - In the shell, a hint on one is the none shape unless its `hostKey` is the playlist's. The check runs before the userinfo test, so `http://a@b:12/` cannot name `b`. A logo on one has no host: `logoHost` in model/logos.mjs answers "", so it is counted refused and named nowhere.
+  - In the helper, `logo_host` answers "" and `fetch_logo` refuses before its opener is built. `DestinationPolicy.refuses_name` is asked before `resolve_within` on every hop of `bounded_create_connection`'s direct path, and first in `check_proxied`. It refuses for origin `playlist` (its own host excepted) and for logos (never excepted), with a `local_address` sentence that names no host.
+  - Origin `user` is never affected.
+  - Only a username of ONE label is caught: a dotted or e-mail username reads as a dotted host and is looked up and named as before, since no test tells it from a host (D-SINK-35's class; the review's F12, pinned by a `noDot` and a `hintVerdicts` case). After D-SINK-80 that cut reaches only a bare value, which a space ends.
+
+**What the lead added at integration.** Each was red under a mutation of its fix, and green with it:
+- The guide status for such a host: a shell loaded before the rule can still hand one over, and the refused run's reply and epg-status.json carried `"sourceHost": "qqqqqq"`. The status now names no host the policy refuses (tests/test_provider_hosts.py EpgStatusTest).
+- A one-label logo is counted with the policy's refusals (`refusedOnPolicy`), as `local_address` is, not as a failure of its address (tests/test_logo_run.py).
+
+**Tests.**
+- tests/fixtures/provider-hosts.json, hand-written, has six sections: 27 first-entry cases, 25 one-label predicates, 35 hint verdicts, 19 hand-offs, 18 logo hosts and, since the review, 18 `absorbed` cases (142).
+- tests/test_provider_hosts.py (27 tests) runs every fetch with `socket.getaddrinfo` replaced by a recorder that answers numeric hosts, a name it is given as the address it maps to, and refuses every other name. So "no lookup" means the recorder saw no call, and nothing leaves the machine; its test servers skip `http.server`'s reverse lookup of their own address (the recheck).
+- Two loopback-server cases in tests/test_destinations.py: the measured list, and its user-typed control.
+- A node block of 13 checks: the verdict, the resolution, the fetch environment, the Sources row and its accessible name, the logo survey, the consent message, and since the review F1's absorbed predicate, its logo survey and its linearity.
+- Expectations changed on purpose:
+  - five destinations hints (`localhost:8080/api/shutdown`, `0x7f000001`, `2130706433`, `LOCALHOST.`, and `localhost:8080/epg` under a `127.0.0.1` playlist) moved from "is a local address" to no hint;
+  - D-SG-3's prototype-named logo hosts are all one label, so its `logoSurvey` probe contacts 1 host where it contacted 6.
+
+**Red first.** The lane measured its 20 tests: 16 failed on 96b8496 and on 0.17.0, with 1 of the 2 new test_destinations cases, and the node block's 10 checks all failed. Re-measured on 2026-11-06 with the final files over 96b8496 (F20): 22 of test_provider_hosts' 27 fail or error (11 and 11), with test_destinations' list case, test_logo_run's two and test_logos' shared survey fixture; and 16 node checks of 3,383: the block's 13 and the three checks whose fixtures were re-expected. The 5 python tests that pass are the controls: the fixture is ASCII and whole, a typed name is looked up on every hop, a dotted name the playlist chose still reaches the lookup, the user's typed proxy control, and the user's one-label proxy (F6's test, which passes on 96b8496 because no one-label rule exists there to wrongly catch it, and goes red under its mutation).
+
+**Mutations.** 46, 43 red. The three left change no answer:
+- lower-casing removed, in either mirror: no code point but `.` lower-cases to a `.`, and both IPv6 parsers lower-case for themselves;
+- the model's empty-home clause: `validateSourceUrl` never yields an http host whose `hostKey` is empty.
+
+The helper's empty-home clause was a survivor until a whitespace-host case was added.
+
+**Cost.**
+- On 10,000 channels: the model's `logoFile` +0.45 ms, and the helper's `logo_survey` +3.1 ms.
+- `hint_first_entry` takes 0.69 microseconds a call, and `epgHintVerdict` 0.7 microseconds more a call.
+- Both mirrors run nine linear-time shapes.
+
+**Siblings.**
+- The hint's only readers are `epgHintVerdict` and the `epg` verb's `fetch_bytes`, both fixed.
+- `tvg-logo` is no list by any convention read. A logo carries no user credential of its own, but a logo URL that absorbed a glued attribute carried that attribute's, and the review found it (F1, below).
+- Stream URLs are whole lines.
+- Every lookup the helper makes goes through `resolve_within`, whose two callers now ask `refuses_name` first. That covers every opener's first hop and redirects, directly and through a proxy.
+- The printed hosts: the Sources row's sentences, `epgSourceHost`, the consent line, the survey, the dimension refusals and the proxy error are fixed by the rules above. `fetch_logo`'s own messages are reached only after its pre-check. `read_http_source`'s userinfo sentence is unreachable from any shell that sets an origin.
+- Not covered, stated: stream hosts, which mpv resolves (docs/ARCHITECTURE-PLAYER.md 19.2).
+
+Two findings the lane raised:
+- `logo_survey` raises on a channels.json logo that `urlsplit` refuses (`https://[qqqqqq]/a.png`). That is D-LOGO-26, open, reachable only from a cache another writer made.
+- The consent sentence calls every refused logo "not https", and since D-SINK-83 that includes https logos on a one-label host, and since the review's F1 an https logo the fetch's backstop refuses for an absorbed attribute (a logo the parse drops is no logo at all, and is not counted). That is D-LOGO-27, open, a copy change for the owner.
+
+### Integration
+
+- The three lane branches were merged onto 96b8496.
+- The conflicts were resolved:
+  - the stub, sealed;
+  - the regex guard, all three entries kept;
+  - tests/Model.test.js, both new blocks kept, each closed.
+- The lead's edits:
+  - lifted test_cut_urls' title exclusion;
+  - added a paragraph on the two run definitions to `cut_free_text`'s docstring;
+  - added the grammar lane's shell check to tests/Model.test.js beside D-SINK-78's;
+  - added the guide stamp, the status host and the logo count above;
+  - renamed the one-label rule's comments from "D-SINK-82's companion" to D-SINK-83;
+  - relabelled `_CONTROL_CHARS` in the regex guard as reading provider text, which it has done since `player_title_text`.
+- The lead's four additions were each mutated alone on a copy of the tree and sealed, and all four are red: the logo tuple without `logo_host`; the stamp check removed; the stamp's write removed; the status host's blanking removed.
+- The first full gate on the integration failed twice, both on expectations the round changes on purpose, and both were fixed: test_epg_retention compares the new helper's guide window with an older one byte for byte, and now strips `"guideRules":1,` from the new side first; logo-scenario's T1 fetched from `localhost`, which D-SINK-83 now refuses as one label, and fetches from a dotted name (`logos.example.test`) instead.
+
+### The review, 2026-11-06
+
+An independent review of the integrated tree (`wf_d094b720-79e`): six lenses (the grammar, the fold, the hosts, siblings, tests, docs), a merge, and two skeptics for each finding, one trying to reproduce it and one judging its scope. 31 raw findings merged to 24: 18 upheld by both skeptics, 4 split (F11, F13, F16, F22), 2 refuted by both (F2, the scheme-control residual, which the fold section states; F18, the Sources-row check's two-letter test, which no case can defeat). The labels F1..F24 are the review's own, used only here and in the rows. Every probe but one ran under a resolver stand-in or against numeric loopback: the tests lens's red run of test_logo_run on a 96b8496 archive asked the system resolver for the synthetic one-label name once, which F5 below closes. And one skeptic's first qmltestrunner start ran with the real HOME before a decoy, and exited at the GTK init before any QML loaded, by its own account.
+
+The three code defects, all fixed:
+- F1, a regression of D-SINK-80's own fix, P3. A URL value kept whole to the end of its run took a quoted attribute glued after it (`url-tvg="A"x-tvg-url="B"`), a quoted list (`url-tvg="A","B"`, with `;` or another separator too), or, bare, an attribute glued by a comma. `hint_first_entry` saw no list, since a `"` stood between the comma and the scheme or no comma stood at all, and the guide fetch sent the second URL's credential to the first URL's host: measured through the shipping `epg` verb against a numeric loopback server, the tree's request line was `GET /guide.xml","http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz`, and 96b8496's `GET /guide.xml`. A logo with a credentialed `catchup-source` glued after it was fetched over TLS with that credential in its path, and the consent dialog named only the logo host while saying no credentials are sent. The first fix was at the fetch, so the value stays whole for every redactor (the recheck, below, moved the main rule into the parse and kept this as its backstop): `absorbed_attribute` and `Model.absorbedAttribute` read a raw `"` (RFC 3986 allows none in any component) or a `,` followed by an attribute key, a `=` and a URL's `://`. Such a hint is no hint; such a logo has no host, so the survey counts it refused and names nothing; and the helper refuses both before any lookup (`fetch_bytes` for origin `playlist`, `bad_url`; `fetch_logo`, `logo_url`, counted with the policy's refusals). An image service's comma path, a `?ids=1,2` query and a proxy's `?url=https://` are URL text and pass. The other fixes the review proposed -- widening the list separator, or ending a quoted run at a `"` that a `name="` follows -- each cut a credential that holds the same shape, which the fetch-side rule never does. A separator that is a non-ASCII space was already refused at both fetches (whitespace, or a non-ASCII request line).
+- F9, P4. The fold deleted C0, DEL and U+0085 inside a URL's run, so `http://qqqqqq.qq:<DEL>/zzzzzz@cdn.test/x` became an empty port, and a dotted username before a digits-only password prefix is the one userinfo both redactors print (R32a''): the row showed `News qqqqqq.qq tail` where raw redaction gave `[host withheld]`. The fold now writes U+FFFD there, which keeps the port non-numeric. While fixing it the lead found the fix's own sibling: inside a run that no redactor reads as a URL (`1://...`), a nested URL's mark spelt with a control (`http:<DEL>//`) was the run's text, and U+FFFD left it unwritten, where deletion had happened to write it. So a run now starts only at a mark with a scheme letter before it; a nested URL inside a real run is that run's text, which every redactor reads as one URL. F11 (split: one skeptic held it pre-existing, since a channel name or group could already break the same row) is closed by the same two changes: U+2028 and U+2029 become U+FFFD inside a run, and a mark with no scheme letter takes the plain fold, so no stored guide title holds a line separator again.
+- F10, P4. A 0.16.0 or 0.17.0 shell normalizes a list hint before it hands it over (`https://epg.test,http//prov.test/...`, host `epg.test,http`), so the helper's list test found no list in it; `fetch_bytes` now also refuses, for origin `playlist`, a URL whose host holds a `,`, which no DNS name or literal does, and the shell no longer adopts one.
+
+The test gaps, closed (F5, F6 and F19 seen red under a mutation; F17 by removing a clause that could not go red):
+- F5: test_logo_run's one-label test ran the real `fetch_logo` with no resolver stand-in, so a red run on 96b8496 asked the system resolver for the synthetic name (the finder disclosed that its own red run did so once). It runs inside test_provider_hosts' `Resolver` now and asserts no lookup.
+- F6: the connect-time one-label check exempts the user's own proxy (`not proxied`); no test held that. `test_the_users_proxy_may_be_a_name_of_one_label` sends a hinted guide through a proxy named `proxy`.
+- F17: the D-SINK-80 node block's tvg-id clause read only the fixture; it is gone, and the section above says the block passes on 96b8496 and why.
+- F19: a comparison mutated to read the stamp's presence alone survived; the stamp test now rewrites it to `GUIDE_RULES - 1`, 0, -1, `"x"`, null, a list and 1e400.
+
+The docs, corrected where they overstated (each in the rows, here and in docs/ARCHITECTURE.md, the README, docs/UX-SOURCES.md and CLAUDE.md): F3, a URL that itself holds `",` with a glued, NBSP-separated or missing close is still cut there, as in every release (one skeptic held the suggested close-at-last-quote fix wrong, measured: it changed 5 of 7 well-formed titles holding a quote and added 720 leaks); F4, a shell before 0.16.0 sets no origin, so both helper backstops are off for it until it restarts; F7, the README's guide-hint paragraph; F8, the D-SINK-80 hint example; F12, a dotted username is looked up as before; F13 (split), a failed stamp refetch; F14, inactive sources refetch at their swap; F15, a URL tvg-id loses the row's whole guide; F16 (split), references saved on an old id keep it; F20, the red-first counts; F21, three fixture strings still said "D-SINK-82's companion"; F22 (split), the fold's C1 wording; F23, CLAUDE.md said the helper reads a list's first entry; F24, a TAB is not split by every tokenizer.
+
+The withheld-token re-redaction seen while writing F9's fixture cases is D-EPG-18 (open, P4, cosmetic, since 0.15.0): a description stored as `http://[host withheld]` is redacted again by the panel and drawn as `[url] withheld]`.
+
+**Mutations.** 18, each on a copy of the tree, sealed or relinked, every one red:
+
+| mutation | caught by |
+|---|---|
+| `absorbed_attribute` always false | test_provider_hosts, test_logo_run, test_logos (11 failures) |
+| its `"` half dropped | test_provider_hosts (8) |
+| its `,key=` half dropped | test_provider_hosts (7) |
+| `fetch_bytes` without the absorbed test | test_provider_hosts (5) |
+| `fetch_bytes` without the `,`-in-host test | test_provider_hosts (2) |
+| `fetch_logo` without the absorbed test | test_provider_hosts, test_logo_run (3) |
+| the survey host without it | test_provider_hosts, test_logos (3) |
+| the failure count without `logo_url` | test_logo_run (1) |
+| the fold deleting again | test_epg_fold (8) |
+| a run at any mark | test_epg_fold (5) |
+| the separators kept in a run | test_epg_fold (4) |
+| the proxy exemption dropped | test_provider_hosts FetchTest (1) |
+| the stamp read by its presence alone | test_epg_fold GuideRulesTest (6) |
+| `fetch_logo`'s one-label pre-check dropped | test_logo_run (1) |
+| `Model.absorbedAttribute` always false | 6 node checks |
+| `epgHintVerdict` without the absorbed test | 2 node checks |
+| `epgHintVerdict` without the `,`-in-host test | 2 node checks |
+| `splitLogoUrl` without the absorbed test | 3 node checks |
+
+### The recheck of the fixes, 2026-11-06
+
+A recheck of the fixes above (`wf_b907992b-35a`): three lenses (the absorbed-address rule, the fold, the tests and the documents) and a skeptic for each finding. 18 findings, 15 upheld; those in this round's scope are fixed or stated here. Every probe ran under a resolver stand-in or against numeric loopback, and no repository file was written.
+
+- **A bare value takes ANY text glued after its comma, not only an attribute** (absorbed lens, upheld at P4; the regression is D-SINK-80's, not the review's fixes). `absorbed_attribute` refused only `,key=scheme://`, so `url-tvg=A,x-tvg-url='B'`, `,=B`, `,x:tvg=B`, `,x-tvg-url=//prov.test/...`, `,username=U,password=P` and a bare logo list `tvg-logo=A,https://B` were adopted and fetched with B's credential in A's request line; 96b8496 and 0.17.0 sent `GET /g.xml` for every one, since a bare value ended at its first `,`. The fix is the skeptic's, at the parse, where the absorption happens: `parse_attrs` records each value that ran past where every earlier release ended it -- a quoted one past its first `"`, a bare one past its first `,`, `"` or whitespace -- and `parse_m3u` stores no guide hint and no logo from it (`absorbed_value`, since renamed `own_value` and refined by the final check below), unless a hint's comma-joined list opens exactly at that point (`url-tvg=A,https://B`, read as its first entry, D-SINK-82); the other header key may then name the hint, and a later clean value of the same key wins. The value stays whole for every redactor, and the fetch-side `absorbed_attribute` stays as the backstop for a cache or a shell from before the rule. The finder's literal fix (drop every bare run that went past its end) was measured to drop the bare list too, and a string rule at the fetch to refuse quoted values 0.17.0 fetched whole, so neither was taken. The costs, stated in the D-SINK-80 row: a bare hint or logo holding a `,`, a `"` or a non-ASCII space in its own text (`?ch=1,2`, `w_100,h_100/...`), or glued to the title's comma, is not used; 0.17.0 cut it there and fetched the piece before it, which for a credential holding one was the username as the host. In D-SINK-80's sweep, 560 of the 1,040 logos and 1,120 of the 2,080 hints are now stored as none, each a bare one or a quoted one whose cut holds a `"`, and every other URL value is stored whole. Over the same 38,142 distinct ordinary lines the grammar lane compared (every playlist and JSON fixture line, and gen-playlist's synthetic, realistic, multi-group, dense-numbering and 10,000-channel output), 30,043 of them with a logo, the logo and the hint parse_m3u stores are identical to 96b8496's for every line. Sibling search: what a bare run absorbs past `,` (this rule), what a quoted run absorbs past `"` (the same rule), and `;`, `|` and `&` in a bare value, which no release ever read as attribute separators (refuted as a defect by its skeptic: the provider wrote both hosts, and `|key=` is Kodi's header form).
+- **No test held the scheme-letter check to ASCII** (P3, upheld): a mutation to `str.isalpha` or `str.isdigit` survived every fold test and brought back the nested-URL leak. The rule test's alphabet now holds a non-ASCII letter and digit, `.`, `-` and an upper-case letter, and the fixture three cases; both mutations are red.
+- **F6's test mapped a name to a public address** (P4): a tree that skipped the proxy would have connected to it. It maps the target to 127.0.0.2 behind the project's one test seam (`loopback_reads_public`), and the three test servers skip `http.server`'s reverse lookup.
+- **RecordTest's separator clause could not see a run** (P4): its probe broke the mark with the separator itself. It runs a second text with the mark intact; keeping the separators in a run is red there now.
+- The fold lens's other findings are wording: the reason the fold keeps C1 controls (keeping is the safe choice under F9's mechanism, corrected above and in the decisions log), and the cost of deleting a mark's controls, which joins prose across a line break (stated above, and pinned). Its finding that the run-start check makes adversarial guides slower was refuted by its skeptic: the worst shape an adversary can write rose about 5% at the cap, below the pre-review tree's own worst, and the bound is stated above.
+- The docs lens's findings are wording, each corrected here and in the rows: the review's tally, D-SINK-80's red-first counts (17 of 101 fail, 14 of them D-SINK-80's), the old fold's counts over the grown fixture, the README's comma-list sentence, the RFC 3986 clause on `",`, D-LOGO-27's scope, the probe-isolation sentence, the node block's 13 checks, and F17's and the stamp test's wording.
+
+**Mutations.** 13, each on a copy of the tree, sealed, every one red:
+
+| mutation | caught by |
+|---|---|
+| `absorbed_value` (now `own_value`) never true | test_provider_hosts, test_attr_grammar (4 failures) |
+| its list exception removed | AbsorbedTest (2) |
+| its list exception at any position | AbsorbedTest (1) |
+| a quoted value's run-past not recorded | test_attr_grammar, AbsorbedTest (4) |
+| a bare value's not recorded | test_attr_grammar, AbsorbedTest (4) |
+| a later clean value not clearing the record | AbsorbedTest (2) |
+| the record not reset between attributes | AbsorbedTest, test_attr_grammar, test_playlist (3) |
+| the hint not dropped | AbsorbedTest, test_attr_grammar (3) |
+| the logo not dropped | AbsorbedTest, test_attr_grammar (3) |
+| the scheme letter read as any Unicode letter | test_epg_fold (4) |
+| the scheme run read with any Unicode digit | test_epg_fold (4) |
+| the separators kept in a run | RecordTest (1) |
+| the helper ignoring the user's proxy | the one-label proxy test (1) |
+
+A first version of the parse's rule also corrected the old end's offset for a quoted value's leading whitespace; its mutation survived, and the correction was removed as dead. It was not dead: the list exception read a quoted hint's offset too, and with one or two leading spaces inside the quotes the uncorrected offset landed on the comma after the quote, so a hint holding a second URL was stored (the final check, below, which restored it).
+
+### The final check of the fixes, 2026-11-06
+
+A last check of the recheck's fixes (`wf_4ac4dbce-7c3`): two lenses, the parse rule and the documents, and a skeptic for each finding. 8 findings, 7 upheld, all fixed here; the eighth, a possible match to a reserved private item, was refuted. Every probe ran under a resolver stand-in or against numeric loopback; no repository file was written.
+
+- **A quoted hint's old end was counted before its strip** (P4, new in the recheck's fix). With one or two leading spaces inside the quotes, `url-tvg=" A",http://B/?u=U&p=P"` landed the offset on the comma after the quote, the list exception held, and the whole value was stored; a shell before 0.16.0 then fetched it with B's credential in A's request line. The offset is counted in the stored value again, and a quoted value can take neither exception now: its old end is always its `"`.
+- **A bare list was stored whole** (P4, D-SINK-80's): `url-tvg=A,https://B` kept `A,https://B` for the shell to read as its first entry, so a shell before 0.16.0, which sets no origin, fetched the whole list, which 96b8496's helper, cutting at the comma, never did. The parse now stores a hint's first entry alone, for a quoted list too, so no shell has a later entry to fetch; a 0.16.0 or 0.17.0 shell, whose helper refused a whole list, now gets a working guide.
+- **`url-tvg=A, B` stored no hint** (P4): the bare run ends at the space, so the stored value is `A,`, and the list test looked inside it alone. A list opening is now judged in the line at the old end, delimiters after the comma allowed, as `hint_first_entry` reads one, and a value that ran past by its trailing comma alone keeps its own piece, what 0.17.0 stored (`url-tvg=A,`, `url-tvg=A, junk`, `tvg-logo=A, News`).
+- **A non-ASCII space after a quoted URL's closing quote, then a space, made the whole line the channel name** (P3, D-SINK-80's): the quoted run ends at the ASCII space, its last character was the NBSP, and it held no `",`, so a well-formed value was unterminated, losing the logo, the group and the tvg-id. A quoted value inside a URL's run now also closes at its last `"` when only whitespace follows it to the run's end, which reads such a line as 0.17.0 read it; measured by the skeptic, it also closes 385 lines of F3's residual and opens none. The same space followed by the title's comma stays a stated cost: closing there would cut a credential that holds `"`, a non-ASCII space and a `,`.
+- Wording: CLAUDE.md dropped the list exception; the review's code defects were three, not two; the README's comma sentence; and a red-first sentence now names all four sinks the lifted sweep goes red at.
+
+Over the 38,142 ordinary lines, both the attribute parse and the stored logo and hint are identical to 96b8496's for every line, re-measured after these changes; the D-SINK-80 sweep's counts are unchanged.
+
+**Mutations.** 8, each on a copy of the tree, sealed, every one red:
+
+| mutation | caught by |
+|---|---|
+| the close not walking back over trailing whitespace | the rule test, the fixture, AbsorbedTest (5 failures) |
+| a quoted value's offset counted before its strip | AbsorbedTest (1) |
+| no list opening ever judged | AbsorbedTest (2) |
+| the trailing-comma piece not kept | AbsorbedTest (2) |
+| a logo taking the list exception | AbsorbedTest (1) |
+| the whole list stored, not its first entry | AbsorbedTest (1) |
+| an absorbed logo kept | AbsorbedTest, the fixture (3) |
+| the list opening not reset between attributes | AbsorbedTest (1) |
+
+The second and the last first survived; each is held by a case added for it (`url-tvg=" A","`, and a bare list-opening value before a quoted hint whose credential holds a `"`).

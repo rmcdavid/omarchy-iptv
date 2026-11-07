@@ -284,10 +284,24 @@ function programmeFieldText(programme, keys) {
 // and/or `episode` numbers. The same normaliser serves the description and
 // the category because the string and number cases are the whole of what
 // those can be; only the object case is episode-specific.
+//
+// D-SINK-79 (2026-11-05): a string is TRIMMED and nothing else. It used to
+// be folded as well, `replace(/\s+/g, " ")`, and that ran BEFORE
+// epgDetailText's sinkText, against epgDetailText's own rule that redaction
+// comes first. JS `\s` holds U+00A0, U+FEFF, U+2028, U+3000 and the other
+// non-ASCII spaces, which a redactor reads as URL text (only the six ASCII
+// delimiters end a URL's run, URL_DELIMITER_CODES), so the fold split
+// `http://qqqqqq:zz<U+FEFF>zz@cdn.test/x` in a description or a category
+// into `http://qqqqqq:zz` and `zz@cdn.test/x`, and the panel printed the
+// username and the password's tail. epgDetailText folds after its
+// redaction, so the panel's text is what it was for every value whose URLs
+// hold none of those code points. The trim stays, so a value of whitespace
+// alone is still absent to programmeFieldText; a trim takes only the
+// text's ends, which never lie between a URL's `//` and its `@`.
 function epgEpisodeText(value) {
   if (value === undefined || value === null) return ""
   if (typeof value === "number") return isFinite(value) ? String(Math.floor(value)) : ""
-  if (typeof value === "string") return value.replace(/\s+/g, " ").trim()
+  if (typeof value === "string") return value.trim()
   if (typeof value === "object" && !Array.isArray(value)) {
     var season = Number(value.season)
     var episode = Number(value.episode)

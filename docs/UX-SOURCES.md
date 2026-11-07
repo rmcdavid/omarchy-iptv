@@ -1397,6 +1397,24 @@ the source's EPG field is the way to use it, which the user's own value
 always wins. A hint whose NAME resolves to a local address cannot be known
 here; its guide fetch fails with the reason below (5.5).
 
+**[2026-11-05, D-SINK-82 and D-SINK-83.]** A hint that is a comma-joined
+list of URLs is read as its first entry, and the table above applies to
+that entry alone. A hint whose host is ONE DNS label -- no dot, so
+`localhost`, `tvh`, an all-digit `2130706433` or a `0x` host among them --
+is no hint at all unless it is the playlist's own host: the segment is
+absent, as for a playlist with no hint, and nothing is fetched or looked
+up. It is not a "not used" segment, because both of those sentences name
+the host, and a one-label host the playlist chose is most often the
+username of an address a space cut short. So a hint the table used to
+answer `<host> is a local address` for `localhost` or `2130706433` now
+leaves the segment out. **[2026-11-06, the review's F1 and its recheck:]**
+so does a hint whose value ran straight into what followed it -- the next
+attribute, a second quoted address joined by a comma with no space, or,
+unquoted, anything but another address glued straight after a comma: fetching the
+whole would send what followed, credentials and all, to the first
+address's host. A comma-joined list is still read as its first entry, and
+since the final check of 2026-11-06 only that entry is stored.
+
 ### 5.3 Footer
 
 | Mode / state | Status (left) | Hints (right) |

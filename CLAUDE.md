@@ -971,7 +971,21 @@ requests and raise the batch.
      docs/ARCHITECTURE-PLAYER.md 19.2 (a NAME that resolves into the LAN --
      mpv resolves it, not the helper -- an FFmpeg redirect, HLS segment
      hosts) and docs/ARCHITECTURE.md section 6 (a LAN device with a global
-     IPv6 address counts as global). The lesson: a
+     IPv6 address counts as global). **[2026-11-05, D-SINK-82 and
+     D-SINK-83: a guide hint that is a comma-joined list is read as its
+     first entry in the shell, refused whole by the helper's fetch, and
+     stored as its first entry alone; a hint or a logo whose value ran past
+     where every earlier release ended it is stored only as its own piece,
+     the text before that end, where 0.17.0 stored it (a trailing comma
+     alone, or a hint's list opening there), and otherwise not at all; and
+     one that holds a raw `"` or a `,` opening an attribute that holds a URL
+     is never fetched, because a URL value kept whole to its run's end
+     absorbs what follows it (the review's F1, its recheck and the final
+     check, 2026-11-06); and a host
+     of ONE DNS label the provider chose for a hint or a logo is refused
+     before any lookup, on every hop, the hint's own playlist host
+     excepted -- the username of a URL a space cut (D-SINK-34's class) is
+     such a host, and the resolver is where it would go.]** The lesson: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.
    - **What a stream server's ANSWER opens** (D-PLY-44, D-SINK-55, -62,

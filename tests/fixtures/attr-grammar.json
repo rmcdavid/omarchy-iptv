@@ -1,0 +1,1084 @@
+{
+ "about": "D-SINK-80 (2026-11-05): the M3U attribute grammar, the helper's parse_attrs (bin/helper 02-sources.py), which serves #EXTINF and #EXTM3U. The shell has no M3U parser, so this fixture is the helper's alone (tests/test_attr_grammar.py). `line` is a whole #EXTINF or #EXTM3U line; `attrs` is what the attributes parse to; `title` is parse_extinf's title, or for #EXTM3U the remainder parse_attrs returns (discarded by parse_m3u). `stored`, where present, is the row parse_m3u writes for that line followed by a stream URL (the header's `epgUrlHint` for #EXTM3U): `id` ending in `:` is a scheme prefix only, and a null field is absent; since the recheck of the review's F1 (2026-11-06) a logo or a guide hint whose value ran past where every earlier release ended it is stored as none (own_value), unless a hint's comma-joined list opens exactly there. `plain` false holds a case to the sinks that delete control characters before they redact (the player's title, the notification body) only. `cost` marks a stated cost of the URL-run rule, `accepted` D-SINK-34's accepted class (an ASCII delimiter inside a URL ends its run at every redactor, so no grammar keeps it whole for them). The credential is spelt in `secret`'s letters, which nothing else here holds.",
+ "secret": "qz",
+ "cases": [
+  {
+   "line": "#EXTINF:-1 tvg-id=espn.us tvg-chno=12,ESPN",
+   "attrs": {
+    "tvg-id": "espn.us",
+    "tvg-chno": "12"
+   },
+   "title": "ESPN",
+   "why": "a bare value ends at the title's comma (tests/test_playlist.py pins it)",
+   "stored": {
+    "name": "ESPN",
+    "group": "Ungrouped",
+    "id": "t:espn.us",
+    "tvgId": "espn.us",
+    "chno": "12"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-chno=12,ESPN http://cdn.test/live",
+   "attrs": {
+    "tvg-chno": "12"
+   },
+   "title": "ESPN http://cdn.test/live",
+   "why": "a bare value is inside a URL's run only when the URL starts in it, not when one comes later in the line"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=News Sports,Bare Value With Space",
+   "attrs": {
+    "group-title": "News"
+   },
+   "title": "Sports,Bare Value With Space",
+   "why": "a bare value ends at a space and the rest is the title (qa-attrs.m3u)",
+   "stored": {
+    "name": "Sports,Bare Value With Space",
+    "group": "News"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"tab.test\"\tgroup-title=\"Tabbed\",Tab Separated",
+   "attrs": {
+    "tvg-id": "tab.test",
+    "group-title": "Tabbed"
+   },
+   "title": "Tab Separated",
+   "why": "a TAB separates attributes (qa-attrs.m3u)",
+   "stored": {
+    "name": "Tab Separated",
+    "group": "Tabbed",
+    "id": "t:tab.test",
+    "tvgId": "tab.test"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"nocomma.test\" Broken EXTINF Without Comma",
+   "attrs": {
+    "tvg-id": "nocomma.test"
+   },
+   "title": "Broken EXTINF Without Comma",
+   "why": "the comma is optional"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"News, World\",World News",
+   "attrs": {
+    "group-title": "News, World"
+   },
+   "title": "World News",
+   "why": "a quoted value holds a comma"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"First\" group-title=\"Second\",Repeated",
+   "attrs": {
+    "group-title": "Second"
+   },
+   "title": "Repeated",
+   "why": "a repeated key: the last value wins"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"News\" group-title=\"\",Kept",
+   "attrs": {
+    "group-title": "News"
+   },
+   "title": "Kept",
+   "why": "a repeated key: an empty value does not replace a value"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-name=\"The \"Big\" Show\" group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-name": "The"
+   },
+   "title": "Big\" Show\" group-title=\"News\",Plain Title",
+   "why": "a quote inside a value with no URL ends it, as it always has",
+   "stored": {
+    "name": "Big\" Show\" group-title=\"News\",Plain Title",
+    "group": "Ungrouped",
+    "tvgName": "The"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"News,Plain Title",
+   "attrs": {},
+   "title": "group-title=\"News,Plain Title",
+   "why": "an unterminated quote ends the walk; the attribute text is the title"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id= group-title=\"News\",Plain Title",
+   "attrs": {},
+   "title": "tvg-id= group-title=\"News\",Plain Title",
+   "why": "an empty bare value ends the walk"
+  },
+  {
+   "line": "#EXTINF:-1 t\u00e9l=\"1\" group-title=\"News\",Plain Title",
+   "attrs": {},
+   "title": "t\u00e9l=\"1\" group-title=\"News\",Plain Title",
+   "why": "a key outside ASCII ends the walk"
+  },
+  {
+   "line": "#EXTINF:-1.5e3 group-title=\"News\",Plain Title",
+   "attrs": {},
+   "title": "e3 group-title=\"News\",Plain Title",
+   "why": "a duration the duration pattern reads only in part leaves a token no key matches"
+  },
+  {
+   "line": "#EXTINF:12.5 tvg-id=\"x.tv\",Twelve",
+   "attrs": {
+    "tvg-id": "x.tv"
+   },
+   "title": "Twelve",
+   "why": "a fractional duration"
+  },
+  {
+   "line": "#EXTINF:-1 TVG-ID=abc.de Group-Title=Sports,Name",
+   "attrs": {
+    "tvg-id": "abc.de",
+    "group-title": "Sports"
+   },
+   "title": "Name",
+   "why": "keys are lower-cased, in either form"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"plain.id\"group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-id": "plain.id",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "glued attributes with no URL both parse"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"News a=b c=d\",Plain Title",
+   "attrs": {
+    "group-title": "News a=b c=d"
+   },
+   "title": "Plain Title",
+   "why": "a quoted value holding key-looking runs"
+  },
+  {
+   "line": "#EXTINF:-1 group-title='Sports HD' tvg-id=\"plain.id\",Plain Title",
+   "attrs": {
+    "group-title": "'Sports"
+   },
+   "title": "HD' tvg-id=\"plain.id\",Plain Title",
+   "why": "a single quote is an ordinary bare character"
+  },
+  {
+   "line": "#EXTINF:-1,group-title=\"News\" Plain Title",
+   "attrs": {},
+   "title": "group-title=\"News\" Plain Title",
+   "why": "attributes after the comma are the title"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"bbc.uk\" tvg-logo=\"https://logos.example.test/channels/ab12/colorLogoPNG.png\" group-title=\"News;UK\",BBC One",
+   "attrs": {
+    "tvg-id": "bbc.uk",
+    "tvg-logo": "https://logos.example.test/channels/ab12/colorLogoPNG.png",
+    "group-title": "News;UK"
+   },
+   "title": "BBC One",
+   "why": "the realistic generator's line: a URL value its own quote ends, then a space",
+   "stored": {
+    "name": "BBC One",
+    "group": "News",
+    "groups": [
+     "News",
+     "UK"
+    ],
+    "id": "t:bbc.uk",
+    "tvgId": "bbc.uk",
+    "logo": "https://logos.example.test/channels/ab12/colorLogoPNG.png"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"https://l.test/a.png\",Sky News",
+   "attrs": {
+    "tvg-logo": "https://l.test/a.png"
+   },
+   "title": "Sky News",
+   "why": "a URL value its quote ends, then the title's comma"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\"\tgroup-title=\"Tabbed\",Tab After URL",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png",
+    "group-title": "Tabbed"
+   },
+   "title": "Tab After URL",
+   "why": "a TAB after a URL value ends its run, so the attribute after it is read",
+   "stored": {
+    "name": "Tab After URL",
+    "group": "Tabbed",
+    "logo": "http://l.test/a.png"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-name=\"http://cdn.test/x The \"Big\" Show\",Title",
+   "attrs": {
+    "tvg-name": "http://cdn.test/x The"
+   },
+   "title": "Big\" Show\",Title",
+   "why": "membership is the run after the last space before the quote: a URL earlier in the value does not move it"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"CNN.us@HD\" group-title=\"News\",CNN",
+   "attrs": {
+    "tvg-id": "CNN.us@HD",
+    "group-title": "News"
+   },
+   "title": "CNN",
+   "why": "an at-sign with no URL in a tvg-id is kept, and keys the row",
+   "stored": {
+    "name": "CNN",
+    "group": "News",
+    "id": "t:CNN.us@HD",
+    "tvgId": "CNN.us@HD"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://cdn.test/x\",News",
+   "attrs": {
+    "group-title": "http://cdn.test/x"
+   },
+   "title": "News",
+   "why": "a URL value's own quote closes it when a comma follows"
+  },
+  {
+   "line": "#EXTM3U url-tvg=\"http://epg.test/guide.xml.gz\" x-tvg-url=\"http://epg2.test/e.xml\"",
+   "attrs": {
+    "url-tvg": "http://epg.test/guide.xml.gz",
+    "x-tvg-url": "http://epg2.test/e.xml"
+   },
+   "title": "",
+   "why": "a header with two hints; url-tvg wins",
+   "stored": {
+    "epgUrlHint": "http://epg.test/guide.xml.gz"
+   }
+  },
+  {
+   "line": "#EXTM3U x-tvg-url=http://epg.test/e.xml",
+   "attrs": {
+    "x-tvg-url": "http://epg.test/e.xml"
+   },
+   "title": "",
+   "why": "a bare hint",
+   "stored": {
+    "epgUrlHint": "http://epg.test/e.xml"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz\"zzzz@cdn.test/x\" tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\"zzzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "a quote in a userinfo's password: the value closes at the quote a space follows",
+   "stored": {
+    "name": "Plain Title",
+    "group": "http://qqqqqq:zz\"zzzz@cdn.test/x",
+    "id": "t:ID.1",
+    "tvgId": "ID.1"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://qq\"qqqq:zzzzzz@cdn.test/l.png\" group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://qq\"qqqq:zzzzzz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a quote in a userinfo's username: the logo ran past its first quote, so it is no logo (own_value)",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News",
+    "logo": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 catchup-source=\"http://prov.test/timeshift/qqqqqq/zz\"zzzz/{duration}/{Y}-{m}-{d}:{H}-{M}/1.ts\" group-title=\"News\",Chan",
+   "attrs": {
+    "catchup-source": "http://prov.test/timeshift/qqqqqq/zz\"zzzz/{duration}/{Y}-{m}-{d}:{H}-{M}/1.ts",
+    "group-title": "News"
+   },
+   "title": "Chan",
+   "why": "an Xtream timeshift catch-up template, an attribute the helper never reads, with a quote in the path's password",
+   "stored": {
+    "name": "Chan",
+    "group": "News"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 catchup-source=\"http://prov.test/timeshift/qq\"qqqq/zzzzzz/{duration}/1.ts\" group-title=\"News\",Chan",
+   "attrs": {
+    "catchup-source": "http://prov.test/timeshift/qq\"qqqq/zzzzzz/{duration}/1.ts",
+    "group-title": "News"
+   },
+   "title": "Chan",
+   "why": "the quote in the path's username: the whole password used to reach the title",
+   "stored": {
+    "name": "Chan",
+    "group": "News"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://cdn.test/get.php?username=qqqqqq&password=zz\"zz&type=m3u\" group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://cdn.test/get.php?username=qqqqqq&password=zz\"zz&type=m3u",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a quote in an Xtream query's password: no logo",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News",
+    "logo": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz\",zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\",zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "a quote and a comma inside the URL: the value closes at the LAST quote a comma follows",
+   "stored": {
+    "name": "Plain Title",
+    "group": "http://qqqqqq:zz\",zz@cdn.test/x"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://\"qqqqqq:zzzzzz@cdn.test/x\" tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://\"qqqqqq:zzzzzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "the quote straight after the scheme's slashes",
+   "stored": {
+    "name": "Plain Title",
+    "group": "http://\"qqqqqq:zzzzzz@cdn.test/x",
+    "id": "t:ID.1"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://\",qqqqqq:zzzzzz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://\",qqqqqq:zzzzzz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "a quote and a comma straight after the scheme's slashes"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://qqqqqq:zz\"zz@cdn.test/l.png\" Plain Title",
+   "attrs": {
+    "tvg-logo": "http://qqqqqq:zz\"zz@cdn.test/l.png"
+   },
+   "title": "Plain Title",
+   "why": "no title comma: the quote a space follows closes the value"
+  },
+  {
+   "line": "#EXTINF:-1 GROUP-TITLE=\"http://qqqqqq:zz\"zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\"zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "an upper-case key"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz\"zz@cdn.test/x\" group-title=\"News\",Plain Title",
+   "attrs": {
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a repeated key after a URL value: the walk reaches it, and the last value wins",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"News\" group-title=\"http://qqqqqq:zz\"zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\"zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "a repeated key, the URL value last"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://cdn.test/get.php?username=qqqqqq&a=\"password=zzzzzz\",Plain Title",
+   "attrs": {
+    "group-title": "http://cdn.test/get.php?username=qqqqqq&a=\"password=zzzzzz"
+   },
+   "title": "Plain Title",
+   "why": "a cut before a key-looking query tail no longer hands the tail to an attribute"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://cdn.test/x?u=qqqqqq&p=\"zzzzzz\" tvg-id=\"plain.id\",Plain Title",
+   "attrs": {
+    "group-title": "http://cdn.test/x?u=qqqqqq&p=\"zzzzzz",
+    "tvg-id": "plain.id"
+   },
+   "title": "Plain Title",
+   "why": "a cut whose tail is quoted: the tail stays in the URL"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-name=\"http://qqqqqq:zz\"a=zzzz@cdn.test/x,",
+   "attrs": {},
+   "title": "tvg-name=\"http://qqqqqq:zz\"a=zzzz@cdn.test/x,",
+   "why": "a URL value with no quote that a delimiter, a comma or the end follows is unterminated: the whole attribute text, URL whole, is the title",
+   "stored": {
+    "name": "tvg-name=\"http://qqqqqq:zz\"a=zzzz@cdn.test/x,",
+    "group": "Ungrouped"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz\"zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {},
+   "title": "group-title=\"http://qqqqqq:zz\"zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "why": "a URL's run that a space ends before any closing quote: unterminated, and the URL reaches the title whole"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"http://qqqqqq:zz\"zzzz@cdn.test/x/a.png\",Plain Title",
+   "attrs": {
+    "tvg-id": "http://qqqqqq:zz\"zzzz@cdn.test/x/a.png"
+   },
+   "title": "Plain Title",
+   "why": "a tvg-id holding a URL parses whole, and the row drops it: no t: id, no guide join",
+   "stored": {
+    "name": "Plain Title",
+    "group": "Ungrouped",
+    "id": "n:",
+    "tvgId": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"http://qqqqqq:zzzzzz@cdn.test/x\" group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-id": "http://qqqqqq:zzzzzz@cdn.test/x",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a whole URL tvg-id with no cut character is dropped as well",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News",
+    "id": "n:",
+    "tvgId": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=http://qqqqqq:zz,zz@cdn.test/x group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-id": "http://qqqqqq:zz,zz@cdn.test/x",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a bare tvg-id holding a URL with a comma",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News",
+    "id": "n:",
+    "tvgId": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://qqqqqq:zz,zz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://qqqqqq:zz,zz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a comma in a bare URL: the value takes the rest of its run, and ran past its old end, so it is no logo",
+   "stored": {
+    "name": "Plain Title",
+    "group": "News",
+    "logo": null
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://qqqqqq:zz\"zz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://qqqqqq:zz\"zz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a quote in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://qqqqqq:zz\",zz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://qqqqqq:zz\",zz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a quote and a comma in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://\"qqqqqq:zzzzzz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://\"qqqqqq:zzzzzz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a quote straight after a bare URL's slashes"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-name=http://cdn.test/live/qqqqqq/zz,zz/1.ts tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "tvg-name": "http://cdn.test/live/qqqqqq/zz,zz/1.ts",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "a comma in a bare Xtream path",
+   "stored": {
+    "name": "Plain Title",
+    "group": "Ungrouped",
+    "tvgName": "http://cdn.test/live/qqqqqq/zz,zz/1.ts",
+    "id": "t:ID.1"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u009f\u0085zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u009f\u0085zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "a C1 control and U+0085 in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http:\u001c//qqqqqq:zzzzzz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http:\u001c//qqqqqq:zzzzzz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a control Python calls whitespace inside a bare value's mark: the mark runs past the value's end; held to the sinks that delete controls, since to the others a control inside the mark is no URL",
+   "plain": false
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http:\u0085//qqqqqq:zzzzzz@cdn.test/l.png group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http:\u0085//qqqqqq:zzzzzz@cdn.test/l.png",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "U+0085, a C1 control Python calls whitespace, inside a bare value's mark: the mark runs past the value's end; held to the sinks that delete controls, since to the others a control inside the mark is no URL",
+   "plain": false
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://cdn.test/l.png?u=qqqqqq:\t//zzzzzz/1.ts group-title=\"News\",Plain Title",
+   "attrs": {
+    "tvg-logo": "http://cdn.test/l.png?u=qqqqqq:\t//zzzzzz/1.ts",
+    "group-title": "News"
+   },
+   "title": "Plain Title",
+   "why": "a second mark across a TAB at the bare value's end: the run is looked for from that mark's end; held to the sinks that delete controls, since the others end the run at the TAB (D-SINK-34)",
+   "plain": false
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"a:::b:/c://qqqqqq:zz\"zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "a:::b:/c://qqqqqq:zz\"zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "colons and a `:/` that start no `://` before the URL's own: the mark is still found",
+   "stored": {
+    "name": "Plain Title",
+    "group": "a:::b:/c://qqqqqq:zz\"zz@cdn.test/x"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u00a0zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u00a0zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+00A0, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL",
+   "stored": {
+    "name": "Plain Title",
+    "group": "http://qqqqqq:zz\u00a0zz@cdn.test/x",
+    "id": "t:ID.1"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u1680zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u1680zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+1680, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2000zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2000zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2000, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2001zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2001zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2001, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2002zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2002zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2002, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2003zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2003zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2003, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2004zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2004zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2004, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2005zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2005zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2005, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2006zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2006zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2006, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2007zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2007zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2007, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2008zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2008zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2008, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2009zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2009zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2009, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u200azz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u200azz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+200A, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2028zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2028zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2028, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u2029zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u2029zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+2029, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u202fzz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u202fzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+202F, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u205fzz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u205fzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+205F, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u3000zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u3000zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+3000, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL",
+   "stored": {
+    "name": "Plain Title",
+    "group": "http://qqqqqq:zz\u3000zz@cdn.test/x",
+    "id": "t:ID.1"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u0085zz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u0085zz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+0085, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u001czz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u001czz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+001C, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u001dzz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u001dzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+001D, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u001ezz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u001ezz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+001E, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u001fzz@cdn.test/x tvg-id=\"ID.1\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\u001fzz@cdn.test/x",
+    "tvg-id": "ID.1"
+   },
+   "title": "Plain Title",
+   "why": "U+001F, which Python's whitespace class holds and no redactor ends a URL at, in a bare URL"
+  },
+  {
+   "line": "#EXTM3U url-tvg=\"http://qqqqqq:zz\"zzzz@epg.test/e.xml\"",
+   "attrs": {
+    "url-tvg": "http://qqqqqq:zz\"zzzz@epg.test/e.xml"
+   },
+   "title": "",
+   "why": "a guide hint with a quote in its password ran past its first quote: no hint (own_value)",
+   "stored": {
+    "epgUrlHint": ""
+   }
+  },
+  {
+   "line": "#EXTM3U url-tvg=\"http://qqqqqq:12\"zzzz@epg.test/e.xml\" tvg-shift=\"0\"",
+   "attrs": {
+    "url-tvg": "http://qqqqqq:12\"zzzz@epg.test/e.xml",
+    "tvg-shift": "0"
+   },
+   "title": "",
+   "why": "a digits-only password fragment used to be adopted with the username as the host; now no hint",
+   "stored": {
+    "epgUrlHint": ""
+   }
+  },
+  {
+   "line": "#EXTM3U x-tvg-url=http://qqqqqq:12,zzzz@epg.test/e.xml",
+   "attrs": {
+    "x-tvg-url": "http://qqqqqq:12,zzzz@epg.test/e.xml"
+   },
+   "title": "",
+   "why": "a bare hint with a comma in its password, which opens no list: no hint",
+   "stored": {
+    "epgUrlHint": ""
+   }
+  },
+  {
+   "line": "#EXTM3U x-tvg-url=\"https://qq\"qqqq:zzzzzz@epg.test/e.xml\"",
+   "attrs": {
+    "x-tvg-url": "https://qq\"qqqq:zzzzzz@epg.test/e.xml"
+   },
+   "title": "",
+   "why": "a quote in a hint's username"
+  },
+  {
+   "line": "#EXTM3U catchup-source=\"http://qqqqqq:zz\"zzzz@cdn.test/x\" url-tvg=\"http://epg2.test/e.xml\"",
+   "attrs": {
+    "catchup-source": "http://qqqqqq:zz\"zzzz@cdn.test/x",
+    "url-tvg": "http://epg2.test/e.xml"
+   },
+   "title": "",
+   "why": "an unread header attribute no longer hides the hint after it",
+   "stored": {
+    "epgUrlHint": "http://epg2.test/e.xml"
+   }
+  },
+  {
+   "line": "#EXTM3U url-tvg=\"http://epg.test/xmltv.php?username=qqqqqq&password=zz\"zzzz\"",
+   "attrs": {
+    "url-tvg": "http://epg.test/xmltv.php?username=qqqqqq&password=zz\"zzzz"
+   },
+   "title": "",
+   "why": "a quote in a hint's query password: no hint, where 0.17.0 sent the password's front to the provider",
+   "stored": {
+    "epgUrlHint": ""
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"https://l.test/a.png\"\u00a0 group-title=\"News\" tvg-id=\"cnn.us\",CNN",
+   "attrs": {
+    "tvg-logo": "https://l.test/a.png",
+    "group-title": "News",
+    "tvg-id": "cnn.us"
+   },
+   "title": "CNN",
+   "why": "a no-break space and then a space after a URL value's closing quote end nothing: the line reads as 0.17.0 read it",
+   "stored": {
+    "name": "CNN",
+    "group": "News",
+    "logo": "https://l.test/a.png",
+    "id": "t:cnn.us",
+    "tvgId": "cnn.us"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\"group-title=\"G\",Name",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png\"group-title=\"G"
+   },
+   "title": "Name",
+   "why": "an attribute glued straight after a URL value is absorbed into the URL",
+   "stored": {
+    "name": "Name",
+    "group": "Ungrouped",
+    "logo": null
+   },
+   "cost": "an attribute glued after a URL value is lost, and so is the logo"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\"\u00a0group-title=\"G\",Name",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png\"\u00a0group-title=\"G"
+   },
+   "title": "Name",
+   "why": "an attribute a no-break space alone separates from a URL value is absorbed",
+   "cost": "an attribute separated from a URL value by non-ASCII whitespace only is lost"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\"\u3000group-title=\"G\",Name",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png\"\u3000group-title=\"G"
+   },
+   "title": "Name",
+   "why": "the same with U+3000",
+   "cost": "an attribute separated from a URL value by non-ASCII whitespace only is lost"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\",News\"",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png\",News"
+   },
+   "title": "",
+   "why": "a title glued after a URL value that ends in a quote is absorbed; the name falls back",
+   "stored": {
+    "name": "Channel 1",
+    "group": "Ungrouped",
+    "logo": null
+   },
+   "cost": "a title with no space that ends in a quote, glued after a URL value, is lost, and so is the logo"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=\"http://l.test/a.png\",Plain\",Title More",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png\",Plain"
+   },
+   "title": "Title More",
+   "why": "a title whose first word holds a quote and a comma, after a URL value, loses that word",
+   "cost": "a title's first word holding a quote and a comma, after a URL value, is lost"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=\"cnn.us\" tvg-logo=\"https://l.test/a.png\"\u00a0,CNN",
+   "attrs": {
+    "tvg-id": "cnn.us"
+   },
+   "title": "tvg-logo=\"https://l.test/a.png\"\u00a0,CNN",
+   "why": "a no-break space and then the title's comma after a URL value's closing quote: unterminated, the rest is the name",
+   "stored": {
+    "name": "tvg-logo=\"https://l.test/a.png\"\u00a0,CNN",
+    "group": "Ungrouped",
+    "logo": null,
+    "id": "t:cnn.us"
+   },
+   "cost": "a URL value's closing quote followed by a non-ASCII space and the title's comma is unterminated: that attribute and the title are lost, and the rest of the line is the name"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://l.test/a.png,Plain Title",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png,Plain"
+   },
+   "title": "Title",
+   "why": "a bare URL glued to the title's comma takes the title's first word",
+   "stored": {
+    "name": "Title",
+    "group": "Ungrouped",
+    "logo": null
+   },
+   "cost": "a bare URL value glued to the comma title takes its first word, and is no logo"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://l.test/a.png,News",
+   "attrs": {
+    "tvg-logo": "http://l.test/a.png,News"
+   },
+   "title": "",
+   "why": "a one-word title glued to a bare URL is lost and the name falls back",
+   "stored": {
+    "name": "Channel 1",
+    "group": "Ungrouped",
+    "logo": null
+   },
+   "cost": "a bare URL value glued to a one-word comma title takes it whole, and is no logo"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-name=\"http://cdn.test/x\tThe\"Big\" Show\",Title",
+   "attrs": {
+    "tvg-name": "http://cdn.test/x\tThe\"Big"
+   },
+   "title": "Show\",Title",
+   "why": "a TAB between a URL and a later quote does not end membership: the control-deleting sinks join it",
+   "cost": "a word a TAB joins to a URL in a quoted value, then a quote, stays in the URL's run"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz zz@cdn.test/x,Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz"
+   },
+   "title": "zz@cdn.test/x,Plain Title",
+   "why": "a space in a bare URL ends its run, as every redactor ends it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@cdn.test/x,Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz"
+   },
+   "title": "zz@cdn.test/x,Plain Title",
+   "why": "a TAB in a bare URL ends its run, as every redactor ends it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u000bzz@cdn.test/x,Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz"
+   },
+   "title": "zz@cdn.test/x,Plain Title",
+   "why": "a VT in a bare URL ends its run, as every redactor ends it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\fzz@cdn.test/x,Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz"
+   },
+   "title": "zz@cdn.test/x,Plain Title",
+   "why": "an FF in a bare URL ends its run, as every redactor ends it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\rzz@cdn.test/x,Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz"
+   },
+   "title": "zz@cdn.test/x,Plain Title",
+   "why": "a CR in a bare URL ends its run, as every redactor ends it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz\"zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz zz"
+   },
+   "title": "zz@cdn.test/x\",Plain Title",
+   "why": "a space before the quote inside the URL: the quote is past the run, and parses as it always has",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz\tzz\"zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\tzz\"zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "a TAB before the quote: membership looks back to a space, so the URL is stored whole, and the plain redactors split it at the TAB",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz@cdn.test/x\",Plain Title",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz zz@cdn.test/x"
+   },
+   "title": "Plain Title",
+   "why": "a space inside a quoted URL is no cut, and the redactors split it there",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTM3U url-tvg=http://qqqqqq:12 zzzz@epg.test/e.xml",
+   "attrs": {
+    "url-tvg": "http://qqqqqq:12"
+   },
+   "title": " zzzz@epg.test/e.xml",
+   "why": "a space in a bare hint's password ends its run: the hint keeps the username as its host",
+   "stored": {
+    "epgUrlHint": "http://qqqqqq:12"
+   },
+   "accepted": "D-SINK-34"
+  }
+ ]
+}

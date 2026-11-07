@@ -1062,6 +1062,52 @@ playlist, guide or probe fetch was followed to any http(s) host. The policy:
   another host, a logo -- may not reach a non-global address, except the
   user's own playlist host in the class its playlist fetch connected to. A
   logo never reaches one, on any hop.
+- **[2026-11-05, D-SINK-82 and D-SINK-83.]** A guide hint that is a
+  comma-joined LIST (a `,` followed, after any run of the six ASCII
+  delimiters, by a scheme and a `://`) is read as its FIRST entry, in the
+  shell (`Model.hintFirstEntry`, before every check above) and in the
+  helper, whose guide fetch refuses a URL the playlist chose that is not its
+  own first entry (`bad_url`, naming no host), or whose host holds a `,`
+  (a 0.16.0 or 0.17.0 shell normalizes a list before it hands it over, to
+  `https://epg.test,http//prov.test/...`), so a 0.16.0 or 0.17.0 shell
+  loaded before the rule sends nothing; a shell before 0.16.0 sets no
+  origin, so its guide fetch reads as the user's and neither check runs
+  until it restarts (the review's F4 and F10, 2026-11-06) -- for a cache an
+  earlier helper wrote only, since the parse now stores a hint's first
+  entry alone (the final check, 2026-11-06). And a host of
+  ONE DNS label that the provider chose
+  (lower-cased, one trailing `.` removed: no `.`, not empty, not an IPv6
+  literal) is refused BEFORE any lookup, on every hop
+  (`DestinationPolicy.refuses_name`, before `resolve_within`, and first in
+  `check_proxied`): for a guide hint, the playlist's own host excepted by
+  `host_key`, the port not compared; for a logo, never excepted. A URL the
+  user typed is never affected. In the shell such a hint is no hint at all
+  rather than a refusal, because both refusal sentences print the host, and
+  such a logo has no host (`logoHost` in model/logos.mjs answers ""). Why: a URL holding
+  an ASCII space or tab in its userinfo is cut there by every redactor
+  (D-SINK-34's class), and the piece left is `http://USER:...`, whose host
+  is the username; looking it up hands it to the resolver and through it to
+  the search domains' servers. Only a username of one label: a dotted or
+  e-mail username reads as a dotted host and is looked up and named as
+  before, since no test tells it from a host (D-SINK-35's class; the
+  review's F12). And a guide hint or a logo whose value ran past where
+  every earlier release ended it -- what a URL value kept whole to its
+  run's end absorbed from what followed it -- is stored only as its own
+  piece, the text before that end, which is what 0.17.0 stored (`own_value`,
+  at the parse: a value that ran past by its trailing comma alone, or a hint
+  whose comma-joined list opens there, judged in the line), and otherwise
+  not at all; and an address that holds a raw `"`, or a `,` opening an
+  attribute holding a URL (`absorbed_attribute`, `Model.absorbedAttribute`,
+  the backstop for a cache or a shell from before that rule), is no hint,
+  no logo host, and refused by both fetches before any lookup (the review's
+  F1 and its recheck, 2026-11-06: those fetches sent the second URL's
+  credential to the first URL's host). The cost, accepted by the owner: a
+  single-label name that would resolve to a GLOBAL address through a search
+  domain is refused (a non-global answer was refused at connect already),
+  and so are `localhost`, an all-digit host (`2130706433`) and a `0x` host
+  off the playlist's own host, which the Sources row used to name as local
+  addresses and now does not mention. Both rules are held in both mirrors
+  by one fixture, `tests/fixtures/provider-hosts.json`.
 - Non-global is `address_class` (bin/helper/01-core.py) over an EXPLICIT
   table, mirrored by `Model.hostClass` and run with it over
   `tests/fixtures/destinations.json`: loopback, private (RFC 1918, ULA,
@@ -1100,7 +1146,19 @@ LAN only when that name answered a LAN address when the playlist was
 fetched. A literal host needs no record. A name with no record (a cache
 written before this) is refused, and such a cache is refreshed at the next
 start or swap whatever its age (`Model.cacheBeforeDestinationRules`, over
-playlist-status.json's `destinationRules`).
+playlist-status.json's `destinationRules`). **[2026-11-05, D-SINK-80: the
+same stamp, now 2, also marks a cache written before the attribute grammar
+kept a URL whole, so every cache an earlier release wrote is refreshed once,
+as the sentence above has it: the active source's at the next start, each
+other source's at its next swap, and each shows its old cache until that
+refresh lands, or after a failed one until a later one succeeds. A guide
+window carries a stamp of its own, its meta line's `guideRules`
+(`GUIDE_RULES`, 1 since D-SINK-79's fold), and the fetch run refetches a
+window written under older rules or none, whatever its age
+(`needs_refetch`): the guide run that starts beside the playlist's refresh
+read the old window as fresh. A refetch that fails reports the guide as
+failed and leaves the old window in use, stale, until one succeeds (the
+review's F13 and F14, 2026-11-06).]**
 
 PROXIES, decided. urllib's default `ProxyHandler` honours `http_proxy` and
 `https_proxy`, and `make_opener` keeps it, so through a proxy the socket
@@ -3945,7 +4003,15 @@ Performance budget (10k channels):
     title, description, category and episode as the cleaners left them,
     UTF-8, separated by `\x1f` (every text has been through `_CONTROL_WS`,
     so neither separator can occur in one, and one that did would be folded
-    rather than move a boundary). JSON is made by `record_body` for the
+    rather than move a boundary). **[2026-11-05, D-SINK-79: titles and
+    details go through `fold_space` instead, which folds as `_CONTROL_WS`
+    does outside a URL's run and, inside one, deletes every control in its
+    `://` and replaces C0, DEL, U+0085, U+2028 and U+2029 after it with
+    U+FFFD (the other C1 controls are kept, as the old fold kept them; the
+    review's F9, F11 and F22 of 2026-11-06), so the separators still cannot
+    occur, and neither can DEL, which separates a channel's records; a run
+    starts only at a `://` with a scheme letter before it.
+    `retain_programme`'s defensive refold is `fold_space` too.]** JSON is made by `record_body` for the
     records actually written, as before. `encode_retained` makes every
     decision `encode_records` made, in the same order -- stable sort by
     start, a missing stop from the next strictly later start or
@@ -4616,7 +4682,13 @@ Performance budget (10k channels):
     channel id is what `play` takes back. A provider that writes a
     credential into a tvg-id still has it carried in the id (the same
     precondition as every item here: the provider who wrote the secret
-    already holds it).
+    already holds it). **[2026-11-05, D-SINK-80: except a tvg-id that holds
+    a URL's `://` (as `_URL_MARK` reads one, controls allowed in it), which
+    is dropped at parse: no writer read puts a URL there, and the grammar
+    now hands it the whole URL, credential and all. The row then joins no
+    guide at all, by name either, since every match publishes under the
+    tvg-id (the review's F15). The row takes an `n:` or `u:` id. An `@` alone (`CNN.us@HD`) is
+    kept.]**
 
     **The notification body is markup, so it is escaped (D-SINK-49).** The
     host draws it as `Text.StyledText` behind a stripper that drops image

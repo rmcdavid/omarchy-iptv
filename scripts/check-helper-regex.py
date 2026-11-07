@@ -87,7 +87,9 @@ REVIEWED = [
      "six ASCII delimiters, R32a''' (_URL_TAIL_RE, redact_urls)"),
     ("'[' + URL_DELIMITER_CHARS + ']'", "provider",
      "linear: one character class, no quantifier; the six ASCII delimiters, R32a''' (_URL_DELIMITER: "
-     "run_host_parts' provider text, the class that ends a free-text URL's authority)"),
+     "run_host_parts' provider text, the class that ends a free-text URL's authority; and parse_attrs' "
+     "search for where a URL value's run ends, once a value, from its first quote or its end onward, "
+     "the walk resuming past the run or stopping, D-SINK-80)"),
     ("'[' + URL_SPACE_CHARS + ']'", "provider",
      "linear: one character class, no quantifier; the enumerated URL whitespace union, R32a'' "
      "(_URL_SPACE: validate_source_url's user text, the class a READER refuses)"),
@@ -109,13 +111,35 @@ REVIEWED = [
      "linear: anchored, literal prefix, one digit run then $ (_GENERATED_NAME)"),
     (r"[\s\x00-\x1f\x7f]+", "provider",
      "linear: one class run and nothing after it; sub resumes past each run (_CONTROL_WS)"),
-    ("[\x00-\x1f\x7f-\x9f]", "user",
-     "linear: one character class, no quantifier (_CONTROL_CHARS)"),
+    ("[\x00-\x1f\x7f-\x9f]", "provider",
+     "linear: one character class, no quantifier; it reads provider text since player_title_text "
+     "(_CONTROL_CHARS)"),
     (":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/", "provider",
      "linear: a literal `:` first, then two runs of one control class, each ended by a `/` the class "
      "cannot hold, so an attempt backs off at most once over each run and a run is scanned only from "
      "the `:` before it; cut_free_text and split_groups each search once a call (_URL_MARK; GROUP_PART is "
-     "built on it)"),
+     "built on it). parse_attrs (D-SINK-80) searches it once a quoted value, bounded to the value's run "
+     "after its last space and begun at the last `:` before that run's first `/`, and a bare value once, "
+     "bounded to the value, plus one match at its last `:` when a control ends the value, so a run is "
+     "scanned from the `:` before it at most twice; fold_space (D-SINK-79) searches it from each run's end, "
+     "so the text is read once"),
+    ("[\x00-\x1f\x7f\x85\u2028\u2029]", "provider",
+     "linear: one character class, no quantifier; sub resumes past each match, over the part of a URL's "
+     "run after its mark, which fold_space hands it once, and replaces each match with U+FFFD "
+     "(_RUN_CONTROLS, fold_space, D-SINK-79, the review's F9 and F11)"),
+    (r"',[A-Za-z0-9_.\\-]+=[A-Za-z][A-Za-z0-9+.\\-]*' + _URL_MARK.pattern", "provider",
+     "linear: a literal `,` first, so search() tries a start only at a comma; then a run of key "
+     "characters ended by the `=` it cannot hold, a letter, a run of scheme characters ended by the `:` "
+     "it cannot hold, and _URL_MARK's two control runs, each ended by a `/`; no run can hold a `,`, so "
+     "the runs two attempts scan are disjoint; once a call over a guide hint or a logo URL, which parse "
+     "drops past 2,048 characters (_ABSORBED_URL, absorbed_attribute, the review's F1)"),
+    (r"',[' + URL_DELIMITER_CHARS + ']*[A-Za-z][A-Za-z0-9+.\\-]*' + _URL_MARK.pattern", "provider",
+     "linear: a literal `,` first, so search() tries a start only at a comma; then a run of the six ASCII "
+     "delimiters, a letter, a run of scheme characters and _URL_MARK's two control runs, each run ended by "
+     "a character it cannot hold (a letter after the delimiters, a `:` after the scheme run, a `/` after "
+     "each control run), so an attempt backs off at most once over each run, and no run can hold a `,`, "
+     "so the runs two attempts scan are disjoint; once a call over a guide hint, which parse drops past "
+     "2,048 characters (_HINT_LIST_COMMA, hint_first_entry, D-SINK-82)"),
     ("'(?:[^;:]+|' + _URL_MARK.pattern + '[^ ]*|:)+'", "provider",
      "linear: nothing follows the outer repeat, so a match once begun never fails and is never backed "
      "into; the branches part at their first character -- a run that cannot hold `;` or `:`, else a "
@@ -161,7 +185,9 @@ REVIEWED = [
      "text is a name folded and cut to EPG_MAX_DISPLAY_NAME by epg_name_text (_EPG_NAME_NOISE)"),
     (r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"', "provider",
      "linear: matched at parse_attrs' position only, which moves past each match and stops at the "
-     "first failure; the key run cannot hold '=' and the value run cannot hold '\"' (_ATTR_QUOTED)"),
+     "first failure; the key run cannot hold '=' and the value run cannot hold '\"' (_ATTR_QUOTED). Since "
+     "D-SINK-80 a value inside a URL's run may close past the match, and the walk resumes after that close "
+     "or stops: it never moves back, so the walk stays one pass"),
     (r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)', "provider",
      "linear: as _ATTR_QUOTED; the value run has nothing after it (_ATTR_BARE)"),
     (r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", "user",

@@ -547,13 +547,15 @@ ck "M2 maxPixels" "$(field 'd["maxPixels"]')" "4194304"
 # ---- T1: the refusal text. `logos --fetch` swallows it into a count, so the
 # sink it reaches is the function's own return value; call the shipping
 # function from the tree under test (rule 14 allows that), with a URL whose
-# path carries a token the text must not echo.
-t1_url="https://localhost:8443/$TOKEN/$SINK_BOMB"
+# path carries a token the text must not echo. The host is dotted: a host
+# of one label (localhost among them) is no logo host at all since D-SINK-83,
+# and the text names it as "an unnamed host".
+t1_url="https://logos.example.test:8443/$TOKEN/$SINK_BOMB"
 t1=$(python3 "$SPIKE/serve-and-fetch.py" refusal --helper "$HELPER" --corpus "$CORPUS" --name "$SINK_BOMB" --url "$t1_url" 2>&1 | grep -a '^RIG ' | head -1)
 if [[ $t1 == "RIG refusal "* ]]; then
   text=${t1#RIG refusal }
   echo "   T1 text: $text"
-  t1v="host"; [[ $text == *localhost* ]] || t1v="no-host"
+  t1v="host"; [[ $text == *logos.example.test* ]] || t1v="no-host"
   [[ $text == *20000x20000* ]] && t1v="$t1v numbers" || t1v="$t1v no-numbers"
   if [[ $text == *"$TOKEN"* || $text == *"https://"* || $text == *"$SINK_BOMB"* ]]; then t1v="$t1v URL-LEAKED"; else t1v="$t1v no-url"; fi
 else

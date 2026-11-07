@@ -1,0 +1,1199 @@
+{
+ "about": "D-SINK-82 and D-SINK-83 (the owner, 2026-11-05): two rules about the host a playlist chose, held in both mirrors by this one file (tests/test_provider_hosts.py runs the helper, tests/Model.test.js the model; neither is the oracle, this file is, and every expected value was written by hand). `firstEntry`: a guide hint that is a comma-joined list is read as its first entry, cut at the first `,` that is followed, after any run of the six ASCII delimiters, by a scheme and a URL's `://` (hint_first_entry / Model.hintFirstEntry). `noDot`: a host of one DNS label -- lower-cased, one trailing dot removed, no dot, not empty, not an IPv6 literal -- (dotless_host / Model.dotlessHost). `hintVerdicts`: Model.epgHintVerdict end to end, with what the helper's policy says of the same host when the shell sends `playlistHost` (DestinationPolicy.refuses_name; null when the first entry is not an http URL). `handOffs`: what the helper's guide fetch does with a URL a shell hands it (code, and every host it asked the resolver for); `listed` and `oneLabel` are the two predicates over it, which both mirrors answer. `absorbed` (the review's F1, 2026-11-06): an address the playlist chose that holds a raw `\"` or a `,` opening an attribute holding a URL, which no fetch sends (absorbed_attribute / Model.absorbedAttribute). `logoHosts`: the logo host the survey counts (logo_survey_host / Model.splitLogoUrl; \"\" is refused, never named) and what fetch_logo does with the URL.",
+ "firstEntry": [
+  {
+   "hint": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "first": "https://epg.test/guide.xml.gz",
+   "why": "the measured list (critic M3): an https guide, then an http URL whose query carries the credential"
+  },
+  {
+   "hint": "https://epg.test/guide.xml.gz, http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "first": "https://epg.test/guide.xml.gz",
+   "why": "a space after the comma: the six ASCII delimiters may stand between the comma and the scheme"
+  },
+  {
+   "hint": "https://epg.test/guide.xml.gz,\t\r\n http://prov.test/xmltv.php",
+   "first": "https://epg.test/guide.xml.gz",
+   "why": "tab, CR, LF and space after the comma, each one of the six"
+  },
+  {
+   "hint": "https://epg.test/guide.xml.gz,http://qqqqqq:zzzzzz@prov.test/xmltv.php",
+   "first": "https://epg.test/guide.xml.gz",
+   "why": "the second entry carries userinfo"
+  },
+  {
+   "hint": "http://a.test/1.xml,http://b.test/2.xml,https://c.test/3.xml",
+   "first": "http://a.test/1.xml",
+   "why": "three entries: the cut is at the FIRST comma that opens a URL"
+  },
+  {
+   "hint": "http://epg.test/xmltv.php?ids=1,2,3&u=x",
+   "first": "http://epg.test/xmltv.php?ids=1,2,3&u=x",
+   "why": "a comma inside a query is URL text and stays"
+  },
+  {
+   "hint": "http://epg.test/a.xml,b.xml",
+   "first": "http://epg.test/a.xml,b.xml",
+   "why": "a comma followed by a word that opens no URL stays"
+  },
+  {
+   "hint": "http://epg.test/a,http",
+   "first": "http://epg.test/a,http",
+   "why": "a scheme word with no `://` after it opens no URL"
+  },
+  {
+   "hint": "http://epg.test/a,http:/b.test/x",
+   "first": "http://epg.test/a,http:/b.test/x",
+   "why": "one slash is not a URL's `://`"
+  },
+  {
+   "hint": "http://epg.test/a,mailto:qqqqqq@prov.test",
+   "first": "http://epg.test/a,mailto:qqqqqq@prov.test",
+   "why": "a scheme with no `//` opens no URL here"
+  },
+  {
+   "hint": "http://epg.test/a,://prov.test/x",
+   "first": "http://epg.test/a,://prov.test/x",
+   "why": "`://` with no scheme before it: a scheme starts with a letter (RFC 3986), and none is there"
+  },
+  {
+   "hint": "http://epg.test/a,1http://prov.test/x",
+   "first": "http://epg.test/a,1http://prov.test/x",
+   "why": "a digit-led word before `://` is no scheme (RFC 3986), so no URL opens at this comma; stated in the write-up"
+  },
+  {
+   "hint": "http://a.test/x,http:\u0000/\u001f/b.test/y",
+   "first": "http://a.test/x",
+   "why": "controls between the `:` and the slashes still make a `://` (_URL_MARK), as a control-deleting sink reads one"
+  },
+  {
+   "hint": "http://a.test/x,HTTPS://b.test/y",
+   "first": "http://a.test/x",
+   "why": "a scheme in upper case is a scheme"
+  },
+  {
+   "hint": "http://a.test/x,x-y+z.1://b.test/y",
+   "first": "http://a.test/x",
+   "why": "any scheme opens a URL: a letter, then letters, digits, `+`, `.` or `-`"
+  },
+  {
+   "hint": "http://a.test/x,file:///etc/passwd",
+   "first": "http://a.test/x",
+   "why": "a file URL after the comma opens an entry too (the first entry is all that is read)"
+  },
+  {
+   "hint": "http://u:p@epg.test/a.xml,https://ok.test/b.xml",
+   "first": "http://u:p@epg.test/a.xml",
+   "why": "the first entry is returned as it is, userinfo and all: the verdict refuses it, never the second instead"
+  },
+  {
+   "hint": ",https://ok.test/b.xml",
+   "first": "",
+   "why": "an empty first entry is empty, never the second"
+  },
+  {
+   "hint": " \t,https://ok.test/b.xml",
+   "first": "",
+   "why": "a first entry of delimiters only is empty"
+  },
+  {
+   "hint": "https://epg.test/a.xml \t,https://b.test/",
+   "first": "https://epg.test/a.xml",
+   "why": "the six ASCII delimiters before the comma are taken off the entry"
+  },
+  {
+   "hint": "  https://a.test/x,http://b.test/",
+   "first": "https://a.test/x",
+   "why": "and off its start, when a cut was made"
+  },
+  {
+   "hint": "  https://a.test/x",
+   "first": "  https://a.test/x",
+   "why": "with no cut the text is untouched (so `first != hint` reads `a list`)"
+  },
+  {
+   "hint": "https://a.test/x\u00a0,http://b.test/",
+   "first": "https://a.test/x\u00a0",
+   "why": "NBSP is not one of the six: it stays on the entry (validation trims it at the edge later)"
+  },
+  {
+   "hint": "https://a.test/x,\u00a0http://b.test/",
+   "first": "https://a.test/x,\u00a0http://b.test/",
+   "why": "NBSP after the comma is not one of the six either: no cut (validation then refuses the whole, a URL holding whitespace)"
+  },
+  {
+   "hint": "https://epg.test/a.xml",
+   "first": "https://epg.test/a.xml",
+   "why": "no comma at all"
+  },
+  {
+   "hint": "http://us,er:pw@a.test/x",
+   "first": "http://us,er:pw@a.test/x",
+   "why": "a comma inside userinfo opens nothing"
+  },
+  {
+   "hint": "",
+   "first": "",
+   "why": "nothing"
+  }
+ ],
+ "noDot": [
+  {
+   "host": "qqqqqq",
+   "refused": true,
+   "why": "the username a cut at a space leaves as the host"
+  },
+  {
+   "host": "qqqqqq.",
+   "refused": true,
+   "why": "one trailing dot is removed first"
+  },
+  {
+   "host": "QQQQ",
+   "refused": true,
+   "why": "case does not matter"
+  },
+  {
+   "host": "localhost",
+   "refused": true,
+   "why": "one label (stated: a hint or logo naming it is no longer a refusal that names it)"
+  },
+  {
+   "host": "localhost.",
+   "refused": true,
+   "why": "one label with its trailing dot"
+  },
+  {
+   "host": "2130706433",
+   "refused": true,
+   "why": "an all-digit host has no dot: refused whatever it names (stated cost)"
+  },
+  {
+   "host": "0x7f000001",
+   "refused": true,
+   "why": "a hex IPv4 spelling has no dot either (stated cost)"
+  },
+  {
+   "host": "tvbox:8080",
+   "refused": true,
+   "why": "a one-label host:port reads as one label (callers hand hosts, never ports)"
+  },
+  {
+   "host": "xn--p1ai",
+   "refused": true,
+   "why": "a punycode label alone is one label"
+  },
+  {
+   "host": "[qqqqqq]",
+   "refused": true,
+   "why": "brackets around a name that is no IPv6 literal exempt nothing"
+  },
+  {
+   "host": "cdn.test",
+   "refused": false,
+   "why": "a dotted name"
+  },
+  {
+   "host": "cdn.test.",
+   "refused": false,
+   "why": "a dotted name with its trailing dot"
+  },
+  {
+   "host": "xn--punycode.test",
+   "refused": false,
+   "why": "a dotted punycode name"
+  },
+  {
+   "host": "a.localhost",
+   "refused": false,
+   "why": "dotted (refused by its class elsewhere, D-SINK-40)"
+  },
+  {
+   "host": "10.0.0.1",
+   "refused": false,
+   "why": "a dotted IPv4 literal (refused by its class elsewhere)"
+  },
+  {
+   "host": "127.1",
+   "refused": false,
+   "why": "a dotted short IPv4 spelling"
+  },
+  {
+   "host": "[::1]",
+   "refused": false,
+   "why": "a bracketed IPv6 literal, as a URL writes it"
+  },
+  {
+   "host": "::1",
+   "refused": false,
+   "why": "an IPv6 literal unbracketed, as http.client hands it to the connect"
+  },
+  {
+   "host": "[2001:db8::1]",
+   "refused": false,
+   "why": "a bracketed IPv6 literal"
+  },
+  {
+   "host": "[fe80::1%25eth0]",
+   "refused": false,
+   "why": "an IPv6 literal with a zone"
+  },
+  {
+   "host": "",
+   "refused": false,
+   "why": "empty is not refused by this rule (no host is the URL reader's refusal)"
+  },
+  {
+   "host": " ",
+   "refused": true,
+   "why": "whitespace is not empty and holds no dot: refused (no URL reader hands one over; nothing strips it here)"
+  },
+  {
+   "host": ".",
+   "refused": false,
+   "why": "a lone dot is empty once its trailing dot is removed"
+  },
+  {
+   "host": "qqqqqq..",
+   "refused": false,
+   "why": "only ONE trailing dot is removed, so a dot is left (the idna codec refuses the empty label before any lookup)"
+  },
+  {
+   "host": "first.qqqqqq",
+   "refused": false,
+   "why": "the review's F12, the residual stated: a dotted username left as the host reads as a dotted host, which no test can tell from one (D-SINK-35's class)"
+  }
+ ],
+ "hintVerdicts": [
+  {
+   "hint": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "https://epg.test/guide.xml.gz",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the measured list: the first entry alone, so the credential stays home"
+  },
+  {
+   "hint": "https://epg.test/guide.xml.gz, http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "https://epg.test/guide.xml.gz",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "with a space after the comma (validation refused the whole before; the first guide now loads)"
+  },
+  {
+   "hint": "https://epg.test/guide.xml.gz,http://qqqqqq:zzzzzz@prov.test/xmltv.php",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "https://epg.test/guide.xml.gz",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "userinfo in the second entry never reaches the first host"
+  },
+  {
+   "hint": "http://a.test/1.xml,http://b.test/2.xml,https://c.test/3.xml",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "http://a.test/1.xml",
+    "refused": "",
+    "host": "a.test",
+    "plainHttp": true
+   },
+   "helperRefusesName": false,
+   "why": "three entries: the first, disclosed as plain http under an https playlist"
+  },
+  {
+   "hint": "http://u:p@epg.test/a.xml,https://ok.test/b.xml",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "userinfo",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a list whose first entry carries userinfo is refused for it, never read from its second entry"
+  },
+  {
+   "hint": "http://192.168.1.1/x,https://ok.test/b.xml",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "local",
+    "host": "192.168.1.1",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a list whose first entry is local is refused for it, never read from its second entry"
+  },
+  {
+   "hint": "https://epg.test,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "https://epg.test/",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a first entry with no path: the old verdict adopted `https://epg.test,http//prov.test/...` (host `epg.test,http`)"
+  },
+  {
+   "hint": "http://epg.test/xmltv.php?ids=1,2&u=x",
+   "playlistUrl": "http://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "http://epg.test/xmltv.php?ids=1,2&u=x",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a comma in a query is URL text: the whole URL is adopted"
+  },
+  {
+   "hint": "http://epg.test/a.xml,b.xml",
+   "playlistUrl": "http://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "http://epg.test/a.xml,b.xml",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a comma before a word that opens no URL: the whole URL is adopted"
+  },
+  {
+   "hint": ",https://ok.test/b.xml",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": null,
+   "why": "an empty first entry is no hint, never the second"
+  },
+  {
+   "hint": "http://qqqqqq:",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "the cut hint (critic M2): its host is the username, so no hint at all and nothing names it"
+  },
+  {
+   "hint": "http://qqqqqq:12/",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "the cut with a digits-only password prefix read as a port"
+  },
+  {
+   "hint": "https://qq/",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "the cut inside the username"
+  },
+  {
+   "hint": "http://QQQQ./x",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "upper case with a trailing dot"
+  },
+  {
+   "hint": "http://qqqqqq:,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "a list whose first entry is one label: no hint, never the second entry"
+  },
+  {
+   "hint": "http://a@b:12/",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "a cut that leaves userinfo and a one-label fragment: no hint, so the userinfo sentence never names `b`"
+  },
+  {
+   "hint": "http://localhost:8080/api/shutdown",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "localhost is one label: no hint (it was a refusal naming it; stated)"
+  },
+  {
+   "hint": "http://2130706433/",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "an all-digit host is one label: no hint (stated cost)"
+  },
+  {
+   "hint": "http://tvbox:8080/epg.xml",
+   "playlistUrl": "http://tvbox:8080/list.m3u",
+   "playlistHost": "tvbox",
+   "expected": {
+    "url": "http://tvbox:8080/epg.xml",
+    "refused": "",
+    "host": "tvbox",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the playlist's own one-label host is excepted"
+  },
+  {
+   "hint": "http://other:8080/epg.xml",
+   "playlistUrl": "http://tvbox:8080/list.m3u",
+   "playlistHost": "tvbox",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "another one-label host is not"
+  },
+  {
+   "hint": "http://tvbox:9090/epg.xml",
+   "playlistUrl": "http://tvbox:8080/list.m3u",
+   "playlistHost": "tvbox",
+   "expected": {
+    "url": "http://tvbox:9090/epg.xml",
+    "refused": "",
+    "host": "tvbox",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the exception compares hosts, not ports"
+  },
+  {
+   "hint": "http://TVBOX./epg.xml",
+   "playlistUrl": "http://tvbox:8080/list.m3u",
+   "playlistHost": "tvbox",
+   "expected": {
+    "url": "http://tvbox./epg.xml",
+    "refused": "",
+    "host": "tvbox.",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the same host by hostKey: case and one trailing dot"
+  },
+  {
+   "hint": "http://u:p@tvbox:8080/epg.xml",
+   "playlistUrl": "http://tvbox:8080/list.m3u",
+   "playlistHost": "tvbox",
+   "expected": {
+    "url": "",
+    "refused": "userinfo",
+    "host": "tvbox",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the own host passes the one-label rule and then meets D-SINK-40's userinfo refusal"
+  },
+  {
+   "hint": "http://tvbox/epg.xml",
+   "playlistUrl": "/home/u/lists/tv.m3u",
+   "playlistHost": "",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": true,
+   "why": "a file playlist has no host to except"
+  },
+  {
+   "hint": "http://localhost:34400/x",
+   "playlistUrl": "http://localhost:34400/m",
+   "playlistHost": "localhost",
+   "expected": {
+    "url": "http://localhost:34400/x",
+    "refused": "",
+    "host": "localhost",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a loopback relay's own host and port: excepted and kept (D-SINK-57)"
+  },
+  {
+   "hint": "http://localhost:34401/x",
+   "playlistUrl": "http://localhost:34400/m",
+   "playlistHost": "localhost",
+   "expected": {
+    "url": "",
+    "refused": "local",
+    "host": "localhost",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the relay's host on another port passes this rule and meets D-SINK-57's port rule"
+  },
+  {
+   "hint": "http://cdn.test/epg.xml",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "http://cdn.test/epg.xml",
+    "refused": "",
+    "host": "cdn.test",
+    "plainHttp": true
+   },
+   "helperRefusesName": false,
+   "why": "a dotted host is untouched"
+  },
+  {
+   "hint": "http://[::1]:631/admin",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "local",
+    "host": "[::1]",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a bracketed IPv6 literal is not one label; refused by its class as before"
+  },
+  {
+   "hint": "https://epg.test/guide.xml\",\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the review's F1: an absorbed quoted list is no hint at all"
+  },
+  {
+   "hint": "https://epg.test/guide.xml\"x-tvg-url=\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "an absorbed glued attribute is no hint"
+  },
+  {
+   "hint": "https://epg.test/guide.xml,x-tvg-url=http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "an absorbed bare attribute is no hint"
+  },
+  {
+   "hint": "https://epg.test/a\"b,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a list whose first entry absorbed a quote is no hint, never read from its next entry"
+  },
+  {
+   "hint": "https://epg.test/guide.xml,http://prov.test/x\"y.php?username=qqqqqq&password=zzzzzz",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "https://epg.test/guide.xml",
+    "refused": "",
+    "host": "epg.test",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "a list's first entry is clean: adopted, whatever its later entries hold"
+  },
+  {
+   "hint": "https://epg.test,foo/x",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "",
+    "refused": "",
+    "host": "",
+    "plainHttp": false
+   },
+   "helperRefusesName": false,
+   "why": "the review's F10: a `,` in the host, which no DNS name holds, is no hint"
+  },
+  {
+   "hint": "http://first.qqqqqq:12",
+   "playlistUrl": "https://prov.test/get.php",
+   "playlistHost": "prov.test",
+   "expected": {
+    "url": "http://first.qqqqqq:12/",
+    "refused": "",
+    "host": "first.qqqqqq",
+    "plainHttp": true
+   },
+   "helperRefusesName": false,
+   "why": "the review's F12, the residual stated: a bare hint cut at a space after a dotted username is adopted on the username, as before"
+  }
+ ],
+ "handOffs": [
+  {
+   "url": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": true,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "a shell loaded before the rule hands the whole list: refused as read, before any lookup"
+  },
+  {
+   "url": "https://epg.test,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": true,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "a first entry with no path: normalizing the whole drops the second entry's `://` (host `epg.test,http`), so the list is judged as the shell handed it, before normalization"
+  },
+  {
+   "url": "https://epg.test/guide.xml.gz,\thttp://prov.test/xmltv.php",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": true,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "a list with a tab after its comma: refused as a list, before validation"
+  },
+  {
+   "url": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "user",
+   "playlistHost": "",
+   "listed": true,
+   "oneLabel": false,
+   "code": "network",
+   "lookups": [
+    "epg.test"
+   ],
+   "why": "the same text typed by the user is theirs: looked up, the first host"
+  },
+  {
+   "url": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "",
+   "playlistHost": "",
+   "listed": true,
+   "oneLabel": false,
+   "code": "network",
+   "lookups": [
+    "epg.test"
+   ],
+   "why": "no origin at all (a human with --url) reads as the user's"
+  },
+  {
+   "url": "http://qqqqqq:/",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": true,
+   "code": "local_address",
+   "lookups": [],
+   "why": "a one-label host the playlist chose: never looked up"
+  },
+  {
+   "url": "http://qqqqqq./x",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": true,
+   "code": "local_address",
+   "lookups": [],
+   "why": "with its trailing dot"
+  },
+  {
+   "url": "http://2130706433/",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": true,
+   "code": "local_address",
+   "lookups": [],
+   "why": "an all-digit host: refused before the numeric lookup too"
+  },
+  {
+   "url": "http://other:8080/epg.xml",
+   "origin": "playlist",
+   "playlistHost": "tvbox",
+   "listed": false,
+   "oneLabel": true,
+   "code": "local_address",
+   "lookups": [],
+   "why": "a one-label host that is not the playlist's"
+  },
+  {
+   "url": "http://tvbox:8080/epg.xml",
+   "origin": "playlist",
+   "playlistHost": "tvbox",
+   "listed": false,
+   "oneLabel": true,
+   "code": "network",
+   "lookups": [
+    "tvbox"
+   ],
+   "why": "the playlist's own one-label host is looked up"
+  },
+  {
+   "url": "http://TVBOX./epg.xml",
+   "origin": "playlist",
+   "playlistHost": "tvbox",
+   "listed": false,
+   "oneLabel": true,
+   "code": "network",
+   "lookups": [
+    "tvbox."
+   ],
+   "why": "the same host by host_key"
+  },
+  {
+   "url": "http://epg.test/guide.xml",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "network",
+   "lookups": [
+    "epg.test"
+   ],
+   "why": "a dotted host the playlist chose is looked up as before"
+  },
+  {
+   "url": "http://tvbox:8080/x",
+   "origin": "user",
+   "playlistHost": "",
+   "listed": false,
+   "oneLabel": true,
+   "code": "network",
+   "lookups": [
+    "tvbox"
+   ],
+   "why": "a one-label host the user typed is looked up"
+  },
+  {
+   "url": "http://[::1]:9/x",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "local_address",
+   "lookups": [
+    "::1"
+   ],
+   "why": "an IPv6 literal is not one label: looked up (numeric, no DNS) and refused by its class as before"
+  },
+  {
+   "url": "https://epg.test/guide.xml\",\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "the review's F1: an absorbed list the playlist chose is refused as read, before any lookup"
+  },
+  {
+   "url": "https://epg.test/guide.xml\"x-tvg-url=\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "an absorbed glued attribute is refused before any lookup"
+  },
+  {
+   "url": "https://epg.test/guide.xml,x-tvg-url=http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "an absorbed bare attribute is refused before any lookup"
+  },
+  {
+   "url": "https://epg.test,http//prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "the review's F10: the list as a shell before D-SINK-82 hands it over, normalized, its host `epg.test,http`: refused before any lookup"
+  },
+  {
+   "url": "https://epg.test/guide.xml\"x-tvg-url=\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "origin": "user",
+   "playlistHost": "",
+   "listed": false,
+   "oneLabel": false,
+   "code": "network",
+   "lookups": [
+    "epg.test"
+   ],
+   "why": "the same text the user typed is theirs, and is looked up"
+  }
+ ],
+ "logoHosts": [
+  {
+   "url": "https://qqqqqq:",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the cut logo of the critic's grid: its host is the username"
+  },
+  {
+   "url": "https://qqqqqq:443/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "with a digits-only password prefix read as a port"
+  },
+  {
+   "url": "https://qq/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "cut inside the username"
+  },
+  {
+   "url": "https://QQQQ./a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "case and one trailing dot"
+  },
+  {
+   "url": "https://localhost/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "localhost is one label (it was refused at connect as local_address)"
+  },
+  {
+   "url": "https://2130706433/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "an all-digit host (stated cost)"
+  },
+  {
+   "url": "https://cdn;x=a.b/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the host the survey reads ends at `;` (D-SINK-30) and is one label; the fetch refuses what the survey refuses"
+  },
+  {
+   "url": "https://user:pass@qqqqqq/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_userinfo",
+    "lookups": []
+   },
+   "why": "userinfo is refused first, as before"
+  },
+  {
+   "url": "https://[qqqqqq]/a.png",
+   "host": "",
+   "fetch": null,
+   "why": "brackets around a name exempt nothing (the fetch's own URL parser refuses this one)"
+  },
+  {
+   "url": "https://cdn.test/a.png",
+   "host": "cdn.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "cdn.test"
+    ]
+   },
+   "why": "a dotted host is counted and looked up as before"
+  },
+  {
+   "url": "https://cdn.test./a.png",
+   "host": "cdn.test.",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "cdn.test."
+    ]
+   },
+   "why": "a dotted host with its trailing dot"
+  },
+  {
+   "url": "https://xn--punycode.test/a.png",
+   "host": "xn--punycode.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "xn--punycode.test"
+    ]
+   },
+   "why": "a dotted punycode host"
+  },
+  {
+   "url": "https://10.0.0.1/a.png",
+   "host": "10.0.0.1",
+   "fetch": {
+    "code": "local_address",
+    "lookups": [
+     "10.0.0.1"
+    ]
+   },
+   "why": "a dotted literal is counted and refused at connect by its class, as before"
+  },
+  {
+   "url": "https://[::1]:8443/a.png",
+   "host": "[::1]",
+   "fetch": {
+    "code": "local_address",
+    "lookups": [
+     "::1"
+    ]
+   },
+   "why": "an IPv6 literal is not one label"
+  },
+  {
+   "url": "https://logos.test/news.png\"catchup-source=\"http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
+   "host": "",
+   "fetch": {
+    "code": "logo_url",
+    "lookups": []
+   },
+   "why": "the review's F1: a logo that absorbed a credentialed catchup-source is no host and is refused before any lookup"
+  },
+  {
+   "url": "https://logos.test/news.png,catchup-source=http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
+   "host": "",
+   "fetch": {
+    "code": "logo_url",
+    "lookups": []
+   },
+   "why": "a bare logo that absorbed a bare catchup-source by a comma"
+  },
+  {
+   "url": "https://images.test/?url=https://cdn.test/logo.png",
+   "host": "images.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "images.test"
+    ]
+   },
+   "why": "an image proxy's `?url=` is a logo as before"
+  },
+  {
+   "url": "https://res.cloudinary.com/demo/image/fetch/w_100,h_100/https://cdn.test/logo.png",
+   "host": "res.cloudinary.com",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "res.cloudinary.com"
+    ]
+   },
+   "why": "an image service's comma path is a logo as before"
+  }
+ ],
+ "absorbed": [
+  {
+   "text": "https://epg.test/guide.xml\",\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": true,
+   "why": "the review's F1: a quoted list, `url-tvg=\"A\",\"B\"`, stored whole as one value"
+  },
+  {
+   "text": "https://epg.test/guide.xml\"x-tvg-url=\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": true,
+   "why": "a quoted attribute glued after the URL value"
+  },
+  {
+   "text": "https://epg.test/guide.xml\";\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": true,
+   "why": "a quoted list with `;`"
+  },
+  {
+   "text": "https://epg.test/guide.xml\"|\"http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": true,
+   "why": "a quoted list with `|`"
+  },
+  {
+   "text": "https://epg.test/guide.xml,x-tvg-url=http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": true,
+   "why": "a bare attribute glued by a comma, its value a URL"
+  },
+  {
+   "text": "https://epg.test/guide.xml,x-tvg-url=http:\u007f//prov.test/x",
+   "absorbed": true,
+   "why": "the glued URL's `://` with a control in it, as _URL_MARK reads one"
+  },
+  {
+   "text": "https://logos.test/news.png\"catchup-source=\"http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
+   "absorbed": true,
+   "why": "a logo with a credentialed catchup-source glued after it"
+  },
+  {
+   "text": "https://logos.test/news.png,catchup-source=http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
+   "absorbed": true,
+   "why": "a bare logo with a bare catchup-source glued by a comma"
+  },
+  {
+   "text": "https://e.test/,a.b-c_d=svn+ssh://h.test/x",
+   "absorbed": true,
+   "why": "an attribute key of `.`, `-` and `_`, a scheme with `+`"
+  },
+  {
+   "text": "https://epg.test/?ids=1,2",
+   "absorbed": false,
+   "why": "a `,` in a query is URL text"
+  },
+  {
+   "text": "https://res.cloudinary.com/demo/image/fetch/w_100,h_100/https://cdn.test/logo.png",
+   "absorbed": false,
+   "why": "a `,` before a `://` with no `key=` between: an image service's path"
+  },
+  {
+   "text": "https://images.test/?url=https://cdn.test/logo.png",
+   "absorbed": false,
+   "why": "an image proxy's `?url=`: no `,` before the key"
+  },
+  {
+   "text": "https://images.test/?a=1&url=https://cdn.test/logo.png",
+   "absorbed": false,
+   "why": "an image proxy's `&url=`"
+  },
+  {
+   "text": "https://e.test/g,a=b",
+   "absorbed": false,
+   "why": "a `,key=` whose value is no URL"
+  },
+  {
+   "text": "https://e.test/g,a=1://x",
+   "absorbed": false,
+   "why": "a `,key=` whose value has no scheme letter first"
+  },
+  {
+   "text": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
+   "absorbed": false,
+   "why": "a comma-joined list is D-SINK-82's rule (hint_first_entry), not this one"
+  },
+  {
+   "text": "https://e.test/a%22b",
+   "absorbed": false,
+   "why": "an encoded quote is URL text"
+  },
+  {
+   "text": "",
+   "absorbed": false,
+   "why": "empty"
+  }
+ ]
+}

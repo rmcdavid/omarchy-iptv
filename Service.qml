@@ -5824,8 +5824,10 @@ Item {
     root.pendingFreshness = false
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
-    // D-SINK-41: a cache written before the destination rules is refreshed
-    // once, whatever its age (Model.cacheBeforeDestinationRules).
+    // D-SINK-41, D-SINK-80: a cache written before the destination rules
+    // or the attribute grammar is refreshed once, whatever its age
+    // (Model.cacheBeforeDestinationRules). A guide window written before
+    // D-SINK-79's fold is refetched by the helper's own stamp (GUIDE_RULES).
     if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)
         || Model.cacheBeforeDestinationRules(root.playlistStatus)) root.refreshPlaylist(true)
     if (root.epgFetchUrl !== "" && !epgProc.running) root.refreshEpg(true)

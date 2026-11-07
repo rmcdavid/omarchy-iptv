@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from helper_loader import load_helper, loopback_reads_public  # redirects HOME and $XDG_* first
 from scripted_server import ScriptedServer, response
 from test_reply_bounds import PROBE, PROBE_LIMIT_MIB, LIMIT_ENV
+from test_provider_hosts import Resolver  # the class alone: no test case of that module runs here
 
 helper = load_helper()
 
@@ -360,6 +361,29 @@ class LogoFolderLockTest(LogoRunCase):
         code, summary, _, _ = self.run_fetch()
         self.assertEqual((code, summary["refusedOnPolicy"]), (0, 1), summary)
         self.assertFalse(self.logo_dir.exists())
+
+    def test_a_host_of_one_label_is_a_policy_refusal(self):
+        # D-SINK-83: the real fetch_logo refuses a host of one label before
+        # any lookup, and the run counts that with the policy's refusals --
+        # as `local_address` is -- not as a failure of the address. The
+        # resolver is the provider-hosts suite's stand-in (the review's F5):
+        # a tree without the rule, or a regression of it, asks it for the
+        # synthetic name, and nothing reaches the system's resolver.
+        self.write_channels(["https://qqqqqq/a.png", ""])
+        with Resolver() as resolver:
+            code, summary, _, _ = self.run_fetch()
+        self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
+                         (0, 1, 0, {"logo_host": 1}, []), summary)
+
+    def test_a_logo_that_ran_into_another_attribute_is_a_policy_refusal(self):
+        # The review's F1: a logo whose run took a glued attribute holding a
+        # credentialed URL is refused before any lookup (`logo_url`), and
+        # counted with the policy's refusals.
+        self.write_channels(['https://logos.test/a.png"catchup-source="http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts', ""])
+        with Resolver() as resolver:
+            code, summary, _, _ = self.run_fetch()
+        self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
+                         (0, 1, 0, {"logo_url": 1}, []), summary)
 
 
 class CeilingSweepTest(LogoRunCase):

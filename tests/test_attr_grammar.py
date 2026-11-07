@@ -1,0 +1,527 @@
+"""D-SINK-80 (2026-11-05): the M3U attribute grammar never ends a value
+inside a URL's run.
+
+parse_attrs ended a quoted value at its first `"` and a bare one at its
+first `,`, `"` or Python whitespace, before any redactor saw it, and every
+redactor reads those as URL text (R32a'''). So a credentialed URL in ANY
+attribute, read or not, was stored cut -- `http://qqqqqq:zz`, which both
+redactors print as the host `qqqqqq` -- and the rest of the line, the
+password's tail first, became the channel's NAME, which no redactor
+touches: the window title, the guide row, the bus, the notifications. On
+#EXTM3U a cut guide hint was adopted with the username as its host. A URL
+now takes the rest of its run (parse_attrs' docstring holds the rule), and a
+tvg-id holding a URL is dropped.
+
+tests/fixtures/attr-grammar.json holds the lines and what they parse to, the
+helper's alone: the shell has no M3U parser. Here: every case through
+parse_attrs and parse_extinf, a subset through parse_m3u's whole row, every
+case's row held to the helper's sinks; a sweep of URL shapes, cut characters,
+attributes, forms and positions through parse_m3u, held to the helper's sinks
+and, in node, to the shell's; the rule against a reference written from its
+statement over random lines; and linear time.
+"""
+import json
+import os
+import random
+import re
+import subprocess
+import time
+import unittest
+
+from helper_loader import load_helper
+
+helper = load_helper()
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+with open(os.path.join(HERE, "fixtures", "attr-grammar.json"), encoding="utf-8") as fh:
+    FIXTURE = json.load(fh)
+CASES = FIXTURE["cases"]
+SECRET = FIXTURE["secret"]
+STREAM = "http://stream.example.test/live/1.ts"
+# The six ASCII delimiters every redactor ends a URL's run at (R32a'''),
+# spelt out rather than read from the helper.
+DELIMITERS = "\t\n\x0b\x0c\r "
+
+
+def leaked(text):
+    return [c for c in SECRET if c in str(text)]
+
+
+def parse(line):
+    """(attrs, title) for a whole #EXTINF or #EXTM3U line, the #EXTM3U
+    remainder as parse_attrs returns it."""
+    if line.startswith("#EXTM3U"):
+        return helper.parse_attrs(line[len("#EXTM3U"):])
+    return helper.parse_extinf(line)
+
+
+def parse_line(line, title_line="#EXTINF:-1,Plain Title"):
+    """parse_m3u over one line and a stream: (the document, its one row)."""
+    if line.startswith("#EXTM3U"):
+        text = line + "\n" + title_line + "\n" + STREAM + "\n"
+    else:
+        text = "#EXTM3U\n" + line + "\n" + STREAM + "\n"
+    doc = helper.parse_m3u(text)
+    assert len(doc["channels"]) == 1, line
+    return doc, doc["channels"][0]
+
+
+def shown_fields(doc, channel):
+    """Every stored text a sink shows: the name, the groups, the tvg-name,
+    the logo and the guide hint."""
+    fields = [("name", channel["name"])]
+    fields += [("group", g) for g in channel.get("groups", [channel["group"]])]
+    fields += [(k, channel[k]) for k in ("tvgName", "logo") if k in channel]
+    if doc["epgUrlHint"]:
+        fields.append(("epgUrlHint", doc["epgUrlHint"]))
+    return fields
+
+
+def helper_sinks(field, value, plain=True):
+    """The helper's sinks for one stored field: the player's title, which
+    deletes control characters before it redacts, and where `plain` (no
+    control inside a `://`, no delimiter inside the URL) its redactor, and
+    for a logo the host the logo survey names."""
+    out = [("player_title_text", helper.player_title_text(value))]
+    if plain:
+        out.append(("redact_urls", helper.redact_urls(value)))
+        if field == "logo":
+            out.append(("logo_survey", " ".join(h["host"] for h in helper.logo_survey([{"logo": value}])["hosts"])))
+    return out
+
+
+def shell_sinks(rows):
+    """The shell's sinks, in node, over [{name, groups, tvgName, logo,
+    epgUrlHint}]: Model.sinkText of every field, the body Model.notifyArgv
+    posts for a stream that did not play, the logo consent text
+    (Model.logoSurvey, Model.logoConsentLines) and the guide hint's host
+    (Model.epgHintVerdict under an https playlist), adopted or refused. The
+    consent text's own closing word "request" holds a `q`, so it is taken
+    out before the text is read."""
+    script = ('const M=require("./Model.mjs");'
+              'const rows=JSON.parse(require("fs").readFileSync(0,"utf8"));'
+              'process.stdout.write(JSON.stringify(rows.map(r=>{'
+              'const out=[];'
+              'for(const v of [r.name].concat(r.groups,r.tvgName?[r.tvgName]:[],r.logo?[r.logo]:[],'
+              'r.epgUrlHint?[r.epgUrlHint]:[]))out.push(["sinkText",M.sinkText(v)]);'
+              'const a=M.notifyArgv("streamFailed",{name:r.name,reason:"r"});out.push(["notifyArgv",a[a.length-1]]);'
+              'if(r.logo)out.push(["logoConsentLines",M.logoConsentLines(M.logoSurvey([{logo:r.logo}]))'
+              '.join(" ").split(" request.").join(" ")]);'
+              'if(r.epgUrlHint){const h=M.epgHintVerdict({epgUrlHint:r.epgUrlHint},"https://prov.test/get.php");'
+              'out.push(["epgHintVerdict",h.host+" "+(h.url?h.url.split("/")[2]:"")])}'
+              'return out})))')
+    done = subprocess.run(["node", "-e", script], input=json.dumps(rows), capture_output=True,
+                          text=True, cwd=ROOT, timeout=300)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr[-800:])
+    return json.loads(done.stdout)
+
+
+def shell_row(doc, channel):
+    return {"name": channel["name"], "groups": channel.get("groups", [channel["group"]]),
+            "tvgName": channel.get("tvgName", ""), "logo": channel.get("logo", ""),
+            "epgUrlHint": doc["epgUrlHint"]}
+
+
+class FixtureTest(unittest.TestCase):
+    def test_the_fixture_is_whole(self):
+        # A shrunken fixture goes red: the ordinary lines, the leak shapes,
+        # the stated costs, D-SINK-34's class and the parsed rows all there.
+        kinds = {"leak": [c for c in CASES if leaked(c["line"]) and "accepted" not in c],
+                 "cost": [c for c in CASES if "cost" in c],
+                 "accepted": [c for c in CASES if c.get("accepted") == "D-SINK-34"],
+                 "stored": [c for c in CASES if "stored" in c],
+                 "header": [c for c in CASES if c["line"].startswith("#EXTM3U")]}
+        self.assertEqual((len(CASES), {k: len(v) for k, v in kinds.items()}),
+                         (104, {"leak": 59, "cost": 9, "accepted": 9, "stored": 38, "header": 9}))
+        self.assertTrue(all(not leaked(c["line"]) for c in kinds["cost"]))
+        self.assertEqual(SECRET, "qz")
+
+    def test_parse_attrs_and_parse_extinf_answer_every_case(self):
+        for c in CASES:
+            self.assertEqual(list(parse(c["line"])), [c["attrs"], c["title"]], (c["why"], c["line"]))
+
+    def test_parse_m3u_stores_the_row_each_case_names(self):
+        for c in CASES:
+            if "stored" not in c:
+                continue
+            doc, channel = parse_line(c["line"])
+            for key, want in c["stored"].items():
+                got = doc["epgUrlHint"] if key == "epgUrlHint" else channel.get(key)
+                if key == "id" and want.endswith(":"):
+                    self.assertTrue(got.startswith(want), (c["why"], got))
+                else:
+                    self.assertEqual(got, want, (c["why"], key))
+
+    def test_no_stored_field_shows_a_credential_at_a_helper_sink(self):
+        # D-SINK-34's accepted class aside: there a delimiter inside the URL
+        # ends its run at every redactor, whatever the grammar does.
+        bad = []
+        for c in CASES:
+            if "accepted" in c:
+                continue
+            doc, channel = parse_line(c["line"])
+            for field, value in shown_fields(doc, channel):
+                bad += [(c["line"], field, sink, out) for sink, out in helper_sinks(field, value, c.get("plain", True))
+                        if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((c["line"], "id", channel["id"]))
+        self.assertEqual(bad, [])
+
+    def test_the_accepted_cases_leak_at_the_redactor_itself(self):
+        # So they are D-SINK-34's class and not the grammar's: the URL as
+        # written, its delimiter inside, already prints a fragment.
+        for c in CASES:
+            if "accepted" in c:
+                url = c["line"][c["line"].index("http://"):]
+                url = url[:url.index("@")] + "@cdn.test/x"
+                self.assertTrue(any(ch in url for ch in DELIMITERS), c["why"])
+                self.assertTrue(leaked(helper.redact_urls(url)), c["why"])
+
+
+# The oracle sweep (the critic's M2): every URL form, cut character,
+# attribute, form and position through parse_m3u, held to every sink, and
+# each URL-bearing value held to its host exactly, so a grammar that drops
+# values cannot pass -- except that a logo or a guide hint whose value ran
+# past where every earlier release ended it is stored as none (the recheck
+# of the review's F1, own_value), and that is held exactly too: a bare
+# one always does here, since every cut character ended a bare value, and a
+# quoted one when the cut holds a `"`. `{c}` is the cut character.
+FORMS = {"user": "http://qq{c}qqqq:zzzzzz@cdn.test/x",
+         "pass": "http://qqqqqq:zz{c}zzzz@cdn.test/x",
+         "path": "http://cdn.test/live/qqqqqq/zz{c}zz/1.ts",
+         "query": "http://cdn.test/get.php?username=qqqqqq&password=zz{c}zz",
+         "scheme": "http://{c}qqqqqq:zzzzzz@cdn.test/x"}
+# What ended a value early: the quote, the quote and comma, the comma, and
+# every whitespace Python's class holds that no redactor ends a URL at.
+CUTS = ['"', '",', ","] + [chr(cp) for cp in (0xa0, 0x1680, *range(0x2000, 0x200b), 0x2028, 0x2029,
+                                             0x202f, 0x205f, 0x3000, 0x85, 0x1c, 0x1d, 0x1e, 0x1f)]
+# D-SINK-34's class: an ASCII delimiter inside the URL.
+ACCEPTED_CUTS = [" ", "\t", "\x0b", "\x0c", "\r"]
+EXTINF_ATTRS = ["group-title", "tvg-name", "tvg-logo", "tvg-id", "catchup-source"]
+HEADER_ATTRS = ["url-tvg", "x-tvg-url"]
+
+
+def sweep():
+    """[(meta, line, title line)] for every case of the sweep."""
+    out = []
+    for attr in EXTINF_ATTRS + HEADER_ATTRS:
+        for form, url in FORMS.items():
+            for cut in CUTS + ACCEPTED_CUTS:
+                for quoted in (True, False):
+                    for first in (True, False):
+                        for comma in (True, False):
+                            value = url.replace("{c}", cut)
+                            if attr == "tvg-logo":
+                                # https, the only scheme the logo survey names a host for.
+                                value = "https" + value[len("http"):]
+                            pair = "%s=%s" % (attr, '"%s"' % value if quoted else value)
+                            sep = "," if comma else " "
+                            if attr in HEADER_ATTRS:
+                                head = "#EXTM3U " + (pair + ' tvg-shift="0"' if first else 'tvg-shift="0" ' + pair)
+                                title = '#EXTINF:-1 tvg-chno="7"' + sep + "Plain Title"
+                            else:
+                                others = 'tvg-chno="7" tvg-shift="0"'
+                                head = "#EXTINF:-1 " + (pair + " " + others if first else others + " " + pair)
+                                head, title = head + sep + "Plain Title", None
+                            meta = {"attr": attr, "form": form, "cut": cut, "quoted": quoted, "first": first,
+                                    "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS}
+                            out.append((meta, head, title))
+    return out
+
+
+def sweep_rows():
+    """[(meta, document, row)] for the whole sweep, through parse_m3u."""
+    rows = []
+    for meta, line, title in sweep():
+        doc, channel = parse_line(line, title) if title else parse_line(line)
+        rows.append((meta, doc, channel))
+    return rows
+
+
+class SweepTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rows = sweep_rows()
+
+    def own_value(self, meta, doc, channel):
+        attr = meta["attr"]
+        if attr in HEADER_ATTRS:
+            return doc["epgUrlHint"]
+        return {"group-title": channel["group"], "tvg-name": channel.get("tvgName"),
+                "tvg-logo": channel.get("logo")}.get(attr)
+
+    def test_the_sweep_is_whole(self):
+        accepted = [m for m, _, _ in self.rows if m["accepted"]]
+        self.assertEqual((len(self.rows), len(accepted)), (8680, 1400))
+
+    def test_no_field_shows_a_credential_at_a_helper_sink(self):
+        bad = []
+        for meta, doc, channel in self.rows:
+            if meta["accepted"]:
+                continue
+            for field, value in shown_fields(doc, channel):
+                bad += [(meta, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((meta, "id", channel["id"]))
+        self.assertEqual(bad[:4], [])
+
+    def test_each_url_value_is_stored_whole_and_redacts_to_its_host(self):
+        # The other direction: stored, redacted, exactly the host; the
+        # attribute after a URL value is read; and the title is the line's,
+        # but where a bare URL value glued to the comma takes its first word
+        # (a stated cost).
+        bad = []
+        for meta, doc, channel in self.rows:
+            if meta["accepted"]:
+                continue
+            value = self.own_value(meta, doc, channel)
+            glued = not meta["quoted"] and not meta["first"] and meta["comma"]
+            if meta["attr"] in HEADER_ATTRS:
+                want_name = "Plain Title"
+            else:
+                want_name = "Title" if glued else "Plain Title"
+            if meta["attr"] in ("tvg-id", "catchup-source"):
+                if "tvgId" in channel or channel["id"].startswith("t:"):
+                    bad.append((meta, "tvg-id kept", channel["id"]))
+            elif meta["attr"] in ["tvg-logo"] + HEADER_ATTRS and (not meta["quoted"] or '"' in meta["cut"]):
+                if value:
+                    bad.append((meta, "absorbed value kept", value))
+            elif value is None or helper.redact_urls(value) != meta["url"].split("://")[0] + "://cdn.test" \
+                    or not value.startswith(meta["url"]):
+                bad.append((meta, "value", value))
+            if channel["name"] != want_name or channel.get("chno") != "7":
+                bad.append((meta, "row", channel["name"], channel.get("chno")))
+        self.assertEqual(bad[:4], [])
+
+    def test_the_accepted_class_is_the_redactors_own(self):
+        # Excluded above, counted, and each one's URL as written already
+        # prints a fragment through the redactor: D-SINK-34's cost, which no
+        # grammar can close.
+        for meta, _, _ in self.rows:
+            if meta["accepted"]:
+                self.assertTrue(leaked(helper.redact_urls(meta["url"])), meta)
+
+    def test_no_field_shows_a_credential_at_a_shell_sink(self):
+        kept = [(m, d, c) for m, d, c in self.rows if not m["accepted"]]
+        outs = shell_sinks([shell_row(d, c) for _, d, c in kept])
+        bad = [(m, sink, out) for (m, _, _), row in zip(kept, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad[:4], [])
+        # And the hint the shell would fetch is never on the username: a
+        # userinfo hint is refused, the rest name the provider's host.
+        hints = [row for (m, _, _), row in zip(kept, outs) if m["attr"] in HEADER_ATTRS]
+        self.assertEqual(len(hints), 2 * len(FORMS) * len(CUTS) * 8)
+
+
+def deleted(text):
+    """`text` without the controls both mirrors delete: C0, DEL and C1."""
+    return "".join(c for c in text if not (ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f))
+
+
+KEY_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+
+
+def mark_end(text, i):
+    """The end of a `://` that starts at `i` -- a `:`, then controls, a `/`,
+    controls, a `/` -- or -1."""
+    if text[i] != ":":
+        return -1
+    j = i + 1
+    for _ in range(2):
+        while j < len(text) and (ord(text[j]) < 0x20 or 0x7f <= ord(text[j]) <= 0x9f):
+            j += 1
+        if j >= len(text) or text[j] != "/":
+            return -1
+        j += 1
+    return j
+
+
+def reference(text, trace):
+    """parse_attrs as the rule states it, one character at a time, with no
+    pattern: today's grammar, and inside a URL's run the run's own end."""
+    attrs, pos, n = {}, 0, len(text)
+    while pos < n:
+        i = pos
+        while i < n and text[i].isspace():
+            i += 1
+        k = i
+        while i < n and text[i] in KEY_CHARS:
+            i += 1
+        if i == k or i >= n or text[i] != "=":
+            break
+        key, vs = text[k:i].lower(), i + 1
+        if vs < n and text[vs] == '"':
+            vs += 1
+            q = text.find('"', vs)
+            if q == -1:
+                break
+            s = max(vs, text.rfind(" ", vs, q) + 1)
+            if "://" not in deleted(text[s:q]):
+                value, end = text[vs:q], q + 1
+            else:
+                e = n
+                for j in range(q, n):
+                    if text[j] in DELIMITERS:
+                        e = j
+                        break
+                close = -1
+                for j in range(q, e):
+                    # ... or nothing but whitespace from it to the run's end
+                    # (a non-ASCII space after the closing quote ends nothing).
+                    if text[j] == '"' and (j + 1 == n or text[j + 1] in DELIMITERS or text[j + 1] == ","
+                                           or (j + 1 < e and text[j + 1:e].isspace())):
+                        close = j
+                trace.append("quoted-unterminated" if close == -1 else "quoted-inside")
+                if close == -1:
+                    break
+                value, end = text[vs:close], close + 1
+        else:
+            ve = vs
+            while ve < n and not text[ve].isspace() and text[ve] not in ',"':
+                ve += 1
+            if ve == vs:
+                break
+            ends = [x for x in (mark_end(text, j) for j in range(vs, ve)) if x != -1]
+            end = ve
+            if ends:
+                trace.append("bare-inside")
+                end = n
+                for j in range(max([ve] + ends), n):
+                    if text[j] in DELIMITERS:
+                        end = j
+                        break
+            value = text[vs:end]
+        value = value.strip()
+        if value or key not in attrs:
+            attrs[key] = value
+        pos = end
+    return attrs, text[pos:]
+
+
+class RuleTest(unittest.TestCase):
+    """parse_attrs against the rule as stated, over random lines built from
+    the characters it reads."""
+
+    # Value text: what ends a value today, what the rule reads (a `://`,
+    # with a control inside it or not), the six delimiters, and whitespace
+    # Python ends a bare value at and no redactor ends a URL at.
+    ALPHABET = ["x", "Z", "=", '"', ",", " ", "\t", ":", "/", "://", "http://", ":\x01/\x00/", "@", "-",
+                chr(0xa0), chr(0x3000), chr(0x85), chr(0x1c), "\x0b", "\r", "\x00", '",', '" ', "a=",
+                "::", ":\x01", "\x9f/", "//", ":" + chr(0x85) + "//"]
+    # How an attribute starts: nothing, a space or other whitespace, then a
+    # key (or something no key is) and `=`, quoted or bare.
+    OPENERS = ["", " ", "\t", chr(0xa0), "  "]
+    KEYS = ["a", "tvg-id", "K.b_c", "t" + chr(0xe9), "", "a "]
+    # And how its value starts, a URL most of the time.
+    STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//"]
+
+    def lines(self, seed, count):
+        rng = random.Random(seed)
+        for _ in range(count):
+            if rng.random() < 0.2:
+                yield "".join(rng.choice(self.ALPHABET) for _ in range(rng.randint(0, 24)))
+                continue
+            parts = []
+            for _ in range(rng.randint(1, 4)):
+                parts.append(rng.choice(self.OPENERS) + rng.choice(self.KEYS) + "=" + rng.choice(['"', '"', ""]))
+                parts.append(rng.choice(self.STARTS))
+                parts.extend(rng.choice(self.ALPHABET) for _ in range(rng.randint(0, 8)))
+                parts.append(rng.choice(['"', '"', "", ","]))
+            yield "".join(parts)
+
+    def test_parse_attrs_is_the_rule(self):
+        trace = []
+        for text in self.lines(80, 40000):
+            self.assertEqual(helper.parse_attrs(text), reference(text, trace), ascii(text))
+        # Not vacuous: every branch of the rule was taken, often.
+        counts = {b: trace.count(b) for b in ("quoted-inside", "quoted-unterminated", "bare-inside")}
+        self.assertTrue(counts["quoted-inside"] > 4000 and counts["bare-inside"] > 3000
+                        and counts["quoted-unterminated"] > 1000, counts)
+
+    def test_the_reference_answers_the_fixture(self):
+        # So the reference is the rule the fixture states, and not only the
+        # code's: over a whole #EXTINF line, the duration and the title as
+        # parse_extinf takes them, which the rule leaves alone.
+        for c in CASES:
+            line = c["line"]
+            if line.startswith("#EXTM3U"):
+                got = list(reference(line[len("#EXTM3U"):], []))
+            else:
+                body = line[len("#EXTINF:"):]
+                body = body[re.match(r"\s*(-?\d+(?:\.\d+)?)?", body).end():]
+                attrs, rest = reference(body, [])
+                rest = rest.lstrip()
+                got = [attrs, (rest[1:] if rest.startswith(",") else rest).strip()]
+            self.assertEqual(got, [c["attrs"], c["title"]], c["why"])
+
+
+class TvgIdTest(unittest.TestCase):
+    def row(self, line):
+        return parse_line(line)[1]
+
+    def test_a_tvg_id_holding_a_url_is_dropped(self):
+        for line in ('#EXTINF:-1 tvg-id="http://qqqqqq:zzzzzz@cdn.test/x",Plain Title',
+                     '#EXTINF:-1 tvg-id="http://qqqqqq:zz"zzzz@cdn.test/x",Plain Title',
+                     '#EXTINF:-1 tvg-id=http://qqqqqq:zz,zz@cdn.test/x,Plain Title',
+                     '#EXTINF:-1 tvg-id="rtmp://cdn.test/live/qqqqqq/zzzzzz",Plain Title',
+                     '#EXTINF:-1 tvg-id="http:\x01//qqqqqq:zzzzzz@cdn.test/x",Plain Title',
+                     '#EXTINF:-1 tvg-id="news.us http:/\x9f/qqqqqq:zzzzzz@cdn.test/x",Plain Title'):
+            channel = self.row(line)
+            self.assertNotIn("tvgId", channel, ascii(line))
+            self.assertFalse(channel["id"].startswith("t:"), ascii(line))
+            self.assertEqual(leaked(channel["id"]), [], ascii(line))
+
+    def test_a_tvg_id_with_an_at_sign_or_a_colon_but_no_url_is_kept(self):
+        for tvg in ("CNN.us@HD", "news:sports", "a:/b", "a//b", "bbc.uk@SD:1"):
+            channel = self.row('#EXTINF:-1 tvg-id="%s",Plain Title' % tvg)
+            self.assertEqual((channel.get("tvgId"), channel["id"]), (tvg, "t:" + tvg))
+
+    def test_a_dropped_tvg_id_is_not_the_name_either(self):
+        # With no title and no tvg-name the name falls back past it.
+        channel = self.row('#EXTINF:-1 tvg-id="http://cdn.test/x",')
+        self.assertEqual((channel["name"], "tvgId" in channel), ("Channel 1", False))
+
+    def test_a_row_with_a_dropped_tvg_id_joins_no_guide(self):
+        doc = helper.parse_m3u("#EXTM3U\n" + '#EXTINF:-1 tvg-id="http://cdn.test/x",A\n' + STREAM + "\n"
+                               + '#EXTINF:-1 tvg-id="a.us",B\n' + STREAM.replace("1.ts", "2.ts") + "\n")
+        alias, total = helper.build_alias(doc)
+        self.assertEqual((total, sorted(alias["exact"])), (2, ["a.us"]))
+
+
+class LinearTest(unittest.TestCase):
+    """parse_attrs runs once a line on text no cap bounds first, so its URL
+    rule may not search back from each quote or each colon: four times the
+    text may cost at most eight times the time plus 2 ms, best of five, in
+    this thread's CPU time."""
+
+    SHAPES = [lambda n: 'a="http://x"' * (n // 12),
+              lambda n: 'a="http://x' + '"y' * (n // 2),
+              lambda n: "a=x:y " * (n // 6),
+              lambda n: 'a="http://x"' + "," * n,
+              lambda n: 'a="http://x' + '"' * n,
+              lambda n: 'a="http://x" ' * (n // 13),
+              lambda n: "a=" + ":" * n,
+              lambda n: "a=" + ":\x00" * (n // 2),
+              lambda n: 'a="' + " " * n + '"',
+              lambda n: ('a="http://x' + "y" * 50 + '" ') * (n // 64),
+              lambda n: "a=x:\t//y " * (n // 10),
+              lambda n: 'a="x:"' * (n // 6),
+              lambda n: 'a="http://x' + '",' * (n // 2) + "y",
+              lambda n: "a=:" + "\x00" * n + " b=c"]
+
+    def best(self, text):
+        times = []
+        for _ in range(5):
+            t0 = time.thread_time()
+            helper.parse_attrs(text)
+            times.append(time.thread_time() - t0)
+        return min(times)
+
+    def test_parse_attrs_is_linear_on_every_shape(self):
+        for shape in self.SHAPES:
+            small, large = self.best(shape(8000)), self.best(shape(32000))
+            self.assertLess(large, 8 * small + 0.002, ascii(shape(16)[:16]))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -77,20 +77,28 @@ JOINED_SHAPES = [
     "http:/\x85/qqqqqq:zzzzzz@cdn.test/x",
     "http:/\x9b/qqqqqq:zzzzzz@cdn.test/x",
 ]
-# What each field's own parse splits: an attribute's value ends at its
-# closing `"` (the tvg-name, the group-title; an #EXTGRP line is no attribute
-# and keeps it). A title, description, category or episode is cut after the
-# guide's whitespace fold (clean_field's). Each sweep takes the shapes its
-# field keeps as they are. The group sweeps left out every shape with a `;`
-# until D-SINK-78, because the stored groups were split at every `;`, and
-# that exclusion was the defect: a `;` after a `://` in its run splits
-# nothing now (split_groups), so a group keeps its URL whole and the group
-# sweeps take every shape their field keeps: 56 through a group-title, 57
-# through an #EXTGRP line.
-ATTR_SHAPES = [s for s in SHAPES if '"' not in s]
-GROUP_SHAPES = ATTR_SHAPES
+# What each field's own parse splits. A title, description, category or
+# episode is cut after the guide's whitespace fold (fold_space's). The title
+# sweeps left out every shape the old fold changed until D-SINK-79, because a
+# title is cut after it, and that exclusion was the defect a third time: the
+# old fold turned a non-ASCII space, DEL or U+0085 inside a URL into a space
+# and split it before any redactor read it. The fold keeps a URL's run whole
+# now, so they take every shape. The group
+# sweeps left out every shape with a `;` until D-SINK-78, because the stored
+# groups were split at every `;`, and that exclusion was the defect: a `;`
+# after a `://` in its run splits nothing now (split_groups). The attribute
+# sweeps (the tvg-name, the group-title) left out every shape with a `"`
+# until D-SINK-80, "because an attribute ends at its `"`", and that exclusion
+# was the defect again: the cut attribute's tail became the channel's NAME,
+# which these sweeps never held to a sink. A `"` inside a URL's run ends no
+# value now (parse_attrs), so they take every shape, and hold the name too:
+# a value whose URL's run a space ends before any closing quote is
+# unterminated, and the whole attribute text, URL whole, is the name
+# (unterminated() below). 57 shapes through each of the four.
+ATTR_SHAPES = SHAPES
+GROUP_SHAPES = SHAPES
 EXTGRP_SHAPES = SHAPES
-TITLE_SHAPES = [s for s in SHAPES if helper.clean_field(s, len(s)) == s]
+TITLE_SHAPES = SHAPES
 SECRET = "qz"
 
 
@@ -116,17 +124,23 @@ def forms(cap, shapes, fold=False):
     lands: before the URL's `://` is whole, all the cut text; past the URL,
     that with the URL whole; in between, what comes before the URL's run --
     the text before its space, or nothing when no space comes before the URL.
-    `fold` is a guide field's, which reads a tab as a space. The glued form's
+    `fold` is a guide field's, which reads a tab before a URL as a space and
+    writes U+FFFD for DEL, U+0085, U+2028 and U+2029 in the URL's run after
+    its `://` (fold_space; the review's F9 and F11). The glued form's
     run never ends, so it keeps its cut text only while that holds no
     `://`."""
     joined = "N\x80N\x9b"
     out = []
     for url in shapes:
+        # The guide's fold keeps a URL's run whole and writes U+FFFD for the
+        # controls in it that it folds elsewhere, and for the line separators
+        # (D-SINK-79; every shape here holds them after its `://`).
+        kept_url = "".join(chr(0xfffd) if c in "\x7f\x85\u2028\u2029" else c for c in url) if fold else url
         for pad in range(max(1, cap - len(url) - 3), cap + 2):
             for head, sep in (("N" * pad, " "), ((joined * pad)[:pad], " "), ("N" * pad, "\t")):
                 text = head + sep + url + " tail"
-                cut = (text.replace("\t", " ") if fold else text)[:cap]
-                whole = url if len(head) + 1 + len(url) <= cap else ""
+                cut = (head + " " + kept_url + " tail" if fold else text)[:cap]
+                whole = kept_url if len(head) + 1 + len(kept_url) <= cap else ""
                 if whole or "://" not in deleted(cut[len(head) + 1:]):
                     before = cut
                 elif cut[len(head)] == " ":
@@ -135,8 +149,65 @@ def forms(cap, shapes, fold=False):
                     before = ""
                 out.append((text, (before.rstrip(), whole)))
             text = "N" * pad + url + "tail"
-            out.append((text, ("" if "://" in deleted(text[:cap]) else text[:cap].rstrip(), "")))
+            seen = "N" * pad + kept_url + "tail"
+            out.append((text, ("" if "://" in deleted(seen[:cap]) else seen[:cap].rstrip(), "")))
     return out
+
+
+def kept_in(raw, at, url, cap):
+    """forms()'s `kept` for a stored text `raw` that holds `url` at `at`,
+    after a space or a tab, cut at `cap`: before the URL's `://` is whole,
+    all the cut text; past the URL, that with the URL whole; in between,
+    what comes before the URL's run -- the text before its space, or nothing
+    when a tab comes before the URL and no space before that. Read off the
+    raw text, never off a parse."""
+    cut = raw[:cap]
+    whole = url if at + len(url) <= cap else ""
+    if whole or "://" not in deleted(cut[at:]):
+        before = cut
+    elif cut[at - 1] == " ":
+        before = cut[:at - 1]
+    else:
+        before = ""
+    return before.rstrip(), whole
+
+
+# The shapes a quoted attribute can leave unterminated: those holding a `"`.
+QUOTED_SHAPES = [s for s in SHAPES if '"' in s]
+
+
+def unterminated(text):
+    """(shape, where) when a quoted attribute holding a forms() `text` is
+    unterminated (D-SINK-80, parse_attrs): its shape's `"` is inside the
+    URL's run, which the space before " tail" ends with no `"` before it that
+    a delimiter, a `,` or the end follows. A glued text's run reaches the
+    attribute's own closing `",`, so it is not."""
+    for url in QUOTED_SHAPES:
+        at = text.find(url)
+        if at > 0 and text[at - 1] in " \t":
+            return url, at
+    return None
+
+
+def attribute_route(test, cases, rows, prefix, suffix, field, own):
+    """Split a sweep's rows by where the attribute's text went: the field
+    (`field(row)`, with forms()' `kept`), or for an unterminated value the
+    name, which then holds `prefix + text + suffix` -- the attribute as
+    written and the title after it -- cut at the name's cap, and the
+    attribute's own stored value (`own(row)`) nothing.
+    -> (field values, their kept, names, their kept)."""
+    values, kept, names, names_kept = [], [], [], []
+    for (text, k), row in zip(cases, rows):
+        spot = unterminated(text)
+        if spot is None:
+            values.append(field(row))
+            kept.append(k)
+            continue
+        url, at = spot
+        test.assertIn(own(row), ("", helper.UNGROUPED), text[-60:])
+        names.append(row["name"])
+        names_kept.append(kept_in(prefix + text + suffix, len(prefix) + at, url, helper.M3U_MAX_NAME))
+    return values, kept, names, names_kept
 
 
 def shell_sinks(values):
@@ -304,16 +375,22 @@ class PlaylistCutTest(unittest.TestCase):
             cases = forms(helper.M3U_MAX_NAME, shapes)
             named = self.parse([("", t, None) for t, _ in cases])
             held_to_every_sink(self, [c["name"] for c in named], helper.M3U_MAX_NAME, [k for _, k in cases], plain)
+        unterminated_names = 0
         for shapes, plain in ((ATTR_SHAPES, True), (JOINED_SHAPES, False)):
             cases = forms(helper.M3U_MAX_NAME, shapes)
-            tvg = self.parse([(' tvg-name="%s"' % t, "Plain", None) for t, _ in cases])
-            held_to_every_sink(self, [c.get("tvgName", "") for c in tvg], helper.M3U_MAX_NAME,
-                               [k for _, k in cases], plain)
-            # A title that cleans to nothing takes the cut tvg-name as the name.
-            fallback = self.parse([(' tvg-name="%s"' % t, "-", None) for t, _ in cases])
-            held_to_every_sink(self, [c["name"] for c in fallback], helper.M3U_MAX_NAME,
-                               [k for _, k in cases], plain)
-        self.assertEqual((len(SHAPES), len(ATTR_SHAPES), len(JOINED_SHAPES)), (57, 56, 9))
+            # The tvg-name; and with a title that cleans to nothing, the name
+            # the cut tvg-name becomes.
+            for title, field in (("Plain", lambda c: c.get("tvgName", "")), ("-", lambda c: c["name"])):
+                rows = self.parse([(' tvg-name="%s"' % t, title, None) for t, _ in cases])
+                values, kept, names, names_kept = attribute_route(self, cases, rows, 'tvg-name="', '",' + title, field,
+                                                                  lambda c: c.get("tvgName", ""))
+                held_to_every_sink(self, values, helper.M3U_MAX_NAME, kept, plain)
+                held_to_every_sink(self, names, helper.M3U_MAX_NAME, names_kept, plain)
+                # And every row's name, which the cut attribute's tail used
+                # to become (D-SINK-80).
+                held_to_every_sink(self, [c["name"] for c in rows], helper.M3U_MAX_NAME, None, plain)
+                unterminated_names += len(names)
+        self.assertEqual((len(SHAPES), len(ATTR_SHAPES), len(JOINED_SHAPES), unterminated_names), (57, 57, 9, 210))
 
     def parse_groups(self, rows):
         """parse() in batches, each under MAX_GROUPS distinct groups, past
@@ -324,12 +401,17 @@ class PlaylistCutTest(unittest.TestCase):
     def test_no_group_cut_keeps_a_credential(self):
         # Through a group-title attribute, and through an #EXTGRP line, which
         # keeps a `"`.
-        for shapes, row in ((GROUP_SHAPES, lambda t: (' group-title="%s"' % t, "G", None)),
-                            (EXTGRP_SHAPES, lambda t: ("", "G", t))):
-            cases = forms(helper.M3U_MAX_GROUP, shapes)
-            rows = self.parse_groups([row(t) for t, _ in cases])
-            held_to_every_sink(self, [c["group"] for c in rows], helper.M3U_MAX_GROUP, [k for _, k in cases])
-        self.assertEqual((len(GROUP_SHAPES), len(EXTGRP_SHAPES)), (56, 57))
+        cases = forms(helper.M3U_MAX_GROUP, GROUP_SHAPES)
+        rows = self.parse_groups([(' group-title="%s"' % t, "G", None) for t, _ in cases])
+        values, kept, names, names_kept = attribute_route(self, cases, rows, 'group-title="', '",G',
+                                                          lambda c: c["group"], lambda c: c["group"])
+        held_to_every_sink(self, values, helper.M3U_MAX_GROUP, kept)
+        held_to_every_sink(self, names, helper.M3U_MAX_NAME, names_kept)
+        held_to_every_sink(self, [c["name"] for c in rows], helper.M3U_MAX_NAME)
+        cases = forms(helper.M3U_MAX_GROUP, EXTGRP_SHAPES)
+        rows = self.parse_groups([("", "G", t) for t, _ in cases])
+        held_to_every_sink(self, [c["group"] for c in rows], helper.M3U_MAX_GROUP, [k for _, k in cases])
+        self.assertEqual((len(GROUP_SHAPES), len(EXTGRP_SHAPES), len(names)), (57, 57, 105))
 
     def test_no_group_text_cut_keeps_a_credential(self):
         # Four groups of 100 first, so the 512 cut lands in a fifth group
@@ -340,6 +422,16 @@ class PlaylistCutTest(unittest.TestCase):
                             (EXTGRP_SHAPES, lambda t: ("", "G", t))):
             cases = forms(helper.M3U_MAX_GROUP_TEXT - len(head), shapes)
             rows = self.parse_groups([row(head + t) for t, _ in cases])
+            held_to_every_sink(self, [c["name"] for c in rows], helper.M3U_MAX_NAME)
+            if row("")[0]:
+                # An unterminated group-title is the name, whole but for the
+                # name's own cut; the rest are held below.
+                _, _, names, names_kept = attribute_route(self, [(head + t, k) for t, k in cases], rows,
+                                                          'group-title="', '",G', lambda c: c["group"],
+                                                          lambda c: c["group"])
+                held_to_every_sink(self, names, helper.M3U_MAX_NAME, names_kept)
+                self.assertEqual(len(names), 105)
+                cases, rows = zip(*[(case, c) for case, c in zip(cases, rows) if unterminated(head + case[0]) is None])
             listed = [c.get("groups", [c["group"]]) for c in rows]
             self.assertTrue(all(gs[:4] == [ch * 100 for ch in "abcd"] for gs in listed))
             held_to_every_sink(self, [g for gs in listed for g in gs[4:]], helper.M3U_MAX_GROUP)
@@ -426,7 +518,7 @@ class TitleCutTest(unittest.TestCase):
         # not kept, so the glued forms whose cut lands in the URL are fewer.
         self.assertGreater(len([t for t in titles if t]), len(cases) * 2 // 3)
         held_to_every_sink(self, titles, helper.EPG_MAX_TITLE, [k for _, k in cases])
-        self.assertEqual(len(TITLE_SHAPES), 52)
+        self.assertEqual(len(TITLE_SHAPES), 57)
 
     def test_no_description_category_or_episode_cut_keeps_a_credential(self):
         """clean_detail's caps, through the same parse: it cuts by

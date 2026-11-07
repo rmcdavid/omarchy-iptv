@@ -666,10 +666,13 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # Hosts and codes only, never the URL (rule 5).
             reasons[failure.code] = reasons.get(failure.code, 0) + 1
             # D-SINK-40: `local_address` is the policy's too -- a logo, or a
-            # hop of one, aimed at this machine or a local network.
+            # hop of one, aimed at this machine or a local network; and so are
+            # `logo_host`, a host of one label, never looked up (D-SINK-83),
+            # and `logo_url`, a URL that runs into another attribute (F1).
             if failure.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                                 "logo_type", "logo_bytes", "logo_too_large",
-                                "logo_dimensions", "logo_scans", "logo_chunks", "local_address"):
+                                "logo_dimensions", "logo_scans", "logo_chunks", "local_address",
+                                "logo_host", "logo_url"):
                 refused += 1
             else:
                 failed += 1

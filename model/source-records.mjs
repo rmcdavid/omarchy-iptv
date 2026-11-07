@@ -1105,14 +1105,17 @@ function entryWith(entry, patch, opts) {
 
 // A cache is stale when its status is not ok, has no fetchedAt, or is older
 // than refreshMinutes.
-// D-SINK-41 (2026-10-29): a playlist cache written before the helper's
-// destination rules (its status carries no `destinationRules` at or above
-// this) holds channels nothing checked -- a LAN literal from a public list,
-// a sign-in header for another host -- and lacks the `sourceClass` a guide
-// hint on the playlist's own host is matched by. The service refreshes such
-// a cache at the next start or swap, once, whatever its age. The helper's
+// DESTINATION_RULES is the version of the helper's rules a playlist cache
+// was WRITTEN under (its status's `destinationRules`). 1 is the destination
+// rules (D-SINK-41, 2026-10-29): a cache before them holds channels nothing
+// checked -- a LAN literal from a public list, a sign-in header for another
+// host -- and lacks the `sourceClass` a guide hint on the playlist's own host
+// is matched by. 2 is the attribute grammar (D-SINK-80, 2026-11-05): a cache
+// before it can hold a name, a group or a guide hint cut inside a URL. The
+// service refetches a cache written under an older version, or carrying
+// none, at the next start or swap, once, whatever its age. The helper's
 // DESTINATION_RULES; joined by the destinations fixture.
-var DESTINATION_RULES = 1
+var DESTINATION_RULES = 2
 
 function cacheBeforeDestinationRules(status) {
   return !!(status && status.ok === true && !(Number(status.destinationRules) >= DESTINATION_RULES))

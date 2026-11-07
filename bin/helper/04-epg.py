@@ -54,18 +54,31 @@ def _xmltv_time_value(raw: str) -> int | None:
 def clean_field(text: str | None, limit: int) -> str:
     """Fold every run of whitespace and control characters to one space, trim,
     and cut at `limit` code points. A str is cut on a code-point boundary,
-    never inside one, so the result is always encodable."""
+    never inside one, so the result is always encodable.
+
+    The plain fold, URL runs and all, so it is for text no redactor reads a
+    credential in any more (D-SINK-79): clean_detail's last step, after its
+    own redaction, and the xmltv_ns episode, which keeps digits alone. Text
+    on its way TO a redactor takes fold_space, which never folds inside a
+    URL's run."""
     if not text:
         return ""
     return _CONTROL_WS.sub(" ", text).strip()[:limit]
 
 
 def clean_title(text: str | None) -> str:
-    """clean_field's fold and cap, cut by cut_free_text (D-SINK-75): a title
-    is stored as written and redacted only at its sinks, after this cut."""
+    """fold_space, trimmed, cut by cut_free_text (D-SINK-75): a title is
+    stored as written and redacted only at its sinks, after this cut.
+
+    D-SINK-79: fold_space and not clean_field's plain fold, because the
+    title reaches every sink unredacted and the plain fold split a URL whose
+    password held a non-ASCII space, U+0085 or DEL, so every sink printed
+    its username. With the run whole, the cut's own rule holds too: a cap
+    inside such a URL now lands inside a run carrying `://`, which
+    cut_free_text drops, where the split left a run with no `://` to keep."""
     if not text:
         return ""
-    return cut_free_text(_CONTROL_WS.sub(" ", text).strip(), EPG_MAX_TITLE)
+    return cut_free_text(fold_space(text).strip(), EPG_MAX_TITLE)
 
 
 def element_text(elem: Any) -> str:
@@ -128,7 +141,8 @@ def clean_detail(text: str | None, limit: int) -> str:
     cost never touched: the text is cut at `limit`, and when that cut lands
     inside a token carrying `://` the whole token is dropped rather than handed
     to the redactor, because half a URL is what published the username above.
-    Every run of whitespace is one space by then, and a space ends a
+    Every ASCII delimiter is one space by then (fold_space; a non-ASCII space
+    inside a URL's run is kept, as URL text, D-SINK-79), and a space ends a
     redactor's run, so the only token the cut can ever have truncated is the
     last one, and dropping it costs a fragment that was unreadable anyway. The
     rule is cut_free_text's since D-SINK-75, which every cap in front of a
@@ -139,7 +153,14 @@ def clean_detail(text: str | None, limit: int) -> str:
     the final cut takes it back to the cap -- and usually shorter than the
     cap when the text carried URLs, by what the redaction removed.
     """
-    text = cut_free_text(_CONTROL_WS.sub(" ", text or "").strip(), limit)
+    # D-SINK-79: the fold before the cut and the redaction is fold_space,
+    # which keeps a URL's run whole (see it), and NOT the plain fold: that
+    # split a URL whose password held a non-ASCII space, U+0085 or DEL, and
+    # this function then redacted two pieces, storing the username as the
+    # host and the password's tail as text. The final clean_field after the
+    # redaction keeps the plain fold, since no credential is left for it to
+    # split.
+    text = cut_free_text(fold_space(text or "").strip(), limit)
     if "://" not in text:
         # The common case, and the hot one. redact_urls cannot rewrite text
         # without "://", so this guard changes no answer. It was worth 2.7 s of
@@ -588,12 +609,15 @@ def _format_record(start: int, stop: int, body: str) -> str:
 # as JSON, so a programme costs its own characters and nothing an escape adds
 # (a title of 200 double quotes is 400 bytes of JSON and 200 here); the JSON
 # is made by record_body for the records actually written, as it always was.
-# The separators are safe: every text has been through _CONTROL_WS, which
-# folds \x00-\x1f to a space, so neither NUL nor \x1f can occur in one -- and
-# should a later cleaner ever let one through, it is folded here rather than
-# allowed to move a field boundary. An absent detail value and an empty one
-# are the same (record_body omits both), and programme_detail never stores an
-# empty one, so (title, detail) and this payload are one-to-one.
+# The separators are safe: every text has been through fold_space, which
+# folds \x00-\x1f to a space outside a URL's run and deletes it inside one
+# (D-SINK-79), so neither NUL nor \x1f can occur in one -- and should a later
+# cleaner ever let one through, it is folded here the same way, rather than
+# allowed to move a field boundary or, through the plain fold, to split a URL
+# that the record then hands a sink in two pieces. An absent detail value and
+# an empty one are the same (record_body omits both), and programme_detail
+# never stores an empty one, so (title, detail) and this payload are
+# one-to-one.
 #
 # What it costs, measured on an ordinary small guide (2,000 vs 4,000
 # programmes over 50 channels with a 120-character description, category and
@@ -637,7 +661,7 @@ _FIELD_SEP = "\x1f"
 def retain_programme(start: int, stop: int | None, title: str, detail: dict[str, str] | None) -> bytes:
     detail = detail or {}
     fields = [title] + [detail.get(key) or "" for key in EPG_DETAIL_KEYS]
-    payload = _FIELD_SEP.join(_CONTROL_WS.sub(" ", text) if (_FIELD_SEP in text or "\x00" in text) else text
+    payload = _FIELD_SEP.join(fold_space(text) if (_FIELD_SEP in text or "\x00" in text) else text
                               for text in fields)
     head = "%d %s\x00" % (start, "" if stop is None else "%d" % stop)
     return (head + payload).encode("utf-8", "surrogatepass")
@@ -1231,6 +1255,8 @@ def needs_refetch(window: dict[str, Any], url: str, now: int, ttl: float, channe
         return "cache older than ttl"
     if coerce_int(window.get("windowEnd")) - now < EPG_REFETCH_MARGIN:
         return "window nearly exhausted"
+    if coerce_int(window.get("guideRules")) < GUIDE_RULES:
+        return "written under older rules"
     if window.get("channelsMtime") != channels_mtime(channels_path):
         return "playlist changed"
     return ""
@@ -1267,6 +1293,8 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         "sourceHost": source_host(url),
         "sourceKey": source_key(url),
         "channelsMtime": mtime,
+        # D-SINK-79: the version of the rules this window was written under.
+        "guideRules": GUIDE_RULES,
         "windowStart": parsed["windowStart"],
         "windowEnd": parsed["windowEnd"],
         "restricted": index is not None,
@@ -1617,6 +1645,13 @@ def cmd_epg(args: argparse.Namespace) -> int:
     if refresh_error is not None:
         log("could not refresh %s: %s" % (EPG_NOW_FILE, refresh_error))
     host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
+    # D-SINK-83: a one-label host the playlist chose was refused before any
+    # lookup (DestinationPolicy.refuses_name), and the status -- the reply
+    # and epg-status.json -- names it no more than the refusal does. Only a
+    # shell loaded before the rule hands one over, and the name is the
+    # username of a URL its space cut (D-SINK-34's class).
+    if url and DestinationPolicy.from_environment("EPG").refuses_name(host):
+        host = ""
     status = error_payload(
         "epg", error,
         sourceHost=host,
