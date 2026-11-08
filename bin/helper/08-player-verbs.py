@@ -54,7 +54,15 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     of its playlist (cached_source) -- so a cache nothing checked cannot
     reach a LAN or loopback literal, or hand a sign-in header to another
     host, while the refresh that would replace it keeps failing. A `--url`
-    a human typed meets the listening rule only (it has no playlist)."""
+    a human typed meets the listening rule only (it has no playlist).
+
+    D-SINK-87 (the owner, 2026-11-08): and both, before anything is sent to
+    the player, a host name it would be handed that host_name_refused
+    refuses (stream_host_name_refused, every reading of the host): a cache
+    written before the rule can hold one, and `--url` is typed. Refused as
+    `unsupported_scheme`, the shell's channel refusal, with one fixed
+    sentence: unlike `local_address` below, it names no host, which may be a
+    userinfo."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)
@@ -71,6 +79,8 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         source = None
     if not is_stream_url(url):
         raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+    if stream_host_name_refused(url):
+        raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
     if source is not None:
         if stream_host_refused(url, source):
             raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "

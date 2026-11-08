@@ -751,13 +751,81 @@ def _listen_refusal(url: str, scheme: str, host: str) -> str:
     return ""
 
 
+# D-SINK-87 (the owner, 2026-11-08): no channel stream address whose host is
+# a name host_name_refused refuses is handed to the player, which reads the
+# host itself and looks it up. The helper cannot ask the player which reading
+# it takes, so where the two could differ the address is refused by ANY
+# reading rather than one picked, each asked of host_name_refused itself (no
+# second rule):
+#   1. the authority's host[:port] as written, after the netloc's LAST `@`
+#      (where urlsplit and FFmpeg both end a userinfo, and both end the
+#      authority at the first `/`, `?` or `#`), judged with its port: FFmpeg
+#      reads a port as the digits up to the next colon and urlsplit reads no
+#      port at all (rc-p1b's `127.0.0.1:631:80`), so what follows a port is
+#      judged too (`h.test:80;sid=x`, `h.test:80:81`). It holds urlsplit's
+#      own reading, the hostname every other stream rule here takes: that is
+#      this text up to its port (or a bracket's content), lower-cased, and
+#      lower-casing changes no code point's verdict (the D-SINK-87 suite on
+#      the dev branch holds that over every code point, and that every
+#      vector urlsplit's hostname refuses is refused here);
+#   2. for the schemes mpv percent-escapes before FFmpeg reads them, that
+#      host[:port] as mpv escapes it. mpv 0.41.0's stream/stream_lavf.c
+#      (read upstream 2026-11-08): open_f rewrites mms:// to mmsh://, then
+#      normalize_url escapes an http, https or mmsh URL with mp_url_escape
+#      (stream/stream.c), byte by byte, keeping only ASCII letters, digits,
+#      `-._~` and PLAYER_URL_KEPT. A plain stream is opened through that
+#      copy; an HLS one is opened by FFmpeg from the URL as given (demux_lavf
+#      passes the stream's own url). So `b<U+00FC>cher.test`, one name to the
+#      helper, is `b%C3%BCcher.test` on one of the player's two paths: a name
+#      holding `%`, refused. urllib.parse.quote's always-safe set is exactly
+#      mp_url_escape's. rtsp, rtmp, udp, rtp and srt are not escaped, so the
+#      first reading is theirs.
+# A percent-decoded reading adds nothing: a raw `%` outside an IPv6 zone is
+# refused already, and urlsplit deletes tab, CR and LF before it reads, which
+# is why every caller asks this AFTER the control-character check
+# (stream_form_ok, stream_entry_refusal), the D-SINK-54 lesson.
+PLAYER_ESCAPED_SCHEMES = frozenset({"http", "https", "mms", "mmsh"})
+PLAYER_URL_KEPT = ":/?#[]@!$&'()*+,;=%"
+# player_target's refusal: one fixed sentence, naming no host and no URL
+# (the host may be a userinfo the provider spelled wrong).
+STREAM_HOST_NAME_REFUSAL = ("refused a stream whose host name holds @, %, ;, =, &, a second colon, whitespace or "
+                            "an invisible format character as the player reads it; not played")
+
+
+def _stream_name_refused(netloc: str, scheme: str) -> bool:
+    """D-SINK-87's readings of one urlsplit, each asked of
+    host_name_refused: `netloc` its netloc, `scheme` lower-cased."""
+    hostport = netloc.rpartition("@")[2]
+    if host_name_refused(hostport, True):
+        return True
+    return scheme in PLAYER_ESCAPED_SCHEMES and host_name_refused(
+        urllib.parse.quote(hostport, safe=PLAYER_URL_KEPT, errors="surrogatepass"), True)
+
+
+def stream_host_name_refused(url: str) -> bool:
+    """D-SINK-87: would the player be handed a host name host_name_refused
+    refuses, by any reading of this stream URL's host (_stream_name_refused)?
+    A URL urlsplit cannot read is refused. Asked by player_target after
+    is_stream_url, which refuses a control character first."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return True
+    return _stream_name_refused(parts.netloc, parts.scheme.lower())
+
+
 def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
     first half, a control character included: stream_form_ok), `listener`
     (stream_listen_refusal, D-SINK-42), `local` (stream_host_refused,
-    D-SINK-41) or `port` (the same rule's loopback-relay half, D-SINK-57)."""
+    D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57) or
+    `name` (a host name the player would be handed that host_name_refused
+    refuses, D-SINK-87). `name` is asked last: the rules before it classify
+    a literal and look nothing up, so a line two rules refuse keeps the
+    older reason, and the parse's host rule still answers row for row as
+    play time's does (the destinations fixture, dev branch)."""
     if url.startswith("-") or _CONTROL_CHARS.search(url):
         return "scheme", ""
     try:
@@ -784,6 +852,8 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     refusal = _host_refusal(host, scheme, source, port)
     if refusal:
         return refusal, host
+    if _stream_name_refused(parts.netloc, scheme):
+        return "name", host
     return "", host
 
 
@@ -1309,6 +1379,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     is_playlist = False
     bounds: dict[str, int] = {}
     playlist = source if isinstance(source, dict) else {"host": "", "local": False}
+    skipped_name = 0
     skipped_listen = 0
     skipped_local = 0
     skipped_port = 0
@@ -1385,6 +1456,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             bound_count(bounds, "url")
         elif refusal == "scheme":
             skipped_scheme += 1
+        elif refusal == "name":
+            skipped_name += 1                 # D-SINK-87: a host name no name may hold
         elif refusal == "listener":
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
@@ -1414,6 +1487,10 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     if skipped_scheme:
         warnings.append(counted_sentence(skipped_scheme, "%d entry skipped: unsupported URL scheme",
                                          "%d entries skipped: unsupported URL scheme"))
+    if skipped_name:
+        # D-SINK-87: a count, never the host (it may be a userinfo).
+        warnings.append(counted_sentence(skipped_name, "%d entry skipped: a stream host name holding a character no host name may hold",
+                                         "%d entries skipped: stream host names holding characters no host name may hold"))
     if skipped_listen:
         warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
                                          "%d entries skipped: the streams would listen on this machine for anyone to send to"))
