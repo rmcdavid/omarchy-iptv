@@ -255,10 +255,32 @@ RESOLVE_WAIT_SLICE_S = 0.05
 # limit_memory's RLIMIT_DATA.
 RESOLVE_STACK_BYTES = 1024 * 1024
 
+# D-SINK-86 (the owner, 2026-11-08): the refusal of a host name that holds
+# what no name may hold (host_name_refused, 02-sources.py), asked before any
+# lookup on every hop. One fixed sentence that names no host, because the
+# host may be a userinfo: a redirect to `http://user:pass@h/` is a request
+# for `user:pass@h`, and the lookup of exactly that was the disclosure.
+# `bad_url`, the code of a URL the validator refuses, so the shell's
+# sentence is "Invalid URL" and the logo run counts it with the policy's
+# refusals (06-failed.py).
+HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a second colon, whitespace or an "
+                     "invisible format character; not looked up")
+
+
+def refuse_host_name(text: Any, with_port: bool = False) -> None:
+    """Raise HOST_NAME_REFUSAL when host_name_refused(text, with_port)."""
+    if host_name_refused(text, with_port):
+        raise HelperError("bad_url", HOST_NAME_REFUSAL)
+
 
 def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
+
+    D-SINK-86: a host name that holds what no name may hold is refused here,
+    before the thread and before the resolver, whoever asks; this is the one
+    call into the resolver the helper has, and its callers ask the same rule
+    earlier, where they can say more about the hop.
 
     The wait is a loop of short joins, so it returns to the interpreter
     every RESOLVE_WAIT_SLICE_S and a FetchDeadline alarm ends it there, as
@@ -269,6 +291,7 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
     then finishes on the resolver's own clock and is discarded (daemon:
     the process does not wait for it at exit). Nothing is cached here and
     nothing is re-looked-up: the result goes straight to the connect."""
+    refuse_host_name(host)
     import socket
     import threading
     result: list[Any] = []
@@ -465,7 +488,10 @@ class DestinationPolicy:
                            % (where, who))
 
     def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
-        """The TARGET of a proxied request, looked up here (see the class)."""
+        """The TARGET of a proxied request, looked up here (see the class).
+        D-SINK-86 first: the proxy would make the lookup this one stands
+        for, so a name that holds what no name may hold reaches neither."""
+        refuse_host_name(host)
         if self.refuses_name(host):
             raise self.name_refusal(first)
         try:
@@ -505,6 +531,11 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
     error: OSError | None = None
     refused = False
+    # D-SINK-86: before the D-SINK-83 test below and before the lookup, with
+    # a policy or none, to a destination or to the user's proxy. The host is
+    # the one http.client split off the request's (its port gone, a
+    # literal's brackets gone), so a colon left in it is a second colon.
+    refuse_host_name(host)
     if policy is not None and not proxied and policy.refuses_name(host):
         # D-SINK-83: before the lookup, not after it -- the
         # lookup is what discloses the name (DestinationPolicy.refuses_name).
@@ -550,11 +581,19 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     hop (urllib opens one connection per request and closes it), so the
     handler counts it and builds that request's connection class around it;
     a proxied request's target is checked here, by name, because its socket
-    goes to the proxy (DestinationPolicy.check_proxied)."""
+    goes to the proxy (DestinationPolicy.check_proxied).
+
+    D-SINK-86: each request's host is judged as the request object holds it
+    -- percent-decoded by urllib, the port still on it -- before its
+    connection object exists, so neither the resolver nor http.client's own
+    host check, whose InvalidURL quotes the host (and, for `user:pass@host`,
+    the password as a port), ever sees a host the rule refuses. Behind a
+    proxy that host is the proxy's, and check_proxied judges the target."""
     import http.client
     import urllib.request
 
     def connection_class(base: Any, req: Any) -> Any:
+        refuse_host_name(req.host, with_port=True)
         if policy is None:
             create = bounded_create_connection
         else:
@@ -634,6 +673,11 @@ def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) 
                     pass
                 raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
             new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None:
+                # D-SINK-86: the next hop's host as its request holds it
+                # (percent-decoded, port and userinfo on), before that hop
+                # is opened; fp is already closed (unread_redirect_handler).
+                refuse_host_name(new.host, with_port=True)
             if new is not None and request_origin(newurl) != request_origin(req.full_url):
                 for name in ("Authorization", "Cookie"):
                     new.remove_header(name)

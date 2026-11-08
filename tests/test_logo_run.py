@@ -385,6 +385,18 @@ class LogoFolderLockTest(LogoRunCase):
         self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
                          (0, 1, 0, {"logo_url": 1}, []), summary)
 
+    def test_a_host_name_holding_what_no_name_holds_is_a_policy_refusal(self):
+        # D-SINK-86: the connection layer refuses a host name that holds a
+        # `;` (here D-SINK-30's session parameter) before any lookup, and the
+        # run counts that with the policy's refusals, not as a failure of the
+        # address. A tree without the rule asked the resolver for
+        # `cdn.test;sid=qqqqqq` and counted a `logo_fetch` failure.
+        self.write_channels(["https://cdn.test;sid=qqqqqq/a.png", ""])
+        with Resolver() as resolver:
+            code, summary, _, _ = self.run_fetch()
+        self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
+                         (0, 1, 0, {"bad_url": 1}, []), summary)
+
 
 class CeilingSweepTest(LogoRunCase):
     """R30b: at the ceiling, before a logo is counted as held back, the files

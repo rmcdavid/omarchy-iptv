@@ -15,7 +15,8 @@ import {
   FETCH_URL_ENV, fetchEnvironment
 } from "./mpv.mjs"
 import {
-  hostOf, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex, redactUrls
+  hostOf, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex,
+  redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -345,7 +346,8 @@ function refusalMessage(code, blocked, kind) {
 // (`unsafe_path`, SR13). Text without a scheme is `scheme` when it looks
 // like a host and `relative_path` otherwise (SR12). The authority refuses
 // backslashes, zero-width characters, ports above 65535 and bracket
-// literals that are not IPv6 (SR15). `opts.kind === "epg"` makes an empty
+// literals that are not IPv6 (SR15), and a host name hostNameRefused
+// refuses (D-SINK-86). `opts.kind === "epg"` makes an empty
 // value ok (the EPG is optional) and prefixes the messages with `EPG:`.
 var ZERO_WIDTH_RE = /[\u200b-\u200d\u2060\ufeff]/
 // D-PERF-3 (R30g). An IPv6 literal is `[`, hex digits, `:` and `.` with at
@@ -359,6 +361,58 @@ var IPV6_LITERAL_RE = /^\[([0-9A-Fa-f:.]*)(?:%25[A-Za-z0-9._~-]+)?\]$/
 function isIpv6Literal(text) {
   var m = IPV6_LITERAL_RE.exec(str(text))
   return m !== null && m[1].indexOf(":") !== -1
+}
+
+// D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold. A name
+// holding `@`, `%`, `;`, `=`, `&`, a colon (the port's is cut off before
+// this is asked), the reader's whitespace (isUrlSpaceAt) or an invisible
+// format character (HOST_FORMAT_RANGES) is `invalid`; a bracketed IPv6
+// literal is judged by isIpv6Literal instead. No DNS name holds any of them:
+// `%40` is a request for `@`, `;`, `=` and `&` are D-SINK-30's parameter
+// delimiters, and a format character draws as nothing while IDNA maps some
+// away (`h<U+00AD>.test` is looked up as `h.test`). The helper's
+// host_name_refused is the same rule, asked by validate_source_url and by its
+// connection layer before every lookup; the shared source-urls fixture holds
+// both validators to it.
+// Unicode category Cf as [first, last]: Python 3.14's unicodedata (Unicode
+// 16.0) and node 26's \p{Cf} (17.0) agree on all 170 code points. Explicit,
+// not a property escape, because the shell's engine is V4 and not node and
+// the two mirrors must refuse one set; each suite holds its table to its
+// engine's category over the whole range, and the fixture pins both ends of
+// every range in both mirrors. Sorted, so a lookup stops at the first range
+// above the code point.
+var HOST_FORMAT_RANGES = [[0x00ad, 0x00ad], [0x0600, 0x0605], [0x061c, 0x061c], [0x06dd, 0x06dd],
+  [0x070f, 0x070f], [0x0890, 0x0891], [0x08e2, 0x08e2], [0x180e, 0x180e], [0x200b, 0x200f],
+  [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x206f], [0xfeff, 0xfeff], [0xfff9, 0xfffb],
+  [0x110bd, 0x110bd], [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a], [0xe0001, 0xe0001], [0xe0020, 0xe007f]]
+
+function isHostFormatCode(code) {
+  for (var i = 0; i < HOST_FORMAT_RANGES.length; i++) {
+    if (code < HOST_FORMAT_RANGES[i][0]) return false
+    if (code <= HOST_FORMAT_RANGES[i][1]) return true
+  }
+  return false
+}
+
+// One index walk over the code units, a surrogate pair read as the one code
+// point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
+function hostNameRefused(host) {
+  var s = str(host)
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a) return true
+    if (isUrlSpaceAt(s, i)) return true
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      var d = s.charCodeAt(i + 1)
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        c = 0x10000 + (c - 0xd800) * 0x400 + (d - 0xdc00)
+        i++
+      }
+    }
+    if (isHostFormatCode(c)) return true
+  }
+  return false
 }
 
 // D-PERF-3 (R30g). `text.replace(/[?#].*$/, "")`, which is what the file
@@ -663,7 +717,8 @@ function validateSourceUrl(text, opts) {
     var colon = hostport.lastIndexOf(":")
     host = colon === -1 ? hostport : hostport.substring(0, colon)
     port = colon === -1 ? "" : hostport.substring(colon + 1)
-    if (/[:\[\]]/.test(host)) return invalid()
+    // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
+    if (/[:\[\]]/.test(host) || hostNameRefused(host)) return invalid()
   }
   if (host === "") return invalid()
   host = host.toLowerCase()
@@ -1918,13 +1973,14 @@ export {
   codePointLength, capCodePoints, sanitizeTyping, lowerFirst,
   innerCharSentence, sourceErrorMessage, sourceReason,
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
-  ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, cutQueryAndFragment,
-  ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
-  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
-  normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
-  IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
-  ipv4Class, ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
+  ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, HOST_FORMAT_RANGES,
+  isHostFormatCode, hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
+  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
+  sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, plainHttpLine,
+  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE,
+  IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class,
+  ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
   ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
   urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
   FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,
