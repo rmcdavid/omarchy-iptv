@@ -38,8 +38,17 @@ for line in io.open(sys.argv[1], encoding='utf-8', errors='replace'):
         continue
     u = urlparse(line)
     parts = [p for p in u.path.split('/') if p]
-    if len(parts) >= 3:
-        print(u.scheme + '://' + u.netloc, parts[0], parts[1])
+    # F-HARNESS-98: scheme://host[:port] only, never urllib's netloc, which
+    # keeps any userinfo the playlist URL carries.
+    try:
+        port = u.port
+    except ValueError:
+        break
+    name = u.hostname or ''
+    if ':' in name:
+        name = '[' + name + ']'
+    if len(parts) >= 3 and name:
+        print(u.scheme + '://' + name + (':%d' % port if port else ''), parts[0], parts[1])
     break
 PY
 )
@@ -54,10 +63,16 @@ echo "Asking your provider (host taken from the playlist file, nothing typed)."
 echo "Nothing below will contain your credentials."
 echo
 
-python3 - "$HOST" "$USER_SEG" "$PASS_SEG" <<'PY'
-import json, ssl, sys, urllib.parse, urllib.request
+# F-HARNESS-98: the host and the two credential segments reach python3 in its
+# ENVIRONMENT, set for this one command, never as arguments: an argument sits
+# in /proc/<pid>/cmdline, which every user on the machine can read, for as
+# long as the requests run. /proc/<pid>/environ is readable by this user only.
+PROBE_HOST=$HOST PROBE_USER=$USER_SEG PROBE_PASS=$PASS_SEG python3 - <<'PY'
+import json, os, ssl, sys, urllib.parse, urllib.request
 
-host, user, pw = sys.argv[1], sys.argv[2], sys.argv[3]
+host = os.environ.pop("PROBE_HOST")
+user = os.environ.pop("PROBE_USER")
+pw = os.environ.pop("PROBE_PASS")
 ctx = ssl.create_default_context()
 
 

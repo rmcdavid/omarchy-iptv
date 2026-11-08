@@ -37,7 +37,7 @@ import time
 sys.dont_write_bytecode = True
 
 import verdict
-from select_channels import redact
+from select_channels import redact, shown
 
 # The shipping base argv, bin/omarchy-iptv mpv_launch_argv() at the dev tip
 # 64fa114. Copied rather than imported: importing the helper compiles it, and
@@ -288,7 +288,7 @@ def measure_one(channel, args, out, index=0):
     sock_path = os.path.join(args.sock_dir, "s%02d" % index)
     log_path = os.path.join(args.scratch, "mpv-%s.log" % key[:48])
     row = {
-        "id": channel["id"], "name": channel["name"], "group": channel["group"],
+        "id": channel["id"], "name": shown(channel["name"]), "group": shown(channel["group"]),
         "host": channel["host"], "urlRedacted": redact(channel["url"]),
         "played": False, "failure": "", "claim": "unseekable", "seek": "",
         "backBytesLimit": args.back_bytes,
@@ -415,7 +415,7 @@ def measure_one(channel, args, out, index=0):
         return row
     finally:
         ipc.close()
-        status = reap(proc, channel["name"], out)
+        status = reap(proc, shown(channel["name"]), out)
         row["mpvExit"] = status
         row["ipcEventsIgnored"] = ipc.events
         try:
@@ -475,15 +475,15 @@ def main(argv):
     rows = []
     started = time.monotonic()
     for index, channel in enumerate(channels, 1):
-        out("[%2d/%d] %s  %s  %s" % (index, len(channels), channel["name"],
-                                     channel["group"], redact(channel["url"])))
+        out("[%2d/%d] %s  %s  %s" % (index, len(channels), shown(channel["name"]),
+                                     shown(channel["group"]), redact(channel["url"])))
         try:
             row = measure_one(channel, args, out, index)
         except Exception as exc:                      # a sweep never dies on one channel
-            row = {"id": channel["id"], "name": channel["name"], "group": channel["group"],
+            row = {"id": channel["id"], "name": shown(channel["name"]), "group": shown(channel["group"]),
                    "host": channel["host"], "urlRedacted": redact(channel["url"]),
-                   "played": False, "failure": "harness error: %s: %s" % (
-                       exc.__class__.__name__, exc)}
+                   "played": False, "failure": shown("harness error: %s: %s" % (
+                       exc.__class__.__name__, exc))}
         rows.append(row)
         if row.get("played"):
             out("        seekable=%s partially=%s ranges=%s cacheDur=%s "

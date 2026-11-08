@@ -174,7 +174,12 @@ steady_playing() {
 # R12's needle, with what it matched on a red (scheme://host is the
 # redaction itself, so a red with no context cannot be read). At most three
 # matches, cut after the host.
-url_context() { grep -oE '.{0,60}[a-z]+://[^/"?#@ ]*' <<<"$1" | head -n 3; }
+# Up to three URLs in an answer, each with the 60 characters before it. The
+# WHOLE answer goes through the SHIPPING helper's redactor first and is cut
+# after (F-HARNESS-96: the pattern that stood here ended its match at an `@`,
+# so it printed a username and password on a red; and a cut made first can
+# start inside an earlier URL, past its scheme, where no redactor sees it).
+url_context() { printf '%s' "$1" | python3 -I "$ROOT/scripts/dev-harness/helper_redact.py" text | grep -oE '.{0,60}[A-Za-z][A-Za-z0-9+.-]*://[^" ]*' | head -n 3; }
 
 # The digit window, plus a margin. Every timeout check waits exactly this.
 wait_out_entry() { sleep "$(awk -v ms="$ENTRY_MS" 'BEGIN { printf "%.2f", ms / 1000 + 0.4 }')"; }

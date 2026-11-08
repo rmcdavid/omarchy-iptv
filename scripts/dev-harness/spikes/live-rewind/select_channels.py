@@ -15,28 +15,42 @@ prints scheme and host only (CLAUDE.md requirement 5).
 """
 
 import argparse
+import importlib.util
 import json
+import os
 import sys
-from urllib.parse import urlparse
+
+
+def _load_helper_redact():
+    """scripts/dev-harness/helper_redact.py, loaded by path (no sys.path edit)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "helper_redact.py")
+    spec = importlib.util.spec_from_file_location("helper_redact", os.path.normpath(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+HELPER_REDACT = _load_helper_redact()
 
 
 def host_of(url):
-    """Network location of a URL, or "" when it has none."""
-    try:
-        return urlparse(url or "").netloc or ""
-    except ValueError:
-        return ""
+    """The host the SHIPPING helper's redactor prints for a URL, "" when it
+    has none (F-HARNESS-97: urllib's netloc, which stood here, keeps the
+    userinfo, and it went into every sample's `host`)."""
+    return HELPER_REDACT.host(url or "")
 
 
 def redact(url):
-    """scheme://host, the only form of a playlist URL that may be printed."""
-    try:
-        parts = urlparse(url or "")
-    except ValueError:
-        return "(unparseable)"
-    if not parts.scheme or not parts.netloc:
-        return "(no host)"
-    return "%s://%s" % (parts.scheme, parts.netloc)
+    """scheme://host, the only form of a playlist URL that may be printed,
+    as the shipping helper's redactor prints it (F-HARNESS-97)."""
+    return HELPER_REDACT.label(url or "")
+
+
+def shown(text):
+    """A channel name, a group or an error text as a human-facing line may
+    show it: every URL inside it as scheme://host (F-HARNESS-97: names and
+    groups were printed and written raw)."""
+    return HELPER_REDACT.redact(str(text or ""))
 
 
 def group_order(channels):

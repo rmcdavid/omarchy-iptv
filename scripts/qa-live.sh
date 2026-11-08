@@ -252,7 +252,7 @@ phase_evidence() {
               "$dir/journal.txt" "$dir/qs-log.txt"); st=$?
     case $st in
       0) ok_ "redaction ok ($ours of our lines swept)" ;;
-      1) printf '%s\n' "$leaks" | sed 's/^/    /'; bad_ "REDACTION FAILURE above" ;;
+      1) printf '%s\n' "$leaks" | sed 's/^/    /'; bad_ "REDACTION FAILURE at the lines above (read them there; they are not repeated here)" ;;
       *) void_ "the capture is empty or holds none of our lines: this run is NOT redaction evidence" ;;
     esac
     echo "evidence written to $dir"

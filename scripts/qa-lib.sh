@@ -620,7 +620,11 @@ qa_served_fixture() {
 
 # qa_leak_scan <control-ere> <leak-ere> <file>...
 #   0 clean, and the control proves the capture holds what we were sweeping
-#   1 a leak (printed) - anywhere in the capture, not only on our own lines
+#   1 a leak - anywhere in the capture, not only on our own lines. Each leaking
+#     line is printed as <file>:<line> and never its text: the text is the
+#     leak, and a red that echoed it would copy it into the transcript the
+#     run's evidence lives in (F-HARNESS-96's class, found by its sibling
+#     search; tls-scenario.sh already counted rather than echoed, by hand).
 #   2 vacuous: a file is missing, unreadable or EMPTY, or the control matched
 #     nothing anywhere, so the capture is not evidence of anything
 # A1: `grep -nE '<leak>' journal.txt qs-log.txt && echo FAILURE || echo ok`
@@ -634,7 +638,10 @@ qa_leak_scan() {
     [[ -f $f && -r $f && -s $f ]] || return 2
   done
   [[ $(qa_count_multi "$control" "$@") -gt 0 ]] || return 2
-  hits=$(grep -naE -- "$leak" "$@" 2>/dev/null)
+  hits=$(for f in "$@"; do
+    grep -naE -- "$leak" "$f" 2>/dev/null | cut -d: -f1 |
+      while IFS= read -r n; do printf '%s:%s\n' "$f" "$n"; done
+  done)
   [[ -z $hits ]] || { printf '%s\n' "$hits"; return 1; }
   return 0
 }
@@ -648,7 +655,12 @@ qa_leak_on_labelled() {
   local label=$1 leak=$2 file=$3 hits
   [[ -f $file && -r $file ]] || return 2
   [[ $(qa_count "$label" "$file") -gt 0 ]] || return 2
-  hits=$(grep -aE -- "$label" "$file" 2>/dev/null | grep -naE -- "$leak")
+  # Locations only, as qa_leak_scan prints them; the leak is tested against
+  # each labelled line's text, never against the number grep put before it.
+  hits=$(grep -naE -- "$label" "$file" 2>/dev/null |
+    while IFS= read -r line; do
+      grep -qaE -- "$leak" <<<"${line#*:}" && printf '%s:%s\n' "$file" "${line%%:*}"
+    done)
   [[ -z $hits ]] || { printf '%s\n' "$hits"; return 1; }
   return 0
 }

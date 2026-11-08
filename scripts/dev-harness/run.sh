@@ -164,16 +164,13 @@ INSTANCE=${OMARCHY_IPTV_HARNESS_INSTANCE:-}
 KEEP_PLAYER=0
 
 # scheme://host of a source URL, "local file" for a path, "(none)" when unset.
+# F-HARNESS-96: this is the SHIPPING helper's redaction of the URL, never a
+# pattern of the harness's own: the pattern that stood here could not cross an
+# `@` in a password and kept a `;sid=` parameter as part of the host. The URL
+# goes on stdin, because an argument would sit in the world-readable
+# /proc/<pid>/cmdline while python3 runs.
 source_label() {
-  local src=$1 re='^([A-Za-z][A-Za-z0-9+.-]*)://([^@/?#]*@)?([^/:?#]+)'
-  if [[ -z $src ]]; then
-    echo "(none)"
-  elif [[ $src =~ $re ]]; then
-    local scheme=${BASH_REMATCH[1],,}
-    if [[ $scheme == file ]]; then echo "local file"; else echo "$scheme://${BASH_REMATCH[3]}"; fi
-  else
-    echo "local file"
-  fi
+  printf '%s' "$1" | python3 -I "$ROOT/scripts/dev-harness/helper_redact.py" label
 }
 
 fixture_server_pattern() {

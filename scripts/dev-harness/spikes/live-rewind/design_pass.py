@@ -55,7 +55,7 @@ sys.dont_write_bytecode = True
 
 import sweep
 import verdict
-from select_channels import redact
+from select_channels import redact, shown
 from sweep import command, get
 
 MIB = 1024.0 * 1024.0
@@ -268,8 +268,8 @@ def seek_and_judge(player, delta, t_ref, out, label, after=2.0, watch=3.0, mode=
 
 def q1_zap(args, channels, out):
     a, b = channels[args.a], channels[args.b]
-    out("Q1 zap: A=%s (%s)  B=%s (%s)" % (a["name"], redact(a["url"]), b["name"], redact(b["url"])))
-    result = {"question": "q1", "a": a["id"], "b": b["id"], "aName": a["name"], "bName": b["name"],
+    out("Q1 zap: A=%s (%s)  B=%s (%s)" % (shown(a["name"]), redact(a["url"]), shown(b["name"]), redact(b["url"])))
+    result = {"question": "q1", "a": a["id"], "b": b["id"], "aName": shown(a["name"]), "bName": shown(b["name"]),
               "aHost": redact(a["url"]), "bHost": redact(b["url"])}
     player = Player(args, 1, out)
     result['pid'] = player.pid
@@ -324,7 +324,7 @@ def q1_zap(args, channels, out):
         result["aFinal"] = snapshot(player.ipc, player.pid, za["t_z"])
         out("  A final: %s" % fmt(result["aFinal"]))
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -378,8 +378,8 @@ def resume_and_check(player, t_ref, out, label):
 
 def q2a_pause_full(args, channels, out):
     ch = channels[args.a]
-    out("Q2a pause with a full back buffer: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "q2a", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("Q2a pause with a full back buffer: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "q2a", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 2, out)
     result['pid'] = player.pid
     try:
@@ -394,7 +394,7 @@ def q2a_pause_full(args, channels, out):
             stop_s, gave_up, fmt(samples[-1]) if samples else None))
         result["resume"] = resume_and_check(player, t0, out, "after full-buffer pause")
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -403,8 +403,8 @@ def q2a_pause_full(args, channels, out):
 
 def q2b_pause_fresh(args, channels, out):
     ch = channels[args.a]
-    out("Q2b pause at t=10 on a fresh stream (control): %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "q2b", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("Q2b pause at t=10 on a fresh stream (control): %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "q2b", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 3, out)
     result['pid'] = player.pid
     try:
@@ -419,7 +419,7 @@ def q2b_pause_fresh(args, channels, out):
             stop_s, gave_up, fmt(samples[-1]) if samples else None))
         result["resume"] = resume_and_check(player, t0, out, "after fresh pause")
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -428,8 +428,8 @@ def q2b_pause_fresh(args, channels, out):
 
 def q2cd_rewind_pause(args, channels, out):
     ch = channels[args.a]
-    out("Q2c/d rewind then pause, pause then rewind: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "q2cd", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("Q2c/d rewind then pause, pause then rewind: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "q2cd", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 4, out)
     result['pid'] = player.pid
     try:
@@ -460,7 +460,7 @@ def q2cd_rewind_pause(args, channels, out):
                                                     after=1.0, watch=2.0)
         result["dResume"] = resume_and_check(player, t0, out, "d: after seek while paused")
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -471,8 +471,8 @@ def q2cd_rewind_pause(args, channels, out):
 
 def q34_watchdog_floor(args, channels, out):
     ch = channels[args.a]
-    out("Q3/Q4 seek at the plateau, the tick, the floor: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "q34", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("Q3/Q4 seek at the plateau, the tick, the floor: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "q34", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 5, out)
     result['pid'] = player.pid
     try:
@@ -575,7 +575,7 @@ def q34_watchdog_floor(args, channels, out):
         result["final"] = snapshot(player.ipc, player.pid, t0)
         out("  final: %s" % fmt(result["final"]))
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -617,8 +617,8 @@ def field_table(state):
 
 def m1_fields(args, channels, out):
     ch = channels[args.a]
-    out("M1 demuxer-cache-state fields: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "m1", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("M1 demuxer-cache-state fields: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "m1", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 11, out)
     result["pid"] = player.pid
     try:
@@ -637,7 +637,7 @@ def m1_fields(args, channels, out):
             for row in table["fields"]:
                 out("    %-36s %-6s %s" % (row["path"], row["type"], row["sample"]))
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -695,8 +695,8 @@ def one_seek(player, target, out, label, expect, t0):
 
 def m2_refusal(args, channels, out):
     ch = channels[args.a]
-    out("M2 refusal detector: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "m2", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("M2 refusal detector: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "m2", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     player = Player(args, 20 + args.index, out)
     result["pid"] = player.pid
     player.ipc.log_sink = []
@@ -752,7 +752,7 @@ def m2_refusal(args, channels, out):
             result["refusedAfter"], result["refusedLater"], result["refusedLogLines"], len(refused),
             result["landedLogLines"], result["cannotSeekLinesInLogFile"]))
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()
@@ -829,8 +829,8 @@ def bar_layers():
 
 def m3_osd(args, channels, out):
     ch = channels[args.a]
-    out("M3 show-text on a real window: %s (%s)" % (ch["name"], redact(ch["url"])))
-    result = {"question": "m3", "channel": ch["id"], "name": ch["name"], "host": redact(ch["url"])}
+    out("M3 show-text on a real window: %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+    result = {"question": "m3", "channel": ch["id"], "name": shown(ch["name"]), "host": redact(ch["url"])}
     shots = os.path.join(args.scratch, "shots")
     os.makedirs(shots, exist_ok=True)
     active_before = (hyprctl_json("activewindow") or {}).get("address")
@@ -928,7 +928,7 @@ def m3_osd(args, channels, out):
             result["afterRestore"] = {"fullscreen": w.get("fullscreen"), "size": w.get("size")}
             out("  fullscreen held %.2f s, restored fullscreen=%s size=%s" % (result["fullscreenHeldS"], w.get("fullscreen"), w.get("size")))
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         if fullscreen_on and addr:
@@ -951,8 +951,8 @@ def m4_zero_point(args, channels, out):
     try:
         for cid in ids:
             ch = channels[cid]
-            out("  %s (%s)" % (ch["name"], redact(ch["url"])))
-            row = {"channel": cid, "name": ch["name"], "host": redact(ch["url"])}
+            out("  %s (%s)" % (shown(ch["name"]), redact(ch["url"])))
+            row = {"channel": cid, "name": shown(ch["name"]), "host": redact(ch["url"])}
             _, error, rtt, t_z = zap(player.ipc, ch, os.getpid())
             row["loadfileError"] = error or ""
             wall0 = pos0 = None
@@ -1005,7 +1005,7 @@ def m4_zero_point(args, channels, out):
                 row["errorAtEndFromTick5"], pfc_count, row["bitrateBps"]))
             result["channels"].append(row)
     except Exception as exc:
-        result["failure"] = "%s: %s" % (exc.__class__.__name__, exc)
+        result["failure"] = shown("%s: %s" % (exc.__class__.__name__, exc))
         out("  FAILED: %s" % result["failure"])
     finally:
         result["mpvExit"] = player.close()

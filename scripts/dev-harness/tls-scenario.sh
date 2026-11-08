@@ -1438,7 +1438,8 @@ ck "S6 control: the player playing it is the tree's own launch ($s8_form), not t
 
 # ============================================================== privacy
 echo "== the credential in the fixture URL reaches no log of ours"
-# qa_leak_scan PRINTS the offending lines, so its output is captured and only
+# qa_leak_scan prints the offending lines' locations (never their text, since
+# F-HARNESS-96's sibling search), and its output is still captured and only
 # COUNTED here: a sweep that echoed the leak it found would put the credential
 # into this run's transcript, which is the same exposure one layer along. The
 # status is the verdict (0 clean, 1 leak, 2 vacuous) and 2 is never a pass --

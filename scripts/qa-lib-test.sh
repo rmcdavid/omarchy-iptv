@@ -245,6 +245,11 @@ st "with a real capture and no leak it passes" 0 qa_leak_scan 'omarchy-iptv' "$L
 
 printf 'omarchy-shell[1]: omarchy-iptv: playlist http://u:p@host/x.m3u?token=1\n' >>"$J"
 st "and it FAILS the moment a credential appears" 1 qa_leak_scan 'omarchy-iptv' "$LEAK" "$J" "$Q"
+# F-HARNESS-96's sibling: the red names WHERE, never WHAT. Its text is the
+# leak, and a caller that lets the output reach its transcript (rewind's R6,
+# qa-live's REDACTION FAILURE) would copy the credential into the evidence.
+is "the red prints the leaking line's location and nothing else" \
+   "$(qa_leak_scan 'omarchy-iptv' "$LEAK" "$J" "$Q")" "$J:2"
 # A leak on a line that is not ours is still a leak in our evidence bundle.
 printf 'someone-else: http://u:p@host/x\n' >"$J"
 st "a leak on an unlabelled line still fails, given a live capture" \
@@ -274,6 +279,8 @@ printf 'omarchy-iptv sourceSwitched {"id":"584a58e5"}\n' >>"$SL"
 st "with a labelled line present and clean, it passes" 0 qa_leak_on_labelled "$LABELS" '://' "$SL"
 printf 'omarchy-iptv sourceProbeFinished {"url":"http://u:p@host/x"}\n' >>"$SL"
 st "and it fails when a labelled line leaks" 1 qa_leak_on_labelled "$LABELS" '://' "$SL"
+is "and names the FILE's line of the labelled leak, never its text (the unlabelled line 1 is not judged)" \
+   "$(qa_leak_on_labelled "$LABELS" '://' "$SL")" "$SL:3"
 
 st "qa_answer_lacks calls an empty IPC answer vacuous" 2 qa_answer_lacks '://' ""
 st "qa_answer_lacks passes a real answer with no URL"  0 qa_answer_lacks '://' '{"service":{"channels":20}}'
@@ -3255,7 +3262,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 607 -> 609 on 2026-11-01, F-HARNESS-86: HarnessLib.sourceKeysByUrl and
 # newKeyKind driven (2), the learned-key instrument key-scenario reads
 # every new source's key through since D-SINK-48 made it random.
-EXPECTED=609
+# 609 -> 611 on 2026-11-08, F-HARNESS-96's sibling search: qa_leak_scan and
+# qa_leak_on_labelled print a red's file:line locations and never the leaking
+# text (2). Red on 8ff582f's qa-lib.sh: both printed the credential.
+EXPECTED=611
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
