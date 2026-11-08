@@ -147,6 +147,16 @@ REVIEWED = [
      "branch failing at a `:` scans only the control runs after it, as _URL_MARK does, and its `[^ ]*` "
      "has nothing after it; a start fails at its first character, a `;`, and findall resumes past "
      "each match (GROUP_PART, split_groups)"),
+    ("' [^ :]*+(?:(?!' + _URL_MARK.pattern + '):[^ :]*+)*+' + _URL_MARK.pattern + '[^ ;]*+;'", "provider",
+     "linear: a literal space first, so search() over ' ' + text starts an attempt only at a space, and "
+     "nothing in it can pass a space, so each attempt reads only its own run; the run before its first "
+     "`://` is taken by POSSESSIVE repeats (a run of neither space nor `:`, then each `:` that the "
+     "lookahead finds starts no _URL_MARK, which reads only the control runs after that `:`, with the "
+     "run after it), then _URL_MARK, then a possessive run to the run's end or a `;`; no repeat is "
+     "backed into, so an attempt costs about its run's length and the runs are disjoint: one pass over "
+     "the text, once a call (GROUP_URL_SEPARATOR, split_groups, D-PERF-13); possessive repeats need "
+     "Python 3.11's re, the helper's first construct past 3.10: docs/ARCHITECTURE.md names 3.14, and "
+     "the pattern compiles at load, so an older python3 would fail every verb, not only the parse"),
     (r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", "user",
      "linear: anchored; the scheme run cannot hold ':' so it backs off at most once over its length, "
      "and (.*)$ under DOTALL reaches the end at once (_SCHEME_RE, _SOURCE_SCHEME_RE)"),

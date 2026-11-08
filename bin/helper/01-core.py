@@ -734,6 +734,32 @@ _CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
 _URL_MARK = re.compile(":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/")
 
 
+def url_mark_start(text: str, pos: int = 0) -> int:
+    """Where `_URL_MARK.search(text, pos)` starts, or -1 when it finds none.
+
+    The same answer at native cost on the usual text (D-PERF-13). The mark's
+    filler is _CONTROL_CHARS' class, so a mark that is not exactly a `://`
+    holds one of those characters. In an ASCII str they are exactly the
+    non-printable ones (C0 and DEL; it has no C1). So when the first `://`
+    at or after `pos` has no such character before it (or there is no `://`
+    and none at all), no other mark can start first: one that did would
+    start at a `:` before the `://`, and with no control after that `:` it
+    would be a `://` itself, or would need a `/` or a control where the
+    `://`'s own `:` stands. str.find and isprintable run in C. Any other
+    text is searched with the pattern. On a run of `:` with no `//` after
+    any of them the pattern made one failed attempt at each `:`
+    (`<n>:::...;/`, 512 characters a channel); this makes none. `pos` is
+    never negative here: str.find would count it from the end, where the
+    pattern starts at 0."""
+    if text.isascii():
+        found = text.find("://", pos)
+        before = text[pos:found] if found >= 0 else (text[pos:] if pos else text)
+        if before.isprintable():
+            return found
+    mark = _URL_MARK.search(text, pos)
+    return -1 if mark is None else mark.start()
+
+
 # fold_space's class inside a URL's run, after its mark: the controls the
 # plain fold turns into a space (C0, DEL and U+0085, _CONTROL_WS's controls)
 # and the line and paragraph separators (U+2028, U+2029), each of which
@@ -1442,11 +1468,11 @@ def cut_free_text(text: str, limit: int, separator: str = "") -> str:
     if text[limit] == " ":
         return cut
     start = cut.rfind(" ")
-    mark = _URL_MARK.search(cut, start + 1)
-    if mark is None:
+    mark = url_mark_start(cut, start + 1)
+    if mark < 0:
         return cut
     if separator:
-        start = max(start, cut.rfind(separator, start + 1, mark.start()))
+        start = max(start, cut.rfind(separator, start + 1, mark))
     return cut[:max(start, 0)]
 
 
@@ -1504,6 +1530,38 @@ _PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\
 # were measured the same way and change nothing on any of the four, so they
 # are not in the class. Mirrors ID_PUNCT_RE in the model.
 _ID_PUNCT = re.compile(r"[\t\n\x0b\x0c\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000!-)\,-/:-@\[-`{-~]+")
+# FOLD as a str.translate table: the same replacement, character for
+# character, as "".join(FOLD.get(ch, ch) for ch in text), in C.
+FOLD_TABLE = str.maketrans(FOLD)
+
+
+def _ascii_space_table(punct: "re.Pattern[str]") -> dict[int, str] | None:
+    """fold_text's ASCII path for `punct` (D-PERF-13): {code: " "} for each
+    ASCII character the class holds, read off the pattern itself so the two
+    cannot drift; or None when the path would not give the whole fold's
+    answer, and fold_text then takes the whole fold (FOLD, then the pattern).
+
+    For an ASCII text the fold is `punct.sub(" ", text).strip(" ")`: each
+    maximal run of the class becomes one space, and the ends lose theirs.
+    Mapping each class character to a space and joining str.split()'s words
+    with one space is the same text, provided the only whitespace str.split()
+    can still see is that space: every ASCII character it splits at must be
+    in the class (both classes hold all ten), and FOLD must leave ASCII alone
+    (its lowest key is U+00DF). Measured on a 213-character group text (S1's
+    16 groups joined), at load 1.7: 35 us a fold through the per-character
+    join and the pattern, 4 us this way; a channel name, 3.3 us to 1.1."""
+    if any(ord(ch) < 128 for ch in FOLD):
+        return None
+    table: dict[int, str] = {}
+    for code in range(128):
+        if punct.fullmatch(chr(code)):
+            table[code] = " "
+        elif chr(code).isspace():
+            return None
+    return table
+
+
+_ASCII_SPACE_TABLES = {pattern: _ascii_space_table(pattern) for pattern in (_PUNCT, _ID_PUNCT)}
 
 
 # A channel NAME as the EPG matcher compares it: normalize_id_text with the
@@ -1780,15 +1838,28 @@ def normalize_id_text(value: Any) -> str:
 
 def fold_text(value: Any, punct: "re.Pattern[str]") -> str:
     text = ("" if value is None else str(value)).lower()
-    if not text.isascii():
+    if text.isascii():
+        # FOLD has no ASCII key, so an ASCII text's class runs are folded
+        # natively when the class has a table (_ascii_space_table,
+        # D-PERF-13). Without one it takes the whole fold below, FOLD
+        # included, as every text did before.
+        table = _ASCII_SPACE_TABLES.get(punct)
+        if table is not None:
+            return " ".join(text.translate(table).split())
+    else:
         import unicodedata
         text = unicodedata.normalize("NFC", _LATIN_MARKS.sub(r"\1", unicodedata.normalize("NFD", text)))
-    folded = "".join(FOLD.get(ch, ch) for ch in text)
-    return punct.sub(" ", folded).strip(" ")
+    return punct.sub(" ", text.translate(FOLD_TABLE)).strip(" ")
 
 
 def search_key(name: Any, group: Any) -> str:
-    key = normalize_text(name)
+    return search_key_of(normalize_text(name), group)
+
+
+def search_key_of(key: str, group: Any) -> str:
+    """search_key for a name already folded by normalize_text. make_channel
+    stores that fold as `nameKey` as well, and folds it once for both
+    (D-PERF-13): the second fold read the same name with the same class."""
     grp = normalize_text(group)
     if grp:
         key = grp if not key else key + " " + grp

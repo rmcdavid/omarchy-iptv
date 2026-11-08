@@ -637,6 +637,11 @@ def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:
     return ""
 
 
+# parse_extinf's duration, compiled once rather than looked up in re's cache
+# on every #EXTINF line (D-PERF-13).
+_EXTINF_DURATION = re.compile(r"\s*(-?\d+(?:\.\d+)?)?")
+
+
 def parse_extinf(line: str, past: dict[str, tuple[int, bool]] | None = None) -> tuple[dict[str, str], str]:
     """#EXTINF:<duration> [attrs],<title> -> (attrs, title).
 
@@ -644,7 +649,7 @@ def parse_extinf(line: str, past: dict[str, tuple[int, bool]] | None = None) -> 
     `past` is parse_attrs'.
     """
     body = line[len("#EXTINF:"):]
-    match = re.match(r"\s*(-?\d+(?:\.\d+)?)?", body)
+    match = _EXTINF_DURATION.match(body)
     body = body[match.end():] if match else body
     attrs, rest = parse_attrs(body, past)
     rest = rest.lstrip()
@@ -893,6 +898,17 @@ GROUP_SEPARATOR = ";"
 # to the next space, whole, `;`s and all, and a `:` that starts no `://` is
 # taken alone.
 GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
+# A `;` that stands in a URL's run: one after the first `://` of a run
+# (from a space to the next), the one place GROUP_PART keeps a `;` inside a
+# group; a text with none splits at every `;` (split_groups, D-PERF-13).
+# Searched in " " + text, so every run, the first included, opens with the
+# literal space and an attempt starts only there. An attempt reads its run
+# once and never backs off (possessive): the characters before the run's
+# first `://`, a run of neither space nor `:` and then each `:` that starts
+# none with the run after it, then the `://`, then up to the run's end or a
+# `;`. So the search is one pass, where a plain `://[^ ;]*;` would rescan a
+# run from each `://` in it.
+GROUP_URL_SEPARATOR = re.compile(" [^ :]*+(?:(?!" + _URL_MARK.pattern + "):[^ :]*+)*+" + _URL_MARK.pattern + "[^ ;]*+;")
 # split_groups' last answer, by its text: a persistent #EXTGRP is split again
 # for every channel after it, the same text each time, and consecutive
 # entries often repeat one group-title. A dict changed in place (as
@@ -923,18 +939,40 @@ def split_groups(value: str) -> list[str]:
     50,000-channel list paid about 32,000 comparisons a channel. Same list,
     one pass. The `://` test is one pass too, and native: GROUP_PART takes
     each URL's run whole as it reaches it and never searches back from a
-    `;`, and a text that holds no `://` is split natively. A text split last
-    time is answered from SPLIT_GROUPS_LAST, as a new list."""
+    `;`, and a text in which no `;` stands in a URL's run is split natively.
+    A text split last time is answered from SPLIT_GROUPS_LAST, as a new
+    list.
+
+    D-PERF-13: GROUP_PART loops once per piece it takes, about 100 ns a
+    character over 512 characters of `a:// ;` repeated, so it runs only
+    where its answer can differ from the native split's: where a `;` stands
+    in a URL's run (GROUP_URL_SEPARATOR). Where none does, every `;`
+    separates, and GROUP_PART's parts are exactly the native split's
+    non-empty pieces; empty ones are dropped below either way. A text with
+    no `://` at all (url_mark_start, native on the usual text) is not
+    searched, so a run of `:` with no `//` costs no attempt."""
     last = SPLIT_GROUPS_LAST.get(value)
     if last is not None:
         return list(last)
-    if GROUP_SEPARATOR in value and "/" in value and _URL_MARK.search(value) is not None:
+    url_separator = False
+    if GROUP_SEPARATOR in value and "/" in value and url_mark_start(value) >= 0:
+        # A `;` written straight after a space, or first, opens its run, so
+        # no `://` can stand before it there: when every `;` is one of those
+        # (`A ; B`), none is in a URL's run and the search is not needed.
+        opening = value.count(" " + GROUP_SEPARATOR) + value.startswith(GROUP_SEPARATOR)
+        url_separator = (value.count(GROUP_SEPARATOR) > opening
+                         and GROUP_URL_SEPARATOR.search(" " + value) is not None)
+    if url_separator:
         parts = GROUP_PART.findall(value)
     else:
-        # No `;`, or no `://`: every `;` separates, and the native split is
-        # the rule's answer at native cost.
+        # No `;` in a URL's run: every `;` separates, and the native split
+        # is the rule's answer at native cost.
         parts = value.split(GROUP_SEPARATOR)
-    groups = list(dict.fromkeys(name for name in (part.strip() for part in parts) if name))
+    # Trimmed, first of each kept in order, the empty name dropped: one
+    # native pass, where a generator per part cost about 0.2 us each.
+    names = dict.fromkeys(map(str.strip, parts))
+    names.pop("", None)
+    groups = list(names)
     SPLIT_GROUPS_LAST.clear()
     SPLIT_GROUPS_LAST[value] = groups
     return list(groups)
@@ -1040,13 +1078,28 @@ def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None,
 def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
     """split_groups' list with each name cut to M3U_MAX_GROUP and at most
     M3U_MAX_GROUPS_PER_CHANNEL of them; a cut that makes two names equal
-    keeps the first, as split_groups does for a repeat."""
+    keeps the first, as split_groups does for a repeat.
+
+    D-PERF-13: when the first M3U_MAX_GROUPS_PER_CHANNEL names are distinct,
+    none is empty and none is over M3U_MAX_GROUP, the loop below keeps each
+    of them as it is and stops at the next, counting it; that answer is
+    taken natively. split_groups' list is distinct and has no empty name,
+    so a persistent 512-character #EXTGRP of short groups (38 of them, 16
+    kept) is no longer walked name by name for every channel."""
+    head = groups[:M3U_MAX_GROUPS_PER_CHANNEL]
+    if head and max(map(len, head)) <= M3U_MAX_GROUP and "" not in head and len(set(head)) == len(head):
+        if len(groups) > len(head):
+            bound_count(bounds, "groupCount")
+        return head
     out: list[str] = []
     for name in groups:
         if len(out) >= M3U_MAX_GROUPS_PER_CHANNEL:
             bound_count(bounds, "groupCount")
             break
-        name = cut_text(name, M3U_MAX_GROUP, "group", bounds)
+        # cut_text's own first test, made here: a name within the cap is
+        # returned as it is, and this skips the call (D-PERF-13).
+        if len(name) > M3U_MAX_GROUP:
+            name = cut_text(name, M3U_MAX_GROUP, "group", bounds)
         if name and name not in out:
             out.append(name)
     return out
@@ -1173,7 +1226,9 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["headers"] = headers
     if options:
         channel["options"] = options
-    channel["searchKey"] = search_key(name, " ".join(groups) if groups else group)
+    # The name is folded once, for searchKey and nameKey alike (search_key_of).
+    name_key = normalize_text(name)
+    channel["searchKey"] = search_key_of(name_key, " ".join(groups) if groups else group)
     # F-PERF-1. `searchKey` has been precomputed since M0 precisely so the
     # guide's filter does not fold 10,000 strings on every keystroke. The
     # ranker needs a SECOND fold -- the name alone, to rank a name match above
@@ -1186,7 +1241,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # An older cache without this key still works -- the reader keeps its
     # fallback -- so there is no migration, only a slower guide until the next
     # refresh writes one.
-    channel["nameKey"] = normalize_text(name)
+    channel["nameKey"] = name_key
     return channel
 
 
@@ -1514,7 +1569,14 @@ def substitute_name_ids(channels: list[dict[str, Any]], legacy: list[str]) -> li
     """The one substitution scheme 2 makes on top of scheme 1. Separate from
     channel_ids so channel_id_remap can hash every URL once instead of twice:
     measured on the user's 3,335-channel list that is 80 ms against 123 ms,
-    and the helper's budget is 10,000 channels parsed in under a second."""
+    and the helper's budget is 10,000 channels parsed in under a second.
+
+    Only a `u:` row is ever substituted, so a list with none comes back as
+    it went in, and its names are neither folded nor hashed (D-PERF-13):
+    the count below decides nothing without one. Measured on PerformanceTest's
+    10,000 rows, each with a tvg-id of its own: 77 ms, then under 1."""
+    if not any(base.startswith("u:") for base in legacy):
+        return list(legacy)
     name_keys = [name_id_key(channel.get("name", "")) for channel in channels]
     name_counts: dict[str, int] = {}
     for key in name_keys:
