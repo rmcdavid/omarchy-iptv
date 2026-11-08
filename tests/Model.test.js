@@ -7422,6 +7422,48 @@ check("R32a: the fixture carries the typo shapes that warn and the Xtream and We
   fixture.some(c => c.warn === false && /remote\.php\/dav/.test(c.input)),
   fixture.some(c => c.warn === true && /^http:\/\/user:2024\/ab@/.test(c.input)),
   fixture.filter(c => !c.ok && /\[/.test(c.input)).length >= 3], [true, true, true, true, true, true])
+// ---- D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold ----
+//
+// A host name holding `@`, `%`, `;`, `=`, `&`, a second `:` (one port is
+// fine), the reader's whitespace or an invisible format character (Unicode
+// Cf) is `invalid`. The fixture loop above runs the rule's vectors; these
+// hold the predicate to the whole code point range, its format table to
+// Unicode's Cf (node's \p{Cf}, the test's oracle only: the shipped model
+// never uses a property escape, which V4 is not node about), and every
+// refusal's message to naming no URL and no host. The helper runs the same
+// fixture and the same range (tests/test_source.py, tests/test_host_names.py).
+checkCall("D-SINK-86: HOST_FORMAT_RANGES is exactly Unicode's Cf category, code point by code point", () => {
+  const ranges = Model.HOST_FORMAT_RANGES
+  const wrong = []
+  for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
+    const listed = ranges.some(r => c >= r[0] && c <= r[1])
+    if (listed !== /\p{Cf}/u.test(String.fromCodePoint(c))) wrong.push(c.toString(16))
+  }
+  return [ranges.length, wrong]
+}, [21, []])
+checkCall("D-SINK-86: hostNameRefused refuses a name holding @ % ; = & :, a reader's whitespace or a format character, and no other code point", () => {
+  const space = new Set(Model.URL_SPACE_CODES)
+  const wrong = []
+  for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
+    const ch = String.fromCodePoint(c)
+    const want = "@%;=&:".indexOf(ch) !== -1 || space.has(c) || /\p{Cf}/u.test(ch)
+    if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
+  }
+  return wrong
+}, [])
+checkCall("D-SINK-86: a format character beyond the BMP is read as one code point, and a lone surrogate is none", () =>
+  [Model.hostNameRefused("h" + String.fromCodePoint(0xe0041) + ".test"), Model.hostNameRefused("h" + String.fromCodePoint(0x1d173)),
+   Model.hostNameRefused("h" + String.fromCodePoint(0x1d172) + ".test"), Model.hostNameRefused("h" + String.fromCharCode(0xdb40) + ".test"),
+   Model.hostNameRefused("h" + String.fromCharCode(0xdc41) + ".test"), Model.hostNameRefused("h.test")],
+  [true, true, false, false, false, false])
+checkCall("D-SINK-86: the rule's vectors are in the fixture, so it cannot be trimmed to green, and every refusal names no URL and no host", () => {
+  const rule = fixture.filter(c => /^D-SINK-86/.test(String(c.note || "")))
+  const named = rule.filter(c => !c.ok).filter(c => {
+    const m = Model.validateSourceUrl(c.input, c.origin ? { origin: c.origin } : undefined).message
+    return m.indexOf("://") !== -1 || /h\.test|evil|secret/i.test(m) || m.indexOf(c.input.slice(7)) !== -1
+  }).map(c => c.input)
+  return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 40, named]
+}, [true, true, []])
 // JS-only vectors (kept out of the shared fixture until the Python mirror
 // agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and
 // fragment are dropped like urlsplit().path, two ports are not a port, a

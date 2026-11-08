@@ -85,6 +85,79 @@ def looks_like_host(text: str) -> bool:
     return re.search(r"[.:]", text.split("/", 1)[0]) is not None
 
 
+# D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold. A name that
+# holds one of these five, a second `:` (one port is fine), the reader's
+# whitespace (URL_SPACE_CHARS) or an invisible format character
+# (HOST_FORMAT_RANGES) is refused: by validate_source_url as `invalid`, and
+# by the connection layer before any lookup, on every hop (03-io-playlist.py:
+# resolve_within, bounded_create_connection, check_proxied, the request each
+# hop opens, whose host urllib holds percent-decoded, and both redirect
+# handlers). No DNS name holds any of them. `@` ends a userinfo and `%` opens
+# an escape (`u%40h` is a request for `u@h`); `;`, `=` and `&` are
+# D-SINK-30's parameter delimiters; a colon past the port's belongs to a
+# userinfo or a second port (http.client splits at the LAST colon, so
+# `user:pass@host` is a lookup of `user:pass@host`); and a format character
+# draws as nothing while IDNA's nameprep maps some away (`h<U+00AD>.test` is
+# looked up as `h.test`), so the name a user reads is not the name asked
+# for. Mirrored by Model.hostNameRefused over the shared source-urls fixture.
+HOST_NAME_REFUSED_CHARS = "@%;=&"
+# Unicode category Cf, every code point of it, as (first, last): what Python
+# 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
+# Explicit rather than unicodedata.category, so both mirrors refuse one set
+# whatever either engine's Unicode version; each suite holds its table to its
+# engine's category over the whole range (test_host_names.py, Model.test.js)
+# and the fixture pins both ends of every range in both mirrors.
+HOST_FORMAT_RANGES = ((0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD),
+                      (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E),
+                      (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064), (0x2066, 0x206F),
+                      (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD), (0x110CD, 0x110CD),
+                      (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0001, 0xE0001),
+                      (0xE0020, 0xE007F))
+_HOST_NAME_REFUSED = frozenset(HOST_NAME_REFUSED_CHARS + URL_SPACE_CHARS).union(
+    chr(code) for first, last in HOST_FORMAT_RANGES for code in range(first, last + 1))
+# What an IPv6 literal's zone may hold: _IPV6_LITERAL's `%25[A-Za-z0-9._~-]+`.
+_ZONE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
+
+
+def _ipv6_literal_text(text: str) -> bool:
+    """Is `text` an IPv6 address without its brackets, with at most a zone
+    of _ZONE_CHARS after a `%` -- decoded (`eth0`, as a request holds it) or
+    not (`25eth0`, as a URL spells it)? Imports ipaddress only for text
+    whose address part holds a colon."""
+    address, sep, zone = text.partition("%")
+    if ":" not in address or (sep and (zone == "" or not _ZONE_CHARS.issuperset(zone))):
+        return False
+    import ipaddress
+    try:
+        ipaddress.IPv6Address(address)
+    except ValueError:
+        return False
+    return True
+
+
+def host_name_refused(text: Any, with_port: bool = False) -> bool:
+    """D-SINK-86: does this host NAME hold what no name may hold?
+
+    `text` is a host as a connection is handed it (no port; an IPv6 literal
+    with or without its brackets), or, `with_port`, a host[:port] as a
+    request object holds it, where one colon is the port's. An IPv6 literal
+    is no name: its colons and its zone's `%` are its own, so a bracketed one
+    is set aside and what follows its `]` is judged as the rest of a name,
+    and a bare one passes where no port can follow it. Every character is
+    asked once against one frozenset, so the cost is linear; nothing here
+    looks anything up. Model.hostNameRefused is the validator's half."""
+    name = str(text or "")
+    if name.startswith("["):
+        close = name.find("]")
+        if close != -1 and _ipv6_literal_text(name[1:close]):
+            name = name[close + 1:]
+    elif not with_port and _ipv6_literal_text(name):
+        return False
+    if name.count(":") > (1 if with_port else 0):
+        return True
+    return not _HOST_NAME_REFUSED.isdisjoint(name)
+
+
 def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     """Mirror of Model.validateSourceUrl(text, {origin}) -> {ok, code,
     message, kind, url, host}; `url` is the normalized form (the source
@@ -95,7 +168,8 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     `origin` "cli" accepts `~` paths verbatim (SR11; expanded by the reader),
     the forms refuse them. The authority refuses backslashes, zero-width
     characters, ports above 65535 and bracket literals that are not IPv6
-    (SR15). Messages never contain a URL."""
+    (SR15), and a host name that host_name_refused refuses (D-SINK-86).
+    Messages never contain a URL."""
     cli = origin == "cli"
     # D-SRC-63 (R32a'''): the URL boundary rule deletes nothing inside the
     # text, so what sanitize_input used to rewrite is refused below instead.
@@ -185,7 +259,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     else:
         colon = hostport.rfind(":")
         host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
-        if _BARE_HOST_CHARS.search(host):
+        # D-SINK-86: and a name holding what no name may hold (`@`, `%`, `;`,
+        # `=`, `&`, a colon, whitespace, a format character); the bracketed
+        # literal above is judged by _IPV6_LITERAL instead.
+        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
             return _validation(False, "invalid", "URL host contains an invalid character")
     if host == "":
         return _validation(False, "invalid", "URL has no host name")

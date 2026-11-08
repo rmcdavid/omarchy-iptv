@@ -484,6 +484,10 @@ def logo_opener(host: str, policy: Any = None) -> Any:
                                   "a logo from %s redirected to a URL carrying userinfo" % host)
             new = super().redirect_request(req, fp, code, msg, headers, newurl)
             if new is not None:
+                # D-SINK-86: the next hop's host as its request holds it,
+                # percent-decoded (the `@` test above reads the raw netloc,
+                # so `%40` passed it), before that hop is opened.
+                refuse_host_name(new.host, with_port=True)
                 # Nothing sets these on a logo request; removed anyway so a
                 # future caller cannot reintroduce the leak by adding a header.
                 for name in ("Authorization", "Cookie"):

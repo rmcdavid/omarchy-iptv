@@ -1134,5 +1134,654 @@
   "ok": false,
   "code": "invalid",
   "note": "a paragraph separator inside an http URL is whitespace (the union class a reader refuses), as D-SRC-06's line separator is"
+ },
+ {
+  "input": "http://u%40evil.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a percent escape in the host (an encoded @)"
+ },
+ {
+  "input": "http://h%2Etest/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a percent escape in the host (an encoded dot)"
+ },
+ {
+  "input": "http://h.test;sid=SECRET/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a ; in the host (D-SINK-30's shape, which validated until now)"
+ },
+ {
+  "input": "http://h.test=SECRET/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: an = in the host"
+ },
+ {
+  "input": "http://h.test&p=SECRET/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: an & in the host"
+ },
+ {
+  "input": "http://h&x.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a lone & in the host, and nothing else the rule refuses"
+ },
+ {
+  "input": "http://h;x.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a lone ; in the host, and nothing else the rule refuses"
+ },
+ {
+  "input": "http://h=x.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a lone = in the host, and nothing else the rule refuses"
+ },
+ {
+  "input": "http://u:p@h.test;sid=SECRET/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a ; in the host after a userinfo"
+ },
+ {
+  "input": "http://h.test;sid=SECRET:8080/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a ; in the host before a port"
+ },
+ {
+  "input": "http://a:b:8080/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a second colon (one port is fine)"
+ },
+ {
+  "input": "http://h.test::8080/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a second colon right after the first"
+ },
+ {
+  "input": "http://h\u3000.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: whitespace in the host (U+3000)"
+ },
+ {
+  "input": "http://h\u2009.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: whitespace in the host (U+2009)"
+ },
+ {
+  "input": "http://h.test\u200e:8080/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a format character (U+200E) before the port"
+ },
+ {
+  "input": "http://h\u00ad.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: a format character from the command line too",
+  "origin": "cli"
+ },
+ {
+  "input": "http://h\u00ad.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+00AD, the only of the format range 00AD"
+ },
+ {
+  "input": "http://h\u0600.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+0600, the first of the format range 0600-0605"
+ },
+ {
+  "input": "http://h\u0605.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+0605, the last of the format range 0600-0605"
+ },
+ {
+  "input": "http://h\u061c.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+061C, the only of the format range 061C"
+ },
+ {
+  "input": "http://h\u06dd.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+06DD, the only of the format range 06DD"
+ },
+ {
+  "input": "http://h\u070f.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+070F, the only of the format range 070F"
+ },
+ {
+  "input": "http://h\u0890.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+0890, the first of the format range 0890-0891"
+ },
+ {
+  "input": "http://h\u0891.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+0891, the last of the format range 0890-0891"
+ },
+ {
+  "input": "http://h\u08e2.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+08E2, the only of the format range 08E2"
+ },
+ {
+  "input": "http://h\u180e.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+180E, the only of the format range 180E"
+ },
+ {
+  "input": "http://h\u200b.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+200B, the first of the format range 200B-200F"
+ },
+ {
+  "input": "http://h\u200f.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+200F, the last of the format range 200B-200F"
+ },
+ {
+  "input": "http://h\u202a.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+202A, the first of the format range 202A-202E"
+ },
+ {
+  "input": "http://h\u202e.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+202E, the last of the format range 202A-202E"
+ },
+ {
+  "input": "http://h\u2060.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+2060, the first of the format range 2060-2064"
+ },
+ {
+  "input": "http://h\u2064.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+2064, the last of the format range 2060-2064"
+ },
+ {
+  "input": "http://h\u2066.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+2066, the first of the format range 2066-206F"
+ },
+ {
+  "input": "http://h\u206f.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+206F, the last of the format range 2066-206F"
+ },
+ {
+  "input": "http://h\ufeff.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+FEFF, the only of the format range FEFF"
+ },
+ {
+  "input": "http://h\ufff9.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+FFF9, the first of the format range FFF9-FFFB"
+ },
+ {
+  "input": "http://h\ufffb.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+FFFB, the last of the format range FFF9-FFFB"
+ },
+ {
+  "input": "http://h\ud804\udcbd.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+110BD, the only of the format range 110BD"
+ },
+ {
+  "input": "http://h\ud804\udccd.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+110CD, the only of the format range 110CD"
+ },
+ {
+  "input": "http://h\ud80d\udc30.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+13430, the first of the format range 13430-1343F"
+ },
+ {
+  "input": "http://h\ud80d\udc3f.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+1343F, the last of the format range 13430-1343F"
+ },
+ {
+  "input": "http://h\ud82f\udca0.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+1BCA0, the first of the format range 1BCA0-1BCA3"
+ },
+ {
+  "input": "http://h\ud82f\udca3.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+1BCA3, the last of the format range 1BCA0-1BCA3"
+ },
+ {
+  "input": "http://h\ud834\udd73.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+1D173, the first of the format range 1D173-1D17A"
+ },
+ {
+  "input": "http://h\ud834\udd7a.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+1D17A, the last of the format range 1D173-1D17A"
+ },
+ {
+  "input": "http://h\udb40\udc01.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+E0001, the only of the format range E0001"
+ },
+ {
+  "input": "http://h\udb40\udc20.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+E0020, the first of the format range E0020-E007F"
+ },
+ {
+  "input": "http://h\udb40\udc7f.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-86: U+E007F, the last of the format range E0020-E007F"
+ },
+ {
+  "input": "http://h\u00ac.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u00ac.test/x",
+  "host": "h\u00ac.test",
+  "key": "fac6e7a8",
+  "note": "D-SINK-86: U+00AC (Sm) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u00ae.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u00ae.test/x",
+  "host": "h\u00ae.test",
+  "key": "f36098f6",
+  "note": "D-SINK-86: U+00AE (So) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u05ff.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u05ff.test/x",
+  "host": "h\u05ff.test",
+  "key": "186b8a00",
+  "note": "D-SINK-86: U+05FF (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u0606.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u0606.test/x",
+  "host": "h\u0606.test",
+  "key": "e26fad20",
+  "note": "D-SINK-86: U+0606 (Sm) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u061b.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u061b.test/x",
+  "host": "h\u061b.test",
+  "key": "65caa19d",
+  "note": "D-SINK-86: U+061B (Po) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u061d.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u061d.test/x",
+  "host": "h\u061d.test",
+  "key": "7c484127",
+  "note": "D-SINK-86: U+061D (Po) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u06dc.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u06dc.test/x",
+  "host": "h\u06dc.test",
+  "key": "74e6d6cb",
+  "note": "D-SINK-86: U+06DC (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u06de.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u06de.test/x",
+  "host": "h\u06de.test",
+  "key": "6f92784d",
+  "note": "D-SINK-86: U+06DE (So) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u070e.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u070e.test/x",
+  "host": "h\u070e.test",
+  "key": "9341c9d4",
+  "note": "D-SINK-86: U+070E (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u0710.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u0710.test/x",
+  "host": "h\u0710.test",
+  "key": "4e3800d6",
+  "note": "D-SINK-86: U+0710 (Lo) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u088f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u088f.test/x",
+  "host": "h\u088f.test",
+  "key": "7fdc0a41",
+  "note": "D-SINK-86: U+088F (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u0892.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u0892.test/x",
+  "host": "h\u0892.test",
+  "key": "de1b89bc",
+  "note": "D-SINK-86: U+0892 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u08e1.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u08e1.test/x",
+  "host": "h\u08e1.test",
+  "key": "4e9f2a9c",
+  "note": "D-SINK-86: U+08E1 (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u08e3.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u08e3.test/x",
+  "host": "h\u08e3.test",
+  "key": "40e5825a",
+  "note": "D-SINK-86: U+08E3 (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u180d.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u180d.test/x",
+  "host": "h\u180d.test",
+  "key": "8d468e20",
+  "note": "D-SINK-86: U+180D (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u180f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u180f.test/x",
+  "host": "h\u180f.test",
+  "key": "5bf5e0ee",
+  "note": "D-SINK-86: U+180F (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u2010.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u2010.test/x",
+  "host": "h\u2010.test",
+  "key": "a5bbda42",
+  "note": "D-SINK-86: U+2010 (Pd) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u2065.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u2065.test/x",
+  "host": "h\u2065.test",
+  "key": "123ab9d0",
+  "note": "D-SINK-86: U+2065 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\u2070.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u2070.test/x",
+  "host": "h\u2070.test",
+  "key": "9665acb5",
+  "note": "D-SINK-86: U+2070 (No) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ufefe.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ufefe.test/x",
+  "host": "h\ufefe.test",
+  "key": "c6392dd0",
+  "note": "D-SINK-86: U+FEFE (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\uff00.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\uff00.test/x",
+  "host": "h\uff00.test",
+  "key": "f4a494eb",
+  "note": "D-SINK-86: U+FF00 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ufff8.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ufff8.test/x",
+  "host": "h\ufff8.test",
+  "key": "2bf4dbc6",
+  "note": "D-SINK-86: U+FFF8 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ufffc.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ufffc.test/x",
+  "host": "h\ufffc.test",
+  "key": "126d6b2a",
+  "note": "D-SINK-86: U+FFFC (So) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud804\udcbc.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud804\udcbc.test/x",
+  "host": "h\ud804\udcbc.test",
+  "key": "9711114d",
+  "note": "D-SINK-86: U+110BC (Po) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud804\udcbe.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud804\udcbe.test/x",
+  "host": "h\ud804\udcbe.test",
+  "key": "9c656fcb",
+  "note": "D-SINK-86: U+110BE (Po) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud804\udccc.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud804\udccc.test/x",
+  "host": "h\ud804\udccc.test",
+  "key": "8e8b15ca",
+  "note": "D-SINK-86: U+110CC (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud804\udcce.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud804\udcce.test/x",
+  "host": "h\ud804\udcce.test",
+  "key": "608fa6cc",
+  "note": "D-SINK-86: U+110CE (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud80d\udc2f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud80d\udc2f.test/x",
+  "host": "h\ud80d\udc2f.test",
+  "key": "aa34f37e",
+  "note": "D-SINK-86: U+1342F (Lo) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud80d\udc40.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud80d\udc40.test/x",
+  "host": "h\ud80d\udc40.test",
+  "key": "2072ce4a",
+  "note": "D-SINK-86: U+13440 (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud82f\udc9f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud82f\udc9f.test/x",
+  "host": "h\ud82f\udc9f.test",
+  "key": "ccfc1f2c",
+  "note": "D-SINK-86: U+1BC9F (Po) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud82f\udca4.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud82f\udca4.test/x",
+  "host": "h\ud82f\udca4.test",
+  "key": "4ccf23a3",
+  "note": "D-SINK-86: U+1BCA4 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud834\udd72.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud834\udd72.test/x",
+  "host": "h\ud834\udd72.test",
+  "key": "46e5c02e",
+  "note": "D-SINK-86: U+1D172 (Mc) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\ud834\udd7b.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ud834\udd7b.test/x",
+  "host": "h\ud834\udd7b.test",
+  "key": "f4f0f6f7",
+  "note": "D-SINK-86: U+1D17B (Mn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\udb40\udc00.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb40\udc00.test/x",
+  "host": "h\udb40\udc00.test",
+  "key": "bf034047",
+  "note": "D-SINK-86: U+E0000 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\udb40\udc02.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb40\udc02.test/x",
+  "host": "h\udb40\udc02.test",
+  "key": "1b9bf949",
+  "note": "D-SINK-86: U+E0002 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\udb40\udc1f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb40\udc1f.test/x",
+  "host": "h\udb40\udc1f.test",
+  "key": "46bd53b4",
+  "note": "D-SINK-86: U+E001F (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://h\udb40\udc80.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb40\udc80.test/x",
+  "host": "h\udb40\udc80.test",
+  "key": "4ed892dd",
+  "note": "D-SINK-86: U+E0080 (Cn) beside a format range is no format character"
+ },
+ {
+  "input": "http://[fe80::1%25eth0]:8080/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://[fe80::1%25eth0]:8080/x",
+  "host": "[fe80::1%25eth0]",
+  "key": "13689137",
+  "note": "D-SINK-86: an IPv6 literal keeps its colons, its zone's % and a port"
+ },
+ {
+  "input": "http://[::ffff:192.0.2.1]:8443/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://[::ffff:192.0.2.1]:8443/x",
+  "host": "[::ffff:192.0.2.1]",
+  "key": "4b8d1b20",
+  "note": "D-SINK-86: an IPv4-mapped IPv6 literal with a port"
+ },
+ {
+  "input": "http://h.test:8080/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h.test:8080/x",
+  "host": "h.test",
+  "key": "1ee8bcaa",
+  "note": "D-SINK-86: one port is fine"
  }
 ]

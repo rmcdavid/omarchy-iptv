@@ -208,6 +208,34 @@ class ValidateSourceUrlTest(unittest.TestCase):
         self.assertGreaterEqual(sum(1 for c in cases if c.get("warn") is True and c["ok"]), 7)
         self.assertGreaterEqual(sum(1 for c in cases if c.get("warn") is False), 15)
 
+    def test_d_sink_86_a_host_name_holding_what_no_name_holds_is_refused(self):
+        """D-SINK-86 (the owner, 2026-11-08): a host NAME holding `@`, `%`,
+        `;`, `=`, `&`, a second `:`, whitespace or a format character
+        (Unicode Cf) is `invalid`, and the refusal names no URL and no host.
+        Every vector the rule added to the shared fixture, through the
+        shipping validator, collected so a red run shows how many disagree:
+        the `;`, `=`, `&` and `%` hosts and most format characters
+        validated until now. The accepted vectors are the controls: the
+        code point beside each format range, an IPv6 literal with its
+        colons, a zone's `%` and a port, and one port on a name. The model
+        runs the same file (tests/Model.test.js)."""
+        cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
+                 if str(c.get("note", "")).startswith("D-SINK-86")]
+        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 45, sum(1 for c in cases if c["ok"]) >= 40),
+                         (True, True), "the fixture cannot be trimmed to green")
+        wrong = []
+        for case in cases:
+            result = helper.validate_source_url(case["input"], origin=case.get("origin", "form"))
+            got = (result["ok"], result["code"] if not result["ok"] else result["url"])
+            want = (case["ok"], case["code"] if not case["ok"] else case["url"])
+            if got != want:
+                wrong.append((ascii(case["input"]), got))
+            if not result["ok"]:
+                for leak in ("://", "h.test", "evil", "SECRET", "secret", case["input"][7:]):
+                    if leak in result["message"]:
+                        wrong.append((ascii(case["input"]), "message names %r" % leak))
+        self.assertEqual(wrong, [], "%d of %d D-SINK-86 vectors disagree" % (len(wrong), len(cases)))
+
     def test_tilde_depends_on_origin(self):
         # SR11: the CLI path keeps accepting ~ (verbatim; the reader expands
         # it), the forms refuse it.
