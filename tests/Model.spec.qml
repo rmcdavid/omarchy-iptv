@@ -266,6 +266,11 @@ TestCase {
     // D-SINK-92: a bracket, written or folded (U+FF3B, U+FE48).
     compare([Model.hostNameRefused("user[sid.test"), Model.hostNameRefused("user" + String.fromCharCode(0xff3b) + "sid.test"),
              Model.hostNameRefused("user" + String.fromCharCode(0xfe48) + "sid.test")], [true, true, true])
+    // The review of bf47cdc: a backslash, an escape to the resolver, written
+    // or folded (U+FF3C, U+FE68).
+    compare([Model.hostNameRefused("user" + String.fromCharCode(0x5c) + "058sid.test"),
+             Model.hostNameRefused("user" + String.fromCharCode(0xff3c) + "sid.test"),
+             Model.hostNameRefused("user" + String.fromCharCode(0xfe68) + "sid.test")], [true, true, true])
     compare(Model.validateSourceUrl("http://user;sid.test/x").code, "invalid")
     compare([Model.hostNameRefused("bücher.test"), Model.hostNameRefused("h．test"),
              Model.hostNameRefused("hＡ.test"), Model.hostNameRefused("h.test")], [false, false, false, false])

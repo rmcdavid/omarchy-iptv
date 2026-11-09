@@ -3092,8 +3092,8 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 section "qa_sock_fits / qa_cage_runtime_fits / F-HARNESS-104: a socket path that cannot fit"
 
 # Four nested cages aborted on 2026-11-08 and 09, each leaving a core and a
-# crash card on the owner's desktop, because the clip preflight ran under a
-# scratch XDG_RUNTIME_DIR of about 100 bytes and cage could not make its
+# crash card on the owner's desktop, because the clip preflight ran under
+# scratch XDG_RUNTIME_DIRs of 113 to 123 bytes and cage could not make its
 # socket there. NOTHING here starts cage, quickshell, a player or a
 # compositor: the predicates are called directly, and every script that would
 # start cage is run with stand-ins first on PATH that only append their name
@@ -3196,6 +3196,35 @@ fh_case "clip-scenario.sh check-tree, the gate's preflight that aborted four cag
   "$FH_CAGE" "$D97" "$FHD-clip" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" check-tree' fh "$ROOT/scripts/dev-harness/clip-scenario.sh"
 fh_case "clip-scenario.sh live: refused above its transcript" \
   "$FH_CAGE" "$D97" "$FHD-clip" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/clip-scenario.sh"
+# F-HARNESS-45's second layer for the gate's own cage, which clip-scenario.sh
+# starts outside private-bus.sh (the review of 40afe25: the record said the
+# preflight had a core limit of its own, and each of the four aborts stored
+# a core). A stand-in cage reads its soft core limit, then reports the
+# caller's display as its own, which the scenario refuses before it drives
+# anything (exit 2); its cleanup kills the stand-in by the pid it wrote. Run
+# with the soft limit raised to the hard one, so a 0 is the scenario's own.
+CORE_CAGE="$SP/core-cage"
+cat >"$CORE_CAGE" <<CORE
+#!/bin/bash
+ulimit -S -c >"$SP/core-soft"
+d=\${2%/*}
+echo wayland-1 >"\$d/display"
+echo \$\$ >"\$d/child.pid"
+exec sleep 20
+CORE
+chmod 0755 "$CORE_CAGE"
+is "the precondition: this run can raise its soft core limit above 0" \
+   "$(ulimit -S -c "$(ulimit -H -c)" 2>/dev/null; [[ $(ulimit -S -c) != 0 ]] && echo raised || ulimit -S -c)" "raised"
+: >"$SP/ran"; rm -f "$SP/core-soft"
+( ulimit -S -c "$(ulimit -H -c)" 2>/dev/null
+  env -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
+    CLIP_CAGE_BIN="$CORE_CAGE" XDG_RUNTIME_DIR="$D96" OMARCHY_IPTV_HARNESS_DIR="$SP/hcore" PATH="$FB:$PATH" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
+    timeout -k 5 60 bash "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$SP/core.out" 2>&1
+  printf '%s\n' "$?" >"$SP/core.rc" )
+is "clip-scenario.sh starts its cage under a soft core limit of 0, and refuses the stand-in's display before it drives anything" \
+   "$(cat "$SP/core-soft" 2>/dev/null || echo unread)|$(cat "$SP/core.rc")|$(qa_count "^REFUSING: cage's child reports display 'wayland-1'" "$SP/core.out")|$(qa_count '^(cage|quickshell|qs|wtype|wl-copy|wl-paste)$' "$SP/ran")" \
+   "0|2|1|0"
 fh_case "key-scenario.sh live: refused above its export and transcript" \
   "$FH_CAGE" "$D97" "$FHD-key" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/key-scenario.sh"
 fh_case "logo-scenario.sh live: refused above its export and transcript" \
@@ -3448,7 +3477,11 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # guard on the shared count (2); check.sh's own clip step read out of the gate
 # (2). Red on 6371c67's scripts: 30 of the 34 failed; 25 single-decision
 # mutants of the new code, 25 red.
-EXPECTED=645
+# 645 -> 647 the same day, the review of 40afe25: clip-scenario.sh starts its
+# cage under a soft core limit of 0 (F-HARNESS-45's second layer, which the
+# gate's own cage lacked), read from a stand-in cage, and its precondition
+# (2). Red on 40afe25's clip-scenario.sh: the stand-in read `unlimited`.
+EXPECTED=647
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

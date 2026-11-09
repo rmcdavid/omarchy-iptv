@@ -24,9 +24,11 @@ stream protocol but udp and srt hands it to the one beneath through
 ff_url_join, which brackets it only when getaddrinfo reads it numerically.
 A zone that is not digits (`%25eth0` is the zone `25eth0` to it) is no
 number, so `rtp://[ff02::1%25eth0]:5004` reaches udp unbracketed and
-av_url_split cuts it at its first colon: a lookup of the name `ff02`. So an
-IPv6 literal whose zone, as the address writes it, is not ASCII digits is
-refused on every stream scheme, from any playlist and when typed: `zone` at
+av_url_split cuts it at its first colon: a lookup of the name `ff02`; nor
+are digits past 4294967295, which glibc's strtoull reading refuses (the
+review of bf47cdc). So an IPv6 literal whose zone, as the address writes
+it, is not ASCII digits of a value at most 4294967295 is refused on every
+stream scheme, from any playlist and when typed: `zone` at
 the parse, `unsupported_scheme` at play time with its own fixed sentence.
 
 How this module observes it: the shipping functions called
@@ -101,6 +103,9 @@ LABEL_REFUSED = [
     # already read, under one name or across both.
     "rtp://239.1.1.1:5004?sources=fe80::1%25252Cuserqqqqqq&sources=fe80::1%252Cuserqqqqqq",
     "rtp://239.1.1.1:5004?block=fe80::1%25252Cuserqqqqqq&sources=fe80::1%252Cuserqqqqqq",
+    # A value repeated before the pair that holds it: the walk skips the
+    # repeat and goes on (the review of bf47cdc: a `break` there passed).
+    "udp://@239.1.1.1:5000?sources=a.example.test&sources=a.example.test&sources=userqqqqqq",
 ]
 
 # From the same playlist, none does.
@@ -136,9 +141,24 @@ ZONE_REFUSED = [
     "mmsh://[fe80::1%25eth0]/live/1",
     "udp://@[ff02::1%25eth0]:5004",
     "srt://[fe80::1%25eth0]:9000?mode=caller",
+    # Digits past 4294967295 are no number to glibc either (strtoull, then
+    # `number <= UINT32_MAX`), so FFmpeg cuts them as it cuts `%25eth0`: the
+    # zone as written, `%25` and all (the review of bf47cdc). From a public
+    # list too, for a multicast group or a global literal.
+    "rtp://[ff02::1%254294967296]:5004",
+    "rtp://[ff02::1%4294967296]:5004",
+    "http://[2a00:1450::1%2599999999999]/live/5.ts",
+    "rtp://[::ffff:239.1.1.1%2599999999999]:5004",
+    "https://[2606:4700::1%254294967296]/live/6.ts",
+    # The host follows the userinfo's LAST `@`, as av_url_split and urlsplit
+    # read it (D-SINK-1), whatever the userinfo holds.
+    "http://a@b@[fe80::1%25eth0]/live/7.ts",
+    "http://a@b@[2606:4700::1%25eth0]/live/8.ts",
+    "rtp://u@v@[ff02::1%25eth0]:5004",
 ]
 
-# A literal with no zone, or a zone of digits, and IPv4 multicast.
+# A literal with no zone, or a zone of digits glibc reads as a number, and
+# IPv4 multicast.
 ZONE_CONTROLS = [
     "rtp://[ff02::1]:5004",
     "rtp://239.1.1.1:5004",
@@ -146,6 +166,10 @@ ZONE_CONTROLS = [
     "rtp://[ff02::1%251]:5004",
     "http://[fe80::1%252]:8080/live/1.ts",
     "rtsp://me:pw@[fe80::1%2512]/stream",
+    # The largest zone glibc reads as a number, and one under it that `%25`
+    # begins.
+    "rtp://[ff02::1%4294967295]:5004",
+    "rtp://[ff02::1%254294967]:5004",
 ]
 
 LABEL_PLURAL = ("%d entries skipped: their addresses name hosts of one label, not the playlist's own, from a playlist "
@@ -177,16 +201,16 @@ def entries(urls):
     return "\n".join(lines) + "\n"
 
 
-def write_cache(directory, urls, local):
+def write_cache(directory, urls, local, host="prov.example.test"):
     """channels.json as the parse would have written it before the rule:
-    every address a channel, from a public playlist on prov.example.test
-    or, `local`, from a local file."""
+    every address a channel, from a public playlist on `host` or, `local`,
+    from a local file."""
     rows = [{"id": "e%d" % i, "name": "E%d" % i, "group": "G", "url": url} for i, url in enumerate(urls)]
     document = {"version": 1, "channels": rows}
     if local:
         document["sourceHost"] = "local file"
     else:
-        document.update({"sourceHost": "prov.example.test", "sourceClass": "global", "sourceLocal": False,
+        document.update({"sourceHost": host, "sourceClass": "global", "sourceLocal": False,
                          "sourcePort": 80})
     path = pathlib.Path(directory)
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -326,7 +350,15 @@ class ZoneGateTest(unittest.TestCase):
         refused = getattr(helper, "stream_zone_refused", lambda netloc: "<missing>")
         texts = [("[ff02::1%25eth0]:5004", True), ("[ff02::1%eth0]", True), ("u:p@[fe80::1%25a]:80", True),
                  ("[fe80::1%251" + chr(0x663) + "]", True), ("[ff02::1%251]:5004", False), ("[ff02::1]:5004", False),
-                 ("@239.1.1.1:5000", False), ("h.test:80", False), ("u%25x@[::1]:80", False), ("", False)]
+                 ("@239.1.1.1:5000", False), ("h.test:80", False), ("u%25x@[::1]:80", False), ("", False),
+                 # The last `@` ends the userinfo, as FFmpeg reads it.
+                 ("a@b@[fe80::1%25eth0]:80", True), ("a@[::1]@[fe80::1%25eth0]", True),
+                 # glibc's bound: a value of at most 4294967295, leading
+                 # zeros allowed, whatever the zone's length (int() refuses
+                 # more than 4,300 digits, and a typed `--url` has no bound).
+                 ("[ff02::1%4294967295]", False), ("[ff02::1%4294967296]", True), ("[ff02::1%254294967295]", True),
+                 ("[ff02::1%00000000000000000001]:5004", False), ("[ff02::1%" + "0" * 5000 + "1]", False),
+                 ("[ff02::1%" + "9" * 5000 + "]", True), ("[ff02::1%0]", False), ("[ff02::1%]", True)]
         self.assertEqual([(t, refused(t)) for t, _ in texts], texts)
 
     def test_parse_counts_them_naming_none(self):
@@ -360,6 +392,19 @@ class PlayTargetTest(unittest.TestCase):
         self.assertEqual(got, [("local_address", sentence, False)] * len(LABEL_REFUSED)
                          + [("played", u) for u in LABEL_CONTROLS])
 
+    def test_the_playlists_own_one_label_host_plays_from_the_cache(self):
+        """The own-host exception at play time, as at the parse: a cache
+        from a public playlist on the one-label host `provider` plays its
+        own host's channels, at another port and spelled another way, and
+        still refuses another one-label host (the review of bf47cdc: the
+        exception dropped at play passed every suite)."""
+        directory = os.path.join(self.root, "own")
+        other = ["http://other:8080/live/1.ts", "udp://@239.1.1.1:5000?sources=other"]
+        ids = write_cache(directory, OWN + other, local=False, host="provider")
+        sentence = getattr(helper, "STREAM_LABEL_REFUSAL", "<no STREAM_LABEL_REFUSAL>")
+        self.assertEqual([self.outcome(directory, cid) for cid in ids],
+                         [("played", u) for u in OWN] + [("local_address", sentence, False)] * len(other))
+
     def test_a_cache_from_before_the_destination_rules_reads_as_public(self):
         """A cache recording no class and no locality, on a named host,
         reads as public (cached_source's stricter reading)."""
@@ -389,6 +434,8 @@ class PlayTargetTest(unittest.TestCase):
         self.assertEqual([self.outcome(directory, cid) for cid in ids], refused + [("played", u) for u in ZONE_CONTROLS])
         self.assertEqual([self.outcome(self.root, "", u) for u in ZONE_REFUSED + ZONE_CONTROLS],
                          refused + [("played", u) for u in ZONE_CONTROLS])
+        # A typed zone longer than int() reads is refused, not `internal`.
+        self.assertEqual(self.outcome(self.root, "", "rtp://[ff02::1%25" + "9" * 5000 + "]:5004"), refused[0])
 
 
 class PlayerWireTest(IdentitySeam, unittest.TestCase):

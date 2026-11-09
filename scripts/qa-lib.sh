@@ -1063,8 +1063,10 @@ qa_target_nested() {
 # (F-HARNESS-45). All four were `cage -- <tmp>/omarchy-iptv-clip.*/child.sh`,
 # the clip preflight scripts/check.sh runs. The cause, found by the lanes that
 # hit it: cage makes its Wayland socket under the caller's XDG_RUNTIME_DIR,
-# and a scratch runtime directory of about 100 bytes pushed that path past
-# sun_path's 108. With a short one the same preflight passed 7 of 7.
+# and scratch runtime directories of 113 to 123 bytes (the four entries'
+# COREDUMP_ENVIRON: 123, 114, 113 and 122), each past sun_path's 108 on its
+# own, left that path no room. With a short one the same preflight passed 7
+# of 7.
 #
 # Read, not measured (nothing here starts cage with a long path, and nothing
 # may): libwayland 1.26's wl_display_add_socket_auto tries wayland-0 upwards

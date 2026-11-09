@@ -7441,9 +7441,9 @@ checkCall("D-SINK-86: HOST_FORMAT_RANGES is exactly Unicode's Cf category, code 
   }
   return [ranges.length, wrong]
 }, [21, []])
-checkCall("D-SINK-86, D-SINK-88, D-SINK-92: hostNameRefused refuses a name holding @ % ; = & : [ ], a reader's whitespace or a format character, or one whose NFKD form does, and no other code point", () => {
+checkCall("D-SINK-86, D-SINK-88, D-SINK-92: hostNameRefused refuses a name holding @ % ; = & : [ ] or a backslash, a reader's whitespace or a format character, or one whose NFKD form does, and no other code point", () => {
   const space = new Set(Model.URL_SPACE_CODES)
-  const refusedChar = ch => "@%;=&:[]".indexOf(ch) !== -1 || space.has(ch.codePointAt(0)) || /\p{Cf}/u.test(ch)
+  const refusedChar = ch => ("@%;=&:[]" + String.fromCharCode(0x5c)).indexOf(ch) !== -1 || space.has(ch.codePointAt(0)) || /\p{Cf}/u.test(ch)
   const wrong = []
   let folds = 0
   for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
@@ -7453,12 +7453,13 @@ checkCall("D-SINK-86, D-SINK-88, D-SINK-92: hostNameRefused refuses a name holdi
     const want = refusedChar(ch) || folded
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
-  // 77: the 70 the helper's codec folds, U+FE13 and U+FE14, and U+2260,
+  // 79: the 70 the helper's codec folds, U+FE13 and U+FE14, and U+2260,
   // and since D-SINK-92 the four that fold to a bracket (U+FF3B and U+FF3D,
-  // which the codec folds too, and U+FE47 and U+FE48), the same set
+  // which the codec folds too, and U+FE47 and U+FE48) and the two that fold
+  // to a backslash (U+FF3C and U+FE68, the review of bf47cdc), the same set
   // test_host_names counts in Python's NFKD.
   return [wrong, folds]
-}, [[], 77])
+}, [[], 79])
 checkCall("D-SINK-88 (the review of 95f1bb9): a name the codec hands on holding `=` because B.2 keeps it from composing with U+0338 is refused, though its NFKC holds no `=`", () => {
   const seq = String.fromCharCode(0x345, 0x338)
   const names = [0x207c, 0x208c, 0xfe66, 0xff1d].map(c => "h" + String.fromCharCode(c) + seq + ".test")

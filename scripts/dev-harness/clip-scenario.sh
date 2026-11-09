@@ -244,10 +244,22 @@ done
 # F-HARNESS-104: both modes start cage, and a cage that cannot make its
 # socket under XDG_RUNTIME_DIR aborts, leaving a core and a crash card on the
 # owner's desktop -- this check-tree did that four times on 2026-11-08/09
-# under a scratch runtime of about 100 bytes. Refused here, above the
+# under scratch runtimes of 113 to 123 bytes, each past sun_path's 108 on its
+# own. Refused here, above the
 # transcript and above everything this starts, with exit 2: never 77, so no
 # CLIP_PREFLIGHT_SKIP_OK can read it as a skip, and check.sh reads it red.
 qa_cage_runtime_fits || exit 2
+# F-HARNESS-45's second layer, which this scenario lacked (the review of
+# 40afe25): the gate starts this cage directly, not under private-bus.sh,
+# and each of those four aborts ran with no core limit and stored a core
+# (COREDUMP_RLIMIT unlimited, a COREDUMP_FILENAME each). A soft RLIMIT_CORE
+# of 0 for everything this starts -- cage, its child, the probes, the
+# harness shell in live mode, wl-copy, wl-paste and wtype. A crash still
+# journals and the host's crash watcher still posts its card, which it draws
+# from the journal entry; what the limit changes is that systemd-coredump
+# stores no file. Soft, as private-bus.sh's is, so a child that wants a core
+# may raise it again. scripts/qa-lib-test.sh reads it from a stand-in cage.
+ulimit -S -c 0
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 # The caller's own display, which the nested one must never be.

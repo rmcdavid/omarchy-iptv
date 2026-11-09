@@ -1037,7 +1037,9 @@ requests and raise the batch.
      bracket in a name is refused on every hop and by both validators,
      written or folded, because http.client keeps `[::1]x.test` whole,
      from a request for `%5B::1%5Dx.test`, and the resolver would be handed
-     it (D-SINK-92). Their lesson: a codec the platform
+     it (D-SINK-92), and so is a backslash, which systemd-resolved reads as
+     an escape (`a\058b.test` is the label `a:b`, `user\.x` one label).
+     Their lesson: a codec the platform
      applies on the way to the resolver is a reader too, a fold that
      composes can hide what one that decomposes keeps, and a library that
      decodes a name into a C string reads it only up to its first NUL.]**

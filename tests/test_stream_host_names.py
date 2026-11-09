@@ -159,6 +159,12 @@ REFUSED = [
     # (the review of 6371c67: decoding that stopped at the repeated reading
     # let it play).
     "rtp://239.1.1.1:5004?sources=fe80::1%252540evil.qqqqqq&sources=fe80::1%2540evil.qqqqqq",
+    # A value repeated before the refused pair, under one name or across
+    # both: decoding skips a value already read and goes on to the next
+    # pair (the review of bf47cdc: a `break` at that skip let both through,
+    # with every suite green).
+    "udp://@239.1.1.1:5000?sources=a.example.test&sources=a.example.test&sources=evil%40qqqqqq.test",
+    "udp://@239.1.1.1:5000?block=a.example.test&sources=a.example.test&block=evil%40qqqqqq.test",
     "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
     # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
     "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
@@ -195,6 +201,17 @@ REFUSED = [
     # keeps U+FF1D's `=` from composing with U+0338, so the codec hands on
     # `=`, while NFKC alone composes it away (the review of 95f1bb9).
     "rtsp://sid" + chr(0xFF1D) + chr(0x345) + chr(0x338) + "evil.test/stream",
+    # 7. D-SINK-92 (the review of bf47cdc): a backslash in an unescaped
+    #    scheme's host, which systemd-resolved reads as an escape -- a
+    #    backslash and 058 a colon, 091 and 093 brackets, 064 an `@`, and
+    #    one before a dot keeps the dot inside one label -- and U+FF3C,
+    #    which the codec folds to one. mpv escapes an http-like URL's to
+    #    `%5C` (section 3).
+    "rtsp://evil" + chr(0x5C) + "058qqqqqq.test/stream",
+    "rtmp://evil" + chr(0x5C) + "091qqqqqq" + chr(0x5C) + "093.test/live/1",
+    "srt://evil" + chr(0x5C) + "064qqqqqq.test:9000?mode=caller",
+    "rtsp://evilqqqqqq" + chr(0x5C) + ".x/stream",
+    "rtmp://evil" + chr(0xFF3C) + "qqqqqq.test/live/1",
 ]
 
 CONTROLS = [

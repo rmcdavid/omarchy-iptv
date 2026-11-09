@@ -186,8 +186,16 @@ than typed; a `wl-paste -l` on the nested display brought focus back within
 ## Recipe, by hand
 
 ```
-# a nested compositor on its own display; read the name from the child
-WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+# a nested compositor on its own display; read the name from the child.
+# Under private-bus.sh (B a short directory that does not exist yet): a bus
+# that can activate nothing (CLAUDE.md, working in parallel 6b), a soft
+# core limit of 0, and, first, the refusal of an XDG_RUNTIME_DIR too long
+# for cage's socket, where cage would abort and post a crash card
+# (F-HARNESS-104). Run from this directory.
+B=$(mktemp -u /tmp/bus.XXXXXX)
+env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE \
+  WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+  ../../private-bus.sh "$B" 70 \
   cage -- sh -c 'echo $WAYLAND_DISPLAY > /tmp/nested; exec sleep 60' &
 N=$(cat /tmp/nested)
 WAYLAND_DISPLAY=$N wtype -s 60000 '' &                 # the keyboard on the seat

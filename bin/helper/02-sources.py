@@ -86,7 +86,8 @@ def looks_like_host(text: str) -> bool:
 
 
 # D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold. A name that
-# holds one of these seven (five, and since D-SINK-92 the two brackets), a second `:` (one port is fine), the reader's
+# holds one of these eight (five, and since D-SINK-92 the two brackets and the
+# backslash), a second `:` (one port is fine), the reader's
 # whitespace (URL_SPACE_CHARS) or an invisible format character
 # (HOST_FORMAT_RANGES) is refused: by validate_source_url as `invalid`, and
 # by the connection layer before any lookup, on every hop (03-io-playlist.py:
@@ -109,7 +110,23 @@ def looks_like_host(text: str) -> bool:
 # `[::1]x.test`, which http.client keeps whole and the resolver would be
 # handed, colons and all -- and so is a fullwidth bracket the idna codec
 # folds to one (`a<U+FF3B>b.test` is handed on as `a[b.test`).
-HOST_NAME_REFUSED_CHARS = "@%;=&[]"
+#
+# D-SINK-92, the review of bf47cdc: and the backslash, which no DNS name
+# holds and which the resolver reads as an escape. On this machine's hosts
+# line `resolve` comes before `dns`, and glibc's dns module, which refuses
+# such a name (res_hnok), is asked only after systemd-resolved. resolved
+# reads a name's text with dns_label_unescape, `\.` and `\\` as themselves
+# and `\DDD` as the byte DDD up to 255, and nss-resolve hands it the name
+# unchecked, so `a\091b\093.test` is the label `a[b]`, `a\058b.test` the
+# label `a:b`, `a\064evil.test` the label `a@evil` and `user\.x` ONE label,
+# `user.x` (read in the sources, not measured). So the bracket and the colon
+# this rule refuses would reach the resolver spelled another way, as would
+# the `@` and, past D-SINK-83 and D-SINK-89, a name of one label. Both validators already refused a written backslash in an
+# authority; a redirect, a logo and an rtsp, rtmp or srt host did not (mpv
+# escapes an http-like URL's to `%5C`, which the `%` refuses), and nor did
+# U+FF3C and U+FE68, which the idna codec and NFKD fold to one: 79 code
+# points fold in all.
+HOST_NAME_REFUSED_CHARS = "@%;=&[]\\"
 # Unicode category Cf, every code point of it, as (first, last): what Python
 # 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
 # Explicit rather than unicodedata.category, so both mirrors refuse one set
@@ -157,7 +174,9 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     (D-SINK-92, 2026-11-09): text after a literal's `]` (`[::1]x.test`,
     which http.client keeps whole, brackets and colons included, and would
     hand the resolver), a bracket anywhere else, and with no port any
-    bracket at all, since a connection is never handed a literal's. Every
+    bracket at all, since a connection is never handed a literal's. And a
+    backslash, which the resolver reads as an escape (`\\058` is a colon,
+    `\\091` a bracket, `\\.` a dot inside a label). Every
     character is asked once against one frozenset, so the cost is linear;
     nothing here looks anything up. Model.hostNameRefused is the validator's
     half.
@@ -184,8 +203,9 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     the codec hands on unfolded), and U+2260 itself, which only NFKD reads
     as `=`; since D-SINK-92 refuses the brackets, four more, 77: U+FF3B and
     U+FF3D, which the codec folds to `[` and `]`, and U+FE47 and U+FE48,
-    which only the running Unicode does. A colon the fold adds is a colon in
-    the name, never the port's.
+    which only the running Unicode does; and since it refuses the
+    backslash, two more, 79: U+FF3C and U+FE68, which both fold to `\\`. A
+    colon the fold adds is a colon in the name, never the port's.
     An ASCII name pays nothing, and the fold is asked only of a name the
     first judgment let through. Model.hostNameRefused folds the same way."""
     name = str(text or "")
@@ -1113,9 +1133,11 @@ def stream_host_name_refused(url: str) -> bool:
 # through ff_url_join (libavformat/url.c: rtp to udp in build_udp_url, http
 # and rtsp and rtmp to tcp, https and rtmps to tls and then tcp, mmsh to
 # http), which brackets it only when getaddrinfo with AI_NUMERICHOST reads
-# it as an IPv6 address. glibc reads a zone numerically only when it is
-# digits or, on a link-local address, an interface's name, so
-# `rtp://[ff02::1%25eth0]:5004` reaches udp as `udp://ff02::1%25eth0:5004`,
+# it as an IPv6 address. glibc reads a zone numerically only when it is,
+# on a link-local address, an interface's name, or digits whose value fits
+# in 32 bits (inet/inet6_scopeid_pton.c: a digit first, then strtoull to
+# the end and `number <= UINT32_MAX`), so `rtp://[ff02::1%25eth0]:5004`
+# reaches udp as `udp://ff02::1%25eth0:5004`,
 # and av_url_split cuts an unbracketed host at its first colon: udp looks
 # up the NAME `ff02`, port 0 (read upstream, the review of 6371c67). The
 # same cut makes http's tcp look up `2a00` for `[2a00:1450::1%25eth0]` and
@@ -1126,19 +1148,37 @@ def stream_host_name_refused(url: str) -> bool:
 # the resolver as written, and an interface's name may be present on one
 # machine and gone on the next, so one rule over the literal is kept
 # rather than a list of the protocols that rewrite it today. A zone of
-# ASCII digits (`%252`, read as 252) and a literal with no zone play.
+# ASCII digits whose value is at most 4294967295 (`%252`, read as 252;
+# leading zeros allowed, as strtoull reads them) and a literal with no zone
+# play. Digits past that value are no number to glibc either, so
+# `[ff02::1%254294967296]` (the zone `254294967296`) is cut as `%25eth0`
+# is (the review of bf47cdc). The value is read only once its text, its
+# leading zeros off, is at most ten digits: a typed `--url` has no length
+# bound, and int() refuses a string of more than 4,300 digits.
 STREAM_ZONE_REFUSAL = "refused a stream whose IPv6 address carries a zone that is not a number; not played"
 
 
 def stream_zone_refused(netloc: str) -> bool:
     """D-SINK-91: is the host after this netloc's last `@` a bracketed IPv6
-    literal whose zone, as the address writes it, is not ASCII digits? No
-    zone, or a host that is no bracketed literal, is no question here."""
+    literal whose zone, as the address writes it, is not a number glibc
+    reads (_numeric_zone)? No zone, or a host that is no bracketed literal,
+    is no question here."""
     hostport = netloc.rpartition("@")[2]
     if not hostport.startswith("["):
         return False
     zone = hostport[1:].partition("]")[0].partition("%")
-    return zone[1] != "" and not (zone[2].isascii() and zone[2].isdigit())
+    return zone[1] != "" and not _numeric_zone(zone[2])
+
+
+def _numeric_zone(zone: str) -> bool:
+    """glibc's numeric reading of a scope (__inet6_scopeid_pton): ASCII
+    digits, and a value of at most UINT32_MAX. The value is read only when
+    the digits past their leading zeros are at most ten, so a zone of any
+    length costs one int() of at most ten digits."""
+    if not (zone.isascii() and zone.isdigit()):
+        return False
+    digits = zone.lstrip("0")
+    return len(digits) <= 10 and int(digits or "0") <= 0xFFFFFFFF
 
 
 # D-SINK-89 (the owner, 2026-11-08: "yes, refuse one-word stream hosts from

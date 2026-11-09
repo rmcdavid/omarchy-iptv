@@ -425,7 +425,11 @@ function isHostFormatCode(code) {
 // `a[b.test`), so the walk refuses both and the fold reads them: 77 code
 // points fold so, the 73 above, U+FF3B and U+FF3D, and U+FE47 and U+FE48,
 // which the running Unicode folds to brackets and Unicode 3.2 left
-// unassigned.
+// unassigned. And the backslash (the review of bf47cdc), which the resolver
+// reads as an escape -- systemd-resolved reads `a\058b.test` as the label
+// `a:b` and `user\.x` as one label -- so a bracket, a colon or an `@` could
+// reach it spelled another way. The validator's authority refuses a written
+// one first; U+FF3C and U+FE68 fold to it, 79 code points in all.
 var NON_ASCII_RE = /[^\x00-\x7f]/
 function hostNameRefused(host) {
   var s = str(host)
@@ -438,7 +442,8 @@ function hostNameRefused(host) {
 function hostNameRefusedAsWritten(s) {
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i)
-    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a || c === 0x5b || c === 0x5d) return true
+    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a || c === 0x5b || c === 0x5d ||
+      c === 0x5c) return true
     if (isUrlSpaceAt(s, i)) return true
     if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
       var d = s.charCodeAt(i + 1)

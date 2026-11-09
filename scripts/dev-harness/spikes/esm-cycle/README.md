@@ -25,13 +25,21 @@ reads another part, directly or through a same-part function) instead of an
 acyclic graph, and refuses to write a split that breaks it.
 
 Re-run: `./run.sh` (node and qmltestrunner). The Quickshell arm, under a
-nested cage only, never the live session:
+nested cage only, never the live session, and that cage under
+`private-bus.sh` (B a short directory that does not exist yet): a bus that
+can activate nothing (CLAUDE.md, working in parallel 6b), a soft core limit
+of 0, and, first, the refusal of an XDG_RUNTIME_DIR too long for cage's
+socket, where cage would abort and post a crash card (F-HARNESS-104). From
+this directory:
 
-    WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+    B=$(mktemp -u /tmp/bus.XXXXXX)
+    env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE \
+      WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+      ../../private-bus.sh "$B" 610 \
       cage -- sh -c 'echo "$WAYLAND_DISPLAY" > /tmp/d; exec sleep 600' &
     # then, with D the nested display and R a private 0700 runtime directory:
-    env -u HYPRLAND_INSTANCE_SIGNATURE XDG_RUNTIME_DIR=$R \
-      WAYLAND_DISPLAY=/run/user/$(id -u)/$D timeout 30 quickshell -p shell.qml
+    env -u HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY XDG_RUNTIME_DIR=$R \
+      WAYLAND_DISPLAY=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$D timeout 30 quickshell -p shell.qml
 
 and read `QS-CYCLE` from its output (`Qt.quit()` has no receiver in
 Quickshell, so the timeout ends it). Stop the cage by killing its child.

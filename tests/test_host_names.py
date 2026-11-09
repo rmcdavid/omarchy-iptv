@@ -49,6 +49,14 @@ http.client keeps whole -- passed every layer and reached the resolver
 holding brackets and colons, and a fullwidth bracket passed the fold, which
 the codec hands on as `[` (the review of 6371c67). REFUSED_CHARS holds both,
 so every survey below counts the bracket folds too.
+
+And the backslash (D-SINK-92, the review of bf47cdc), which systemd-resolved
+reads as an escape: a backslash and the digits 058 are a colon to it, 091 a
+`[`, 064 an `@`, and a backslash before a dot keeps the dot inside its
+label, so a name the rule let through reached the resolver holding what the
+rule refuses, spelled another way. A redirect or a logo URL carried one as
+`%5C`, which urllib decodes into the request's host; the validators already
+refused a written one, not U+FF3C and U+FE68, which fold to it.
 """
 import functools
 import io
@@ -70,7 +78,9 @@ helper = load_helper()
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "source-urls.json"
 SECRET = "qqqqqq"
 FORMAT = frozenset(c for c in range(0x110000) if unicodedata.category(chr(c)) == "Cf")
-REFUSED_CHARS = frozenset(map(ord, "@%;=&:[]")) | frozenset(map(ord, helper.URL_SPACE_CHARS)) | FORMAT
+BACKSLASH = chr(0x5C)
+REFUSED_CHARS = (frozenset(map(ord, "@%;=&:[]" + BACKSLASH)) | frozenset(map(ord, helper.URL_SPACE_CHARS))
+                 | FORMAT)
 
 # Hosts as a connection is handed them (http.client has split the port off
 # at the last colon and taken a literal's brackets off), each holding one
@@ -101,6 +111,11 @@ NAMES = [
     # fullwidth bracket the codec hands on as `[`.
     "[::1]" + SECRET + ".evil.test", "[fe80::1%eth0]" + SECRET + ".evil.test", "[fe80::1%" + SECRET + "]evil.test",
     "evil.test[" + SECRET + "]", SECRET + "].evil.test", "[::1]", "u" + chr(0xFF3B) + SECRET + ".evil.test",
+    # The backslash, an escape to systemd-resolved: a colon, a bracketed
+    # name, an `@`, a dot inside one label (one label as the resolver reads
+    # it, two to dotless_host), and U+FF3C, which the codec folds to one.
+    "evil" + BACKSLASH + "058" + SECRET + ".test", "a" + BACKSLASH + "091" + SECRET + BACKSLASH + "093.evil.test",
+    "u" + BACKSLASH + "064evil.test", "evil" + SECRET + BACKSLASH + ".x", "u" + chr(0xFF3C) + SECRET + ".evil.test",
 ]
 
 
@@ -280,12 +295,13 @@ class PredicateTest(unittest.TestCase):
         or, D-SINK-88, for a code point whose NFKD form holds one of them.
         D-SINK-92 adds the two brackets, and with them four folds: U+FF3B
         and U+FF3D, which the codec folds, and U+FE47 and U+FE48, which only
-        the running Unicode does."""
+        the running Unicode does; and the backslash, and with it U+FF3C and
+        U+FE68, which both fold to one, 79."""
         predicate = getattr(helper, "host_name_refused", None)
         self.assertIsNotNone(predicate)
         folds = {c for c in range(0x80, 0x110000)
                  if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))}
-        self.assertEqual(len(folds - REFUSED_CHARS), 77)
+        self.assertEqual(len(folds - REFUSED_CHARS), 79)
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
                      if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds)]
@@ -334,9 +350,10 @@ class PredicateTest(unittest.TestCase):
         REFUSED_CHARS. Red before the fold: 68 code points in the first form
         (63 that urlsplit also accepts, and the five that fold to `@` or
         `:`), and U+FDFA and U+FDFB in the second, 70 in all; and since
-        D-SINK-92, U+FF3B and U+FF3D, which fold to a bracket, 72."""
+        D-SINK-92, U+FF3B and U+FF3D, which fold to a bracket, and U+FF3C
+        and U+FE68, which fold to a backslash, 74."""
         folds, missed = codec_survey()
-        self.assertEqual(len(folds), 72, "the codec's folds were not found")
+        self.assertEqual(len(folds), 74, "the codec's folds were not found")
         self.assertEqual((len(missed), missed[:8]), (0, []))
 
     def test_no_sequence_of_the_reviews_class_reaches_the_resolver_holding_a_refused_character(self):
@@ -367,7 +384,7 @@ class PredicateTest(unittest.TestCase):
                  "http://user" + chr(0xFE14) + "sid.test/x", "http://user" + chr(0xFE47) + "sid.test/x",
                  "http://user" + chr(0xFE48) + "sid.test/x"]
         self.assertEqual(([hex(c) for c, url in sorted(wanted.items()) if url not in listed],
-                          [ascii(u) for u in extra if u not in listed], len(accepted)), ([], [], 67))
+                          [ascii(u) for u in extra if u not in listed], len(accepted)), ([], [], 69))
 
     def test_one_port_is_fine_and_a_literal_keeps_its_colons(self):
         predicate = getattr(helper, "host_name_refused", lambda *_: "<missing>")
@@ -397,7 +414,12 @@ class PredicateTest(unittest.TestCase):
                    ("[::1]", False), ("[::1]x.test", True), ("[::1]x.test", False), ("[::1]x.test:80", True),
                    ("[fe80::1%eth0]x.test", True), ("[::1]:80]", True), ("h.test[x]", False), ("x].test", True),
                    ("[ab]x.test", True), ("[::1", True), ("h" + chr(0xFF3B) + "x.test", False),
-                   ("h" + chr(0xFE48) + "x.test:80", True)]
+                   ("h" + chr(0xFE48) + "x.test:80", True),
+                   # A backslash, an escape to the resolver, wherever it
+                   # stands, and folded.
+                   ("h" + BACKSLASH + "058x.test", False), ("h" + BACKSLASH + "091x.test:80", True),
+                   ("user" + BACKSLASH + ".x", False), ("[::1]" + BACKSLASH, True),
+                   ("h" + chr(0xFF3C) + "x.test", False), ("h" + chr(0xFE68) + "x.test:80", True)]
         self.assertEqual([(ascii(t), p, predicate(t, p)) for t, p in allowed + refused],
                          [(ascii(t), p, False) for t, p in allowed] + [(ascii(t), p, True) for t, p in refused])
 
@@ -461,7 +483,10 @@ class ConnectionTest(unittest.TestCase):
                               "evil%EF%BC%9B" + SECRET + ".test", "evil%C2%A8" + SECRET + ".test",
                               # D-SINK-92: the decoded host holds brackets.
                               "%5B::1%5D" + SECRET + ".evil.test", "%5B%3A%3A1%5D" + SECRET + ".evil.test:8080",
-                              "evil.test%5B" + SECRET + "%5D", "evil%EF%BC%BB" + SECRET + ".test"):
+                              "evil.test%5B" + SECRET + "%5D", "evil%EF%BC%BB" + SECRET + ".test",
+                              # And a backslash, decoded from `%5C`.
+                              "evil%5C058" + SECRET + ".test", "evil" + SECRET + "%5C.x:8080",
+                              "evil%EF%BC%BC" + SECRET + ".test"):
                 request = urllib.request.Request("%s://%s/x" % (scheme, authority))
                 request.timeout = 1.0
                 opener = getattr(handler, scheme + "_open")
@@ -485,7 +510,10 @@ class ConnectionTest(unittest.TestCase):
                            "https://evil%EF%BC%9B" + SECRET + ".test/x", "https://evil%EF%BC%85" + "40" + SECRET + ".test/x",
                            # D-SINK-92: the review of 6371c67's Locations.
                            "https://%5B::1%5D" + SECRET + ".evil.test/x",
-                           "https://%5Bfe80::1%25" + SECRET + "%5Devil.test/x", "https://" + SECRET + "%5D.evil.test/x"):
+                           "https://%5Bfe80::1%25" + SECRET + "%5Devil.test/x", "https://" + SECRET + "%5D.evil.test/x",
+                           # The review of bf47cdc: a backslash the request
+                           # holds decoded, an escape to the resolver.
+                           "https://evil%5C058" + SECRET + ".test/x", "https://u%5C064evil.test/x"):
                 request = urllib.request.Request("https://cdn.test/a.png")
                 with SocketResolver() as resolver:
                     code, message = attempt(lambda: handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, newurl))
@@ -539,6 +567,13 @@ class RedirectTest(unittest.TestCase):
         "http://%5B::1%5D" + SECRET + ".evil.test:8080/x",
         "http://evil.test%5B" + SECRET + "%5D/x",
         "http://evil%EF%BC%BB" + SECRET + ".test/x",
+        # D-SINK-92, the review of bf47cdc: a backslash, which the resolver
+        # reads as an escape (a colon, a bracket, a dot inside one label),
+        # decoded from `%5C` or folded from U+FF3C.
+        "http://evil%5C058" + SECRET + ".test/x",
+        "http://a%5C091" + SECRET + "%5C093.evil.test/x",
+        "http://evil" + SECRET + "%5C.x/x",
+        "http://evil%EF%BC%BC" + SECRET + ".test/x",
     ]
 
     def follow(self, location):
@@ -585,7 +620,10 @@ class LogoTest(unittest.TestCase):
                     # netloc, where `%5B` is no bracket and the name has a
                     # dot).
                     "https://%5B%3A%3A1%5D" + SECRET + ".evil.test/a.png",
-                    "https://evil%EF%BC%BB" + SECRET + ".test/a.png"):
+                    "https://evil%EF%BC%BB" + SECRET + ".test/a.png",
+                    # A backslash decoded from `%5C`, which the raw netloc's
+                    # checks read past too.
+                    "https://evil%5C058" + SECRET + ".test/a.png", "https://evil%5C064" + SECRET + ".test/a.png"):
             patch = provenance("")
             try:
                 with SocketResolver() as resolver:

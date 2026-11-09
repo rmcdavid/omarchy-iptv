@@ -263,8 +263,8 @@ RESOLVE_STACK_BYTES = 1024 * 1024
 # `bad_url`, the code of a URL the validator refuses, so the shell's
 # sentence is "Invalid URL" and the logo run counts it with the policy's
 # refusals (06-failed.py).
-HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a second colon, whitespace or "
-                     "an invisible format character; not looked up")
+HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a backslash, a second colon, "
+                     "whitespace or an invisible format character; not looked up")
 
 
 def refuse_host_name(text: Any, with_port: bool = False) -> None:

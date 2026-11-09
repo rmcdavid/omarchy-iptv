@@ -2251,5 +2251,17 @@
   "ok": false,
   "code": "invalid",
   "note": "D-SINK-88's fold, D-SINK-92's bracket: U+FE48, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `]`"
+ },
+ {
+  "input": "http://user\uff3csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's backslash: U+FF3C, which the resolver path reads as `\\`, an escape to systemd-resolved"
+ },
+ {
+  "input": "http://user\ufe68sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's backslash: U+FE68, which the resolver path reads as `\\`, an escape to systemd-resolved"
  }
 ]
