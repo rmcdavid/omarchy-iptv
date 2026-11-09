@@ -20,7 +20,8 @@ whole: every runtime import resolves inside it, every manifest entry point is
 on it, the README points at nothing outside it, and no agent-instruction
 filename is on it.
 
-HOW A RELEASE HAPPENS. `release.py build`, on a clean `dev`, after a green
+HOW A RELEASE HAPPENS. `release.py build`, on a clean `dev` whose local `main`
+holds every commit origin's `main` does (D-REL-13), after a green
 gate: build a git tree holding exactly the allowlisted blobs at their current
 `dev` content, validate it with `omarchy plugin validate` from an extracted
 copy, commit it onto `main` with `main`'s current tip as parent, and tag it.
@@ -48,6 +49,9 @@ import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL
 
 RELEASE_BRANCH = 'main'
 DEV_BRANCH = 'dev'
+# Where RELEASE_BRANCH is pushed, and what a cut must be able to fast-forward
+# (D-REL-13, remote_main_problems).
+RELEASE_REMOTE = 'origin'
 
 # Exactly what a user needs and nothing they do not. Explicit paths, no globs.
 ALLOWLIST = (
@@ -356,6 +360,134 @@ def premise_exception_problems(root):
     return []
 
 
+# D-REL-13. `build` parents the release commit on the LOCAL main and never
+# looked at the remote. On 2026-11-08 the owner added a file through GitHub's
+# web UI, which commits to the default branch, and origin's main moved past
+# the 0.18.0 release (dc402e7 -> ce68db5) while every clone's main stayed
+# behind. A cut made then would have parented the new release on dc402e7, and
+# the remote's ruleset (no non-fast-forward, no bypass) refuses that push --
+# but only at push time, after the cut has already moved the local main and
+# written the tag, and the obvious way out for a tired releaser is a force
+# push, which strands every install (`omarchy-plugin-update` is
+# `git merge --ff-only`). So the cut asks the remote first, and refuses.
+#
+# It READS ONLY: `git ls-remote`, never a fetch, and nothing that writes a
+# ref, an object or the config, so a refusal leaves the clone exactly as it
+# was and the releaser runs the fetch themselves. A remote that cannot be
+# asked refuses too, for premise_exception_problems' reason: a cut that
+# cannot see whether it can be pushed does not ship. There is no flag that
+# skips it. What it cannot see is a commit that lands on origin AFTER it
+# asks; the ruleset still refuses that push, which is the remote doing its
+# job, and the cut is then re-run on a fetched main.
+REMOTE_TIMEOUT = 60                          # seconds; a remote that hangs is a refusal
+
+# A remote URL can carry a credential in its userinfo, and git's own messages
+# can print the URL, so a message quoted from git loses everything between
+# `scheme://` and the LAST `@` before the host (D-SINK-1's lesson).
+_URL_USERINFO = re.compile(r'([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]*@')
+_OBJECT_ID = re.compile(r'^(?:[0-9a-f]{40}|[0-9a-f]{64})$')
+
+
+def _git_detail(stderr):
+    """git's first message line, with any URL userinfo dropped, for a refusal."""
+    for line in stderr.decode('utf-8', 'replace').splitlines():
+        line = _URL_USERINFO.sub(r'\1', line.strip()).rstrip('.')
+        if line:
+            return line
+    return 'no message'
+
+
+def remote_main_problems(root):
+    """Why the cut must stop because RELEASE_REMOTE's RELEASE_BRANCH holds a
+    commit the local one lacks; [] when it need not (D-REL-13).
+
+    Only `build` calls this, after the clean-tree, branch and premise guards
+    and before the allowlist check and the gate re-run, so a cut that could
+    not be pushed stops in seconds and before anything is written.
+
+    It passes when the remote's branch IS the local one, or is an ancestor of
+    it: an earlier cut not pushed yet still fast-forwards. Anything else is
+    one sentence that says what to run, and none of them says to force a
+    push, which is the one thing the remote refuses and every install would
+    pay for.
+    """
+    ref = 'refs/heads/%s' % RELEASE_BRANCH
+    remote_branch = "%s's %s" % (RELEASE_REMOTE, RELEASE_BRANCH)
+    fetch = 'git fetch %s %s:%s' % (RELEASE_REMOTE, RELEASE_BRANCH, RELEASE_BRANCH)
+    listing = 'git ls-remote %s %s' % (RELEASE_REMOTE, ref)
+    unseen = ('so nothing shows whether %s holds a commit the local %s lacks, and a cut '
+              'that cannot see it does not ship' % (remote_branch, RELEASE_BRANCH))
+    # Prompts off, the rest of the environment kept: an https remote that wants
+    # credentials fails instead of waiting on a terminal nobody is watching,
+    # and a partial clone may not fetch a missing object to answer cat-file.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_NO_LAZY_FETCH='1')
+
+    def run(args, timeout=None):
+        return subprocess.run(['git', '-C', root] + args, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              env=env, timeout=timeout)
+
+    # Asked by name first: `git ls-remote origin` with no such remote reads
+    # `origin` as a path, relative to wherever git happens to be.
+    if run(['remote', 'get-url', RELEASE_REMOTE]).returncode != 0:
+        return ['this clone has no remote named %r, %s: add it and cut again.'
+                % (RELEASE_REMOTE, unseen)]
+    try:
+        listed = run(['ls-remote', RELEASE_REMOTE, ref], timeout=REMOTE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return ['%s did not answer within %d s, %s: fix the remote or the network and '
+                'cut again.' % (listing, REMOTE_TIMEOUT, unseen)]
+    if listed.returncode != 0:
+        return ['%s failed (%s), %s: fix the remote or the network and cut again.'
+                % (listing, _git_detail(listed.stderr), unseen)]
+    # The pattern is a TAIL match at a slash boundary, so a branch named
+    # x/refs/heads/main is printed beside the real one, and either may come
+    # first. Only the exact name decides.
+    remote_sha = ''
+    for line in listed.stdout.decode('utf-8', 'replace').splitlines():
+        sha, _, name = line.partition('\t')
+        if name.strip() == ref:
+            remote_sha = sha.strip()
+    if not remote_sha:
+        return ['%s has no %s, so nothing shows what a cut would be pushed over and there '
+                'is no %s there to fast-forward: find out what happened to it before cutting.'
+                % (RELEASE_REMOTE, ref, RELEASE_BRANCH)]
+    if not _OBJECT_ID.match(remote_sha):
+        return ['%s answered %r for %s, which is not a commit id, %s: look at the remote '
+                'before cutting.' % (listing, remote_sha[:80], ref, unseen)]
+    short = remote_sha[:12]
+    if run(['cat-file', '-e', '%s^{commit}' % remote_sha]).returncode != 0:
+        return ['%s is at %s, a commit this clone does not have, so a release cut onto the '
+                'local %s could not be pushed: run %s and cut again.'
+                % (remote_branch, short, RELEASE_BRANCH, fetch)]
+    local = run(['rev-parse', '-q', '--verify', '%s^{commit}' % ref])
+    local_sha = local.stdout.decode('utf-8', 'replace').strip()
+    if local.returncode != 0 or not local_sha:
+        return ['this clone has no local %s, so a release has nothing to be cut onto: run '
+                '%s and cut again.' % (RELEASE_BRANCH, fetch)]
+    if local_sha == remote_sha:
+        return []
+    behind = run(['merge-base', '--is-ancestor', remote_sha, local_sha])
+    if behind.returncode == 0:
+        return []                            # the local main is ahead: it fast-forwards
+    ahead = run(['merge-base', '--is-ancestor', local_sha, remote_sha])
+    if behind.returncode == 1 and ahead.returncode == 0:
+        return ['%s is at %s, ahead of the local %s at %s, so a release cut onto the local '
+                '%s could not be pushed: run %s and cut again.'
+                % (remote_branch, short, RELEASE_BRANCH, local_sha[:12], RELEASE_BRANCH,
+                   fetch)]
+    if behind.returncode == 1 and ahead.returncode == 1:
+        return ['%s at %s and the local %s at %s have diverged, each holding a commit the '
+                'other lacks, so no release cut here can be pushed and %s would be refused: '
+                'a person must compare the two and settle %s before anything is cut.'
+                % (remote_branch, short, RELEASE_BRANCH, local_sha[:12], fetch,
+                   RELEASE_BRANCH)]
+    return ['git could not compare %s at %s with the local %s at %s (%s), so nothing shows '
+            'that a cut here could be pushed: look at both before cutting.'
+            % (remote_branch, short, RELEASE_BRANCH, local_sha[:12],
+               _git_detail(behind.stderr if behind.returncode not in (0, 1) else ahead.stderr))]
+
+
 def check(root, out=sys.stdout):
     """Prove the allowlist is whole. Returns a list of problems."""
     problems = []
@@ -643,6 +775,12 @@ def build(root, gate_already_green=False, validate=True, tag=True,
     blocked = premise_exception_problems(root)
     if blocked:
         raise ReleaseError(' '.join(blocked))
+    # D-REL-13: before the allowlist check and the gate re-run too, so a cut
+    # that could not be pushed stops in seconds, and long before the refs
+    # below are written. It reads only; a refusal leaves the clone as it was.
+    behind = remote_main_problems(root)
+    if behind:
+        raise ReleaseError(' '.join(behind))
     problems = check(root, out=out)
     if problems:
         raise ReleaseError('the allowlist is not whole:\n  ' + '\n  '.join(problems))

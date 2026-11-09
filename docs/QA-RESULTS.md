@@ -18607,3 +18607,39 @@ Workflow `wf_c181844a-1b1`: a profile of the slow shapes at 8ff582f, two indepen
 - **The owed fixes, applied by the lead.** (1) The held S5 test is skipped, with D-PERF-13 named in its reason: it failed once in two full-suite runs at about 5% margin (verify-B: 1022 ms best at load 3.0-3.6), and the budget is not loosened. S1, S6 and S7 stay held. (2) `fold_text`'s fallback for an ASCII text when `_ascii_space_table` gives no table ran the pattern alone and dropped FOLD, so the builder's FOLD check protected nothing (verify-B: with a `q` -> `k` key added, 8ff582f folded `Quiz Show` to `kuiz show` and B to `quiz show`); it now takes the whole fold. A new test, `test_a_fold_with_an_ascii_key_takes_the_whole_fold`, adds that key, rebuilds the tables with the shipping builder and is red on B as it came (`quiz show`), green with the fix. (3) `GROUP_URL_SEPARATOR` is the helper's first possessive pattern, which needs Python 3.11's `re`; its review line in scripts/check-helper-regex.py now says so, beside the 3.14 docs/ARCHITECTURE.md names.
 - **Still open** (the row stays open): S5 in a fresh interpreter, 1.005-1.014 s, and verify-A's crafted list, 1.23 s. What is left is work per character over text that does not repeat: the split and strip of each piece, the fold of a 300-character join, the URL-run reading of a 512-character value, and the larger channels.json. `urlsplit`, `parse_attrs` and the JSON writer were left alone on purpose: they sit on the security path.
 - **Filed with it.** F-GATE-23 (P4, open): attempt A turned `test_very_low_limit_refuses_an_ordinary_playlist_in_one_sentence` red with no defect in the parse, because the test's refusal depends on whether a later allocation needs fresh memory; its skeptic could not reproduce A's numbers, so the dependence is shown and its size is not. B's tree passes it.
+
+### D-REL-13: a cut refuses while origin's main is ahead (2026-11-09)
+
+Dev tooling only (`scripts/release.py` and its tests); nothing here ships.
+
+- **The defect.** `build` committed the allowlist tree with `commit-tree -p` the LOCAL `refs/heads/main` and never looked at the remote. On 2026-11-08 the owner's web commit (`CODE_OF_CONDUCT.md`) moved origin's `main` dc402e7 -> ce68db5. A cut made then without `git fetch origin main:main` would have parented the release on dc402e7, and the `main-is-the-artifact` ruleset refuses that push only after the cut has moved the local `main` and written the tag.
+- **The fix.** `remote_main_problems`, called by `build` after the premise guard and before `check()` and the gate re-run. It runs `git remote get-url origin`, then `git ls-remote origin refs/heads/main` (prompts off, environment kept, 60 s timeout), takes the line whose ref is exactly `refs/heads/main`, then `cat-file -e` and `merge-base --is-ancestor` both ways. It refuses, one sentence each: no remote, a failed or timed-out read, no `main` on origin, an origin commit this clone does not have, origin ahead, diverged. It passes on equal or on the local `main` ahead. No flag or parameter skips it.
+- **The fixture.** Every `ReleaseCase` clone now has a local bare `origin` holding `main` (fetched into it, not pushed), so every existing cut passes through the guard. `origin_commit` makes the owner's web commit on the bare repository alone; `origin_takes_main` checks a cut fast-forwards by having the bare repository fetch it into `main` without a `+`.
+- **Red first.** `tests/test_release.py` 74 -> 92 tests. Against ad15c7d's `release.py` (swapped in place, the test file unchanged): 14 of the 18 new tests red, 10 failures and 4 errors (the errors are the tests that call or patch a new name: `the_guard_only_reads`, `the_remote_is_asked_with_prompts_off_and_the_environment_kept`, `a_quoted_git_message_loses_the_urls_userinfo`, `an_origin_that_does_not_answer_is_refused_in_bounded_time`), and the 74 existing tests green. All 92 green on the fix. The 4 new tests that are green on both are controls and a pin: `a_cut_proceeds_when_origin_holds_exactly_main`, `a_cut_proceeds_when_main_is_ahead_of_origin`, `a_decoy_that_would_refuse_does_not_decide`, `nothing_skips_the_origin_guard`. Each goes red under a mutant below.
+- **Mutants**, one decision each, written over the fixed file and restored after (sha256 checked); every one red:
+
+| Mutant | Red tests |
+|---|---|
+| M1 drop the ancestry check | `a_cut_refuses_when_origin_and_main_have_diverged`, `a_cut_refuses_while_origin_is_ahead_with_its_commit_already_here` |
+| M2 drop the presence check | `a_cut_refuses_while_origin_holds_a_commit_this_clone_lacks`, `a_decoy_that_would_pass_does_not_decide`, `the_command_line_cut_refuses_while_origin_is_ahead`, `the_origin_guard_runs_before_the_allowlist_check_and_the_gate` |
+| M3 take the first ls-remote line | `a_decoy_that_would_pass_does_not_decide`, `a_decoy_that_would_refuse_does_not_decide` |
+| M3b take the last line whose ref ends in `refs/heads/main` | the same two |
+| M4 accept a failed ls-remote | `an_origin_that_cannot_be_read_is_refused` |
+| M4b accept a timed-out ls-remote | `an_origin_that_does_not_answer_is_refused_in_bounded_time` |
+| M5 move the call after the gate | `the_origin_guard_runs_before_the_allowlist_check_and_the_gate`, `the_command_line_cut_refuses_while_origin_is_ahead` (the allowlist line printed first) |
+| M5b move the call after the allowlist check | the same two |
+| M6 fetch instead of ls-remote | 11, among them `the_guard_only_reads` and `a_refused_cut_moves_no_ref_and_writes_no_tag` (FETCH_HEAD, the objects or the remote-tracking ref change) |
+| M7 prompts left on | `the_remote_is_asked_with_prompts_off_and_the_environment_kept` |
+| M7b the environment replaced, not kept | the same |
+| M8 no timeout on ls-remote | `an_origin_that_does_not_answer_is_refused_in_bounded_time` (the silent upload-pack ends at 5 s) |
+| M9 a quoted git message keeps the URL's userinfo | `a_quoted_git_message_loses_the_urls_userinfo` |
+| M10 ls-remote without asking whether the remote is named | `a_clone_with_no_origin_is_refused` |
+| M11 a missing origin `main` accepted | `an_origin_without_main_is_refused` |
+| M12 the local-ahead pass dropped | `a_cut_proceeds_when_main_is_ahead_of_origin`, `the_guard_only_reads`, and the existing `nothing_new_is_refused` |
+| M13 a parameter on `build` that skips the guard | `nothing_skips_the_origin_guard` |
+| M14 the call removed from `build` | 11, the 14 red on ad15c7d less the 3 that call a new name directly |
+| M15 an origin equal to `main` refused | 17, among them `a_cut_proceeds_when_origin_holds_exactly_main` and 10 existing cuts |
+
+- **Siblings (rule 15).** Searched `scripts/`, `tests/` and `bin/` for `commit-tree`, `ls-remote`, `refs/heads/main`, `git push`, `rev-parse` of `main`, `origin/main` and `RELEASE_BRANCH`: `release.py` is the only code that parents a commit on `main` or reads a remote. Cleared: `tests/test_split_helper.py:812` (the string "main" in a call list) and `tests/test_harness_gpu_sw_check.py:227` (an orphan branch in a scratch repository).
+- **What it does not see.** A commit that lands on origin after the guard asks, which for a cut without `--gate-already-green` includes the whole gate re-run. The ruleset still refuses that push, and the cut is re-run on a fetched `main`.
+- **Safety.** No `build` ran against the worktree or the main clone; every cut ran in a temporary repository. Checked before the commit: the main clone's `refs/heads/main` is still ce68db5 and it has no v0.18.1 or v0.19.0 tag.

@@ -129,7 +129,10 @@ Consequences you must respect:
   live arm is the only observer of the start-up window that D-SRC-15 lives
   in; `check.sh` runs just its 11-check preflight, and a README that
   promises the live run is only true while this step is run), then
-  `scripts/release.py build --gate-already-green`, then push
+  `scripts/release.py build --gate-already-green` (which refuses while
+  origin's `main` holds a commit the local `main` lacks, D-REL-13,
+  2026-11-09, after the owner's web commit moved it, so run
+  `git fetch origin main:main` first), then push
   `dev`, `main` and the tag, then create the GitHub Release for that tag
   (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
