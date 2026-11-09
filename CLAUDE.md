@@ -136,7 +136,8 @@ Consequences you must respect:
   `main`, so run `git fetch origin main:main` first, and settle a diverged `main` by
   setting it to origin's as the refusal says, never by a merge), then push
   `dev`, `main` and the tag in one `git push --atomic origin dev main vX.Y.Z` (a plain push
-  sends `dev` and the tag even when `main` is refused), then create the
+  sends what it can: `dev` and the tag when `main` is refused, `dev` and
+  `main` when the tag is), then create the
   GitHub Release for that tag
   (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is

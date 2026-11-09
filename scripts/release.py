@@ -379,9 +379,11 @@ def premise_exception_problems(root):
 #
 # It asks about the tag the cut writes in the same call. A tag origin already
 # has (a web-UI release, a push from another clone, or a push that was not
-# atomic) would be refused at push time while main went up, and the GitHub
-# Release, which `gh release create --verify-tag` makes from origin's tag,
-# would then name the wrong commit. So that refuses too.
+# atomic) makes the release step's atomic push refused whole, and leaves the
+# local main and tag to unwind by hand. A plain push would move origin's main
+# and refuse the tag, and the GitHub Release, which `gh release create
+# --verify-tag` makes from origin's tag, would then name the wrong commit. So
+# that refuses too.
 #
 # What it asks must be what the push meets. So it refuses a clone whose origin
 # is pushed somewhere other than where ls-remote reads (a pushurl, a

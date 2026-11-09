@@ -140,6 +140,17 @@ class ReleaseCase(unittest.TestCase):
         self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture())
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
+        # The real main is not linear: what it held before the split carries
+        # 45 merge commits, the newest 482a21e (2026-09-16). The origin guard
+        # looks for a merge only in what the local main ADDS to origin's, and
+        # over a linear double a walk of the whole local main passes every
+        # test (rule 10), so this history holds one too: a lane merged the
+        # --no-ff way, the tree unchanged.
+        tree = self.git('rev-parse', 'HEAD^{tree}').strip()
+        lane = self.git('commit-tree', tree, '-p', 'HEAD', '-m', 'a lane before the split').strip()
+        merged = self.git('commit-tree', tree, '-p', 'HEAD', '-p', lane,
+                          '-m', 'merge: a lane before the split').strip()
+        self.git('update-ref', 'refs/heads/main', merged)
         # D-REL-13: the cut asks origin whether its main holds a commit the
         # local one lacks, and refuses a clone it cannot ask. The real clone
         # always has one, so the double does too (rule 10): a local bare
@@ -501,8 +512,11 @@ class ReleaseCase(unittest.TestCase):
 
     def test_a_cut_proceeds_when_main_is_ahead_of_origin(self):
         """An earlier cut not pushed yet: origin's main is its ancestor, and the
-        two still go up as one fast-forward."""
+        two still go up as one fast-forward. Origin's main holds a merge commit
+        below its tip, as the real one does, so the cut goes only when the
+        guard looks for a merge in what the local main adds and nowhere else."""
         old = self.git('rev-parse', 'main').strip()
+        self.assertTrue(self.ogit('rev-list', '--min-parents=2', 'refs/heads/main').strip())
         first = self.build()
         self.bump('1.0.0')
         second = self.build()
@@ -841,9 +855,10 @@ class ReleaseCase(unittest.TestCase):
 
     def test_a_cut_refuses_while_origin_already_has_its_tag(self):
         """The guard asked about main alone, so a cut whose tag push would be
-        refused passed it, and the push then moved main and refused the tag:
-        origin's tag, the one `gh release create --verify-tag` publishes from,
-        kept naming the previous artifact."""
+        refused passed it, and the plain push the release step then named
+        moved main and refused the tag: origin's tag, the one `gh release
+        create --verify-tag` publishes from, kept naming the previous
+        artifact. (The atomic push the step names now is refused whole.)"""
         self.origin_tag('v0.9.9', self.git('rev-parse', 'main').strip())
         self.assertEqual('', self.git('tag', '--list').strip())
         self.assert_refused(
@@ -877,8 +892,9 @@ class ReleaseCase(unittest.TestCase):
         is refused (here origin takes those two itself, by fetch, which is what
         that push leaves). Deleting the local tag and fetching main brings the
         tag back; deleting it again used to clear every guard, and the next
-        push would move origin's main and refuse the tag, which stayed at a
-        cut that is not on origin's main."""
+        push, an atomic one, would be refused whole, where a plain one would
+        move origin's main and refuse the tag, which stayed at a cut that is
+        not on origin's main."""
         cut = self.build()
         self.origin_commit()
         subprocess.run(['git', '-C', self.origin, 'fetch', '-q', self.dir,
