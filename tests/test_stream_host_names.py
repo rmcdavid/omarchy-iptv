@@ -165,6 +165,13 @@ REFUSED = [
     # with every suite green).
     "udp://@239.1.1.1:5000?sources=a.example.test&sources=a.example.test&sources=evil%40qqqqqq.test",
     "udp://@239.1.1.1:5000?block=a.example.test&sources=a.example.test&block=evil%40qqqqqq.test",
+    # An ENTRY already judged before the refused one, in an earlier pair or
+    # earlier in the same reading: the walk passes over it and goes on (the
+    # review of cce5548: a `break` at that skip passed every suite, and what
+    # it let through moved with the hash seed while the entries were walked
+    # as a set). `fe80::1` holds a colon, so no reading here is plain.
+    "udp://@239.1.1.1:5000?sources=fe80::1&block=fe80::1,evil%40qqqqqq.test",
+    "udp://@239.1.1.1:5000?sources=fe80::1,+fe80::1,evil%40qqqqqq.test",
     "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
     # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
     "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
@@ -212,6 +219,23 @@ REFUSED = [
     "srt://evil" + chr(0x5C) + "064qqqqqq.test:9000?mode=caller",
     "rtsp://evilqqqqqq" + chr(0x5C) + ".x/stream",
     "rtmp://evil" + chr(0xFF3C) + "qqqqqq.test/live/1",
+    # Each of the six code points D-SINK-92's fold reads as a bracket or a
+    # backslash (U+FF3B, U+FF3D, U+FE47, U+FE48; U+FF3C, U+FE68), in a udp
+    # or rtp source entry, where the ASCII three are refused whole by the
+    # reading and the folds only by the name rule, and in an unescaped
+    # scheme's authority (the review of cce5548: either call site could
+    # stop asking about them with every suite green).
+    "udp://@239.1.1.1:5000?sources=evil%EF%BC%BBqqqqqq.test",
+    "udp://@239.1.1.1:5000?sources=10.0.0.1,evil%EF%B9%87qqqqqq.test",
+    "udp://@239.1.1.1:5000?block=evil%EF%BC%BCqqqqqq.test",
+    "rtp://239.1.1.1:5004?block=evil%EF%BC%BDqqqqqq.test",
+    "rtp://239.1.1.1:5004?block=10.0.0.1,evil%EF%B9%88qqqqqq.test",
+    "rtp://239.1.1.1:5004?sources=evil%EF%B9%A8qqqqqq.test",
+    "rtsp://evil" + chr(0xFF3B) + "qqqqqq.test/stream",
+    "rtsp://evil" + chr(0xFF3D) + "qqqqqq.test/stream",
+    "rtmp://evil" + chr(0xFE47) + "qqqqqq.test/live/1",
+    "srt://evil" + chr(0xFE48) + "qqqqqq.test:9000?mode=caller",
+    "srt://evil" + chr(0xFE68) + "qqqqqq.test:9000?mode=caller",
 ]
 
 CONTROLS = [

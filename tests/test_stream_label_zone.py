@@ -106,6 +106,14 @@ LABEL_REFUSED = [
     # A value repeated before the pair that holds it: the walk skips the
     # repeat and goes on (the review of bf47cdc: a `break` there passed).
     "udp://@239.1.1.1:5000?sources=a.example.test&sources=a.example.test&sources=userqqqqqq",
+    # An ENTRY already asked before the one-label one, in an earlier pair or
+    # earlier in the same reading: the walk passes over it and goes on (the
+    # review of cce5548: a `break` at that skip passed every suite, and what
+    # it let through moved with the hash seed while the entries were walked
+    # as a set).
+    "udp://@239.1.1.1:5000?sources=a.example.test&block=a.example.test,userqqqqqq",
+    "udp://@239.1.1.1:5000?sources=a.example.test,+a.example.test,userqqqqqq",
+    "rtp://239.1.1.1:5004?block=10.0.0.1&sources=10.0.0.1,userqqqqqq",
 ]
 
 # From the same playlist, none does.
@@ -506,7 +514,12 @@ class CostTest(unittest.TestCase):
     colon passed D-SINK-87, which lets a colon through only in an IPv6
     literal, so it is never asked of dotless_host (whose literal parse is
     the expensive part), and each distinct entry of a line is asked once
-    however many pairs repeat it. A local playlist asks nothing."""
+    however many pairs repeat it. A local playlist asks nothing. And a list
+    of PLAIN entries from a public playlist -- names, IPv4 literals --
+    which reading 3 accepts with one translate, is walked here an entry at
+    a time, a call per distinct entry: the cost the D-SINK-89 row states
+    for it, about three times a local list's per line (the review of
+    cce5548, which found it stated only for a list of IPv6 literals)."""
 
     def calls(self, url, source):
         real = helper.dotless_host
@@ -529,13 +542,22 @@ class CostTest(unittest.TestCase):
         rtp6 = "rtp://239.1.1.1:5004?block=" + listed
         pairs = "rtp://239.1.1.1:5004?" + "sources=a.example.test&" * 150
         names = "udp://@239.1.1.1:5000?block=" + ",".join("h%d.example.test" % i for i in range(200))
+        ipv4, index = "udp://@239.1.1.1:5000?sources=", 0
+        while len(ipv4) + 16 < helper.M3U_MAX_URL:
+            ipv4 += "10.%d.%d.1," % (index // 256, index % 256)
+            index += 1
         got = [self.calls(ipv6, remote()), self.calls(rtp6, remote()), self.calls(pairs, remote()),
                self.calls(names, remote()), self.calls(ipv6, local_sources()["file"]),
-               self.calls("http://stream.example.test/x", remote())]
+               self.calls("http://stream.example.test/x", remote()), self.calls(ipv4, remote()),
+               self.calls(ipv4, local_sources()["file"])]
         # The authority's host is asked once a line; the lists of literals
-        # ask only the empty entry their last comma leaves, never a literal.
-        self.assertEqual(got, [("", 2), ("", 2), ("", 2), ("", 201), ("", 0), ("", 1)])
+        # ask only the empty entry their last comma leaves, never a literal;
+        # a plain list from a public playlist asks every distinct entry,
+        # the empty one its last comma leaves among them.
+        self.assertEqual(got, [("", 2), ("", 2), ("", 2), ("", 201), ("", 0), ("", 1), ("", index + 2), ("", 0)])
         self.assertGreater(len(ipv6), 4000)
+        self.assertGreater(len(ipv4), 4000)
+        self.assertGreater(index, 300)
 
 
 if __name__ == "__main__":

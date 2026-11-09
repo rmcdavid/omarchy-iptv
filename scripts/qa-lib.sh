@@ -1074,9 +1074,21 @@ qa_target_nested() {
 # bytes ("socket path ... plus null terminator exceeds 108 bytes" and
 # "XDG_RUNTIME_DIR is invalid or not set in the environment" are both in the
 # installed library's strings), and cage 0.3.1 answers the NULL with `goto
-# end`, whose cleanup calls wl_display_destroy (cage.c at v0.3.1). So an unset
-# or relative XDG_RUNTIME_DIR, one that is not a directory this user can
-# write, and one too long for the socket all end in the same abort.
+# end`, whose cleanup calls wl_display_destroy (cage.c at v0.3.1). So an empty
+# or relative XDG_RUNTIME_DIR, which libwayland refuses, one that is not a
+# directory this user can write, and one too long for the socket all end in
+# the same abort. An UNSET one does not reach libwayland: cage 0.3.1 checks
+# getenv("XDG_RUNTIME_DIR") before it creates a display, logs "XDG_RUNTIME_DIR
+# is not set in the environment" (in the installed binary's strings too) and
+# returns 1 -- no display, no cleanup, no abort, no card. [The review of
+# cce5548: this said an unset one aborted the same way.] It is refused here
+# all the same, and on purpose: such a cage measures nothing, and before this
+# guard the clip preflight waited 10 s for its display and answered 77, which
+# CLIP_PREFLIGHT_SKIP_OK accepts. A skip is for a machine that cannot run the
+# check; a caller's environment without a runtime directory is fixed by giving
+# it one (every login session has one), as a long one is, so it gets the same
+# exit 2 and the same one line, never a skip a lever set for another reason
+# would silence.
 #
 # The longest name each socket-maker can put in its directory, written out at
 # full length, so a suffix's length IS the bytes it adds:
@@ -1147,8 +1159,12 @@ qa_sock_fits() {
 #     1  refused: ONE line on stderr beginning "REFUSING to start cage:"
 qa_cage_runtime_fits() {
   local rt=${XDG_RUNTIME_DIR-}
+  if [[ -z ${XDG_RUNTIME_DIR+set} ]]; then
+    printf 'REFUSING to start cage: XDG_RUNTIME_DIR is unset, so cage would exit 1 before it makes a display (no abort) and measure nothing (F-HARNESS-104); give it a directory of at most 96 bytes\n' >&2
+    return 1
+  fi
   if [[ $rt != /* ]]; then
-    if [[ -z $rt ]]; then rt="unset or empty"; else rt="not absolute ($rt)"; fi
+    if [[ -z $rt ]]; then rt="empty"; else rt="not absolute ($rt)"; fi
     printf 'REFUSING to start cage: XDG_RUNTIME_DIR is %s, so libwayland makes no socket and cage aborts (F-HARNESS-104)\n' "$rt" >&2
     return 1
   fi

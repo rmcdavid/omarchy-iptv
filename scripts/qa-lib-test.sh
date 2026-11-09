@@ -3136,8 +3136,15 @@ is "the precondition: a UTF-8 locale counts that 97-byte name as 96 characters" 
    "$(env LC_ALL=C.UTF-8 bash -c 'printf %s "${#1}"' mb "$DMB")" "96"
 is "and it is refused there all the same: sun_path holds bytes" \
    "$(env LC_ALL=C.UTF-8 XDG_RUNTIME_DIR="$DMB" bash -c '. "$1"; qa_cage_runtime_fits 2>/dev/null; printf %s "$?"' mb "$HERE/qa-lib.sh")" "1"
-is "unset is refused: libwayland makes no socket without one" "$(cf)" "1 1"
+is "unset is refused: cage would exit 1 before it makes a display" "$(cf)" "1 1"
+# The review of cce5548: cage 0.3.1 checks for an unset XDG_RUNTIME_DIR itself
+# and returns 1 before any display exists, so it never reaches libwayland or
+# the abort; only an empty or relative one does. The line says which.
+is "and its line says cage exits before a display, not that it aborts" "$(<"$SP/cf.err")" \
+   "REFUSING to start cage: XDG_RUNTIME_DIR is unset, so cage would exit 1 before it makes a display (no abort) and measure nothing (F-HARNESS-104); give it a directory of at most 96 bytes"
 is "empty is refused" "$(cf '')" "1 1"
+is "and its line says libwayland makes no socket and cage aborts" "$(<"$SP/cf.err")" \
+   "REFUSING to start cage: XDG_RUNTIME_DIR is empty, so libwayland makes no socket and cage aborts (F-HARNESS-104)"
 mkdir -p "$SP/rel"
 is "a relative one is refused, though it names a directory here" "$(cf rel)" "1 1"
 is "one that does not exist is refused" "$(cf "$SP/none")" "1 1"
@@ -3481,7 +3488,11 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # cage under a soft core limit of 0 (F-HARNESS-45's second layer, which the
 # gate's own cage lacked), read from a stand-in cage, and its precondition
 # (2). Red on 40afe25's clip-scenario.sh: the stand-in read `unlimited`.
-EXPECTED=647
+# 647 -> 649 the same day, the review of cce5548: the unset refusal's line and
+# the empty one's read apart, because cage 0.3.1 exits 1 on an unset
+# XDG_RUNTIME_DIR before it makes a display and never aborts (2). Red on
+# cce5548's qa-lib.sh: both read "unset or empty ... cage aborts".
+EXPECTED=649
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

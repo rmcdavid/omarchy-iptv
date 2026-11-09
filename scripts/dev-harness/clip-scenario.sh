@@ -149,10 +149,15 @@
 # 10 s is the same 77: the sink cannot be observed here. CLIP_CAGE_BIN and
 # CLIP_QML_BIN override the two binaries; they exist so the 77 path can be
 # driven on a machine that has both. An XDG_RUNTIME_DIR cage cannot make its
-# socket in -- unset, relative, not a directory this user can write, or too
+# socket in -- empty, relative, not a directory this user can write, or too
 # long for $XDG_RUNTIME_DIR/wayland-NN and its NUL in sun_path's 108 bytes --
 # exits 2 before anything starts (F-HARNESS-104, qa_cage_runtime_fits): a
 # refusal, never a skip, because that cage would abort and post a crash card.
+# An UNSET one exits 2 the same way, though that cage would not abort (cage
+# 0.3.1 exits 1 before it makes a display): it would measure nothing, and the
+# fix is the caller's, giving it a runtime directory, not a skip lever set for
+# another reason [the review of cce5548, which found this saying an unset one
+# aborted too; it was a 77 after the 10 s wait before F-HARNESS-104].
 #
 # INTERRUPTED. INT and TERM are trapped into an exit, so cleanup() runs
 # (bash runs no EXIT trap for a signal that kills it while it waits on a

@@ -1103,8 +1103,13 @@ def _query_entries_refused(reading: str, judged: set[str]) -> bool:
     """Reading 3's judgment with no shortcut: is an entry of `reading`, split
     at `,` and trimmed of _TOKEN_SPACE as av_get_token reads it, a name
     host_name_refused refuses? An entry already in `judged` is not asked
-    again; every entry asked is added to it."""
-    for raw in set(reading.split(",")):
+    again, and the walk goes on past it; every entry asked is added to it.
+    The entries are walked in their own order (dict.fromkeys, not a set),
+    so which of them a skip passes over is the line's, never the hash
+    seed's, and a vector can hold the skip (the review of cce5548: a
+    `break` there passed every suite, and what it let through moved with
+    PYTHONHASHSEED)."""
+    for raw in dict.fromkeys(reading.split(",")):
         entry = raw.strip(_TOKEN_SPACE)
         if entry in judged:
             continue
@@ -1201,7 +1206,11 @@ def _numeric_zone(zone: str) -> bool:
 # or in hex (`16843009`) is, as it is for a hint or a logo. Asked after
 # D-SINK-87's readings, which let an entry hold a colon only as an IPv6
 # literal, so an entry holding a colon is no question here and costs no
-# literal parse.
+# literal parse. Every other distinct entry is asked, and that is the cost
+# the D-SINK-89 row states: from a list that is not local, a source list
+# of plain names or IPv4 literals, which reading 3 accepts with one
+# translate, is walked here an entry at a time, about three times a local
+# list's cost per line (the review of cce5548).
 STREAM_LABEL_REFUSAL = ("refused a stream whose address names a host of one label, from a playlist that is not on this "
                         "machine or a local network; not played")
 
@@ -1220,9 +1229,11 @@ def stream_label_refused(url: str, host: str, scheme: str, source: dict[str, Any
     decodes = STREAM_QUERY_HOST_SCHEMES.get(scheme, 0)
     if decodes == 0:
         return False
+    # The entries in their own order, as _query_entries_refused walks them:
+    # an entry already asked is passed over and the walk goes on.
     asked: set[str] = set()
     for reading in _query_readings(url, decodes, params):
-        for raw in set(reading.split(",")):
+        for raw in dict.fromkeys(reading.split(",")):
             entry = raw.strip(_TOKEN_SPACE)
             if entry in asked:
                 continue
