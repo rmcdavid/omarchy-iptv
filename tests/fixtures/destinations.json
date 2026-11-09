@@ -10,7 +10,7 @@
   "multicast",
   "reserved"
  ],
- "destinationRules": 2,
+ "destinationRules": 3,
  "env": {
   "url": "OMARCHY_IPTV_URL",
   "origin": "OMARCHY_IPTV_ORIGIN",

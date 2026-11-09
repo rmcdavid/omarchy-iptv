@@ -1111,11 +1111,15 @@ function entryWith(entry, patch, opts) {
 // checked -- a LAN literal from a public list, a sign-in header for another
 // host -- and lacks the `sourceClass` a guide hint on the playlist's own host
 // is matched by. 2 is the attribute grammar (D-SINK-80, 2026-11-05): a cache
-// before it can hold a name, a group or a guide hint cut inside a URL. The
-// service refetches a cache written under an older version, or carrying
-// none, at the next start or swap, once, whatever its age. The helper's
-// DESTINATION_RULES; joined by the destinations fixture.
-var DESTINATION_RULES = 2
+// before it can hold a name, a group or a guide hint cut inside a URL. 3 is
+// the stream host-name rules, D-SINK-87 and D-SINK-88 (2026-11-08): a cache
+// before them can hold a channel whose address names a host the player
+// would read in a form no host name or port may take, which the helper then
+// refuses at every play. The service refetches a cache written under an
+// older version, or carrying none, at the next start or swap, once, whatever
+// its age. The helper's DESTINATION_RULES; joined by the destinations
+// fixture.
+var DESTINATION_RULES = 3
 
 function cacheBeforeDestinationRules(status) {
   return !!(status && status.ok === true && !(Number(status.destinationRules) >= DESTINATION_RULES))

@@ -1447,14 +1447,21 @@ class StartTest(PlayerTestCase):
         names it `Stream` instead; a dotted host still names it. Through
         player_target over a cache written by the parser (a nameless row gets
         the generated `Channel N`, so the fallback is reached through the
-        raw-URL path and through a row whose name is cleared in place)."""
+        raw-URL path and through a row whose name is cleared in place).
+        Since D-SINK-87 the typo whose password reads as a port (`myuser:pa`,
+        which the player would read as host `myuser`) is refused at play, so
+        the raw-URL path reaches the fallback through one whose port is
+        digits."""
         channels = helper.load_channels(helper.cache_dir(self.cache))
         self.assertEqual(helper.fallback_channel_name("http://myuser:pa/ss@cdn.test/x", "channel"), "Stream")
         self.assertEqual(helper.fallback_channel_name("http://nas:8000/me@home/x", "channel"), "Stream")
         self.assertEqual(helper.fallback_channel_name("http://u:p@cdn.test/live/me@x/1.ts", "channel"), "cdn.test")
         self.assertEqual(helper.fallback_channel_name("http://u:p@nas/x", "channel"), "nas")
         self.assertEqual(helper.fallback_channel_name("", "stream"), "stream")
-        target = helper.player_target("", "http://myuser:pa/ss@cdn.test/x", self.cache)
+        with self.assertRaises(helper.HelperError) as refused:
+            helper.player_target("", "http://myuser:pa/ss@cdn.test/x", self.cache)
+        self.assertEqual(refused.exception.code, "unsupported_scheme")
+        target = helper.player_target("", "http://nas:8000/me@home/x", self.cache)
         self.assertEqual(target["name"], "Stream")
         target = helper.player_target("", "http://prov.test/live/U5ER/P4@SSW0RD/1.ts", self.cache)
         self.assertEqual(target["name"], "prov.test")

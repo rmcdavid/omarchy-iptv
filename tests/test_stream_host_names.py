@@ -1,12 +1,13 @@
-"""D-SINK-87 (the owner, 2026-11-08): a channel stream address whose host is
-a name D-SINK-86 refuses is never handed to the player.
+"""D-SINK-87 (the owner, 2026-11-08): no channel stream address that names a
+host the player would read in a form D-SINK-86 refuses is handed to the
+player.
 
 D-SINK-86's host_name_refused refuses a host name that holds `@`, `%`, `;`,
 `=`, `&`, a second `:` (one port is fine), whitespace or an invisible format
-character, and the helper asks it before every connection it opens itself.
-A channel's stream address is not one of those: the helper hands it to the
-player, which reads the host and looks it up. So the two gates that decide
-what reaches the player ask it too:
+character, and, since D-SINK-88, one whose NFKC form does; the helper asks it
+before every connection it opens itself. A channel's stream address is not
+one of those: the helper hands it to the player, which reads the host and
+looks it up. So the two gates that decide what reaches the player ask it too:
 
 1. Parse. stream_entry_refusal (called by parse_m3u) refuses such a
    location line, so it never becomes a channel in channels.json, and the
@@ -14,20 +15,29 @@ what reaches the player ask it too:
    that names no host and no URL.
 2. Play. player_target refuses such an address before anything is sent to
    the player, whether it comes from a cache written before the rule or from
-   a typed `play --url`, with `unsupported_scheme` (the shell's channel
-   refusal) and one fixed sentence that names no host and no URL.
+   a typed `play --url`, with `unsupported_scheme` and one fixed sentence
+   that names no host and no URL.
 
 The host is judged as the PLAYER would read it, and where the helper's
 reading and the player's could differ, by every reading, each asked of the
-same predicate: the authority's host[:port] as written, after its last `@`
-(FFmpeg reads a port as the digits up to the next colon, urlsplit reads no
-port at all, so what follows the port is judged too; urlsplit's own host is
-inside it, which SubsumptionTest holds); and, for the schemes mpv
-percent-escapes before FFmpeg reads them (http, https, mmsh, and mms,
-rewritten to mmsh), that host[:port] as mpv escapes it -- a `%` for every
-byte outside the unreserved and reserved sets, so a Unicode host name the
-helper reads whole reaches the player, on a plain stream's path, as a name
-holding `%`.
+same predicate (bin/helper/02-sources.py, the D-SINK-87 block):
+  1. the authority's host[:port] as written, after its last `@` (FFmpeg
+     reads a port as the digits up to the next colon, urlsplit reads no port
+     at all, so what follows the port is judged too), in SR15's form: a port
+     of ASCII digits or none, and a bracket only as an IPv6 literal's
+     (FFmpeg reads `[v1.a:b]` as the name `v1.a:b`). urlsplit's own host is
+     then inside it, which SubsumptionTest holds;
+  2. for the schemes mpv percent-escapes before FFmpeg reads them (http,
+     https, mmsh, and mms, rewritten to mmsh), that host[:port] as mpv
+     escapes it -- a `%` for every byte outside the unreserved and reserved
+     sets, so a Unicode host name the helper reads whole reaches the player
+     as a name holding `%`;
+  3. for udp and rtp, every entry of the `sources` and `block` values,
+     which FFmpeg decodes (once; rtp twice) and looks up by name; a value
+     holding `'` or a backslash is refused whole.
+A fast accept in front of the readings (an authority of plain ASCII with a
+digits-only port, never for udp or rtp) is held equal to them by
+FastPathTest over every code point.
 
 How this module observes it: the shipping `playlist` verb as a subprocess
 on a local playlist FILE (nothing is fetched, nothing is looked up), and
@@ -36,6 +46,8 @@ tests/test_mpv.py's FakeMpv on a scratch socket under /tmp, never the
 default socket and never a real player: "never handed to the player" means
 the FakeMpv recorded no `loadfile` and no command naming the address. A
 control channel on the same FakeMpv IS loaded, so the absence is the gate's.
+A typed `--url` holding a byte no text decodes runs the verb as a
+subprocess, so its argv is decoded as the helper's own is.
 """
 import contextlib
 import io
@@ -95,6 +107,40 @@ REFUSED = [
     "mms://evil" + chr(0xFC) + ".test/live/1",
     "http://evil" + chr(0x5C) + "x.test/live/1.ts",
     "http://evil|x.test/live/1.ts",
+    "mmsh://evil" + chr(0xFC) + ".test/live/1",
+    # 4. The form: a bracket that is no IPv6 literal (FFmpeg reads its
+    #    content as the host, a name holding a colon; urlsplit accepts it as
+    #    IPvFuture), and a port that is not digits (FFmpeg reads host
+    #    `evil`, port 123).
+    "http://[v1.evil:qqqqqq]/live/1.ts",
+    "rtsp://[v1.evil:qqqqqq]/stream",
+    "srt://[v1.evil:qqqqqq]?mode=caller",
+    "https://user:pw@[v1.evil:qqqqqq]/live/1.ts",
+    "http://evil:123qqqqqq/live/1.ts",
+    "rtmp://evil:1935qqqqqq/live/1",
+    # 5. The hosts a udp or rtp query names, which FFmpeg decodes (rtp
+    #    twice) and looks up entry by entry: an escaped `@`, a userinfo, an
+    #    escaped `;` and `=`, `+` as a space, an escaped name, a second
+    #    entry, `+` escaped once (a space only on rtp's second decode),
+    #    quoting, a host folded to `=` (D-SINK-88), and a space av_get_token
+    #    does not trim.
+    "udp://@239.1.1.1:5000?sources=evil%40qqqqqq.test",
+    "udp://@239.1.1.1:5000?sources=ok.test,u:p@evil.test&p=qqqqqq",
+    "udp://@239.1.1.1:5000?block=evil%3Bsid%3Dqqqqqq",
+    "udp://@239.1.1.1:5000?sources=evil+qqqqqq",
+    "udp://@239.1.1.1:5000?%73ources=evil%25qqqqqq",
+    "rtp://239.1.1.1:5004?block=10.0.0.1,evil;qqqqqq",
+    "rtp://239.1.1.1:5004?sources=evil%2Bqqqqqq.test",
+    "udp://@239.1.1.1:5000?sources='evil,qqqqqq'",
+    "udp://@239.1.1.1:5000?sources=evil" + chr(0x5C) + ",qqqqqq",
+    "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
+    # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
+    "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
+    # 6. D-SINK-88: an unescaped scheme's host whose NFKC form, which the
+    #    resolver path reads, holds `;`, `%40` or a space.
+    "rtsp://evil" + chr(0xFF1B) + "qqqqqq.test/stream",
+    "srt://evil" + chr(0xFE6A) + "40qqqqqq.test:9000?mode=caller",
+    "rtmp://evil" + chr(0xA8) + "qqqqqq.test/live/1",
 ]
 
 CONTROLS = [
@@ -117,10 +163,22 @@ CONTROLS = [
     "rtmp://stream.example.test/live/stream live=1",
     "udp://@239.1.1.1:1234",
     "srt://stream.example.test:9000?mode=caller&passphrase=a;b=c",
+    "http://[2001:db8::1]/live/8.ts",
+    # IP literals, a bare IPv6 one, and av_get_token's trimmed space: what
+    # a multicast source list holds.
+    "udp://@239.1.1.1:1234?sources=10.0.0.1,10.0.0.2",
+    "rtp://239.1.1.1:5004?block=192.0.2.1,+192.0.2.2&ttl=4",
+    "udp://@239.1.1.1:1234?sources=fe80::1",
+    # `+` escaped once is a `+` to udp, which decodes once.
+    "udp://@239.1.1.1:1234?sources=a%2Bb.test",
+    # An http query names no host the player looks up.
+    "http://stream.example.test/live/9.ts?sources=a@b%40c&block=x;y",
+    # A host whose NFKC form is a full stop and a letter.
+    "rtsp://stream" + chr(0xFF0E) + "example.test/stream",
 ]
 
-PLURAL = "%d entries skipped: stream host names holding characters no host name may hold"
-SINGULAR = "1 entry skipped: a stream host name holding a character no host name may hold"
+PLURAL = "%d entries skipped: their addresses name hosts the player would read in forms no host name or port may take"
+SINGULAR = "1 entry skipped: its address names a host the player would read in a form no host name or port may take"
 
 
 def leaks(text):
@@ -179,11 +237,21 @@ class ReadingsTest(unittest.TestCase):
 
 
 class SubsumptionTest(unittest.TestCase):
-    """The gate judges the authority's host[:port] as written and not
-    urlsplit's hostname separately, because the first holds the second: the
-    hostname is that text up to its port (or a bracket's content),
-    lower-cased. These hold the two halves of that claim, so the reading the
-    gate leaves out is one it cannot need."""
+    """The gate judges the authority's host[:port] as written, in SR15's
+    form, and not urlsplit's hostname separately, because the first holds
+    the second: with a digits-only port and a bracket only as an IPv6
+    literal's, the hostname is that text up to its port, or the literal's
+    content, lower-cased. Before the form was held this was false: `[v1.a:b]`
+    spent the port's one colon inside its bracket and played, while urlsplit's
+    hostname `v1.a:b` is refused (the review of fdd95a4). These hold the two
+    halves of the claim, so the reading the gate leaves out is one it cannot
+    need: lower-casing changes no code point's verdict, and every vector,
+    the IPvFuture ones and these brackets among them, that urlsplit's
+    hostname refuses the gate refuses."""
+
+    BRACKETS = ["http://[v1.a:b]/x", "http://[v1.a]/x", "http://[v1.a;b]:80/x", "http://[V1.A:B]/x",
+                "http://[fe80::1%25eth0]/x", "http://[fe80::1%25a]:80/x", "http://[::ffff:192.0.2.1]/x",
+                "http://[2001:db8::1]:8080/x", "rtsp://[v7.a:b:c]/x"]
 
     def test_lower_casing_changes_no_code_points_verdict(self):
         predicate = getattr(helper, "host_name_refused")
@@ -193,9 +261,69 @@ class SubsumptionTest(unittest.TestCase):
 
     def test_every_vector_urlsplit_refuses_the_gate_refuses(self):
         gate = getattr(helper, "stream_host_name_refused", lambda url: "<missing>")
-        missed = [ascii(u) for u in REFUSED + CONTROLS
+        vectors = REFUSED + CONTROLS + self.BRACKETS
+        missed = [ascii(u) for u in vectors
                   if helper.host_name_refused(urllib.parse.urlsplit(u).hostname or "") and gate(u) is not True]
         self.assertEqual(missed, [])
+        # The IPvFuture vectors whose content holds a colon are among them,
+        # the case the review found, so this can go red.
+        future = [u for u in vectors if (urllib.parse.urlsplit(u).hostname or "").startswith("v")
+                  and ":" in urllib.parse.urlsplit(u).hostname]
+        self.assertGreaterEqual(len(future), 7)
+
+
+class FastPathTest(unittest.TestCase):
+    """The fast accept in front of the readings (_plain_authority, asked by
+    _stream_name_refused) is a shortcut, not a rule: whatever it accepts,
+    every reading (_stream_name_readings) lets through, for an escaped
+    scheme (http) and an unescaped one (rtsp). Held over every code point
+    inserted into the host, the port, and the host after a userinfo, and
+    over the ASCII range before the host and right after the port's colon,
+    so a character the shortcut wrongly trusts, a port it wrongly reads as
+    digits, or a userinfo it ends in the wrong place, is found. And the
+    shortcut is what the gate answers with: over the low code points
+    _stream_name_refused equals the readings, and udp and rtp, whose query
+    hosts the readings judge, never take it."""
+
+    EVERY = [("stream", ".example.test"), ("stream.example.test:8", "0"), ("us:er@stream", ".example.test")]
+    ASCII = [("", "stream.example.test:8080"), ("stream.example.test:", "")]
+
+    def test_what_the_shortcut_accepts_no_reading_refuses(self):
+        plain = getattr(helper, "_plain_authority", None)
+        readings = getattr(helper, "_stream_name_readings", None)
+        self.assertIsNotNone(plain)
+        accepted, wrong = 0, []
+        for netlocs, top in ((self.EVERY, 0x110000), (self.ASCII, 0x80)):
+            for head, tail in netlocs:
+                for c in range(top):
+                    netloc = head + chr(c) + tail
+                    if plain(netloc):
+                        accepted += 1
+                        for scheme in ("http", "rtsp"):
+                            if readings("%s://%s/x" % (scheme, netloc), netloc, scheme) is not False:
+                                wrong.append((scheme, ascii(netloc)))
+        # Each of the three host parts takes the 66 plain characters and an
+        # `@` (which ends a userinfo, leaving a plain authority after it);
+        # each port part the ten digits and an `@`: 67 * 3 + 11 * 2. So a
+        # shortcut that trusted nothing would be red here too, while every
+        # answer stayed right.
+        self.assertEqual((accepted, wrong[:8]), (223, []))
+
+    def test_the_gate_answers_the_readings_and_udp_and_rtp_never_take_the_shortcut(self):
+        gate, readings = helper._stream_name_refused, helper._stream_name_readings
+        wrong = []
+        for head, tail in self.EVERY + self.ASCII:
+            for c in range(0x800):
+                netloc = head + chr(c) + tail
+                for scheme in ("http", "rtsp"):
+                    url = "%s://%s/x" % (scheme, netloc)
+                    if gate(url, netloc, scheme) != readings(url, netloc, scheme):
+                        wrong.append((scheme, ascii(netloc)))
+        for scheme in ("udp", "rtp"):
+            url = "%s://@239.1.1.1:5000?sources=evil%%40qqqqqq.test" % scheme
+            if gate(url, "@239.1.1.1:5000", scheme) is not True:
+                wrong.append((scheme, "the query hosts were skipped"))
+        self.assertEqual(wrong[:8], [])
 
 
 class ParseTest(unittest.TestCase):
@@ -323,6 +451,27 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
             return run("player", verb, "--socket", self.sock, "--cache-dir", self.cache, "--id", cid,
                        "--seq", "1", "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "1",
                        "--first-load-timeout", "0.2")
+
+    def test_a_typed_address_holding_a_byte_no_text_decodes_gets_the_refusal(self):
+        """A `--url` typed with a byte that is no UTF-8 reaches the helper,
+        as every argv does, as a lone surrogate (surrogateescape). The gate's
+        escaped reading percent-escapes it (surrogatepass), as mpv escapes
+        every byte outside its kept set, so the reading holds `%` and is
+        refused, rather than ending in an `internal` error and a traceback. A subprocess, so the argv is the
+        interpreter's own decoding; the refusal comes before any connection,
+        so the socket is never opened."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("OMARCHY_IPTV_")}
+        done = subprocess.run([sys.executable, str(HELPER), "play", "--url", b"http://evil\xffqqqqqq.test/live/1.ts",
+                               "--socket", os.path.join(self.dir, "none.sock"), "--ipc-timeout", "1"],
+                              capture_output=True, text=True, env=env, timeout=60)
+        lines = [l for l in done.stdout.strip().splitlines() if l.strip()]
+        reply = json.loads(lines[-1]) if lines else {}
+        error = reply.get("error") or {}
+        self.assertEqual((done.returncode, error.get("code"), error.get("message"), "Traceback" in done.stderr,
+                          leaks(done.stdout + done.stderr)),
+                         (helper.EXIT_ERROR, "unsupported_scheme", getattr(helper, "STREAM_HOST_NAME_REFUSAL", None),
+                          False, []), done.stderr)
+        self.assertEqual(self.loads(), [])
 
     def test_a_start_or_a_restart_with_a_channel_hands_the_player_no_refused_address(self):
         replies = [self.start(verb, cid) for verb in ("start", "restart") for cid in self.ids]

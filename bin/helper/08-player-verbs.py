@@ -57,12 +57,17 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     a human typed meets the listening rule only (it has no playlist).
 
     D-SINK-87 (the owner, 2026-11-08): and both, before anything is sent to
-    the player, a host name it would be handed that host_name_refused
-    refuses (stream_host_name_refused, every reading of the host): a cache
-    written before the rule can hold one, and `--url` is typed. Refused as
-    `unsupported_scheme`, the shell's channel refusal, with one fixed
-    sentence: unlike `local_address` below, it names no host, which may be a
-    userinfo."""
+    the player, an address naming a host the player would read in a form
+    host_name_refused refuses (stream_host_name_refused, every reading): a
+    cache written before the rule can hold one (DESTINATION_RULES 3 has the
+    shell refetch it once at the next start or swap), and `--url` is typed.
+    Refused as `unsupported_scheme` with one fixed sentence: unlike
+    `local_address` below, it names no host, which may be a userinfo. On a
+    `player start` or `player restart` the shell reads that code as the
+    channel's own refusal (PLAYER_START_CHANNEL_REFUSALS: a card, and the
+    channel marked failed); on a `play`, a zap into a running player, it
+    is D-PLY-42's untold refusal (open, the owner's call): no card and no
+    mark, so a next or previous zap lands on the channel again."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)

@@ -397,8 +397,27 @@ function isHostFormatCode(code) {
 
 // One index walk over the code units, a surrogate pair read as the one code
 // point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
+//
+// D-SINK-88 (2026-11-08): and a name that is not ASCII is judged again in its
+// NFKC form, which is how the resolver path reads it: the helper's socket
+// hands a host to the C resolver through Python's idna codec, whose nameprep
+// is NFKC with case folding, so `user<U+FF1B>sid.test` passed the walk and
+// was looked up as `user;sid.test` (68 code points fold so: fifty to a
+// space, the rest to `;`, `=`, `&`, `%`, `@` or `:`). A colon the fold adds
+// is refused with the rest, since this name never carries a port. An ASCII
+// name pays nothing. The helper's host_name_refused folds the same way; the shared
+// source-urls fixture holds both validators to all of them, and the QML spec
+// on the dev branch holds the shell's own engine to the fold.
+var NON_ASCII_RE = /[^\x00-\x7f]/
 function hostNameRefused(host) {
   var s = str(host)
+  if (hostNameRefusedAsWritten(s)) return true
+  if (!NON_ASCII_RE.test(s)) return false
+  var folded = s.normalize("NFKC")
+  return folded !== s && hostNameRefusedAsWritten(folded)
+}
+
+function hostNameRefusedAsWritten(s) {
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i)
     if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a) return true
@@ -1974,30 +1993,30 @@ export {
   innerCharSentence, sourceErrorMessage, sourceReason,
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, HOST_FORMAT_RANGES,
-  isHostFormatCode, hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
-  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
-  sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, plainHttpLine,
-  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE,
-  IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class,
-  ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
-  ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
-  urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
-  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,
-  fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
-  EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
-  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
-  cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
-  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
-  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
-  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
-  logoFailedPath, logoBrokenMark, logoHaveLess
+  isHostFormatCode, NON_ASCII_RE, hostNameRefused, hostNameRefusedAsWritten,
+  cutQueryAndFragment, ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY,
+  HOST_WITHHELD, runHostParts, urlHostWithheld, sourceUrlWarning,
+  formWarningLine, WARN_PLAIN_HTTP, plainHttpLine, formAdviceLine,
+  looksLikeHost, validateSourceUrl, normalizeSourceUrl, ADDRESS_CLASSES,
+  ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE, IPV4_OCTET_RE,
+  parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class, ipv6Class,
+  hostClass, hostKey, HINT_LIST_RE, hintFirstEntry, ABSORBED_URL_RE,
+  absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS, urlPortOf, ownHostMatch,
+  typedHttpHost, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV,
+  FETCH_HOME_PORT_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
+  EPG_HINT_HOST_MAX, epgHintVerdict, epgHintUrl, resolveEpgUrl,
+  epgHintRowState, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
+  randomSourceKey, sourceCacheDir, cutHostParams, hostPortOf, deriveLabel,
+  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
+  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
+  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
+  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT,
+  epgHintRowText, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
+  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost,
+  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
 }

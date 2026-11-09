@@ -281,7 +281,10 @@ function playFailureVerdict(code, context) {
 // and where:
 //   player_target   no_cache (channels.json missing or unreadable),
 //                   unknown_channel (the cache does not hold the id),
-//                   unsupported_scheme (the entry's own URL scheme)
+//                   unsupported_scheme (the entry's own URL: a scheme or a
+//                   form is_stream_url refuses, or, since D-SINK-87, an
+//                   address naming a host the player would read in a form
+//                   no host name or port may take)
 //   player_runtime  folder_unusable, runtime_unwritable
 //   check_socket_path  socket_path_blocked
 //   acquire_lock    runtime_unwritable, busy
@@ -300,7 +303,11 @@ function playFailureVerdict(code, context) {
 //                   code: parseHelperStatus)
 // Only `unsupported_scheme` is about the entry, and only a cache this
 // helper's parser would not write can carry one (it skips such lines), so
-// it is the one code listed.
+// it is the one code listed. This list is the START path's: on a zap into a
+// running player the same code comes back from `play`, which
+// playFailureVerdict reads as `failed` -- no card and no mark, D-PLY-42's
+// untold refusal (open, the owner's call) -- so a next or previous zap
+// lands on that channel again until the cache is refetched.
 //
 // A list of the CHANNEL code rather than a fourth list of local ones, and
 // on purpose: marking is the costly direction, so a code the helper grows

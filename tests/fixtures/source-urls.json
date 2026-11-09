@@ -1783,5 +1783,413 @@
   "host": "h.test",
   "key": "1ee8bcaa",
   "note": "D-SINK-86: one port is fine"
+ },
+ {
+  "input": "http://user\u00a8sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+00A8, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u00afsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+00AF, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u00b4sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+00B4, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u00b8sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+00B8, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02d8sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02D8, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02d9sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02D9, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02dasid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02DA, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02dbsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02DB, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02dcsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02DC, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u02ddsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+02DD, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u037asid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+037A, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u037esid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+037E, which the resolver path reads as `;`"
+ },
+ {
+  "input": "http://user\u0384sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+0384, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u0385sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+0385, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fbdsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FBD, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fbfsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FBF, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fc0sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FC0, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fc1sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FC1, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fcdsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FCD, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fcesid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FCE, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fcfsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FCF, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fddsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FDD, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fdesid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FDE, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fdfsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FDF, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1fedsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FED, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1feesid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FEE, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1ffdsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FFD, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u1ffesid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+1FFE, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u2017sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+2017, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u203esid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+203E, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u207csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+207C, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\u208csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+208C, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\u2a74sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+2A74, which the resolver path reads as `=`, `:` (urlsplit refuses it, the validators did not)"
+ },
+ {
+  "input": "http://user\u2a75sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+2A75, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\u2a76sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+2A76, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\u309bsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+309B, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\u309csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+309C, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc5esid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC5E, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc5fsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC5F, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc60sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC60, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc61sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC61, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc62sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC62, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufc63sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FC63, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe49sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE49, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe4asid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE4A, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe4bsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE4B, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe4csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE4C, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe54sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE54, which the resolver path reads as `;`"
+ },
+ {
+  "input": "http://user\ufe55sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE55, which the resolver path reads as `:` (urlsplit refuses it, the validators did not)"
+ },
+ {
+  "input": "http://user\ufe60sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE60, which the resolver path reads as `&`"
+ },
+ {
+  "input": "http://user\ufe66sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE66, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\ufe6asid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE6A, which the resolver path reads as `%`"
+ },
+ {
+  "input": "http://user\ufe6bsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE6B, which the resolver path reads as `@` (urlsplit refuses it, the validators did not)"
+ },
+ {
+  "input": "http://user\ufe70sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE70, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe72sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE72, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe74sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE74, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe76sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE76, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe78sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE78, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe7asid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE7A, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe7csid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE7C, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\ufe7esid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE7E, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://user\uff05sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF05, which the resolver path reads as `%`"
+ },
+ {
+  "input": "http://user\uff06sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF06, which the resolver path reads as `&`"
+ },
+ {
+  "input": "http://user\uff1asid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF1A, which the resolver path reads as `:` (urlsplit refuses it, the validators did not)"
+ },
+ {
+  "input": "http://user\uff1bsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF1B, which the resolver path reads as `;`"
+ },
+ {
+  "input": "http://user\uff1dsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF1D, which the resolver path reads as `=`"
+ },
+ {
+  "input": "http://user\uff20sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF20, which the resolver path reads as `@` (urlsplit refuses it, the validators did not)"
+ },
+ {
+  "input": "http://user\uffe3sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FFE3, which the resolver path reads as a space"
  }
 ]

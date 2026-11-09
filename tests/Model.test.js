@@ -7441,16 +7441,20 @@ checkCall("D-SINK-86: HOST_FORMAT_RANGES is exactly Unicode's Cf category, code 
   }
   return [ranges.length, wrong]
 }, [21, []])
-checkCall("D-SINK-86: hostNameRefused refuses a name holding @ % ; = & :, a reader's whitespace or a format character, and no other code point", () => {
+checkCall("D-SINK-86, D-SINK-88: hostNameRefused refuses a name holding @ % ; = & :, a reader's whitespace or a format character, or one whose NFKC form does, and no other code point", () => {
   const space = new Set(Model.URL_SPACE_CODES)
+  const refusedChar = ch => "@%;=&:".indexOf(ch) !== -1 || space.has(ch.codePointAt(0)) || /\p{Cf}/u.test(ch)
   const wrong = []
+  let folds = 0
   for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
     const ch = String.fromCodePoint(c)
-    const want = "@%;=&:".indexOf(ch) !== -1 || space.has(c) || /\p{Cf}/u.test(ch)
+    const folded = c >= 0x80 && Array.from(ch.normalize("NFKC")).some(refusedChar)
+    if (folded && !refusedChar(ch)) folds++
+    const want = refusedChar(ch) || folded
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
-  return wrong
-}, [])
+  return [wrong, folds >= 68]
+}, [[], true])
 checkCall("D-SINK-86: a format character beyond the BMP is read as one code point, and a lone surrogate is none", () =>
   [Model.hostNameRefused("h" + String.fromCodePoint(0xe0041) + ".test"), Model.hostNameRefused("h" + String.fromCodePoint(0x1d173)),
    Model.hostNameRefused("h" + String.fromCodePoint(0x1d172) + ".test"), Model.hostNameRefused("h" + String.fromCharCode(0xdb40) + ".test"),
@@ -20227,12 +20231,13 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
 
-  checkCall("D-SINK-41, D-SINK-80: a playlist cache whose status predates the current rules (none, the destination rules' 1) is refreshed once whatever its age; one written under them (2, the attribute grammar) or later is not", () =>
-    [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }),
-     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 3 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2) is refreshed once whatever its age; one written under them (3, the stream host-name rules) or later is not", () =>
+    [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 3 }),
+     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 4 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
      Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null),
-     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }), Model.DESTINATION_RULES],
-    [true, false, false, true, false, false, true, 2])
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }), Model.DESTINATION_RULES],
+    [true, false, false, true, false, false, true, true, 3])
 
   // Service.qml's own functions (tests/service-harness.js): every URL-carrying
   // spawn says where its URL came from, through the one assignment, reset
@@ -20283,7 +20288,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
-  checkCall("D-SINK-41, D-SINK-80 (service): applyFreshness refreshes a fresh cache written before the current rules (none, or the destination rules' 1), and leaves one written under them", () => {
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2), and leaves one written under them", () => {
     const runs = status => {
       const h = boot([rec(LAN)])
       h.root.playlistStatus = status
@@ -20294,8 +20299,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     }
     const now = Math.floor(Date.now() / 1000)
     return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 }),
-            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 })]
-  }, [1, 1, 0])
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 }),
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 3 })]
+  }, [1, 1, 1, 0])
 })()
 
 // ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----
