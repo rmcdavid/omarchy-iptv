@@ -388,7 +388,10 @@ def premise_exception_problems(root):
 # What it asks must be what the push meets. So it refuses a clone whose origin
 # is pushed somewhere other than where ls-remote reads (a pushurl, a
 # pushInsteadOf, several urls, all of which push and only the first of which
-# ls-remote reads) or that maps a push onto other refs (remote.origin.push);
+# ls-remote reads) or that maps a push onto other refs (remote.origin.push,
+# or push.default `upstream` while main tracks another branch; a legacy
+# .git/remotes/origin file's Push: line, which git still honours, is not
+# read);
 # it compares the two mains in the object graph the server has, with replace
 # refs and a grafts file switched off; and a local main that is ahead passes
 # only when what it adds holds no merge commit, because main stays linear and
@@ -510,6 +513,11 @@ def remote_main_problems(root, tag_name=None):
                         if tag_name else ''))
     unseen = 'so ' + nothing_shows
     env = dict(os.environ, **_GUARD_ENV)
+    # GIT_CONFIG makes `git config` read that one file alone, while push,
+    # remote get-url and ls-remote ignore it, so left in place it would hide
+    # from the reads below a setting the push obeys (measured by the review:
+    # an empty GIT_CONFIG hid push.default and remote.origin.push alike).
+    env.pop('GIT_CONFIG', None)
 
     def run(args):
         return subprocess.run(['git', '-C', root] + args, stdin=subprocess.DEVNULL,
