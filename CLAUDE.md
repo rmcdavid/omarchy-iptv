@@ -997,15 +997,25 @@ requests and raise the batch.
      (`host_name_refused`, judged as the request object holds the host,
      which urllib has percent-decoded), so a userinfo the provider spelled
      wrong never reaches the resolver; both state readers drop a stored
-     source whose host holds one, a cost the owner accepted for D-SINK-86's
-     set and has not yet been asked about for the fold's wider one. A channel's stream address meets the same predicate before the
+     source whose host holds one, and clear a kept source's guide URL whose
+     host holds one, with no log line -- the owner accepted the drop for
+     D-SINK-86's set, and has not yet been asked about the fold's wider set
+     or about the guide-URL clear, which no cost sentence named until the
+     review of 3ba4044. A channel's stream address meets the same predicate before the
      player is handed it, at the parse and at play, in every reading the
      player could take: the authority's host[:port] in SR15's form (a
      bracket only as a leading IPv6 literal's pair, a port of digits; a `[`
      in the userinfo makes urlsplit read `v1.evil]x` as a host), mpv's
      percent-escaped copy for http, https, mms and mmsh, and every entry of
      udp's and rtp's `sources` and `block`, which FFmpeg resolves by name
-     (rtp at both its decodes). So a stream host's FORM is judged before mpv
+     (rtp at both its decodes), under every name FFmpeg reads as one of
+     them: it reads a query name up to a decoded NUL, so `sources%00x` is
+     `sources` -- the same reading had let `mode%00=listener` and
+     `localport%00=` past D-SINK-42's listening rule since 0.16.0 -- and a
+     decoded list holding a quote or a backslash (av_get_token's quoting),
+     a bracket (an entry reaches the resolver as it is, so a bracketed
+     literal is a name) or a NUL (where FFmpeg's C string ends the list) is
+     refused whole (the review of 3ba4044). So a stream host's FORM is judged before mpv
      looks it up; where a well-formed name resolves -- the LAN or not --
      stays open as above, and so do names a stream server's answer chooses.
      And the platform rewrites a name between the check and the lookup:
@@ -1020,8 +1030,9 @@ requests and raise the batch.
      assuming it. FFmpeg hands the resolver a stream name's own bytes (read
      in n9.0.2's tcp.c and ip.c: no AI_IDN), so this fold is the helper's
      own lookups' and the validators'. Their lesson: a codec the platform
-     applies on the way to the resolver is a reader too, and a fold that
-     composes can hide what one that decomposes keeps.]**
+     applies on the way to the resolver is a reader too, a fold that
+     composes can hide what one that decomposes keeps, and a library that
+     decodes a name into a C string reads it only up to its first NUL.]**
      The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.

@@ -754,15 +754,25 @@ def stream_params(url: str) -> list[tuple[str, str]]:
     """The (name, value) pairs FFmpeg reads off a stream URL: everything after
     the FIRST `?` -- a `#` does not end it, unlike urlsplit's query, which is
     how `srt://h:1#?mode=listener` would have slipped past -- split at `&`,
-    each name cut at its `=`. Names are compared case-folded and with their
-    %-escapes decoded, which FFmpeg does neither of: stricter, never looser."""
+    each name cut at its `=`. Each name is read as FFmpeg n9.0.2 reads it
+    (libavformat/utils.c find_opt: percent-decoded into a C string that its
+    option lookup reads up to the first NUL, so `mode%00=listener` sets
+    srt's `mode` and `sources%00x` is `sources`; the review of 3ba4044 read
+    it upstream and measured it with ffprobe), and is then compared
+    case-folded and trimmed, which FFmpeg does not do: stricter, never
+    looser. FFmpeg also decodes a `+` to a space, which no option's name
+    holds, so a `+` before the NUL makes a name no option's either way, and
+    is left as written. The value is returned as written."""
     mark = url.find("?")
     if mark == -1:
         return []
     pairs = []
     for item in url[mark + 1:].split("&"):
         name, _, value = item.partition("=")
-        pairs.append((urllib.parse.unquote(name).strip().lower(), value))
+        name = urllib.parse.unquote(name)
+        if "\x00" in name:
+            name = name.partition("\x00")[0]
+        pairs.append((name.strip().lower(), value))
     return pairs
 
 
@@ -805,12 +815,16 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 #      holds an IPv6 literal (av_url_split reads a bracket's content as the
 #      host, so `[v1.a:b]`, which urlsplit accepts as an IPvFuture literal,
 #      is the name `v1.a:b`), so a `[` or `]` anywhere else, or text between
-#      a literal's `]` and its port's colon, is refused. urlsplit refuses
-#      those only when a bracket opens the host: with the `[` in the userinfo
-#      it reads `http://a[@v1.evil]x/` as the host `v1.evil]x` (an IPvFuture
-#      match it never splits at the bracket), which av_url_split reads the
-#      same way, so this holds the whole form itself rather than leaning on
-#      urlsplit (the review of 95f1bb9).
+#      a literal's `]` and its port's colon, is refused. urlsplit (Python
+#      3.14) refuses a netloc holding only one kind of bracket; holding both,
+#      it refuses text before a `[` in the host[:port] after the last `@`, or
+#      between its `]` and a port's colon, and otherwise requires the host
+#      (the bracket's content, or with no `[` there the text up to the first
+#      colon) to be an IPv6 address or IPvFuture-shaped. So with the `[` in
+#      the userinfo it reads `http://a[@v1.evil]x/` as the host `v1.evil]x`,
+#      an IPvFuture match, which av_url_split reads the same way, and this
+#      holds the whole form itself rather than leaning on urlsplit (the
+#      reviews of 95f1bb9 and 3ba4044).
 #      That form is what makes urlsplit's own reading, the hostname every
 #      other stream rule here takes, a part of this one: that hostname is
 #      this text up to its port, or an IPv6 literal's content, lower-cased,
@@ -834,24 +848,33 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 #   3. for udp and rtp, the hosts the address's query names
 #      (STREAM_QUERY_HOST_SCHEMES). FFmpeg n9.0.2's udp.c and rtpproto.c read
 #      what follows the URL's FIRST `?` as their options
-#      (ff_parse_opts_from_query_string: split at `&`, every value
-#      percent-decoded with `+` read as a space), and ip.c resolves each
-#      entry of `sources` and `block` by name (av_get_token at `,`, then
-#      getaddrinfo, no AI_NUMERICHOST); rtp resolves them itself and pastes
-#      them, decoded, into the udp URL it opens, where udp decodes them
-#      again. So every entry of every reading -- decoded once, and for rtp
-#      twice -- is judged with no port, trimmed of only the ASCII whitespace
-#      av_get_token skips, and a reading holding `'` or a backslash is
-#      refused whole, because av_get_token's quoting would join or split its
-#      entries otherwise: the reading's, not the raw value's, since
-#      `%27user,+pass%27` is the one name `user, pass` to FFmpeg. rtp's
-#      once-decoded reading is resolved too, so both of its readings are
-#      judged. `sources=10.0.0.1,10.0.0.2` plays. Such a name is a
-#      lookup, not a listener, so it is a `name`, never D-SINK-42's
+#      (ff_parse_opts_from_query_string: split at `&`, every name and value
+#      percent-decoded with `+` read as a space, each into a C string, so a
+#      decoded NUL ends it), and ip.c resolves each entry of `sources` and
+#      `block` by name (av_get_token at `,`, then getaddrinfo, no
+#      AI_NUMERICHOST, and no bracket handling: an entry is handed on as it
+#      is); rtp resolves them itself and pastes them, decoded, into the udp
+#      URL it opens, where udp decodes them again. So every value whose name
+#      stream_params reads as `sources` or `block` (`sources%00x` among them:
+#      the review of 3ba4044) is read, and every entry of every reading --
+#      decoded once, and for rtp twice -- is judged with no port, trimmed of
+#      only the ASCII whitespace av_get_token skips. A reading holding `'` or
+#      a backslash is refused whole, because av_get_token's quoting would
+#      join or split its entries otherwise: the reading's, not the raw
+#      value's, since `%27user,+pass%27` is the one name `user, pass` to
+#      FFmpeg. So is one holding `[` or `]`: host_name_refused sets a leading
+#      bracketed IPv6 literal aside as URL syntax, and here it is none, so
+#      `[2001:db8::1]x` would be looked up as a name holding brackets and
+#      colons (the review of 3ba4044); and one holding a NUL, where FFmpeg's
+#      C string ends the list and this reading would not. rtp's once-decoded
+#      reading is resolved too, so both of its readings are judged.
+#      `sources=10.0.0.1,10.0.0.2` and a bare `fe80::1` play. Such a name is
+#      a lookup, not a listener, so it is a `name`, never D-SINK-42's
 #      `listener`. No other option the player reads from a stream URL of any
 #      scheme here names a host it looks up (read in mpv 0.41.0 and FFmpeg
-#      n9.0.2 on 2026-11-08; `localaddr` is a LISTEN_PARAMS name already;
-#      the search is recorded in the dev branch's QA-RESULTS).
+#      n9.0.2 on 2026-11-08; `localaddr` is a LISTEN_PARAMS name, under any
+#      name stream_params reads as that one; the search is recorded in the
+#      dev branch's QA-RESULTS).
 # A percent-decoded reading of the authority adds nothing: a raw `%` outside
 # an IPv6 zone is refused already, and urlsplit deletes tab, CR and LF before
 # it reads, which is why every caller asks this AFTER the control-character
@@ -869,12 +892,17 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 # Reading 3 has three of its own, so a provider's source list costs no more
 # than its length (the review of 95f1bb9 measured a 4,096-character list of
 # `::1` entries at 68 s per 10,000 lines): a reading of only
-# _PLAIN_HOST_CHARS and commas (_PLAIN_READING_BYTES) is accepted at once,
-# for the same reason as the authority; the entries of any other reading are
-# judged once each, however often they repeat; and rtp's second decode is
-# skipped when it changes nothing. The query's pairs are read once per line,
-# by the listening rule and this one together. A list of DISTINCT entries
-# that are not plain (IPv6 literals) still costs a call per entry.
+# _PLAIN_HOST_CHARS and commas (_PLAIN_READING_BYTES) is accepted at once
+# (_plain_reading), for the same reason as the authority and held to the
+# per-entry judgment the same way (ReadingShortcutTest, the dev branch's
+# D-SINK-87 suite); each distinct entry is judged once per line, across
+# every reading of every pair, however often the line repeats it (the
+# review of 3ba4044 counted 340 calls for a line of `sources=::1&` pairs,
+# deduplicated then only within a value); and a reading already judged on
+# the line, rtp's unchanged second decode among them, is not read again.
+# The query's pairs are read once per line, by the listening rule and this
+# one together. A line of DISTINCT entries that are not plain (IPv6
+# literals, one-code-point Unicode names) still costs a call per entry.
 PLAYER_ESCAPED_SCHEMES = frozenset({"http", "https", "mms", "mmsh"})
 PLAYER_URL_KEPT = ":/?#[]@!$&'()*+,;=%"
 # Reading 3: each scheme whose query names hosts, and how many times FFmpeg
@@ -927,8 +955,9 @@ def _stream_authority_refused(hostport: str, scheme: str) -> bool:
     """Readings 1 and 2 of an authority's host[:port], and its form: a
     bracket only as a leading IPv6 literal's pair, followed by nothing or by
     a port's colon, and a port of ASCII digits or none. The whole form is
-    asked here, because urlsplit (Python 3.14) refuses a misplaced bracket
-    only when a bracket opens the host, not after a `[` in the userinfo."""
+    asked here, because urlsplit (Python 3.14) checks a host's brackets only
+    where its own split puts them: with a `[` in the userinfo and a `]` in
+    the host it accepts an IPvFuture-shaped host such as `v1.evil]x`."""
     if hostport.startswith("["):
         close = hostport.find("]")
         if close == -1 or not _ipv6_literal_text(hostport[1:close]):
@@ -952,34 +981,74 @@ def _stream_authority_refused(hostport: str, scheme: str) -> bool:
 def _stream_query_hosts_refused(url: str, decodes: int, params: list[tuple[str, str]] | None = None) -> bool:
     """Reading 3: does a `sources` or `block` value name a host, in any of
     its `decodes` readings, that host_name_refused refuses? stream_params
-    reads the names as FFmpeg does or more widely (case-folded, trimmed);
-    `params` is its answer when the caller has it. A later reading that
-    decoding left unchanged is the one already judged."""
+    reads the names as FFmpeg does (up to a decoded NUL) or more widely
+    (case-folded, trimmed); `params` is its answer when the caller has it.
+    A value already read on this line is not decoded again, a reading
+    already judged on it (rtp's unchanged second decode among them) is not
+    judged again, and `judged` carries the entries already asked across
+    every pair, so a line costs a call per DISTINCT entry however many pairs
+    repeat it."""
+    values: set[str] = set()
+    readings: set[str] = set()
+    judged: set[str] = set()
     for name, value in (stream_params(url) if params is None else params):
-        if name not in STREAM_QUERY_HOST_PARAMS:
+        if name not in STREAM_QUERY_HOST_PARAMS or value in values:
             continue
-        reading, judged = value, None
+        values.add(value)
+        reading = value
         for _ in range(decodes):
             reading = urllib.parse.unquote_plus(reading)
-            if reading == judged:
-                break
-            judged = reading
-            if _query_reading_refused(reading):
+            if reading in readings:
+                continue
+            readings.add(reading)
+            if _query_reading_refused(reading, judged):
                 return True
     return False
 
 
-def _query_reading_refused(reading: str) -> bool:
+# A decoded reading holding any of these is refused whole: av_get_token's
+# quote and escape, a bracket (an entry is looked up as it is, so a
+# bracketed IPv6 literal would be a name holding brackets and colons), and
+# a NUL, where FFmpeg's C string ends the list.
+_READING_REFUSED = ("'", "\\", "[", "]", "\x00")
+
+
+def _query_reading_refused(reading: str, judged: set[str] | None = None) -> bool:
     """One decoded `sources` or `block` reading: refused whole when it holds
-    `'` or a backslash, accepted at once when it is only
-    _PLAIN_READING_BYTES, and otherwise refused when one of its entries,
-    trimmed of _TOKEN_SPACE, is a name host_name_refused refuses -- each
-    distinct entry asked once, however often the list repeats it."""
-    if "'" in reading or "\\" in reading:
+    one of _READING_REFUSED, accepted at once when it is only
+    _PLAIN_READING_BYTES (_plain_reading), and otherwise judged entry by
+    entry (_query_entries_refused), `judged` the entries already asked on
+    the line."""
+    if any(mark in reading for mark in _READING_REFUSED):
         return True
-    if reading.isascii() and not reading.encode("ascii").translate(None, _PLAIN_READING_BYTES):
+    if _plain_reading(reading):
         return False
-    return any(host_name_refused(entry.strip(_TOKEN_SPACE)) for entry in set(reading.split(",")))
+    return _query_entries_refused(reading, set() if judged is None else judged)
+
+
+def _plain_reading(reading: str) -> bool:
+    """Reading 3's fast accept: is the reading only _PLAIN_READING_BYTES,
+    plain host characters and commas? No entry of it can be refused: none of
+    those characters is one host_name_refused refuses or folds, and a
+    trimmed entry of them holds no colon. A shortcut held equal to
+    _query_entries_refused over every code point (ReadingShortcutTest, the
+    dev branch's D-SINK-87 suite), not a second rule."""
+    return reading.isascii() and not reading.encode("ascii").translate(None, _PLAIN_READING_BYTES)
+
+
+def _query_entries_refused(reading: str, judged: set[str]) -> bool:
+    """Reading 3's judgment with no shortcut: is an entry of `reading`, split
+    at `,` and trimmed of _TOKEN_SPACE as av_get_token reads it, a name
+    host_name_refused refuses? An entry already in `judged` is not asked
+    again; every entry asked is added to it."""
+    for raw in set(reading.split(",")):
+        entry = raw.strip(_TOKEN_SPACE)
+        if entry in judged:
+            continue
+        judged.add(entry)
+        if host_name_refused(entry):
+            return True
+    return False
 
 
 def stream_host_name_refused(url: str) -> bool:

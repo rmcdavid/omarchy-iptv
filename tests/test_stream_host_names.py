@@ -35,14 +35,16 @@ same predicate (bin/helper/02-sources.py, the D-SINK-87 block):
      as a name holding `%`;
   3. for udp and rtp, every entry of the `sources` and `block` values,
      which FFmpeg decodes (once; rtp twice, and resolves both) and looks up
-     by name; a reading holding `'` or a backslash, as decoded, is refused
-     whole.
+     by name, under any name FFmpeg reads as one of those two (it decodes a
+     name into a C string, so `sources%00x` is `sources`); a reading holding
+     `'`, a backslash, a bracket or a NUL, as decoded, is refused whole.
 A fast accept in front of the readings (an authority of plain ASCII with a
 digits-only port, never for udp or rtp) is held equal to them by
 FastPathTest over every code point, and held to be TAKEN for the plain
-addresses a playlist is made of. CostTest holds reading 3's own shortcuts,
-so a 4,096-character source list costs a few calls per line, not one per
-entry.
+addresses a playlist is made of; reading 3's own fast accept is held equal
+to its per-entry judgment by ReadingShortcutTest the same way. CostTest
+holds reading 3's own shortcuts, so a 4,096-character source list costs a
+few calls per line, not one per entry, however many pairs repeat it.
 
 How this module observes it: the shipping `playlist` verb as a subprocess
 on a local playlist FILE (nothing is fetched, nothing is looked up), and
@@ -153,6 +155,30 @@ REFUSED = [
     "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
     # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
     "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
+    # A name FFmpeg n9.0.2 reads up to its first decoded NUL: find_opt
+    # decodes it into a C string, so `sources%00` and `block%00x` are
+    # `sources` and `block` to it (the review of 3ba4044).
+    "udp://@239.1.1.1:5000?sources%00=evil;sid=qqqqqq.test",
+    "udp://@239.1.1.1:5000?block%00x=user:pass@evil.test",
+    "rtp://239.1.1.1:5004?sources%00=evil%3Bsid.qqqqqq",
+    "rtp://239.1.1.1:5004?block%00=evil+qqqqqq.test",
+    # A bracket in an entry: ip.c hands each entry to getaddrinfo as it is,
+    # with no bracket handling, so `[2001:db8::1]qqqqqq` is looked up as a
+    # NAME holding `[`, colons and `]` (the review of 3ba4044).
+    "udp://@239.1.1.1:5000?sources=[2001:db8::1]qqqqqq",
+    "udp://@239.1.1.1:5000?sources=%5Bfe80::1%2525evil.qqqqqq%5D",
+    "rtp://239.1.1.1:5004?block=[::1]evil.test,10.0.0.1",
+    "udp://@239.1.1.1:5000?block=10.0.0.1,qqqqqq]evil",
+    # A NUL in a value ends FFmpeg's C string, so the list past it is not the
+    # one FFmpeg reads: refused whole, as a quote is, not read two ways.
+    "udp://@239.1.1.1:5000?sources=10.0.0.1,evil.test%00qqqqqq",
+    # An entry holding only a decoded `:`, `=`, `&` or tab of the refused
+    # characters: reading 3's fast accept must trust none of them (the
+    # review of 3ba4044 added each to it with every suite green).
+    "udp://@239.1.1.1:5000?sources=user%3Aqqqqqq.evil.test",
+    "udp://@239.1.1.1:5000?block=a%3Dqqqqqq.evil",
+    "udp://@239.1.1.1:5000?sources=evil%26qqqqqq",
+    "udp://@239.1.1.1:5000?sources=evil%09qqqqqq",
     # 6. D-SINK-88: an unescaped scheme's host whose folded form (the idna
     #    codec's, and NFKD's) holds `;`, `%40` or a space.
     "rtsp://evil" + chr(0xFF1B) + "qqqqqq.test/stream",
@@ -295,9 +321,11 @@ class SubsumptionTest(unittest.TestCase):
 
 class FormTest(unittest.TestCase):
     """_stream_authority_refused, readings 1 and 2, asked of host[:port]
-    texts directly: some of these urlsplit refuses before the gate is asked
-    (a bracket that opens the host), so a vector through the gate alone
-    could not hold the form's every decision."""
+    texts directly: urlsplit (Python 3.14) refuses some of these before the
+    gate is asked -- a netloc holding one kind of bracket, text before a `[`
+    in the host[:port] or between its `]` and a port's colon, a bracketed
+    host that is neither an IPv6 address nor IPvFuture-shaped -- so a vector
+    through the gate alone could not hold the form's every decision."""
 
     REFUSED = ["[::1]x", "[::1]x:80", "[::1]]", "[::1]:8[0]", "[v1.a]", "[v1.a:b]:80", "[::1", "a]b", "a[b",
                "v1.evil]x", "v1.a]b.test:80", "h.test:8o", "h.test:80:81"]
@@ -396,6 +424,51 @@ class FastPathTest(unittest.TestCase):
         self.assertEqual(calls, query)
 
 
+class ReadingShortcutTest(unittest.TestCase):
+    """Reading 3's fast accept (_plain_reading, asked by
+    _query_reading_refused) is a shortcut, not a rule, held as FastPathTest
+    holds the authority's: whatever it accepts, the per-entry judgment
+    (_query_entries_refused) lets through. Held over every code point alone,
+    at an entry's edge, as an entry between two, and inside an entry, so a
+    character it wrongly trusts is found wherever av_get_token's trim would
+    hide it (a tab at an entry's edge is trimmed, inside one it is not). And
+    the shortcut is what the reading's judgment answers with: over the low
+    code points in the same places, _query_reading_refused answers what it
+    answers with the shortcut turned off. The review of 3ba4044 added `:`,
+    `=`, `&` and a tab to the shortcut's set, each with every suite green."""
+
+    PLACES = ["%s", "10.0.0.1%s,10.0.0.2", "10.0.0.1,%s,10.0.0.2", "h.te%sst"]
+
+    def test_what_the_shortcut_accepts_no_entry_refuses(self):
+        plain = getattr(helper, "_plain_reading", None)
+        entries = getattr(helper, "_query_entries_refused", None)
+        self.assertIsNotNone(plain)
+        self.assertIsNotNone(entries)
+        accepted, wrong = 0, []
+        for place in self.PLACES:
+            for c in range(0x110000):
+                reading = place % chr(c)
+                if plain(reading):
+                    accepted += 1
+                    if entries(reading, set()) is not False:
+                        wrong.append(ascii(reading))
+        # The 66 plain characters and the comma, in each of the four places:
+        # a shortcut that trusted nothing would be red here too.
+        self.assertEqual((accepted, wrong[:8]), (67 * 4, []))
+
+    def test_the_reading_is_judged_as_with_the_shortcut_off(self):
+        judge = helper._query_reading_refused
+        readings = [place % chr(c) for place in self.PLACES for c in range(0x800)]
+        on = [judge(reading) for reading in readings]
+        with mock.patch.object(helper, "_plain_reading", lambda reading: False):
+            off = [judge(reading) for reading in readings]
+        wrong = [ascii(reading) for reading, a, b in zip(readings, on, off) if a != b]
+        # Both answers occur: 43 code points below U+0800 are refused in each
+        # place, and inside an entry also the four av_get_token trims at an
+        # edge (tab, LF, CR and the space).
+        self.assertEqual((wrong[:8], on.count(True)), ([], 43 * 4 + 4))
+
+
 class CostTest(unittest.TestCase):
     """Reading 3's cost (constraint 7): a provider's `sources` or `block`
     list, as long as a stream URL may be (M3U_MAX_URL), costs the parse at
@@ -403,12 +476,16 @@ class CostTest(unittest.TestCase):
     each distinct entry) and one read of the query, not one call per entry -- the review of 95f1bb9 measured such lists at up to
     68 s per 10,000 lines. Counted, not timed, so it cannot pass by luck or
     fail by load: a reading of plain characters is accepted at once (lists
-    of distinct numbers, IPv4 literals and names among the shapes), a
-    repeated entry is judged once, rtp's second decode is skipped when it
-    changes nothing, and the listening rule's read of the query is reused.
-    A list of DISTINCT entries that are not plain -- IPv6 literals, say --
-    still costs a call per entry: bounding that is a refusal past a count,
-    which is the owner's call, not a shortcut."""
+    of distinct numbers, IPv4 literals and names among the shapes), each
+    distinct entry is judged once per line however many pairs repeat it (a
+    query of `sources=::1&` pairs among the shapes, which the review of
+    3ba4044 counted at 340 calls a line), a value already read on the line
+    is not decoded again, a reading already judged on it, rtp's unchanged
+    second decode among them, is not judged again (the shapes say how many
+    distinct readings each holds), and the listening rule's read of the
+    query is reused. A list of DISTINCT entries that are not plain -- IPv6 literals,
+    say -- still costs a call per entry: bounding that is a refusal past a
+    count, which is the owner's call, not a shortcut."""
 
     @staticmethod
     def filled(head, unit):
@@ -425,20 +502,26 @@ class CostTest(unittest.TestCase):
         return url
 
     def shapes(self):
+        """(url, the distinct readings it holds): one for each list, none for
+        the `%41&` query, which names no source, one for a line of one pair
+        repeated, and two for one of two pairs repeated."""
         shapes = []
         for scheme, authority in (("udp", "@239.1.1.1:5000"), ("rtp", "239.1.1.1:5004")):
             for name in ("sources", "block"):
                 head = "%s://%s?%s=" % (scheme, authority, name)
-                shapes += [self.filled(head, "1,"), self.filled(head, ","), self.filled(head, "::1,"),
-                           self.filled(head, "10.0.0.1,"), self.filled(head, "+192.0.2.2,"),
-                           self.distinct(head, "%d"), self.distinct(head, "10.0.%d.1"),
-                           self.distinct(head, "h%d.test")]
-            shapes.append(self.filled("%s://%s?" % (scheme, authority), "%41&"))
+                shapes += [(self.filled(head, "1,"), 1), (self.filled(head, ","), 1), (self.filled(head, "::1,"), 1),
+                           (self.filled(head, "10.0.0.1,"), 1), (self.filled(head, "+192.0.2.2,"), 1),
+                           (self.distinct(head, "%d"), 1), (self.distinct(head, "10.0.%d.1"), 1),
+                           (self.distinct(head, "h%d.test"), 1)]
+            query = "%s://%s?" % (scheme, authority)
+            shapes += [(self.filled(query, "%41&"), 0), (self.filled(query, "sources=::1&"), 1),
+                       (self.filled(query, "block=::1&"), 1), (self.filled(query, "sources=::1,::2&block=::2,::1&"), 2)]
         return shapes
 
     def test_a_long_source_list_costs_a_few_calls_per_line(self):
         real_name, real_params = helper.host_name_refused, helper.stream_params
-        names, params = [], []
+        real_reading, real_decode = helper._query_reading_refused, urllib.parse.unquote_plus
+        names, params, readings, decodes = [], [], [], []
 
         def name(*args, **kwargs):
             names.append(args[0])
@@ -448,13 +531,26 @@ class CostTest(unittest.TestCase):
             params.append(args[0])
             return real_params(*args, **kwargs)
 
+        def reading(*args, **kwargs):
+            readings.append(args[0])
+            return real_reading(*args, **kwargs)
+
+        def decode(*args, **kwargs):
+            decodes.append(args[0])
+            return real_decode(*args, **kwargs)
+
         got = []
-        with mock.patch.object(helper, "host_name_refused", name), mock.patch.object(helper, "stream_params", read):
-            for url in self.shapes():
-                del names[:], params[:]
+        with mock.patch.object(helper, "host_name_refused", name), mock.patch.object(helper, "stream_params", read), \
+                mock.patch.object(helper, "_query_reading_refused", reading), \
+                mock.patch.object(urllib.parse, "unquote_plus", decode):
+            for url, _ in self.shapes():
+                del names[:], params[:], readings[:], decodes[:]
                 refusal = helper.stream_entry_refusal(url, {"host": "", "local": True})[0]
-                got.append((url[:32], len(url) > 4000, refusal, len(names) <= 3, len(params)))
-        self.assertEqual(got, [(url[:32], True, "", True, 1) for url in self.shapes()])
+                # Only reading 3 decodes with `+` as a space: each distinct
+                # value once a decode, at most two values here, rtp's twice.
+                got.append((url[:32], len(url) > 4000, refusal, len(names) <= 3, len(params), len(readings),
+                            len(decodes) <= 4))
+        self.assertEqual(got, [(url[:32], True, "", True, 1, count, True) for url, count in self.shapes()])
 
 
 class ParseTest(unittest.TestCase):

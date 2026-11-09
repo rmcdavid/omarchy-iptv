@@ -592,6 +592,46 @@
    "stream": false
   },
   {
+   "url": "srt://relay.example.test:9000?mode%00=listener",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode%00x=rendezvous",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode=caller&mode%00=listener",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "udp://@239.1.1.1:1234?localport%00=4444",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "udp://@239.1.1.1:1234?localaddr%00=192.168.1.5",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtp://@239.0.0.2:5004?local_rtpport%00=5006",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtp://@239.0.0.2:5004?localrtpport%00x=5006",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode%01=listener",
+   "listen": "",
+   "stream": true
+  },
+  {
    "url": "http://h.test/x?token=a&reuse_socket=1",
    "listen": "listener",
    "stream": false
