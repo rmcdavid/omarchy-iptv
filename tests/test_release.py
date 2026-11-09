@@ -1177,6 +1177,39 @@ class ReleaseCase(unittest.TestCase):
         self.build()
         self.assertTrue(self.origin_takes_main())
 
+    def test_a_push_default_that_maps_main_elsewhere_is_refused(self):
+        """push.default `upstream` (or its old name `tracking`) maps a branch
+        named bare on the push command line onto its branch.<name>.merge, so
+        the release step's `git push --atomic origin dev main vX.Y.Z` sent main
+        to refs/heads/elsewhere while the guard, asking about main, passed
+        (measured on git 2.56.0, the record's D-REL-13 section)."""
+        self.git('config', 'branch.main.remote', 'origin')
+        for default, merge in (('upstream', 'refs/heads/elsewhere'),
+                               ('tracking', 'refs/heads/elsewhere'),
+                               ('upstream', 'elsewhere')):
+            with self.subTest(default=default, merge=merge):
+                self.git('config', 'push.default', default)
+                self.git('config', 'branch.main.merge', merge)
+                self.assert_refused('push.default is %s and the local main tracks %s'
+                                    % (default, merge),
+                                    'a cut that cannot see it does not ship')
+        # The controls: main tracking main, or a push.default that maps
+        # nothing, sends main to main (measured), and the guard passes.
+        for default, merge in (('upstream', 'refs/heads/main'), ('upstream', 'main'),
+                               ('simple', 'refs/heads/elsewhere'),
+                               (None, 'refs/heads/elsewhere')):
+            with self.subTest(control=default, merge=merge):
+                if default is None:
+                    self.git('config', '--unset', 'push.default')
+                else:
+                    self.git('config', 'push.default', default)
+                self.git('config', 'branch.main.merge', merge)
+                self.assertEqual([], release.remote_main_problems(self.dir))
+        self.git('config', '--unset', 'branch.main.merge')
+        self.git('config', '--unset', 'branch.main.remote')
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
     def test_ancestry_this_clone_alone_was_given_does_not_decide(self):
         """A replace ref or a grafts file gives the local main a parent the
         server's object graph does not have: diverged mains then read as an

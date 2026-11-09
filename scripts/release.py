@@ -543,6 +543,24 @@ def remote_main_problems(root, tag_name=None):
         return ['%s has a push refspec of its own (%s), so the release push need not land on '
                 'the refs asked about here and %s: unset it and cut again.'
                 % (RELEASE_REMOTE, mapped, nothing_shows)]
+    # push.default `upstream`, or its old name `tracking`, maps a branch named
+    # bare on the push command line onto its branch.<name>.merge (measured on
+    # git 2.56.0: `git push --atomic origin main` sent main to
+    # refs/heads/elsewhere). git maps only when branch.main.remote is set and
+    # main tracks exactly one branch; this refuses without asking either, so
+    # it also refuses two configurations that would map nothing. `--get` reads
+    # the last value, the one git uses.
+    default = run(['config', '--get', 'push.default']).stdout.decode('utf-8', 'replace').strip()
+    if default in ('upstream', 'tracking'):
+        tracked = run(['config', '--get-all', 'branch.%s.merge' % RELEASE_BRANCH])
+        for merge in tracked.stdout.decode('utf-8', 'replace').splitlines():
+            merge = merge.strip()
+            if merge and merge not in (ref, RELEASE_BRANCH):
+                return ['push.default is %s and the local %s tracks %s (branch.%s.merge), so '
+                        'the release push need not land on the refs asked about here and %s: '
+                        'set push.default to simple, or have %s track %s, and cut again.'
+                        % (default, RELEASE_BRANCH, merge, RELEASE_BRANCH, nothing_shows,
+                           RELEASE_BRANCH, ref)]
     try:
         listed = _ask_remote(['git', '-c', 'credential.interactive=false', '-C', root,
                               'ls-remote', RELEASE_REMOTE] + asked, env)
