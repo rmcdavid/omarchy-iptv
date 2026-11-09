@@ -482,7 +482,7 @@ class ReleaseCase(unittest.TestCase):
 
     def test_an_origin_that_cannot_be_read_is_refused(self):
         self.git('remote', 'set-url', 'origin', os.path.join(self.top, 'gone.git'))
-        self.assert_refused('git ls-remote origin refs/heads/main failed (',
+        self.assert_refused('git ls-remote origin refs/heads/main refs/tags/v0.9.9 failed (',
                             'does not appear to be a git repository',
                             'a cut that cannot see it does not ship')
 
@@ -496,7 +496,8 @@ class ReleaseCase(unittest.TestCase):
         self.git('config', 'remote.origin.uploadpack', hang)
         with mock.patch.object(release, 'REMOTE_TIMEOUT', 1):
             start = time.monotonic()
-            self.assert_refused('git ls-remote origin refs/heads/main did not answer within 1 s',
+            self.assert_refused('git ls-remote origin refs/heads/main refs/tags/v0.9.9 did not '
+                                'answer within 1 s',
                                 'a cut that cannot see it does not ship')
             self.assertLess(time.monotonic() - start, 4.5)
 
@@ -618,6 +619,172 @@ class ReleaseCase(unittest.TestCase):
         usage = self.release_cli('build', '--help').stdout.split('\n\n')[0]
         self.assertEqual({'-h', '--gate-already-green', '--no-validate', '--no-tag', '--trailer'},
                          set(re.findall(r'\[(--?[a-z][-a-z]*)', usage)))
+
+    # -- D-REL-13, the review's round: the tag, and the branches nobody reached
+
+    def origin_tag(self, name, commit):
+        """An annotated tag on origin alone, as a web-UI release or a push from
+        another clone would leave it."""
+        self.ogit('-c', 'user.name=web', '-c', 'user.email=web@example.invalid',
+                  'tag', '-a', name, commit, '-m', 'release elsewhere')
+
+    def test_a_cut_refuses_while_origin_already_has_its_tag(self):
+        """The guard asked about main alone, so a cut whose tag push would be
+        refused passed it, and the push then moved main and refused the tag:
+        origin's tag, the one `gh release create --verify-tag` publishes from,
+        kept naming the previous artifact."""
+        self.origin_tag('v0.9.9', self.git('rev-parse', 'main').strip())
+        self.assertEqual('', self.git('tag', '--list').strip())
+        self.assert_refused(
+            'origin already has the tag v0.9.9, so the tag this cut writes could not be pushed',
+            'bump the manifest.json version, or have a person look at that tag, before cutting')
+        # What it says to do lets the cut go, and the cut then fast-forwards.
+        self.bump('1.0.0')
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
+    def test_an_untagged_cut_does_not_ask_about_the_tag(self):
+        self.origin_tag('v0.9.9', self.git('rev-parse', 'main').strip())
+        release.build(self.dir, gate_already_green=True, validate=False, tag=False,
+                      out=io.StringIO(), today=TODAY)
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_tag_decoy_does_not_decide(self):
+        """The tag's pattern is a tail match as well: a tag named
+        x/refs/tags/v0.9.9 is printed for refs/tags/v0.9.9 and is not it."""
+        decoy = 'x/refs/tags/v0.9.9'
+        self.origin_tag(decoy, self.git('rev-parse', 'main').strip())
+        printed = [line.split('\t')[1] for line in
+                   self.git('ls-remote', 'origin', 'refs/tags/v0.9.9').splitlines()]
+        self.assertEqual(['refs/tags/' + decoy], printed)
+        new = self.build()
+        self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+
+    def test_a_tag_a_push_that_was_not_atomic_left_on_origin_refuses_the_rerun(self):
+        """The chain the review measured. A commit lands on origin after the
+        cut, and a push that is not atomic publishes dev and the tag while main
+        is refused (here origin takes those two itself, by fetch, which is what
+        that push leaves). Deleting the local tag and fetching main brings the
+        tag back; deleting it again used to clear every guard, and the next
+        push would move origin's main and refuse the tag, which stayed at a
+        cut that is not on origin's main."""
+        cut = self.build()
+        self.origin_commit()
+        subprocess.run(['git', '-C', self.origin, 'fetch', '-q', self.dir,
+                        'refs/heads/dev:refs/heads/dev', 'refs/tags/v0.9.9:refs/tags/v0.9.9'],
+                       check=True, stdout=subprocess.PIPE)
+        self.assertFalse(self.origin_takes_main())
+        self.git('tag', '-d', 'v0.9.9')
+        self.git('update-ref', 'refs/heads/main', 'refs/heads/main^')
+        self.git('fetch', '-q', 'origin', 'main:main')
+        self.assertEqual(cut, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+        self.git('tag', '-d', 'v0.9.9')
+        self.assertEqual(cut, self.ogit('rev-parse', 'refs/tags/v0.9.9^{commit}').strip())
+        self.assert_refused('origin already has the tag v0.9.9,')
+
+    def test_a_comparison_git_cannot_make_is_refused(self):
+        """The fallback: neither ancestry answer is a yes or a no, here because
+        a commit under the local main is missing from the object store."""
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        first = self.local_commit()
+        mine = self.local_commit()
+        os.unlink(os.path.join(self.dir, '.git', 'objects', first[:2], first[2:]))
+        said = self.assert_refused(
+            "git could not compare origin's main at %s with the local main at %s (" % (web[:12], mine[:12]),
+            'look at both before cutting')
+        self.assertIn(first, said)
+
+    def test_a_partial_clone_fetches_nothing_to_answer(self):
+        """A partial clone fetches a missing object on demand, which would make
+        the guard that only reads write a pack. GIT_NO_LAZY_FETCH stops it."""
+        subprocess.run(['git', '-C', self.origin, 'config', 'uploadpack.allowFilter', 'true'],
+                       check=True)
+        for key, value in (('remote.origin.promisor', 'true'),
+                           ('remote.origin.partialclonefilter', 'blob:none'),
+                           ('core.repositoryformatversion', '1'),
+                           ('extensions.partialClone', 'origin')):
+            self.git('config', key, value)
+        web = self.origin_commit()
+        with mock.patch.dict(os.environ):
+            os.environ.pop('GIT_NO_LAZY_FETCH', None)
+            self.assert_refused("origin's main is at %s, a commit this clone does not have" % web[:12],
+                                'run git fetch origin main:main and cut again')
+            # The control: this clone does fetch on demand, so the guard's
+            # footprint is a real observation and not an empty one.
+            before = self.git('count-objects', '-v')
+            self.git('cat-file', '-e', '%s^{commit}' % web)
+            self.assertNotEqual(before, self.git('count-objects', '-v'))
+
+    def test_a_server_message_quoted_in_a_refusal_loses_the_urls_userinfo(self):
+        """What reaches the failure sentence from a real remote is the server's
+        own text: git anonymizes the URLs it prints itself, a server's ERR line
+        it prints as sent."""
+        payload = b'ERR https://x-access-token:SECRET@github.com/r/x.git\n'
+        packet = (b'%04x' % (len(payload) + 4) + payload).decode('ascii')
+        wrapper = os.path.join(self.top, 'refusing-upload-pack')
+        with io.open(wrapper, 'w', encoding='utf-8') as fh:
+            fh.write("#!/bin/sh\nprintf '%%s' '%s'\n" % packet)
+        os.chmod(wrapper, 0o755)
+        self.git('config', 'remote.origin.uploadpack', wrapper)
+        raw = subprocess.run(['git', '-C', self.dir, 'ls-remote', 'origin', 'refs/heads/main'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertIn(b'x-access-token:SECRET@', raw.stderr)
+        said = self.assert_refused('failed (fatal: remote error: https://github.com/r/x.git)')
+        ran = self.release_cli('build', '--gate-already-green', '--no-validate')
+        self.assertEqual(1, ran.returncode, ran.stdout)
+        self.assertTrue(ran.stdout.startswith('release: REFUSED. git ls-remote origin'), ran.stdout)
+        for text in (said, ran.stdout):
+            self.assertIn('https://github.com/r/x.git', text)
+            self.assertNotIn('SECRET', text)
+            self.assertNotIn('x-access-token', text)
+
+    def test_a_clone_with_no_local_main_is_refused(self):
+        """`git clone -b dev` leaves no local main, and a cut has nothing to be
+        cut onto until the fetch the sentence names."""
+        self.git('update-ref', '-d', 'refs/heads/main')
+        self.assert_refused('this clone has no local main, so a release has nothing to be cut onto',
+                            'run git fetch origin main:main and cut again')
+        self.git('fetch', '-q', 'origin', 'main:main')
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
+    def test_an_answer_that_is_not_a_commit_id_is_refused(self):
+        """Through git this cannot happen, because ls-remote prints the hex ids
+        its client parsed, so a double answers for git here, and it is the less
+        forgiving side (rule 10). `main` is what would pass as its own
+        ancestor; a SHA-256 id is an id, refused only because it is not here."""
+        real = subprocess.run
+
+        def answering(answer):
+            def run(args, *rest, **kwargs):
+                if 'ls-remote' in args:
+                    return subprocess.CompletedProcess(
+                        args, 0, ('%s\trefs/heads/main\n' % answer).encode(), b'')
+                return real(args, *rest, **kwargs)
+            return run
+        with mock.patch.object(release.subprocess, 'run', answering('main')):
+            self.assert_refused("answered 'main' for refs/heads/main, which is not a commit id",
+                                'look at the remote before cutting')
+        absent = 'ab' * 32
+        with mock.patch.object(release.subprocess, 'run', answering(absent)):
+            self.assert_refused("origin's main is at %s, a commit this clone does not have"
+                                % absent[:12])
+
+    def test_a_manifest_that_gives_no_version_is_refused_in_one_sentence(self):
+        """The version is read before the origin guard now, which asks about its
+        tag, so a manifest that gives none refuses there, in a sentence."""
+        for name, change, said in (
+                ('missing', lambda: self.git('rm', '-q', 'manifest.json'), 'FileNotFoundError'),
+                ('not JSON', lambda: self.write('manifest.json', 'not json\n'), 'JSONDecodeError'),
+                ('no version', lambda: self.write('manifest.json', '{"entryPoints": {}}\n'),
+                 "KeyError: 'version'")):
+            with self.subTest(name):
+                change()
+                self.commit_all(name)
+                self.assert_refused('could not read the version from manifest.json (%s' % said,
+                                    'so the cut cannot name its tag or ask origin about it: fix '
+                                    'it and cut again')
 
     # -- the allowlist check that runs in the gate ------------------------
 

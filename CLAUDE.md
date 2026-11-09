@@ -130,10 +130,12 @@ Consequences you must respect:
   in; `check.sh` runs just its 11-check preflight, and a README that
   promises the live run is only true while this step is run), then
   `scripts/release.py build --gate-already-green` (which refuses while
-  origin's `main` holds a commit the local `main` lacks, D-REL-13,
-  2026-11-09, after the owner's web commit moved it, so run
-  `git fetch origin main:main` first), then push
-  `dev`, `main` and the tag, then create the GitHub Release for that tag
+  origin's `main` holds a commit the local `main` lacks or origin already
+  has the tag, D-REL-13, 2026-11-09, after the owner's web commit moved it,
+  so run `git fetch origin main:main` first), then push `dev`, `main` and
+  the tag in one `git push --atomic origin dev main vX.Y.Z` (a plain push
+  sends `dev` and the tag even when `main` is refused), then create the
+  GitHub Release for that tag
   (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
   GitHub's latest Release object, not the newest tag, and it read v0.7.0 for
