@@ -62,12 +62,18 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     cache written before the rule can hold one (DESTINATION_RULES 3 has the
     shell refetch it once at the next start or swap), and `--url` is typed.
     Refused as `unsupported_scheme` with one fixed sentence: unlike
-    `local_address` below, it names no host, which may be a userinfo. On a
-    `player start` or `player restart` the shell reads that code as the
-    channel's own refusal (PLAYER_START_CHANNEL_REFUSALS: a card, and the
-    channel marked failed); on a `play`, a zap into a running player, it
-    is D-PLY-42's untold refusal (open, the owner's call): no card and no
-    mark, so a next or previous zap lands on the channel again."""
+    `local_address` below, it names no host, which may be a userinfo. The
+    shell reads that code as the channel's own refusal
+    (PLAYER_START_CHANNEL_REFUSALS: a card, and the channel marked failed,
+    unless the user has stopped since) on a `player start` or `player
+    restart` it sends with no player playing on, and on the automatic
+    restart of another build's player, which it then stops. A `player
+    start` refused while the player the shell observes plays on is D-PLY-52's
+    instead: the label goes back and nothing is told or marked. A channel
+    change sends one while another build's player is still owed its restart
+    (Model.playFork). A `play`, a zap into a running player, is untold the
+    same way, D-PLY-42's untold refusal (open, the owner's call): no card
+    and no mark, so a next or previous zap lands on the channel again."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)

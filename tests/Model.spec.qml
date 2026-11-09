@@ -249,16 +249,20 @@ TestCase {
   }
 
   // D-SINK-88 in the shell's own engine: hostNameRefused judges a name that
-  // is not ASCII again in its NFKC form, the form the helper's socket hands
-  // the resolver, through String.prototype.normalize, which in V4 is Qt's
-  // own and not node's ICU. One code point folding to each of `;`, `=`,
-  // `&`, `%`, a space and `@`, the validator's refusal of one of the shared
-  // fixture's vectors, and the names the fold must leave alone.
+  // is not ASCII again in its NFKD form, which holds every refused character
+  // the helper's socket can hand the resolver, through
+  // String.prototype.normalize, which in V4 is Qt's own and not node's ICU.
+  // One code point folding to each of `;`, `=`, `&`, `%`, a space and `@`,
+  // the sequence whose `=` NFKC alone composes away and U+2260 (the review
+  // of 95f1bb9), the validator's refusal of one of the shared fixture's
+  // vectors, and the names the fold must leave alone.
   function test_hostNameFoldIsTheResolversInV4() {
     compare([Model.hostNameRefused("user；sid.test"), Model.hostNameRefused("user﹦sid.test"),
              Model.hostNameRefused("user﹠sid.test"), Model.hostNameRefused("user％sid.test"),
              Model.hostNameRefused("user¨sid.test"), Model.hostNameRefused("user＠sid.test")],
             [true, true, true, true, true, true])
+    compare([Model.hostNameRefused("user" + String.fromCharCode(0xff1d, 0x345, 0x338) + "sid.test"),
+             Model.hostNameRefused("user" + String.fromCharCode(0x2260) + "sid.test")], [true, true])
     compare(Model.validateSourceUrl("http://user;sid.test/x").code, "invalid")
     compare([Model.hostNameRefused("bücher.test"), Model.hostNameRefused("h．test"),
              Model.hostNameRefused("hＡ.test"), Model.hostNameRefused("h.test")], [false, false, false, false])

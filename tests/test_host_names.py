@@ -27,10 +27,17 @@ every name. "Never looked up" means the recorder saw no call. Nothing leaves
 the machine. An IPv6 literal keeps its colons and its zone's `%`; the
 controls below are looked up exactly as before.
 
-D-SINK-88 (2026-11-08): a name that is not ASCII is judged again in its NFKC
-form, the fold the socket's idna codec applies; PredicateTest holds every
-code point to the codec itself, and the shared source-urls fixture carries
-every code point the fold is for.
+D-SINK-88 (2026-11-08): a name that is not ASCII is judged again in its NFKD
+form. The socket's idna codec runs nameprep -- stringprep's B.1 removed, B.2
+case folding, then NFKC under Unicode 3.2 -- and NFKC alone, which this
+judged first, misses names where B.2 keeps a `=` from composing away
+(`<U+FF1D><U+0345><U+0338>`: B.2 maps U+0345 to the letter U+03B9). NFKD
+never composes. PredicateTest holds the argument over every code point (B.1,
+B.2 and Unicode 3.2 add no refused character the current NFKD lacks, and `=`
+is the one refused character a composition can take), holds every
+one-code-point name and every sequence of the class the review found to the
+codec itself, and holds the shared source-urls fixture to a vector for every
+code point the codec folds.
 """
 import functools
 import io
@@ -67,11 +74,14 @@ NAMES = [
     # One label as well: the rule is asked before D-SINK-83's one-label
     # test, so the refusal is this rule's whatever the policy.
     "u:" + SECRET + "@evil",
-    # D-SINK-88: names whose code points pass and whose NFKC form, which the
-    # socket's idna codec hands the resolver, does not: `;`, `%40`, a space,
-    # `@` and `:`.
+    # D-SINK-88: names whose code points pass and whose form as the socket's
+    # idna codec hands it to the resolver does not: `;`, `%40`, a space, `@`
+    # and `:`.
     "evil" + chr(0xFE54) + SECRET + ".test", "evil" + chr(0xFF05) + "40" + SECRET + ".test",
     "evil" + chr(0xA8) + SECRET + ".test", "u" + chr(0xFF20) + "evil.test", "u" + chr(0xFF1A) + SECRET + ".evil.test",
+    # And a sequence the codec hands on holding `=` while NFKC alone does
+    # not (the review of 95f1bb9): the socket would look up `u=...`.
+    "u" + chr(0xFF1D) + chr(0x345) + chr(0x338) + SECRET + ".evil.test",
 ]
 
 
@@ -109,30 +119,95 @@ def kept_by_nameprep(ch):
             and idna_codec.unicodedata.normalize("NFKC", ch) == ch)
 
 
+# The two one-code-point names the survey asks of the codec: inside a
+# left-to-right label, and as a label of its own, which is the only form a
+# right-to-left code point passes nameprep's bidi check in (U+FDFA and U+FDFB
+# fold to Arabic words separated by spaces).
+SURVEY_FORMS = ("user%ssid.test", "%s.test")
+
+
 @functools.lru_cache(maxsize=None)
 def codec_survey():
-    """One pass over every code point X, with the name `user<X>sid.test`:
-    -> (folds, missed). `folds` maps each X outside REFUSED_CHARS whose name
-    the socket's idna codec hands the resolver holding one of REFUSED_CHARS
-    to that name: what D-SINK-88 is for. `missed` lists each X whose name
-    host_name_refused lets through while the codec hands it on holding one:
-    what D-SINK-88 must leave empty. An ASCII name is asked of the codec
-    like any other; a code point nameprep keeps (kept_by_nameprep) adds no
-    ASCII, so it alone is not."""
+    """One pass over every code point X, with each of SURVEY_FORMS:
+    -> (folds, missed). `folds` maps each X outside REFUSED_CHARS whose name,
+    in either form, the socket's idna codec hands the resolver holding one
+    of REFUSED_CHARS to the first such (form, name sent): what D-SINK-88 is
+    for. `missed` lists each X and form whose name host_name_refused lets
+    through while the codec hands it on holding one: what D-SINK-88 must
+    leave empty. An ASCII name is asked of the codec like any other; a code
+    point nameprep keeps (kept_by_nameprep) adds no ASCII, so it alone is
+    not."""
     folds, missed = {}, []
     for c in range(0x110000):
         ch = chr(c)
         if c >= 0x80 and kept_by_nameprep(ch):
             continue
-        name = "user" + ch + "sid.test"
-        sent = socket_form(name)
-        if sent is None or not REFUSED_CHARS.intersection(map(ord, sent)):
-            continue
-        if c not in REFUSED_CHARS:
-            folds[c] = sent
-        if not helper.host_name_refused(name):
-            missed.append("U+%04X -> %s" % (c, ascii(sent)))
+        for form in SURVEY_FORMS:
+            name = form % ch
+            sent = socket_form(name)
+            if sent is None or not REFUSED_CHARS.intersection(map(ord, sent)):
+                continue
+            if c not in REFUSED_CHARS:
+                folds.setdefault(c, (form, sent))
+            if not helper.host_name_refused(name):
+                missed.append("U+%04X %s -> %s" % (c, form, ascii(sent)))
     return folds, missed
+
+
+def nameprep_map(ch):
+    """nameprep's mapping of one code point: nothing for B.1, map_table_b2
+    otherwise. map_table_b2 is B.3, then NFKC and B.3 again where they
+    change it, so a code point B.3 and Unicode 3.2's NFKC both leave is its
+    own mapping, and the slow table is asked only of the others."""
+    if stringprep.in_table_b1(ch):
+        return ""
+    if stringprep.map_table_b3(ch) == ch and idna_codec.unicodedata.normalize("NFKC", ch) == ch:
+        return ch
+    return stringprep.map_table_b2(ch)
+
+
+@functools.lru_cache(maxsize=None)
+def sequence_survey():
+    """The class the review of 95f1bb9 found, widened: every code point the
+    codec reads as `=` (or `=` and more), each followed by U+0338, with every
+    combining mark and every code point nameprep maps (MARKS) placed before
+    it, after it, before U+0345, or after U+0345 -- the orders in which B.2's
+    letter for U+0345, or a B.1 removal, decides whether `=` composes away.
+    `=` is the one refused character a composition can take (PredicateTest
+    holds that), so it is the one this class needs. -> (equals, marks,
+    hidden, missed): `hidden` counts the names the codec hands on holding a
+    refused character while their NFKC holds none -- the names an NFKC fold
+    lets through, so the class is real -- and `missed` lists those of any
+    kind host_name_refused lets through. The codec is asked only of a name
+    one of the two folds lets through: one both refuse is no question."""
+    u32 = idna_codec.unicodedata
+    equals, marks = [], []
+    for c in range(0x80, 0x110000):
+        if 0xD800 <= c <= 0xDFFF:
+            continue
+        ch = chr(c)
+        mapped = nameprep_map(ch)
+        if "=" in u32.normalize("NFKC", mapped):
+            equals.append(ch)
+        if mapped != ch or unicodedata.combining(ch):
+            marks.append(ch)
+    over, iota = chr(0x338), chr(0x345)
+    hidden, missed = 0, []
+    for e in equals:
+        for m in marks:
+            for middle in (m + over, over + m, m + iota + over, iota + m + over):
+                name = "h" + e + middle + ".test"
+                clean = REFUSED_CHARS.isdisjoint(map(ord, unicodedata.normalize("NFKC", name)))
+                refused = helper.host_name_refused(name)
+                if refused and not clean:
+                    continue
+                form = socket_form(name)
+                if form is None or REFUSED_CHARS.isdisjoint(map(ord, form)):
+                    continue
+                hidden += clean
+                if not refused:
+                    missed.append(ascii(name) + " -> " + form)
+    return len(equals), len(marks), hidden, missed
 
 
 def urlsplit_accepts(url):
@@ -183,37 +258,92 @@ class PredicateTest(unittest.TestCase):
         """Every code point of the whole range, inside a name and inside a
         name with its port: refused exactly for the five characters, a colon
         past the port's, the reader's whitespace (URL_SPACE_CHARS) and Cf --
-        or, D-SINK-88, for a code point whose NFKC form holds one of them."""
+        or, D-SINK-88, for a code point whose NFKD form holds one of them."""
         predicate = getattr(helper, "host_name_refused", None)
         self.assertIsNotNone(predicate)
         folds = {c for c in range(0x80, 0x110000)
-                 if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKC", chr(c))))}
+                 if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))}
+        self.assertEqual(len(folds - REFUSED_CHARS), 73)
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
                      if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds)]
             self.assertEqual(wrong[:8], [], "with_port=%s" % with_port)
 
-    def test_no_name_it_lets_through_reaches_the_resolver_as_one_it_refuses(self):
+    def test_nameprep_adds_no_refused_character_the_decomposed_form_lacks(self):
+        """Why NFKD is enough, held over every code point rather than
+        assumed. nameprep's output is NFKC (Unicode 3.2) of each code point's
+        mapping -- nothing for B.1, map_table_b2 otherwise -- and an NFKC
+        holds no refused character its NFKD lacks, because composition makes
+        only primary composites and no refused character is one (U+2000 and
+        U+2001 decompose to one code point, which composition never undoes).
+        So it is enough that, for every code point, the refused characters of
+        its mapping's Unicode 3.2 NFKD are among those of the code point and
+        of its current NFKD. And `=` is the only refused character that is
+        the first half of a pair a composition joins (U+2260), which is why
+        sequence_survey needs `=` alone."""
+        u32 = idna_codec.unicodedata
+        bad = []
+        for c in range(0x110000):
+            ch = chr(c)
+            if 0xD800 <= c <= 0xDFFF or stringprep.in_table_b1(ch):
+                continue
+            if u32.normalize("NFKD", ch) == ch and stringprep.map_table_b3(ch) == ch:
+                continue        # B.2 leaves it, and it decomposes to itself
+            sent = REFUSED_CHARS.intersection(map(ord, u32.normalize("NFKD", stringprep.map_table_b2(ch))))
+            if not sent <= REFUSED_CHARS.intersection(map(ord, ch + unicodedata.normalize("NFKD", ch))):
+                bad.append(hex(c))
+        composites, pairs = [], []
+        for db in (unicodedata, u32):
+            for c in range(0x110000):
+                mapping = db.decomposition(chr(c)) if not 0xD800 <= c <= 0xDFFF else ""
+                if not mapping or mapping.startswith("<"):
+                    continue
+                parts = [int(x, 16) for x in mapping.split()]
+                if c in REFUSED_CHARS and len(parts) > 1:
+                    composites.append(hex(c))
+                if len(parts) == 2 and parts[0] in REFUSED_CHARS:
+                    pairs.append((hex(c), chr(parts[0])))
+        self.assertEqual((bad[:8], composites, sorted(set(pairs))), ([], [], [("0x2260", "=")]))
+
+    def test_no_one_code_point_name_it_lets_through_reaches_the_resolver_as_one_it_refuses(self):
         """D-SINK-88, against the codec itself: for every code point X, if
-        host_name_refused lets `user<X>sid.test` through, the name the
-        socket's idna codec hands the resolver holds none of REFUSED_CHARS.
-        Red before the fold: 68 code points (63 that urlsplit also accepts,
-        and the five that fold to `@` or `:`)."""
+        host_name_refused lets `user<X>sid.test` or `<X>.test` through, the
+        name the socket's idna codec hands the resolver holds none of
+        REFUSED_CHARS. Red before the fold: 68 code points in the first form
+        (63 that urlsplit also accepts, and the five that fold to `@` or
+        `:`), and U+FDFA and U+FDFB in the second, 70 in all."""
         folds, missed = codec_survey()
-        self.assertGreaterEqual(len(folds), 68, "the codec's folds were not found")
+        self.assertEqual(len(folds), 70, "the codec's folds were not found")
+        self.assertEqual((len(missed), missed[:8]), (0, []))
+
+    def test_no_sequence_of_the_reviews_class_reaches_the_resolver_holding_a_refused_character(self):
+        """D-SINK-88's sequences, against the codec itself: a code point the
+        codec reads as `=`, U+0338, and a mark or a mapped code point around
+        it (sequence_survey). Red on the NFKC fold: the four
+        `h<X><U+0345><U+0338>.test` the review found, and longer ones built on
+        U+0345."""
+        equals, marks, hidden, missed = sequence_survey()
+        self.assertEqual((equals, marks >= 2000), (7, True), "the survey's inputs were not found")
+        self.assertGreaterEqual(hidden, 4, "the class NFKC alone lets through was not found")
         self.assertEqual((len(missed), missed[:8]), (0, []))
 
     def test_the_shared_fixture_holds_every_code_point_the_fold_is_for(self):
         """Both validators run tests/fixtures/source-urls.json, so the fold's
         vectors there are the node suite's oracle too: one refused vector
-        for each code point codec_survey finds, so the fixture cannot be
-        trimmed to green."""
+        for each code point codec_survey finds, in the form it found it in,
+        so the fixture cannot be trimmed to green; and the sequence and
+        U+2260 vectors besides."""
         cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
-                 if str(c.get("note", "")).startswith("D-SINK-88")]
-        listed = sorted(ord(c["input"][len("http://user")]) for c in cases if not c["ok"] and c["code"] == "invalid")
+                 if str(c.get("note", "")).startswith("D-SINK-88") and not c["ok"] and c["code"] == "invalid"]
+        listed = set(c["input"] for c in cases)
         targets = codec_survey()[0]
-        accepted = [hex(c) for c in targets if urlsplit_accepts("http://user" + chr(c) + "sid.test/x")]
-        self.assertEqual((listed, len(accepted)), (sorted(targets), 63))
+        wanted = {c: "http://" + (form % chr(c)) + "/x" for c, (form, _) in targets.items()}
+        accepted = [hex(c) for c, url in wanted.items() if urlsplit_accepts(url)]
+        extra = ["http://user" + chr(0xFF1D) + chr(0x345) + chr(0x338) + "sid.test/x",
+                 "http://user" + chr(0x2260) + "sid.test/x", "http://user" + chr(0xFE13) + "sid.test/x",
+                 "http://user" + chr(0xFE14) + "sid.test/x"]
+        self.assertEqual(([hex(c) for c, url in sorted(wanted.items()) if url not in listed],
+                          [ascii(u) for u in extra if u not in listed], len(accepted)), ([], [], 65))
 
     def test_one_port_is_fine_and_a_literal_keeps_its_colons(self):
         predicate = getattr(helper, "host_name_refused", lambda *_: "<missing>")
@@ -231,7 +361,12 @@ class PredicateTest(unittest.TestCase):
                    # D-SINK-88: a colon the fold makes is the name's, never
                    # the port's one: http.client splits at an ASCII colon.
                    ("h" + chr(0xFF1A) + "8080", True), ("h.test" + chr(0xFE55) + "80", True),
-                   ("h" + chr(0xFF1B) + "x.test:8080", True)]
+                   ("h" + chr(0xFF1B) + "x.test:8080", True),
+                   # The review of 95f1bb9: a sequence B.2 keeps `=` in, and
+                   # U+2260, which NFKD reads as `=` and U+0338.
+                   ("h" + chr(0xFF1D) + chr(0x345) + chr(0x338) + ".test", False),
+                   ("h" + chr(0x207C) + chr(0x345) + chr(0x338) + ".test:80", True),
+                   ("h" + chr(0x2260) + ".test", False)]
         self.assertEqual([(ascii(t), p, predicate(t, p)) for t, p in allowed + refused],
                          [(ascii(t), p, False) for t, p in allowed] + [(ascii(t), p, True) for t, p in refused])
 

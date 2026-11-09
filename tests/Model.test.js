@@ -7441,20 +7441,28 @@ checkCall("D-SINK-86: HOST_FORMAT_RANGES is exactly Unicode's Cf category, code 
   }
   return [ranges.length, wrong]
 }, [21, []])
-checkCall("D-SINK-86, D-SINK-88: hostNameRefused refuses a name holding @ % ; = & :, a reader's whitespace or a format character, or one whose NFKC form does, and no other code point", () => {
+checkCall("D-SINK-86, D-SINK-88: hostNameRefused refuses a name holding @ % ; = & :, a reader's whitespace or a format character, or one whose NFKD form does, and no other code point", () => {
   const space = new Set(Model.URL_SPACE_CODES)
   const refusedChar = ch => "@%;=&:".indexOf(ch) !== -1 || space.has(ch.codePointAt(0)) || /\p{Cf}/u.test(ch)
   const wrong = []
   let folds = 0
   for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
     const ch = String.fromCodePoint(c)
-    const folded = c >= 0x80 && Array.from(ch.normalize("NFKC")).some(refusedChar)
+    const folded = c >= 0x80 && Array.from(ch.normalize("NFKD")).some(refusedChar)
     if (folded && !refusedChar(ch)) folds++
     const want = refusedChar(ch) || folded
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
-  return [wrong, folds >= 68]
-}, [[], true])
+  // 73: the 70 the helper's codec folds, U+FE13 and U+FE14, and U+2260,
+  // the same set test_host_names counts in Python's NFKD.
+  return [wrong, folds]
+}, [[], 73])
+checkCall("D-SINK-88 (the review of 95f1bb9): a name the codec hands on holding `=` because B.2 keeps it from composing with U+0338 is refused, though its NFKC holds no `=`", () => {
+  const seq = String.fromCharCode(0x345, 0x338)
+  const names = [0x207c, 0x208c, 0xfe66, 0xff1d].map(c => "h" + String.fromCharCode(c) + seq + ".test")
+  return [names.map(n => Model.hostNameRefused(n)), names.map(n => n.normalize("NFKC").indexOf("=") !== -1),
+    Model.validateSourceUrl("http://sid" + String.fromCharCode(0xff1d) + seq + "qqqqqq.test/list.m3u").code]
+}, [[true, true, true, true], [false, false, false, false], "invalid"])
 checkCall("D-SINK-86: a format character beyond the BMP is read as one code point, and a lone surrogate is none", () =>
   [Model.hostNameRefused("h" + String.fromCodePoint(0xe0041) + ".test"), Model.hostNameRefused("h" + String.fromCodePoint(0x1d173)),
    Model.hostNameRefused("h" + String.fromCodePoint(0x1d172) + ".test"), Model.hostNameRefused("h" + String.fromCharCode(0xdb40) + ".test"),

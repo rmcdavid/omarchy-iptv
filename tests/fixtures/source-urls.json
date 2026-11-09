@@ -2191,5 +2191,41 @@
   "ok": false,
   "code": "invalid",
   "note": "D-SINK-88: U+FFE3, which the resolver path reads as a space"
+ },
+ {
+  "input": "http://\ufdfa.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FDFA in a label of its own (a right-to-left label, the only form nameprep's bidi check passes it in), which the resolver path reads as Arabic words separated by spaces"
+ },
+ {
+  "input": "http://\ufdfb.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FDFB in a label of its own, which the resolver path reads as Arabic words separated by a space"
+ },
+ {
+  "input": "http://user\uff1d\u0345\u0338sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FF1D, U+0345, U+0338, which the resolver path reads with its `=` (nameprep's B.2 maps U+0345 to U+03B9, which keeps `=` and U+0338 apart) while NFKC alone composes them to U+2260 (the review of 95f1bb9)"
+ },
+ {
+  "input": "http://user\u2260sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+2260, which the codec hands on as itself and NFKD reads as `=` and U+0338: the fold's one refusal beyond the codec's own folds"
+ },
+ {
+  "input": "http://user\ufe13sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE13, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `:`"
+ },
+ {
+  "input": "http://user\ufe14sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88: U+FE14, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `;`"
  }
 ]

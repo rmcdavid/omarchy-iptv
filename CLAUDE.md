@@ -989,7 +989,40 @@ requests and raise the batch.
      of ONE DNS label the provider chose for a hint or a logo is refused
      before any lookup, on every hop, the hint's own playlist host
      excepted -- the username of a URL a space cut (D-SINK-34's class) is
-     such a host, and the resolver is where it would go.]** The lesson: a
+     such a host, and the resolver is where it would go.]**
+     **[2026-11-08, D-SINK-86, -87 and -88: what a host NAME may hold,
+     asked before any lookup. A name holding `@`, `%`, `;`, `=`, `&`, a
+     second `:`, whitespace or a Unicode Cf character is refused by both
+     source validators and by the helper's connection layer on every hop
+     (`host_name_refused`, judged as the request object holds the host,
+     which urllib has percent-decoded), so a userinfo the provider spelled
+     wrong never reaches the resolver; both state readers drop a stored
+     source whose host holds one, a cost the owner accepted for D-SINK-86's
+     set and has not yet been asked about for the fold's wider one. A channel's stream address meets the same predicate before the
+     player is handed it, at the parse and at play, in every reading the
+     player could take: the authority's host[:port] in SR15's form (a
+     bracket only as a leading IPv6 literal's pair, a port of digits; a `[`
+     in the userinfo makes urlsplit read `v1.evil]x` as a host), mpv's
+     percent-escaped copy for http, https, mms and mmsh, and every entry of
+     udp's and rtp's `sources` and `block`, which FFmpeg resolves by name
+     (rtp at both its decodes). So a stream host's FORM is judged before mpv
+     looks it up; where a well-formed name resolves -- the LAN or not --
+     stays open as above, and so do names a stream server's answer chooses.
+     And the platform rewrites a name between the check and the lookup:
+     CPython's socket encodes a str host with the idna codec, whose
+     nameprep (B.1 removal, B.2 case folding, NFKC under Unicode 3.2) made
+     `user<U+FF1B>sid.test` the lookup of `user;sid.test`, so a name that is
+     not ASCII is judged again in its NFKD form. Not NFKC, which the first
+     fix used: composition only ever removes a refused character, and B.2's
+     letter for the combining mark U+0345 kept a `=` that NFKC alone
+     composed into U+2260 (the review of that fix). The suite holds the
+     decomposed form's sufficiency over every code point instead of
+     assuming it. FFmpeg hands the resolver a stream name's own bytes (read
+     in n9.0.2's tcp.c and ip.c: no AI_IDN), so this fold is the helper's
+     own lookups' and the validators'. Their lesson: a codec the platform
+     applies on the way to the resolver is a reader too, and a fold that
+     composes can hide what one that decomposes keeps.]**
+     The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.
    - **What a stream server's ANSWER opens** (D-PLY-44, D-SINK-55, -62,

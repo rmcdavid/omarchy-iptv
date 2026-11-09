@@ -4,7 +4,7 @@ player.
 
 D-SINK-86's host_name_refused refuses a host name that holds `@`, `%`, `;`,
 `=`, `&`, a second `:` (one port is fine), whitespace or an invisible format
-character, and, since D-SINK-88, one whose NFKC form does; the helper asks it
+character, and, since D-SINK-88, one whose NFKD form does; the helper asks it
 before every connection it opens itself. A channel's stream address is not
 one of those: the helper hands it to the player, which reads the host and
 looks it up. So the two gates that decide what reaches the player ask it too:
@@ -24,20 +24,25 @@ same predicate (bin/helper/02-sources.py, the D-SINK-87 block):
   1. the authority's host[:port] as written, after its last `@` (FFmpeg
      reads a port as the digits up to the next colon, urlsplit reads no port
      at all, so what follows the port is judged too), in SR15's form: a port
-     of ASCII digits or none, and a bracket only as an IPv6 literal's
-     (FFmpeg reads `[v1.a:b]` as the name `v1.a:b`). urlsplit's own host is
-     then inside it, which SubsumptionTest holds;
+     of ASCII digits or none, and a bracket only as a leading IPv6 literal's
+     pair (FFmpeg reads `[v1.a:b]` as the name `v1.a:b`; urlsplit reads
+     `a[@v1.evil]x` as the host `v1.evil]x`), which FormTest holds. urlsplit's
+     own host is then inside it, which SubsumptionTest holds;
   2. for the schemes mpv percent-escapes before FFmpeg reads them (http,
      https, mmsh, and mms, rewritten to mmsh), that host[:port] as mpv
      escapes it -- a `%` for every byte outside the unreserved and reserved
      sets, so a Unicode host name the helper reads whole reaches the player
      as a name holding `%`;
   3. for udp and rtp, every entry of the `sources` and `block` values,
-     which FFmpeg decodes (once; rtp twice) and looks up by name; a value
-     holding `'` or a backslash is refused whole.
+     which FFmpeg decodes (once; rtp twice, and resolves both) and looks up
+     by name; a reading holding `'` or a backslash, as decoded, is refused
+     whole.
 A fast accept in front of the readings (an authority of plain ASCII with a
 digits-only port, never for udp or rtp) is held equal to them by
-FastPathTest over every code point.
+FastPathTest over every code point, and held to be TAKEN for the plain
+addresses a playlist is made of. CostTest holds reading 3's own shortcuts,
+so a 4,096-character source list costs a few calls per line, not one per
+entry.
 
 How this module observes it: the shipping `playlist` verb as a subprocess
 on a local playlist FILE (nothing is fetched, nothing is looked up), and
@@ -101,6 +106,11 @@ REFUSED = [
     "https://evil.test:443&p=qqqqqq/live/1.ts",
     "http://[2001:db8::1]:80:81/evil/1.ts",
     "rtsp://evil.test:554" + chr(0x20) + "1/stream",
+    # A `]` in the host after a `[` in the userinfo, which urlsplit reads as
+    # an IPvFuture-shaped host and never splits at the bracket (the review
+    # of 95f1bb9): not SR15's form, though no character of it is refused.
+    "http://a[@v1.evil]x/live/1.ts",
+    "http://u[@v1.a]evil.test:80/live/1.ts",
     # 3. As mpv escapes an http-like URL before FFmpeg reads it: a `%`.
     "http://evil" + chr(0xFC) + ".test/live/1.ts",
     "https://evil" + chr(0xE9) + ".test/live/1.ts",
@@ -133,14 +143,25 @@ REFUSED = [
     "rtp://239.1.1.1:5004?sources=evil%2Bqqqqqq.test",
     "udp://@239.1.1.1:5000?sources='evil,qqqqqq'",
     "udp://@239.1.1.1:5000?sources=evil" + chr(0x5C) + ",qqqqqq",
+    # The same, escaped: the quote and the backslash are the DECODED
+    # reading's, which is what av_get_token reads.
+    "udp://@239.1.1.1:5000?sources=%27evil,qqqqqq%27",
+    "udp://@239.1.1.1:5000?sources=evil%5C,qqqqqq",
+    # rtp's once-decoded reading, which rtp resolves itself, holds `%`; its
+    # twice-decoded one (`evilAqqqqqq.test`) would pass.
+    "rtp://239.1.1.1:5004?sources=evil%2541qqqqqq.test",
     "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
     # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
     "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
-    # 6. D-SINK-88: an unescaped scheme's host whose NFKC form, which the
-    #    resolver path reads, holds `;`, `%40` or a space.
+    # 6. D-SINK-88: an unescaped scheme's host whose folded form (the idna
+    #    codec's, and NFKD's) holds `;`, `%40` or a space.
     "rtsp://evil" + chr(0xFF1B) + "qqqqqq.test/stream",
     "srt://evil" + chr(0xFE6A) + "40qqqqqq.test:9000?mode=caller",
     "rtmp://evil" + chr(0xA8) + "qqqqqq.test/live/1",
+    # A sequence, not one code point: B.2 maps U+0345 to a letter that
+    # keeps U+FF1D's `=` from composing with U+0338, so the codec hands on
+    # `=`, while NFKC alone composes it away (the review of 95f1bb9).
+    "rtsp://sid" + chr(0xFF1D) + chr(0x345) + chr(0x338) + "evil.test/stream",
 ]
 
 CONTROLS = [
@@ -272,6 +293,26 @@ class SubsumptionTest(unittest.TestCase):
         self.assertGreaterEqual(len(future), 7)
 
 
+class FormTest(unittest.TestCase):
+    """_stream_authority_refused, readings 1 and 2, asked of host[:port]
+    texts directly: some of these urlsplit refuses before the gate is asked
+    (a bracket that opens the host), so a vector through the gate alone
+    could not hold the form's every decision."""
+
+    REFUSED = ["[::1]x", "[::1]x:80", "[::1]]", "[::1]:8[0]", "[v1.a]", "[v1.a:b]:80", "[::1", "a]b", "a[b",
+               "v1.evil]x", "v1.a]b.test:80", "h.test:8o", "h.test:80:81"]
+    ALLOWED = ["[::1]", "[::1]:", "[::1]:80", "[fe80::1%25eth0]:8080", "[2001:db8::1]", "h.test", "h.test:",
+               "h.test:80", "127.0.0.1:5000"]
+
+    def test_a_bracket_is_only_a_leading_literals_pair_and_a_port_only_digits(self):
+        refused = getattr(helper, "_stream_authority_refused")
+        got = [(scheme, text, refused(text, scheme)) for scheme in ("http", "rtsp")
+               for text in self.REFUSED + self.ALLOWED]
+        want = [(scheme, text, text in self.REFUSED) for scheme in ("http", "rtsp")
+                for text in self.REFUSED + self.ALLOWED]
+        self.assertEqual(got, want)
+
+
 class FastPathTest(unittest.TestCase):
     """The fast accept in front of the readings (_plain_authority, asked by
     _stream_name_refused) is a shortcut, not a rule: whatever it accepts,
@@ -324,6 +365,96 @@ class FastPathTest(unittest.TestCase):
             if gate(url, "@239.1.1.1:5000", scheme) is not True:
                 wrong.append((scheme, "the query hosts were skipped"))
         self.assertEqual(wrong[:8], [])
+
+
+    def test_the_shortcut_is_taken_for_a_playlists_plain_addresses(self):
+        """The shortcut is what the gate answers with, not only what it may
+        answer: over the stream lines of test_playlist's PerformanceTest and
+        every control with a plain authority that is not udp or rtp, the
+        parse's question never reaches the readings, and over the udp and rtp
+        controls it always does. Without this, a gate that dropped the
+        shortcut was held only by a timing budget it missed by about 1%."""
+        real = helper._stream_name_readings
+        calls = []
+
+        def counted(*args, **kwargs):
+            calls.append(args[0])
+            return real(*args, **kwargs)
+
+        lines = ["http://stream.example.test/live/%d/index.m3u8" % i for i in range(0, 10000, 37)]
+        plain = [u for u in CONTROLS if urllib.parse.urlsplit(u).scheme not in ("udp", "rtp")
+                 and helper._plain_authority(urllib.parse.urlsplit(u).netloc)]
+        query = [u for u in CONTROLS if urllib.parse.urlsplit(u).scheme in ("udp", "rtp")]
+        source = {"host": "", "local": True}
+        with mock.patch.object(helper, "_stream_name_readings", counted):
+            answers = [helper.stream_entry_refusal(u, source)[0] for u in lines + plain]
+            taken = list(calls)
+            del calls[:]
+            for u in query:
+                helper.stream_entry_refusal(u, source)
+        self.assertEqual((set(answers), taken, len(plain) >= 8), ({""}, [], True))
+        self.assertEqual(calls, query)
+
+
+class CostTest(unittest.TestCase):
+    """Reading 3's cost (constraint 7): a provider's `sources` or `block`
+    list, as long as a stream URL may be (M3U_MAX_URL), costs the parse at
+    most three calls of host_name_refused per line here (the authority and
+    each distinct entry) and one read of the query, not one call per entry -- the review of 95f1bb9 measured such lists at up to
+    68 s per 10,000 lines. Counted, not timed, so it cannot pass by luck or
+    fail by load: a reading of plain characters is accepted at once (lists
+    of distinct numbers, IPv4 literals and names among the shapes), a
+    repeated entry is judged once, rtp's second decode is skipped when it
+    changes nothing, and the listening rule's read of the query is reused.
+    A list of DISTINCT entries that are not plain -- IPv6 literals, say --
+    still costs a call per entry: bounding that is a refusal past a count,
+    which is the owner's call, not a shortcut."""
+
+    @staticmethod
+    def filled(head, unit):
+        return head + unit * ((helper.M3U_MAX_URL - len(head)) // len(unit))
+
+    @staticmethod
+    def distinct(head, entry):
+        """head, then entry % 0, entry % 1, ... joined by commas, to the
+        longest stream URL the parse keeps: every entry its own name."""
+        url, index = head, 0
+        while len(url) + len(entry % index) + 1 <= helper.M3U_MAX_URL:
+            url += entry % index + ","
+            index += 1
+        return url
+
+    def shapes(self):
+        shapes = []
+        for scheme, authority in (("udp", "@239.1.1.1:5000"), ("rtp", "239.1.1.1:5004")):
+            for name in ("sources", "block"):
+                head = "%s://%s?%s=" % (scheme, authority, name)
+                shapes += [self.filled(head, "1,"), self.filled(head, ","), self.filled(head, "::1,"),
+                           self.filled(head, "10.0.0.1,"), self.filled(head, "+192.0.2.2,"),
+                           self.distinct(head, "%d"), self.distinct(head, "10.0.%d.1"),
+                           self.distinct(head, "h%d.test")]
+            shapes.append(self.filled("%s://%s?" % (scheme, authority), "%41&"))
+        return shapes
+
+    def test_a_long_source_list_costs_a_few_calls_per_line(self):
+        real_name, real_params = helper.host_name_refused, helper.stream_params
+        names, params = [], []
+
+        def name(*args, **kwargs):
+            names.append(args[0])
+            return real_name(*args, **kwargs)
+
+        def read(*args, **kwargs):
+            params.append(args[0])
+            return real_params(*args, **kwargs)
+
+        got = []
+        with mock.patch.object(helper, "host_name_refused", name), mock.patch.object(helper, "stream_params", read):
+            for url in self.shapes():
+                del names[:], params[:]
+                refusal = helper.stream_entry_refusal(url, {"host": "", "local": True})[0]
+                got.append((url[:32], len(url) > 4000, refusal, len(names) <= 3, len(params)))
+        self.assertEqual(got, [(url[:32], True, "", True, 1) for url in self.shapes()])
 
 
 class ParseTest(unittest.TestCase):

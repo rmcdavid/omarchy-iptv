@@ -303,8 +303,15 @@ function playFailureVerdict(code, context) {
 //                   code: parseHelperStatus)
 // Only `unsupported_scheme` is about the entry, and only a cache this
 // helper's parser would not write can carry one (it skips such lines), so
-// it is the one code listed. This list is the START path's: on a zap into a
-// running player the same code comes back from `play`, which
+// it is the one code listed. This list is the START path's, and not every
+// start reply that carries it is told: Service.qml's start tail tells it (a
+// card and a mark, unless the user has stopped since) for a start or restart
+// sent with no player playing on, and for the automatic restart of another
+// build's player, which it stops; a start refused while the player it
+// observes plays on -- a channel change while another build's player is
+// still owed its restart sends one (playFork) -- is D-PLY-52's
+// refusedWhilePlaying, which puts the label back and tells nothing. On a zap
+// into a running player the same code comes back from `play`, which
 // playFailureVerdict reads as `failed` -- no card and no mark, D-PLY-42's
 // untold refusal (open, the owner's call) -- so a next or previous zap
 // lands on that channel again until the cache is refetched.

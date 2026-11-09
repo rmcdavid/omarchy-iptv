@@ -399,21 +399,30 @@ function isHostFormatCode(code) {
 // point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
 //
 // D-SINK-88 (2026-11-08): and a name that is not ASCII is judged again in its
-// NFKC form, which is how the resolver path reads it: the helper's socket
-// hands a host to the C resolver through Python's idna codec, whose nameprep
-// is NFKC with case folding, so `user<U+FF1B>sid.test` passed the walk and
-// was looked up as `user;sid.test` (68 code points fold so: fifty to a
-// space, the rest to `;`, `=`, `&`, `%`, `@` or `:`). A colon the fold adds
-// is refused with the rest, since this name never carries a port. An ASCII
-// name pays nothing. The helper's host_name_refused folds the same way; the shared
-// source-urls fixture holds both validators to all of them, and the QML spec
-// on the dev branch holds the shell's own engine to the fold.
+// NFKD form, which holds every refused character the resolver path can read
+// in it: the helper's socket hands a host to the C resolver through Python's
+// idna codec, whose nameprep removes stringprep's B.1 characters, case folds
+// by B.2 and applies NFKC (Unicode 3.2), so `user<U+FF1B>sid.test` passed
+// the walk and was looked up as `user;sid.test`. Not NFKC: composition only
+// ever removes a refused character (`=` and U+0338 compose to U+2260), and
+// B.2 maps the combining mark U+0345 to the letter U+03B9, which blocks a
+// composition NFKC alone makes, so a name holding U+FF1D, U+0345 and U+0338
+// read as U+2260 here while the codec handed on its `=`. The decomposed form
+// never composes; the helper's suite holds, over every code point, that
+// nameprep adds no refused character the current NFKD lacks. 73 code points
+// fold so beyond the walk's: the 70 nameprep folds (fifty-two to a space,
+// the rest to `;`, `=`, `&`, `%`, `@` or `:`), U+FE13 and U+FE14 (unassigned
+// in Unicode 3.2), and U+2260. A colon the fold adds is refused with the rest,
+// since this name never carries a port. An ASCII name pays nothing. The
+// helper's host_name_refused folds the same way; the shared source-urls
+// fixture holds both validators to its vectors, and the QML spec on the dev
+// branch holds the shell's own engine to the fold.
 var NON_ASCII_RE = /[^\x00-\x7f]/
 function hostNameRefused(host) {
   var s = str(host)
   if (hostNameRefusedAsWritten(s)) return true
   if (!NON_ASCII_RE.test(s)) return false
-  var folded = s.normalize("NFKC")
+  var folded = s.normalize("NFKD")
   return folded !== s && hostNameRefusedAsWritten(folded)
 }
 
