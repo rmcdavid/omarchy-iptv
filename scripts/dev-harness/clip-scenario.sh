@@ -148,7 +148,11 @@
 # out even with an empty PATH. A cage that does not bring up a display within
 # 10 s is the same 77: the sink cannot be observed here. CLIP_CAGE_BIN and
 # CLIP_QML_BIN override the two binaries; they exist so the 77 path can be
-# driven on a machine that has both.
+# driven on a machine that has both. An XDG_RUNTIME_DIR cage cannot make its
+# socket in -- unset, relative, not a directory this user can write, or too
+# long for $XDG_RUNTIME_DIR/wayland-NN and its NUL in sun_path's 108 bytes --
+# exits 2 before anything starts (F-HARNESS-104, qa_cage_runtime_fits): a
+# refusal, never a skip, because that cage would abort and post a crash card.
 #
 # INTERRUPTED. INT and TERM are trapped into an exit, so cleanup() runs
 # (bash runs no EXIT trap for a signal that kills it while it waits on a
@@ -237,6 +241,13 @@ for f in editable.qml readonly.qml nofield.qml; do
 done
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
+# F-HARNESS-104: both modes start cage, and a cage that cannot make its
+# socket under XDG_RUNTIME_DIR aborts, leaving a core and a crash card on the
+# owner's desktop -- this check-tree did that four times on 2026-11-08/09
+# under a scratch runtime of about 100 bytes. Refused here, above the
+# transcript and above everything this starts, with exit 2: never 77, so no
+# CLIP_PREFLIGHT_SKIP_OK can read it as a skip, and check.sh reads it red.
+qa_cage_runtime_fits || exit 2
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 # The caller's own display, which the nested one must never be.

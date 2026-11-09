@@ -543,6 +543,19 @@ harness_env() {
   fi
   export WAYLAND_DISPLAY="$wl"
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
+  # F-HARNESS-104's sibling. Everything this script starts makes its sockets
+  # in the runtime directory just exported: quickshell its IPC socket (the one
+  # every `ipc` verb connects to) and the helper the player's mpv.sock. Past
+  # sun_path neither can be bound or reached, and nothing here would say so
+  # (reasoned from the kernel's limit, not measured: a shell with no IPC
+  # server, a `qs ipc` that finds nothing to answer it, a player start that
+  # waits out its socket). Asked here, in the function start, restart-shell,
+  # ipc and plugin-ipc share, before anything starts. The IPC socket is the
+  # longer of the two ($QA_SOCK_QUICKSHELL against $QA_SOCK_PLAYER), so the
+  # player's fits whenever it does.
+  local fit
+  fit=$(qa_sock_fits "the harness shell (quickshell)" OMARCHY_IPTV_HARNESS_DIR "$SCRATCH" "/runtime$QA_SOCK_QUICKSHELL" 2>&1) \
+    || die "$fit"
   # F-HARNESS-45 (2026-10-25): a player under a nested headless cage. mpv
   # 0.41.0's automatic VO probe ABORTS on a compositor that can serve no
   # hardware GL or Vulkan context: `waylandvk` loses its surface, `x11vk`

@@ -1516,7 +1516,10 @@ step "scripts/dev-harness/clip-scenario.sh check-tree (D-CLIP-1)"
 # qml runtime answers 77 with the reason, and so does a cage that brings up
 # no display: RED here unless CLIP_PREFLIGHT_SKIP_OK=1 is set, printing the
 # reason either way, for the same reason as the logo step above -- a gate
-# that measured nothing has proved nothing.
+# that measured nothing has proved nothing. A runtime directory cage cannot
+# make its socket in is not that case: it answers 2 and is red whatever
+# CLIP_PREFLIGHT_SKIP_OK says (F-HARNESS-104), because the cage it would have
+# started aborts and posts a crash card on the owner's desktop.
 clip_log=$CHECK_TMP/clip-scenario.log
 "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$clip_log" 2>&1; clip_rc=$?
 if (( clip_rc == 0 )); then
@@ -1530,7 +1533,11 @@ elif (( clip_rc == 77 )); then
     bad "clip preflight SKIPPED, which is not green: $clip_why (set CLIP_PREFLIGHT_SKIP_OK=1 to accept a gate that observed no probe)"
   fi
 else
-  cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
+  # F-HARNESS-104: a runtime directory cage cannot make its socket in is
+  # refused before cage starts, with exit 2 -- never 77, so the SKIP_OK above
+  # cannot accept it -- and one REFUSING line, which the red line carries.
+  clip_why=$(grep -a -m 1 '^REFUSING' "$clip_log")
+  cat "$clip_log"; bad "clip preflight (exit $clip_rc)${clip_why:+: $clip_why}"
 fi
 
 step "scripts/dev-harness/open-scenario.sh check-tree (R27f, D-PERF-1)"
