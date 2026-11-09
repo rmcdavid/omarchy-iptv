@@ -2227,5 +2227,29 @@
   "ok": false,
   "code": "invalid",
   "note": "D-SINK-88: U+FE14, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `;`"
+ },
+ {
+  "input": "http://user\uff3bsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's bracket: U+FF3B, which the resolver path reads as `[`"
+ },
+ {
+  "input": "http://user\uff3dsid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's bracket: U+FF3D, which the resolver path reads as `]`"
+ },
+ {
+  "input": "http://user\ufe47sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's bracket: U+FE47, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `[`"
+ },
+ {
+  "input": "http://user\ufe48sid.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-88's fold, D-SINK-92's bracket: U+FE48, unassigned in Unicode 3.2 (the codec hands it on as itself), which the running Unicode folds to `]`"
  }
 ]

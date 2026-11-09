@@ -38,6 +38,17 @@ is the one refused character a composition can take), holds every
 one-code-point name and every sequence of the class the review found to the
 codec itself, and holds the shared source-urls fixture to a vector for every
 code point the codec folds.
+
+D-SINK-92 (2026-11-09): and `[` and `]` are refused in a name, which no DNS
+name holds. A bracketed IPv6 literal is set aside only in a host[:port] as a
+request holds it, and only when nothing or a port's colon follows its `]`;
+a host a connection is handed has had a literal's brackets taken off, so a
+bracket there is refused whatever surrounds it. Before, `[::1]x.test` -- a
+redirect to `http://%5B::1%5Dx.test/`, which urllib percent-decodes and
+http.client keeps whole -- passed every layer and reached the resolver
+holding brackets and colons, and a fullwidth bracket passed the fold, which
+the codec hands on as `[` (the review of 6371c67). REFUSED_CHARS holds both,
+so every survey below counts the bracket folds too.
 """
 import functools
 import io
@@ -59,7 +70,7 @@ helper = load_helper()
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "source-urls.json"
 SECRET = "qqqqqq"
 FORMAT = frozenset(c for c in range(0x110000) if unicodedata.category(chr(c)) == "Cf")
-REFUSED_CHARS = frozenset(map(ord, "@%;=&:")) | frozenset(map(ord, helper.URL_SPACE_CHARS)) | FORMAT
+REFUSED_CHARS = frozenset(map(ord, "@%;=&:[]")) | frozenset(map(ord, helper.URL_SPACE_CHARS)) | FORMAT
 
 # Hosts as a connection is handed them (http.client has split the port off
 # at the last colon and taken a literal's brackets off), each holding one
@@ -82,6 +93,14 @@ NAMES = [
     # And a sequence the codec hands on holding `=` while NFKC alone does
     # not (the review of 95f1bb9): the socket would look up `u=...`.
     "u" + chr(0xFF1D) + chr(0x345) + chr(0x338) + SECRET + ".evil.test",
+    # D-SINK-92: a bracket, which a connection is never handed in a literal
+    # (http.client takes a literal's off), so the provider's: text after a
+    # literal's `]` (a request for `http://%5B::1%5Dx.test/` is a connection
+    # to `[::1]x.test`, brackets and colons and all), a zone carrying a
+    # name, a bracket elsewhere, a literal still in its brackets, and a
+    # fullwidth bracket the codec hands on as `[`.
+    "[::1]" + SECRET + ".evil.test", "[fe80::1%eth0]" + SECRET + ".evil.test", "[fe80::1%" + SECRET + "]evil.test",
+    "evil.test[" + SECRET + "]", SECRET + "].evil.test", "[::1]", "u" + chr(0xFF3B) + SECRET + ".evil.test",
 ]
 
 
@@ -258,12 +277,15 @@ class PredicateTest(unittest.TestCase):
         """Every code point of the whole range, inside a name and inside a
         name with its port: refused exactly for the five characters, a colon
         past the port's, the reader's whitespace (URL_SPACE_CHARS) and Cf --
-        or, D-SINK-88, for a code point whose NFKD form holds one of them."""
+        or, D-SINK-88, for a code point whose NFKD form holds one of them.
+        D-SINK-92 adds the two brackets, and with them four folds: U+FF3B
+        and U+FF3D, which the codec folds, and U+FE47 and U+FE48, which only
+        the running Unicode does."""
         predicate = getattr(helper, "host_name_refused", None)
         self.assertIsNotNone(predicate)
         folds = {c for c in range(0x80, 0x110000)
                  if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))}
-        self.assertEqual(len(folds - REFUSED_CHARS), 73)
+        self.assertEqual(len(folds - REFUSED_CHARS), 77)
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
                      if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds)]
@@ -311,9 +333,10 @@ class PredicateTest(unittest.TestCase):
         name the socket's idna codec hands the resolver holds none of
         REFUSED_CHARS. Red before the fold: 68 code points in the first form
         (63 that urlsplit also accepts, and the five that fold to `@` or
-        `:`), and U+FDFA and U+FDFB in the second, 70 in all."""
+        `:`), and U+FDFA and U+FDFB in the second, 70 in all; and since
+        D-SINK-92, U+FF3B and U+FF3D, which fold to a bracket, 72."""
         folds, missed = codec_survey()
-        self.assertEqual(len(folds), 70, "the codec's folds were not found")
+        self.assertEqual(len(folds), 72, "the codec's folds were not found")
         self.assertEqual((len(missed), missed[:8]), (0, []))
 
     def test_no_sequence_of_the_reviews_class_reaches_the_resolver_holding_a_refused_character(self):
@@ -341,15 +364,16 @@ class PredicateTest(unittest.TestCase):
         accepted = [hex(c) for c, url in wanted.items() if urlsplit_accepts(url)]
         extra = ["http://user" + chr(0xFF1D) + chr(0x345) + chr(0x338) + "sid.test/x",
                  "http://user" + chr(0x2260) + "sid.test/x", "http://user" + chr(0xFE13) + "sid.test/x",
-                 "http://user" + chr(0xFE14) + "sid.test/x"]
+                 "http://user" + chr(0xFE14) + "sid.test/x", "http://user" + chr(0xFE47) + "sid.test/x",
+                 "http://user" + chr(0xFE48) + "sid.test/x"]
         self.assertEqual(([hex(c) for c, url in sorted(wanted.items()) if url not in listed],
-                          [ascii(u) for u in extra if u not in listed], len(accepted)), ([], [], 65))
+                          [ascii(u) for u in extra if u not in listed], len(accepted)), ([], [], 67))
 
     def test_one_port_is_fine_and_a_literal_keeps_its_colons(self):
         predicate = getattr(helper, "host_name_refused", lambda *_: "<missing>")
         allowed = [("h.test", False), ("h.test:8080", True), ("h.test:", True), ("127.0.0.1", False),
                    ("127.1", False), ("::1", False), ("2001:db8::1", False), ("fe80::1%eth0", False),
-                   ("fe80::1%25eth0", False), ("::ffff:192.0.2.1", False), ("[::1]", False), ("[::1]", True),
+                   ("fe80::1%25eth0", False), ("::ffff:192.0.2.1", False), ("[::1]", True),
                    ("[::1]:8080", True), ("[fe80::1%eth0]:8080", True), ("[fe80::1%25eth0]:443", True),
                    ("b" + chr(0xFC) + "cher.test", False), ("xn--bcher-kva.test:80", True), ("", False)]
         refused = [("h.test:8080", False), ("a:b:8080", True), ("[::1]:80:90", True),
@@ -366,7 +390,14 @@ class PredicateTest(unittest.TestCase):
                    # U+2260, which NFKD reads as `=` and U+0338.
                    ("h" + chr(0xFF1D) + chr(0x345) + chr(0x338) + ".test", False),
                    ("h" + chr(0x207C) + chr(0x345) + chr(0x338) + ".test:80", True),
-                   ("h" + chr(0x2260) + ".test", False)]
+                   ("h" + chr(0x2260) + ".test", False),
+                   # D-SINK-92: a bracket, except a leading literal's pair in
+                   # a host[:port] followed by nothing or a port; with no
+                   # port, any bracket (a connection is handed no literal's).
+                   ("[::1]", False), ("[::1]x.test", True), ("[::1]x.test", False), ("[::1]x.test:80", True),
+                   ("[fe80::1%eth0]x.test", True), ("[::1]:80]", True), ("h.test[x]", False), ("x].test", True),
+                   ("[ab]x.test", True), ("[::1", True), ("h" + chr(0xFF3B) + "x.test", False),
+                   ("h" + chr(0xFE48) + "x.test:80", True)]
         self.assertEqual([(ascii(t), p, predicate(t, p)) for t, p in allowed + refused],
                          [(ascii(t), p, False) for t, p in allowed] + [(ascii(t), p, True) for t, p in refused])
 
@@ -427,7 +458,10 @@ class ConnectionTest(unittest.TestCase):
         for scheme, handler in zip(("http", "https"), helper.bounded_handlers(None, helper.DestinationPolicy("playlist", "user"))):
             for authority in ("u%40evil.test", "u%3A" + SECRET + "%40evil.test", "h%20evil.test",
                               "evil.test%3A80%3A80", "evil.test%3Bsid=" + SECRET, "h%C2%ADevil.test",
-                              "evil%EF%BC%9B" + SECRET + ".test", "evil%C2%A8" + SECRET + ".test"):
+                              "evil%EF%BC%9B" + SECRET + ".test", "evil%C2%A8" + SECRET + ".test",
+                              # D-SINK-92: the decoded host holds brackets.
+                              "%5B::1%5D" + SECRET + ".evil.test", "%5B%3A%3A1%5D" + SECRET + ".evil.test:8080",
+                              "evil.test%5B" + SECRET + "%5D", "evil%EF%BC%BB" + SECRET + ".test"):
                 request = urllib.request.Request("%s://%s/x" % (scheme, authority))
                 request.timeout = 1.0
                 opener = getattr(handler, scheme + "_open")
@@ -448,7 +482,10 @@ class ConnectionTest(unittest.TestCase):
             handler = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)][0]
             for newurl in ("https://u%40evil.test/x", "https://evil.test%3A80%3A80/x", "https://h%C2%ADevil.test/x",
                            "https://evil.test;sid=" + SECRET + "/x", "https://u%3A" + SECRET + "%40evil.test/x",
-                           "https://evil%EF%BC%9B" + SECRET + ".test/x", "https://evil%EF%BC%85" + "40" + SECRET + ".test/x"):
+                           "https://evil%EF%BC%9B" + SECRET + ".test/x", "https://evil%EF%BC%85" + "40" + SECRET + ".test/x",
+                           # D-SINK-92: the review of 6371c67's Locations.
+                           "https://%5B::1%5D" + SECRET + ".evil.test/x",
+                           "https://%5Bfe80::1%25" + SECRET + "%5Devil.test/x", "https://" + SECRET + "%5D.evil.test/x"):
                 request = urllib.request.Request("https://cdn.test/a.png")
                 with SocketResolver() as resolver:
                     code, message = attempt(lambda: handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, newurl))
@@ -494,6 +531,14 @@ class RedirectTest(unittest.TestCase):
         "http://h%E2%80%AEevil.test/x",
         # D-SINK-88: folded to `;` by the socket's idna codec.
         "http://evil%EF%BC%9B" + SECRET + ".test/x",
+        # D-SINK-92: brackets in the decoded host, which http.client keeps
+        # whole unless the host both opens and ends with one (the review of
+        # 6371c67), and a fullwidth bracket the codec folds to `[`.
+        "http://%5B::1%5D" + SECRET + ".evil.test/x",
+        "http://%5Bfe80::1%25" + SECRET + "%5Devil.test/x",
+        "http://%5B::1%5D" + SECRET + ".evil.test:8080/x",
+        "http://evil.test%5B" + SECRET + "%5D/x",
+        "http://evil%EF%BC%BB" + SECRET + ".test/x",
     ]
 
     def follow(self, location):
@@ -534,7 +579,13 @@ class LogoTest(unittest.TestCase):
         got = []
         for url in ("https://u%40evil.test/a.png", "https://evil.test;sid=" + SECRET + "/a.png",
                     "https://evil.test%3Bsid=" + SECRET + "/a.png", "https://h%C2%ADevil.test/a.png",
-                    "https://evil.test%3A443%3A443/a.png", "https://evil%EF%BC%9B" + SECRET + ".test/a.png"):
+                    "https://evil.test%3A443%3A443/a.png", "https://evil%EF%BC%9B" + SECRET + ".test/a.png",
+                    # D-SINK-92: a decoded host holding brackets, which
+                    # fetch_logo's own checks read past (they read the raw
+                    # netloc, where `%5B` is no bracket and the name has a
+                    # dot).
+                    "https://%5B%3A%3A1%5D" + SECRET + ".evil.test/a.png",
+                    "https://evil%EF%BC%BB" + SECRET + ".test/a.png"):
             patch = provenance("")
             try:
                 with SocketResolver() as resolver:

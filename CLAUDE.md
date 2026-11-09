@@ -1029,7 +1029,15 @@ requests and raise the batch.
      decomposed form's sufficiency over every code point instead of
      assuming it. FFmpeg hands the resolver a stream name's own bytes (read
      in n9.0.2's tcp.c and ip.c: no AI_IDN), so this fold is the helper's
-     own lookups' and the validators'. Their lesson: a codec the platform
+     own lookups' and the validators'. And since 2026-11-09 a channel from
+     a playlist that is not local is refused at the parse and, cached, at
+     play when a host it names -- its authority's, or a udp or rtp source
+     entry -- is one label, as a hint or a logo is (D-SINK-89; the
+     playlist's own host excepted, a typed `--url` never asked), and a
+     bracket in a name is refused on every hop and by both validators,
+     written or folded, because http.client keeps `[::1]x.test` whole,
+     from a request for `%5B::1%5Dx.test`, and the resolver would be handed
+     it (D-SINK-92). Their lesson: a codec the platform
      applies on the way to the resolver is a reader too, a fold that
      composes can hide what one that decomposes keeps, and a library that
      decodes a name into a C string reads it only up to its first NUL.]**

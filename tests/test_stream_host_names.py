@@ -152,6 +152,13 @@ REFUSED = [
     # rtp's once-decoded reading, which rtp resolves itself, holds `%`; its
     # twice-decoded one (`evilAqqqqqq.test`) would pass.
     "rtp://239.1.1.1:5004?sources=evil%2541qqqqqq.test",
+    # A later pair whose first reading is an earlier pair's second: its own
+    # second decode (`fe80::1@evil.qqqqqq`) is one the first pair never
+    # made, and the one rtp hands udp, FFmpeg keeping the last value. Every
+    # reading before it is a literal whose zone holds only zone characters
+    # (the review of 6371c67: decoding that stopped at the repeated reading
+    # let it play).
+    "rtp://239.1.1.1:5004?sources=fe80::1%252540evil.qqqqqq&sources=fe80::1%2540evil.qqqqqq",
     "udp://@239.1.1.1:5000?sources=evil" + chr(0xFF1D) + "qqqqqq.test",
     # av_get_token trims only its four ASCII spaces: U+3000 stays in the name.
     "udp://@239.1.1.1:5000?sources=qqqqqq.evil%E3%80%80",
@@ -200,8 +207,10 @@ CONTROLS = [
     "http://stream.example.test:8080/live/a;b=c&d=e%20f?u=a@b&p=c%40d",
     "https://stream.example.test:443/live/3.ts",
     "http://stream.example.test:/live/4.ts",
-    # An IPv6 literal keeps its colons and its zone's `%` (D-SINK-86).
-    "http://[fe80::1%25eth0]:8080/live/5.ts",
+    # An IPv6 literal keeps its colons and its zone's `%` (D-SINK-86). Its
+    # zone is digits: one that is not (`%25eth0`) FFmpeg cuts into another
+    # host, which D-SINK-91 refuses (tests/test_stream_label_zone.py).
+    "http://[fe80::1%252]:8080/live/5.ts",
     "http://xn--bcher-kva.test/live/6.ts",
     # rtsp is not escaped by mpv (its demuxer opens the URL as given), so
     # the one reading is the name, which the predicate allows.
@@ -483,9 +492,13 @@ class CostTest(unittest.TestCase):
     is not decoded again, a reading already judged on it, rtp's unchanged
     second decode among them, is not judged again (the shapes say how many
     distinct readings each holds), and the listening rule's read of the
-    query is reused. A list of DISTINCT entries that are not plain -- IPv6 literals,
-    say -- still costs a call per entry: bounding that is a refusal past a
-    count, which is the owner's call, not a shortcut."""
+    query is reused. A list of DISTINCT entries that are not plain still
+    costs a call per entry: one whose entries hold colons, IPv6 literals
+    say, needs it; one whose entries hold none could take a per-code-point
+    verdict with the same answers, a shortcut not taken; and whether to
+    bound a list at all is the owner's open question (the D-SINK-87 row:
+    FFmpeg's own names fail the open at 512 bytes, a name only this reading
+    takes does not)."""
 
     @staticmethod
     def filled(head, unit):

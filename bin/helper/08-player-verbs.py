@@ -73,7 +73,27 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     change sends one while another build's player is still owed its restart
     (Model.playFork). A `play`, a zap into a running player, is untold the
     same way, D-PLY-42's untold refusal (open, the owner's call): no card
-    and no mark, so a next or previous zap lands on the channel again."""
+    and no mark, so a next or previous zap lands on the channel again.
+
+    D-SINK-91 (2026-11-09): and both, an IPv6 literal whose zone is not a
+    number (stream_zone_refused), which FFmpeg would cut into another host:
+    `unsupported_scheme` again, routed as above, with its own fixed
+    sentence.
+
+    D-SINK-89 (the owner, 2026-11-08): and a cached channel only, never a
+    typed `--url`, whose address names a host of one label from a playlist
+    the cache records as not local (stream_label_refused, against
+    cached_source as D-SINK-58's host rule is). Refused as `local_address`,
+    the code of a channel refused for where its playlist sent it, with one
+    fixed sentence that names no host, which may be a username. The shell
+    routes it as it routes `local_address` (PLAYER_START_CHANNEL_REFUSALS):
+    on a `player start` or `player restart` with no player playing on, and
+    on the automatic restart of another build's player, a card ("Refused a
+    local address") and the channel marked failed, unless the user has
+    stopped since; a start refused while the observed player plays on is
+    D-PLY-52's, the label put back and nothing told or marked; and a `play`,
+    a zap into a running player, is D-PLY-42's untold refusal (open, the
+    owner's call): no card and no mark."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)
@@ -92,10 +112,14 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
     if stream_host_name_refused(url):
         raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
+    if stream_zone_refused(urllib.parse.urlsplit(url).netloc):
+        raise HelperError("unsupported_scheme", STREAM_ZONE_REFUSAL)
     if source is not None:
         if stream_host_refused(url, source):
             raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
                                                "chose; not played" % (url_host(url) or "the host"))
+        if stream_label_refused(url, url_host(url), stream_scheme(url), source):
+            raise HelperError("local_address", STREAM_LABEL_REFUSAL)
         held = {"url": url, "headers": headers}
         if drop_sign_in_headers(held, source):
             log("play: dropped a sign-in header for another host")

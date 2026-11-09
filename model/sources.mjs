@@ -417,6 +417,15 @@ function isHostFormatCode(code) {
 // helper's host_name_refused folds the same way; the shared source-urls
 // fixture holds both validators to its vectors, and the QML spec on the dev
 // branch holds the shell's own engine to the fold.
+//
+// D-SINK-92 (2026-11-09): and `[` and `]`, which no DNS name holds. The
+// validator's bare host refuses a written bracket before this is asked; a
+// fullwidth one (U+FF3B, U+FF3D) passed the walk, and the helper's idna
+// codec hands it to the resolver as `[` or `]` (`a<U+FF3B>b.test` as
+// `a[b.test`), so the walk refuses both and the fold reads them: 77 code
+// points fold so, the 73 above, U+FF3B and U+FF3D, and U+FE47 and U+FE48,
+// which the running Unicode folds to brackets and Unicode 3.2 left
+// unassigned.
 var NON_ASCII_RE = /[^\x00-\x7f]/
 function hostNameRefused(host) {
   var s = str(host)
@@ -429,7 +438,7 @@ function hostNameRefused(host) {
 function hostNameRefusedAsWritten(s) {
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i)
-    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a) return true
+    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a || c === 0x5b || c === 0x5d) return true
     if (isUrlSpaceAt(s, i)) return true
     if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
       var d = s.charCodeAt(i + 1)

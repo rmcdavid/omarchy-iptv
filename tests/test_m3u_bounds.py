@@ -253,9 +253,26 @@ class MemoryLimitTest(unittest.TestCase):
         self.assertNotIn(SECRET, stdout + stderr)
 
     def test_very_low_limit_refuses_an_ordinary_playlist_in_one_sentence(self):
-        server = LocalHttp()
+        # 2,000 entries, about 60 KB: a playlist whose parse must ask for
+        # memory beyond the limit. The limit is absolute and the helper is
+        # already past it when it is set, so a run fails only once it needs
+        # NEW memory, and a list as small as LocalHttp's own one-entry
+        # playlist could be parsed inside what the interpreter had already
+        # freed: on 2026-11-09 the same helper parsed it under the limit at
+        # one path and was refused at another, the heap's slack moving with
+        # the length of the path it ran from.
+        body = ("#EXTM3U\n" + entries(2000, extra=' group-title="News"')).encode("ascii")
+
+        def ordinary(handler):
+            handler.send_response(200)
+            handler.send_header("Content-Type", "audio/x-mpegurl")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+
+        server = LocalHttp({"/ordinary": ordinary})
         self.addCleanup(server.httpd.shutdown)
-        url = server.url("/playlist", userinfo="user:" + SECRET)
+        url = server.url("/ordinary", userinfo="user:" + SECRET)
         code, status, stdout, stderr = run_helper("playlist", "--cache-dir", self.cache, limit=8, url=url)
         self.assert_refused(code, status, stdout, stderr, "playlist")
         self.assertEqual(status["sourceHost"], "127.0.0.1")

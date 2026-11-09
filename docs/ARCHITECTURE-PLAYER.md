@@ -3386,7 +3386,11 @@ what it lets into channels.json and what it lets through `player_target`.
   and the aliases FFmpeg's udp, rtp, tcp, rtmp and rtsp protocols give them,
   read the way FFmpeg reads them (after the FIRST `?`, a `#` included, so
   `srt://h:1#?mode=listener` is refused) and compared case-folded and
-  %-decoded, which is stricter than FFmpeg. `player_target` runs every
+  %-decoded, which is stricter than FFmpeg. [2026-11-09, D-SINK-90: not for
+  a name holding an encoded NUL, which FFmpeg reads up to the NUL and this
+  read whole, so `mode%00=listener` and `localport%00=` passed from this
+  rule's commit through v0.18.0; read up to the NUL since 6371c67.]
+  `player_target` runs every
   cached URL through `is_stream_url` before a load, so a cache written
   before this cannot open a port either; it answers `unsupported_scheme`,
   as for any URL the gate refuses (a CHANNEL refusal, D-PLY-31's reading).
@@ -3462,6 +3466,9 @@ one, made FFmpeg open listeners the protocol list had to admit.
   `max_redirects` would stop that, but only through `--stream-lavf-o`, which
   must stay EMPTY (D-SINK-13 layer three, D-SINK-16's read-back), and a
   redirect-free player would break every load-balanced provider.
+  [2026-11-09, D-SINK-89: a name of ONE label from a playlist that is not
+  local is refused before the player is handed it, at the parse and at
+  play; a dotted name still resolves where it resolves.]
 - **HLS variant and segment URLs.** FFmpeg's hls demuxer fetches them
   itself; measured, it opens only http(s), file and data URLs (an HLS-shaped
   playlist whose "segments" were `udp://0.0.0.0:P` and `rtp://0.0.0.0:P`

@@ -263,8 +263,8 @@ RESOLVE_STACK_BYTES = 1024 * 1024
 # `bad_url`, the code of a URL the validator refuses, so the shell's
 # sentence is "Invalid URL" and the logo run counts it with the policy's
 # refusals (06-failed.py).
-HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a second colon, whitespace or an "
-                     "invisible format character; not looked up")
+HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a second colon, whitespace or "
+                     "an invisible format character; not looked up")
 
 
 def refuse_host_name(text: Any, with_port: bool = False) -> None:
@@ -533,8 +533,15 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     refused = False
     # D-SINK-86: before the D-SINK-83 test below and before the lookup, with
     # a policy or none, to a destination or to the user's proxy. The host is
-    # the one http.client split off the request's (its port gone, a
-    # literal's brackets gone), so a colon left in it is a second colon.
+    # the one http.client split off the request's: its port gone, and a
+    # literal's brackets gone only when the host both opens with `[` and ends
+    # with `]`. So a colon left in it is a second colon unless the whole host
+    # is a bare IPv6 literal, and a bracket left in it -- `[::1]x.test`, from
+    # a request for `http://%5B::1%5Dx.test/`, which urllib percent-decodes
+    # and http.client keeps whole -- is the provider's text, refused as any
+    # bracket in a name is (D-SINK-92, 2026-11-09; this comment said a
+    # literal's brackets were always gone, and the review of 6371c67 found
+    # the name reaching the resolver).
     refuse_host_name(host)
     if policy is not None and not proxied and policy.refuses_name(host):
         # D-SINK-83: before the lookup, not after it -- the

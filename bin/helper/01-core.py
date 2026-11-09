@@ -196,10 +196,13 @@ ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
 # destination rules (D-SINK-41: a cache before them holds channels nothing
 # checked); 2 is the attribute grammar (D-SINK-80: a cache before it can hold
 # a name, a group or a guide hint cut inside a URL, and the credential's tail
-# as a title); 3 is the stream host-name rules, D-SINK-87 and D-SINK-88 (a
-# cache before them can hold a channel whose address names a host the player
-# would read in a form no host name or port may take, which player_target
-# then refuses at every play). A cache written under an older version, or
+# as a title); 3 is the stream host-name rules, D-SINK-87, D-SINK-88, D-SINK-89
+# and D-SINK-91, with D-SINK-90's reading of a query name (a cache before them
+# can hold a channel whose address names a host the player would read in a
+# form no host name or port may take, an IPv6 zone the player would cut into
+# another host, a host of one label from a playlist that is not local, or a
+# listening parameter spelled with an encoded NUL, which player_target then
+# refuses at every play). A cache written under an older version, or
 # carrying none, is refetched once, whatever its age, when its source is the
 # active one: the active source's at the next start, each other source's at
 # its next swap, and each shows its old cache until that refetch lands -- or,

@@ -334,6 +334,8 @@ function playFailureVerdict(code, context) {
 // playlist, so a cache nothing checked -- one from before the destination
 // rules, whose refresh failed -- refuses a channel on a LAN or loopback
 // literal that its playlist chose. That refusal is about the entry.
+// D-SINK-89 (2026-11-09): and so is the same code for a cached channel whose
+// address names a host of one label from a playlist that is not local.
 var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme", "local_address"]
 
 function playerStartFailure(code) {

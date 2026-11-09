@@ -263,6 +263,9 @@ TestCase {
             [true, true, true, true, true, true])
     compare([Model.hostNameRefused("user" + String.fromCharCode(0xff1d, 0x345, 0x338) + "sid.test"),
              Model.hostNameRefused("user" + String.fromCharCode(0x2260) + "sid.test")], [true, true])
+    // D-SINK-92: a bracket, written or folded (U+FF3B, U+FE48).
+    compare([Model.hostNameRefused("user[sid.test"), Model.hostNameRefused("user" + String.fromCharCode(0xff3b) + "sid.test"),
+             Model.hostNameRefused("user" + String.fromCharCode(0xfe48) + "sid.test")], [true, true, true])
     compare(Model.validateSourceUrl("http://user;sid.test/x").code, "invalid")
     compare([Model.hostNameRefused("bücher.test"), Model.hostNameRefused("h．test"),
              Model.hostNameRefused("hＡ.test"), Model.hostNameRefused("h.test")], [false, false, false, false])

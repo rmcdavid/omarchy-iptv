@@ -86,7 +86,7 @@ def looks_like_host(text: str) -> bool:
 
 
 # D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold. A name that
-# holds one of these five, a second `:` (one port is fine), the reader's
+# holds one of these seven (five, and since D-SINK-92 the two brackets), a second `:` (one port is fine), the reader's
 # whitespace (URL_SPACE_CHARS) or an invisible format character
 # (HOST_FORMAT_RANGES) is refused: by validate_source_url as `invalid`, and
 # by the connection layer before any lookup, on every hop (03-io-playlist.py:
@@ -100,7 +100,16 @@ def looks_like_host(text: str) -> bool:
 # draws as nothing while IDNA's nameprep maps some away (`h<U+00AD>.test` is
 # looked up as `h.test`), so the name a user reads is not the name asked
 # for. Mirrored by Model.hostNameRefused over the shared source-urls fixture.
-HOST_NAME_REFUSED_CHARS = "@%;=&"
+#
+# D-SINK-92 (2026-11-09): and `[` and `]`, which no DNS name holds either.
+# A bracket is URL syntax only around an IPv6 literal in a URL's authority;
+# a host handed to a connection has had a literal's brackets taken off
+# (http.client and urlsplit both remove them), so a bracket left in a name
+# is the provider's text -- `http://%5B::1%5Dx.test/` is a request for
+# `[::1]x.test`, which http.client keeps whole and the resolver would be
+# handed, colons and all -- and so is a fullwidth bracket the idna codec
+# folds to one (`a<U+FF3B>b.test` is handed on as `a[b.test`).
+HOST_NAME_REFUSED_CHARS = "@%;=&[]"
 # Unicode category Cf, every code point of it, as (first, last): what Python
 # 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
 # Explicit rather than unicodedata.category, so both mirrors refuse one set
@@ -138,14 +147,20 @@ def _ipv6_literal_text(text: str) -> bool:
 def host_name_refused(text: Any, with_port: bool = False) -> bool:
     """D-SINK-86: does this host NAME hold what no name may hold?
 
-    `text` is a host as a connection is handed it (no port; an IPv6 literal
-    with or without its brackets), or, `with_port`, a host[:port] as a
-    request object holds it, where one colon is the port's. An IPv6 literal
-    is no name: its colons and its zone's `%` are its own, so a bracketed one
-    is set aside and what follows its `]` is judged as the rest of a name,
-    and a bare one passes where no port can follow it. Every character is
-    asked once against one frozenset, so the cost is linear; nothing here
-    looks anything up. Model.hostNameRefused is the validator's half.
+    `text` is a host as a connection is handed it (no port, and an IPv6
+    literal without its brackets, which http.client and urlsplit have taken
+    off), or, `with_port`, a host[:port] as a request object holds it, where
+    one colon is the port's. An IPv6 literal is no name: its colons and its
+    zone's `%` are its own, so a bare one passes where no port can follow
+    it, and, `with_port`, a leading bracketed one is set aside when nothing
+    or a port's colon follows its `]`. Any other bracket is refused
+    (D-SINK-92, 2026-11-09): text after a literal's `]` (`[::1]x.test`,
+    which http.client keeps whole, brackets and colons included, and would
+    hand the resolver), a bracket anywhere else, and with no port any
+    bracket at all, since a connection is never handed a literal's. Every
+    character is asked once against one frozenset, so the cost is linear;
+    nothing here looks anything up. Model.hostNameRefused is the validator's
+    half.
 
     D-SINK-88 (2026-11-08): and a name that is not ASCII is judged again in
     its NFKD form, which holds every refused character the resolver path can
@@ -167,7 +182,10 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     running Unicode's, which refuses 73 code points beyond the code-point
     rule: the 70 nameprep folds, U+FE13 and U+FE14 (unassigned in 3.2, which
     the codec hands on unfolded), and U+2260 itself, which only NFKD reads
-    as `=`. A colon the fold adds is a colon in the name, never the port's.
+    as `=`; since D-SINK-92 refuses the brackets, four more, 77: U+FF3B and
+    U+FF3D, which the codec folds to `[` and `]`, and U+FE47 and U+FE48,
+    which only the running Unicode does. A colon the fold adds is a colon in
+    the name, never the port's.
     An ASCII name pays nothing, and the fold is asked only of a name the
     first judgment let through. Model.hostNameRefused folds the same way."""
     name = str(text or "")
@@ -182,10 +200,12 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
 
 def _host_name_refused_as_written(name: str, with_port: bool) -> bool:
     """host_name_refused's judgment of the code points as they stand."""
-    if name.startswith("["):
+    if with_port and name.startswith("["):
         close = name.find("]")
         if close != -1 and _ipv6_literal_text(name[1:close]):
             name = name[close + 1:]
+            if name and not name.startswith(":"):
+                return True
     elif not with_port and _ipv6_literal_text(name):
         return False
     if name.count(":") > (1 if with_port else 0):
@@ -903,6 +923,16 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 # The query's pairs are read once per line, by the listening rule and this
 # one together. A line of DISTINCT entries that are not plain (IPv6
 # literals, one-code-point Unicode names) still costs a call per entry.
+# For entries holding no colon that is this code's choice, not a limit: such
+# an entry's verdict is the OR of its code points' own, so a per-code-point
+# verdict would accept the list in linear time with the same answers (not
+# taken; the review of 6371c67). Entries holding colons need the call.
+# Whether to bound a list at all is the owner's open question (the D-SINK-87
+# row on the dev branch): FFmpeg n9.0.2 fails the udp or rtp open before
+# any lookup when a value of an option it knows is 512 raw bytes or more,
+# and keeps only a string option's last value, but skips undecoded a value
+# under a name it does not know, which this reading still judges
+# (`SOURCES=`), so a line that plays can carry such a list.
 PLAYER_ESCAPED_SCHEMES = frozenset({"http", "https", "mms", "mmsh"})
 PLAYER_URL_KEPT = ":/?#[]@!$&'()*+,;=%"
 # Reading 3: each scheme whose query names hosts, and how many times FFmpeg
@@ -980,17 +1010,32 @@ def _stream_authority_refused(hostport: str, scheme: str) -> bool:
 
 def _stream_query_hosts_refused(url: str, decodes: int, params: list[tuple[str, str]] | None = None) -> bool:
     """Reading 3: does a `sources` or `block` value name a host, in any of
-    its `decodes` readings, that host_name_refused refuses? stream_params
-    reads the names as FFmpeg does (up to a decoded NUL) or more widely
-    (case-folded, trimmed); `params` is its answer when the caller has it.
-    A value already read on this line is not decoded again, a reading
-    already judged on it (rtp's unchanged second decode among them) is not
-    judged again, and `judged` carries the entries already asked across
-    every pair, so a line costs a call per DISTINCT entry however many pairs
-    repeat it."""
+    its `decodes` readings (_query_readings), that host_name_refused
+    refuses? `judged` carries the entries already asked across every pair,
+    so a line costs a call per DISTINCT entry however many pairs repeat
+    it."""
+    judged: set[str] = set()
+    for reading in _query_readings(url, decodes, params):
+        if _query_reading_refused(reading, judged):
+            return True
+    return False
+
+
+def _query_readings(url: str, decodes: int, params: list[tuple[str, str]] | None = None) -> Any:
+    """Each distinct reading of each `sources` or `block` value on this
+    line, in order, lazily: decoded once, and for rtp (`decodes` 2) twice.
+    stream_params reads the names as FFmpeg does (up to a decoded NUL) or
+    more widely (case-folded, trimmed); `params` is its answer when the
+    caller has it. A value already read on this line is not decoded again,
+    and a reading already given (rtp's unchanged second decode among them)
+    is not given again -- but decoding goes on past it, because a later
+    pair's first reading can equal an earlier pair's second, and its own
+    second decode is then one the earlier pair never made, and the one rtp
+    hands udp when that pair is the last (FFmpeg keeps a string option's
+    last value). Asked by reading 3 (D-SINK-87) and by the one-label rule
+    (D-SINK-89)."""
     values: set[str] = set()
     readings: set[str] = set()
-    judged: set[str] = set()
     for name, value in (stream_params(url) if params is None else params):
         if name not in STREAM_QUERY_HOST_PARAMS or value in values:
             continue
@@ -1001,9 +1046,7 @@ def _stream_query_hosts_refused(url: str, decodes: int, params: list[tuple[str, 
             if reading in readings:
                 continue
             readings.add(reading)
-            if _query_reading_refused(reading, judged):
-                return True
-    return False
+            yield reading
 
 
 # A decoded reading holding any of these is refused whole: av_get_token's
@@ -1063,19 +1106,107 @@ def stream_host_name_refused(url: str) -> bool:
     return _stream_name_refused(url, parts.netloc, parts.scheme.lower())
 
 
+# D-SINK-91 (2026-11-09): an IPv6 literal whose zone is not a number. FFmpeg
+# n9.0.2 never percent-decodes a URL's host, so it holds the zone as the
+# address writes it (`ff02::1%25eth0`: the zone `25eth0`), and every stream
+# protocol but udp and srt hands that host to the protocol beneath it
+# through ff_url_join (libavformat/url.c: rtp to udp in build_udp_url, http
+# and rtsp and rtmp to tcp, https and rtmps to tls and then tcp, mmsh to
+# http), which brackets it only when getaddrinfo with AI_NUMERICHOST reads
+# it as an IPv6 address. glibc reads a zone numerically only when it is
+# digits or, on a link-local address, an interface's name, so
+# `rtp://[ff02::1%25eth0]:5004` reaches udp as `udp://ff02::1%25eth0:5004`,
+# and av_url_split cuts an unbracketed host at its first colon: udp looks
+# up the NAME `ff02`, port 0 (read upstream, the review of 6371c67). The
+# same cut makes http's tcp look up `2a00` for `[2a00:1450::1%25eth0]` and
+# connect to 0.0.10.46 for `[2606:4700::1%25eth0]`, and rtp's
+# `[::ffff:239.1.1.1%25eth0]` bind every interface (observed by that review
+# inside an unshared network namespace, numeric hosts only). So such a
+# literal is refused, on every stream scheme: udp and srt hand the zone to
+# the resolver as written, and an interface's name may be present on one
+# machine and gone on the next, so one rule over the literal is kept
+# rather than a list of the protocols that rewrite it today. A zone of
+# ASCII digits (`%252`, read as 252) and a literal with no zone play.
+STREAM_ZONE_REFUSAL = "refused a stream whose IPv6 address carries a zone that is not a number; not played"
+
+
+def stream_zone_refused(netloc: str) -> bool:
+    """D-SINK-91: is the host after this netloc's last `@` a bracketed IPv6
+    literal whose zone, as the address writes it, is not ASCII digits? No
+    zone, or a host that is no bracketed literal, is no question here."""
+    hostport = netloc.rpartition("@")[2]
+    if not hostport.startswith("["):
+        return False
+    zone = hostport[1:].partition("]")[0].partition("%")
+    return zone[1] != "" and not (zone[2].isascii() and zone[2].isdigit())
+
+
+# D-SINK-89 (the owner, 2026-11-08: "yes, refuse one-word stream hosts from
+# remote playlists too"): D-SINK-83's rule, which refuses before any lookup
+# a host of ONE DNS label that the provider chose for a guide hint or a
+# logo, reaches the channels too. A host a URL's space cut leaves (D-SINK-
+# 34's class) is the username of `http://USER:...`, one label, and the
+# player would ask the resolver, and through it the search domains'
+# servers, about it. So from a playlist that is not local
+# (playlist_source's `local`: a file, or an http(s) source whose last hop
+# connected to a non-global address) a channel is refused when the host
+# its address names is one label by dotless_host -- the authority's, as
+# urlsplit reads it, which D-SINK-87's form makes the player's too -- and,
+# for udp and rtp, when any entry of any reading of a `sources` or `block`
+# value is (_query_readings: the names FFmpeg looks up). The playlist's own
+# host is excepted, compared as DestinationPolicy.refuses_name compares it:
+# host_key equal, the port not compared. A local playlist keeps one-label
+# names (a LAN's own names: `tvheadend`, `hdhomerun`). A dotted IPv4 or an
+# IPv6 literal is never one label; an IPv4 address written as one number
+# or in hex (`16843009`) is, as it is for a hint or a logo. Asked after
+# D-SINK-87's readings, which let an entry hold a colon only as an IPv6
+# literal, so an entry holding a colon is no question here and costs no
+# literal parse.
+STREAM_LABEL_REFUSAL = ("refused a stream whose address names a host of one label, from a playlist that is not on this "
+                        "machine or a local network; not played")
+
+
+def stream_label_refused(url: str, host: str, scheme: str, source: dict[str, Any],
+                         params: list[tuple[str, str]] | None = None) -> bool:
+    """D-SINK-89: `url` a channel's address, `host` its urlsplit hostname,
+    `scheme` lower-cased, `source` playlist_source's (or cached_source's)
+    record of its playlist, `params` stream_params(url) when the caller has
+    it. -> whether it names a host of one label the playlist may not."""
+    if source.get("local"):
+        return False
+    home = str(source.get("host") or "")
+    if dotless_host(host) and host_key(host) != home:
+        return True
+    decodes = STREAM_QUERY_HOST_SCHEMES.get(scheme, 0)
+    if decodes == 0:
+        return False
+    asked: set[str] = set()
+    for reading in _query_readings(url, decodes, params):
+        for raw in set(reading.split(",")):
+            entry = raw.strip(_TOKEN_SPACE)
+            if entry in asked:
+                continue
+            asked.add(entry)
+            if ":" not in entry and dotless_host(entry) and host_key(entry) != home:
+                return True
+    return False
+
+
 def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
     first half, a control character included: stream_form_ok), `listener`
     (stream_listen_refusal, D-SINK-42), `local` (stream_host_refused,
-    D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57) or
+    D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57),
     `name` (the address names a host the player would read in a form
-    host_name_refused refuses, D-SINK-87). `name` is asked last: the rules
-    before it classify a literal and look nothing up, so a line two rules
-    refuse keeps the older reason, and the parse's host rule still answers
-    row for row as play time's does (the destinations fixture, dev
-    branch)."""
+    host_name_refused refuses, D-SINK-87), `zone` (an IPv6 literal whose
+    zone is not a number, D-SINK-91) or `label` (a host of one label from a
+    playlist that is not local, D-SINK-89). `name`, `zone` and `label` are
+    asked last, in that order: the rules before them classify a literal and
+    look nothing up, so a line two rules refuse keeps the older reason, and
+    the parse's host rule still answers row for row as play time's does
+    (the destinations fixture, dev branch)."""
     if url.startswith("-") or _CONTROL_CHARS.search(url):
         return "scheme", ""
     try:
@@ -1105,6 +1236,13 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         return refusal, host
     if _stream_name_refused(url, parts.netloc, scheme, params):
         return "name", host
+    # Each asked only where it can answer, so a plain line of a local list,
+    # the 10,000-channel case, pays two tests and no call: a netloc with no
+    # `[` holds no literal, and a local playlist keeps every label.
+    if "[" in parts.netloc and stream_zone_refused(parts.netloc):
+        return "zone", host
+    if not source.get("local") and stream_label_refused(url, host, scheme, source, params):
+        return "label", host
     return "", host
 
 
@@ -1631,6 +1769,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     bounds: dict[str, int] = {}
     playlist = source if isinstance(source, dict) else {"host": "", "local": False}
     skipped_name = 0
+    skipped_zone = 0
+    skipped_label = 0
     skipped_listen = 0
     skipped_local = 0
     skipped_port = 0
@@ -1709,6 +1849,10 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             skipped_scheme += 1
         elif refusal == "name":
             skipped_name += 1                 # D-SINK-87: a host in a form no host takes
+        elif refusal == "zone":
+            skipped_zone += 1                 # D-SINK-91: an IPv6 zone that is not a number
+        elif refusal == "label":
+            skipped_label += 1                # D-SINK-89: one label, from a list that is not local
         elif refusal == "listener":
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
@@ -1742,6 +1886,13 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
         # D-SINK-87: a count, never the host (it may be a userinfo).
         warnings.append(counted_sentence(skipped_name, "%d entry skipped: its address names a host the player would read in a form no host name or port may take",
                                          "%d entries skipped: their addresses name hosts the player would read in forms no host name or port may take"))
+    if skipped_zone:
+        warnings.append(counted_sentence(skipped_zone, "%d entry skipped: its address is an IPv6 literal whose zone is not a number",
+                                         "%d entries skipped: their addresses are IPv6 literals whose zones are not numbers"))
+    if skipped_label:
+        # D-SINK-89: a count, never the host (it may be a username).
+        warnings.append(counted_sentence(skipped_label, "%d entry skipped: its address names a host of one label, not the playlist's own, from a playlist that is not on this machine or a local network",
+                                         "%d entries skipped: their addresses name hosts of one label, not the playlist's own, from a playlist that is not on this machine or a local network"))
     if skipped_listen:
         warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
                                          "%d entries skipped: the streams would listen on this machine for anyone to send to"))
