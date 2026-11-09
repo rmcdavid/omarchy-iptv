@@ -141,16 +141,21 @@ class ReleaseCase(unittest.TestCase):
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
         # The real main is not linear: what it held before the split carries
-        # 45 merge commits, the newest 482a21e (2026-09-16). The origin guard
-        # looks for a merge only in what the local main ADDS to origin's, and
-        # over a linear double a walk of the whole local main passes every
-        # test (rule 10), so this history holds one too: a lane merged the
-        # --no-ff way, the tree unchanged.
+        # 45 merge commits, the newest 482a21e (2026-09-16), with 40 plain
+        # commits above it up to ce68db5. The origin guard looks for a merge
+        # only in what the local main ADDS to origin's, and over a linear
+        # double a walk of the whole local main passes every test (rule 10),
+        # so this history holds one too: a lane merged the --no-ff way, the
+        # tree unchanged, and a plain commit above it, so the merge sits
+        # BELOW origin's tip as the real one does. With the merge AT the tip,
+        # a walk of the whole local main that drops only origin's tip, and
+        # one that looks at the local tip alone, both passed every test.
         tree = self.git('rev-parse', 'HEAD^{tree}').strip()
         lane = self.git('commit-tree', tree, '-p', 'HEAD', '-m', 'a lane before the split').strip()
         merged = self.git('commit-tree', tree, '-p', 'HEAD', '-p', lane,
                           '-m', 'merge: a lane before the split').strip()
-        self.git('update-ref', 'refs/heads/main', merged)
+        above = self.git('commit-tree', tree, '-p', merged, '-m', 'a release after the lane').strip()
+        self.git('update-ref', 'refs/heads/main', above)
         # D-REL-13: the cut asks origin whether its main holds a commit the
         # local one lacks, and refuses a clone it cannot ask. The real clone
         # always has one, so the double does too (rule 10): a local bare
@@ -514,9 +519,13 @@ class ReleaseCase(unittest.TestCase):
         """An earlier cut not pushed yet: origin's main is its ancestor, and the
         two still go up as one fast-forward. Origin's main holds a merge commit
         below its tip, as the real one does, so the cut goes only when the
-        guard looks for a merge in what the local main adds and nowhere else."""
+        guard looks for a merge in what the local main adds and nowhere else:
+        not in all of the local main, with or without origin's tip."""
         old = self.git('rev-parse', 'main').strip()
         self.assertTrue(self.ogit('rev-list', '--min-parents=2', 'refs/heads/main').strip())
+        # The merge is below origin's tip, not the tip itself: one parent.
+        self.assertEqual(2, len(self.ogit('rev-list', '--parents', '-n', '1',
+                                          'refs/heads/main').split()))
         first = self.build()
         self.bump('1.0.0')
         second = self.build()
@@ -1086,7 +1095,10 @@ class ReleaseCase(unittest.TestCase):
     def test_a_local_main_settled_with_a_merge_is_refused(self):
         """The review's chain: an earlier cut not pushed, the owner's web
         commit, and main settled by merging origin's into it. That fast-
-        forwards, and origin's ruleset refuses it anyway, for the merge."""
+        forwards, and origin's ruleset refuses it anyway, for the merge. A cut
+        made on that merge by a release.py older than this guard puts a plain
+        commit above it, and the refusal still names the merge, now below the
+        local tip."""
         self.local_commit()
         web = self.origin_commit()
         self.git('fetch', '-q', 'origin')
@@ -1100,6 +1112,12 @@ class ReleaseCase(unittest.TestCase):
         said = self.assert_refused(
             "the local main at %s holds a merge commit, %s, that origin's main at %s lacks"
             % (merged[:12], merged[:12], web[:12]),
+            "origin's ruleset refuses a merge commit there", 'a person must look at what it holds')
+        self.assertFalse(self.origin_takes_main())
+        above = self.local_commit()
+        said = self.assert_refused(
+            "the local main at %s holds a merge commit, %s, that origin's main at %s lacks"
+            % (above[:12], merged[:12], web[:12]),
             "origin's ruleset refuses a merge commit there", 'a person must look at what it holds')
         self.assertFalse(self.origin_takes_main())
         self.settle_as_said(said)
