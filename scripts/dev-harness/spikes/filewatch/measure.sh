@@ -407,6 +407,13 @@ fi
 # ---------------------------------------------------------------- outside
 HELPER=${1:-$ROOT/bin/omarchy-iptv}
 SET=${2:-r23g}
+# F-HARNESS-104: the cage below makes its socket under XDG_RUNTIME_DIR and
+# aborts, with a core and a crash card on the owner's desktop, when it
+# cannot. Asked before the work directory is made; private-bus.sh asks again
+# for its own bus socket, which lives inside that directory.
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
+qa_cage_runtime_fits || exit 2
 RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 WORK=$(mktemp -d "$RUNTIME/${FW_PREFIX:-omarchy-iptv-fw}.XXXXXX") || exit 2
 chmod 700 "$WORK"

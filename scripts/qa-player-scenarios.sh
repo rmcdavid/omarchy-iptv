@@ -576,9 +576,13 @@ print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))
 }
 cold_guard() {
   # AF_UNIX is 108 bytes and the bind is the whole scenario. Say so rather
-  # than reporting "the player did not open its socket".
-  if (( ${#COLD_SOCK} > 100 )); then
-    bad "SETUP FAILED: $COLD_SOCK is ${#COLD_SOCK} bytes, past the AF_UNIX limit; set OMARCHY_IPTV_HARNESS_DIR shorter"
+  # than reporting "the player did not open its socket". F-HARNESS-104: the
+  # shared count, in bytes, NUL included; the copy that stood here counted
+  # characters and stopped at 100. The socket is COLD_SOCK itself, read as
+  # the harness directory the caller chose plus what this script adds to it.
+  local why
+  if ! why=$(qa_sock_fits "the cold stub player" OMARCHY_IPTV_HARNESS_DIR "$SCRATCH" "${COLD_SOCK#"$SCRATCH"}" 2>&1); then
+    bad "SETUP FAILED: $why"
     return 1
   fi
   command -v socat >/dev/null || { bad "SETUP FAILED: socat is not installed"; return 1; }

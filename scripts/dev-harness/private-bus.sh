@@ -59,6 +59,21 @@ if [[ -e $DIR ]]; then
   echo "private-bus.sh: $DIR exists; refusing to reuse it" >&2
   exit 2
 fi
+# F-HARNESS-104 (2026-11-09): two sockets are made beneath this script, and
+# both are asked about before anything starts.
+# - The nested cage's. This script exists to host one (CLAUDE.md, parallel
+#   6b, makes it the bus of EVERY nested cage, a lane's own rig included),
+#   and a cage that cannot make its socket under XDG_RUNTIME_DIR aborts with
+#   a core and a crash card on the owner's desktop -- four did on 2026-11-08
+#   and 09. Asked for whatever CMD is, because a rig can start cage from
+#   inside a command this script cannot read; a scenario that starts cage
+#   itself asks again, above its own transcript.
+# - The bus's own, at DIR/dbus-XXXXXXXXXX, which dbus-daemon refuses past 99
+#   bytes. Before this line that read "printed no address within 5 s".
+# shellcheck source=scripts/qa-lib.sh
+. "$(cd "$(dirname "$0")" && pwd)/../qa-lib.sh" || exit 2
+qa_cage_runtime_fits || exit 2
+qa_sock_fits "the private bus (dbus-daemon)" DIR "$DIR" "$QA_SOCK_DBUS" "$QA_DBUS_ROOM" || exit 2
 mkdir -m 700 -p "$DIR" || exit 2
 BUS_PID=""
 cleanup() {

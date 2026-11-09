@@ -141,6 +141,12 @@ HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
+# F-HARNESS-104: the live arm starts cage, and a cage that cannot make its
+# socket under XDG_RUNTIME_DIR aborts with a core and a crash card on the
+# owner's desktop. Refused here, above the export and the transcript.
+if [[ $MODE == live ]]; then
+  qa_cage_runtime_fits || exit 2
+fi
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 LIVE_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}

@@ -3087,6 +3087,180 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
    "$(env -u OMARCHY_IPTV_HARNESS_REAL_HOME HOME="$HH/scratch/home" bash -c '. "$1"; qa_harness_real_home "$2"' hh "$HERE/qa-lib.sh" "$HH/scratch")" \
    "$(getent passwd "$(id -u)" | cut -d: -f6)"
 
+# ======================================= AF_UNIX socket paths (F-HARNESS-104)
+
+section "qa_sock_fits / qa_cage_runtime_fits / F-HARNESS-104: a socket path that cannot fit"
+
+# Four nested cages aborted on 2026-11-08 and 09, each leaving a core and a
+# crash card on the owner's desktop, because the clip preflight ran under a
+# scratch XDG_RUNTIME_DIR of about 100 bytes and cage could not make its
+# socket there. NOTHING here starts cage, quickshell, a player or a
+# compositor: the predicates are called directly, and every script that would
+# start cage is run with stand-ins first on PATH that only append their name
+# to a log, which must stay empty. The one real process started is a
+# dbus-daemon through private-bus.sh, the positive control at dbus's own
+# limit. The directories live under a SHORT root of their own, whatever
+# TMPDIR says, so each length below is exact.
+SP=$(mktemp -d /tmp/qa-fh104.XXXXXX)
+trap 'chmod -R u+rwX "$SP" 2>/dev/null; rm -rf -- "$TMP" "$SP"' EXIT
+# sp_path <bytes> [<first>]: a path under $SP exactly <bytes> BYTES long,
+# <first> and then r's.
+sp_path() {
+  local n=$1 d="$SP/${2:-}r"
+  local LC_ALL=C
+  while (( ${#d} < n )); do d+=r; done
+  printf '%s\n' "$d"
+}
+D96=$(sp_path 96); D97=$(sp_path 97)
+mkdir -p "$D96" "$D97"
+# cf [<XDG_RUNTIME_DIR>]: qa_cage_runtime_fits' status and the number of lines
+# it wrote to stderr (kept in $SP/cf.err), in a subshell started in $SP. No
+# argument: XDG_RUNTIME_DIR unset.
+cf() {
+  ( cd "$SP" || exit 9
+    if (( $# )); then export XDG_RUNTIME_DIR=$1; else unset XDG_RUNTIME_DIR; fi
+    qa_cage_runtime_fits 2>"$SP/cf.err"
+    printf '%s %s\n' "$?" "$(wc -l <"$SP/cf.err" | tr -d ' ')" )
+}
+is "96 bytes fits: \$XDG_RUNTIME_DIR/wayland-NN and its NUL fill sun_path's 108 exactly, and nothing is said" \
+   "$(cf "$D96")" "0 0"
+is "97 bytes is refused, in one line" "$(cf "$D97")" "1 1"
+is "and that line names the variable, its bytes, the socket, the limit and the most it may hold" \
+   "$(<"$SP/cf.err")" \
+   "REFUSING to start cage: XDG_RUNTIME_DIR is 97 bytes ($D97), so the socket \$XDG_RUNTIME_DIR/wayland-NN needs 109 bytes with its NUL, past the 108-byte limit, and cage could not make it (F-HARNESS-104); give XDG_RUNTIME_DIR at most 96 bytes"
+# Bytes, not characters: a name with one two-byte character in it, 96
+# characters and 97 bytes long, read in a UTF-8 locale.
+DMB=$(sp_path 97 "$(printf '\303\251')")
+mkdir -p "$DMB"
+is "the precondition: a UTF-8 locale counts that 97-byte name as 96 characters" \
+   "$(env LC_ALL=C.UTF-8 bash -c 'printf %s "${#1}"' mb "$DMB")" "96"
+is "and it is refused there all the same: sun_path holds bytes" \
+   "$(env LC_ALL=C.UTF-8 XDG_RUNTIME_DIR="$DMB" bash -c '. "$1"; qa_cage_runtime_fits 2>/dev/null; printf %s "$?"' mb "$HERE/qa-lib.sh")" "1"
+is "unset is refused: libwayland makes no socket without one" "$(cf)" "1 1"
+is "empty is refused" "$(cf '')" "1 1"
+mkdir -p "$SP/rel"
+is "a relative one is refused, though it names a directory here" "$(cf rel)" "1 1"
+is "one that does not exist is refused" "$(cf "$SP/none")" "1 1"
+: >"$SP/afile"
+is "a file is refused, though this user can write it" "$(cf "$SP/afile")" "1 1"
+mkdir -p "$SP/ro"; chmod 0500 "$SP/ro"
+is "a directory this user cannot write is refused" "$(cf "$SP/ro")" "1 1"
+# sf <args>: qa_sock_fits' status and its stderr's line count.
+sf() { ( qa_sock_fits "$@" 2>"$SP/sf.err"; printf '%s %s\n' "$?" "$(wc -l <"$SP/sf.err" | tr -d ' ')" ); }
+is "qa_sock_fits: an empty directory is refused, not counted as a short one" "$(sf who LABEL '' /x)" "1 1"
+is "qa_sock_fits: a suffix that is not a path is a usage error (2)" "$(sf who LABEL /d x)" "2 1"
+is "the bus: a DIR of 83 bytes fits dbus-daemon's own 99 and the NUL" \
+   "$(sf bus DIR "$(sp_path 83)" "$QA_SOCK_DBUS" "$QA_DBUS_ROOM")" "0 0"
+is "and one of 84 does not" "$(sf bus DIR "$(sp_path 84)" "$QA_SOCK_DBUS" "$QA_DBUS_ROOM")" "1 1"
+is "the harness shell: a harness directory of 61 bytes leaves room for quickshell's IPC socket" \
+   "$(sf qs HD "$(sp_path 61)" "/runtime$QA_SOCK_QUICKSHELL")" "0 0"
+is "and one of 62 does not" "$(sf qs HD "$(sp_path 62)" "/runtime$QA_SOCK_QUICKSHELL")" "1 1"
+
+# Every script under scripts/ that starts cage, run to its refusal. The
+# stand-ins: each appends its own name to $SP/ran and exits 1, except unshare,
+# which logo-scenario.sh asks for a namespace before it reaches the check and
+# which must answer 0 to get there (it starts nothing either way).
+FB="$SP/bin"; mkdir -p "$FB"
+for fb_t in cage quickshell qs wtype wl-copy wl-paste dbus-probe; do
+  printf '#!/bin/sh\necho %s >>"%s"\nexit 1\n' "$fb_t" "$SP/ran" >"$FB/$fb_t"
+done
+printf '#!/bin/sh\necho unshare >>"%s"\nexit 0\n' "$SP/ran" >"$FB/unshare"
+chmod 0755 "$FB"/*
+# fh_case <label> <first-line glob> <XDG_RUNTIME_DIR> <must-not-exist> <cmd...>:
+# one check -- the status, whether the first line out matches, how many
+# stand-ins for a starter ran, and whether <must-not-exist> was made -- which
+# must read "2|matched|0|none". Bounded, so a check that has stopped refusing
+# (rule 11's mutations) cannot hold this file up: a scenario that gets past it
+# meets a stand-in cage and gives up within its own 10 s.
+fh_case() {
+  local label=$1 glob=$2 rt=$3 never=$4 rc first
+  shift 4
+  : >"$SP/ran"
+  env -u CLIP_CAGE_BIN -u KEY_CAGE_BIN -u LOGO_CAGE_BIN -u OPEN_CAGE_BIN -u LOGO_UNSHARE_BIN \
+      -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
+      XDG_RUNTIME_DIR="$rt" PATH="$FB:$PATH" DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
+      FH104_HD="$never" timeout -k 5 120 "$@" >"$SP/run.out" 2>&1
+  rc=$?
+  first=$(head -n 1 "$SP/run.out")
+  # shellcheck disable=SC2053
+  [[ $first == $glob ]] && first=matched
+  is "$label" \
+     "$rc|$first|$(qa_count '^(cage|quickshell|qs|wtype|wl-copy|wl-paste|dbus-probe)$' "$SP/ran")|$([[ -e $never ]] && echo made || echo none)" \
+     "2|matched|0|none"
+}
+# A scenario's own harness directory reaches it as FH104_HD, which the
+# command sets as OMARCHY_IPTV_HARNESS_DIR: a refusal must not have made it.
+FH_CAGE="REFUSING to start cage: XDG_RUNTIME_DIR is 97 bytes (*"
+FHD=$SP/h
+fh_case "clip-scenario.sh check-tree, the gate's preflight that aborted four cages: refused, cage never run" \
+  "$FH_CAGE" "$D97" "$FHD-clip" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" check-tree' fh "$ROOT/scripts/dev-harness/clip-scenario.sh"
+fh_case "clip-scenario.sh live: refused above its transcript" \
+  "$FH_CAGE" "$D97" "$FHD-clip" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/clip-scenario.sh"
+fh_case "key-scenario.sh live: refused above its export and transcript" \
+  "$FH_CAGE" "$D97" "$FHD-key" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/key-scenario.sh"
+fh_case "logo-scenario.sh live: refused above its export and transcript" \
+  "$FH_CAGE" "$D97" "$FHD-logo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/logo-scenario.sh"
+fh_case "open-scenario.sh live: refused above its export and transcript" \
+  "$FH_CAGE" "$D97" "$FHD-open" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/open-scenario.sh"
+fh_case "spikes/first-open/run.sh: refused before it makes its scratch tree" \
+  "$FH_CAGE" "$D97" "$FHD-fo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
+FH_HD62=$(sp_path 62 h)
+fh_case "spikes/first-open/run.sh, a harness directory its probe quickshells' IPC socket cannot fit under: refused too" \
+  "REFUSING to start the probe quickshell: OMARCHY_IPTV_HARNESS_DIR is 62 bytes (*" "$D96" "$FH_HD62" \
+  bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
+fh_case "spikes/filewatch/measure.sh: refused before its work directory, the first line out" \
+  "$FH_CAGE" "$D97" "$FHD-fw" bash "$ROOT/scripts/dev-harness/spikes/filewatch/measure.sh" "$ROOT/bin/omarchy-iptv" r24
+fh_case "private-bus.sh, whose command is or starts a cage on every documented use: refused, its directory never made" \
+  "$FH_CAGE" "$D97" "$SP/pb1" bash "$ROOT/scripts/dev-harness/private-bus.sh" "$SP/pb1" 20 "$FB/dbus-probe"
+fh_case "private-bus.sh, a DIR too long for the bus's own socket: refused, where it used to wait 5 s for an address" \
+  "REFUSING to start the private bus (dbus-daemon): DIR is 84 bytes (*" "$D96" "$(sp_path 84 b)" \
+  bash "$ROOT/scripts/dev-harness/private-bus.sh" "$(sp_path 84 b)" 20 "$FB/dbus-probe"
+# The positive control at the bus's limit, the one real process here: a
+# 99-byte socket path is one dbus-daemon 1.16 takes, so 84 is the first DIR
+# that is refused for a reason, and the bus is up when its command runs.
+PB83=$(sp_path 83 b)
+pb_ok=$(env -u WAYLAND_DISPLAY -u DISPLAY XDG_RUNTIME_DIR="$D96" \
+  timeout -k 5 60 bash "$ROOT/scripts/dev-harness/private-bus.sh" "$PB83" 20 \
+  bash -c 'printf "%s\n" "$DBUS_SESSION_BUS_ADDRESS"' 2>/dev/null; printf 'rc=%s' "$?")
+is "and a DIR of 83 bytes runs its command on the bus, then leaves nothing" \
+   "$([[ $pb_ok == "unix:path=$PB83/dbus-"*rc=0 ]] && echo bus || echo "$pb_ok") $([[ -e $PB83 ]] && echo left || echo gone)" "bus gone"
+# Its own 62-byte directory, so a red here is run.sh's and never what
+# another case made.
+RUN_HD62=$(sp_path 62 j)
+fh_case "run.sh start, a harness directory quickshell's IPC socket cannot fit under: refused before anything starts" \
+  "\[run.sh] REFUSING to start the harness shell (quickshell): OMARCHY_IPTV_HARNESS_DIR is 62 bytes (*" "$D96" "$RUN_HD62" \
+  bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" --detach --timeout 0 --playlist none' fh "$ROOT/scripts/dev-harness/run.sh"
+fh_case "and run.sh ipc, which would otherwise ask a shell that could never answer" \
+  "\[run.sh] REFUSING to start the harness shell (quickshell): OMARCHY_IPTV_HARNESS_DIR is 62 bytes (*" "$D96" "$RUN_HD62" \
+  bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" ipc state' fh "$ROOT/scripts/dev-harness/run.sh"
+# qa-player-scenarios.sh's cold phase binds a stub player at
+# $OMARCHY_IPTV_HARNESS_DIR/cold/runtime/omarchy-iptv/mpv.sock: 35 bytes past
+# the harness directory. Its copy of this check counted characters and
+# stopped at 100; the shared one counts bytes to 108. `print` runs nothing.
+qp_setup() {
+  env -u WAYLAND_DISPLAY -u DISPLAY OMARCHY_IPTV_HARNESS_DIR="$1" XDG_RUNTIME_DIR="$D96" \
+    timeout -k 5 60 bash "$ROOT/scripts/qa-player-scenarios.sh" print H17 2>&1 \
+    | qa_count 'SETUP FAILED: .* bytes' /dev/stdin
+}
+is "qa-player-scenarios.sh: a cold socket of 107 bytes and its NUL is not refused (the old copy refused it)" \
+   "$(qp_setup "$(sp_path 72 q)")" "0"
+is "and one of 108 is, through the shared check" "$(qp_setup "$(sp_path 73 q)")" "1"
+# scripts/check.sh's own clip step, read out of the gate and run over that
+# refusal with CLIP_PREFLIGHT_SKIP_OK=1: red, with the reason, never a skip.
+CB=$(sed -n '/^clip_log=\$CHECK_TMP\/clip-scenario\.log$/,/^fi$/p' "$ROOT/scripts/check.sh")
+is "the gate's clip step is where this reads it" "$(printf '%s\n' "$CB" | head -n 1)" 'clip_log=$CHECK_TMP/clip-scenario.log'
+mkdir -p "$SP/ct"; : >"$SP/ran"
+env -u CLIP_CAGE_BIN -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE \
+  XDG_RUNTIME_DIR="$D97" OMARCHY_IPTV_HARNESS_DIR="$FHD-gate" PATH="$FB:$PATH" CLIP_PREFLIGHT_SKIP_OK=1 \
+  timeout -k 5 120 bash -c 'ROOT=$1 CHECK_TMP=$2 CLIP_PREFLIGHT_MIN=7 fail=0
+ok()  { printf "ok   %s\n" "$*"; }
+bad() { printf "FAIL %s\n" "$*"; fail=1; }
+eval "$3"
+echo "fail=$fail"' cb "$ROOT" "$SP/ct" "$CB" >"$SP/cb.out" 2>&1
+is "and it reads that refusal RED, with the reason on its FAIL line, even with CLIP_PREFLIGHT_SKIP_OK=1" \
+   "$(qa_count '^FAIL clip preflight \(exit 2\): REFUSING to start cage: XDG_RUNTIME_DIR is 97 bytes' "$SP/cb.out") $(qa_count '^(ok|SKIP) ' "$SP/cb.out") $(tail -n 1 "$SP/cb.out") $(qa_count '^cage$' "$SP/ran")" \
+   "1 0 fail=1 0"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -3265,7 +3439,16 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 609 -> 611 on 2026-11-08, F-HARNESS-96's sibling search: qa_leak_scan and
 # qa_leak_on_labelled print a red's file:line locations and never the leaking
 # text (2). Red on 8ff582f's qa-lib.sh: both printed the credential.
-EXPECTED=611
+# 611 -> 645 on 2026-11-09, F-HARNESS-104: qa_sock_fits and
+# qa_cage_runtime_fits called directly, the boundaries of all three socket
+# names they size included (17); every script under scripts/ that starts cage
+# run to its refusal with stand-ins first on PATH, private-bus.sh's bus
+# socket at dbus's own limit with the real daemon as the positive control,
+# and run.sh's scratch runtime through start and ipc (13); qa-player's cold
+# guard on the shared count (2); check.sh's own clip step read out of the gate
+# (2). Red on 6371c67's scripts: 30 of the 34 failed; 25 single-decision
+# mutants of the new code, 25 red.
+EXPECTED=645
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

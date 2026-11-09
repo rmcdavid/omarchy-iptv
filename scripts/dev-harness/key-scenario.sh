@@ -892,6 +892,13 @@ if [[ -n $ONLY ]]; then
 fi
 # Is block $1 in this run? Every block, when --only is absent.
 seg_on() { [[ -z $ONLY || ",$ONLY," == *",$1,"* ]]; }
+# F-HARNESS-104: the live arm starts cage, and a cage that cannot make its
+# socket under XDG_RUNTIME_DIR aborts with a core and a crash card on the
+# owner's desktop. Refused with the levers, above the export and the
+# transcript, before anything starts.
+if [[ $MODE == live ]]; then
+  qa_cage_runtime_fits || exit 2
+fi
 if [[ -n $TREE ]]; then
   PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
   # The model is whatever qa_model_files answers (D-REL-5: Model.mjs and its

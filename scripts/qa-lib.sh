@@ -1053,6 +1053,110 @@ qa_target_nested() {
   return 0
 }
 
+# ------------------------------------------------------ AF_UNIX socket paths
+
+# F-HARNESS-104 (2026-11-09). Between 19:29 on 2026-11-08 and 03:15 the next
+# morning four nested cage runs ABORTED (SIGABRT in wl_display_destroy, during
+# cage's start-up cleanup), each leaving a core under
+# /var/lib/systemd/coredump and a journal entry, from which the host's crash
+# watcher draws a card on the owner's desktop whatever the core limit says
+# (F-HARNESS-45). All four were `cage -- <tmp>/omarchy-iptv-clip.*/child.sh`,
+# the clip preflight scripts/check.sh runs. The cause, found by the lanes that
+# hit it: cage makes its Wayland socket under the caller's XDG_RUNTIME_DIR,
+# and a scratch runtime directory of about 100 bytes pushed that path past
+# sun_path's 108. With a short one the same preflight passed 7 of 7.
+#
+# Read, not measured (nothing here starts cage with a long path, and nothing
+# may): libwayland 1.26's wl_display_add_socket_auto tries wayland-0 upwards
+# to wayland-32 and refuses a path that does not fit, NUL included, in 108
+# bytes ("socket path ... plus null terminator exceeds 108 bytes" and
+# "XDG_RUNTIME_DIR is invalid or not set in the environment" are both in the
+# installed library's strings), and cage 0.3.1 answers the NULL with `goto
+# end`, whose cleanup calls wl_display_destroy (cage.c at v0.3.1). So an unset
+# or relative XDG_RUNTIME_DIR, one that is not a directory this user can
+# write, and one too long for the socket all end in the same abort.
+#
+# The longest name each socket-maker can put in its directory, written out at
+# full length, so a suffix's length IS the bytes it adds:
+QA_SUN_PATH_ROOM=108
+#   cage (libwayland): wayland-0 .. wayland-32, so two digits.
+QA_SOCK_CAGE=/wayland-NN
+#   quickshell's IPC socket: by-id/<instance id>/ipc.sock under
+#   $XDG_RUNTIME_DIR/quickshell (src/core/paths.cpp), the id base36(pid) and
+#   base36(launch seconds) (src/launch/launch.cpp): at most 5 characters for a
+#   pid under the kernel's 4,194,304 ceiling and 6 for the seconds until
+#   2038-12-24, 11 in all.
+QA_SOCK_QUICKSHELL=/quickshell/by-id/XXXXXXXXXXX/ipc.sock
+#   the helper's player socket, default_socket_path (bin/helper/01-core.py).
+QA_SOCK_PLAYER=/omarchy-iptv/mpv.sock
+#   dbus-daemon 1.16's `unix:dir=` listener: "dbus-" and 10 random characters
+#   (dbus-server-socket.c), and dbus refuses a path over its own
+#   _DBUS_MAX_SUN_PATH_LENGTH of 99 bytes ("Socket name too long"), so 100
+#   with the NUL, not 108.
+QA_SOCK_DBUS=/dbus-XXXXXXXXXX
+QA_DBUS_ROOM=100
+
+# qa_sock_fits <who> <label> <dir> </suffix> [<room>]
+#   Will the socket <who> makes at <dir><suffix> fit, NUL included, in <room>
+#   bytes (default QA_SUN_PATH_ROOM)? <suffix> is everything the socket's
+#   maker and the caller add below <dir>, at full length: a QA_SOCK_* name,
+#   or one behind a path of the caller's own ("/runtime$QA_SOCK_QUICKSHELL").
+#   <label> is what the caller can change (a variable's name), and it is what
+#   the refusal names. Bytes, never characters: the locale is C for
+#   the count, because sun_path holds bytes and a UTF-8 name holds more of
+#   them than it has characters.
+#     0  it fits
+#     1  it does not, or <dir> is empty: ONE line on stderr, beginning
+#        "REFUSING to start <who>:", naming <label>, the bytes and the limit
+#     2  usage
+#   A refusal is a reason to start nothing, never a SKIP: a caller exits 2,
+#   which no *_SKIP_OK in scripts/check.sh can accept.
+qa_sock_fits() {
+  local who=${1-} label=${2-} dir=${3-} suffix=${4-} room=${5:-$QA_SUN_PATH_ROOM} need
+  if [[ -z $who || -z $label || $suffix != /* || ! $room =~ ^[1-9][0-9]*$ ]]; then
+    echo "qa_sock_fits: usage: qa_sock_fits <who> <label> <dir> </suffix> [<room>]" >&2
+    return 2
+  fi
+  if [[ -z $dir ]]; then
+    printf 'REFUSING to start %s: %s is empty, so %s has no directory to make its socket in (F-HARNESS-104)\n' \
+      "$who" "$label" "$who" >&2
+    return 1
+  fi
+  local LC_ALL=C
+  need=$(( ${#dir} + ${#suffix} + 1 ))
+  if (( need > room )); then
+    printf 'REFUSING to start %s: %s is %d bytes (%s), so the socket $%s%s needs %d bytes with its NUL, past the %d-byte limit, and %s could not make it (F-HARNESS-104); give %s at most %d bytes\n' \
+      "$who" "$label" "${#dir}" "$dir" "$label" "$suffix" "$need" "$room" "$who" "$label" "$(( room - ${#suffix} - 1 ))" >&2
+    return 1
+  fi
+  return 0
+}
+
+# qa_cage_runtime_fits
+#   May a nested cage start in this environment? Asked by EVERY script under
+#   scripts/ that starts cage, above the cage line and above whatever the
+#   script would start first (the scenarios do it with their other refusals,
+#   above the transcript), and by private-bus.sh for the command it runs,
+#   which on every documented use is or starts a cage (CLAUDE.md, parallel
+#   6b). The environment is the one cage will inherit: none of those scripts
+#   assigns XDG_RUNTIME_DIR between the call and the cage line.
+#     0  cage can make its socket: XDG_RUNTIME_DIR is absolute, a directory
+#        this user can write, and short enough for $QA_SOCK_CAGE
+#     1  refused: ONE line on stderr beginning "REFUSING to start cage:"
+qa_cage_runtime_fits() {
+  local rt=${XDG_RUNTIME_DIR-}
+  if [[ $rt != /* ]]; then
+    if [[ -z $rt ]]; then rt="unset or empty"; else rt="not absolute ($rt)"; fi
+    printf 'REFUSING to start cage: XDG_RUNTIME_DIR is %s, so libwayland makes no socket and cage aborts (F-HARNESS-104)\n' "$rt" >&2
+    return 1
+  fi
+  if [[ ! -d $rt || ! -w $rt ]]; then
+    printf 'REFUSING to start cage: XDG_RUNTIME_DIR (%s) is not a directory this user can write, so cage could make no socket there and would abort (F-HARNESS-104)\n' "$rt" >&2
+    return 1
+  fi
+  qa_sock_fits cage XDG_RUNTIME_DIR "$rt" "$QA_SOCK_CAGE"
+}
+
 # ------------------------------------------------------------ transcripts
 
 # F-M3-1, half (b). One live run of m3-scenario.sh answered "17 passed, 14

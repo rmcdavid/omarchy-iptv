@@ -61,6 +61,14 @@ LIVE_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-first-open}
 export OMARCHY_IPTV_HARNESS_DIR=$SCRATCH
 qa_harness_home "$SCRATCH" || exit 2
+# F-HARNESS-104, both before anything is made or started: the cage this
+# starts makes its socket under XDG_RUNTIME_DIR, and aborts with a core and a
+# crash card on the owner's desktop when it cannot; and the probe quickshells
+# make their IPC socket under $SCRATCH/runtime (pipc below), which run.sh's
+# own check does not see, because they are started from here. A probe that
+# could not bind would read as "answered no IPC within 10 s".
+qa_cage_runtime_fits || exit 2
+qa_sock_fits "the probe quickshell" OMARCHY_IPTV_HARNESS_DIR "$SCRATCH" "/runtime$QA_SOCK_QUICKSHELL" || exit 2
 mkdir -p "$SCRATCH/runtime" "$SCRATCH/bin" "$SCRATCH/fixtures" || exit 2
 qa_transcript_start first-open || exit 2
 echo "== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo no-git))   arm $ARM   reps $REPS"
