@@ -17,14 +17,18 @@ is expected to ship the day it exists.
 """
 
 import importlib.util
+import inspect
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _spec = importlib.util.spec_from_file_location(
@@ -98,8 +102,13 @@ MUST_NOT_SHIP = ('CLAUDE.md', 'docs/PRODUCT.md', 'tests/test_x.py',
 class ReleaseCase(unittest.TestCase):
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp(prefix='release-test-')
-        self.addCleanup(shutil.rmtree, self.dir, True)
+        # The clone and its origin sit side by side under one directory, so the
+        # remote is outside the work tree and one cleanup removes both.
+        self.top = tempfile.mkdtemp(prefix='release-test-')
+        self.addCleanup(shutil.rmtree, self.top, True)
+        self.dir = os.path.join(self.top, 'clone')
+        self.origin = os.path.join(self.top, 'origin.git')
+        os.mkdir(self.dir)
         self.git('init', '-q', '-b', 'main')
         self.git('config', 'user.email', 't@example.invalid')
         self.git('config', 'user.name', 'test')
@@ -131,6 +140,32 @@ class ReleaseCase(unittest.TestCase):
         self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture())
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
+        # The real main is not linear: what it held before the split carries
+        # 45 merge commits, the newest 482a21e (2026-09-16), with 40 plain
+        # commits above it up to ce68db5. The origin guard looks for a merge
+        # only in what the local main ADDS to origin's, and over a linear
+        # double a walk of the whole local main passes every test (rule 10),
+        # so this history holds one too: a lane merged the --no-ff way, the
+        # tree unchanged, and a plain commit above it, so the merge sits
+        # BELOW origin's tip as the real one does. With the merge AT the tip,
+        # a walk of the whole local main that drops only origin's tip, and
+        # one that looks at the local tip alone, both passed every test.
+        tree = self.git('rev-parse', 'HEAD^{tree}').strip()
+        lane = self.git('commit-tree', tree, '-p', 'HEAD', '-m', 'a lane before the split').strip()
+        merged = self.git('commit-tree', tree, '-p', 'HEAD', '-p', lane,
+                          '-m', 'merge: a lane before the split').strip()
+        above = self.git('commit-tree', tree, '-p', merged, '-m', 'a release after the lane').strip()
+        self.git('update-ref', 'refs/heads/main', above)
+        # D-REL-13: the cut asks origin whether its main holds a commit the
+        # local one lacks, and refuses a clone it cannot ask. The real clone
+        # always has one, so the double does too (rule 10): a local bare
+        # repository holding main (fetched into it, not pushed), which every
+        # cut below passes through rather than around.
+        subprocess.run(['git', 'init', '-q', '--bare', '-b', 'main', self.origin],
+                       check=True, stdout=subprocess.PIPE)
+        subprocess.run(['git', '-C', self.origin, 'fetch', '-q', self.dir,
+                        'refs/heads/main:refs/heads/main'], check=True, stdout=subprocess.PIPE)
+        self.git('remote', 'add', 'origin', self.origin)
         self.git('checkout', '-q', '-b', 'dev')
 
     def git(self, *args):
@@ -320,6 +355,930 @@ class ReleaseCase(unittest.TestCase):
         spec.loader.exec_module(premise)
         self.assertEqual(os.path.join(ROOT, release.A11Y_PREMISE_FIXTURE), premise.FIXTURE)
         self.assertTrue(os.path.isfile(premise.FIXTURE))
+
+    # -- D-REL-13: no cut while origin's main holds what main lacks ---------
+    #
+    # On 2026-11-08 the owner's web commit moved origin's main (dc402e7 ->
+    # ce68db5) and no clone had fetched it. `build` parented the release on
+    # the LOCAL main, so a cut that day would have built on dc402e7, and the
+    # remote's ruleset refuses that push only after the cut has moved main and
+    # written the tag. The origin here is the fixture's local bare repository.
+
+    def ogit(self, *args, **kwargs):
+        """git in the fixture's bare origin."""
+        return subprocess.run(['git', '-C', self.origin] + list(args), check=True,
+                              stdout=subprocess.PIPE, **kwargs).stdout.decode()
+
+    def origin_commit(self, ref='refs/heads/main', path='CODE_OF_CONDUCT.md'):
+        """A commit on origin that this clone has not fetched, made the way the
+        owner's web commit was: on the remote alone, origin's main plus one
+        file, parented on origin's main."""
+        blob = self.ogit('hash-object', '-w', '--stdin', input=b'Be kind.\n').strip()
+        listing = self.ogit('ls-tree', 'refs/heads/main')
+        listing += '100644 blob %s\t%s\n' % (blob, path)
+        tree = self.ogit('mktree', input=listing.encode()).strip()
+        new = self.ogit('-c', 'user.name=web', '-c', 'user.email=web@example.invalid',
+                        'commit-tree', tree, '-p', 'refs/heads/main',
+                        '-m', 'Add a code of conduct').strip()
+        self.ogit('update-ref', ref, new)
+        return new
+
+    def local_commit(self):
+        """A commit on the local main that origin lacks: a cut not pushed yet."""
+        tree = self.git('rev-parse', 'main^{tree}').strip()
+        new = self.git('commit-tree', tree, '-p', 'main', '-m', 'an unpushed cut').strip()
+        self.git('update-ref', 'refs/heads/main', new)
+        return new
+
+    def bump(self, version):
+        """manifest, PLUGIN_VERSION and a dated heading, as a real cut bumps them."""
+        self.write('manifest.json', self.git('show', 'dev:manifest.json').replace('0.9.9', version))
+        self.write(VERSION_PART, self.git('show', 'dev:' + VERSION_PART).replace('0.9.9', version))
+        self.write('CHANGELOG.md', '# Changelog\n\n## %s (%s)\n\n- a thing\n' % (version, TODAY))
+        self.commit_all(version)
+
+    def origin_takes_main(self):
+        """Whether origin would take this clone's main as its ruleset does, and
+        no push: the bare repository fetches it into its own main without a
+        `+`, which git refuses unless it fast-forwards, and a fast-forward that
+        brings a merge commit is refused as well and put back, because the
+        ruleset forbids merge commits on main (rule 10: a fast-forward alone
+        is the more forgiving double)."""
+        old = self.ogit('rev-parse', 'refs/heads/main').strip()
+        if subprocess.run(['git', '-C', self.origin, 'fetch', '-q', self.dir,
+                           'refs/heads/main:refs/heads/main'], stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE).returncode != 0:
+            return False
+        if self.ogit('rev-list', '--min-parents=2', '%s..refs/heads/main' % old).strip():
+            self.ogit('update-ref', 'refs/heads/main', old)
+            return False
+        return True
+
+    def footprint(self):
+        """What a guard that only reads leaves alone: every ref, HEAD, the
+        config, FETCH_HEAD and the object store."""
+        gitdir = os.path.join(self.dir, '.git')
+
+        def content(name):
+            try:
+                with io.open(os.path.join(gitdir, name), 'rb') as fh:
+                    return fh.read()
+            except FileNotFoundError:
+                return None
+        return {'refs': self.git('for-each-ref', '--format=%(refname) %(objectname)'),
+                'HEAD': self.git('symbolic-ref', 'HEAD'),
+                'config': content('config'),
+                # Its bytes, not whether it exists: a fetch rewrites one that is there.
+                'FETCH_HEAD': content('FETCH_HEAD'),
+                'objects': self.git('count-objects', '-v')}
+
+    def assert_refused(self, *said, gate_already_green=True, tag=True):
+        """The cut refuses, says each of `said` in one sentence that never
+        mentions forcing anything, and leaves the clone exactly as it was."""
+        before = self.footprint()
+        with self.assertRaises(release.ReleaseError) as refused:
+            release.build(self.dir, gate_already_green=gate_already_green, validate=False,
+                          tag=tag, out=io.StringIO(), today=TODAY)
+        message = str(refused.exception)
+        for part in said:
+            self.assertIn(part, message)
+        self.assertNotIn('. ', message)
+        self.assertTrue(message.endswith('.'), message)
+        self.assertNotIn('force', message.lower())
+        self.assertEqual(before, self.footprint())
+        return message
+
+    def test_a_cut_refuses_while_origin_holds_a_commit_this_clone_lacks(self):
+        old = self.git('rev-parse', 'main').strip()
+        web = self.origin_commit()
+        said = self.assert_refused("origin's main is at %s, a commit this clone does not have"
+                                   % web[:12], 'run git fetch origin main and cut again')
+        # What each sentence says to run, run as it is written, is what lets
+        # the cut go, and the cut then fast-forwards origin.
+        self.fetch_as_said(said)
+        said = self.assert_refused("origin's main is at %s, ahead of the local main at %s"
+                                   % (web[:12], old[:12]),
+                                   'run git fetch origin main:main and cut again')
+        self.fetch_as_said(said)
+        new = self.build()
+        self.assertEqual(web, self.git('rev-parse', '%s^' % new).strip())
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_cut_refuses_while_origin_is_ahead_with_its_commit_already_here(self):
+        """A plain `git fetch` brings the commit in and moves origin/main, not
+        main: present, so this is the ancestry decision, not the presence one."""
+        old = self.git('rev-parse', 'main').strip()
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        self.assertEqual(web, self.git('rev-parse', 'refs/remotes/origin/main').strip())
+        self.assertEqual(old, self.git('rev-parse', 'main').strip())
+        self.assert_refused("origin's main is at %s, ahead of the local main at %s" % (web[:12], old[:12]),
+                            'run git fetch origin main:main and cut again')
+
+    def test_a_cut_refuses_when_origin_and_main_have_diverged(self):
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        mine = self.local_commit()
+        said = self.assert_refused(
+            "origin's main at %s and the local main at %s have diverged" % (web[:12], mine[:12]),
+            'git fetch origin main:main would be refused', 'a person must compare the two',
+            'settle main with no merge commit',
+            'setting the local main to origin\'s with git update-ref refs/heads/main %s before'
+            % web[:12])
+        self.assertNotIn('run git', said)
+        self.assertNotIn('+main', said)
+        # And it is right that no cut here can be pushed.
+        self.assertFalse(self.origin_takes_main())
+        # The settle it names, run as it is written, lets the cut go.
+        self.settle_as_said(said)
+        new = self.build()
+        self.assertEqual(web, self.git('rev-parse', '%s^' % new).strip())
+        self.assertTrue(self.origin_takes_main())
+
+    def settle_as_said(self, said):
+        """Run the `git update-ref` a refusal names, exactly as it names it."""
+        command = re.search(r'with (git update-ref \S+ [0-9a-f]{12}) before', said).group(1)
+        subprocess.run(command.split()[:1] + ['-C', self.dir] + command.split()[1:],
+                       check=True, stdout=subprocess.PIPE)
+
+    def fetch_as_said(self, said):
+        """Run the `git fetch` a refusal names, exactly as it names it."""
+        command = re.search(r'run (git fetch [^,]+?) and cut again', said).group(1).split()
+        ran = subprocess.run(command[:1] + ['-C', self.dir] + command[1:],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, ran.returncode, (command, ran.stderr))
+
+    def test_a_cut_proceeds_when_origin_holds_exactly_main(self):
+        old = self.git('rev-parse', 'main').strip()
+        self.assertEqual('%s\trefs/heads/main\n' % old, self.git('ls-remote', 'origin', 'refs/heads/main'))
+        new = self.build()
+        self.assertEqual(old, self.git('rev-parse', '%s^' % new).strip())
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_cut_proceeds_when_main_is_ahead_of_origin(self):
+        """An earlier cut not pushed yet: origin's main is its ancestor, and the
+        two still go up as one fast-forward. Origin's main holds a merge commit
+        below its tip, as the real one does, so the cut goes only when the
+        guard looks for a merge in what the local main adds and nowhere else:
+        not in all of the local main, with or without origin's tip."""
+        old = self.git('rev-parse', 'main').strip()
+        self.assertTrue(self.ogit('rev-list', '--min-parents=2', 'refs/heads/main').strip())
+        # The merge is below origin's tip, not the tip itself: one parent.
+        self.assertEqual(2, len(self.ogit('rev-list', '--parents', '-n', '1',
+                                          'refs/heads/main').split()))
+        first = self.build()
+        self.bump('1.0.0')
+        second = self.build()
+        self.assertEqual(first, self.git('rev-parse', '%s^' % second).strip())
+        self.assertEqual(old, self.git('ls-remote', 'origin', 'refs/heads/main').split()[0])
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_clone_with_no_origin_is_refused(self):
+        self.git('remote', 'remove', 'origin')
+        self.assert_refused("this clone has no remote named 'origin'",
+                            'a cut that cannot see it does not ship')
+
+    def test_an_origin_that_cannot_be_read_is_refused(self):
+        self.git('remote', 'set-url', 'origin', os.path.join(self.top, 'gone.git'))
+        self.assert_refused('git ls-remote origin refs/heads/main refs/tags/v0.9.9 failed (',
+                            'does not appear to be a git repository',
+                            'a cut that cannot see it does not ship')
+
+    def test_an_origin_that_does_not_answer_is_refused_in_bounded_time(self):
+        """The bound itself is checked, not the clock: the ls-remote is waited
+        on for exactly REMOTE_TIMEOUT, whatever runs the wait. A bound 3 s
+        late used to pass a wall-clock assertion and say `within 1 s`."""
+        # An upload-pack that never advertises: it ends when git hangs up, or
+        # after 5 s, so a guard with no timeout of its own reads a failure.
+        hang = os.path.join(self.top, 'silent-upload-pack')
+        with io.open(hang, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\nexec timeout 5 cat\n')
+        os.chmod(hang, 0o755)
+        self.git('config', 'remote.origin.uploadpack', hang)
+        real = subprocess.Popen.communicate
+        bounds = []
+
+        def recording(proc, *args, **kwargs):
+            if 'ls-remote' in proc.args:
+                bounds.append(inspect.signature(real).bind(proc, *args, **kwargs)
+                              .arguments.get('timeout'))
+            return real(proc, *args, **kwargs)
+        with mock.patch.object(release, 'REMOTE_TIMEOUT', 1), \
+                mock.patch.object(subprocess.Popen, 'communicate', recording):
+            self.assert_refused('git ls-remote origin refs/heads/main refs/tags/v0.9.9 did not '
+                                'answer within 1 s',
+                                'a cut that cannot see it does not ship')
+        self.assertEqual([1], bounds)
+
+    def test_a_remote_that_does_not_answer_leaves_nothing_running(self):
+        """The timeout ends the remote side too. Killing git alone left its
+        remote helper running, reparented, and a remote helper that wants a
+        login opened its prompt again after the cut had been refused. Here the
+        remote side is an upload-pack that never answers and never reads."""
+        pidfile = os.path.join(self.top, 'upload-pack.pid')
+        hang = os.path.join(self.top, 'hanging-upload-pack')
+        with io.open(hang, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\necho $$ > "%s"\nexec sleep 31\n' % pidfile)
+        os.chmod(hang, 0o755)
+        self.git('config', 'remote.origin.uploadpack', hang)
+        self.addCleanup(self.stop_recorded_sleep, pidfile)
+        with mock.patch.object(release, 'REMOTE_TIMEOUT', 1):
+            start = time.monotonic()
+            self.assert_refused('did not answer within 1 s')
+            # Loose on purpose: it tells "the group was killed at the bound"
+            # from "git was waited for until the remote side ended by itself"
+            # (31 s), and nothing finer.
+            self.assertLess(time.monotonic() - start, 20)
+        with io.open(pidfile, encoding='utf-8') as fh:
+            pid = int(fh.read())
+        deadline = time.monotonic() + 5
+        while not self.ended(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(self.ended(pid), 'the remote side of a refused ls-remote still runs')
+
+    def test_an_interrupted_cut_leaves_nothing_running(self):
+        """The interrupt half of the same kill. Ctrl-C reaches the cut and not
+        the guard's git, which runs in a session of its own, and Popen's exit
+        on KeyboardInterrupt waits a quarter of a second and leaves the child,
+        on the assumption that the signal reached it too: so the guard ends
+        the group itself, and the interrupt still ends the cut. The interrupt
+        is raised where the guard waits, once the remote side has started."""
+        pidfile = os.path.join(self.top, 'upload-pack.pid')
+        hang = os.path.join(self.top, 'hanging-upload-pack')
+        with io.open(hang, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\necho $$ > "%s"\nexec sleep 31\n' % pidfile)
+        os.chmod(hang, 0o755)
+        self.git('config', 'remote.origin.uploadpack', hang)
+        self.addCleanup(self.stop_recorded_sleep, pidfile)
+        real = subprocess.Popen.communicate
+        started = []
+
+        def interrupted(proc, *args, **kwargs):
+            if 'ls-remote' not in proc.args:
+                return real(proc, *args, **kwargs)
+            deadline = time.monotonic() + 10
+            while not self.recorded(pidfile) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            started.append(self.recorded(pidfile))
+            raise KeyboardInterrupt
+        before = self.footprint()
+        with mock.patch.object(subprocess.Popen, 'communicate', interrupted), \
+                self.assertRaises(KeyboardInterrupt):
+            release.build(self.dir, gate_already_green=True, validate=False, tag=True,
+                          out=io.StringIO(), today=TODAY)
+        self.assertEqual([True], started, 'the remote side never started')
+        self.assertEqual(before, self.footprint())
+        with io.open(pidfile, encoding='utf-8') as fh:
+            pid = int(fh.read())
+        deadline = time.monotonic() + 5
+        while not self.ended(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue(self.ended(pid), 'the remote side of an interrupted ls-remote still runs')
+
+    @staticmethod
+    def recorded(pidfile):
+        """The upload-pack has written its whole pid line."""
+        try:
+            with io.open(pidfile, encoding='utf-8') as fh:
+                return fh.read().endswith('\n')
+        except FileNotFoundError:
+            return False
+
+    @staticmethod
+    def ended(pid):
+        """Gone, or a zombie waiting to be reaped."""
+        try:
+            with io.open('/proc/%d/stat' % pid, 'rb') as fh:
+                return fh.read().rsplit(b')', 1)[1].split()[0] in (b'Z', b'X')
+        except FileNotFoundError:
+            return True
+
+    def stop_recorded_sleep(self, pidfile):
+        """Kill the recorded pid, and only while it is still that sleep."""
+        try:
+            with io.open(pidfile, encoding='utf-8') as fh:
+                pid = int(fh.read())
+            with io.open('/proc/%d/cmdline' % pid, 'rb') as fh:
+                if fh.read() != b'sleep\x0031\x00':
+                    return
+            os.kill(pid, 9)
+        except (OSError, ValueError):
+            pass
+
+    def test_an_origin_without_main_is_refused(self):
+        self.ogit('update-ref', 'refs/heads/dev', 'refs/heads/main')
+        self.ogit('update-ref', '-d', 'refs/heads/main')
+        self.assert_refused('origin has no refs/heads/main',
+                            'find out what happened to it before cutting')
+
+    # ls-remote's pattern is a tail match at a slash boundary, so both of these
+    # are printed beside the real main, one before it and one after.
+    DECOYS = ('refs/heads/a/refs/heads/main', 'refs/heads/x/refs/heads/main')
+
+    def plant_decoys(self, sha):
+        for ref in self.DECOYS:
+            self.ogit('update-ref', ref, sha)
+        printed = [line.split('\t')[1] for line in
+                   self.git('ls-remote', 'origin', 'refs/heads/main').splitlines()]
+        self.assertEqual([self.DECOYS[0], 'refs/heads/main', self.DECOYS[1]], printed)
+
+    def test_a_decoy_that_would_refuse_does_not_decide(self):
+        stranger = self.origin_commit(ref=self.DECOYS[0])
+        self.plant_decoys(stranger)
+        new = self.build()
+        self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+
+    def test_a_decoy_that_would_pass_does_not_decide(self):
+        web = self.origin_commit()
+        self.plant_decoys(self.git('rev-parse', 'main').strip())
+        self.assert_refused("origin's main is at %s, a commit this clone does not have" % web[:12])
+
+    def test_a_refused_cut_moves_no_ref_and_writes_no_tag(self):
+        self.origin_commit()
+        before = self.git('for-each-ref')
+        with self.assertRaisesRegex(release.ReleaseError, "origin's main"):
+            self.build()
+        self.assertEqual(before, self.git('for-each-ref'))
+        self.assertEqual('', self.git('tag', '--list').strip())
+
+    def test_the_origin_guard_runs_before_the_allowlist_check_and_the_gate(self):
+        marker = os.path.join(self.top, 'gate-ran')
+        self.write('scripts/check.sh', '#!/bin/sh\n: > "%s"\nexit 1\n' % marker)
+        os.chmod(os.path.join(self.dir, 'scripts', 'check.sh'), 0o755)
+        self.git('rm', '-q', 'contrib/windows.lua')
+        self.commit_all('a red gate and an allowlist that is not whole')
+        self.origin_commit()
+        said = self.assert_refused("origin's main is at", gate_already_green=False)
+        self.assertNotIn('allowlist', said)
+        self.assertFalse(os.path.exists(marker), 'the gate ran before the origin guard')
+
+        # The rig sees the other two: once main is fetched the allowlist check
+        # speaks, and once the allowlist is whole the gate runs, red.
+        def cut():
+            return release.build(self.dir, gate_already_green=False, validate=False,
+                                 tag=True, out=io.StringIO(), today=TODAY)
+        self.git('fetch', '-q', 'origin', 'main:main')
+        with self.assertRaisesRegex(release.ReleaseError, 'not tracked'):
+            cut()
+        self.assertFalse(os.path.exists(marker))
+        self.git('checkout', '-q', 'HEAD~1', '--', 'contrib/windows.lua')
+        self.commit_all('the allowlist whole again')
+        with self.assertRaisesRegex(release.ReleaseError, 'check.sh is red'):
+            cut()
+        self.assertTrue(os.path.exists(marker))
+
+    def test_the_command_line_cut_refuses_while_origin_is_ahead(self):
+        web = self.origin_commit()
+        before = self.git('for-each-ref')
+        ran = self.release_cli('build', '--gate-already-green', '--no-validate')
+        self.assertEqual(1, ran.returncode, ran.stdout)
+        self.assertRegex(ran.stdout, r"^release: REFUSED\. origin's main is at %s, a commit this "
+                                     r"clone does not have, .*: run git fetch origin main "
+                                     r"and cut again\.$" % web[:12])
+        self.assertEqual(1, len(ran.stdout.strip().splitlines()), ran.stdout)
+        self.assertEqual(before, self.git('for-each-ref'))
+
+    def test_the_guard_only_reads(self):
+        """No fetch, no ref, no object, no config, whatever it answers."""
+        def ask(name, refuses):
+            before = self.footprint()
+            said = release.remote_main_problems(self.dir)
+            self.assertEqual(refuses, bool(said), (name, said))
+            self.assertEqual(before, self.footprint(), name)
+            self.assertFalse(os.path.exists(os.path.join(self.dir, '.git', 'FETCH_HEAD')), name)
+        ask('origin is main', False)
+        self.local_commit()
+        ask('main is ahead', False)
+        self.origin_commit()
+        ask('diverged, origin\'s commit not here', True)
+        self.ogit('update-ref', 'refs/heads/main', 'refs/heads/main^')
+        self.git('update-ref', 'refs/heads/main', 'refs/heads/main^')
+        self.origin_commit(path='SECURITY.md')
+        ask('origin is ahead, its commit not here', True)
+
+    def test_the_remote_is_asked_with_prompts_off_and_the_environment_kept(self):
+        seen = os.path.join(self.top, 'upload-pack-env')
+        wrapper = os.path.join(self.top, 'recording-upload-pack')
+        with io.open(wrapper, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\nenv > "%s"\nexec git-upload-pack "$@"\n' % seen)
+        os.chmod(wrapper, 0o755)
+        self.git('config', 'remote.origin.uploadpack', wrapper)
+        with mock.patch.dict(os.environ, {'RELEASE_TEST_KEPT': 'yes', 'GIT_TERMINAL_PROMPT': '1',
+                                          'GIT_ASKPASS': '/usr/bin/false',
+                                          'SSH_ASKPASS_REQUIRE': 'force'}):
+            self.assertEqual([], release.remote_main_problems(self.dir))
+        with io.open(seen, encoding='utf-8') as fh:
+            env = fh.read().splitlines()
+        # Compared by name, so a failure prints those lines and not the whole
+        # environment of whoever runs the gate.
+        self.assertEqual(['GIT_TERMINAL_PROMPT=0'], self.named('GIT_TERMINAL_PROMPT', env))
+        # Two of the askpass layers, whatever the caller had set: an empty
+        # GIT_ASKPASS is what stops git running GIT_ASKPASS, core.askPass or
+        # SSH_ASKPASS, and ssh is told to use none. (The third, the -c, is
+        # dropped by git on its way to a LOCAL upload-pack, so the test below
+        # reads it where it arrives, in a remote helper.)
+        self.assertEqual(['GIT_ASKPASS='], self.named('GIT_ASKPASS', env))
+        self.assertEqual(['SSH_ASKPASS_REQUIRE=never'], self.named('SSH_ASKPASS_REQUIRE', env))
+        self.assertEqual(['RELEASE_TEST_KEPT=yes'], self.named('RELEASE_TEST_KEPT', env))
+
+    @staticmethod
+    def named(name, env):
+        """The lines of an `env` listing that set `name`."""
+        return [line for line in env if line.partition('=')[0] == name]
+
+    def test_no_prompt_is_opened_for_a_remote_that_wants_a_login(self):
+        """GIT_TERMINAL_PROMPT=0 alone does not stop a prompt: git runs an
+        askpass program, from any of three places, before it reads that
+        variable. The remote here is a remote helper that asks git for a login
+        the way git-remote-http does, through `git credential fill`, with no
+        network and no credential helper of the user's (both config files
+        out of reach)."""
+        bindir = os.path.join(self.top, 'bin')
+        os.mkdir(bindir)
+        helper = os.path.join(bindir, 'git-remote-login')
+        seen = os.path.join(self.top, 'helper-env')
+        with io.open(helper, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\nenv > "%s"\n'
+                     'printf "protocol=https\\nhost=example.invalid\\n\\n" '
+                     '| git credential fill >/dev/null\nexit 1\n' % seen)
+        asked = os.path.join(self.top, 'asked')
+        askpass = os.path.join(self.top, 'askpass')
+        with io.open(askpass, 'w', encoding='utf-8') as fh:
+            fh.write('#!/bin/sh\necho "$1" >> "%s"\necho nobody\n' % asked)
+        for path in (helper, askpass):
+            os.chmod(path, 0o755)
+        self.git('remote', 'set-url', 'origin', 'login::example.invalid/r.git')
+        isolated = {'PATH': bindir + os.pathsep + os.environ['PATH'],
+                    'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        for name in ('GIT_ASKPASS', 'SSH_ASKPASS', 'core.askPass'):
+            with self.subTest(name), mock.patch.dict(os.environ, isolated):
+                for var in ('GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE'):
+                    os.environ.pop(var, None)
+                if name == 'core.askPass':
+                    self.git('config', 'core.askPass', askpass)
+                else:
+                    os.environ[name] = askpass
+                # The control: the same remote, asked by git with prompts
+                # off and nothing else, does run the program.
+                subprocess.run(['git', '-C', self.dir, 'ls-remote', 'origin'],
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT='0'),
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+                self.assertTrue(os.path.exists(asked), name)
+                os.unlink(asked)
+                self.assert_refused('git ls-remote origin refs/heads/main refs/tags/v0.9.9 failed (',
+                                    'a cut that cannot see it does not ship')
+                self.assertFalse(os.path.exists(asked), 'the guard ran %s' % name)
+                # Each layer reached the remote helper, the -c among them,
+                # which every git it starts reads as config.
+                with io.open(seen, encoding='utf-8') as fh:
+                    env = fh.read().splitlines()
+                self.assertEqual(['GIT_ASKPASS='], self.named('GIT_ASKPASS', env))
+                params = self.named('GIT_CONFIG_PARAMETERS', env)
+                self.assertTrue(any("'credential.interactive'='false'" in line
+                                    for line in params), params)
+                if name == 'core.askPass':
+                    self.git('config', '--unset', 'core.askPass')
+
+    def test_a_quoted_git_message_loses_the_urls_userinfo(self):
+        said = release._git_detail(b"fatal: unable to access 'https://x-access-token:p@ss@github.com"
+                                   b"/r/x.git/': boom.\nmore\n")
+        self.assertEqual("fatal: unable to access 'https://github.com/r/x.git/': boom", said)
+
+    def test_nothing_skips_the_origin_guard(self):
+        """No flag and no parameter goes around D-REL-13's guard. A new one turns
+        this red, on purpose: it has to be argued for, not slipped in."""
+        self.assertEqual(['root', 'gate_already_green', 'validate', 'tag', 'trailers', 'out', 'today'],
+                         list(inspect.signature(release.build).parameters))
+        usage = self.release_cli('build', '--help').stdout.split('\n\n')[0]
+        self.assertEqual({'-h', '--gate-already-green', '--no-validate', '--no-tag', '--trailer'},
+                         set(re.findall(r'\[(--?[a-z][-a-z]*)', usage)))
+
+    # -- D-REL-13, the review's round: the tag, and the branches nobody reached
+
+    def origin_tag(self, name, commit):
+        """An annotated tag on origin alone, as a web-UI release or a push from
+        another clone would leave it."""
+        self.ogit('-c', 'user.name=web', '-c', 'user.email=web@example.invalid',
+                  'tag', '-a', name, commit, '-m', 'release elsewhere')
+
+    def test_a_cut_refuses_while_origin_already_has_its_tag(self):
+        """The guard asked about main alone, so a cut whose tag push would be
+        refused passed it, and the plain push the release step then named
+        moved main and refused the tag: origin's tag, the one `gh release
+        create --verify-tag` publishes from, kept naming the previous
+        artifact. (The atomic push the step names now is refused whole.)"""
+        self.origin_tag('v0.9.9', self.git('rev-parse', 'main').strip())
+        self.assertEqual('', self.git('tag', '--list').strip())
+        self.assert_refused(
+            'origin already has the tag v0.9.9, so the tag this cut writes could not be pushed',
+            'bump the manifest.json version, or have a person look at that tag, before cutting')
+        # What it says to do lets the cut go, and the cut then fast-forwards.
+        self.bump('1.0.0')
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
+    def test_an_untagged_cut_does_not_ask_about_the_tag(self):
+        self.origin_tag('v0.9.9', self.git('rev-parse', 'main').strip())
+        release.build(self.dir, gate_already_green=True, validate=False, tag=False,
+                      out=io.StringIO(), today=TODAY)
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_tag_decoy_does_not_decide(self):
+        """The tag's pattern is a tail match as well: a tag named
+        x/refs/tags/v0.9.9 is printed for refs/tags/v0.9.9 and is not it."""
+        decoy = 'x/refs/tags/v0.9.9'
+        self.origin_tag(decoy, self.git('rev-parse', 'main').strip())
+        printed = [line.split('\t')[1] for line in
+                   self.git('ls-remote', 'origin', 'refs/tags/v0.9.9').splitlines()]
+        self.assertEqual(['refs/tags/' + decoy], printed)
+        new = self.build()
+        self.assertEqual(new, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+
+    def test_a_tag_a_push_that_was_not_atomic_left_on_origin_refuses_the_rerun(self):
+        """The chain the review measured. A commit lands on origin after the
+        cut, and a push that is not atomic publishes dev and the tag while main
+        is refused (here origin takes those two itself, by fetch, which is what
+        that push leaves). Deleting the local tag and fetching main brings the
+        tag back; deleting it again used to clear every guard, and the next
+        push, an atomic one, would be refused whole, where a plain one would
+        move origin's main and refuse the tag, which stayed at a cut that is
+        not on origin's main."""
+        cut = self.build()
+        self.origin_commit()
+        subprocess.run(['git', '-C', self.origin, 'fetch', '-q', self.dir,
+                        'refs/heads/dev:refs/heads/dev', 'refs/tags/v0.9.9:refs/tags/v0.9.9'],
+                       check=True, stdout=subprocess.PIPE)
+        self.assertFalse(self.origin_takes_main())
+        self.git('tag', '-d', 'v0.9.9')
+        self.git('update-ref', 'refs/heads/main', 'refs/heads/main^')
+        self.git('fetch', '-q', 'origin', 'main:main')
+        self.assertEqual(cut, self.git('rev-parse', 'v0.9.9^{commit}').strip())
+        self.git('tag', '-d', 'v0.9.9')
+        self.assertEqual(cut, self.ogit('rev-parse', 'refs/tags/v0.9.9^{commit}').strip())
+        self.assert_refused('origin already has the tag v0.9.9,')
+
+    def test_a_comparison_git_cannot_make_is_refused(self):
+        """The fallback: neither ancestry answer is a yes or a no, here because
+        a commit under the local main is missing from the object store."""
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        first = self.local_commit()
+        mine = self.local_commit()
+        os.unlink(os.path.join(self.dir, '.git', 'objects', first[:2], first[2:]))
+        said = self.assert_refused(
+            "git could not compare origin's main at %s with the local main at %s (" % (web[:12], mine[:12]),
+            'look at both before cutting')
+        self.assertIn(first, said)
+
+    def test_a_partial_clone_fetches_nothing_to_answer(self):
+        """A partial clone fetches a missing object on demand, which would make
+        the guard that only reads write a pack. GIT_NO_LAZY_FETCH stops it."""
+        subprocess.run(['git', '-C', self.origin, 'config', 'uploadpack.allowFilter', 'true'],
+                       check=True)
+        for key, value in (('remote.origin.promisor', 'true'),
+                           ('remote.origin.partialclonefilter', 'blob:none'),
+                           ('core.repositoryformatversion', '1'),
+                           ('extensions.partialClone', 'origin')):
+            self.git('config', key, value)
+        web = self.origin_commit()
+        with mock.patch.dict(os.environ):
+            os.environ.pop('GIT_NO_LAZY_FETCH', None)
+            self.assert_refused("origin's main is at %s, a commit this clone does not have" % web[:12],
+                                'run git fetch origin main and cut again')
+            # The control: this clone does fetch on demand, so the guard's
+            # footprint is a real observation and not an empty one.
+            before = self.git('count-objects', '-v')
+            self.git('cat-file', '-e', '%s^{commit}' % web)
+            self.assertNotEqual(before, self.git('count-objects', '-v'))
+
+    def test_a_server_message_quoted_in_a_refusal_loses_the_urls_userinfo(self):
+        """What reaches the failure sentence from a real remote is the server's
+        own text: git anonymizes the URLs it prints itself, a server's ERR line
+        it prints as sent."""
+        payload = b'ERR https://x-access-token:SECRET@github.com/r/x.git\n'
+        packet = (b'%04x' % (len(payload) + 4) + payload).decode('ascii')
+        wrapper = os.path.join(self.top, 'refusing-upload-pack')
+        with io.open(wrapper, 'w', encoding='utf-8') as fh:
+            fh.write("#!/bin/sh\nprintf '%%s' '%s'\n" % packet)
+        os.chmod(wrapper, 0o755)
+        self.git('config', 'remote.origin.uploadpack', wrapper)
+        raw = subprocess.run(['git', '-C', self.dir, 'ls-remote', 'origin', 'refs/heads/main'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertIn(b'x-access-token:SECRET@', raw.stderr)
+        said = self.assert_refused('failed (fatal: remote error: https://github.com/r/x.git)')
+        ran = self.release_cli('build', '--gate-already-green', '--no-validate')
+        self.assertEqual(1, ran.returncode, ran.stdout)
+        self.assertTrue(ran.stdout.startswith('release: REFUSED. git ls-remote origin'), ran.stdout)
+        for text in (said, ran.stdout):
+            self.assertIn('https://github.com/r/x.git', text)
+            self.assertNotIn('SECRET', text)
+            self.assertNotIn('x-access-token', text)
+
+    def test_a_clone_with_no_local_main_is_refused(self):
+        """`git clone -b dev` leaves no local main, and a cut has nothing to be
+        cut onto until the fetch the sentence names."""
+        self.git('update-ref', '-d', 'refs/heads/main')
+        self.assert_refused('this clone has no local main, so a release has nothing to be cut onto',
+                            'run git fetch origin main:main and cut again')
+        self.git('fetch', '-q', 'origin', 'main:main')
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
+    def test_an_answer_that_is_not_a_commit_id_is_refused(self):
+        """Through git this cannot happen, because ls-remote prints the hex ids
+        its client parsed, so a double answers for git here, and it is the less
+        forgiving side (rule 10). `main` is what would pass as its own
+        ancestor; a SHA-256 id is an id, refused only because it is not here."""
+        real = subprocess.Popen
+
+        def answering(answer):
+            # A real process prints the answer in ls-remote's place, so the
+            # bound, the process group and the parse are all the shipping ones.
+            def popen(args, *rest, **kwargs):
+                if 'ls-remote' in args:
+                    args = ['printf', '%s', '%s\trefs/heads/main\n' % answer]
+                return real(args, *rest, **kwargs)
+            return popen
+        with mock.patch.object(release.subprocess, 'Popen', answering('main')):
+            self.assert_refused("answered 'main' for refs/heads/main, which is not a commit id",
+                                'look at the remote before cutting')
+        # The id is the whole answer, not its start: `<id>~0` is a revision
+        # expression for the local main itself, so it too would pass as its
+        # own ancestor.
+        suffixed = self.git('rev-parse', 'main').strip() + '~0'
+        with mock.patch.object(release.subprocess, 'Popen', answering(suffixed)):
+            self.assert_refused("answered '%s' for refs/heads/main, which is not a commit id"
+                                % suffixed, 'look at the remote before cutting')
+        absent = 'ab' * 32
+        with mock.patch.object(release.subprocess, 'Popen', answering(absent)):
+            self.assert_refused("origin's main is at %s, a commit this clone does not have"
+                                % absent[:12])
+
+    def test_a_manifest_that_gives_no_version_is_refused_in_one_sentence(self):
+        """The version is read before the origin guard now, which asks about its
+        tag, so a manifest that gives none refuses there, in a sentence."""
+        for name, change, said in (
+                ('missing', lambda: self.git('rm', '-q', 'manifest.json'), 'FileNotFoundError'),
+                ('not JSON', lambda: self.write('manifest.json', 'not json\n'), 'JSONDecodeError'),
+                ('no version', lambda: self.write('manifest.json', '{"entryPoints": {}}\n'),
+                 "KeyError: 'version'"),
+                ('not an object', lambda: self.write('manifest.json', '[]\n'), 'TypeError')):
+            with self.subTest(name):
+                change()
+                self.commit_all(name)
+                self.assert_refused('could not read the version from manifest.json (%s' % said,
+                                    'so the cut cannot name its tag or ask origin about it: fix '
+                                    'it and cut again')
+
+    # -- D-REL-13, the second review's round: where the push really lands --
+
+    def test_an_untagged_cut_still_asks_about_origins_main(self):
+        """`--no-tag` drops the tag from the question and nothing else."""
+        web = self.origin_commit()
+        self.assert_refused("origin's main is at %s, a commit this clone does not have" % web[:12],
+                            tag=False)
+        before = self.footprint()
+        ran = self.release_cli('build', '--no-tag', '--gate-already-green', '--no-validate')
+        self.assertEqual(1, ran.returncode, ran.stdout)
+        self.assertTrue(ran.stdout.startswith(
+            "release: REFUSED. origin's main is at %s, a commit this clone does not have"
+            % web[:12]), ran.stdout)
+        self.assertEqual(before, self.footprint())
+
+    def test_the_fetch_named_for_an_absent_commit_works_when_main_has_diverged(self):
+        """Before origin's commit is here nothing shows whether the two mains
+        have diverged, and `main:main` is refused when they have, so the first
+        sentence names the fetch that works either way."""
+        mine = self.local_commit()
+        web = self.origin_commit()
+        said = self.assert_refused("origin's main is at %s, a commit this clone does not have"
+                                   % web[:12], 'run git fetch origin main and cut again')
+        self.fetch_as_said(said)
+        self.assertEqual(mine, self.git('rev-parse', 'main').strip())
+        # With the clone's usual refspec the remote-tracking ref moves too.
+        self.assertEqual(web, self.git('rev-parse', 'refs/remotes/origin/main').strip())
+        self.assert_refused("origin's main at %s and the local main at %s have diverged"
+                            % (web[:12], mine[:12]), 'git fetch origin main:main would be refused')
+        # What the second sentence says about main:main is so.
+        self.assertNotEqual(0, subprocess.run(
+            ['git', '-C', self.dir, 'fetch', '-q', 'origin', 'main:main'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode)
+
+    def test_the_fetch_named_for_an_absent_commit_works_in_a_single_branch_clone(self):
+        """`git clone --single-branch -b dev`, and `--depth`, which implies it,
+        map only dev in the clone's fetch refspec, so a plain `git fetch
+        origin` never brings origin's main, and a sentence that named it
+        refused again after every run. The fetch it names, run as written,
+        brings the commit whatever the refspec and leaves the local main
+        alone; the next refusal is then the one that says what is left."""
+        self.ogit('fetch', '-q', self.dir, 'refs/heads/dev:refs/heads/dev')
+        self.git('config', 'remote.origin.fetch', '+refs/heads/dev:refs/remotes/origin/dev')
+        old = self.git('rev-parse', 'main').strip()
+        web = self.origin_commit()
+        absent = "origin's main is at %s, a commit this clone does not have" % web[:12]
+        said = self.assert_refused(absent)
+        self.fetch_as_said(said)
+        self.assertEqual(old, self.git('rev-parse', 'main').strip())
+        self.assertEqual(0, subprocess.run(['git', '-C', self.dir, 'cat-file', '-e',
+                                            '%s^{commit}' % web], stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE).returncode,
+                         'the fetch it names did not bring origin\'s main')
+        said = self.assert_refused("origin's main is at %s, ahead of the local main at %s"
+                                   % (web[:12], old[:12]))
+        self.assertNotIn(absent, said)
+        self.fetch_as_said(said)
+        new = self.build()
+        self.assertEqual(web, self.git('rev-parse', '%s^' % new).strip())
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_local_main_settled_with_a_merge_is_refused(self):
+        """The review's chain: an earlier cut not pushed, the owner's web
+        commit, and main settled by merging origin's into it. That fast-
+        forwards, and origin's ruleset refuses it anyway, for the merge. A cut
+        made on that merge by a release.py older than this guard puts a plain
+        commit above it, and the refusal still names the merge, now below the
+        local tip."""
+        self.local_commit()
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        self.assert_refused('have diverged')
+        self.git('checkout', '-q', 'main')
+        self.git('merge', '-q', '--no-edit', 'refs/remotes/origin/main')
+        self.git('checkout', '-q', 'dev')
+        merged = self.git('rev-parse', 'main').strip()
+        self.assertEqual(0, subprocess.run(['git', '-C', self.dir, 'merge-base', '--is-ancestor',
+                                            web, merged]).returncode)
+        said = self.assert_refused(
+            "the local main at %s holds a merge commit, %s, that origin's main at %s lacks"
+            % (merged[:12], merged[:12], web[:12]),
+            "origin's ruleset refuses a merge commit there", 'a person must look at what it holds')
+        self.assertFalse(self.origin_takes_main())
+        above = self.local_commit()
+        said = self.assert_refused(
+            "the local main at %s holds a merge commit, %s, that origin's main at %s lacks"
+            % (above[:12], merged[:12], web[:12]),
+            "origin's ruleset refuses a merge commit there", 'a person must look at what it holds')
+        self.assertFalse(self.origin_takes_main())
+        self.settle_as_said(said)
+        new = self.build()
+        self.assertEqual(web, self.git('rev-parse', '%s^' % new).strip())
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_merge_check_git_cannot_make_is_refused(self):
+        """The local main is ahead, and the walk that looks for a merge in
+        what it adds fails: a double answers for that one git call, the less
+        forgiving side, because a store that lets merge-base through and
+        stops rev-list is not one a test can build on purpose."""
+        old = self.git('rev-parse', 'main').strip()
+        mine = self.local_commit()
+        real = subprocess.run
+
+        def failing(args, *rest, **kwargs):
+            if 'rev-list' in args:
+                return subprocess.CompletedProcess(args, 128, b'', b'fatal: the walk broke\n')
+            return real(args, *rest, **kwargs)
+        with mock.patch.object(release.subprocess, 'run', failing):
+            self.assert_refused("git could not compare origin's main at %s with the local main at "
+                                '%s (fatal: the walk broke)' % (old[:12], mine[:12]),
+                                'look at both before cutting')
+
+    def test_a_push_that_would_land_elsewhere_is_refused(self):
+        """ls-remote reads origin's first url; the push goes to its pushurl or
+        to every url, rewritten by pushInsteadOf, and a push refspec moves it
+        onto other refs. Each makes what is asked here not what is pushed to."""
+        elsewhere = os.path.join(self.top, 'push.git')
+        cases = (
+            ('a pushurl', [['config', 'remote.origin.pushurl', elsewhere]],
+             ['config', '--unset', 'remote.origin.pushurl'], 'one and the same URL'),
+            ('a second url', [['remote', 'set-url', '--add', 'origin', elsewhere]],
+             ['remote', 'set-url', '--delete', 'origin', elsewhere], 'one and the same URL'),
+            ('a pushInsteadOf', [['config', 'url.%s.pushInsteadOf' % elsewhere, self.origin]],
+             ['config', '--unset', 'url.%s.pushInsteadOf' % elsewhere], 'one and the same URL'),
+            ('a push refspec', [['config', 'remote.origin.push', 'refs/heads/main:refs/heads/other']],
+             ['config', '--unset', 'remote.origin.push'],
+             'origin has a push refspec of its own (remote.origin.push)'),
+            # git-push(1): a push goes to every pushurl. The first is origin's
+            # own url, so only a read of all of them sees the second.
+            ('a second pushurl', [['config', 'remote.origin.pushurl', self.origin],
+                                  ['config', '--add', 'remote.origin.pushurl', elsewhere]],
+             ['config', '--unset-all', 'remote.origin.pushurl'], 'one and the same URL'))
+        for name, give, take, said in cases:
+            with self.subTest(name):
+                for command in give:
+                    self.git(*command)
+                if name == 'a second pushurl':
+                    # The control: the first line of each read agrees.
+                    self.assertEqual(self.git('remote', 'get-url', 'origin'),
+                                     self.git('remote', 'get-url', '--push', 'origin'))
+                self.assert_refused(said, 'a cut that cannot see it does not ship')
+                self.git(*take)
+        # The control: with each undone, the same clone cuts.
+        self.build()
+        self.assertTrue(self.origin_takes_main())
+
+    def test_a_push_default_that_maps_main_elsewhere_is_refused(self):
+        """push.default `upstream` (or its old name `tracking`) maps a branch
+        named bare on the push command line onto its branch.<name>.merge, so
+        the release step's `git push --atomic origin dev main vX.Y.Z` sent main
+        to refs/heads/elsewhere while the guard, asking about main, passed
+        (measured on git 2.56.0, the record's D-REL-13 section)."""
+        # The runner's own global and system config stay out: a global
+        # push.default would change what the controls below must answer.
+        empty = os.path.join(self.top, 'empty.gitconfig')
+        layered = os.path.join(self.top, 'global.gitconfig')
+        io.open(empty, 'w', encoding='utf-8').close()
+        isolated = {'GIT_CONFIG_GLOBAL': empty, 'GIT_CONFIG_NOSYSTEM': '1'}
+        with mock.patch.dict(os.environ, isolated):
+            self.git('config', 'branch.main.remote', 'origin')
+            for default, merge in (('upstream', 'refs/heads/elsewhere'),
+                                   ('tracking', 'refs/heads/elsewhere'),
+                                   ('upstream', 'elsewhere'),
+                                   # Both end in `main` and are not main
+                                   # (measured by the review: each is where the
+                                   # push went).
+                                   ('upstream', 'refs/remotes/origin/main'),
+                                   ('upstream', 'refs/heads/domain')):
+                with self.subTest(default=default, merge=merge):
+                    self.git('config', 'push.default', default)
+                    self.git('config', 'branch.main.merge', merge)
+                    self.assert_refused('push.default is %s and the local main tracks %s'
+                                        % (default, merge),
+                                        'a cut that cannot see it does not ship')
+            self.git('config', 'branch.main.merge', 'refs/heads/elsewhere')
+            # From the global file, and layered: git uses the LAST value, so
+            # a global `simple` under a local `upstream` maps, as a global
+            # `upstream` under no local value does.
+            for name, global_value, local_value in (('global alone', 'upstream', None),
+                                                    ('layered', 'simple', 'upstream')):
+                with self.subTest(name), \
+                        mock.patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': layered}):
+                    with io.open(layered, 'w', encoding='utf-8') as fh:
+                        fh.write('[push]\n\tdefault = %s\n' % global_value)
+                    if local_value:
+                        self.git('config', '--local', 'push.default', local_value)
+                    else:
+                        self.git('config', '--local', '--unset', 'push.default')
+                    self.assert_refused('push.default is upstream and the local main tracks '
+                                        'refs/heads/elsewhere')
+            self.git('config', '--local', 'push.default', 'upstream')
+            # GIT_CONFIG makes `git config` read that one file alone, while the
+            # push ignores it (measured by the review), so it must not hide
+            # either setting that maps the push from the guard's reads.
+            with self.subTest('GIT_CONFIG'), \
+                    mock.patch.dict(os.environ, {'GIT_CONFIG': empty}):
+                self.assert_refused('push.default is upstream and the local main tracks '
+                                    'refs/heads/elsewhere')
+            self.git('config', '--unset', 'push.default')
+            self.git('config', 'remote.origin.push', 'refs/heads/main:refs/heads/elsewhere')
+            with self.subTest('GIT_CONFIG and a push refspec'), \
+                    mock.patch.dict(os.environ, {'GIT_CONFIG': empty}):
+                self.assert_refused('origin has a push refspec of its own (remote.origin.push)')
+            self.git('config', '--unset', 'remote.origin.push')
+            # The controls: main tracking main, or a push.default that maps
+            # nothing, sends main to main (measured), and the guard passes.
+            for default, merge in (('upstream', 'refs/heads/main'), ('upstream', 'main'),
+                                   ('simple', 'refs/heads/elsewhere'),
+                                   (None, 'refs/heads/elsewhere')):
+                with self.subTest(control=default, merge=merge):
+                    if default is None:
+                        self.git('config', '--unset', 'push.default')
+                    else:
+                        self.git('config', 'push.default', default)
+                    self.git('config', 'branch.main.merge', merge)
+                    self.assertEqual([], release.remote_main_problems(self.dir))
+            self.git('config', '--unset', 'branch.main.merge')
+            self.git('config', '--unset', 'branch.main.remote')
+            self.build()
+            self.assertTrue(self.origin_takes_main())
+
+    def test_ancestry_this_clone_alone_was_given_does_not_decide(self):
+        """A replace ref or a grafts file gives the local main a parent the
+        server's object graph does not have: diverged mains then read as an
+        ancestor and a descendant here, and origin refuses the push."""
+        web = self.origin_commit()
+        self.git('fetch', '-q', 'origin')
+        mine = self.local_commit()
+        grafts = os.path.join(self.dir, '.git', 'info', 'grafts')
+
+        def write_grafts():
+            with io.open(grafts, 'w', encoding='utf-8') as fh:
+                fh.write('%s %s\n' % (mine, web))
+        cases = (('a replace ref', lambda: self.git('replace', '--graft', mine, web),
+                  lambda: self.git('replace', '-d', mine)),
+                 ('a grafts file', write_grafts, lambda: os.unlink(grafts)))
+        quiet = {'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'advice.graftFileDeprecated',
+                 'GIT_CONFIG_VALUE_0': 'false'}
+        for name, give, take in cases:
+            with self.subTest(name), mock.patch.dict(os.environ, quiet):
+                give()
+                # The control: this clone's own git sees origin's main as an ancestor.
+                self.assertEqual(0, subprocess.run(['git', '-C', self.dir, 'merge-base',
+                                                    '--is-ancestor', web, 'main']).returncode)
+                self.assert_refused("origin's main at %s and the local main at %s have diverged"
+                                    % (web[:12], mine[:12]))
+                self.assertFalse(self.origin_takes_main())
+                take()
 
     # -- the allowlist check that runs in the gate ------------------------
 
@@ -797,7 +1756,7 @@ class ChangelogHeadingTest(unittest.TestCase):
         13 name-join inside the repair that exists to stop one."""
         case = ReleaseCase('run')
         case.setUp()
-        self.addCleanup(lambda: shutil.rmtree(case.dir, True))
+        self.addCleanup(case.doCleanups)
         case.write('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (unreleased)\n\n- a thing\n')
         case.commit_all()
         with self.assertRaisesRegex(release.ReleaseError, 'release notes'):

@@ -129,8 +129,16 @@ Consequences you must respect:
   live arm is the only observer of the start-up window that D-SRC-15 lives
   in; `check.sh` runs just its 11-check preflight, and a README that
   promises the live run is only true while this step is run), then
-  `scripts/release.py build --gate-already-green`, then push
-  `dev`, `main` and the tag, then create the GitHub Release for that tag
+  `scripts/release.py build --gate-already-green` (which refuses while
+  origin's `main` holds a commit the local `main` lacks, while the local
+  `main` holds a merge commit origin's lacks, or while origin already has
+  the tag, D-REL-13, 2026-11-09, after the owner's web commit moved origin's
+  `main`, so run `git fetch origin main:main` first, and settle a diverged `main` by
+  setting it to origin's as the refusal says, never by a merge), then push
+  `dev`, `main` and the tag in one `git push --atomic origin dev main vX.Y.Z` (a plain push
+  sends what it can: `dev` and the tag when `main` is refused, `dev` and
+  `main` when the tag is), then create the
+  GitHub Release for that tag
   (`gh release create vX.Y.Z --verify-tag --latest --title "Omarchy IPTV
   X.Y.Z" --notes-file <that version's CHANGELOG section>`): the marketplace's "Last known release" is
   GitHub's latest Release object, not the newest tag, and it read v0.7.0 for
