@@ -226,6 +226,28 @@ Consequences you must respect:
   returns []) and the decision request above is moot. A release still waits for the owner's word; the #12636 hold
   above stood until the owner lifted it later the same day.
 
+## Standing authority (product owner, 2026-11-09)
+
+The owner asked to have the lead "just take your recommendations", and
+approved the scope below the same day. So the LEAD, never a lane, settles a
+question it would otherwise raise by taking its own recommendation, and
+pushes `dev` once `check.sh` is green on the tree it pushes and a scan of the
+push range finds no private id. A call taken this way is recorded where the
+decision lives as "the lead's call under the owner's standing authority of
+2026-11-09", never as the owner's decision, so the owner can find and
+overturn it. These still wait for the owner's word: cutting a release or
+moving `main` or a tag; anything posted outside this repository (marketplace
+issues, upstream reports, other repositories); anything on the owner's
+running desktop, live install or player; and deleting anything that cannot
+be recovered.
+
+A daily run, the desktop app's scheduled task `iptv-daily-improve` at 03:00
+local, works the board under this authority within a usage budget it polices
+itself: it reads the plan's weekly meter between steps and stops once the
+meter has risen 10 points in the run or the week passes 85%, so it never
+reaches extra usage. The meter is read between steps in whole points, so a
+run can pass the line by one step; it keeps its steps small.
+
 ## Where the truth lives
 
 Read these before changing anything; they outrank your instincts.
