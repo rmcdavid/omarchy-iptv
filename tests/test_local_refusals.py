@@ -389,6 +389,67 @@ class LocalRefusalTest(unittest.TestCase):
                         folder = cache_root / where if where else cache_root
                         self.assertEqual(reply["error"]["message"], "%s %s; nothing was written" % (folder, what))
 
+    # D-SRC-75 (2026-11-09): a key folder, or its logo folder, the helper
+    # cannot delete in (mode 0500). Every cache subverb that deletes there
+    # reached main()'s catch-all: `internal`, a PermissionError naming the
+    # path, a traceback. They answer the fetch verbs' `cache_unwritable`
+    # now (D-SRC-69), with a sentence that names no path and no file: a
+    # logo's file name is the hash of its address (D-LOGO-4), and the
+    # folder's path carries the home directory (R12). Nothing is changed.
+    # Rule 15: prune meets the same folder two ways, removing an unkept key
+    # and ageing a kept one's guide files, and a third, ageing a kept one's
+    # logo folder; all three are driven. Red on dev
+    # c1f5f7c.
+    OTHER_KEY = "0a1b2c3d"
+    LOGO_NAME = "1f2e3d4c.png"
+    READONLY_CASES = (
+        ("key", "remove", ["--key", KEY]),
+        ("key", "epg-clear", ["--key", KEY]),
+        ("key", "prune", ["--keep", OTHER_KEY, "--active", OTHER_KEY]),
+        ("key", "prune", ["--keep", KEY, "--active", OTHER_KEY, "--epg-max-age", "0"]),
+        ("logos", "logos-clear", ["--key", KEY]),
+        ("logos", "prune", ["--keep", KEY, "--active", OTHER_KEY, "--epg-max-age", "3600"]),
+    )
+
+    def readonly_cache(self, which):
+        cache_root = self.root / "cache-root"
+        key_dir = cache_root / "sources" / KEY
+        logos = key_dir / "logos"
+        logos.mkdir(parents=True, mode=0o700)
+        (key_dir / "channels.json").write_text("{}", encoding="utf-8")
+        (key_dir / "epg-window.txt").write_text("x", encoding="utf-8")
+        (logos / self.LOGO_NAME).write_bytes(b"x")
+        old = 1_000_000_000
+        # The key case ages the guide file; the logos case ages the logo
+        # folder and leaves the guide file young, so nothing else is deleted.
+        os.utime(key_dir / "epg-window.txt" if which == "key" else logos, (old, old))
+        locked = key_dir if which == "key" else logos
+        os.chmod(locked, 0o500)
+        self.addCleanup(os.chmod, locked, 0o700)
+        names = lambda: sorted(str(p.relative_to(cache_root)) for p in cache_root.rglob("*"))
+        before = names()
+        return cache_root, lambda: names() == before
+
+    @unittest.skipIf(os.geteuid() == 0, "root deletes in a 0500 folder")
+    def test_a_folder_the_cache_verbs_cannot_delete_in_is_cache_unwritable(self):
+        for which, verb, extra in self.READONLY_CASES:
+            with self.subTest(folder=which, verb=verb, args=extra):
+                self.scratch()
+                cache_root, untouched = self.readonly_cache(which)
+                exit_code, lines, err = self.helper(["cache", "--cache-dir", str(cache_root), verb, *extra])
+                self.assertEqual(len(lines), 1, (lines, err))
+                reply = json.loads(lines[0])
+                self.assertNotIn("Traceback", err)
+                self.assertTrue(untouched(), "a file was deleted")
+                self.assertEqual((exit_code, reply["ok"], reply["kind"], reply.get("action"),
+                                  (reply.get("error") or {}).get("code")),
+                                 (1, False, "cache", verb, "cache_unwritable"))
+                message = reply["error"]["message"]
+                self.assertEqual(message, "could not delete in the source's cache folder (Permission denied)")
+                for text in (message, err):
+                    self.assertNotIn(str(self.root), text)
+                    self.assertNotIn(self.LOGO_NAME, text)
+
 
 if __name__ == "__main__":
     unittest.main()

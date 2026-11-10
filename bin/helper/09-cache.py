@@ -550,6 +550,21 @@ def cmd_cache(args: argparse.Namespace) -> int:
         result.update(payload)
         emit(result)
         return EXIT_OK
+    except FolderUnusable:
+        raise
+    except PermissionError as io_error:
+        # D-SRC-75 (2026-11-09): a folder a removal, a clear or a prune must
+        # delete in and cannot (a key folder or its logo folder at 0500)
+        # used to reach main()'s catch-all, `internal` with the path. It is
+        # the fetch verbs' `cache_unwritable` (D-SRC-69) here too, with a
+        # sentence that names no path (R12) and no file: a logo's name is
+        # the hash of its address (D-LOGO-4). What was deleted before the
+        # refusal stays deleted; the folder is left as it is.
+        reason = io_error.strerror or type(io_error).__name__
+        error = HelperError("cache_unwritable", "could not delete in the source's cache folder (%s)" % reason)
+        log("cache %s: %s" % (action, error.message))
+        emit(error_payload("cache", error, action=action))
+        return EXIT_ERROR
     except HelperError as error:
         log("cache %s: %s" % (action, error.message))
         emit(error_payload("cache", error, action=action))
