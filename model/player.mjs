@@ -1113,8 +1113,32 @@ function endedReport(context) {
     notify: verdict.notify === true,
     kind: verdict.kind,
     target: channelForEnd(ctx.owners, ctx.lastEndFile, ctx.nowPlaying),
-    reason: format !== "" ? format : tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
+    reason: format !== "" ? format : tail.length > 0 ? playerTailReason(tail) : str(verdict.reason)
   }
+}
+
+// D-PLY-29: a log or stderr line that only WARNS is not the reason a channel
+// did not play. Under software GL, mpv's stderr carries driver lines such as
+// "MESA-EGL: warning: failed to get driver name for fd -1", and the tail's
+// last line used to be the reason whatever it said. A line is a warning when
+// it opens, after an optional "[prefix] " and any run of "tag: " words, with
+// "warning:" in one of three spellings. Exact cases, no case-insensitive
+// flag: the helper's player_log_warning is the same pattern, and the two
+// languages fold case differently outside ASCII. Pinned in the shared
+// fixture player-endings.json (`warningLines`), which the python suite reads.
+var PLAYER_WARNING_RE = /^(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):/
+
+function playerLogWarning(line) {
+  return PLAYER_WARNING_RE.test(str(line))
+}
+
+// The reason a tail gives: its last line that is not a warning, or its last
+// line when every line warns (a warning still says more than nothing). ""
+// for an empty tail.
+function playerTailReason(tail) {
+  var rows = asList(tail)
+  for (var i = rows.length - 1; i >= 0; i--) if (!playerLogWarning(rows[i])) return str(rows[i])
+  return rows.length > 0 ? str(rows[rows.length - 1]) : ""
 }
 
 // D-PLY-44 (owner, 2026-10-29: refuse nested playlists). The helper's own
@@ -1287,7 +1311,8 @@ export {
   PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
   playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
   playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport, PLAYER_FORMAT_ERROR,
+  rememberEntryOwner, channelForEnd, endedReport, PLAYER_WARNING_RE,
+  playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

@@ -6035,6 +6035,35 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
     ["", "", Model.PLAYER_FORMAT_SENTENCE, "", "", "[stream] Failed to open 127.0.0.1.", "Failed to open 127.0.0.1."])
 })()
 
+// ---- D-PLY-29: a line that only warns is not the reason (player-endings.json `tailWarnings`) ----
+//
+// The helper's half is tests/test_player_endings.py over the same section:
+// player_log_warning over `lines`, observe_first_load over `firstLoad` and
+// launch_reason over `launchStderr`. Here: Model.playerLogWarning over
+// `lines`, and mpv's lines through the router and Model.deathReport at the
+// socket's EOF over `socket`. Red on dev 2b44348 (no playerLogWarning; the
+// reason was the tail's last line, the driver warning).
+;(function () {
+  const TW = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-endings.json"), "utf8")).tailWarnings
+  checkCall("D-PLY-29: Model.playerLogWarning reads a warning exactly as the fixture's lines say -- a tagged or prefixed `warning:` in three spellings, never a warning word inside the text, an odd case, a plural or a leading space",
+    () => TW.lines.map(l => [l.line, Model.playerLogWarning(l.line)]),
+    TW.lines.map(l => [l.line, l.warning]))
+  checkCall("D-PLY-29: at the socket's EOF a driver warning after the failing line does not become the reason; when every line warns the last one still is",
+    () => TW.socket.map(c => {
+      let st = Model.playerRouterState(null)
+      for (const l of c.lines) st = Model.routePlayerEvent(st, JSON.stringify(l))
+      let owners = Model.keyedMap()
+      for (const [entry, who] of c.owners) owners = Model.rememberEntryOwner(owners, entry, who)
+      const r = Model.deathReport({ lastEndFile: st.lastEndFile, owners, nowPlaying: c.nowPlaying, entryId: st.entryId, tail: st.tail })
+      return [c.name, r.notify ? r.card : "", r.mark, r.reason]
+    }),
+    TW.socket.map(c => [c.name, c.expect.card, c.expect.mark, c.expect.reason]))
+  checkCall("D-PLY-29: Model.playerTailReason takes the last line that does not warn, the last line when all warn, and \"\" for an empty or junk tail",
+    () => [Model.playerTailReason(["a", "warning: b", "c", "MESA-EGL: warning: d"]), Model.playerTailReason(["warning: a", "warning: b"]),
+           Model.playerTailReason([]), Model.playerTailReason(null), Model.playerTailReason("x")],
+    ["c", "warning: b", "", "", ""])
+})()
+
 // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived from the helper's bounds ----
 //
 // tests/fixtures/player-bounds.json is shared: tests/test_player_bounds.py

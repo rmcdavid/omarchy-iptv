@@ -320,4 +320,96 @@
       "expect": {"card": "streamFailed", "mark": true, "output": ""}
     }
   ]
+,
+  "tailWarnings": {
+    "_comment": [
+      "D-PLY-29: a line that only warns is not the reason a channel did not play. One of seven cage runs' toasts read",
+      "\"Stream failed ... did not play - MESA-EGL: warning: failed to get driver name for fd -1\" under software GL",
+      "(lane-fh46's recheck, 2026-10-26), because every reader took the LAST line. `lines` is the one pattern both",
+      "languages hold (Model.playerLogWarning, the helper's player_log_warning). The reason is the last line that",
+      "does not warn, or the last line when every line warns: at the socket's EOF (Model.endedReport over",
+      "`socket`), in player start's first-load window (observe_first_load over `firstLoad`), and from mpv's",
+      "launch stderr (launch_reason over `launchStderr`). The events are shaped from that toast, not measured."
+    ],
+    "lines": [
+      {"line": "MESA-EGL: warning: failed to get driver name for fd -1", "warning": true},
+      {"line": "[vo/gpu] MESA-EGL: warning: failed to get driver name for fd -1", "warning": true},
+      {"line": "warning: something", "warning": true},
+      {"line": "Warning: something", "warning": true},
+      {"line": "WARNING: something", "warning": true},
+      {"line": "[ffmpeg] libEGL: warning: DRI3 error", "warning": true},
+      {"line": "Failed to open 127.0.0.1.", "warning": false},
+      {"line": "[stream] Failed to open 127.0.0.1.", "warning": false},
+      {"line": "Error: could not create a GL context", "warning": false},
+      {"line": "a warning: inside the text", "warning": false},
+      {"line": "wArning: odd case", "warning": false},
+      {"line": "warnings: 3", "warning": false},
+      {"line": " warning: leading space", "warning": false},
+      {"line": "[vo/gpu]warning: no space after the prefix", "warning": false},
+      {"line": "", "warning": false}
+    ],
+    "socket": [
+      {
+        "name": "D-PLY-29: a driver warning after the failing line -- the failing line is the reason, the stream's, so marked",
+        "owners": [[1, {"id": "t:x", "name": "X"}]],
+        "nowPlaying": {"id": "t:x", "name": "X"},
+        "lines": [
+          {"event": "start-file", "playlist_entry_id": 1},
+          {"event": "log-message", "prefix": "stream", "level": "error", "text": "Failed to open http://127.0.0.1:9/x.ts.\n"},
+          {"event": "log-message", "prefix": "", "level": "error", "text": "MESA-EGL: warning: failed to get driver name for fd -1\n"},
+          {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+        ],
+        "expect": {"card": "streamFailed", "mark": true, "reason": "[stream] Failed to open 127.0.0.1."}
+      },
+      {
+        "name": "D-PLY-29: every line warns -- the last one is still the reason",
+        "owners": [[1, {"id": "t:x", "name": "X"}]],
+        "nowPlaying": {"id": "t:x", "name": "X"},
+        "lines": [
+          {"event": "start-file", "playlist_entry_id": 1},
+          {"event": "log-message", "prefix": "", "level": "error", "text": "warning: one\n"},
+          {"event": "log-message", "prefix": "", "level": "error", "text": "MESA-EGL: warning: failed to get driver name for fd -1\n"},
+          {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+        ],
+        "expect": {"card": "streamFailed", "mark": true, "reason": "MESA-EGL: warning: failed to get driver name for fd -1"}
+      }
+    ],
+    "firstLoad": [
+      {
+        "name": "D-PLY-29: a driver warning after the failing line in the first-load window -- the failing line is the reason",
+        "entryId": 1,
+        "batches": [[
+          {"event": "start-file", "playlist_entry_id": 1},
+          {"event": "log-message", "prefix": "stream", "level": "error", "text": "Failed to open http://127.0.0.1:9/x.ts.\n"},
+          {"event": "log-message", "prefix": "", "level": "error", "text": "MESA-EGL: warning: failed to get driver name for fd -1\n"},
+          {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+        ]],
+        "reply": {"state": "failed", "reason": "Failed to open http://127.0.0.1.", "ended": "end-file", "fileError": "loading failed"}
+      },
+      {
+        "name": "D-PLY-29: only a warning before mpv closed the connection -- it is the only line, so it is the reason",
+        "entryId": 1,
+        "batches": [[
+          {"event": "start-file", "playlist_entry_id": 1},
+          {"event": "log-message", "prefix": "", "level": "error", "text": "MESA-EGL: warning: failed to get driver name for fd -1\n"}
+        ], null],
+        "reply": {"state": "failed", "reason": "MESA-EGL: warning: failed to get driver name for fd -1", "ended": "closed"}
+      },
+      {
+        "name": "D-PLY-29: a launch stderr failure line is not replaced by a later warning on the socket",
+        "entryId": 1,
+        "launchErrors": ["[vo/gpu] Error: could not create a GL context\n"],
+        "batches": [[
+          {"event": "log-message", "prefix": "", "level": "error", "text": "MESA-EGL: warning: failed to get driver name for fd -1\n"}
+        ], null],
+        "reply": {"state": "failed", "reason": "[vo/gpu] Error: could not create a GL context", "ended": "closed"}
+      }
+    ],
+    "launchStderr": [
+      {"name": "a driver warning after mpv's own last line", "stderr": "[vo/gpu] Error: could not create a GL context\nMESA-EGL: warning: failed to get driver name for fd -1\n", "reason": "[vo/gpu] Error: could not create a GL context"},
+      {"name": "every line warns, so the last is the reason", "stderr": "warning: one\nMESA-EGL: warning: failed to get driver name for fd -1\n", "reason": "MESA-EGL: warning: failed to get driver name for fd -1"},
+      {"name": "no warning: the last line, as before", "stderr": "first\nsecond\n", "reason": "second"},
+      {"name": "nothing on stderr", "stderr": "", "reason": ""}
+    ]
+  }
 }

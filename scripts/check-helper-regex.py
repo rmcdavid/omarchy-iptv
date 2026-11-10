@@ -69,6 +69,11 @@ CALLS = {"compile", "search", "match", "fullmatch", "sub", "subn", "split", "fin
 # (pattern, what it reads, verdict). Written with the same literal the
 # helper uses, so a reader can find the line.
 REVIEWED = [
+    (r"(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):", "provider",
+     "linear: matched at the start only; the bracket run ends at the first `]` and backs off one test "
+     "per character; each tag repetition ends with `: `, which its class cannot hold, so every "
+     "repetition has one split and giving them up costs one word each (PLAYER_WARNING_RE, D-PLY-29: "
+     "mpv's log and stderr lines)"),
     (r"^[0-9a-f]{8}(-[0-9]{1,3})?$", "own",
      "linear: anchored, every quantifier bounded (SOURCE_KEY_RE)"),
     ("'[A-Za-z0-9]{%d,}' % EPG_ADDR_MIN_TOKEN", "provider",

@@ -18961,3 +18961,9 @@ One independent reviewer, read only in the worktree, measuring in scratch pairs 
 - **Mutants**, in a scratch copy, over the two push-landing tests: the first value (red on `layered`), `--local` alone (`global alone`), the last segment (`refs/remotes/origin/main`), `endswith` (both), `GIT_CONFIG` kept (both `GIT_CONFIG` subtests), and the sixth round's five re-run. All 10 red; the fix OK.
 - **Measured by the review and not counted.** `dev`'s own upstream maps `dev` (the guard never asks about `dev`; `main` and the tag land right). A local `refs/heads/main` that is a symbolic ref to another branch lands there (the clone's ref state, contrived, and older than this guard). The refusal quotes the branch name, so a branch named like `force-x` puts that word in a sentence (cosmetic).
 - `tests/test_release.py` stays at 113 tests, all OK in the worktree. The gate: in the merge's commit message.
+
+### D-PLY-29: a trailing warning is not the reason (the daily run, 2026-11-10)
+
+- Change: the Stream failed card, the first-load reply and the launch failure reason take the last log or stderr line that does not warn (`Model.playerTailReason`, `Model.playerLogWarning`; the helper's `player_log_warning`, `observe_first_load`, `launch_reason`), falling back to the last line when every line warns.
+- Evidence: the shared fixture section `tailWarnings` in tests/fixtures/player-endings.json, run by both suites. Against 2b44348 with the new tests: node 3 of 3 D-PLY-29 checks FAIL, python 3 of 3 tests FAIL. Six mutants of the fix, each red in the suite that owns it.
+- Not measured: the cage run that showed the MESA-EGL toast was not repeated; the cases are shaped from that toast's text.

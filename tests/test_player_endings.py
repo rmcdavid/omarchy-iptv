@@ -108,6 +108,32 @@ class FirstLoadReplyTest(unittest.TestCase):
         self.assertEqual(reply, {"state": "unknown", "reason": ""})
 
 
+class TailWarningsTest(unittest.TestCase):
+    """D-PLY-29: a line that only warns is not the reason. The model's half
+    of `tailWarnings` is in tests/Model.test.js. Red on dev 2b44348 (no
+    player_log_warning; the last line was the reason, the driver warning)."""
+
+    TW = FIXTURE["tailWarnings"]
+
+    def test_the_pattern_is_the_fixtures(self):
+        for case in self.TW["lines"]:
+            with self.subTest(line=case["line"]):
+                self.assertEqual(helper.player_log_warning(case["line"]), case["warning"])
+
+    def test_the_first_load_window_keeps_the_failing_line(self):
+        for case in self.TW["firstLoad"]:
+            with self.subTest(case=case["name"]):
+                client = Batches(case["batches"])
+                reply = helper.observe_first_load(client, case["entryId"], 5.0, case.get("launchErrors"))
+                self.assertEqual(reply, case["reply"])
+                self.assertEqual(client.batches, [])
+
+    def test_launch_stderr_keeps_the_failing_line(self):
+        for case in self.TW["launchStderr"]:
+            with self.subTest(case=case["name"]):
+                self.assertEqual(helper.launch_reason([case["stderr"]]), case["reason"])
+
+
 def short_dir():
     """A private folder whose socket path fits sun_path (108 bytes): the
     default temporary folder, or /tmp when TMPDIR is long."""

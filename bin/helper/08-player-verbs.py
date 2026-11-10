@@ -936,6 +936,9 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
     state = "unknown"
     reason = ""
     last_error = launch_reason(launch_errors or [])
+    # D-PLY-29: a warning replaces only a reason that is itself a warning
+    # (or none), so a driver line after the failure does not become it.
+    named = last_error != "" and not player_log_warning(last_error)
     while time.monotonic() < deadline:
         events = client.drain_events(deadline)
         if events is None:                       # mpv closed the connection
@@ -945,7 +948,11 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
             event = str(message.get("event") or "")
             mine = entry_id is None or message.get("playlist_entry_id") == entry_id
             if event == "log-message" and str(message.get("level") or "") in ("error", "fatal"):
-                last_error = redact_urls(str(message.get("text") or "")).strip() or last_error
+                text = redact_urls(str(message.get("text") or "")).strip()
+                if text and not player_log_warning(text):
+                    last_error, named = text, True
+                elif text and not named:
+                    last_error = text
             elif event == "file-loaded":
                 return {"state": "playing", "reason": ""}
             elif event == "end-file" and mine:

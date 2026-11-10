@@ -1592,8 +1592,24 @@ def drain_launch_stderr(fd: int, buffer: list[str]) -> None:
         _LAUNCH_TAIL[fd] = pending
 
 
+# D-PLY-29: a line that only warns is not the reason. Model.playerLogWarning
+# is the same pattern (exact cases on purpose: the two languages fold case
+# differently outside ASCII); the shared fixture player-endings.json (dev
+# branch tests), its `tailWarnings` section, holds both to it.
+PLAYER_WARNING_RE = re.compile(r"(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):")
+
+
+def player_log_warning(line: str) -> bool:
+    return PLAYER_WARNING_RE.match(str(line)) is not None
+
+
 def launch_reason(buffer: list[str]) -> str:
+    """mpv's last stderr line that is not a warning (a driver's warning is
+    what software GL writes there), or its last line when all of them warn."""
     lines = [line.strip() for line in "".join(buffer).splitlines() if line.strip()]
+    for line in reversed(lines):
+        if not player_log_warning(line):
+            return line
     return lines[-1] if lines else ""
 
 
