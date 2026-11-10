@@ -119,6 +119,18 @@ Neither is ours to fix and both block something:
 Nothing to build. Watch, and keep the harness ready for the day the first one
 lands, because that is the day D-A11Y-1 stops being latent and becomes live.
 
+**[2026-11-10: the first one landed by another route.** quickshell#1144 was
+closed on 2026-09-21 with no comment, and the fix came as Quickshell 916a0dd,
+in the 0.3.2 installed here on 2026-10-31. D-A11Y-1 was treated as live from
+that day and fixed on `dev` on 2026-11-01 (75cc827), released in 0.16.0.
+omacom/omarchy#12009 is still open, with three open pull requests linked to it
+(omacom/omarchy#13212, omacom/omarchy#16608, omacom/omarchy#17648), and the
+installed Omarchy 4.5.0 kit declares no `Accessible` anywhere. A comment on it
+of 2026-11-10, from another plugin's author, names gaps in `Ui/Toggle` and
+`Ui/ButtonGroup`. This plugin uses neither; it takes only `Ui.TextField` from
+the kit, and its form fields are read-only and reach the bus through a sibling
+item of their own (D-A11Y-1).]
+
 ### 2. Settle the thirty-one unverified fixes
 
 Thirty-one board rows read `fixed` rather than `verified fixed`: a commit
