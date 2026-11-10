@@ -1007,9 +1007,10 @@ requests and raise the batch.
      wrong never reaches the resolver; both state readers drop a stored
      source whose host holds one, and clear a kept source's guide URL whose
      host holds one, with no log line -- the owner accepted the drop for
-     D-SINK-86's set, and has not yet been asked about the fold's wider set
-     or about the guide-URL clear, which no cost sentence named until the
-     review of 3ba4044. A channel's stream address meets the same predicate before the
+     D-SINK-86's set, and on 2026-11-09 the fold's wider set, the
+     guide-URL clear, which no cost sentence named until the review of
+     3ba4044, and the six bracket and backslash folds D-SINK-92 added.
+     A channel's stream address meets the same predicate before the
      player is handed it, at the parse and at play, in every reading the
      player could take: the authority's host[:port] in SR15's form (a
      bracket only as a leading IPv6 literal's pair, a port of digits; a `[`
