@@ -7661,6 +7661,18 @@ check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d59
   check("D-SRC-77 (shared fixture): isSourceKey takes every well-formed key and refuses every other, one ending in a line feed included",
     [KS.valid.map(Model.isSourceKey), KS.invalid.map(Model.isSourceKey)], [KS.valid.map(() => true), KS.invalid.map(() => false)])
 }
+{
+  // D-PLY-63: the shared fixture the helper's shown_name runs too
+  // (tests/test_mpv.py DisplayNamesTest): which name of a cached channel is
+  // shown. The player's title took the stored name; this holds the row's
+  // choice where it is while the helper is brought to the same answer.
+  const DN = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/display-names.json"), "utf8")).cases
+  check("D-PLY-63 (shared fixture): displayName answers every case's shown name, and prepareChannels gives a row that name",
+    DN.map(function (c) { return [c.why, Model.displayName(c.channel, c.position)] })
+      .concat([DN.filter(function (c) { return c.position === 1 })
+        .filter(function (c) { return Model.prepareChannels([c.channel])[0].name !== c.shown }).map(function (c) { return c.why })]),
+    DN.map(function (c) { return [c.why, c.shown] }).concat([[]]))
+}
 const collided = [{ key: "d5977d8a", url: "http://other.test/x" }, { key: "d5977d8a-2", url: "http://other2.test/x" }]
 // D-SINK-48: a new key is a draw; `draw` pins it here, so the suffix rule is
 // what is checked. Randomness itself is checked in the lane-p2a block.

@@ -16,6 +16,43 @@ def fallback_channel_name(url: str, default: str) -> str:
     return url_host(url) or default
 
 
+# D-PLY-63: Model.looksLikeUrl's two patterns as one, matched at the start.
+# ASCII, because the model's `/i` never folds a letter outside ASCII onto one
+# inside it and Python's does (U+212A KELVIN SIGN reads as `k`, U+017F as `s`).
+_NAME_URL_SHAPE = re.compile(r"[a-z][a-z0-9+.-]*://|(?:rtp|udp|rtsp|mms):", re.I | re.A)
+
+
+def shown_name(channel: dict[str, Any], position: int) -> str:
+    """The name the guide row shows for a cached channel: Model.displayName's
+    mirror (D-PLY-63), run with it over one shared fixture (display-names,
+    dev branch tests). The stored `name` is clean_name's answer, which keeps
+    a U+FEFF because the `n:` id is hashed from it (D-STATE-2); what is SHOWN
+    takes the reader's class off both ends, leading dashes with it, and a
+    name that is then empty or URL-shaped gives way to the tvg-name, and
+    that to the word and the row's position. The player's title, the stash
+    a reattaching shell labels the bar from, and the reply's `name` all take
+    this, so a name of U+FEFF alone no longer titles the player with
+    nothing beside a row that reads its tvg-name."""
+    for key in ("name", "tvgName"):
+        text = str(channel.get(key) or "").lstrip(URL_SPACE_CHARS + "-").rstrip(URL_SPACE_CHARS)
+        if text and not _NAME_URL_SHAPE.match(text):
+            return text
+    return GENERATED_NAME_FORMAT % position if position > 0 else GENERATED_NAME_WORD + " ?"
+
+
+def channel_position(channels: list[Any], channel: dict[str, Any]) -> int:
+    """The 1-based place of a cached channel among the rows the guide makes
+    (Model.prepareChannels: every entry that is an object, a list included),
+    which is the number in a generated name. 0 when it is not in the list."""
+    place = 0
+    for entry in channels:
+        if isinstance(entry, (dict, list)):
+            place += 1
+        if entry is channel:
+            return place
+    return 0
+
+
 def cached_source(document: dict[str, Any]) -> dict[str, Any]:
     """playlist_source as the parse saw it, read back out of channels.json
     (D-SINK-58, 2026-10-29), so player_target can run the parse's host rule
@@ -98,7 +135,7 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)
         url = str(channel.get("url") or "")
-        name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
+        name = shown_name(channel, channel_position(document["channels"], channel))
         headers = dict(channel.get("headers")) if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
         source = cached_source(document)
@@ -626,7 +663,8 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
         client.try_command("set_property", prop, "auto")
     # F-SINK-14 (2026-10-29): the name the window title and media-title show
     # is the one the guide row shows -- redact_urls, Model.sinkText's mirror
-    # (the shared shown-names fixture, dev branch, runs both). A name holding a
+    # (the shared shown-names fixture, dev branch, runs both), over
+    # shown_name's choice of name (D-PLY-63, player_target). A name holding a
     # credentialed URL put the whole URL in the compositor's toplevel title,
     # where every client that lists windows reads it. `$>` stays (S-01).
     # F-SINK-16: and with no control character in it. The parse keeps a

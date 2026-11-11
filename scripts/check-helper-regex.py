@@ -69,6 +69,10 @@ CALLS = {"compile", "search", "match", "fullmatch", "sub", "subn", "split", "fin
 # (pattern, what it reads, verdict). Written with the same literal the
 # helper uses, so a reader can find the line.
 REVIEWED = [
+    (r"[a-z][a-z0-9+.-]*://|(?:rtp|udp|rtsp|mms):", "provider",
+     "linear: matched at the start only; one class run then `://`, whose `:` and `/` the class cannot "
+     "hold, backing off one test per character; the other arm is four literals (_NAME_URL_SHAPE, "
+     "D-PLY-63: a cached channel's name and tvg-name)"),
     (r"(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):", "provider",
      "linear: matched at the start only; the bracket run ends at the first `]` and backs off one test "
      "per character; each tag repetition ends with `: `, which its class cannot hold, so every "

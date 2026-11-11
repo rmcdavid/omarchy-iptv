@@ -918,7 +918,9 @@ class ShownNamesTest(MpvTestCase):
 
     Driven over the SHARED fixture tests/Model.test.js runs every shown-name
     composer over (tests/fixtures/shown-names.json), through the shipping
-    `play` verb against FakeMpv: `py` is exactly what each property is set to.
+    `play` verb against FakeMpv: `py` is exactly what each property is set to,
+    except for the one name that is nothing but a URL, which the row replaces
+    with a generated name and so, since D-PLY-63, does the title.
     Red on dev 2727179: every name with a URL went out whole."""
 
     def names(self):
@@ -941,6 +943,8 @@ class ShownNamesTest(MpvTestCase):
         code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
         self.assertEqual(code, 0, stderr)
         seen = []
+        generated = ["rtmp://u5er:S3CRET@cdn.test:1935/live"]
+        self.assertEqual([v["name"] for v in names if helper.shown_name({"name": v["name"]}, 1) != v["name"]], generated)
         for i, v in enumerate(names):
             with self.subTest(why=v["why"]):
                 sock = os.path.join(self.dir, "s%d.sock" % i)
@@ -952,12 +956,94 @@ class ShownNamesTest(MpvTestCase):
                 self.assertEqual(code, 0, stderr)
                 titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
                 forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
-                self.assertEqual(titles, [helper.MPV_RAW_PREFIX + v["py"]])
-                self.assertEqual(forced, [v["py"]])
+                # D-PLY-63: a name that IS a URL is not the name the row shows
+                # (Model.displayName), so the title is the row's generated
+                # name, by its place in the list, and holds no URL to redact.
+                want = "Channel %d" % (i + 1) if v["name"] in generated else v["py"]
+                self.assertEqual(titles, [helper.MPV_RAW_PREFIX + want])
+                self.assertEqual(forced, [want])
                 for frag in v["mustNotAppear"]:
                     self.assertNotIn(frag, titles[0] + forced[0])
-                seen.append(v["py"])
+                seen.append(want)
         self.assertEqual(len(seen), len(names))
+
+
+class DisplayNamesTest(MpvTestCase):
+    """D-PLY-63: the player's title, the stash and the play reply name the
+    channel as the guide row does. They took channels.json's `name`, which
+    keeps a U+FEFF (the `n:` id is hashed from it, D-STATE-2) and may be
+    URL-shaped, where the row takes the U+FEFF off and falls back to the
+    tvg-name and then to the word and the position (Model.displayName). So
+    a name of U+FEFF alone titled the player with nothing.
+
+    The SHARED fixture tests/Model.test.js runs Model.displayName over
+    (tests/fixtures/display-names.json) is run through the helper's
+    shown_name, and three of its shapes go through the shipping parse and
+    the shipping `play` verb against FakeMpv. Red on dev f2b0b26: shown_name
+    did not exist, and the titles were U+FEFF, U+FEFF + Arena and the
+    redacted URL."""
+
+    FEFF = chr(0xfeff)
+
+    def cases(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "fixtures", "display-names.json"), encoding="utf-8") as fh:
+            return json.load(fh)["cases"]
+
+    def test_shown_name_is_the_fixture_s_shown_name(self):
+        cases = self.cases()
+        self.assertGreater(len(cases), 15)
+        bad = [(c["why"], helper.shown_name(c["channel"], c["position"])) for c in cases
+               if helper.shown_name(c["channel"], c["position"]) != c["shown"]]
+        self.assertEqual([], bad)
+
+    def test_the_position_counts_the_rows_the_guide_makes(self):
+        rows = [{"id": "a"}, "text", None, [], {"id": "b"}, 7, {"id": "c"}]
+        self.assertEqual([helper.channel_position(rows, rows[0]), helper.channel_position(rows, rows[4]),
+                          helper.channel_position(rows, rows[6]), helper.channel_position(rows, {"id": "a"})],
+                         [1, 3, 4, 0])
+
+    def test_play_titles_the_player_with_the_name_the_row_shows(self):
+        playlist = os.path.join(self.dir, "display.m3u")
+        lines = ["#EXTM3U",
+                 '#EXTINF:-1 tvg-id="first.test",First',
+                 "http://stream.example.test/live/0.m3u8",
+                 '#EXTINF:-1 tvg-id="feff.test" tvg-name="Fallback TV",' + self.FEFF,
+                 "http://stream.example.test/live/1.m3u8",
+                 '#EXTINF:-1 tvg-id="led.test",' + self.FEFF + "Arena",
+                 "http://stream.example.test/live/2.m3u8",
+                 '#EXTINF:-1 tvg-id="url.test",http://u5er:S3CRET@cdn.test/live/1.ts',
+                 "http://stream.example.test/live/3.m3u8"]
+        pathlib.Path(playlist).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        with open(os.path.join(self.cache, "channels.json"), encoding="utf-8") as fh:
+            stored = {c["id"]: c["name"] for c in json.load(fh)["channels"]}
+        # The cache really holds what the row does not show: this is the
+        # parse's output, not a file the test wrote.
+        self.assertEqual([stored["t:feff.test"], stored["t:led.test"], stored["t:url.test"]],
+                         [self.FEFF, self.FEFF + "Arena", "http://u5er:S3CRET@cdn.test/live/1.ts"])
+        for i, (cid, shown) in enumerate([("t:feff.test", "Fallback TV"), ("t:led.test", "Arena"),
+                                          ("t:url.test", "Channel 4")]):
+            with self.subTest(id=cid):
+                sock = os.path.join(self.dir, "d%d.sock" % i)
+                server = FakeMpv(sock)
+                self.addCleanup(server.close)
+                self.identity(sock)
+                code, payload, stdout, stderr = run("play", "--id", cid, "--cache-dir", self.cache,
+                                                    "--socket", sock, "--ipc-timeout", "1", "--scope", "all")
+                self.assertEqual(code, 0, stderr)
+                titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
+                forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
+                self.assertEqual(titles, [helper.MPV_RAW_PREFIX + shown])
+                self.assertEqual(forced, [shown])
+                self.assertEqual(payload["name"], shown)
+                stashes = [c[2] for c in server.commands
+                           if c[:2] == ["set_property", helper.USER_DATA_STASH] and isinstance(c[2], dict)]
+                self.assertTrue(stashes)
+                self.assertEqual({s["name"] for s in stashes}, {shown})
+                for c in server.commands:
+                    self.assertNotIn("S3CRET", json.dumps(c))
 
 
 class TitleControlsTest(MpvTestCase):

@@ -1,0 +1,179 @@
+{
+  "note": "D-PLY-63 (2026-11-11): ONE rule for which name of a cached channel is shown. `channel` is a row of channels.json, `position` its 1-based place among the rows, and `shown` EXACTLY what Model.displayName answers (the guide row, the bar) and what the helper's shown_name answers (the player's window title and media title after redaction, the stash, the play reply's name). tests/Model.test.js and tests/test_shown_name.py both run every case. Every host is under the reserved .test TLD and every credential is invented.",
+  "cases": [
+    {
+      "why": "an ordinary name is itself",
+      "channel": {
+        "name": "News HD"
+      },
+      "position": 3,
+      "shown": "News HD"
+    },
+    {
+      "why": "the row's shape: a name of U+FEFF alone gives way to the tvg-name",
+      "channel": {
+        "name": "\ufeff",
+        "tvgName": "Fallback TV"
+      },
+      "position": 1,
+      "shown": "Fallback TV"
+    },
+    {
+      "why": "a leading U+FEFF is not shown",
+      "channel": {
+        "name": "\ufeffArena"
+      },
+      "position": 1,
+      "shown": "Arena"
+    },
+    {
+      "why": "a trailing U+FEFF is not shown",
+      "channel": {
+        "name": "Arena\ufeff"
+      },
+      "position": 1,
+      "shown": "Arena"
+    },
+    {
+      "why": "a dash behind a U+FEFF is dropped with it",
+      "channel": {
+        "name": "\ufeff-\ufeff -Arena"
+      },
+      "position": 1,
+      "shown": "Arena"
+    },
+    {
+      "why": "a U+FEFF inside a name stays",
+      "channel": {
+        "name": "Are\ufeffna"
+      },
+      "position": 1,
+      "shown": "Are\ufeffna"
+    },
+    {
+      "why": "a trailing dash stays",
+      "channel": {
+        "name": "Arena -"
+      },
+      "position": 1,
+      "shown": "Arena -"
+    },
+    {
+      "why": "a URL-shaped name gives way to the tvg-name",
+      "channel": {
+        "name": "http://u5er:S3CRET@cdn.test/live/1.ts",
+        "tvgName": "Cinema One"
+      },
+      "position": 2,
+      "shown": "Cinema One"
+    },
+    {
+      "why": "a URL-shaped name with no tvg-name is the word and the position",
+      "channel": {
+        "name": "HTTPS://cdn.test/x"
+      },
+      "position": 7,
+      "shown": "Channel 7"
+    },
+    {
+      "why": "a scheme with no slashes that the player reads",
+      "channel": {
+        "name": "UDP:239.0.0.1:1234",
+        "tvgName": "Multicast"
+      },
+      "position": 1,
+      "shown": "Multicast"
+    },
+    {
+      "why": "both URL-shaped: the word and the position",
+      "channel": {
+        "name": "rtsp://cam.test/1",
+        "tvgName": "mms:cam.test"
+      },
+      "position": 12,
+      "shown": "Channel 12"
+    },
+    {
+      "why": "a URL-shaped tvg-name behind a U+FEFF name",
+      "channel": {
+        "name": "\ufeff\ufeff",
+        "tvgName": " http://cdn.test/x"
+      },
+      "position": 4,
+      "shown": "Channel 4"
+    },
+    {
+      "why": "a URL inside a name is still a name",
+      "channel": {
+        "name": "News (http://cdn.test/x)"
+      },
+      "position": 1,
+      "shown": "News (http://cdn.test/x)"
+    },
+    {
+      "why": "a colon that follows no scheme the rule names",
+      "channel": {
+        "name": "Kanal: 5"
+      },
+      "position": 1,
+      "shown": "Kanal: 5"
+    },
+    {
+      "why": "the KELVIN SIGN is no ASCII letter, so this is no scheme",
+      "channel": {
+        "name": "\u212aodi://film"
+      },
+      "position": 1,
+      "shown": "\u212aodi://film"
+    },
+    {
+      "why": "LATIN SMALL LETTER LONG S is no ASCII letter",
+      "channel": {
+        "name": "rt\u017fp://x",
+        "tvgName": "T"
+      },
+      "position": 1,
+      "shown": "rt\u017fp://x"
+    },
+    {
+      "why": "mms behind a long s is no mms",
+      "channel": {
+        "name": "mm\u017f:x"
+      },
+      "position": 1,
+      "shown": "mm\u017f:x"
+    },
+    {
+      "why": "U+0085 and U+001F at the edges are taken",
+      "channel": {
+        "name": "\u0085\u001fArena\u001c\u0085"
+      },
+      "position": 1,
+      "shown": "Arena"
+    },
+    {
+      "why": "only dashes and spaces: the tvg-name",
+      "channel": {
+        "name": "-- - ",
+        "tvgName": "- Second"
+      },
+      "position": 1,
+      "shown": "Second"
+    },
+    {
+      "why": "no name at all and no position",
+      "channel": {},
+      "position": 0,
+      "shown": "Channel ?"
+    },
+    {
+      "why": "an empty tvg-name",
+      "channel": {
+        "name": "",
+        "tvgName": ""
+      },
+      "position": 9,
+      "shown": "Channel 9"
+    }
+  ]
+}
