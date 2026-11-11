@@ -1402,6 +1402,35 @@ def _record_ok(record: str) -> bool:
             and record[11:21].isdigit() and record[:21].isascii())
 
 
+def _record_tail_ok(record: str) -> bool:
+    """Is the record's tail, from index 22, what record_body writes: the
+    title's JSON string, then `,"key":"value"` members and nothing else?
+    D-EPG-17: programme_json pastes the tail as it is, so a tail that is not
+    JSON (a hand edit, a damaged disk) wrote a fragment line no reader can
+    parse; the shell indexes that line by its key alone, so the channel
+    counted as covered and showed no programme. Asked only of the one or two
+    records a channel's entry is made from, and with the decoder's own
+    string scanner rather than a whole decode: a decode of each cost the
+    10,000-channel recompute about two thirds again (measured), and a string
+    cannot nest, so the scanner has no depth to run out of (D-STATE-7)."""
+    scan = json.decoder.scanstring
+    size = len(record)
+    try:
+        if record[22:23] != '"':
+            return False
+        end = scan(record, 23)[1]
+        while end < size:
+            if record[end:end + 2] != ',"':
+                return False
+            end = scan(record, end + 2)[1]
+            if record[end:end + 2] != ':"':
+                return False
+            end = scan(record, end + 2)[1]
+    except ValueError:
+        return False
+    return True
+
+
 def _untitled(record: str) -> bool:
     """Is the record's title the empty string? The title's JSON value sits
     at index 22 (EPG_RECORD_SEP's contract), bare, so an empty one is `""`
@@ -1425,8 +1454,12 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
     wrote holds no such line; one an earlier helper wrote can (a playlist
     tvg-id carrying a TAB, a CR or another C0 control), and it used to end
     the 5-minute recompute in `internal` or write an epg-now.json no reader
-    could parse, for every channel of the source, until the next fetch. The
-    record's tail is not re-checked: record_body has always encoded it.
+    could parse, for every channel of the source, until the next fetch.
+
+    D-EPG-17: and when the tail of a record it would write is not what
+    record_body writes (_record_tail_ok). record_body has always encoded the
+    tail, so only a hand edit or a damaged disk makes one; pasted unchecked,
+    it wrote a fragment line that does not parse.
     """
     sep = EPG_RECORD_SEP
     bisect_right = bisect.bisect_right
@@ -1455,8 +1488,8 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
                 break
             probe -= 1
         following = records[index] if index < len(records) else None
-        if (current is not None and not _record_ok(current)) or (
-                following is not None and not _record_ok(following)):
+        if (current is not None and not (_record_ok(current) and _record_tail_ok(current))) or (
+                following is not None and not (_record_ok(following) and _record_tail_ok(following))):
             skipped += 1
             continue
         # R31c (D-EPG-11): an entry is written only with a TITLED now or
