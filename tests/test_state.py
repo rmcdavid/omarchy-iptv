@@ -654,6 +654,37 @@ class SessionKeyTest(unittest.TestCase):
         for row in fixture["records"]:
             self.assertEqual(helper.normalize_saved_search(row["in"]), row["out"], repr(row["in"]))
 
+    def test_a_saved_query_is_cut_by_units_and_never_through_a_pair(self):
+        """D-STATE-3: the `lists` section of the shared fixture, which
+        tests/Model.test.js runs through parseState, and the CLI write the
+        defect broke. The model cut a saved query at 64 UTF-16 units with a
+        plain slice, which can leave half a surrogate pair; this reader cut
+        at 64 code points, so the two kept different text, and no helper
+        write can encode half a pair: `state favorite add` over a file
+        holding one answered `internal` (a UnicodeEncodeError)."""
+        import json, os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "saved-searches.json")
+        with open(path, encoding="utf-8") as fh:
+            lists = json.load(fh)["lists"]
+        self.assertGreaterEqual(len(lists), 3)
+        for row in lists:
+            stored = [{"query": q, "at": 1} for q in row["in"]]
+            kept = helper.normalize_state({"version": 2, "savedSearches": stored})["savedSearches"]
+            self.assertEqual([r["query"] for r in kept], row["kept"], ascii(row["in"]))
+        # The file the model's old cut wrote, as JSON holds it: the half pair
+        # escaped. Built from code points so this source stays ASCII.
+        emoji = chr(0x1f600)
+        half = "a" + emoji * 31 + chr(0xd83d)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps({"version": 2, "favorites": [], "savedSearches": [
+            {"query": half, "at": 5}, {"query": "bbc", "at": 6}]}), encoding="ascii")
+        code, payload, stderr = self.state("favorite", "add", "t:x.test")
+        self.assertEqual(code, 0, stderr)
+        written = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(written["favorites"], ["t:x.test"])
+        self.assertEqual([r["query"] for r in written["savedSearches"]], ["a" + emoji * 31, "bbc"])
+        self.path.read_text(encoding="utf-8").encode("utf-8")
+
     def test_saved_searches_are_bounded_and_de_duplicated_on_the_folded_terms(self):
         many = [{"query": "term%d" % i, "at": 0} for i in range(helper.MAX_SAVED_SEARCHES + 10)]
         self.assertEqual(len(helper.normalize_state({"savedSearches": many})["savedSearches"]),

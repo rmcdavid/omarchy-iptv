@@ -2144,6 +2144,20 @@ checkCall("saved searches: the shared fixture's term and record vectors, which p
   }).map(function (r) { return JSON.stringify(r.in) })
   return [badTerms, badRecords]
 }, [[], []])
+checkCall("D-STATE-3 (shared fixture): a saved query is cut by UTF-16 units and never through a surrogate pair -- parseState keeps the fixture's queries from each stored list, withSavedSearch stores no half pair, and what it stores reads back as itself", function () {
+  const lone = function (q) { return /[\ud800-\udbff](?![\udc00-\udfff])|(?:[^\ud800-\udbff]|^)[\udc00-\udfff]/.test(q) }
+  const badLists = savedFixture.lists.filter(function (l) {
+    const st = Model.parseState(JSON.stringify({ version: 2, savedSearches: l.in.map(function (q) { return { query: q, at: 1 } }) }))
+    return JSON.stringify(st.savedSearches.map(function (r) { return r.query })) !== JSON.stringify(l.kept)
+  }).map(function (l) { return JSON.stringify(l.in) })
+  const emoji = String.fromCodePoint(0x1f600)
+  const added = Model.withSavedSearch(null, "a" + emoji.repeat(40) + " news", 5)
+  const stored = added.state.savedSearches[0].query
+  const again = Model.parseState(JSON.stringify(added.state)).savedSearches
+  return [badLists, savedFixture.lists.length >= 3, added.added, stored === "a" + emoji.repeat(31), lone(stored),
+          again.length === 1 && again[0].query === stored,
+          Model.withSavedSearch(added.state, "a" + emoji.repeat(31), 6).reason]
+}, [[], true, true, true, false, true, "duplicate"])
 checkCall("saved searches: bounded, on the MAX_SOURCES / MAX_LABEL precedent", function () {
   // The performance argument for this feature was stated "for ten terms", a
   // bound the design did not have. These are it.

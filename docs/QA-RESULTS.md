@@ -18967,3 +18967,10 @@ One independent reviewer, read only in the worktree, measuring in scratch pairs 
 - Change: the Stream failed card, the first-load reply and the launch failure reason take the last log or stderr line that does not warn (`Model.playerTailReason`, `Model.playerLogWarning`; the helper's `player_log_warning`, `observe_first_load`, `launch_reason`), falling back to the last line when every line warns.
 - Evidence: the shared fixture section `tailWarnings` in tests/fixtures/player-endings.json, run by both suites. Against 2b44348 with the new tests: node 3 of 3 D-PLY-29 checks FAIL, python 3 of 3 tests FAIL. Six mutants of the fix, each red in the suite that owns it.
 - Not measured: the cage run that showed the MESA-EGL toast was not repeated; the cases are shaped from that toast's text.
+
+### D-STATE-3 and D-STATE-8: a saved query's cut, and a half pair elsewhere (the daily run, 2026-11-11)
+
+- Change: `savedQueryCut` (model/state.mjs) and `saved_query_cut` (the helper's state part) cut a saved query to `MAX_SAVED_QUERY` UTF-16 units, never inside a surrogate pair, and take a high surrogate off the end of what is left. The model used a plain slice and the helper cut by code points.
+- Evidence: tests/fixtures/saved-searches.json gains five `terms` rows, eight `records` and a `lists` section, run by both suites; tests/test_state.py also drives `state favorite add` over a state.json that holds the half pair the old cut wrote. Against 575d817 with the new tests: 2 node checks FAIL and 2 python tests FAIL. Eight mutants, of the two cuts and their four callers, each red in the suite that owns it.
+- D-STATE-8, measured while fixing it and NOT fixed: the same `state favorite add` over four state files, each holding one escaped high surrogate (U+D83D) in a different place: a hidden group's name, a favourite's id, a recent's name, and the middle of a saved query. All four answered `internal` with a UnicodeEncodeError and left the file as it was. The helper's readers keep the half and its UTF-8 writer cannot encode it.
+- Not measured: what Qt's write path stores for a string holding half a pair; the shell's side of D-STATE-8.

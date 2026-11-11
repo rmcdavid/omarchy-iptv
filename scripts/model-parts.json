@@ -215,6 +215,7 @@
         "MAX_SAVED_SEARCHES",
         "MAX_SAVED_TERMS",
         "MAX_SAVED_QUERY",
+        "savedQueryCut",
         "savedSearchTerms",
         "savedSearchHit",
         "savedSearchCount",

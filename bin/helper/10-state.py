@@ -72,8 +72,22 @@ MAX_SAVED_TERMS = 8
 MAX_SAVED_QUERY = 64
 
 
+def saved_query_cut(query: Any) -> str:
+    """A saved query's cut, Model.savedQueryCut's mirror (D-STATE-3): at most
+    MAX_SAVED_QUERY UTF-16 units, as the model counts, never inside a pair,
+    and with a high surrogate taken off the end of what is left. This side
+    cut by code points, so the two readers kept different text past the
+    Basic Multilingual Plane; and the model's cut could leave half a pair,
+    which a file may still hold and which no write of this helper's can
+    encode."""
+    text = truncate_utf16(str(query or ""), MAX_SAVED_QUERY)
+    if text and 0xD800 <= ord(text[-1]) <= 0xDBFF:
+        text = text[:-1]
+    return text
+
+
 def saved_search_terms(query: Any) -> list[str]:
-    text = normalize_text(str(query or "")[:MAX_SAVED_QUERY])
+    text = normalize_text(saved_query_cut(query))
     if not text:
         return []
     return text.split(" ")[:MAX_SAVED_TERMS]
@@ -82,7 +96,7 @@ def saved_search_terms(query: Any) -> list[str]:
 def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
-    query = str(entry.get("query") or "")[:MAX_SAVED_QUERY]
+    query = saved_query_cut(entry.get("query"))
     if not saved_search_terms(query):
         return None
     # coerce_int, NOT int(): the shared fixture is what forced it, because the
