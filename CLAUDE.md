@@ -246,7 +246,11 @@ local, works the board under this authority within a usage budget it polices
 itself: it reads the plan's weekly meter between steps and stops once the
 meter has risen 10 points in the run or the week passes 85%, so it never
 reaches extra usage. The meter is read between steps in whole points, so a
-run can pass the line by one step; it keeps its steps small.
+run can pass the line by one step; it keeps its steps small. Since
+2026-11-11 (the owner's word) a run takes more than one item: one at a
+time, each merged and pushed before the next starts, and it starts no new
+item after 4 hours (2 hours for a run that starts outside 01:00-06:00
+local), after 8 items, or after two in a row that ended without a push.
 
 ## Where the truth lives
 
