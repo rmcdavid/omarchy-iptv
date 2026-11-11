@@ -441,6 +441,10 @@ function statusReason(status) {
     // (check_socket_path); its message, "the socket path is not a socket",
     // reached the "did not play" card as it was.
     socket_path_blocked: "Something else is at the player's socket path",
+    // D-PLY-38 (2026-11-11): the helper had no file descriptor left, so it
+    // could neither list the processes nor open a socket to the player. It
+    // used to be main()'s `internal` naming a library path, or no reply.
+    no_descriptors: "The helper ran out of file descriptors",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",

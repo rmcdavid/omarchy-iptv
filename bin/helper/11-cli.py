@@ -654,12 +654,27 @@ def main(argv: list[str] | None = None) -> int:
         log("%s: %s" % (args.command, error.sentence))
         emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": redact_urls(error.sentence)}})
         return EXIT_ERROR
+    except HelperError as error:
+        # D-PLY-38: a refusal raised where a verb has no net of its own
+        # (the /proc scan and the probe connection of `player pause`,
+        # `tracks` and `seek`, which can now answer no_descriptors). It is
+        # a named refusal, not a bug: the reply every refusal has.
+        log("%s: %s" % (args.command, error.message))
+        emit(error_payload(args.command, error))
+        return EXIT_ERROR
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
-        import traceback
-        sys.stderr.write(bounded_text(redact_urls(traceback.format_exc()), INTERNAL_TRACE_MAX, keep_tail=True))
         message = bounded_text(redact_urls("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        try:
+            import traceback
+            trace = traceback.format_exc()
+        except Exception:
+            # D-PLY-38: with no descriptor left `traceback` cannot be read,
+            # and that import's own failure used to replace the answer
+            # below with nothing at all (the shell's `no_output`).
+            trace = "%s (no traceback: it could not be loaded)\n" % message
+        sys.stderr.write(bounded_text(redact_urls(trace), INTERNAL_TRACE_MAX, keep_tail=True))
         emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": message}})
         return EXIT_ERROR
 

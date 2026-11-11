@@ -219,12 +219,17 @@ function zapArgs(socket, cacheDir, key, nowPlaying) {
 // and it routes exactly as that did -- on this branch and on the status
 // branch (helperCannotTell) -- because nothing ran: no switch failed, no
 // player misbehaved. Only the sentence changed (settings.mjs maps the code).
-var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache", "helper_damaged"]
+//
+// `no_descriptors` (D-PLY-38, 2026-11-11) is the helper with no file
+// descriptor left: it could not look at the player at all, so it routes as
+// the two above do, here and on the status branch.
+var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache", "helper_damaged",
+                       "no_descriptors"]
 
 // The status branch's "cannot tell": a helper that could not answer is
 // neither healthy nor a health strike, so a stub or a damaged install never
 // reaps a working player by restarting it through the same broken helper.
-var HELPER_CANNOT_TELL = ["not_implemented", "no_output", "helper_damaged"]
+var HELPER_CANNOT_TELL = ["not_implemented", "no_output", "helper_damaged", "no_descriptors"]
 
 function helperCannotTell(code) {
   return HELPER_CANNOT_TELL.indexOf(str(code)) !== -1
@@ -288,6 +293,8 @@ function playFailureVerdict(code, context) {
 //   player_runtime  folder_unusable, runtime_unwritable
 //   check_socket_path  socket_path_blocked
 //   acquire_lock    runtime_unwritable, busy
+//   find_player, MpvIpc.connect  no_descriptors (D-PLY-38: no file
+//                   descriptor left for the /proc scan or the socket)
 //   check_seq       superseded
 //   adopt_or_spawn  mpv_missing, spawn_failed, no_socket
 //   apply_channel   tls_unverified (read off the PLAYER before the channel

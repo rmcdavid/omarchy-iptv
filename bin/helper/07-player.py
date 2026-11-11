@@ -1123,7 +1123,11 @@ def find_player(sock_path: str) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     try:
         entries = os.listdir("/proc")
-    except OSError:
+    except OSError as error:
+        # D-PLY-38: with no descriptor left the scan cannot run, and "no
+        # player" would be a false answer a stop reports as done.
+        if out_of_descriptors(error):
+            raise no_descriptors(error) from None
         return found
     mine = os.getpid()
     for entry in entries:
@@ -1623,8 +1627,12 @@ def probe_client(sock_path: str, ipc_timeout: float) -> MpvIpc | None:
         ok, _ = client.try_command("get_property", "mpv-version")
         if ok:
             return client
-    except HelperError:
-        pass
+    except HelperError as error:
+        if error.code == "no_descriptors":
+            # D-PLY-38: the helper could not look, which is not "the player
+            # does not answer" -- adopt_or_spawn stops such a player.
+            client.close()
+            raise
     client.close()
     return None
 
@@ -1635,7 +1643,13 @@ def wait_for_socket(sock_path: str, timeout: float, ipc_timeout: float,
     while True:
         if stderr_fd >= 0 and stderr_buffer is not None:
             drain_launch_stderr(stderr_fd, stderr_buffer)
-        client = probe_client(sock_path, ipc_timeout)
+        try:
+            client = probe_client(sock_path, ipc_timeout)
+        except HelperError:
+            # no_descriptors (D-PLY-38), after a spawn: read as "not yet",
+            # so the wait stays bounded and the caller reaps what it
+            # launched instead of leaving it behind an error.
+            client = None
         if client is not None:
             return client
         if time.monotonic() >= deadline:

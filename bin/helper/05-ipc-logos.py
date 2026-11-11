@@ -29,6 +29,24 @@ def ipc_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def out_of_descriptors(error: OSError) -> bool:
+    return error.errno in (errno.EMFILE, errno.ENFILE)
+
+
+def no_descriptors(error: OSError) -> HelperError:
+    """D-PLY-38 (2026-11-11): this process has no file descriptor left, so
+    it can neither list the processes nor open a socket to the player.
+
+    Its own code, and never `not_running` or `ipc_error`: both of those say
+    something about the PLAYER (it is gone; it did not answer), and the
+    callers act on them -- a start ladders an unanswering player down as
+    wedged, a stop that finds no process answers that nothing was running.
+    This says the helper could not look, so nothing is touched and the
+    shell reads no verdict on the player from it (Model.helperCannotTell).
+    The message carries the error's words and no path."""
+    return HelperError("no_descriptors", "the helper has no file descriptor left (%s)" % (error.strerror or "too many open files"))
+
+
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
     correlated by request_id, unsolicited events KEPT.
@@ -51,8 +69,20 @@ class MpvIpc:
         self.closed = False
 
     def connect(self) -> None:
-        import socket
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        # D-PLY-38 (2026-11-11): the import and the socket are this
+        # process's own, and with no descriptor left either raised an
+        # OSError outside the try below -- main()'s `internal`, naming a
+        # library path, or no reply at all -- under a player verb that
+        # holds its lock. Named (no_descriptors says why it is its own
+        # code); any other failure to make the socket is the connection
+        # that could not be made, in the words connect()'s own have.
+        try:
+            import socket
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except OSError as error:
+            if out_of_descriptors(error):
+                raise no_descriptors(error) from None
+            raise HelperError("ipc_error", "could not connect to mpv: %s" % (error.strerror or type(error).__name__)) from None
         sock.settimeout(self.timeout)
         try:
             sock.connect(self.path)
@@ -99,9 +129,15 @@ class MpvIpc:
         descriptor would answer as mpv. None of the children mpv starts
         accepts on it; a program written to is a same-uid process, which owns
         the 0600 socket already."""
-        import socket
-        import struct
         if self.sock is None:
+            return 0
+        try:
+            import socket
+            import struct
+        except OSError:
+            # D-PLY-38: no descriptor left to read `struct` with, which is
+            # "cannot be read" (the except below names struct.error, so the
+            # import cannot sit inside that try).
             return 0
         try:
             raw = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))

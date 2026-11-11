@@ -397,6 +397,29 @@ that cannot be started; that reply carries no `error` object and the shell
 drops every clipboard failure without a word, so mpv's sentence is chosen
 only for a player verb's kind. Both codes are local (`PROBE_LOCAL_REFUSALS`,
 D-PLY-30's reading; `Model.playerStartFailure` already read them so).]**
+**[Amended 2026-11-11, D-PLY-38: one code is added, `no_descriptors`. A
+player verb holds its lock in a descriptor, and with none left after it the
+/proc scan (`find_player`) and the socket to the player (`MpvIpc.connect`,
+whose `import socket` and socket sat outside its try) raised an OSError no
+verb caught: `player probe` and `player stop` answered main()'s `internal`
+naming a library path, and `player start` answered nothing, because the
+catch-all's own `import traceback` failed too. Both now raise
+`no_descriptors`, "the helper has no file descriptor left (<the error's
+words>)", and every verb answers it in its own reply shape. It is a code of
+its own because `not_running` and `ipc_error` are verdicts on the player
+that the verbs act on: a start stops a player that does not answer as
+wedged, and a stop that finds no process answers that nothing ran. So the
+scan no longer reads a refused listing as "no player", `probe_client`
+passes the code on rather than answering None, the wait for a spawned
+player's socket reads it as "not yet" so the spawn is still reaped, and
+`status` closes its connection before its scan and keeps its own verdict if
+the scan cannot run. main() answers a HelperError no verb caught as that
+refusal (the scans of `player pause`, `tracks` and `seek`), and answers a
+bug even when `traceback` cannot be loaded. The user reads `The helper ran
+out of file descriptors`; the shell reads no verdict on the player from it
+(`Model.helperCannotTell`, `PLAY_UNREADABLE`, `PROBE_LOCAL_REFUSALS`). With
+no descriptor free at exec the interpreter cannot load at all, which the
+shell reads as `no_output`, as before.]**
 
 Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
 (so a zap refreshes the stash) and returns `"entryId"`; `status` gains

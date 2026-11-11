@@ -5848,6 +5848,18 @@ checkCall("D-PLY-32: one notion of local -- no code on PLAY_UNREADABLE, HELPER_C
   // player_target refuses a cached channel on a LAN or loopback literal its
   // playlist chose, which is about the entry.
   { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme", "local_address"] })
+// D-PLY-38 (2026-11-11): the helper with no file descriptor left could not
+// look at the player, so its code is no verdict on the player anywhere.
+checkCall("D-PLY-38: no_descriptors is 'cannot tell' on the status branch, 'unknown' on a zap whether or not retries are left, local on a start, and reads its own sentence under every player kind",
+  () => {
+    const ctx = { playerUp: true, nowPlaying: true, userStopped: false, retriesLeft: true }
+    const reply = kind => Model.statusReason(Model.parseHelperStatus(JSON.stringify({ ok: false, kind: kind,
+      error: { code: "no_descriptors", message: "the helper has no file descriptor left (Too many open files)" } }), kind))
+    return [Model.helperCannotTell("no_descriptors"), Model.playFailureVerdict("no_descriptors", ctx),
+            Model.playFailureVerdict("no_descriptors", Object.assign({}, ctx, { retriesLeft: false })),
+            Model.playerStartFailure("no_descriptors"), ["player.start", "player.stop", "player", "play", "status"].map(reply)]
+  },
+  [true, "unknown", "unknown", "local", Array(5).fill("The helper ran out of file descriptors")])
 checkCall("D-PLY-32: notifyArgv localPlayFailure -- its own title, mpvMissing's glyph, its own replace-id 74021, and the stream failure's body word for word (the channel that did not play, then the reason)",
   () => {
     const p = { name: "Sky Sports", reason: "Could not write the player's runtime folder" }

@@ -1886,11 +1886,13 @@ function fetchingLine(host, kind) {
 // socket at the player's socket path) and `spawn_failed` (mpv could not be
 // started: its exec, or the spawn's own pipes or fork, refused) join it by
 // D-PLY-30's reading -- this machine's, and composed with no host anywhere.
+// `no_descriptors` (D-PLY-38, 2026-11-11: the helper had no file descriptor
+// left) joins it by the same reading.
 // The guide's own refusals, `bad_xml` and `empty_epg` (D-EPG-13), do NOT:
 // they are about the provider's guide.
 var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
                             "helper_timeout", "no_output", "helper_damaged", "not_implemented", "folder_unusable",
-                            "runtime_unwritable", "socket_path_blocked", "spawn_failed"]
+                            "runtime_unwritable", "socket_path_blocked", "spawn_failed", "no_descriptors"]
 
 // "<reason> from <host>", or the reason alone when the code is a local
 // failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is

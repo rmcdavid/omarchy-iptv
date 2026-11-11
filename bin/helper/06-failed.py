@@ -939,7 +939,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         # the 23 test_mpv.py (dev branch tests) cases depend on it). `process` is additive
         # and says whether the player is gone or merely wedged, so the health
         # verdict does not need a second call (4.13).
-        found = find_player(path)
+        # D-PLY-38: the connection is closed first, so the scan has its
+        # descriptor back, and a scan that still cannot run (no_descriptors)
+        # leaves the verdict above as it is rather than replacing it.
+        client.close()
+        try:
+            found = find_player(path)
+        except HelperError:
+            found = []
         log("status: %s" % error.message)
         emit(error_payload("status", error, running=False,
                            process={"found": bool(found), "pid": int(found[0]["pid"]) if found else None}))

@@ -43,6 +43,16 @@ the helper's own process, between the fork and the exec, never in this one.
 The clipboard verb's `spawn_failed` (a wl-paste that cannot be executed) is
 pinned beside them, because the two share a code and not a sentence.
 
+D-PLY-38 (2026-11-11). One descriptor fewer than `pipes-refused` leaves: the
+player's lock takes the last one, and the /proc scan and the socket to the
+player -- which sat outside every net -- ended in main()'s `internal` naming
+a library path, or, on `player start`, in no reply at all (the catch-all's
+own `import traceback` failed). Every such verb answers `no_descriptors`, a
+code of its own because "not running" and "did not answer" are verdicts on
+the player that a start and a stop act on. The parts no subprocess can reach
+(a socket that cannot be made while the scan could run) are driven in this
+process by NoDescriptorTest, below.
+
 D-EPG-13 (2026-10-28). The EPG verb's two parse refusals, `bad_xml` (a feed
 that does not parse, and one that declares an XML entity, D-EPG-6) and
 `empty_epg`, from three small fixture feeds into a fresh cache folder.
@@ -55,7 +65,9 @@ directory: nothing of the user's is read, and no mpv can be started.
 
 Run: python3 -m unittest discover -s tests
 """
+import builtins
 import contextlib
+import errno
 import fcntl
 import io
 import json
@@ -65,6 +77,7 @@ import resource
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -88,21 +101,32 @@ def refuse_fork():
     resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
 
 
-def leave_two_descriptors():
+def leave_descriptors(free):
     """Between the fork and the exec of the helper: lower RLIMIT_NOFILE and
-    fill every slot below its last two with an INHERITABLE /dev/null (dup2
+    fill every slot below its last `free` with an INHERITABLE /dev/null (dup2
     makes one), so what the helper finds free after the exec does not depend
     on which descriptors this test process happened to hold. Slots the parent
     held close-on-exec are overwritten here, never left to be freed at exec."""
     resource.setrlimit(resource.RLIMIT_NOFILE, (NOFILE_LIMIT, NOFILE_LIMIT))
     null = os.open(os.devnull, os.O_RDONLY)
-    for fd in range(3, NOFILE_LIMIT - 2):
+    for fd in range(3, NOFILE_LIMIT - free):
         if fd != null:
             os.dup2(null, fd)
-    if 3 <= null < NOFILE_LIMIT - 2:
+    if 3 <= null < NOFILE_LIMIT - free:
         os.set_inheritable(null, True)
     else:
         os.close(null)
+
+
+def leave_two_descriptors():
+    leave_descriptors(2)
+
+
+def leave_one_descriptor():
+    """lock-takes-last-descriptor (D-PLY-38): the one free slot is enough for
+    the interpreter to read its files one at a time, and the player's lock
+    then holds it for the rest of the verb."""
+    leave_descriptors(1)
 
 
 class LocalRefusalTest(unittest.TestCase):
@@ -202,6 +226,14 @@ class LocalRefusalTest(unittest.TestCase):
             self.preexec = leave_two_descriptors
             self.close_fds = False
             folder = self.root / "run" / "omarchy-iptv"
+            return folder, lambda: not os.path.lexists(folder / "mpv.sock")
+        if name == "lock-takes-last-descriptor":
+            self.preexec = leave_one_descriptor
+            self.close_fds = False
+            folder = self.root / "run" / "omarchy-iptv"
+            # The runtime folder exists, as it does once a player has run:
+            # the probe takes its settle's lock only in a folder that does.
+            folder.mkdir(parents=True, mode=0o700)
             return folder, lambda: not os.path.lexists(folder / "mpv.sock")
         if name in ("key-file", "sources-link"):
             cache_root = self.root / "cache-root"
@@ -449,6 +481,111 @@ class LocalRefusalTest(unittest.TestCase):
                 for text in (message, err):
                     self.assertNotIn(str(self.root), text)
                     self.assertNotIn(self.LOGO_NAME, text)
+
+
+class NoDescriptorTest(unittest.TestCase):
+    """D-PLY-38, the parts the fixture's cases cannot reach from outside:
+    under a lock the /proc scan is refused first, so a socket that cannot be
+    made is met only when the scan could still run. Each test calls the
+    shipping function with the one system call refused."""
+
+    EMFILE = OSError(errno.EMFILE, "Too many open files")
+    MESSAGE = "the helper has no file descriptor left (Too many open files)"
+
+    def no_socket(self, error=None):
+        import socket
+        return mock.patch.object(socket, "socket", side_effect=error or self.EMFILE)
+
+    def run_main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper_module.main(list(argv))
+        return code, out.getvalue().strip().splitlines(), err.getvalue()
+
+    def test_a_socket_that_cannot_be_made_is_no_descriptors_and_any_other_failure_ipc_error(self):
+        for error, code, message in (
+                (self.EMFILE, "no_descriptors", self.MESSAGE),
+                (OSError(errno.ENFILE, "Too many open files in system"), "no_descriptors",
+                 "the helper has no file descriptor left (Too many open files in system)"),
+                (OSError(errno.ENOBUFS, "No buffer space available"), "ipc_error",
+                 "could not connect to mpv: No buffer space available")):
+            with self.subTest(errno=error.errno), self.no_socket(error):
+                client = helper_module.MpvIpc("/nonexistent/mpv.sock", 1.0)
+                with self.assertRaises(helper_module.HelperError) as caught:
+                    client.connect()
+                self.assertEqual((caught.exception.code, caught.exception.message), (code, message))
+                self.assertIsNone(client.sock)
+
+    def test_the_probe_connection_says_it_could_not_look_and_still_reads_no_answer_as_none(self):
+        with self.no_socket():
+            with self.assertRaises(helper_module.HelperError) as caught:
+                helper_module.probe_client("/nonexistent/mpv.sock", 1.0)
+        self.assertEqual(caught.exception.code, "no_descriptors")
+        # No socket at the path: `not_running`, which the probe reads as
+        # "nothing answered", as it always has.
+        self.assertIsNone(helper_module.probe_client("/nonexistent/mpv.sock", 1.0))
+
+    def test_the_wait_for_a_spawned_player_stays_bounded_and_answers_none(self):
+        with self.no_socket():
+            started = time.monotonic()
+            self.assertIsNone(helper_module.wait_for_socket("/nonexistent/mpv.sock", 0.1, 1.0))
+            self.assertLess(time.monotonic() - started, 5.0)
+
+    def test_the_process_scan_refused_is_no_descriptors_and_any_other_failure_finds_nothing(self):
+        with mock.patch.object(helper_module.os, "listdir", side_effect=self.EMFILE):
+            with self.assertRaises(helper_module.HelperError) as caught:
+                helper_module.find_player("/nonexistent/mpv.sock")
+        self.assertEqual((caught.exception.code, caught.exception.message), ("no_descriptors", self.MESSAGE))
+        with mock.patch.object(helper_module.os, "listdir", side_effect=PermissionError(errno.EACCES, "Permission denied")):
+            self.assertEqual(helper_module.find_player("/nonexistent/mpv.sock"), [])
+
+    def test_a_verb_with_no_net_of_its_own_answers_the_refusal_and_not_internal(self):
+        # `player pause` scans outside any try of its own.
+        with mock.patch.object(helper_module.os, "listdir", side_effect=self.EMFILE):
+            code, lines, err = self.run_main(["player", "pause", "--socket", "/nonexistent/mpv.sock"])
+        self.assertEqual(len(lines), 1, (lines, err))
+        self.assertEqual((code, json.loads(lines[0])),
+                         (1, {"ok": False, "kind": "player", "error": {"code": "no_descriptors", "message": self.MESSAGE}}))
+        self.assertNotIn("Traceback", err)
+        self.assertIn(self.MESSAGE, err)
+
+    def test_status_keeps_its_own_verdict_when_the_scan_after_it_cannot_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "mpv.sock")
+            with mock.patch.object(helper_module, "find_player", side_effect=helper_module.no_descriptors(self.EMFILE)):
+                code, lines, err = self.run_main(["status", "--socket", path])
+        self.assertEqual(len(lines), 1, (lines, err))
+        reply = json.loads(lines[0])
+        self.assertEqual((code, reply["error"]["code"], reply["process"]), (1, "not_running", {"found": False, "pid": None}))
+
+    def test_a_bug_is_still_answered_when_the_traceback_module_cannot_be_read(self):
+        real_import = builtins.__import__
+
+        def refuse_traceback(name, *args, **kwargs):
+            if name == "traceback":
+                raise OSError(errno.EMFILE, "Too many open files", "/usr/lib/python3/traceback.py")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(helper_module, "find_player", side_effect=RuntimeError("a bug")), \
+                mock.patch.object(builtins, "__import__", side_effect=refuse_traceback):
+            code, lines, err = self.run_main(["player", "pause", "--socket", "/nonexistent/mpv.sock"])
+        self.assertEqual(len(lines), 1, (lines, err))
+        self.assertEqual((code, json.loads(lines[0])),
+                         (1, {"ok": False, "kind": "player", "error": {"code": "internal", "message": "RuntimeError: a bug"}}))
+        self.assertIn("RuntimeError: a bug", err)
+
+    def test_the_peer_cannot_be_read_when_struct_cannot_be_loaded(self):
+        real_import = builtins.__import__
+
+        def refuse_struct(name, *args, **kwargs):
+            if name == "struct":
+                raise OSError(errno.EMFILE, "Too many open files")
+            return real_import(name, *args, **kwargs)
+
+        client = helper_module.MpvIpc("/nonexistent/mpv.sock", 1.0)
+        client.sock = object()
+        with mock.patch.object(builtins, "__import__", side_effect=refuse_struct):
+            self.assertEqual(client.peer_pid(), 0)
 
 
 if __name__ == "__main__":
