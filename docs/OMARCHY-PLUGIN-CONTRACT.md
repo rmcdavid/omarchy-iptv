@@ -642,6 +642,12 @@ now): it adds `--transient` (the `transient` hint above, `:54-55`,
 `Security.parseExecActions` holds to the click's argv rules), and its
 `known_flag` (`:118`) covers them. The plugin uses none of them; a body
 that carries a name is always quoted, so it can never be read as a flag.
+**[2026-11-11, D-HOST-7: what the plugin needs of it is pinned by a test
+on the `dev` branch that runs the wrapper with the plugin's own argv over a
+stub `busctl`: it must take `-p`, exit 0, and print the id the server
+returned alone on one line (`:280-281`, `${out##* }`), and hand the title
+and the body to `Notify` as the summary and the body, unchanged. Without
+`-p` the wrapper exits 1 with an empty stdout and the notice is lost.]**
 
 [2026-10-29, F-SINK-14 and F-SINK-16: the window-title row above carries
 the SHOWN name -- control characters dropped, URLs redacted by the helper's
