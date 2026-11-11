@@ -257,7 +257,10 @@ CONFIG_SHIELD_ATTEMPTS = 3
 # fnv1a32 of the normalized playlist URL (8 hex digits, "-2", "-3" on a
 # collision); it is validated before it ever becomes a path component.
 SOURCES_DIR = "sources"
-SOURCE_KEY_RE = re.compile(r"^[0-9a-f]{8}(-[0-9]{1,3})?$")
+# D-SRC-77: `\Z`, not `$`. Every reader uses `.match`, and Python's `$` also
+# matches before a final line feed, so a key ending in one was kept here and
+# refused by the shell (Model.isSourceKey), which then dropped the record.
+SOURCE_KEY_RE = re.compile(r"^[0-9a-f]{8}(-[0-9]{1,3})?\Z")
 FAILED_FILE = "failed.json"
 # FAILED_FILE is in this tuple deliberately: it is what makes a removed
 # source take its failure marks with it, which is D-LOGO-4's lesson applied

@@ -1,0 +1,28 @@
+{
+  "comment": [
+    "D-SRC-77: what a source key is, read alike by the shell and the helper. Run by",
+    "Model.isSourceKey (tests/Model.test.js) and by the helper's readers of a key",
+    "(tests/test_source_key_shape.py). The helper's pattern ended in `$`, which in Python also",
+    "matches before a final line feed, so it kept a key the shell refuses. ASCII only."
+  ],
+  "valid": [
+    "d990c2e4",
+    "d990c2e4-2",
+    "00000000-999"
+  ],
+  "invalid": [
+    "d990c2e4\n",
+    "d990c2e4-2\n",
+    "d990c2e4\n\n",
+    "d990c2e4\r",
+    "d990c2e4\r\n",
+    "\nd990c2e4",
+    "d990c2e4 ",
+    "D990C2E4",
+    "d990c2e4-",
+    "d990c2e4-1234",
+    "d990c2e",
+    "../x",
+    ""
+  ]
+}

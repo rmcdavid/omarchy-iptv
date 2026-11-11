@@ -7620,6 +7620,14 @@ check("statusReason knows the new codes", [Model.statusReason({ ok: false, error
 // ---- keys (D4) ----
 check("sourceKey vectors", [Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.sourceKey("/srv/tv/local.m3u")], ["d5977d8a", "d990c2e4", "b0eed9fb"])
 check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d5977d8", "../x", "d5977d8a/..", "d5977d8a-1000"].map(Model.isSourceKey), [true, true, true, false, false, false, false, false])
+{
+  // D-SRC-77: the shared fixture the helper's readers of a key run too
+  // (tests/test_source_key_shape.py). The shell never took a key ending in a
+  // line feed; this holds it there while the helper is brought to the same answer.
+  const KS = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/source-key-shapes.json"), "utf8"))
+  check("D-SRC-77 (shared fixture): isSourceKey takes every well-formed key and refuses every other, one ending in a line feed included",
+    [KS.valid.map(Model.isSourceKey), KS.invalid.map(Model.isSourceKey)], [KS.valid.map(() => true), KS.invalid.map(() => false)])
+}
 const collided = [{ key: "d5977d8a", url: "http://other.test/x" }, { key: "d5977d8a-2", url: "http://other2.test/x" }]
 // D-SINK-48: a new key is a draw; `draw` pins it here, so the suffix rule is
 // what is checked. Randomness itself is checked in the lane-p2a block.
