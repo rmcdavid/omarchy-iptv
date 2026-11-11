@@ -1313,7 +1313,7 @@ def acquire_lock(path: str, timeout: float) -> int:
             except OSError as error:
                 if error.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
                     os.close(fd)
-                    raise HelperError("busy", "could not lock the player: %s" % (error.strerror or error))
+                    raise HelperError("busy", "could not lock the player: %s" % (error.strerror or type(error).__name__))
                 if _monotonic() >= deadline:
                     break
                 _sleep(LOCK_POLL_S)

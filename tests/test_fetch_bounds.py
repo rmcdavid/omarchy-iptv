@@ -1,6 +1,7 @@
 """The playlist, guide and probe download (read_http_source): one wall-clock
 deadline over the whole fetch, redirect bodies never read, the status line's
-text capped, and the atomic writers' leftovers swept.
+text kept out of the reply (D-SRC-59, then D-SINK-93), and the atomic
+writers' leftovers swept.
 
 R30e (D-SRC-58, D-LOGO-15's playlist half): the 60-second deadline was
 checked only between body reads, after `open()` had returned, so connect,
@@ -8,7 +9,7 @@ TLS, the status line, the headers and every redirect -- whose BODY the
 stdlib read whole -- ran outside it; and a chunked body's trailers, read
 inside the last read1, could end a download that had overrun its deadline
 and have it ACCEPTED. D-SRC-59: the server's raw first line reached the
-replies whole. D-SRC-60: a killed atomic write left its temporary forever.
+replies whole (capped then; since D-SINK-93 named by kind only). D-SRC-60: a killed atomic write left its temporary forever.
 
 How this module is shaped, by the project's input rule: every server is a
 ScriptedServer (tests/scripted_server.py) giving an ORDINARY small response
@@ -381,45 +382,21 @@ class LookupBoundTest(LoweredDeadline):
 
 
 class StatusLineDetailTest(LoweredDeadline):
-    """D-SRC-59: a server's first line, when it is not a status line, reaches
-    the reply redacted, then cut to NETWORK_DETAIL_MAX characters, its control
-    characters folded."""
+    """D-SRC-59: a server's first line, when it is not a status line, used to
+    reach the reply redacted and cut to 200 characters. Since D-SINK-93 the
+    refusal names the error's kind only (tests/test_network_sentences.py
+    holds the case over the same scripted server); this keeps the
+    long-line case D-SRC-59 was filed for."""
 
-    PREFIX = "could not reach 127.0.0.1: "
-
-    def detail(self, first_line):
-        server = self.serve({"/list.m3u": (first_line,)})
+    def test_a_long_first_line_reaches_no_reply(self):
+        server = self.serve({"/list.m3u": (b"BAD http://user:SECRETPW@h.test/pppp " + b"w" * 300 + b"\r\n\r\n",)})
         code, status, stderr = run("playlist", "--url", server.url("/list.m3u"), "--cache-dir", self.cache)
         self.assertEqual(code, 1, stderr)
-        self.assertEqual(status["error"]["code"], "network", status)
-        message = status["error"]["message"]
-        self.assertTrue(message.startswith(self.PREFIX), message)
+        self.assertEqual(status["error"], {"code": "network", "message": "could not reach 127.0.0.1: BadStatusLine"})
         on_disk = json.loads((pathlib.Path(self.cache) / helper.PLAYLIST_STATUS_FILE).read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["error"]["message"], message)
-        return message[len(self.PREFIX):], stderr
-
-    def test_an_ordinary_long_first_line_is_cut(self):
-        detail, stderr = self.detail(b"BAD http://user:SECRETPW@h.test/pppp " + b"w" * 300 + b"\r\n\r\n")
-        # The stated figure (03-io-playlist.py, the README): 200 characters
-        # and the three dots of the cut.
-        self.assertEqual(getattr(helper, "NETWORK_DETAIL_MAX", None), 200)
-        self.assertLessEqual(len(detail), 200 + 3, detail)
-        self.assertTrue(detail.endswith("..."), detail)
-        self.assertTrue(detail.startswith("BAD http://h.test "), detail)
-        for leak in ("SECRETPW", "user", "pppp", "\r", "\n"):
-            self.assertNotIn(leak, detail)
-            self.assertNotIn(leak if leak not in ("\n",) else "\r", stderr)
-
-    def test_the_cut_comes_after_the_redaction(self):
-        # A cut at 15 falls inside the userinfo: cut first, then redacted,
-        # would read "BAD http://user" -- the username in the reply.
-        with mock.patch.object(helper, "NETWORK_DETAIL_MAX", 15, create=True):
-            detail, _ = self.detail(b"BAD http://user:SECRETPW@h.test/pppp\r\n\r\n")
-        self.assertEqual(detail, "BAD http://h.te...")
-
-    def test_control_characters_are_folded(self):
-        detail, _ = self.detail(b"BAD\x01first\x7fsecond\x1bthird\r\n\r\n")
-        self.assertEqual(detail, "BAD first second third")
+        self.assertEqual(on_disk["error"], status["error"])
+        for leak in ("BAD", "SECRETPW", "user", "pppp", "www"):
+            self.assertNotIn(leak, stderr)
 
 
 class StaleTemporarySweepTest(unittest.TestCase):

@@ -146,7 +146,7 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         group = ""
         source = None
     if not is_stream_url(url):
-        raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+        raise HelperError("unsupported_scheme", "unsupported stream URL scheme%s" % scheme_phrase(stream_scheme(url)))
     if stream_host_name_refused(url):
         raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
     if stream_zone_refused(urllib.parse.urlsplit(url).netloc):

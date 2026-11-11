@@ -344,7 +344,8 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
             break
         worker.join(min(RESOLVE_WAIT_SLICE_S, left))
     if not result:
-        raise TimeoutError("the host-name lookup took longer than %.1f s" % bound)
+        # A strerror of its own, the sentence network_detail repeats (D-SINK-93).
+        raise TimeoutError(errno.ETIMEDOUT, "the host-name lookup took longer than %.1f s" % bound)
     found = result[0]
     if isinstance(found, BaseException):
         raise found
@@ -581,7 +582,8 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         raise error
     if refused and policy is not None:
         raise policy.refusal(host, first)
-    raise OSError("getaddrinfo returned an empty list")
+    # A strerror of its own, the sentence network_detail repeats (D-SINK-93).
+    raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
 
 
 def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> list[Any]:
@@ -644,26 +646,49 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     return [BoundedHTTPHandler(), BoundedHTTPSHandler(context=context)]
 
 
-# D-SRC-59: the most of a library error's text a network refusal carries.
-# For http.client.BadStatusLine (a server whose first line is not a status
-# line) and UnknownProtocol (one whose first word is not a known HTTP
-# version), str(error) is the provider's own first line, read with
-# readline(_MAXLINE + 1): up to 65,536 characters, which reached the
-# playlist, probe and guide replies, both status files and the stderr line.
-# Redacted FIRST and cut after, so a cut can never leave the userinfo of a
-# URL that the redaction would have removed; control characters are folded
-# to spaces (a raw line carries its CR LF, and a C0 character escapes to six
-# bytes of JSON). The status line is decoded ISO-8859-1, so every character
-# left is at most two bytes of UTF-8 and the detail at most
-# (200 + 3) x 2 = 406 bytes of a reply.
-NETWORK_DETAIL_MAX = 200
+# D-SINK-93 (2026-11-11): what a network refusal of `playlist`, the probe and
+# `epg` says after `could not reach <host>:` -- a fixed sentence chosen by
+# the error's kind, never the error's own text (the owner's rule of
+# 2026-11-08 for what reaches the journal: codes and fixed sentences only
+# for anything built from an error message). The text was the leak: for a
+# redirect to `http://user:pass/x@host/` http.client reads `user` as the
+# host and `pass` as a port, and its InvalidURL ("nonnumeric port:
+# 'pass'") quoted the password into the reply, both status files and the
+# stderr line the shell writes to the journal -- no `://` was left in it
+# for redact_urls to find. D-SRC-59 had capped and redacted the same text
+# for a server whose first line is not a status line (BadStatusLine quotes
+# that line); it is now named by kind like the rest, as read_logo_response
+# has named http.client's errors since D-LOGO-24.
+#
+# What is kept is text no provider and no URL writes: an OS error's
+# strerror (the C library's sentence for its errno: "Connection refused",
+# "Name or service not known"; the helper's own two raises carry their own
+# fixed strerror), a timeout's "timed out", OpenSSL's reason token for a TLS
+# failure, and the status code of a proxy that refused a tunnel. Model.
+# statusReason reads the first three for its short reasons ("Connection
+# refused", "Could not resolve host", "Timed out", "TLS error").
+_SSL_REASON = re.compile(r"[A-Z0-9_]{1,64}")
+_TUNNEL_REFUSED = re.compile(r"Tunnel connection failed: ([0-9]{3})(?![0-9])")
 
 
 def network_detail(error: Any) -> str:
-    text = redact_urls(error)
-    if len(text) > NETWORK_DETAIL_MAX:
-        text = text[:NETWORK_DETAIL_MAX].rstrip() + "..."
-    return _CONTROL_CHARS.sub(" ", text).strip()
+    ssl = sys.modules.get("ssl")
+    if ssl is not None and isinstance(error, ssl.SSLCertVerificationError):
+        return "certificate verify failed"
+    if ssl is not None and isinstance(error, ssl.SSLError):
+        reason = getattr(error, "reason", None)
+        if isinstance(reason, str) and _SSL_REASON.fullmatch(reason):
+            return "TLS error (%s)" % reason
+        return "TLS error"
+    if isinstance(error, OSError):
+        if isinstance(error.strerror, str) and error.strerror.strip():
+            return _CONTROL_CHARS.sub(" ", error.strerror).strip()
+        if isinstance(error, TimeoutError):
+            return "timed out"
+        tunnel = _TUNNEL_REFUSED.match(str(error.args[0])) if len(error.args) == 1 else None
+        if tunnel:
+            return "the proxy refused the tunnel (HTTP %s)" % tunnel.group(1)
+    return type(error).__name__
 
 
 def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) -> Any:
@@ -686,7 +711,7 @@ def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) 
                     fp.close()
                 except OSError:
                     pass
-                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
+                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme%s" % (label, host, scheme_phrase(scheme)))
             new = super().redirect_request(req, fp, code, msg, headers, newurl)
             if new is not None:
                 # D-SINK-86: the next hop's host as its request holds it
@@ -947,13 +972,20 @@ def read_http_response(opener: Any, request: Any, timeout: float, label: str, ho
     except HelperError:
         raise
     except urllib.error.HTTPError as error:
+        # Closed here: an HTTPError holds its response, and one left to the
+        # collector is reported with its message, which for a refused
+        # redirect is the target URL (D-SINK-93).
+        close_quietly(error)
         if 300 <= error.code < 400:
             # urllib refused the redirect itself (file:, data:, a loop); its
             # message carries the target URL, so it is not repeated here.
             raise HelperError("unsafe_redirect", "%s redirect from %s not followed" % (label, host))
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
-        reason = getattr(error, "reason", error)
+        # The reason when it is an error (urllib wraps every OSError of the
+        # connection in one); a reason that is text is urllib's own words,
+        # named by the URLError's kind (D-SINK-93).
+        reason = error.reason if isinstance(getattr(error, "reason", None), BaseException) else error
         raise HelperError("network", "could not reach %s: %s" % (host, network_detail(reason)))
     except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("network", "could not reach %s: %s" % (host, network_detail(error)))

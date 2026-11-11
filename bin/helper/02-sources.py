@@ -298,7 +298,7 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
             return _validation(False, "invalid", "file URL path is not absolute")
         return _validate_path(path)
     if scheme not in ("http", "https"):
-        return _validation(False, "scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % scheme)
+        return _validation(False, "scheme", "unsupported source scheme%s (use http, https or an absolute path)" % scheme_phrase(scheme))
     if not rest.startswith("//"):
         return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
     if _URL_SPACE.search(rest):

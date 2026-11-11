@@ -3965,7 +3965,12 @@ Performance budget (10k channels):
     can end in: the message cut to `INTERNAL_MESSAGE_MAX` and the
     traceback to the first and last halves of `INTERNAL_TRACE_MAX`, the
     middle counted. The library text in a `network` refusal of `playlist`,
-    the probe and `epg` (`could not reach <host>: ...`): cut to
+    the probe and `epg` (`could not reach <host>: ...`) [2026-11-11,
+    D-SINK-93: is no longer the library's text at all -- `network_detail`
+    gives a fixed sentence chosen by the error's kind (an OS error's
+    strerror, "timed out", a TLS reason token, a refused proxy tunnel's
+    status code, or the class name), so `NETWORK_DETAIL_MAX` is gone and
+    what follows is the history]: cut to
     `NETWORK_DETAIL_MAX` = 200 characters and three dots, its control
     characters folded to spaces (D-SRC-59, 2026-10-21) -- for
     `http.client.BadStatusLine` that text is the server's own first line,
@@ -4501,8 +4506,11 @@ Performance budget (10k channels):
     memo was written, so the same logo ended every later run and no logo
     after it in channel order was ever fetched (and InvalidURL's text, which
     quotes the path and query, was printed). `read_logo_response` now maps
-    them to `logo_fetch` with the class name only, as `read_http_response`
-    has since D-SRC-59; the run keeps a backstop that turns any other
+    them to `logo_fetch` with the class name only [corrected 2026-11-11:
+    this said "as `read_http_response` has since D-SRC-59", and it had
+    not -- D-SRC-59 capped and redacted the text there, and InvalidURL's
+    could quote part of a userinfo; D-SINK-93 names it by kind]; the run
+    keeps a backstop that turns any other
     exception of one logo's fetch or cached-file check into that logo's
     `logo_fetch` (said once on stderr by class name), MemoryError and
     `folder_unusable` excepted, which are the run's; and the memo's end-of-run

@@ -69,6 +69,12 @@ CALLS = {"compile", "search", "match", "fullmatch", "sub", "subn", "split", "fin
 # (pattern, what it reads, verdict). Written with the same literal the
 # helper uses, so a reader can find the line.
 REVIEWED = [
+    (r"[A-Z0-9_]{1,64}", "provider",
+     "linear: fullmatch of one bounded class run over the TLS error's reason attribute, which is "
+     "OpenSSL's token (_SSL_REASON, D-SINK-93)"),
+    (r"Tunnel connection failed: ([0-9]{3})(?![0-9])", "provider",
+     "linear: matched at the start only; a literal, three digits and a one-character lookahead "
+     "(_TUNNEL_REFUSED, D-SINK-93: http.client's text for a proxy that refused a CONNECT)"),
     (r"[a-z][a-z0-9+.-]*://|(?:rtp|udp|rtsp|mms):", "provider",
      "linear: matched at the start only; one class run then `://`, whose `:` and `/` the class cannot "
      "hold, backing off one test per character; the other arm is four literals (_NAME_URL_SHAPE, "

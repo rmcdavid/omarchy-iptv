@@ -98,7 +98,7 @@ class MpvIpc:
             raise HelperError("not_running", "mpv socket did not accept the connection")
         except OSError as error:
             sock.close()
-            raise HelperError("ipc_error", "could not connect to mpv: %s" % (error.strerror or error))
+            raise HelperError("ipc_error", "could not connect to mpv: %s" % (error.strerror or type(error).__name__))
         self.sock = sock
 
     def close(self) -> None:
@@ -161,7 +161,7 @@ class MpvIpc:
             except (ConnectionResetError, BrokenPipeError):
                 return None
             except OSError as error:
-                raise HelperError("ipc_error", "could not read from mpv: %s" % (error.strerror or error))
+                raise HelperError("ipc_error", "could not read from mpv: %s" % (error.strerror or type(error).__name__))
             if not chunk:
                 return None
             self.buffer += chunk
@@ -185,7 +185,7 @@ class MpvIpc:
                 return {"error": "success", "request_id": request_id}
             raise HelperError("ipc_error", "mpv closed the connection")
         except OSError as error:
-            raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or error))
+            raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or type(error).__name__))
         deadline = time.monotonic() + self.timeout
         while True:
             line = self.read_line(deadline)

@@ -75,6 +75,22 @@ EXIT_USAGE = 2
 STREAM_SCHEMES = {"http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt"}
 # Schemes a playlist/EPG *source* may use.
 SOURCE_SCHEMES = {"http", "https", "file"}
+# D-SINK-94 (2026-11-11): the schemes a refusal may NAME. The three
+# scheme refusals (a source, a stream to play, a redirect) quoted whatever
+# came before the URL's first `:`, and for an address typed without its
+# `http://` -- `user:pass@host/list.m3u` -- that is the username, which
+# reached the reply, the status file and the stderr line. A scheme not on
+# this list is refused without its name (scheme_phrase).
+NAMED_SCHEMES = frozenset(STREAM_SCHEMES | SOURCE_SCHEMES | {
+    "ftp", "ftps", "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"})
+
+
+def scheme_phrase(scheme: Any) -> str:
+    """` 'ftp'` -- a space and the quoted scheme -- for a scheme on
+    NAMED_SCHEMES, compared lower-cased; "" for any other text, the empty
+    one included (D-SINK-94)."""
+    name = str(scheme or "").lower()
+    return " '%s'" % name if name in NAMED_SCHEMES else ""
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 # Bounds on what channels.json may carry (S-07): the shell parses that file

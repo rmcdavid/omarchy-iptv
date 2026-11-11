@@ -1023,7 +1023,9 @@ carry channel ids — most do — are not affected at all.
   -- `127.0.0.1`, `localhost` -- the host is the address AND the port, so a
   local relay such as Threadfin may redirect within its own port but not
   to another program's). When the server's
-  answer is not HTTP at all, the error shows at most 200 characters of it.
+  answer is not HTTP at all, or a redirect names an address the HTTP
+  library cannot read, the error names only the kind of failure
+  (`BadStatusLine`, `InvalidURL`), never the text of it.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.
