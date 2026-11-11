@@ -1334,7 +1334,7 @@ def read_regular_text(path: str) -> str:
 
 def read_json(path: str) -> Any:
     try:
-        return json.loads(read_regular_text(path))
+        return json_decode(read_regular_text(path))
     except (OSError, ValueError):
         return None
 

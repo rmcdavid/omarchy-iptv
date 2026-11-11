@@ -194,7 +194,7 @@ class MpvIpc:
                     return {"error": "success", "request_id": request_id}
                 raise HelperError("ipc_error", "mpv closed the connection")
             try:
-                message = json.loads(line)
+                message = json_decode(line)
             except ValueError:
                 continue
             if not isinstance(message, dict):
@@ -222,7 +222,7 @@ class MpvIpc:
             self.closed = True
             return None
         try:
-            message = json.loads(line)
+            message = json_decode(line)
         except ValueError:
             return []
         if isinstance(message, dict) and "request_id" not in message:

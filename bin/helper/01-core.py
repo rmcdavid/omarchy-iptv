@@ -26,6 +26,19 @@ from typing import Any, BinaryIO
 
 
 
+def json_decode(text: str) -> Any:
+    """json.loads for every document the helper reads. D-STATE-7: the C
+    decoder raises RecursionError, which is no ValueError, once a document
+    nests past what its stack takes (about 50,000 levels), and every reader
+    here catches ValueError: a state or cache file nested that deep ended its
+    verb `internal`. It is damage like any other text that does not parse, so
+    it is raised as the ValueError those readers already handle."""
+    try:
+        return json.loads(text)
+    except RecursionError:
+        raise ValueError("JSON nested too deeply") from None
+
+
 # Heavier modules (socket, calendar, hashlib, unicodedata, urllib.request,
 # xml.etree, traceback) are imported where needed so that `play`, `status`
 # and `epg --now-only` start faster.
@@ -42,7 +55,7 @@ def _manifest_version() -> str:
     try:
         here = os.path.dirname(os.path.realpath(__file__))
         with open(os.path.join(here, os.pardir, "manifest.json"), encoding="utf-8") as fh:
-            found = json.load(fh).get("version")
+            found = json_decode(fh.read()).get("version")
         if isinstance(found, str) and found.strip():
             return found.strip()
     except (OSError, ValueError):

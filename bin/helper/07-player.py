@@ -1346,7 +1346,7 @@ def read_lock_record(fd: int) -> dict[str, Any]:
     except OSError:
         return {}
     try:
-        document = json.loads(raw.decode("utf-8"))
+        document = json_decode(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return {}
     return document if isinstance(document, dict) else {}
@@ -1356,7 +1356,7 @@ def read_lock_file(sock_path: str) -> dict[str, Any]:
     """The record without taking the lock (probe is lock-free)."""
     try:
         with os.fdopen(open_regular(player_lock_path(sock_path)), "rb") as handle:
-            document = json.loads(handle.read().decode("utf-8"))
+            document = json_decode(handle.read().decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return {}
     return document if isinstance(document, dict) else {}

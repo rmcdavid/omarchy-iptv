@@ -780,7 +780,7 @@ def read_state_strict(path: str) -> dict[str, Any]:
     except ValueError:
         raise HelperError("state_unreadable", "state.json is not UTF-8 text; nothing was written")
     try:
-        raw = json.loads(text)
+        raw = json_decode(text)
     except ValueError:
         raw = None
     if not isinstance(raw, dict):
@@ -879,7 +879,7 @@ def cmd_state(args: argparse.Namespace) -> int:
             # descriptor outranks the lstat: a regular file swapped for
             # something else in between is "other".
             try:
-                state = normalize_state(json.loads(read_regular_text(path)))
+                state = normalize_state(json_decode(read_regular_text(path)))
             except NotRegularFile:
                 state = default_state()
                 if found != "link":

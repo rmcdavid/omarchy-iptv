@@ -616,7 +616,7 @@ def helper_arguments(argv: list[str], environ: Any) -> list[str]:
     if len(raw) > ARGS_ENV_MAX:
         raise HelperError("bad_arguments", "$%s is longer than an environment string can be" % ARGS_ENV)
     try:
-        items = json.loads(raw)
+        items = json_decode(raw)
     except ValueError:
         items = None
     if not isinstance(items, list) or not all(isinstance(item, str) and "\0" not in item for item in items):

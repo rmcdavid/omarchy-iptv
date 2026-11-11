@@ -1208,7 +1208,7 @@ def load_window(path: str) -> dict[str, Any] | None:
         return None
     head, _, body = text.partition("\n")
     try:
-        meta = json.loads(head)
+        meta = json_decode(head)
     except ValueError:
         return None
     if not isinstance(meta, dict) or meta.get("version") != 1:
@@ -1239,7 +1239,7 @@ def window_channels(window: dict[str, Any]) -> dict[str, str]:
     for line in window.get("lines", []):
         cid, tab, blob = line.partition("\t")
         if tab:
-            out[json.loads(cid)] = blob
+            out[json_decode(cid)] = blob
     return out
 
 
@@ -1349,7 +1349,7 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
 def record_to_dict(record: str) -> dict[str, Any]:
     """-> {"title", "start", "stop"} plus whichever EPG_DETAIL_KEYS the record
     carries. Diagnostics and tests; programme_json is the hot path."""
-    out = dict(json.loads('{"title":' + record[22:] + "}"))
+    out = dict(json_decode('{"title":' + record[22:] + "}"))
     out["start"] = int(record[:10])
     out["stop"] = int(record[11:21])
     return out
@@ -1387,7 +1387,7 @@ def _window_id_ok(cid: str) -> bool:
     if inner.isprintable() and '"' not in inner and "\\" not in inner:
         return True
     try:
-        return isinstance(json.loads(cid), str)
+        return isinstance(json_decode(cid), str)
     except ValueError:
         return False
 
