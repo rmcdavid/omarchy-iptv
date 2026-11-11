@@ -7,7 +7,7 @@ import {
   channelId
 } from "./text.mjs"
 import {
-  primaryGroup, groupSearchText
+  primaryGroup, rowGroup, groupSearchText
 } from "./channels.mjs"
 import {
   matchRank, channelsForScope, effectiveScope
@@ -944,8 +944,8 @@ function toggleHiddenGroup(state, name) {
 // nothing hidden this is the SAME array, not a copy, because
 // channelsForScope(all) used to return the list itself and callers may
 // compare by identity; a filter that always copied would change that
-// silently. Costs one primaryGroup per channel only when something is
-// hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
+// silently. Costs one stored-group read per channel (rowGroup, D-PERF-12)
+// only when something is hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
 function browsableChannels(channels, state) {
   var list = asList(channels)
   var hidden = hiddenGroupSet(state)
@@ -955,7 +955,7 @@ function browsableChannels(channels, state) {
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    if (hidden[primaryGroup(list[i])] !== true) out.push(list[i])
+    if (hidden[rowGroup(list[i])] !== true) out.push(list[i])
   }
   return out
 }

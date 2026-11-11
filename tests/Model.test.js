@@ -905,16 +905,20 @@ checkCall("scopeEntries is scopeSurface's entries, byte for byte, so its shipped
   return [JSON.stringify(wrapper) === JSON.stringify(Model.scopeSurface(channels, state).entries), wrapper.length]
 }, [true, 9])
 // P1 as an assertion, not a benchmark: ONE pass over the channel array, not
-// two. groupChannels is the only thing in scopeSurface that reads `group` (the
-// favourite and recent counters index by id), so counting reads of that
-// property counts the passes through the module boundary -- which swapping the
-// exported function cannot do, since the caller is inside the module.
+// two. groupChannels is the only thing in scopeSurface that reads a row's
+// group (the favourite and recent counters index by id), so counting reads of
+// it counts the passes through the module boundary -- which swapping the
+// exported function cannot do, since the caller is inside the module. Since
+// D-PERF-12 a pass reads the group prepareChannels stored (`primaryGroup`)
+// and `group` only on a row that carries none, so both are watched.
 function groupReadCounter(list) {
   let reads = 0
   const watched = list.map(function (row) {
     const copy = {}
-    Object.keys(row).forEach(function (k) { if (k !== "group") copy[k] = row[k] })
+    Object.keys(row).forEach(function (k) { if (k !== "group" && k !== "primaryGroup") copy[k] = row[k] })
     Object.defineProperty(copy, "group", { get: function () { reads++; return row.group }, enumerable: true })
+    if (Object.prototype.hasOwnProperty.call(row, "primaryGroup"))
+      Object.defineProperty(copy, "primaryGroup", { get: function () { reads++; return row.primaryGroup }, enumerable: true })
     return copy
   })
   return { rows: watched, reads: function () { return reads } }
@@ -7619,6 +7623,35 @@ check("statusReason knows the new codes", [Model.statusReason({ ok: false, error
 
 // ---- keys (D4) ----
 check("sourceKey vectors", [Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.sourceKey("/srv/tv/local.m3u")], ["d5977d8a", "d990c2e4", "b0eed9fb"])
+{
+  // D-PERF-12: the passes that run on every rebuild read the group
+  // prepareChannels stored on the row and do not derive it again. The rows
+  // here answer `group` through a counting getter, so a pass that asks
+  // primaryGroup for a prepared row is seen doing it.
+  const FS = String.fromCharCode(0x1c)
+  const raw = [
+    { name: "A", url: "http://p.test/a", group: FS + "   Sports" }, { name: "B", url: "http://p.test/b", group: "News" },
+    { name: "C", url: "http://p.test/c", group: "" }, { name: "D", url: "http://p.test/d", group: "Sports" }]
+  const prepared = Model.prepareChannels(raw)
+  let reads = 0
+  const counted = prepared.map(function (r) {
+    const o = Object.assign({}, r), g = r.group
+    Object.defineProperty(o, "group", { get: function () { reads++; return g }, enumerable: true })
+    return o
+  })
+  const hidden = Object.assign(Model.emptyState(), { hiddenGroups: ["News"] })
+  const names = function (list) { return list.map(function (r) { return r.name }) }
+  const passes = function (rows) {
+    return [names(Model.browsableChannels(rows, hidden)), names(Model.channelsForScope(rows, "g:Sports", hidden)),
+            names(Model.channelsForScope(rows, "g:" + Model.UNGROUPED, hidden)),
+            Model.groupChannels(rows).map(function (g) { return g.name + ":" + g.count })]
+  }
+  const WANT = [["A", "C", "D"], ["A", "D"], ["C"], ["Sports:2", "News:1", Model.UNGROUPED + ":1"]]
+  check("D-PERF-12: over prepared rows the hidden-group filter, a group's channels and the group list give the same answers and read no row's `group` again",
+    [passes(counted), reads], [WANT, 0])
+  check("D-PERF-12: rows prepareChannels did not make (no stored group, or one that is not a string) are read from `group` as before",
+    [passes(raw), passes(prepared.map(function (r) { return Object.assign({}, r, { primaryGroup: 42 }) }))], [WANT, WANT])
+}
 check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d5977d8", "../x", "d5977d8a/..", "d5977d8a-1000"].map(Model.isSourceKey), [true, true, true, false, false, false, false, false])
 {
   // D-SRC-77: the shared fixture the helper's readers of a key run too
