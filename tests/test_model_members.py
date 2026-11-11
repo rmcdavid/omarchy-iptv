@@ -389,10 +389,19 @@ class GateWiring(unittest.TestCase):
     def test_the_judge_is_handed_the_file_being_linted(self):
         line = self.lines[self.judge_line()]
         self.assertIn('--file "$file"', line)
-        loop = max(n for n, l in enumerate(self.lines[:self.judge_line()]) if l.startswith('for file in '))
+        # F-GATE-16 moved the step's body into gate_qmllint_file, which the
+        # per-file loop calls with the file it is on. The door that function
+        # got is driven for real, with a mistyped member, by
+        # tests/test_qmllint_count.py.
+        opened = max(n for n, l in enumerate(self.lines[:self.judge_line()]) if l == 'gate_qmllint_file() {')
+        self.assertTrue(self.lines[opened + 1].startswith('local file=$1 '), self.lines[opened + 1])
+        self.assertFalse(any(l == '}' for l in self.lines[opened:self.judge_line()]),
+                         'the judge runs after gate_qmllint_file has closed')
+        call = self.lines.index('gate_qmllint_file "$file"', self.judge_line())
+        loop = max(n for n, l in enumerate(self.lines[:call]) if l.startswith('for file in '))
         self.assertTrue(self.lines[loop].endswith('; do'), self.lines[loop])
-        self.assertFalse(any(l == 'done' for l in self.lines[loop:self.judge_line()]),
-                         'the judge runs after the per-file loop has closed')
+        self.assertFalse(any(l == 'done' for l in self.lines[loop:call]),
+                         'the step is called after the per-file loop has closed')
 
     def test_a_non_zero_verdict_turns_the_gate_red(self):
         i = self.lines.index('if (( members_status != 0 )); then')

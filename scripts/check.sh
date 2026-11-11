@@ -98,6 +98,16 @@
 # 222 -> 224 warnings, same three categories; anything outside this baseline
 # is a real finding.
 #
+# F-GATE-16 (2026-11-11): every figure above was a count of qmllint's TEXT
+# lines, and since qmllint 6.12.0 that text is only a trailing run of what it
+# finds, so the gate's counts read low (BarWidget.qml printed 6 warnings and
+# 1 on Model members where the report holds 17 and 8). The counts are now
+# read from qmllint's `--json` report by scripts/qmllint-count.py and are
+# not comparable with the figures above. On this tree, qmllint 6.12.0:
+# BarWidget.qml 17 + 8 on Model members, Guide.qml 374 + 278, Service.qml
+# 45 + 366, tests/Model.spec.qml 67 + 900. CHECK_VERBOSE=1 lists every entry
+# as `warning: <file>:<line>:<column>: <message> [<id>]`.
+#
 # EVERY COUNT THIS FILE PRINTS IS ALSO ASSERTED. A runner that exits 0 having
 # executed nothing is the failure this whole cleanup round is about: the gate
 # used to print `ok   qml spec (0 passed)` and stay green, and an emptied
@@ -1122,6 +1132,84 @@ gate_control_scan() {
   fi
 }
 
+# The qmllint step's two halves, as functions above the first `step` so the
+# door below can run them alone (tests/test_qmllint_count.py drives it over a
+# generated file: the count the gate PRINTS is what F-GATE-16 is about, and a
+# test that called only the counting script could pass while this file went
+# on grepping qmllint's text).
+gate_qmllint_root() {
+  mkdir -p "$QMLROOT/qs" || bad "could not create the qmllint import root $QMLROOT"
+  ln -sfn "$SHELL_DIR/Commons" "$QMLROOT/qs/Commons" || bad "could not link qs.Commons into $QMLROOT"
+  ln -sfn "$SHELL_DIR/Ui" "$QMLROOT/qs/Ui" || bad "could not link qs.Ui into $QMLROOT"
+  [[ -d $QMLROOT/qs/Commons && -d $QMLROOT/qs/Ui ]] || bad "qs.Commons / qs.Ui do not resolve under $QMLROOT"
+}
+
+gate_qmllint_file() {
+  local file=$1 output lint_status counts errors warnings model_members members_out members_status
+  # F-GATE-16: counted from qmllint's `--json` report, which is whole.
+  # The text output these counts were grepped from is, on qmllint 6.12.0,
+  # only a trailing run of what it finds (Guide.qml 385 lines of 649
+  # entries), so every count printed here read low and CHECK_VERBOSE
+  # showed a fraction. qmllint-count.py runs qmllint, reads the report and
+  # prints `errors warnings model-members`, then every entry; a syntax
+  # error is typed a warning and told only by qmllint's exit status, which
+  # the script turns into an error. A report it cannot read is red.
+  output=$(python3 "$ROOT/scripts/qmllint-count.py" --list "$QT_BIN/qmllint" -I "$QMLROOT" -I "$QML_IMPORTS" "$file" 2>&1)
+  lint_status=$?
+  counts=${output%%$'\n'*}
+  if [[ $output == *$'\n'* ]]; then output=${output#*$'\n'}; else output=""; fi
+  if (( lint_status != 0 )) || [[ ! $counts =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)$ ]]; then
+    bad "$(basename "$file"): qmllint's findings could not be counted"
+    printf '%s\n' "$counts" "$output"
+    return
+  fi
+  errors=${BASH_REMATCH[1]}
+  warnings=${BASH_REMATCH[2]}
+  model_members=${BASH_REMATCH[3]}
+  # D-REL-5: qmllint reads no ES module's exports, so since the model
+  # became Model.mjs every Model member it reaches is a `missing-property`
+  # on type "Model". The first version of this comment said the classic
+  # Model.js was not resolved either, so no check was lost. Measured, that
+  # was false: Model.js WAS resolved, a real member drew nothing and a
+  # mistyped one drew a warning naming it (BarWidget.qml 0 -> 1). Here that
+  # warning would be one line in a bucket of hundreds, so the member lines
+  # are counted apart, to keep the rest comparable with the baseline.
+  # They are NOT what judges a member any more (Qt 6.12): the judge used
+  # to read the names out of these lines, and qmllint 6.12.0's text output
+  # prints only a trailing run of what it finds (BarWidget.qml 7 of the 25
+  # warnings its --json lists), so a mistyped member at BarWidget.qml:86
+  # drew no line and the judge passed. check-model-members.py now reads the
+  # QML itself and judges every `Model.<name>` in code against the
+  # aggregator's export names, including the positions qmllint never
+  # reached; an unknown one is red, and so is a file it could not read.
+  members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file")
+  members_status=$?
+  if (( errors > 0 )); then
+    bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
+    printf '%s\n' "$output"
+  else
+    ok "$(basename "$file"): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
+    if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
+  fi
+  if (( members_status != 0 )); then
+    bad "$(basename "$file"): a Model member that Model.mjs does not export"
+    printf '%s\n' "$members_out"
+  fi
+}
+
+# One file through the qmllint step, and nothing else: the door
+# tests/test_qmllint_count.py drives. Like the byte-scan door below it stays
+# above the first `step`, so no other gate runs.
+if [[ ${1:-} == --qmllint-file ]]; then
+  if (( $# != 2 )) || [[ ! -f $2 ]]; then
+    printf 'usage: %s --qmllint-file <file.qml>\n' "$0" >&2; exit 2
+  fi
+  [[ -x "$QT_BIN/qmllint" ]] || { printf 'qmllint not found at %s\n' "$QT_BIN/qmllint" >&2; exit 2; }
+  gate_qmllint_root
+  gate_qmllint_file "$2"
+  exit $fail
+fi
+
 # One byte scan, against one root, and nothing else. This is the door
 # tests/test_gate_file_scan.py drives: it builds throwaway git repositories in
 # a temp directory and runs the REAL functions above over them, rather than
@@ -1145,10 +1233,7 @@ step "omarchy plugin validate $ROOT"
 if omarchy plugin validate "$ROOT"; then ok "manifest valid"; else bad "manifest invalid"; fi
 
 step "qmllint (imports: $QMLROOT, $QML_IMPORTS)"
-mkdir -p "$QMLROOT/qs" || bad "could not create the qmllint import root $QMLROOT"
-ln -sfn "$SHELL_DIR/Commons" "$QMLROOT/qs/Commons" || bad "could not link qs.Commons into $QMLROOT"
-ln -sfn "$SHELL_DIR/Ui" "$QMLROOT/qs/Ui" || bad "could not link qs.Ui into $QMLROOT"
-[[ -d $QMLROOT/qs/Commons && -d $QMLROOT/qs/Ui ]] || bad "qs.Commons / qs.Ui do not resolve under $QMLROOT"
+gate_qmllint_root
 if [[ ! -x "$QT_BIN/qmllint" ]]; then
   # Name the package, not an install command: the marketplace security baseline
   # scans this file as commands and cannot tell a message string from a real one.
@@ -1178,41 +1263,7 @@ else
   for file in "$ROOT"/*.qml "$ROOT"/tests/*.qml "$stage"/*.qml; do
     [[ -f $file ]] || continue
     linted=$(( linted + 1 ))
-    output=$("$QT_BIN/qmllint" -I "$QMLROOT" -I "$QML_IMPORTS" "$file" 2>&1)
-    lint_status=$?
-    errors=$(grep -c -E '^Error:|: error:|Error at' <<<"$output")
-    (( lint_status == 0 )) || errors=$(( errors + 1 ))
-    warnings=$(grep -c -E 'Warning:|: warning:' <<<"$output")
-    # D-REL-5: qmllint reads no ES module's exports, so since the model
-    # became Model.mjs every Model member it reaches is a `missing-property`
-    # on type "Model". The first version of this comment said the classic
-    # Model.js was not resolved either, so no check was lost. Measured, that
-    # was false: Model.js WAS resolved, a real member drew nothing and a
-    # mistyped one drew a warning naming it (BarWidget.qml 0 -> 1). Here that
-    # warning would be one line in a bucket of hundreds, so the member lines
-    # are counted apart, to keep the rest comparable with the baseline.
-    # They are NOT what judges a member any more (Qt 6.12): the judge used
-    # to read the names out of these lines, and qmllint 6.12.0's text output
-    # prints only a trailing run of what it finds (BarWidget.qml 7 of the 25
-    # warnings its --json lists), so a mistyped member at BarWidget.qml:86
-    # drew no line and the judge passed. check-model-members.py now reads the
-    # QML itself and judges every `Model.<name>` in code against the
-    # aggregator's export names, including the positions qmllint never
-    # reached; an unknown one is red, and so is a file it could not read.
-    model_members=$(grep -c -E 'not found on type "Model" \[missing-property\]' <<<"$output")
-    members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file")
-    members_status=$?
-    if (( errors > 0 )); then
-      bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
-      printf '%s\n' "$output"
-    else
-      ok "$(basename "$file"): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
-      if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
-    fi
-    if (( members_status != 0 )); then
-      bad "$(basename "$file"): a Model member that Model.mjs does not export"
-      printf '%s\n' "$members_out"
-    fi
+    gate_qmllint_file "$file"
   done
   # `[[ -f $file ]] || continue` means an unmatched glob lints NOTHING while
   # the gate reports green. Count what was actually linted.
