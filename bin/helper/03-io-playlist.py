@@ -14,8 +14,16 @@ def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
     anything else through validate_source_url (D11: the guide and the
     helper accept exactly the same set; the 2,048-character cap and control
     characters are enforced here too). A leading `~` is expanded first, as
-    in 0.1, for values set from the command line."""
-    value = (url or "").strip()
+    in 0.1, for values set from the command line.
+
+    D-SRC-76: only the validator's own edges come off before that test
+    (_URL_EDGE_SPACE: the six ASCII whitespace characters and a no-break
+    space). A bare strip() took Python's whole whitespace set, so a URL
+    with an information separator, U+0085 or a Unicode space at an end was
+    fetched here while the validator, handed the same text by `state source
+    add` or the guide's form, refuses it (D-SRC-63: refused, never
+    deleted)."""
+    value = (url or "").strip(_URL_EDGE_SPACE)
     if value.startswith("~"):
         value = os.path.expanduser(value)
     result = validate_source_url(value)
@@ -1394,10 +1402,13 @@ def url_from(args: argparse.Namespace) -> str:
     printed on purpose (D12, read_local_source) and carries no credential;
     log() redacts whatever is left.
     """
-    explicit = (getattr(args, "url", None) or "").strip()
+    # D-SRC-76: the validator's edges and no more (resolve_source), so a
+    # --url of nothing but those is absent, and anything else whitespace
+    # leaves at an end reaches the validator, which refuses it.
+    explicit = (getattr(args, "url", None) or "").strip(_URL_EDGE_SPACE)
     if explicit:
         return explicit
-    return (os.environ.get(URL_ENV) or "").strip()
+    return (os.environ.get(URL_ENV) or "").strip(_URL_EDGE_SPACE)
 
 
 def cmd_playlist(args: argparse.Namespace) -> int:
