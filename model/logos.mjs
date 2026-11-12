@@ -190,7 +190,9 @@ function logoConsentLines(survey) {
     if (withLogoEarly > 0) {
       return [formatCount(withLogoEarly) + (withLogoEarly === 1 ? " channel offers a logo" : " channels offer a logo")
               + ", and none of them can be used.",
-              "Every one is either not https or has no host, so nothing would be fetched"
+              // D-LOGO-27: the reasons are more than two (see below), so
+              // the sentence names none of them wrongly.
+              "Every one has an address that is refused, so nothing would be fetched"
               + " and nothing would be contacted.",
               "No credentials are ever sent with a logo request."]
     }
@@ -211,8 +213,14 @@ function logoConsentLines(survey) {
                + " a logo. Each one is fetched once and cached."]
   var refused = Math.max(0, Math.floor(Number(s.refused) || 0))
   if (refused > 0) {
-    lines.push(formatCount(refused) + (refused === 1 ? " logo is" : " logos are")
-               + " not https and will be skipped.")
+    // D-LOGO-27. This read "N logos are not https and will be skipped",
+    // which was true of one reason in five: logoSurvey's `refused` also
+    // counts an https logo with no host, with a user name or password in
+    // it, on a host of one label (D-SINK-83), or holding another attribute
+    // it absorbed (D-SINK-80's review). The sentence says what happens and
+    // names no reason it cannot vouch for.
+    lines.push(formatCount(refused) + (refused === 1 ? " logo" : " logos")
+               + " cannot be used and will be skipped.")
   }
   lines.push("No credentials are ever sent with a logo request.")
   return lines

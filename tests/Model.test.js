@@ -3228,8 +3228,23 @@ checkCall("M2-04: the consent sentence counts parties, and names the busiest", f
   return Model.logoConsentLines(Model.logoSurvey(rows))
 }, ["Turning logos on will contact 2 hosts, the busiest being i.imgur.com (999 channels).",
     "1,171 of 1,471 channels carry a logo. Each one is fetched once and cached.",
-    "2 logos are not https and will be skipped.",
+    "2 logos cannot be used and will be skipped.",
     "No credentials are ever sent with a logo request."])
+
+checkCall("D-LOGO-27: the skipped-logo sentence names no reason, because an https logo is skipped for four reasons that are not its scheme; one logo is singular; a playlist whose every logo is refused says so without naming a reason either", function () {
+  const good = { logo: "https://cdn.test/a.png" }
+  // https, and refused: a user name in it, a host of one label, no host.
+  const skipped = [{ logo: "https://user:pw@cdn.test/a.png" }, { logo: "https://intranet/a.png" }, { logo: "https:///a.png" }]
+  const survey = Model.logoSurvey([good].concat(skipped))
+  const lines = Model.logoConsentLines(survey)
+  const one = Model.logoConsentLines(Model.logoSurvey([good, skipped[0]]))
+  const all = Model.logoConsentLines(Model.logoSurvey(skipped))
+  const everyLine = lines.concat(one, all).join(" ")
+  return [survey.refused, lines[2], one[2], all[0], all[1], /not https/.test(everyLine), /user|pw@|intranet/.test(everyLine)]
+}, [3, "3 logos cannot be used and will be skipped.", "1 logo cannot be used and will be skipped.",
+    "3 channels offer a logo, and none of them can be used.",
+    "Every one has an address that is refused, so nothing would be fetched and nothing would be contacted.",
+    false, false])
 
 checkCall("M2-04: a playlist with no logos says so instead of counting to zero", function () {
   return Model.logoConsentLines(Model.logoSurvey([{ name: "a" }, { name: "b" }]))
