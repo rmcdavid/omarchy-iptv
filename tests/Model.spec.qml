@@ -3095,4 +3095,29 @@ TestCase {
     var st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", { typed: false })
     compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************************")
   }
+
+  // Round 4f (D-SINK-98, the lead's call under the owner's standing
+  // authority of 2026-11-09): K1's whole-value shape (v), K2's head before a
+  // `//` on its three readings and the two readings of an escaped token,
+  // K3's fold of the raw token, and K4's `;`-less and named entities, in
+  // the engine the shell runs (the decoder's callback takes a sixth
+  // argument here).
+  function test_round4fInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["qqqqqq:zzzzzz" + String.fromCharCode(0xff20) + "cdn.test//zzzzzz.zz/1.ts", W],
+      ["nas:8080//qqqqqq.qq/zzzzzz/1.ts", W], ["cdn.test.//qqqqqq.qq/zzzzzz/1.ts", W], ["cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"],
+      ["qqqqqq.qq//zzzzzz@cdn.test/x", W], ["cdn.test%2Fqqqqqq.qq//zzzzzz.zz/x", W], ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["Server cdn.test%2F. Login qqqqqq zzzzzz", "cdn.test"], ["Server cdn.test" + String.fromCharCode(0xff0f) + ". Login qqqqqq zzzzzz", W],
+      ["http&colon;&sol;&sol;qqqqqq&colon;zzzzzz&commat;cdn.test&sol;get.php", "cdn.test"], ["http&#58&#47&#47qqqqqq&#58zzzzzz&#64cdn.test&#47get.php", "cdn.test"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    compare(Model.labelDecode("&colon;&sol;&commat;&quest;&amp;&equals;&semi;&bsol;&#58&#x2f&COLON;"), ":/@?&=;" + BS + ":/&COLON;")
+    compare(Model.labelDecode("&#1114112"), "&#1114112")
+    var holds = ["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts", "&#47&#47qqqqqq"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["Dr. Who/Torchwood", "Ch. 4 / Ch. 5", "cdn.test /qqqqqq"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+  }
 }

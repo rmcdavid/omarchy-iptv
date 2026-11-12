@@ -9257,9 +9257,15 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
   // here as a table of the eight escapes and two entity patterns, between
   // two NFKD passes.
   const O_PCT = { "2f": "/", "3a": ":", "40": "@", "3d": "=", "26": "&", "3f": "?", "3b": ";", "5c": BS }
+  // Round 4f (K4, the same authority): a numeric entity's `;` optional (the
+  // longest digit run), and the eight delimiters' HTML names, as HTML
+  // spells them, `;` required -- written here as a list of names searched
+  // at each `&`.
+  const O_NAMED = [["&colon;", ":"], ["&sol;", "/"], ["&commat;", "@"], ["&quest;", "?"], ["&amp;", "&"], ["&equals;", "="], ["&semi;", ";"], ["&bsol;", BS]]
   function oDecode(t) {
-    return t.replace(/%([0-9A-Fa-f]{2})|&#(\d+);|&#[xX]([0-9A-Fa-f]+);|\\u00([0-9A-Fa-f]{2})/g, function (m, p, d, x, u) {
+    return t.replace(/%([0-9A-Fa-f]{2})|&#(\d+)(;?)|&#[xX]([0-9A-Fa-f]+)(;?)|\\u00([0-9A-Fa-f]{2})|&[a-z]+;/g, function (m, p, d, ds, x, xs, u) {
       if (p !== undefined) return O_PCT[p.toLowerCase()] !== undefined ? O_PCT[p.toLowerCase()] : m
+      if (m.charAt(0) === "&" && m.charAt(1) !== "#") { const n = O_NAMED.find(function (e) { return e[0] === m }); return n ? n[1] : m }
       const cp = d !== undefined ? Number(d) : x !== undefined ? Number("0x" + x) : Number("0x" + u)
       return cp <= 0x10ffff ? String.fromCodePoint(cp) : m
     })
@@ -9343,12 +9349,27 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
   // Each kept only when it is a host's shape, else HOST_WITHHELD; and when
   // none applies, the same asked of the token with its escapes decoded
   // (round 4e, I1), else HOST_WITHHELD. "" below means none applies.
+  // Round 4f (K2 d): a token with an escape the decoder changes is read both
+  // ways; one reading naming nothing defers to the other, and two that
+  // differ -- a host against another, or against withheld -- withhold.
   function oTokenHost(token) {
+    const W = Model.HOST_WITHHELD
     const a = oAuthority(oCore(token), token)
-    if (a !== "") return a
     const d = oDecode(token)
-    const b = d !== token ? oAuthority(oCore(d), d) : ""
-    return b !== "" ? b : Model.HOST_WITHHELD
+    if (d === token) return a !== "" ? a : W
+    const b = oAuthority(oCore(d), d)
+    if (a === "") return b !== "" ? b : W
+    if (b === "") return a
+    return a === b ? a : W
+  }
+  // Round 4f (K2 a, b): a head that is an authority on its own text, its
+  // escapes decoded or its fold -- an `@`, a host, a dotless-or-dotted name
+  // with `:` and a port, or a name ending in `.` -- written as regular
+  // expressions over each reading.
+  function oHeadAuthority(head) {
+    return head !== "" && [head, oDecode(head), oFold(head)].some(function (r) {
+      return /@/.test(r) || oHost(r) || /^(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?:\d+$/.test(r) || /^(?:[A-Za-z0-9-]+\.)+$/.test(r)
+    })
   }
   function oAuthority(t, whole) {
     const W = Model.HOST_WITHHELD
@@ -9361,10 +9382,17 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
       const h = sc[2].substring(sc[2].lastIndexOf("@") + 1)
       return oHost(h) ? h : W
     }
-    // The first `/` opens `//` (nothing before it holds a `/`), and what is
-    // before it holds no `@` and is no host.
+    // The first `/` opens `//` (nothing before it holds a `/`). When what
+    // is before it is an authority (round 4f, K2), an `@` after the `//`
+    // before the next `/` withholds (K2 c), and an authority this text's
+    // own head does not name (no `@`, no host) names none here -- deferring
+    // to the decoded reading where the decoder changes the head; else the
+    // `//` authority.
     const a = /^([^\/]*)\/\/([^\/?#]*)/.exec(t)
-    if (a && !/@/.test(a[1]) && !oHost(a[1]) && (a[2].indexOf("@") !== -1 || oHost(a[2]))) { const h = a[2].replace(/^[\s\S]*@/, ""); return oHost(h) ? h : W }
+    if (a && oHeadAuthority(a[1])) {
+      if (/^[^\/]*@/.test(t.substring(a[1].length + 2))) return W
+      if (!/@/.test(a[1]) && !oHost(a[1])) return oDecode(a[1]) !== a[1] ? "" : W
+    } else if (a && (a[2].indexOf("@") !== -1 || oHost(a[2]))) { const h = a[2].replace(/^[\s\S]*@/, ""); return oHost(h) ? h : W }
     if (/:[\s\S]*@/.test(t)) {
       const m = /@([^@\/]*)(\/|$)/.exec(t.split("/")[0] + "/")
       if (!m) return W
@@ -9392,9 +9420,11 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
   }
   // F1's five shapes, written from the decisions' words as regular
   // expressions (the model walks indexes): (i) to (iv) over the WHOLE value;
-  // (v) within one U+0020 token since round 4e (I5).
+  // (v) within one U+0020 token since round 4e (I5), or (round 4f, K1) two
+  // `/` anywhere after a `.` of the whole value.
   function oCarries(v) {
-    return /\/\//.test(v) || /:[\s\S]*[\/\\@]/.test(v) || /[^ ]@/.test(v) || /[?;&][\s\S]*=/.test(v) || /\.[^ ]*\//.test(v)
+    return /\/\//.test(v) || /:[\s\S]*[\/\\@]/.test(v) || /[^ ]@/.test(v) || /[?;&][\s\S]*=/.test(v) || /\.[^ ]*\//.test(v) ||
+      /\.[\s\S]*\/[\s\S]*\//.test(v)
   }
   // Whether a value holds the field (round 4d, F1): it reads as an address
   // by the oracle, or it carries one of the five shapes on its own text or
@@ -9686,6 +9716,27 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return BS + "u00" + c.charCodeAt(0).toString(16) }) }]
   const ENCODED = []
   ENCODINGS.forEach(function (e) { ENC_BASES.forEach(function (u) { ENCODED.push(e(u)) }) })
+  // Round 4f (K4, the lead's call under the owner's standing authority of
+  // 2026-11-09): each base as the eight delimiters' HTML names and as
+  // numeric entities with no `;`, 14 values, held and read as their host
+  // since K4 (round 4e published all 14 in the field and when stored).
+  const NAMED_ENT = { ":": "&colon;", "/": "&sol;", "@": "&commat;", "?": "&quest;", "&": "&amp;", "=": "&equals;" }
+  const ENCODED_4F = []
+  ;[function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return NAMED_ENT[c] }) },
+    function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return "&#" + c.charCodeAt(0) }) }].forEach(function (e) { ENC_BASES.forEach(function (u) { ENCODED_4F.push(e(u)) }) })
+  // Round 4f (K1, the same authority): scheme-less stream-path bases, each
+  // whole or with one range deleted, and each of those with one U+0020 at
+  // every index (48,199 values), so the corpus counts the class a per-token
+  // shape (v) let through: `cdn.test /live/qqqqqq/zzzzzz/1.ts`.
+  const PATH_BASES = ["cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test/qqqqqq/zzzzzz/playlist.m3u8", "Provider cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+  function pathCorpus(out) {
+    PATH_BASES.forEach(function (b) {
+      const dels = [b]
+      for (let i = 0; i < b.length; i++) for (let j = i + 1; j <= b.length; j++) dels.push(b.substring(0, i) + b.substring(j))
+      dels.forEach(function (d) { out.add(d); for (let i = 0; i <= d.length; i++) out.add(d.substring(0, i) + " " + d.substring(i)) })
+    })
+    return out
+  }
   function pasteCorpus() {
     const out = new Set()
     PASTE_BASES.forEach(function (b) {
@@ -9694,7 +9745,8 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
       ;[0x20, 0xa0, 0x3000, 0x200b, 0xfeff, 0x28, 0x22].forEach(function (c) { for (let i = 0; i <= b.length; i++) out.add(b.substring(0, i) + fw(c) + b.substring(i)) })
     })
     ENCODED.forEach(function (v) { out.add(v) })
-    return out
+    ENCODED_4F.forEach(function (v) { out.add(v) })
+    return pathCorpus(out)
   }
   function pastedHeard(v) {
     const cap = Model.formCapacity("label")
@@ -9705,12 +9757,14 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
   // The residual classes, by what the value holds rather than by F1's
   // shapes: no `:`, `@`, `=` or `/` at all; a `:` with nothing of `/`, `\`
   // or `@` after it; a `=` with no `?`, `;` or `&` before it; a `/` with no
-  // `.` before it.
+  // `.` before it; and (round 4f, K1) a value with one `/` alone, whose `.`
+  // before it is in another U+0020 token.
   function pasteResidual(v) {
     if (/^[^:@=\/]*$/.test(v)) return "no delimiter"
     if (/^[^@=\/]*:[^\/\\@]*$/.test(v)) return "user:pass, nothing after"
     if (/=/.test(v) && !/[?;&][\s\S]*=/.test(v)) return "key=value, no ?;& before"
     if (/^[^.]*\//.test(v)) return "path, no . before its /"
+    if (/^[^\/]*\/[^\/]*$/.test(v)) return "one /, its . across a space"
     return "OTHER"
   }
   const pastedRuns = memo(function () {
@@ -9730,11 +9784,13 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     stored.forEach(function (v) { one(out.stored, v) })
     return out
   })
-  checkCall("D-SINK-98 (round 4d, F1; round 4e, I1): pasted whole into an empty add form, no value of round 4b's paste corpus (10,603, and round 4e's 35 encoded values) or of the E3 stored sweep publishes a run in the label field's Value while it holds one of F1's five shapes or reads as an address (round 4c heard 603 corpus values that hold a shape)",
-    () => [pastedRuns().values, pastedRuns().held, pastedRuns().stored.held], [10638, [], []])
-  checkCall("D-SINK-98 (round 4d, F1): and what still publishes a run, pasted whole, is the stated residual -- a value with no delimiter, `user:pass` with nothing after its `:`, `key=value` with no `?`, `;` or `&` before, or a path with no `.` before its `/` -- counted",
+  checkCall("D-SINK-98 (round 4d, F1; round 4e, I1; round 4f, K1/K4): pasted whole into an empty add form, no value of round 4b's paste corpus (10,603, round 4e's 35 encoded values, round 4f's 14 and its 48,199 scheme-less stream paths) or of the E3 stored sweep publishes a run in the label field's Value while it holds one of F1's five shapes or reads as an address (round 4c heard 603 corpus values that hold a shape)",
+    () => [pastedRuns().values, pastedRuns().held, pastedRuns().stored.held], [58817, [], []])
+  checkCall("D-SINK-98 (round 4d, F1; round 4f, K1): and what still publishes a run, pasted whole, is the stated residual -- a value with no delimiter, `user:pass` with nothing after its `:`, `key=value` with no `?`, `;` or `&` before, a path with no `.` before its `/`, or one `/` alone whose `.` is in another token -- counted",
     () => [pastedRuns().classes, pastedRuns().stored.classes],
-    [{ "no delimiter": 140, "user:pass, nothing after": 185, "key=value, no ?;& before": 165, "path, no . before its /": 110 }, ROUND4D_STORED_PASTE_CLASSES])
+    [{ "no delimiter": 140, "user:pass, nothing after": 185, "key=value, no ?;& before": 165, "path, no . before its /": 10427, "one /, its . across a space": 860 }, ROUND4D_STORED_PASTE_CLASSES])
+  // Round 4f (K1): that last class is a range deletion that leaves one
+  // segment of the credential path (`cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts`).
   // F1: every BMP code point inserted at either side of the `:` of the
   // `://` of a URL whose password holds a raw space, pasted whole: none is
   // heard (round 4c heard 126,210 of 126,976 non-surrogate values). The
@@ -9877,7 +9933,7 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
   checkCall("D-SINK-98 (round 4e, I1): labelDecode decodes %2F %3A %40 %3D %26 %3F %3B %5C in either case and no other percent escape, `&#NN;` and `&#xHH;` up to U+10FFFF, and backslash-u00HH, once",
     () => [["%2f%2F", "//"], ["%3a%3A%40%3d%26%3f%3b%5c%5C", "::@=&?;" + BS + BS], ["%25%20%2E%2G", "%25%20%2E%2G"], ["&#47;&#x2F;&#X2f;&#0047;", "////"],
      [BS + "u002f" + BS + "u003A" + BS + "u0040", "/:@"], [BS + "u2215" + BS + "U002f", BS + "u2215" + BS + "U002f"], ["&#1114111;", String.fromCodePoint(0x10ffff)],
-     ["&#1114112;&#x110000;", "&#1114112;&#x110000;"], ["&#37;2F%2526", "%2F%2526"], ["&#;&#x;&#47", "&#;&#x;&#47"], ["My TV", "My TV"]]
+     ["&#1114112;&#x110000;", "&#1114112;&#x110000;"], ["&#37;2F%2526", "%2F%2526"], ["&#;&#x;", "&#;&#x;"], ["My TV", "My TV"]]
       .filter(function (c) { return Model.labelDecode(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelDecode(c[0])] }), [])
   // The stored reading, shape by shape.
   const ROUND4E_SHAPES = [
@@ -9954,6 +10010,76 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     },
     [["Sports: Live/HD", "Kids: 24/7", "news@9", "Live: News/Sport", "Pluto.tv/US", "Weather.com/Live", "Sat.1/ProSieben", "radio=on&tv=off", "x?a=b", "a&b=c",
       "News:/Sport"], true, "Dr. Who/Torchwood", "*".repeat(15)])
+
+  // ---- round 4f (2026-11-12), each the lead's call under the owner's
+  // standing authority of 2026-11-09, each answering a finding of the review
+  // of round 4e.
+  //
+  // K1: shape (v) holds per U+0020 token, or over the whole value when it
+  // has two or more `/` after its first `.` -- a credential path pasted with
+  // one U+0020 in its host or before its path is held again (round 4e heard
+  // 275 such values of its review's sweep that round 4d held); a `.` and one
+  // later `/` in another token still do not hold.
+  checkCall("D-SINK-98 (round 4f, K1): labelMayCarryCredential holds a credential path with one U+0020 in its host or before its path, and still not a `.` and one `/` in two tokens",
+    () => [["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn.test /qqqqqq/zzzzzz/playlist.m3u8", "Provider cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts",
+            "/cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn" + fw(0xff0e) + "test /live/qqqqqq/zzzzzz/1.ts"].map(Model.labelMayCarryCredential),
+           ["cdn.test /qqqqqq", "cdn. zzzzzz/1.ts", "Dr. Who/Torchwood", "Ch. 4 / Ch. 5", "U.S. / Canada", "Mr. Robot / S01", "v2.0 / beta"].map(Model.labelMayCarryCredential)],
+    [[true, true, true, true, true, true], [false, false, false, false, false, false, false]])
+  checkCall("D-SINK-98 (round 4f, K1): pasted into the Label field, `cdn.test /live/qqqqqq/zzzzzz/1.ts` and `cdn. test/live/qqqqqq/zzzzzz/1.ts` are heard as one `*` per character",
+    () => ["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts"].map(function (v) { return pastedHeard(v)[1] }),
+    ["*".repeat(33), "*".repeat(33)])
+  // K4: numeric entities with no `;` and the eight delimiters' HTML names
+  // decode; the encodings still not decoded stay as typed.
+  checkCall("D-SINK-98 (round 4f, K4): labelDecode decodes `&#NN` and `&#xHH` with no `;` (the longest digit run, up to U+10FFFF) and `&colon;` `&sol;` `&commat;` `&quest;` `&amp;` `&equals;` `&semi;` `&bsol;` as HTML spells them, once; `\\xHH`, `%u00HH`, `\\U000000HH`, octal and `+` stay",
+    () => [["&#47", "/"], ["&#58&#47&#47", "://"], ["&#x3a&#X2F", ":/"], ["&#0058x", ":x"], ["&#58;", ":"], ["&#5812", fw(5812)], ["&#1114112", "&#1114112"], ["&#x110000", "&#x110000"],
+     ["&colon;&sol;&commat;&quest;&amp;&equals;&semi;&bsol;", ":/@?&=;" + BS], ["&COLON;&AMP;&Sol;&colon&sol", "&COLON;&AMP;&Sol;&colon&sol"], ["&amp;colon;&#38;sol;", "&colon;&sol;"],
+     ["&nbsp;&lt;", "&nbsp;&lt;"], [BS + "x3a%u003a" + BS + "U0000003a" + BS + "072a+b", BS + "x3a%u003a" + BS + "U0000003a" + BS + "072a+b"]]
+      .filter(function (c) { return Model.labelDecode(c[0]) !== c[1] || oDecode(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelDecode(c[0]), oDecode(c[0])] }), [])
+  checkCall("D-SINK-98 (round 4f, K4): each of 14 credential URLs pasted as HTML names or as `;`-less numeric entities is held in the Label field and, stored, holds no run in any composer",
+    () => [ENCODED_4F.filter(function (v) { const h = pastedHeard(v); return h[1] !== "*".repeat(h[0].length) }),
+           ENCODED_4F.filter(function (v) { return storedSinks(Model.sanitizeInput(v, 999)).some(function (o) { return RUN.test(o) }) }),
+           Array.from(new Set(ENCODED_4F.map(function (v) { return Model.labelSinkText(v) }))).sort()],
+    [[], [], ["[host withheld]", "cdn.test", "cdn.test:8080", "cdn.test:8443"]])
+  // K2 and K3, the stored reading.
+  const ROUND4F_SHAPES = [
+    // K2 a: the head is an authority on its decoded text or its fold.
+    ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["qqqqqq:zzzzzz&#64;cdn.test//zzzzzz.zz/1.ts", "cdn.test"],
+    ["qqqqqq:zzzzzz" + fw(0xff20) + "cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD], ["http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test//zzzzzz.zz/x", "cdn.test"],
+    ["qqqqqq%3Azzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["cdn" + fw(0xff0e) + "test//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    ["cdn.test" + fw(0x200b) + ":8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    // K2 b: a host with a port, dotless included, or a trailing `.`.
+    ["nas:8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD], ["localhost:8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    ["cdn.test.//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD], ["cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"],
+    // K2 c: an `@` after the `//` before the next `/` withholds; its cost.
+    ["qqqqqq.qq//zzzzzz@cdn.test/x", Model.HOST_WITHHELD], ["qqqqqq.qq//@cdn.test/x", Model.HOST_WITHHELD],
+    ["qqqqqq:zzzzzz@cdn.test//@x", Model.HOST_WITHHELD], ["qqqqqq.//qq@cdn.test/x", Model.HOST_WITHHELD],
+    // K2 d: the raw and the decoded readings name different hosts.
+    ["cdn.test%2Fqqqqqq.qq//zzzzzz.zz/x", Model.HOST_WITHHELD], ["qqqqqq.qq%2F@cdn.test/x", Model.HOST_WITHHELD], ["x.test%2Fqqqqqq:zzzzzz@cdn.test/y", Model.HOST_WITHHELD],
+    // ...and a dotless head with no port keeps the `//` branch.
+    ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["News//cdn.test/x", "cdn.test"],
+    ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["192.168.1.10:8080//qqqqqq.qq/zzzzzz/1.ts", "192.168.1.10:8080"],
+    // K3: the fold of the raw token is what reads these.
+    ["Server cdn.test%2F. Login qqqqqq zzzzzz", "cdn.test"], ["Server cdn.test" + fw(0xff0f) + ". Login qqqqqq zzzzzz", Model.HOST_WITHHELD],
+    ["cdn.test&#47;, qqqqqq/zzzzzz", "cdn.test"], ["cdn.test" + fw(0xff0f) + ", qqqqqq zzzzzz", Model.HOST_WITHHELD],
+    // K4: HTML names and `;`-less entities.
+    ["cdn.test&colon;8080&sol;qqqqqq&sol;zzzzzz", "cdn.test:8080"], ["qqqqqq&#58zzzzzz&#64cdn.test", "cdn.test"], ["cdn.test&#47live&#47qqqqqq&#47zzzzzz", "cdn.test"]
+  ]
+  checkCall("D-SINK-98 (round 4f, K2-K4): the stored reading, shape by shape -- a head before a `//` that is an authority on any reading, or a host with a port or a trailing `.`, names no later segment; an `@` after such a `//` withholds; raw and decoded readings that disagree withhold; and HTML names decode",
+    () => ROUND4F_SHAPES.filter(function (c) { return Model.labelSinkText(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelSinkText(c[0])] }), [])
+  check("D-SINK-98 (round 4f): and the test's oracle reads each of them the same way, and none of them holds a run",
+    ROUND4F_SHAPES.filter(function (c) { return oRead(c[0]).text !== c[1] || RUN.test(c[1]) }).map(function (c) { return [c[0], oRead(c[0]).text] }), [])
+  // The stated residuals: a dotless head with no port is no authority, so
+  // its `//` names the segment after it; a name HTML does not spell so is
+  // not decoded.
+  checkCall("D-SINK-98 (round 4f, K2/K4): the stated residuals -- `cdn-test//qqqqqq.qq/...` names the segment after its `//`, and `&COLON;` and its kin pass as typed",
+    () => ["cdn-test//qqqqqq.qq/zzzzzz/1.ts", "http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x"].map(function (l) { return [Model.labelSinkText(l), oRead(l).text] }),
+    [["qqqqqq.qq", "qqqqqq.qq"], ["http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x", "http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x"]])
+  // K2 through the composers: the row, its dialog and the Removed line.
+  checkCall("D-SINK-98 (round 4f, K2): the Sources row's name, the remove dialog and the Removed transient name the head's host for an encoded or decoded authority before a `//`, and no composer holds a run for a dotless host with a port",
+    () => ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "nas:8080//qqqqqq.qq/zzzzzz/1.ts"].map(function (label) {
+      const sinks = storedSinks(label)
+      return [sinks[1].indexOf("cdn.test") === 0, sinks.some(function (o) { return RUN.test(o) })]
+    }), [[true, false], [true, false], [false, false]])
 
   // D-SINK-97 / D-SINK-98 (D4): line terminators, in every field.
   checkCall("D-SINK-97 (D4): a paste into ANY field removes LF, VT, FF, CR, U+0085, U+2028 and U+2029 (the name fields kept U+2028 and U+2029); a tab still reaches a URL field's validator",

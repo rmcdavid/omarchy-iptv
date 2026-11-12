@@ -1399,15 +1399,27 @@ function withFormValue(st, field, value, opts) {
 // value first holds -- a username, `qqqqqq:zzzzzz` before its `@` or `/`,
 // `mailto:qqqqqq` before its `@` (17 states over the reviews' 13 labels),
 // and `username=qqqqqq&password`, until the `=` after its `&`. Pasted
-// whole, 600 of round 4b's 10,603 corpus values with round 4e's 35 encoded
-// ones, in four classes: no delimiter at all (140: a username, a password,
+// whole, 11,777 of 58,817 corpus values (round 4b's 10,603, round 4e's 35
+// encoded, and round 4f's 14 encoded and 48,199 scheme-less stream paths),
+// in five classes: no delimiter at all (140: a username, a password,
 // a host), `user:pass` with nothing of `/`, a backslash or `@` after its
 // `:` (185), `key=value` with no `?`, `;` or `&` before its `=` (165, the
-// remnant `password=zzzzzz`), and a path with no `.` before its `/` (110, the
-// remnant `/live/qqqqqq/zzzzzz/1.ts`) -- deletion remnants as well as
-// prefixes, which no shape tells from a name. A credential's URL pasted
-// percent- or entity-encoded is no longer among them (round 4e, I1: its
-// escapes are decoded before the shapes are asked). The hold is the
+// remnant `password=zzzzzz`), a path with no `.` before its `/` (10,427, the
+// remnant `/live/qqqqqq/zzzzzz/1.ts`), and one `/` alone whose `.` is in
+// another U+0020 token (860, `cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts`, none
+// holding both a username's run and a password's) -- deletion remnants as
+// well as prefixes, which no shape tells from a name. Round 4e asked shape
+// (v) per token alone and so heard `cdn.test /live/qqqqqq/zzzzzz/1.ts`, a
+// credential path pasted with one U+0020 before its path, whole; since
+// round 4f (K1, the lead's call under the owner's standing authority of
+// 2026-11-09) two `/` after its first `.` hold it again, as round 4d did.
+// A credential's URL pasted percent- or entity-encoded is no longer among
+// them (round 4e, I1; round 4f, K4: a numeric entity with no `;` and the
+// eight delimiters' HTML names too). Still not decoded, so heard as typed
+// when nothing else holds the value: `\xHH`, `%u00HH`, `\U000000HH`, octal
+// `\072`, `+` for `/`, a name HTML does not spell so (`&COLON;`), a
+// `;`-less hex entity followed by a hex digit (`&#x40cdn.test` is U+40CD
+// and `n.test`), and every double escape. The hold is the
 // field's alone: a label saved while held is stored as typed and drawn and
 // heard through labelSinkText (model/sources.mjs), with that rule's
 // residual -- a stored label with no address shape is published as typed.
