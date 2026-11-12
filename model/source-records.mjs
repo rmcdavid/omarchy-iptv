@@ -22,7 +22,7 @@ import {
   capCodePoints, sourceErrorMessage, validateSourceUrl, isUrlField,
   isSourceKey, findSource, findSourceByUrl, allocateSourceKey, deriveLabel,
   uniqueLabel, validateLabel, maskUrl, accessibleStars,
-  addressAccessibleValue, labelSinkText, labelReadsAsAddress, sourceView,
+  addressAccessibleValue, labelSinkText, labelHoldsField, sourceView,
   sourceViews
 } from "./sources.mjs"
 
@@ -1366,28 +1366,41 @@ function withFormValue(st, field, value, opts) {
 // D-SINK-98, round 4c (the lead's call under the owner's standing authority
 // of 2026-11-09). Whether the label FIELD is held, from whether it was held
 // and the value it now holds: never once it is empty, and otherwise held
-// while it was held or once the value reads as an address
-// (labelReadsAsAddress). A pure function of the two, asked on every write of
-// the label (withFormValue) and when a form is made or copied (copyForm): a
-// new add form is not held, an edit form is held when its stored label reads
-// as an address, and closing the form drops it with the form. While held,
-// the field's Value is stars (fieldAccessibleValue). Why: a label that has
-// read as an address is one edit from a credential the label rule cannot
-// tell from a name -- one Backspace on the `:` of `qqqqqq:zzzzzz@cdn.test`
-// leaves `qqqqqqzzzzzz@cdn.test`, and deleting `cdn.test/get.php?username=
-// qqqqqq&` from a pasted query leaves `password=zzzzzz` -- and round 4b's
-// sweep measured 933 of 10,920 such edit states publishing the run. The
-// cost, stated: once the value has read as an address in this form session,
-// a screen-reader user hears the field as stars, its length only, until
-// they empty it. What is typed before it first reads as one (`qqqqqq:zzzzzz`
-// on the way to its `@`) is heard as typed, the stated residual. The hold is
-// the field's alone: a label saved while held is stored as typed and drawn
-// and heard through labelSinkText (model/sources.mjs), with that rule's
-// residual -- a stored label with no address shape is published as typed.
+// while it was held or once the value holds the field (labelHoldsField,
+// round 4d). A pure function of the two, asked on every write of the label
+// (withFormValue) and when a form is made or copied (copyForm): a new add
+// form is not held, an edit form is held when its stored label holds the
+// field, and closing the form drops it with the form. While held, the
+// field's Value is stars (fieldAccessibleValue). Why: a label that has read
+// as an address is one edit from a credential the label rule cannot tell
+// from a name -- one Backspace on the `:` of `qqqqqq:zzzzzz@cdn.test` leaves
+// `qqqqqqzzzzzz@cdn.test`, and deleting `cdn.test/get.php?username=qqqqqq&`
+// from a pasted query leaves `password=zzzzzz` -- and round 4b's sweep
+// measured 933 of 10,920 such edit states publishing the run. Round 4d (the
+// lead's call under the same authority): the hold is separate from the
+// stored reading and broad, because it costs only the field's Value --
+// labelHoldsField is labelReadsAsAddress OR labelMayCarryCredential, the
+// five delimiters a credential's URL puts after a username or a password,
+// asked over the whole value. Round 4c held by labelReadsAsAddress alone,
+// and 603 of round 4b's 10,603 pasted values that hold one of those
+// delimiters were heard in full
+// (`qqqqqq:zz zz@cdn.test`, `http<U+00A0>://qqqqqq:zz zz@cdn.test/x`,
+// `username=qqqqqq&password=zzzzzz`). The cost, stated: once the value holds
+// one of those shapes in this form session, a screen-reader user hears the
+// field as stars, its length only, until they empty it -- `IPTV@Home`,
+// `Me@BBC.co.uk`, `1.5/2 HD`, `Sports: Live/HD`, `News//Sport`, `Q&A=fun`
+// after its `=`. What remains heard, measured after round 4d, is what
+// holds none of them: a typed prefix before the value first holds -- a
+// username, `user:pass` before its `@` or `/`, `username=qqqqqq` before its
+// `&` -- and the same text pasted whole, which no shape tells from a name. The
+// hold is the field's alone: a label saved while held is stored as typed and
+// drawn and heard through labelSinkText (model/sources.mjs), with that
+// rule's residual -- a stored label with no address shape is published as
+// typed.
 function labelHeldAfter(held, value) {
   var v = str(value)
   if (v === "") return false
-  return held === true || labelReadsAsAddress(v)
+  return held === true || labelHoldsField(v)
 }
 
 function withFormFocus(st, id) {

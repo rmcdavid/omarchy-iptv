@@ -124,7 +124,9 @@ def readbacks(log_path):
 
 
 def bar(name):
-    return _scenario("barhost.qml", "barscenario.txt", name, "BAR_HOST_READY")
+    nodes, rb = _scenario("barhost.qml", "barscenario.txt", name, "BAR_HOST_READY")
+    check_tree_size("bar-" + name, nodes)
+    return nodes, rb
 
 
 # D-A11Y-7. The tree this harness grades can COLLAPSE without a single check
@@ -143,58 +145,96 @@ def bar(name):
 # which is exactly why an equality would be edited away rather than believed.
 # It may not lose them. Raise a floor when a scenario grows; never lower one
 # to make a run green.
-TREE_FLOOR = {
-    # Round 4c (D-A11Y-12, 2026-11-11): every floor below is re-levelled to
-    # the size measured that day, because the round took off the bus every
-    # named node the guide does not show -- the closed remove dialog, the
-    # closed form and its buttons, the Sources list and its rows outside the
-    # Sources view, the eye buttons of fields that cannot be masked, the
-    # closed Tracks, Programme and Keys panels and their contents, the
-    # channel-number alert, the empty banner, screen title, search line and
-    # empty state, and the channel list's rows behind Sources -- and for no
-    # other reason. Measured by dumping each scenario's node list on 93d034b
-    # and on this tree: the lists differ by those nodes alone (none added,
-    # none moved), except the Label field's Value in editstored and
-    # editlabel, which is stars now (D-SINK-98, E1). Round 4b's floors were
-    # 30, 34, 32, 31, 50, 42, then 53, 53, 49, 49, 55, 55, 53, 49, 49, 53, 53.
-    "firstrun": 14,
-    "banner": 21,
-    "query": 16,
-    "querynomatch": 15,
-    "scale10k": 55,
-    "xtream": 23,
-    "addtyped": 24,
-    "editstored": 23,
-    "sourcesrow": 21,
-    "removelabel": 22,
-    "srvtyped": 23,
-    "srvpasted": 23,
-    "editlabel": 22,
-    "labelrow": 21,
-    "labelremove": 22,
-    "probing": 24,
-    "probefail": 24,
-    # Round 4c's own scenarios, at their first run (2026-11-11).
-    "rbcolon": 23,
-    "rbpass": 23,
-    "rbfeffrow": 22,
-    "rbnbsp": 22,
-    "rbfeffguide": 20,
-    "rbdotted": 24,
-    "rbdottedfail": 24,
+# Round 4d (2026-11-12): every scenario's measured size, which is its
+# ceiling (TREE_CEIL, below) and, for the scenarios round 4d added, its
+# floor too.
+TREE_CEIL_4D = {
+    "bar-idle": 3, "bar-playing": 3, "bar-error": 3, "firstrun": 14, "banner": 18, "query": 15,
+    "querynomatch": 15, "scale10k": 34, "xtream": 20, "addtyped": 21, "editstored": 20,
+    "sourcesrow": 18, "removelabel": 19, "srvtyped": 20, "srvpasted": 20, "editlabel": 19,
+    "labelrow": 18, "labelremove": 19, "probing": 21, "probefail": 21, "rbcolon": 20, "rbpass": 20,
+    "rbfeffrow": 19, "rbnbsp": 19, "rbfeffguide": 17, "rbdotted": 21, "rbdottedfail": 21,
+    "rvpaste": 20, "rvpaste2": 20, "rvparen": 19, "rvfrsrc": 13, "wall": 11,
 }
+
+TREE_FLOOR = {
+    # Round 4d (D-A11Y-12, 2026-11-12, the lead's call under the owner's
+    # standing authority of 2026-11-09): every floor below is re-levelled to
+    # the size measured that day, LOWER than round 4c's, because the round
+    # took the hidden channel wall's tiles off the bus (F7) and for no other
+    # reason. Measured by dumping each scenario's node list on c00be80 and on
+    # this tree: the lists differ by the wall's re-parented tiles alone --
+    # three in every scenario with the three-channel fixture and a channel
+    # list, one in query (one row matches), twenty-one in scale10k, none in
+    # firstrun and querynomatch -- with none added and none moved. Round 4c's
+    # floors were 14, 21, 16, 15, 55, 23, then 24, 23, 21, 22, 23, 23, 22,
+    # 21, 22, 24, 24, and 23, 23, 22, 22, 20, 24, 24 for its own scenarios.
+    "firstrun": 14,
+    "banner": 18,
+    "query": 15,
+    "querynomatch": 15,
+    "scale10k": 34,
+    "xtream": 20,
+    "addtyped": 21,
+    "editstored": 20,
+    "sourcesrow": 18,
+    "removelabel": 19,
+    "srvtyped": 20,
+    "srvpasted": 20,
+    "editlabel": 19,
+    "labelrow": 18,
+    "labelremove": 19,
+    "probing": 21,
+    "probefail": 21,
+    "rbcolon": 20,
+    "rbpass": 20,
+    "rbfeffrow": 19,
+    "rbnbsp": 19,
+    "rbfeffguide": 17,
+    "rbdotted": 21,
+    "rbdottedfail": 21,
+    # Round 4d's own scenarios, at their first run (2026-11-12).
+    "rvpaste": TREE_CEIL_4D["rvpaste"],
+    "rvpaste2": TREE_CEIL_4D["rvpaste2"],
+    "rvparen": TREE_CEIL_4D["rvparen"],
+    "rvfrsrc": TREE_CEIL_4D["rvfrsrc"],
+    "wall": TREE_CEIL_4D["wall"],
+}
+
+# F-HARNESS-106's sibling, round 4d (D-A11Y-12, the lead's call under the
+# owner's standing authority of 2026-11-09): a CEILING beside every floor.
+# The floor catches a tree that collapsed; nothing caught one that GREW, and
+# D-A11Y-12 is exactly nodes the guide does not show coming back: the
+# review's bus mutant that put the closed Programme panel's seven labels
+# back grew every scenario by seven nodes and left the whole run green. Each
+# ceiling is the size measured on 2026-11-12 on the tree that took the
+# wall's hidden tiles and the hidden form fields off the bus (round 4d, F5
+# and F7). A ceiling is raised only with the node it admits named in the
+# commit, never to make a run green.
+TREE_CEIL = dict(TREE_CEIL_4D)
+
+
+def check_tree_size(name, nodes):
+    n = len(nodes) if nodes else 0
+    floor = TREE_FLOOR.get(name)
+    if floor is not None:
+        check("L2-TREE-%s" % name,
+              nodes is not None and n >= floor,
+              "%s: the tree is the size a rendered guide produces, not a collapsed one" % name,
+              "%d nodes, floor %d -- below the floor means the scenario is grading "
+              "a guide that never laid out, and every PASS below it is worthless"
+              % (n, floor))
+    ceil = TREE_CEIL.get(name)
+    if ceil is not None:
+        check("L2-CEIL-%s" % name,
+              nodes is not None and n <= ceil,
+              "%s: the tree holds no node the measured guide did not (D-A11Y-12: a hidden node back on the bus)" % name,
+              "%d nodes, ceiling %d" % (n, ceil))
 
 
 def guide(name):
     nodes, rb = _scenario("host2.qml", "scenario2.txt", name, "PROBE_READBACK_FINAL")
-    floor = TREE_FLOOR.get(name)
-    if floor is not None:
-        check("L2-TREE-%s" % name,
-              nodes is not None and len(nodes) >= floor,
-              "%s: the tree is the size a rendered guide produces, not a collapsed one" % name,
-              "%d nodes, floor %d -- below the floor means the scenario is grading "
-              "a guide that never laid out, and every PASS below it is worthless"
-              % (len(nodes) if nodes else 0, floor))
+    check_tree_size(name, nodes)
     return nodes, rb
 
 
@@ -802,6 +842,7 @@ def check_sources():
 
     check_sources_4b()
     check_sources_4c()
+    check_sources_4d()
 
 
 # D-A11Y-12: a row's Edit and Remove buttons are on the bus only while the
@@ -1100,6 +1141,104 @@ def check_sources_4c():
               "; ".join(leaked))
 
 
+# Round 4d (D-SINK-98 F1/F4, D-A11Y-12 F5/F7), mirroring host_guide.qml.
+PASTE_NBSP = "http\u00a0://qqqqqq:zz zz@cdn.test/x"
+PASTE_SPACE = "qqqqqq:zz zz@cdn.test"
+PAREN_LABEL = "Provider (cdn.test:8080/qqqqqq/zzzzzz)"
+FORM_FIELDS = ("Label, optional", "Playlist URL or path", "EPG URL, optional", "Server URL", "Username")
+# The three channels' tiles and rows, as Model.rowAccessibleName composes
+# them with the arguments the wall's tile passes (no number: the fixture
+# carries no chnoLabel; channel 2 is a favourite).
+WALL_TILES = ("BBC One HD, row 1 of 3", "ITV 1, favorite, row 2 of 3", "Sky Sports Main Event, row 3 of 3")
+CHANNEL_ROW_RE = re.compile(", row [0-9,]+ of [0-9,]+$")
+
+
+def check_sources_4d():
+    # F1: a whole credential pasted into an empty Label field that no stored
+    # clause reads is held and heard as stars (round 4c heard it raw).
+    for name, cid, value, what in (
+            ("rvpaste", "L2-SRC-59", PASTE_NBSP, "a credential whose scheme join holds a U+00A0 and whose password holds a space"),
+            ("rvpaste2", "L2-SRC-61", PASTE_SPACE, "`user:pass@host` whose password holds a space")):
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        late = rb.get("LATE") or {}
+        check_field(cid, nodes, "Label, optional", "*" * len(value),
+                    "D-SINK-98 (round 4d, F1): %s, pasted whole into the Label field, is held and heard as stars "
+                    "(round 4c heard it in full)" % what)
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 1),
+              not leaked and (late.get("intact") or {}).get("label") is True and late.get("labelHeld") is True,
+              "D-SINK-98 (round 4d, F1): nothing in the form's tree carries a piece of it, the field holds it whole, "
+              "and the form reports it held",
+              "; ".join(leaked) or "intact %r, labelHeld %r" % (late.get("intact"), late.get("labelHeld")))
+
+    # F4 f: a stored host/path inside parentheses reads as its host in the
+    # row, the row's buttons and the remove dialog (round 4c passed it raw).
+    nodes, rb = guide("rvparen")
+    if nodes:
+        view = ('M.sourceView({key: "k9", url: %s, epgUrl: "", kind: "http", label: %s, labelCustom: true, '
+                'origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, '
+                'channelCount: 3, groupCount: 2}, "k9", 1789000000, "")'
+                % (json.dumps(CLEAN_PLAYLIST), json.dumps(PAREN_LABEL)))
+        composed = model_try("M.sourceAccessibleName(%s)" % view)
+        rows = pick(nodes, "list item", composed) if composed else []
+        check("L2-SRC-63", (composed or "").startswith("cdn.test:8080, cdn.test, ") and len(rows) == 1,
+              "D-SINK-98 (round 4d, F4): the row of a stored label whose host/path sits inside parentheses is named "
+              "by Model.sourceAccessibleName with the label as its host",
+              "composed %r, rows %d" % (shown(composed), len(rows)))
+        dialog = "Remove \u201ccdn.test:8080\u201d? It is the active source; the guide returns to setup."
+        buttons = [n["name"] for n in with_role(nodes, "push button") if ROW_BUTTON_RE.match(n.get("name") or "")]
+        check("L2-SRC-64",
+              sorted(buttons) == ["Edit cdn.test:8080", "Remove cdn.test:8080"] and len(pick(nodes, "dialog", dialog)) == 1,
+              "D-SINK-98 (round 4d, F4): its Edit and Remove buttons and the remove dialog name the host",
+              "row buttons %r, dialogs %r" % ([shown(b) for b in buttons], [shown(n["name"]) for n in with_role(nodes, "dialog")]))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-65", not leaked,
+              "D-SINK-98 (round 4d, F4): nothing in the tree carries a piece of that label's credential",
+              "; ".join(leaked))
+
+    # F5: Sources opened over the first-run form (its saved-sources link):
+    # the form is not shown, and no field of it is on the bus.
+    nodes, rb = guide("rvfrsrc")
+    if nodes:
+        late = rb.get("LATE") or {}
+        fields = [n for n in with_role(nodes, "text") if (n.get("name") or "") in FORM_FIELDS]
+        shown_sources = len(pick(nodes, "heading", "Sources")) == 1 and len(pick(nodes, "list", "Sources")) == 1
+        check("L2-SRC-66", shown_sources and not fields,
+              "D-A11Y-12 (round 4d, F5): with Sources opened from the first-run form, the Sources view is on the bus "
+              "and no field of the form behind it is",
+              "Sources shown %r; form fields on the bus %r" % (shown_sources, [(shown(n["name"]), shown(n.get("text"))) for n in fields]))
+        found = hidden_on_bus(nodes, "Provider", sources_open=True)
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-67", not found and not leaked and all((late.get("intact") or {}).get(f) is True for f in ("playlist", "epg")),
+              "D-A11Y-12 (round 4d, F5): nothing hidden and no piece of the form's credentials is on the bus, and the "
+              "form behind Sources still holds both fields whole",
+              "hidden %r; %s; intact %r" % ([(r, shown(n)) for r, n in found], "; ".join(leaked), late.get("intact")))
+
+    # F7: the wall's tiles are on the bus only while the wall is shown --
+    # not behind Sources or a form, and not in list mode beside the rows --
+    # and the wall, shown, keeps each of its tiles once.
+    hidden_tiles = {}
+    for name in ("sourcesrow", "removelabel", "addtyped", "editstored", "xtream", "rbfeffrow", "rvfrsrc"):
+        nodes, rb = guide(name)
+        if nodes:
+            tiles = [n["name"] for n in with_role(nodes, "list item") if CHANNEL_ROW_RE.search(n.get("name") or "")]
+            if tiles:
+                hidden_tiles[name] = tiles
+    check("L2-SRC-68", not hidden_tiles,
+          "D-A11Y-12 (round 4d, F7): behind Sources and every form, no channel tile or row is on the bus",
+          "channel nodes on the bus: %r" % hidden_tiles)
+    nodes, rb = guide("wall")
+    if nodes:
+        counts = dict((t, len(pick(nodes, "list item", t))) for t in WALL_TILES)
+        walls = pick(nodes, "list", "Channels in All")
+        check("L2-WALL-01", all(c == 1 for c in counts.values()) and len(walls) == 1,
+              "D-A11Y-12 (round 4d, F7): the wall, shown, is one channel list and keeps each of its three tiles on the "
+              "bus exactly once",
+              "tiles %r, channel lists %d" % (counts, len(walls)))
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -1194,7 +1333,13 @@ def main():
 # nested headless cage: the xtream scenario held four `Hide query` buttons,
 # all checked, on 93d034b and holds none on this tree, and L2-XT-11 passes.
 # The set is empty; D-A11Y-10's four failures (L2-Q-04-LIT, L2-Q-06,
-# L2-SC-03-LIT, L2-SC-06) were never in it and still read off it.
+# L2-SC-03-LIT, L2-SC-06) were never in it and read off it until round 4d
+# (2026-11-12), when the hidden wall's tiles left the bus (D-A11Y-12, F7):
+# each was a list row and the wall's tile for the same channel, re-parented
+# to the guide dialog while the wall was hidden, so "exactly one" saw two.
+# Measured in a nested headless cage: query held two `BBC One HD, row 1 of 1`
+# items on c00be80 and holds one now, and scale10k's `Channel 0, row 1 of
+# 10,000` likewise; all four pass and the run is on baseline.
 BASELINE = []
 
 

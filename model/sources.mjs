@@ -1780,7 +1780,18 @@ function addressAtAfterAuthority(value) {
 // The cost of "scheme and host", stated (round 4c, accepted): a range
 // deletion that leaves a piece of the credential where the host was --
 // `http://qqqqqq/zzzzzz/1.ts` once `cdn.test/live/` is deleted -- is heard
-// as that host; 555 of 12,630 measured edit states are that shape.
+// as that host; 555 of 12,630 measured edit states are that shape. And
+// (round 4d, accepted, the lead's call under the owner's standing authority
+// of 2026-11-09) the typed prefixes of R32a's typo class, a userinfo holding
+// an unencoded `/`, `?` or `#`, up to its `@`: `http://qqqqqq:12/zzzzzz@...`
+// is heard as `http://qqqqqq:12/` and then `http://qqqqqq:12/` and an
+// ellipsis until the `@` is typed, the username in the host position and
+// the password's leading digits as the port -- seven typed states each for
+// `http://qqqqqq:12/zzzzzz@cdn.test/get.php`, `http://qqqqqq/zzzzzz@cdn.test/x`,
+// `http://qqqqqq:12#zzzzzz@cdn.test/x`, `http://qqqqqq:12?zzzzzz@cdn.test/x`
+// and `http://qqqqqq.test:12#zzzzzz@cdn.test/x`, in each address field. They
+// cannot be told from `http://nas:12/` until the `@` arrives; once it does
+// they are stars, and pasted whole they are stars.
 function addressAuthorityParts(value) {
   var s = str(value)
   if (hasAddressLineTerminator(s)) return null
@@ -1830,25 +1841,43 @@ function addressAccessibleValue(value) {
 // The rule: the label is cut into tokens at U+0020 alone, the token edge of
 // round 3's redactor -- not at JS `\s`, which held U+FEFF and U+2028, so
 // `qqqqqq:zzzzzz<U+FEFF>@cdn.test` was two tokens, neither an address, and
-// passed raw everywhere. When ANY token reads as an address
-// (labelTokenReadsAsAddress), the whole label is the hosts its address
-// tokens name, joined by a space: each the one labelTokenHost takes from the
-// token's own text if labelHost accepts it, else HOST_WITHHELD. Otherwise the
-// label passes, and sinkText runs over it. So these are drawn and heard as
-// typed: `My TV`, `Sports: Live`, `BBC 1/2`, `News & Weather`, `IPTV@Home`,
-// `Me@BBC.co.uk`, `cdn.test`, `cdn.test:8080`, `cdn.test (2)`, `tv.m3u`,
-// `1.5/2 HD`, `ESPN 2.0/3.0`, `time 10:30/11:30`, `U.S./News`, `v1.2/beta`,
-// `News?lang=en`, `Rock&Roll=Live`, `TV & Movies?=`, `Q&A=fun`, `x;y=1`,
-// `C:/TV`, `News//Sport`, and every label deriveLabel and uniqueLabel give
-// for the fixtures' URLs. The costs, stated: a label with an address's shape
-// is drawn and heard as its hosts alone (`Sky.UK/Sports` as `Sky.UK`), or as
-// `[host withheld]` where the host is not a host's shape (`Sport:Live@HD`,
-// `Fox:News@9`, `mailto:qqqqqq@zzzzzz`, a URL naming a dotless LAN host); and
-// a STORED label holding a credential without an address's shape -- a
-// username alone, `user:pass` with no `@`, `pass@host` with no `:` before its
-// `@`, `password=zzzzzz`, `qqqqqq/zzzzzz/1.ts` -- is drawn and heard as typed,
-// because nothing tells it from a name. In the form, such a label is held
-// once it has read as an address (labelHeldAfter); a stored one is not.
+// passed raw everywhere. Each token's leading run of ASCII `( [ { < " '` and
+// trailing run of `) ] } > " ' . , ; : ! ?` are set aside first (labelCore,
+// round 4d), and the clauses read what is left. When ANY token reads as an
+// address (labelTokenReadsAsAddress), the whole label is the hosts its
+// address tokens name, joined by a space: each the one labelTokenHost takes
+// from the core's own text if labelHost accepts it, else HOST_WITHHELD. When
+// none does and sinkText would change the label -- the predicate the field
+// is held by (labelReadsAsAddress) -- the label is HOST_WITHHELD (round 4d:
+// until then it was sinkText's output, which kept the username and a piece
+// of the password of `htt:p://qqqqqq:zz zz@cdn.test/x`). Otherwise the label
+// passes as typed. So these are drawn and heard as typed: `My TV`,
+// `Sports: Live`, `BBC 1/2`, `News & Weather`, `IPTV@Home`, `Me@BBC.co.uk`,
+// `cdn.test`, `cdn.test:8080`, `cdn.test (2)`, `tv.m3u`, `1.5/2 HD`,
+// `ESPN 2.0/3.0`, `time 10:30/11:30`, `U.S./News`, `v1.2/beta`,
+// `(v1.2/beta)`, `(News/Sport)`, `News?lang=en`, `Rock&Roll=Live`,
+// `TV & Movies?=`, `Q&A=fun`, `x;y=1`, `C:/TV`, `News//Sport`, and every
+// label deriveLabel and uniqueLabel give for the fixtures' URLs. The costs,
+// stated: a label with an address's shape is drawn and heard as its hosts
+// alone (`Sky.UK/Sports` as `Sky.UK`, `Provider (cdn.test:8080/x)` as
+// `cdn.test:8080`, `me@mail.test/x` as `mail.test`), or as `[host withheld]`
+// where the host is not a host's shape (`Sport:Live@HD`, `Fox:News@9`,
+// `mailto:qqqqqq@zzzzzz`, a URL naming a dotless LAN host). And a STORED
+// label holding a credential without an address's shape is drawn and heard
+// as typed, because nothing tells it from a name; measured after round 4d,
+// 1,107 of the 10,918 stored states round 4c swept (1,342 before it), in
+// these classes: a username or a password alone, `user:pass` with no `@` after it,
+// `password=zzzzzz` or `username=qqqqqq&...` with nothing before the `?`,
+// `;` or `&` that is a `.` or a `/`, a path whose first segment is no host
+// (`/live/qqqqqq/zzzzzz/1.ts`, `qqqqqq/zzzzzz/1.ts`), `//qqqqqq` with no
+// `@` or host after it, a host/path whose host holds a character no host
+// has, and a userinfo holding a U+0020 with no `/` after its host
+// (`qqqqqq:zz zz@cdn.test`, whose second token `zz@cdn.test` has no path;
+// with one, `zz@cdn.test/x` reads by clause d's `X@H` form and names
+// `cdn.test`). A U+0020 inside a password defeats every clause but an
+// intact `scheme://`: the token edge splits the userinfo from its `@`. In
+// the form, such a label is held while it holds any of the shapes
+// labelMayCarryCredential asks for (labelHeldAfter); a stored one is not.
 function labelSinkText(text) {
   var s = str(text)
   var tokens = s.split(" ")
@@ -1856,13 +1885,16 @@ function labelSinkText(text) {
   for (var i = 0; i < tokens.length; i++) {
     if (tokens[i] !== "" && labelTokenReadsAsAddress(tokens[i])) hosts.push(labelTokenHost(tokens[i]))
   }
-  return hosts.length > 0 ? hosts.join(" ") : sinkText(s)
+  if (hosts.length > 0) return hosts.join(" ")
+  return sinkText(s) !== s ? HOST_WITHHELD : s
 }
 
 // D-SINK-98, round 4c (the lead's call under the owner's standing authority
 // of 2026-11-09): whether a label READS as an address -- a token of it does
 // (labelTokenReadsAsAddress, the tokens labelSinkText cuts), or sinkText
-// changes it. What holds the label field (labelHeldAfter).
+// changes it. Exactly when labelSinkText gives something other than the
+// label as typed (round 4d). Read by labelHoldsField, which holds the field
+// by it OR by labelMayCarryCredential; nothing else in the model reads it.
 function labelReadsAsAddress(text) {
   var s = str(text)
   var tokens = s.split(" ")
@@ -1872,18 +1904,100 @@ function labelReadsAsAddress(text) {
   return sinkText(s) !== s
 }
 
+// D-SINK-98, round 4d (the lead's call under the owner's standing authority
+// of 2026-11-09): what HOLDS the label field (labelHeldAfter). Separate from
+// the stored reading and broader, because a hold costs only the field's
+// Value -- stars, its length -- while the stored reading is what every row,
+// dialog and line draws: a value holds the field when it reads as an
+// address (labelReadsAsAddress) or may carry a credential
+// (labelMayCarryCredential). Round 4c held it by labelReadsAsAddress alone,
+// round 4c's narrowed stored reading, so a whole credential pasted in that
+// no clause reads was heard in full: `http<U+00A0>://qqqqqq:zz zz@cdn.test/x`,
+// `qqqqqq:zz zz@cdn.test`, `username=qqqqqq&password=zzzzzz`,
+// `Provider (cdn.test:8080/qqqqqq/zzzzzz)` -- 603 of the 10,603 values of
+// round 4b's paste corpus hold a delimiter below and were heard (by calling
+// the model; the first two also on the bus, through the paste path).
+function labelHoldsField(text) {
+  var s = str(text)
+  return labelReadsAsAddress(s) || labelMayCarryCredential(s)
+}
+
+// Round 4d: whether the WHOLE value -- U+0020 is no boundary here -- on its
+// own text or on its NFKD fold less Cf (labelFold) holds any of: (i) `//`
+// anywhere; (ii) a `:` with a `/`, a backslash or an `@` anywhere after it;
+// (iii) an `@` that is not the value's first character and not preceded by
+// U+0020; (iv) a `=` with a `?`, `;` or `&` anywhere before it; (v) a `/`
+// with a `.` anywhere before it. Each is a delimiter a credential's URL
+// puts after a username or a password, so a credential pasted or typed in
+// whole holds one wherever its spaces are. The cost, stated (the label
+// field's Value is stars until emptied once one holds): `IPTV@Home`,
+// `Me@BBC.co.uk`, `1.5/2 HD`, `Sports: Live/HD`, `News//Sport` and `Q&A=fun`
+// after its `=` are heard as their length while typed; nothing drawn and no
+// stored label changes.
+function labelMayCarryCredential(text) {
+  var s = str(text)
+  if (labelCarriesDelimiter(s)) return true
+  var f = labelFold(s)
+  return f !== s && labelCarriesDelimiter(f)
+}
+
+function labelCarriesDelimiter(s) {
+  if (s.indexOf("//") !== -1) return true
+  var colon = s.indexOf(":")
+  if (colon !== -1 && /[\/\\@]/.test(s.substring(colon + 1))) return true
+  for (var at = s.indexOf("@"); at !== -1; at = s.indexOf("@", at + 1)) {
+    if (at > 0 && s.charAt(at - 1) !== " ") return true
+  }
+  var eq = s.lastIndexOf("=")
+  if (eq !== -1 && /[?;&]/.test(s.substring(0, eq))) return true
+  var slash = s.lastIndexOf("/")
+  return slash !== -1 && s.substring(0, slash).indexOf(".") !== -1
+}
+
+// Round 4d (the lead's call under the owner's standing authority of
+// 2026-11-09): a token's core, the text the clauses read -- its leading run
+// of ASCII `(`, `[`, `{`, `<`, `"` and `'` and its trailing run of `)`, `]`,
+// `}`, `>`, `"`, `'`, `.`, `,`, `;`, `:`, `!` and `?` set aside. So the host
+// of `(cdn.test:8080/qqqqqq/zzzzzz)` is `cdn.test:8080`, where round 4c read
+// `(cdn.test:8080` as no host and passed the label raw; `(v1.2/beta)` and
+// `(News/Sport)` still have no shape. A `[` that opens, and a `]` that
+// closes, a bracketed IPv6 literal with no zone (isZonelessIpv6Literal) is
+// kept, so `[::1]:8080/x` still reads `[::1]:8080` (round 4c's list).
+var LABEL_LEAD = "([{<\"'"
+var LABEL_TRAIL = ")]}>\"'.,;:!?"
+function labelCore(token) {
+  var s = str(token)
+  var a = 0
+  var b = s.length
+  while (a < b && LABEL_LEAD.indexOf(s.charAt(a)) !== -1) {
+    if (s.charAt(a) === "[") {
+      var close = s.indexOf("]", a)
+      if (close !== -1 && isZonelessIpv6Literal(s.substring(a, close + 1))) break
+    }
+    a++
+  }
+  while (b > a && LABEL_TRAIL.indexOf(s.charAt(b - 1)) !== -1) {
+    if (s.charAt(b - 1) === "]") {
+      var open = s.lastIndexOf("[", b - 1)
+      if (open >= a && isZonelessIpv6Literal(s.substring(open, b))) break
+    }
+    b--
+  }
+  return s.substring(a, b)
+}
+
 // A token reads as an address when one of the shape clauses holds of its
-// own text or of its fold (labelFold): the fold makes a fullwidth `:` or `/`
-// the ASCII one and removes the format characters, so U+FEFF, U+200B,
-// U+2060 and U+00AD neither split a token nor hide a shape; U+00A0, U+3000,
-// U+2028 and U+2029 are token text (NFKD makes the first two a space inside
-// the fold). Both are asked, so a character the fold changes can only add a
-// reading: `//a<U+FF1F>b@cdn.test/x` reads by its own `//`, which its fold
-// cuts at the `?` U+FF1F becomes.
+// core's own text or of the core of its fold (labelFold): the fold makes a
+// fullwidth `:` or `/` the ASCII one and removes the format characters, so
+// U+FEFF, U+200B, U+2060 and U+00AD neither split a token nor hide a shape;
+// U+00A0, U+3000, U+2028 and U+2029 are token text (NFKD makes the first two
+// a space inside the fold). Both are asked, so a character the fold changes
+// can only add a reading: `//a<U+FF1F>b@cdn.test/x` reads by its own `//`,
+// which its fold cuts at the `?` U+FF1F becomes.
 function labelTokenReadsAsAddress(token) {
-  var t = str(token)
+  var t = labelCore(token)
   if (labelShapeReadsAsAddress(t)) return true
-  var f = labelFold(t)
+  var f = labelCore(labelFold(t))
   return f !== t && labelShapeReadsAsAddress(f)
 }
 
@@ -1896,8 +2010,10 @@ function labelTokenReadsAsAddress(token) {
 //           (labelSchemeSlash): `http:/...` reads, `C:/TV` does not;
 //   c       an `@` with a `:` before its last `@` (labelUserinfoAt), the
 //           owner's 2026-11-08 shape a:b@c;
-//   d       the text before the first `/` is a host and something follows
-//           the `/` (labelHostPath): `cdn.test/x` reads, `1.5/2` does not;
+//   d       the text before the first `/` is a host, or (round 4d) is
+//           X `@` H with X not empty and H a host after its LAST `@`, and
+//           something follows the `/` (labelHostPath): `cdn.test/x` and
+//           `zzzzzz@cdn.test/x` read, `1.5/2` and `IPTV@Home` do not;
 //   e       a `?`, `;` or `&` with a `=` after it, when the token has a `.`
 //           or `/` before that `?`, `;` or `&` (labelQueryParam):
 //           `get.php?username=...` reads, `News?lang=en` does not.
@@ -1948,12 +2064,19 @@ function labelUserinfoAt(t) {
 }
 
 // Clause d: the host before the first `/` (labelHost), when something
-// follows that `/`; "" otherwise.
+// follows that `/`; or, when the text before that `/` is X `@` H with X not
+// empty, H after the last `@` if labelHost accepts it (round 4d, the lead's
+// call under the owner's standing authority of 2026-11-09: round 4b read
+// `zzzzzz@cdn.test/x` as an address and round 4c passed it raw); "" otherwise.
 function labelHostPath(t) {
   var s = str(t)
   var slash = s.indexOf("/")
   if (slash <= 0 || slash + 1 >= s.length) return ""
-  return labelHost(s.substring(0, slash))
+  var head = s.substring(0, slash)
+  var host = labelHost(head)
+  if (host !== "") return host
+  var at = head.lastIndexOf("@")
+  return at > 0 ? labelHost(head.substring(at + 1)) : ""
 }
 
 // Clause e: a `?`, `;` or `&` after the token's first `.` or `/`, with a
@@ -1993,28 +2116,44 @@ function labelFold(token) {
   return out.join("")
 }
 
-// The host an address token names, from its own text, or HOST_WITHHELD, by
-// the first of these that applies:
+// The host an address token names, from its core's own text (labelCore), or
+// HOST_WITHHELD. Round 4d (the lead's call under the owner's standing
+// authority of 2026-11-09): the host comes from the LEFTMOST authority, the
+// first of these that the token has:
 //   `scheme://...`  the host rule c publishes (addressAuthorityParts: a
-//                   source URL's scheme, a closed authority, no later `@`),
-//                   if labelHost accepts it;
-//   `//...`         clause a's authority, after its last `@`;
-//   a:b@c           the text after the last `@`, to the first of `/`, `?`,
-//                   `#` or `;`;
-//   host/path       clause d's host;
-// each kept only when labelHost accepts it. Anything else -- clause b or e
-// alone, a token that reads only once folded -- names none.
+//                   source URL's scheme, a closed authority, no later `@`);
+//   `//...`         clause a's authority, after its last `@` -- only when
+//                   that `//` holds the token's FIRST `/`;
+//   a:b@c           when clause c reads, the text after the last `@` BEFORE
+//                   the first `/`, to the first of `?`, `#` or `;`;
+//   host/path       clause d's host (labelHostPath);
+// each kept only when labelHost accepts it, else HOST_WITHHELD. Anything
+// else -- clause b or e alone, a token that reads only once folded -- names
+// none. Until round 4d clause a's authority was asked first wherever its
+// `//` was, and the a:b@c tail ran to the token's last `@`, so a later `//`
+// named the path segment after it: `qqqqqq:zzzzzz@cdn.test/live/qqqqqq//
+// zzzzzz.zz/1.ts` read `zzzzzz.zz`, a password. The cost, stated: an a:b@c
+// token with no `@` before its first `/` names what is before that `/`, so
+// `qqqqqq.test:12/zzzzzz@cdn.test/x` reads `qqqqqq.test:12`, R32a's RFC
+// host, as R32a's own stored label for that URL does.
 function labelTokenHost(token) {
-  var t = str(token)
+  var t = labelCore(token)
   if (LABEL_SCHEME_RE.test(t)) {
     var parts = addressAuthorityParts(t)
     return parts !== null && labelHost(parts.host) !== "" ? parts.host : HOST_WITHHELD
   }
-  var auth = labelSlashAuthority(t)
-  if (auth !== null) return labelHost(auth.substring(auth.lastIndexOf("@") + 1)) || HOST_WITHHELD
-  if (labelUserinfoAt(t)) {
-    var tail = t.substring(t.lastIndexOf("@") + 1)
-    var end = tail.search(/[\/?#;]/)
+  var slash = t.indexOf("/")
+  if (slash !== -1 && t.charAt(slash + 1) === "/") {
+    var rest = t.substring(slash + 2)
+    var cut = rest.search(/[\/?#]/)
+    var auth = cut === -1 ? rest : rest.substring(0, cut)
+    if (auth.indexOf("@") !== -1 || labelHost(auth) !== "") return labelHost(auth.substring(auth.lastIndexOf("@") + 1)) || HOST_WITHHELD
+  }
+  var head = slash === -1 ? t : t.substring(0, slash)
+  var at = head.lastIndexOf("@")
+  if (at !== -1 && labelUserinfoAt(t)) {
+    var tail = head.substring(at + 1)
+    var end = tail.search(/[?#;]/)
     return labelHost(end === -1 ? tail : tail.substring(0, end)) || HOST_WITHHELD
   }
   return labelHostPath(t) || HOST_WITHHELD
@@ -2506,17 +2645,18 @@ export {
   hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,
   addressAccessibleHost, LABEL_NAME_RE, labelHost, isDottedQuad,
   addressAuthoritySplit, addressAtAfterAuthority, addressAuthorityParts,
-  addressAccessibleValue, labelSinkText, labelReadsAsAddress,
-  labelTokenReadsAsAddress, LABEL_SCHEME_RE, labelShapeReadsAsAddress,
-  labelSlashAuthority, labelSchemeSlash, labelUserinfoAt, labelHostPath,
-  labelQueryParam, labelFold, labelTokenHost, encodeQueryValue, xtreamUrls,
-  validateXtream, pluralGroups, countsLine, sameDay, formatLastUsed,
-  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail, sourceAccessibleName,
-  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
-  confirmLogosMessage, confirmRemoveMessage, fetchingLine,
-  PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
-  logoHaveLess
+  addressAccessibleValue, labelSinkText, labelReadsAsAddress, labelHoldsField,
+  labelMayCarryCredential, labelCarriesDelimiter, LABEL_LEAD, LABEL_TRAIL,
+  labelCore, labelTokenReadsAsAddress, LABEL_SCHEME_RE,
+  labelShapeReadsAsAddress, labelSlashAuthority, labelSchemeSlash,
+  labelUserinfoAt, labelHostPath, labelQueryParam, labelFold, labelTokenHost,
+  encodeQueryValue, xtreamUrls, validateXtream, pluralGroups, countsLine,
+  sameDay, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 }

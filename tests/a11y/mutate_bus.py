@@ -148,9 +148,12 @@ MUTATIONS = [
      'Accessible.name: ""',
      ["query"]),
 
+    # Round 4d (F11): the anchor followed the group entry's name into
+    # Model.scopeEntryAccessibleName (M3-01); the old text was skipped as
+    # "pattern not found" on every run since.
     ("groups: the group entry stops counting its channels",
      "GuideProbe.qml",
-     'Accessible.name: isHeader ? label : label + ", " + Model.pluralChannels(count)',
+     "Accessible.name: Model.scopeEntryAccessibleName({ label: label, count: count, kind: kind })",
      "Accessible.name: label",
      ["scale"]),
 
@@ -295,6 +298,37 @@ MUTATIONS = [
      "GuideProbe.qml",
      "                Accessible.ignored: !visible\n                Accessible.role: Accessible.AlertMessage\n                Accessible.name: \"Entering channel number \"",
      "                Accessible.role: Accessible.AlertMessage\n                Accessible.name: \"Entering channel number \"",
+     ["sources"]),
+
+    # Round 4d.
+    ("D-A11Y-12 (round 4d, F6): the closed Programme panel's seven labels stay on the bus (the review's B1)",
+     "GuideProbe.qml",
+     "                Accessible.ignored: !visible\n                Accessible.role: Accessible.StaticText\n                Accessible.name: text\n",
+     "                Accessible.role: Accessible.StaticText\n                Accessible.name: text\n",
+     ["query", "sources"]),
+
+    ("D-A11Y-12 (round 4d, F5): a hidden form's fields stay on the bus",
+     "GuideProbe.qml",
+     "                  enabled: field.enabled\n                  Accessible.ignored: !visible\n                  Accessible.role: Accessible.EditableText\n",
+     "                  enabled: field.enabled\n                  Accessible.role: Accessible.EditableText\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4d, F7): the hidden wall's tiles stay on the bus",
+     "GuideProbe.qml",
+     "                  Accessible.ignored: !visible\n                  Accessible.role: Accessible.ListItem\n                  // The row's own composer",
+     "                  Accessible.role: Accessible.ListItem\n                  // The row's own composer",
+     ["query", "sources"]),
+
+    ("D-SINK-98 (round 4d, F1): the label field is held by the stored reading alone again",
+     "Model.mjs",
+     "  return labelReadsAsAddress(s) || labelMayCarryCredential(s)\n",
+     "  return labelReadsAsAddress(s)\n",
+     ["sources"]),
+
+    ("D-SINK-98 (round 4d, F4): a token's brackets are not set aside",
+     "Model.mjs",
+     "    b--\n  }\n  return s.substring(a, b)\n}\n",
+     "    b--\n  }\n  return s\n}\n",
      ["sources"]),
 
     ("first run: the empty field reads back its placeholder as if it were content",

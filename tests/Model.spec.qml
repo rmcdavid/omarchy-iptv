@@ -2959,14 +2959,14 @@ TestCase {
       ["My TV", "My TV"], ["Sports: Live", "Sports: Live"], ["BBC 1/2", "BBC 1/2"], ["IPTV@Home", "IPTV@Home"],
       ["cdn.test:8080", "cdn.test:8080"], ["tv.m3u", "tv.m3u"], ["Caf" + String.fromCharCode(0xe9), "Caf" + String.fromCharCode(0xe9)],
       ["qqqqqq:zzzzzz@cdn.test", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
-      ["cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"], ["http:/qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"], ["http:/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
       ["mailto:qqqqqq@cdn.test?password=zzzzzz", "cdn.test"], ["http:" + BS + BS + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["http" + String.fromCharCode(0xff1a) + "//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["http:" + String.fromCharCode(0xff0f, 0xff0f) + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
-      ["http:/" + String.fromCharCode(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http:/" + String.fromCharCode(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
       ["http" + String.fromCharCode(0xff1a, 0xff0f, 0xff0f) + "qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz" + String.fromCharCode(0xff20) + "cdn.test", Model.HOST_WITHHELD],
       ["http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "cdn.test:8080"],
-      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD],
+      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD + " cdn.test"],
       ["My" + String.fromCharCode(0xa0) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["My" + String.fromCharCode(0xfeff) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["My" + String.fromCharCode(0x3000) + "TV", "My" + String.fromCharCode(0x3000) + "TV"]
@@ -3042,5 +3042,31 @@ TestCase {
     compare(v("http://cdn.test!zzzzzz/x"), stars("http://cdn.test!zzzzzz/x"))
     compare(v("http://nas/x"), "http://nas/" + E)
     compare(v("http://[fe80::1%25qqqqqq]/x"), stars("http://[fe80::1%25qqqqqq]/x"))
+  }
+
+  // Round 4d in the shell's engine: the field's broad hold (F1), the
+  // redactor-only withholding (F2), the leftmost authority (F3), the token's
+  // core and clause d's X@H (F4) and a host's labels (F10). node runs the
+  // sweeps and the oracle; this holds V4 to the same answers.
+  function test_round4dInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["htt?p://qqqqqq:zzzzzz/x", W], ["htt:p://qqqqqq:zz zz@cdn.test", W], ["x(p://qqqqqq:zz zz@cdn.test)", W],
+      ["qqqqqq:zzzzzz@cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"], ["cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"],
+      ["qqqqqq:zzzzzz@cdn.test/live//qqqqqq.qqqqqq/1.ts", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x?u=me:x@mail.test", "cdn.test"],
+      ["Provider (cdn.test:8080/qqqqqq/zzzzzz)", "cdn.test:8080"], ["(v1.2/beta)", "(v1.2/beta)"], ["(News/Sport)", "(News/Sport)"],
+      ["[::1]:8080/x", "[::1]:8080"], ["zzzzzz@cdn.test/x", "cdn.test"], ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["IPTV@Home", "IPTV@Home"],
+      ["qqqqqq:zz zz@cdn.test", "qqqqqq:zz zz@cdn.test"], ["qqqqqq:zzzzzz@my_host.test/x", W], ["my_host.test/x", "my_host.test/x"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    var holds = ["a//b", "x:y/z", "x:y" + BS + "z", "x:y@z", "qqqqqq:zz zz@cdn.test", "a?b=c", "a.b/c", "IPTV@Home",
+                 "a" + String.fromCharCode(0xff0f, 0xff0f) + "b", "a/" + String.fromCharCode(0x200b) + "/b", "username=qqqqqq&password=zzzzzz"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["My TV", "@home", "Me @Home", "a=b?c", "a/b.c", "x:y", "Sports: Live", "BBC 1/2", "cdn.test:8080", "qqqqqq:zzzzzz", "password=zzzzzz"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+    var st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", "http" + String.fromCharCode(0xa0) + "://qqqqqq:zz zz@cdn.test/x", { typed: false })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************")
+    compare(Model.openEditForm(Model.guideState("all"), "k", { label: "username=qqqqqq&password=zzzzzz", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld, true)
   }
 }

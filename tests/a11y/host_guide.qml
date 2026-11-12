@@ -38,7 +38,7 @@ Window {
   readonly property string passwordValue: "PASSTOKEN3"
   readonly property string playlistUrl: "http://prov.example:8080/get.php?username=joe&password=PLAYTOKEN4"
 
-  readonly property bool wantChannels: host.scenario !== "firstrun"
+  readonly property bool wantChannels: host.scenario !== "firstrun" && host.scenario !== "rvfrsrc"
   readonly property int scaleCount: host.scenario === "scale10k" ? 10000 : 3
 
   // ---- D-SINK-97 / D-SINK-98 (the Sources scenarios) ----------------------
@@ -51,7 +51,8 @@ Window {
   // pasted.
   readonly property bool sourcesScenario: ["addtyped", "editstored", "sourcesrow", "removelabel",
     "srvtyped", "srvpasted", "editlabel", "labelrow", "labelremove", "probing", "probefail",
-    "rbcolon", "rbpass", "rbfeffrow", "rbnbsp", "rbfeffguide", "rbdotted", "rbdottedfail"].indexOf(host.scenario) !== -1
+    "rbcolon", "rbpass", "rbfeffrow", "rbnbsp", "rbfeffguide", "rbdotted", "rbdottedfail",
+    "rvpaste", "rvpaste2", "rvparen"].indexOf(host.scenario) !== -1
   readonly property string typedPrefix: "http://qqqqqq:zzzzzz"
   readonly property string typedEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php?password=zzzzzz"
   readonly property string storedPlaylist: "http://qqqqqq:zz#zz@cdn.test/x"
@@ -84,6 +85,18 @@ Window {
   readonly property string feffLabel: "qqqqqq:zzzzzz" + String.fromCharCode(0xfeff) + "@cdn.test"
   readonly property string lineLabel: "qqqqqq:" + String.fromCharCode(0x2028) + "zzzzzz" + String.fromCharCode(0xa0) + "@cdn.test"
   readonly property string dottedPlaylist: "http://qqqqqq.test:12#zzzzzz@cdn.test/x"
+  // ---- round 4d (D-SINK-98 F1/F4, D-A11Y-12 F5/F7), the reviews' scenarios ----
+  // `pasteNbsp` and `pasteSpace` whole credentials pasted into the Label
+  // field that no stored clause reads (a U+00A0 at the scheme join and a
+  // space in the password; a space in the password with no path);
+  // `parenLabel` a stored label whose host/path sits inside parentheses;
+  // `frPlaylist` and `frEpg` the first-run form's two fields, filled before
+  // Sources is opened from its saved-sources link.
+  readonly property string pasteNbsp: "http" + String.fromCharCode(0xa0) + "://qqqqqq:zz zz@cdn.test/x"
+  readonly property string pasteSpace: "qqqqqq:zz zz@cdn.test"
+  readonly property string parenLabel: "Provider (cdn.test:8080/qqqqqq/zzzzzz)"
+  readonly property string frPlaylist: "http://qqqqqq:12/zzzzzz@cdn.test/get.php"
+  readonly property string frEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php"
   // The record the service would hold, and its view built by the shipping
   // Model.sourceView, so the row reads what the service would hand it. Its
   // URL's RFC host is cdn.test, so what the rows grade is the label. The `#`
@@ -95,7 +108,8 @@ Window {
     epgUrl: "", kind: "http",
     label: (host.scenario === "labelrow" || host.scenario === "labelremove") ? host.rowLabel
       : (host.scenario === "rbfeffrow" || host.scenario === "rbfeffguide") ? host.feffLabel
-      : host.scenario === "rbnbsp" ? host.lineLabel : host.credLabel,
+      : host.scenario === "rbnbsp" ? host.lineLabel
+      : host.scenario === "rvparen" ? host.parenLabel : host.credLabel,
     labelCustom: true, origin: "guide",
     addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, channelCount: 3, groupCount: 2
   })
@@ -275,6 +289,9 @@ Window {
     else if (host.scenario === "rbcolon") expected = { label: host.colonEdited }
     else if (host.scenario === "rbpass") expected = { label: host.passEdited }
     else if (host.scenario === "rbdotted" || host.scenario === "rbdottedfail") expected = { playlist: host.dottedPlaylist }
+    else if (host.scenario === "rvpaste") expected = { label: host.pasteNbsp }
+    else if (host.scenario === "rvpaste2") expected = { label: host.pasteSpace }
+    else if (host.scenario === "rvfrsrc") expected = { playlist: host.frPlaylist, epg: host.frEpg }
     var ids = item.formFieldIds || []
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i]
@@ -367,6 +384,29 @@ Window {
       item.setFieldValue("playlist", host.dottedPlaylist, true)
       item.submitForm()
       if (which === "rbdottedfail") item.onProbeFinished({ ok: false, id: "k10", reason: "Could not resolve host", host: "" })
+    } else if (which === "rvpaste" || which === "rvpaste2") {
+      // Round 4d (F1, the still-on-bus review's scenarios): a whole
+      // credential pasted into an empty Label field through the shipping
+      // paste path, no typed prefix.
+      item.openSources()
+      item.openAddForm()
+      item.fieldFocused("label")
+      item.pasteFromProcess(which === "rvpaste" ? host.pasteNbsp : host.pasteSpace)
+    } else if (which === "rvparen") {
+      // Round 4d (F4 f): the stored label in parentheses -- its row, the
+      // row's buttons and the remove dialog at once.
+      item.openSources()
+      item.startRemove()
+    } else if (which === "rvfrsrc") {
+      // Round 4d (F5): the first-run form's fields filled, then Sources
+      // opened as its saved-sources link opens it; the form survives in the
+      // guide state behind Sources.
+      item.setFieldValue("playlist", host.frPlaylist, false)
+      item.setFieldValue("epg", host.frEpg, true)
+      item.openSources()
+    } else if (which === "wall") {
+      // Round 4d (F7): the wall view shown, as its key shows it.
+      item.toggleWall()
     } else if (which === "query") {
       item.setQuery("bbc")
     } else if (which === "querynomatch") {

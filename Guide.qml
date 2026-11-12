@@ -3680,9 +3680,10 @@ Item {
                 // identical channel lists and the hidden one is indexed.
                 // This takes the hidden LIST off the bus and not its tiles:
                 // an ignored container's descendants are re-parented (measured
-                // in round 4c, D-A11Y-12's lever note at removeDialog), so a
-                // hidden wall's tiles stay, which is the shape D-A11Y-10's
-                // duplicate rows read as; left for that row.
+                // in round 4c, D-A11Y-12's lever note at removeDialog), so
+                // each tile carries the lever itself (round 4d, below). Until
+                // then a hidden wall's tiles stayed, beside the list's rows,
+                // which is what D-A11Y-10's duplicate rows were.
                 Accessible.ignored: !visible
 
                 delegate: Item {
@@ -3874,6 +3875,13 @@ Item {
                     Accessible.ignored: true
                   }
 
+                  // D-A11Y-12, round 4d (the lead's call under the owner's
+                  // standing authority of 2026-11-09): a tile is on the bus
+                  // only while the wall shows it, the lever the list rows
+                  // carry. The wall's own ignored re-parents its tiles rather
+                  // than removing them (round 4c), so behind Sources and every
+                  // form, and in list mode, the hidden wall's tiles stayed.
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.ListItem
                   // The row's own composer, with the row's own arguments. The
                   // first build passed only the name, so a reader on the wall
@@ -4997,7 +5005,15 @@ Item {
                 // or stars (a local path is stars since round 4b), and its
                 // Description is empty; D-SINK-98: the label's is
                 // Model.labelSinkText of it, or stars once the field is held
-                // (round 4c, Model.labelHeldAfter).
+                // (round 4c, Model.labelHeldAfter; round 4d holds it by
+                // Model.labelHoldsField, a broader test than the stored
+                // reading). D-A11Y-12, round 4d (the lead's call under the
+                // owner's standing authority of 2026-11-09): on the bus only
+                // while it is shown. Its visibility is formColumn's, and
+                // formColumn's own ignored RE-PARENTS this node rather than
+                // removing it (round 4c's measurement), so Sources opened
+                // from the first-run form's saved-sources link left both
+                // address fields on the bus beside the Sources list.
                 Item {
                   id: fieldA11y
                   readonly property string text: Model.fieldAccessibleValue(root.form, fieldRow.fieldId)
@@ -5006,6 +5022,7 @@ Item {
                   width: field.width
                   height: field.height
                   enabled: field.enabled
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.EditableText
                   Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
                   // The password row had `Accessible.passwordEdit: true`. It

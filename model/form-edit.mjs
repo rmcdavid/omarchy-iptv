@@ -308,7 +308,16 @@ function withFormProbing(st, probing, opts) {
 // stores are unchanged (the owner's ruling): the stored label is still the
 // RFC host, `qqqqqq.test:12`, R32a's stated residual, and so are the two
 // lines that name a STORED label, the `Added ...` transient once the record
-// is listed and `Already in Sources as ...`.
+// is listed and `Already in Sources as ...`. The cost of the `@` test,
+// stated (round 4d, the lead's call under the owner's standing authority of
+// 2026-11-09): shape alone cannot tell a typo from a VALID URL with an `@`
+// in its path or query, so R32a's own working email-username link,
+// `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus`, and
+// `http://cdn.test/get.php?username=me@mail.test&password=...` make the
+// fetching and failure lines and the placeholder say `[host withheld]`,
+// with no warning to explain it, while the label the save stores and the
+// `Added ...` line once the record is listed name the RFC host,
+// `host.test:25461`.
 function formProbeField(form) {
   return form && form.kind === "xtream" ? "server" : "playlist"
 }
