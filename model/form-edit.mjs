@@ -386,7 +386,8 @@ function sanitizeFieldInput(field, text, limit) {
 // -- and then takes the field's rule above. A URL wrapped by a mail client
 // or a chat window is a paste the form must take, and under D-SRC-63 alone
 // it was refused as a URL with a line break inside it, which is true and
-// useless. D-SINK-97 (2026-11-11, the owner's decision): the line
+// useless. D-SINK-97 (2026-11-11, the lead's call under the owner's standing
+// authority of 2026-11-09): the line
 // terminators are the seven an address field's accessible Value is starred
 // for -- LF, VT, FF, CR, U+0085, U+2028 and U+2029 -- where until then they
 // were CR and LF alone, so a URL wrapped with U+2028 reached the field whole

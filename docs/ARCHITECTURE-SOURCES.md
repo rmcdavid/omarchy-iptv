@@ -738,7 +738,8 @@ acceptance rule, no control character ever types) and a paste through
         `News [url]<TAB>cdn.test/live/qqqqqq/...`), unless an `@` after it
         makes the token a credential.
      7. One odd code point a stretch still marks a URL, the owner-accepted
-        false positives: `ESPN<U+200B>//<U+200B>HD` prints `<U+200B>HD`; a
+        false positives: `ESPN<U+200B>//<U+200B>HD` prints `<U+200B>HD` (the
+        helper `<U+200B>hd`); a
         list of single CJK, Korean or Cyrillic characters behind an ASCII
         word prints its last item (`Audio:<CJK>/<CJK>/<CJK>`, `RU:` and three
         Cyrillic letters); a fullwidth colon glued to CJK prose
@@ -787,7 +788,10 @@ acceptance rule, no control character ever types) and a paste through
          after an `@` is a host (`Ed@Caf<U+00E9>.com`, `KC@BUF_20:15`), so a
          title holding one after a bare value with a `:` is taken with the
          value: 16 of 45 synthetic lines, none of the 351 names or the
-         realistic corpus.
+         realistic corpus. A bare value holding a `:` grows with no
+         condition across whitespace from a URL's own colon when no key
+         follows, across whitespace from a colon outside every URL, and
+         across `"`.
      13. A long bare M3U value pays two reading passes: the bare group-title
          `x:@` + (`a!+`<ZW><DIV><DIV>)* costs 151.6 ms at 1M characters and
          598.5 at 4M (a8e8174: 21.9 and 76.5), over the 150 / 600 ms budget
