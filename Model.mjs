@@ -238,7 +238,8 @@ export {
   formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
   openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
   withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, fieldAccessibleValue, toggleReveal, withFormReveal
+  fieldMasked, fieldAccessibleValue, fieldAccessibleDescription, toggleReveal,
+  withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

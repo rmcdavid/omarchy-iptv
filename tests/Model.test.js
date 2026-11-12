@@ -8704,14 +8704,14 @@ checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: n
 })()
 
 // ---- R33a (round 7, 2026-10-22): A PASTE INTO A URL FIELD JOINS ITS LINES ----
-checkCall("R33a: sanitizePasteInput -- a URL wrapped onto two lines by a mail client (CRLF and LF) pastes as ONE URL into the playlist, EPG and server fields, and that value validates; a TAB inside the same paste is kept and then refused by the validator with the sentence that names it (the one exception is CR and LF, nothing else); a name field strips every control character as before; the field rule's own edge trim still applies", () => {
+checkCall("R33a: sanitizePasteInput -- a URL wrapped onto two lines by a mail client (CRLF and LF) pastes as ONE URL into the playlist, EPG and server fields, and that value validates; a TAB inside the same paste is kept and then refused by the validator with the sentence that names it (the one exception is the line terminators -- CR and LF, and since D-SINK-97 VT, FF, U+0085, U+2028 and U+2029 -- nothing else); a name field strips every control character as before; the field rule's own edge trim still applies", () => {
   const wrapped = "http://h.test/get.php?username=u&\r\npassword=zpass&type=m3u_plus\n"
   const joined = "http://h.test/get.php?username=u&password=zpass&type=m3u_plus"
   const tabbed = "http://u:pa\tss@h.test/x\n"
   return [Model.sanitizePasteInput("playlist", wrapped, 4096), Model.sanitizePasteInput("epg", wrapped, 4096), Model.sanitizePasteInput("server", "http://h.test\n:8080", 4096),
           Model.validateSourceUrl(Model.sanitizePasteInput("playlist", wrapped, 4096)).ok,
           Model.sanitizePasteInput("playlist", tabbed, 4096), Model.validateSourceUrl(Model.sanitizePasteInput("playlist", tabbed, 4096)).message,
-          Model.sanitizePasteInput("playlist", "http://h.test/a\u0085b", 4096) === "http://h.test/a\u0085b", Model.sanitizePasteInput("playlist", "http://h.test/a\u2028b", 4096) === "http://h.test/a\u2028b",
+          Model.sanitizePasteInput("playlist", "http://h.test/a\u0085b", 4096) === "http://h.test/ab", Model.sanitizePasteInput("playlist", "http://h.test/a\u2028b", 4096) === "http://h.test/ab",
           Model.sanitizePasteInput("label", "Pro\r\nvider\t", 64), Model.sanitizePasteInput("username", "u\nser", 64), Model.sanitizePasteInput("playlist", "  " + joined + "  ", 4096),
           Model.sanitizeFieldInput("playlist", wrapped, 4096) === wrapped.replace(/\n$/, "")]
 }, ["http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test:8080", true, "http://u:pa\tss@h.test/x", Model.sourceErrorMessage("url_control"), true, true, "Provider", "user", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", true])
@@ -8763,10 +8763,292 @@ check("toggleReveal: reveal, hide, no-op when nothing to mask", [Model.toggleRev
 // value, revealed or not; the label and a plain local path still read.
 const a11yForm = { values: { label: "My TV", playlist: "http://joe:PLAYUSER@h.test:80/g.php?username=joe&password=PLAYTOKEN&type=m3u#FRAGTOKEN", epg: "http://h.test/xmltv.php?password=EPGTOKEN", server: "http://prov.example:8080/get.php?username=joe&password=SRVTOKEN", username: "USERTOKEN", password: "PASSTOKEN" }, revealed: { playlist: true, epg: true } }
 check("D-A11Y-1 fieldAccessibleValue: no credential reaches the bus, revealed or not", Object.keys(a11yForm.values).filter(k => /TOKEN|PLAYUSER/.test(Model.fieldAccessibleValue(a11yForm, k))), [])
-check("D-A11Y-1 fieldAccessibleValue: per field", ["label", "playlist", "epg", "server", "username", "password"].map(k => Model.fieldAccessibleValue(a11yForm, k)), ["My TV", "http://****@h.test:80/g.php?username=****&password=****&type=m3u#****", "http://h.test/xmltv.php?password=****", "http://prov.example:8080/get.php?username=****&password=****", "*********", "*********"])
+check("D-A11Y-1 fieldAccessibleValue: per field (D-SINK-97: an address field says scheme and host and the closing character, never its path, query or fragment)", ["label", "playlist", "epg", "server", "username", "password"].map(k => Model.fieldAccessibleValue(a11yForm, k)), ["My TV", "http://****@h.test:80/" + Model.ELLIPSIS, "http://h.test/" + Model.ELLIPSIS, "http://prov.example:8080/" + Model.ELLIPSIS, "*********", "*********"])
 check("D-A11Y-1 fieldAccessibleValue: a schemeless server is starred whole (it can carry user:pass@)", Model.fieldAccessibleValue({ values: { server: "joe:SECRET@prov.example" } }, "server"), "***********************")
 check("D-A11Y-1 fieldAccessibleValue: a local path passes, a path with a query does not", [Model.fieldAccessibleValue({ values: { playlist: "/home/me/tv.m3u" } }, "playlist"), Model.fieldAccessibleValue({ values: { epg: "~/epg.xml" } }, "epg"), Model.fieldAccessibleValue({ values: { playlist: "/x?k=SECRET" } }, "playlist")], ["/home/me/tv.m3u", "~/epg.xml", "***********"])
 check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no form", [Model.fieldAccessibleValue({ values: { other: "abc" } }, "other"), Model.fieldAccessibleValue({ values: {} }, "username"), Model.fieldAccessibleValue(null, "password")], ["***", "", ""])
+// ---- D-SINK-97 and D-SINK-98 (2026-11-11): what the Sources form's
+// address fields and its label publish on the accessibility bus. Every check
+// drives the shipping path -- the form state (openAddForm / openXtreamForm,
+// withFormValue as applyEdit and pasteFromProcess call it), the key edits
+// (editInsert, editDelete) and the paste join (sanitizePasteInput) -- and
+// reads what fieldA11y publishes: Model.fieldAccessibleValue and
+// Model.fieldAccessibleDescription. The fixture credentials are spelled from
+// `q` and `z` alone and no scheme, host, mark or ellipsis below holds either
+// letter, so "no q and no z" is the whole credential, a fragment of it, or
+// one character of it, on the bus.
+;(function () {
+  const E = Model.ELLIPSIS
+  const LT = { LF: "\n", VT: String.fromCharCode(11), FF: String.fromCharCode(12), CR: "\r",
+               NEL: String.fromCharCode(0x85), LS: String.fromCharCode(0x2028), PS: String.fromCharCode(0x2029) }
+  const ADDRESS = ["playlist", "epg", "server"]
+  const LEAK = /[qz]/
+  function formFor(field) {
+    return field === "server" ? Model.openXtreamForm(Model.guideState("all"), "sources") : Model.openAddForm(Model.guideState("all"))
+  }
+  // Both reveal states: the bus publishes the same either way.
+  function heard(st, field) {
+    const shown = Model.withFormReveal(st, field, true).form
+    const hidden = Model.withFormReveal(st, field, false).form
+    return [Model.fieldAccessibleValue(st.form, field), Model.fieldAccessibleValue(shown, field), Model.fieldAccessibleValue(hidden, field),
+            Model.fieldAccessibleDescription(field, field)]
+  }
+  function leaks(values) { return values.filter(function (v) { return LEAK.test(v) }) }
+  // A sweep runs once, inside the first checkCall that reads it, so a name
+  // the model does not export (the base commit has no
+  // fieldAccessibleDescription) is one failure per check, not an abort.
+  function memo(fn) {
+    let done = false
+    let value
+    return function () { if (!done) { value = fn(); done = true } return value }
+  }
+
+  // (i) Every prefix, typed left to right through the key path (typedText,
+  // which keeps U+2028 and drops U+0085 as Qt does, then editInsert).
+  const TYPED = [
+    "http://qqqqqq:zzzzzz@cdn.test/get.php",
+    "https://qqqqqq:zzzzzz@cdn.test:8443/get.php",
+    "http://qqqqqq:zzzzzz@cdn.test:8080/live/get.php?type=m3u_plus",
+    "https://qqqqqq:zzzzzz@cdn.test?username=qqqqqq&password=zzzzzz",
+    "http://qqqqqq:zzzzzz@cdn.test/x#zzzzzz",
+    "https://qqqqqq:zzzzzz@cdn.test/",
+    "http://qqqqqq@cdn.test/get.php",
+    "http://qqqqqq:zzz/zzz@cdn.test/get.php",
+    "http://qqqqqq:zzz?zzz@cdn.test/get.php",
+    "https://qqqqqq:zzz#zzz@cdn.test:8443/get.php",
+    "http://qqqqqq:zzz" + LT.LS + "zzz@cdn.test/get.php",
+    "http://qqqqqq:zzz" + LT.NEL + "zzz@cdn.test/get.php",
+    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz&type=m3u_plus",
+    "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+    "http://cdn.test/get.php;username=qqqqqq;password=zzzzzz",
+    "http://cdn.test/get.php?username=qqqqqq&password=zz&zz",
+    "http://cdn.test/get.php?qqqqqq&zzzzzz",
+    "http://cdn.test/x#qqqqqq" + LT.LS + "zzzzzz"
+  ]
+  const typedRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      TYPED.forEach(function (url) {
+        let st = formFor(field)
+        let value = ""
+        const out = []
+        for (let i = 0; i < url.length; i++) {
+          const edit = Model.editInsert(value, value.length, value.length, Model.typedText(url.charAt(i), false), Model.formCapacity(field))
+          value = edit.value
+          st = Model.withFormValue(st, field, value, { typed: true })
+          heard(st, field).forEach(function (v) { out.push(v) })
+        }
+        runs.push({ field: field, url: url, prefixes: url.length, typedWhole: value === Model.typedText(url, false), leaks: leaks(out).length })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: every prefix of " + TYPED.length + " credentialed URLs, typed key by key into the playlist, EPG and server fields, publishes no character of the credential in the Value (as typed, revealed or hidden) or the Description",
+    () => typedRuns().filter(function (r) { return r.leaks !== 0 || !r.typedWhole }), [])
+  checkCall("D-SINK-97: the typed sweep really typed every prefix (" + TYPED.length + " URLs x 3 fields)",
+    () => [typedRuns().length, typedRuns().reduce(function (n, r) { return n + r.prefixes }, 0) > 3 * 600], [TYPED.length * 3, true])
+
+  // (ii) Edit states of a whole value: each userinfo character deleted in
+  // turn, the `@` deleted, and word deletes both ways from every caret
+  // position, repeated until nothing is left.
+  const EDITED = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test:8443/x?y=1", "http://qqqqqq:zz/zz@cdn.test/"]
+  const editRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      EDITED.forEach(function (url) {
+        const states = []
+        const at = url.lastIndexOf("@")
+        for (let i = url.indexOf("//") + 2; i <= at; i++) states.push(Model.editDelete(url, i, i, 1, false, false).value)
+        for (let pos = 0; pos <= url.length; pos++) {
+          ;[-1, 1].forEach(function (dir) {
+            let v = url
+            let caret = pos
+            for (let n = 0; n < 64 && v !== ""; n++) {
+              const edit = Model.editDelete(v, caret, caret, dir, true, false)
+              if (!edit.changed) break
+              v = edit.value
+              caret = edit.caret
+              states.push(v)
+            }
+          })
+        }
+        // The password is never heard, and the username is never heard while
+        // the value still holds an `@` or any of the password. Once both are
+        // deleted the username is the host the value names -- `http://qqqqqq/x`
+        // -- and is heard as one, which no rule that says the host can avoid.
+        let leaked = 0
+        states.forEach(function (v) {
+          const st = Model.withFormValue(formFor(field), field, v, { typed: true })
+          heard(st, field).forEach(function (h) { if (/z/.test(h) || (/q/.test(h) && /[@z]/.test(v))) leaked++ })
+        })
+        runs.push({ field: field, url: url, states: states.length, leaks: leaked,
+                    atGone: Model.fieldAccessibleValue(Model.withFormValue(formFor(field), field, url.substring(0, at) + url.substring(at + 1), { typed: true }).form, field) })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: deleting each userinfo character, the `@` alone, and word after word both ways from every caret never publishes the password, nor the username while an `@` or the password is left",
+    () => editRuns().filter(function (r) { return r.leaks !== 0 || r.states < 40 }), [])
+  checkCall("D-SINK-97: the `@` deleted from a whole value is stars, not the credential read as a host (maskUrl found no userinfo there)",
+    () => editRuns().map(function (r) { return r.atGone === new Array(r.url.length).join("*") }), EDITED.concat(EDITED, EDITED).map(function () { return true }))
+
+  // (iii) A paste with each line terminator: joined by sanitizePasteInput,
+  // as it joins CR and LF, and the joined value is heard as scheme and host.
+  const pasteRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      Object.keys(LT).forEach(function (name) {
+        ;[["inside the userinfo", "http://qqqqqq:zzz" + LT[name] + "zzz@cdn.test/get.php", "http://qqqqqq:zzzzzz@cdn.test/get.php"],
+          ["after the `#`", "http://cdn.test/x#qqqqqq" + LT[name] + "zzzzzz", "http://cdn.test/x#qqqqqqzzzzzz"],
+          ["wrapped at the end", "http://qqqqqq:zzzzzz@cdn.test/get.php" + LT[name], "http://qqqqqq:zzzzzz@cdn.test/get.php"]].forEach(function (c) {
+          const cap = Model.formCapacity(field)
+          const joined = Model.sanitizePasteInput(field, c[1], cap)
+          const st = Model.withFormValue(formFor(field), field, Model.editInsert("", 0, 0, joined, cap).value, { typed: false })
+          runs.push({ field: field, lt: name, where: c[0], joined: joined === c[2], heard: heard(st, field) })
+        })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: a paste holding LF, VT, FF, CR, U+0085, U+2028 or U+2029 into an address field is joined, and what it publishes is scheme and host",
+    () => pasteRuns().filter(function (r) {
+      const want = r.where === "after the `#`" ? "http://cdn.test/" + E : "http://****@cdn.test/" + E
+      return !r.joined || r.heard[0] !== want || r.heard[1] !== want || r.heard[2] !== want || r.heard[3] !== ""
+    }).map(function (r) { return r.field + " " + r.lt + " " + r.where }), [])
+  check("D-SINK-97: a line terminator in a value that reached the field another way (a stored source, a caller) is stars, in every address field",
+    ADDRESS.map(function (field) {
+      return Object.keys(LT).filter(function (name) {
+        const v = "http://cdn.test/get.php?x=1" + LT[name] + "#y"
+        return Model.fieldAccessibleValue({ values: { [field]: v } }, field) !== new Array(v.length + 1).join("*")
+      })
+    }), [[], [], []])
+  check("D-SINK-97: a name field's paste is unchanged (it strips every control character, and U+2028 is not one)",
+    [Model.sanitizePasteInput("label", "Pro" + LT.CR + LT.LF + "vider", 64), Model.sanitizePasteInput("username", "u" + LT.LS + "ser", 64)], ["Provider", "u" + LT.LS + "ser"])
+
+  // (iv) file:, local paths, `//` and `~/`.
+  const local = [
+    ["file:///home/me/tv.m3u", "file:///home/me/tv.m3u"],
+    ["File:///home/me/tv.m3u", "File:///home/me/tv.m3u"],
+    ["file://qqqqqq:zzzzzz@cdn.test/x", "*"],
+    ["file:///x?zzzzzz", "*"],
+    ["file:///x#zzzzzz", "*"],
+    ["/home/me/tv.m3u", "/home/me/tv.m3u"],
+    ["~/epg.xml", "~/epg.xml"],
+    ["/", "/"],
+    ["//qqqqqq:zzzzzz@cdn.test/x", "*"],
+    ["//cdn.test/x", "*"],
+    ["~/qqqqqq@zzzzzz", "*"],
+    ["/qqqqqq:zzzzzz@cdn.test/x", "*"],
+    ["/x?k=zzzzzz", "*"],
+    ["/x#zzzzzz", "*"],
+    ["~qqqqqq/zzzzzz", "*"],
+    ["~/x" + LT.LF + "y", "*"],
+    ["/x" + LT.PS + "y", "*"]
+  ]
+  check("D-SINK-97: file: URLs and local paths -- as typed only without `@`, `?`, `#` or a line, never `//`, and stars otherwise, in every address field",
+    ADDRESS.map(function (field) {
+      return local.filter(function (c) {
+        const got = Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)
+        return got !== (c[1] === "*" ? new Array(c[0].length + 1).join("*") : c[1])
+      }).map(function (c) { return c[0] })
+    }), [[], [], []])
+
+  // What an ordinary value publishes: the rule's own words.
+  const ordinary = [
+    ["http://cdn.test/get.php?type=m3u_plus", "http://cdn.test/" + E],
+    ["https://cdn.test:8443/x.m3u", "https://cdn.test:8443/" + E],
+    ["http://cdn.test/", "http://cdn.test/"],
+    ["http://cdn.test?x=1", "http://cdn.test?" + E],
+    ["http://cdn.test#top", "http://cdn.test#" + E],
+    ["http://qqqqqq:zzzzzz@cdn.test/", "http://****@cdn.test/"],
+    ["http://qqqqqq:z@z@cdn.test/get.php", "http://****@cdn.test/" + E],
+    ["http://@cdn.test/x", "http://****@cdn.test/" + E],
+    ["HTTP://CDN.test/x", "HTTP://CDN.test/" + E],
+    ["rtsp://cdn.test:554/live", "rtsp://cdn.test:554/" + E],
+    ["http://[2001:db8::1]:8080/x", "http://[2001:db8::1]:8080/" + E],
+    ["http://[::1]/", "http://[::1]/"],
+    ["http://cdn.test", "*"],
+    ["http://cdn.test:8080", "*"],
+    ["http:cdn.test/x", "*"],
+    ["http:/cdn.test/x", "*"],
+    ["http:///x", "*"],
+    ["http://cdn.test:/x", "*"],
+    ["http://cdn.test:80a/x", "*"],
+    ["http://qqqqqq:zzzzzz/x", "*"],
+    ["http://cdn.test/x@y", "*"],
+    ["http://qqqqqq:zz#zz@cdn.test/x", "*"],
+    ["http://qqqqqq?zz@cdn.test/x", "*"],
+    ["http://cdn.test%40x/y", "*"],
+    ["http://cdn;test/y", "*"],
+    ["http://cdn" + String.fromCharCode(0xff1b) + "test/y", "*"],
+    ["http://cdn test/y", "*"],
+    ["http://[qqqqqq]/y", "*"],
+    ["http://[::1/y", "*"],
+    ["http://[::1]x/y", "*"],
+    ["http://[::1]:zz/y", "*"],
+    ["http://[::1]x8080/y", "*"],
+    ["http://:8080/x", "*"],
+    ["http://qqqqqq:zzzzzz@:8080/x", "*"],
+    ["qqqqqq:zzzzzz@cdn.test", "*"],
+    ["cdn.test/get.php", "*"],
+    ["", ""]
+  ]
+  check("D-SINK-97: ordinary values publish `scheme://[****@]host[:port]` and the authority's closing character with an ellipsis, `/` alone for a bare `/`, and stars for an authority that is not closed, holds an `@` after it, or has a host that does not parse",
+    ADDRESS.map(function (field) {
+      return ordinary.filter(function (c) {
+        const got = Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)
+        return got !== (c[1] === "*" ? new Array(c[0].length + 1).join("*") : c[1])
+      }).map(function (c) { return [c[0], Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)] })
+    }), [[], [], []])
+  checkCall("D-SINK-97: an address field's Description is empty, revealed or not; the password's is its label; the other fields' are empty",
+    () => [ADDRESS.map(function (f) { return Model.fieldAccessibleDescription(f, "Playlist URL") }),
+     Model.fieldAccessibleDescription("password", "Password"), Model.fieldAccessibleDescription("username", "Username"),
+     Model.fieldAccessibleDescription("label", "Label"), Model.fieldAccessibleDescription(null, "x")],
+    [["", "", ""], "Password", "", "", ""])
+  check("D-SINK-97: the username and password stay one `*` per character",
+    [Model.fieldAccessibleValue({ values: { username: "qqqqqq" } }, "username"), Model.fieldAccessibleValue({ values: { password: "zz#zz@" } }, "password")],
+    ["******", "******"])
+
+  // (v) The label (D-SINK-98): its Value and every composed name carrying it.
+  const LABELS = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test/x",
+                  "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "rtmp://qqqqqq:zzzzzz@cdn.test:1935/live"]
+  const labelRuns = LABELS.map(function (label) {
+    const st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", label, { typed: true })
+    const added = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: label, origin: "guide" }, 100)
+    const second = Model.addSource(added.state, { playlistUrl: "http://other.test/list.m3u", label: "Other", origin: "guide" }, 101)
+    const views = Model.sourceViews(second.state, added.key, 200, {})
+    const view = views.filter(function (v) { return v.id === added.key })[0] || {}
+    const names = [
+      Model.fieldAccessibleValue(st.form, "label"),
+      Model.sourceAccessibleName(view),
+      Model.confirmRemoveMessage(view.label, true), Model.confirmRemoveMessage(view.label, false),
+      Model.sourceTransient("added", { label: view.label, host: "cdn.test", channelCount: 3, groupCount: 1 }),
+      Model.sourceTransient("switched", { label: view.label, channelCount: 3 }),
+      Model.sourceTransient("removed", { label: view.label, wasActive: true }),
+      Model.sourceErrorMessage("label_taken", { label: label }), Model.sourceErrorMessage("duplicate", { label: view.label }),
+      Model.footerStatus({ configured: true, count: 3, activeLabel: view.label, sourceCount: 2 }),
+      JSON.stringify(Model.sourcesSummary(second.state, added.key))
+    ]
+    return { label: label, stored: view.label === label, leaks: leaks(names), value: names[0] }
+  })
+  check("D-SINK-98: a label that is a credentialed URL is stored as typed, and its Value and every composed name carrying it -- the row's name, the remove dialog, the transients, the error line, the footer, the IPC summary -- hold no character of the credential",
+    labelRuns.filter(function (r) { return !r.stored || r.leaks.length !== 0 }), [])
+  check("D-SINK-98: such a label is heard as its host, or as `[host withheld]` where the host is a username in front of a `#`",
+    labelRuns.map(function (r) { return r.value }), ["cdn.test", Model.HOST_WITHHELD, "cdn.test", "cdn.test"])
+  check("D-SINK-98: an ordinary label passes unchanged everywhere",
+    [Model.fieldAccessibleValue({ values: { label: "My TV" } }, "label"), Model.confirmRemoveMessage("NAS Tvheadend", false),
+     Model.sourceTransient("removed", { label: "Provider" }), Model.sourceErrorMessage("label_taken", { label: "BBC" }),
+     Model.footerStatus({ configured: true, count: 3, activeLabel: "NAS", sourceCount: 2 }).indexOf("NAS") === 0],
+    ["My TV", "Remove " + Model.QUOTE_OPEN + "NAS Tvheadend" + Model.QUOTE_CLOSE + "? Its cache is deleted too.", "Removed Provider",
+     "A source named " + Model.QUOTE_OPEN + "BBC" + Model.QUOTE_CLOSE + " already exists", true])
+  // The Sources row draws its label, and names its two buttons, through the
+  // sink (QML; the bus half is the a11y probe's L2-SRC-* checks).
+  checkCall("D-SINK-98 (structural): the Sources row's label, drawn and in the edit and remove buttons' names, is Model.sinkText of the stored label, and the IPC active source names it the same way",
+    () => [guideSource.indexOf("readonly property string label: srow.source ? Model.sinkText(String(srow.source.label))") !== -1,
+           serviceSource.indexOf("label: Model.sinkText(view.label), host: view.host") !== -1,
+           guideSource.indexOf("Accessible.description: Model.fieldAccessibleDescription(fieldRow.fieldId, root.fieldLabelText(fieldRow.fieldId))") !== -1],
+    [true, true, true])
+})()
 check("withFormReveal explicit", Model.withFormReveal(pasted, "playlist", true).form.revealed.playlist, true)
 const revealed = Model.toggleReveal(pasted, "playlist")
 check("withFormFocus re-masks the field being left", (() => { const n = Model.withFormFocus(revealed, "epg"); return [n.form.focus, n.form.revealed.playlist] })(), ["epg", false])
@@ -13289,8 +13571,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   check("F-SINK-10: no guide site reads a channel name into text without the sink", [
     (guideSource.match(/String\((?:row|tile)\.channel\.name[^)]*\)/g) || []),
     (guideSource.match(/String\(row\.name[^)]*\)/g) || []),
+    // Four since D-SINK-98: the three channel-name sites and the Sources
+    // row's label.
     (guideSource.match(/Model\.sinkText\(/g) || []).length
-  ], [[], [], 3])
+  ], [[], [], 4])
   // The map describes the grammar; the footer gates. A narrowed map is still
   // possible, and that is what `opts` is for.
   // HELP_KEY is the ONE bare printable character that is not list-mode only,

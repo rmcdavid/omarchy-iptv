@@ -16,7 +16,7 @@ import {
 } from "./mpv.mjs"
 import {
   hostOf, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex,
-  redactUrls
+  redactUrls, sinkText
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -220,10 +220,13 @@ function innerCharSentence(noun, withSpace) {
   return "Remove the " + (withSpace ? "space, " : "") + "tab, line break or control character inside the " + noun
 }
 
+// D-SINK-98: a label in a sentence is sinkText of it (fieldAccessibleValue
+// says why), here as in every composer that names a source by its label.
 function sourceErrorMessage(code, opts) {
   var o = opts || {}
   var c = str(code)
-  var quoted = QUOTE_OPEN + str(o.label) + QUOTE_CLOSE
+  var label = sinkText(str(o.label))
+  var quoted = QUOTE_OPEN + label + QUOTE_CLOSE
   var schemeText = "Start with http://, https://, or / for a local file"
   var invalidText = "Invalid URL" + SEP + "check the host"
   var serverText = "Server must start with http:// or https://"
@@ -249,7 +252,7 @@ function sourceErrorMessage(code, opts) {
     relative_path: "Use an absolute path (starts with /, not ~)",
     unsafe_path: "Path not allowed",
     too_long: "Too long" + SEP + "max " + formatCount(MAX_SOURCE_URL) + " characters",
-    duplicate: str(o.label) !== "" ? "Already in Sources as " + quoted : "Already in Sources",
+    duplicate: label !== "" ? "Already in Sources as " + quoted : "Already in Sources",
     label_too_long: "Label too long" + SEP + "max " + formatCount(MAX_LABEL) + " characters",
     label_taken: "A source named " + quoted + " already exists",
     server_empty: "Enter the server URL",
@@ -1796,10 +1799,10 @@ function sourceDetail(view, narrow) {
   return joinParts(parts)
 }
 
-// UX-SOURCES 7.1 row name.
+// UX-SOURCES 7.1 row name. D-SINK-98: the label through sinkText.
 function sourceAccessibleName(view) {
   var v = view || {}
-  var out = str(v.label) + ", " + str(v.host)
+  var out = sinkText(str(v.label)) + ", " + str(v.host)
   out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.active) out += ", active"
   var epg = epgHintRowText(v)
@@ -1843,9 +1846,10 @@ function confirmLogosMessage(survey) {
   return logoConsentLines(survey).join("\n")
 }
 
-// Confirm dialog message (UX-SOURCES 5.7).
+// Confirm dialog message (UX-SOURCES 5.7). D-SINK-98: the label through
+// sinkText.
 function confirmRemoveMessage(label, active) {
-  var quoted = QUOTE_OPEN + str(label) + QUOTE_CLOSE
+  var quoted = QUOTE_OPEN + sinkText(str(label)) + QUOTE_CLOSE
   if (active) return "Remove " + quoted + "? It is the active source; the guide returns to setup."
   return "Remove " + quoted + "? Its cache is deleted too."
 }
@@ -1910,15 +1914,17 @@ function probeFailureLine(reason, host, kind, code) {
 
 // Footer transients (UX-SOURCES 5.3). `added` names the new source by its
 // label (`Added list.m3u`, `Added tv.example.net`), never `local file`;
-// `host` is the fallback when the caller has no label.
+// `host` is the fallback when the caller has no label. D-SINK-98: the label
+// through sinkText.
 function sourceTransient(event, opts) {
   var o = opts || {}
   var counts = Number(o.channelCount) >= 0 ? countsLine(o.channelCount, o.groupCount) : ""
+  var label = sinkText(str(o.label))
   if (event === "loaded") return counts
-  if (event === "added") return "Added " + (str(o.label) !== "" ? str(o.label) : str(o.host)) + (counts !== "" ? SEP + counts : "")
+  if (event === "added") return "Added " + (label !== "" ? label : str(o.host)) + (counts !== "" ? SEP + counts : "")
   if (event === "saved") return "Saved" + (counts !== "" ? SEP + counts : "")
-  if (event === "switched") return "Switched to " + str(o.label) + (Number(o.channelCount) >= 0 ? SEP + pluralChannels(o.channelCount) : "")
-  if (event === "removed") return "Removed " + str(o.label) + (o.wasActive ? SEP + "no active source" : "")
+  if (event === "switched") return "Switched to " + label + (Number(o.channelCount) >= 0 ? SEP + pluralChannels(o.channelCount) : "")
+  if (event === "removed") return "Removed " + label + (o.wasActive ? SEP + "no active source" : "")
   return ""
 }
 

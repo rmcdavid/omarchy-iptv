@@ -286,18 +286,23 @@ function sanitizeFieldInput(field, text, limit) {
 
 // The boundary rule for a PASTE, and the one stated exception to "nothing
 // inside a URL is deleted" (R33a, round 7, 2026-10-22): a paste into a URL
-// field JOINS ITS LINES first -- CR and LF removed, nothing else -- and then
-// takes the field's rule above. A URL wrapped by a mail client or a chat
-// window is a paste the form must take, and under D-SRC-63 alone it was
-// refused as a URL with a line break inside it, which is true and useless.
-// Only CR and LF: a tab, U+0085, U+2028 or an information separator inside
-// the pasted text still reaches validateSourceUrl and is refused there,
-// with the sentence that names it (R33b). A name field keeps sanitizeInput,
-// which removes every control character anyway (6.1: a multi-line paste
-// into a name collapses to one line). Typing cannot insert CR or LF (Qt's
-// own acceptance rule, typedText), and the submit path reads a value this
-// has already joined, so the paste is the one place the join is made.
-var PASTE_LINE_BREAK_RE = /[\r\n]/g
+// field JOINS ITS LINES first -- the line terminators removed, nothing else
+// -- and then takes the field's rule above. A URL wrapped by a mail client
+// or a chat window is a paste the form must take, and under D-SRC-63 alone
+// it was refused as a URL with a line break inside it, which is true and
+// useless. D-SINK-97 (2026-11-11, the owner's decision): the line
+// terminators are the seven an address field's accessible Value is starred
+// for -- LF, VT, FF, CR, U+0085, U+2028 and U+2029 -- where until then they
+// were CR and LF alone, so a URL wrapped with U+2028 reached the field whole
+// and every reader of it disagreed about where its parts ended. A tab or an
+// information separator inside the pasted text still reaches
+// validateSourceUrl and is refused there, with the sentence that names it
+// (R33b). A name field keeps sanitizeInput, which removes every control
+// character anyway (6.1: a multi-line paste into a name collapses to one
+// line). Typing cannot insert a line terminator (Qt's own acceptance rule,
+// typedText), and the submit path reads a value this has already joined, so
+// the paste is the one place the join is made.
+var PASTE_LINE_BREAK_RE = /[\n\v\f\r\x85\u2028\u2029]/g
 
 function sanitizePasteInput(field, text, limit) {
   var t = str(text)

@@ -2891,4 +2891,53 @@ TestCase {
     compare(mouseInput.selectedText, "ell", "a drag selects on a read-only input")
     compare(mouseInput.text, "hello", "and none of it edited the field")
   }
+
+  // D-SINK-97 and D-SINK-98, in the shell's own engine: the Value an address
+  // field publishes (every prefix of a credentialed URL typed key by key,
+  // revealed, and the rule's table) and a label that is a credentialed URL.
+  // node runs the wide sweeps; this holds V4 to the same answers, since the
+  // rule reads regexes, String.prototype.normalize (hostNameRefused) and the
+  // line terminators, where the two engines have differed before.
+  function test_addressAccessibleValueInV4() {
+    var E = Model.ELLIPSIS
+    var LS = String.fromCharCode(0x2028)
+    var urls = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test:8443/x",
+                "http://qqqqqq:zzz" + LS + "zzz@cdn.test/get.php", "http://cdn.test/get.php?username=qqqqqq&password=zz&zz"]
+    var fields = ["playlist", "epg", "server"]
+    var leaked = []
+    for (var f = 0; f < fields.length; f++) {
+      for (var u = 0; u < urls.length; u++) {
+        var st = fields[f] === "server" ? Model.openXtreamForm(Model.guideState("all"), "sources") : Model.openAddForm(Model.guideState("all"))
+        var value = ""
+        for (var i = 0; i < urls[u].length; i++) {
+          value = Model.editInsert(value, value.length, value.length, Model.typedText(urls[u].charAt(i), false), Model.formCapacity(fields[f])).value
+          st = Model.withFormValue(st, fields[f], value, { typed: true })
+          var heard = Model.fieldAccessibleValue(st.form, fields[f])
+          if (/[qz]/.test(heard)) leaked.push(fields[f] + " " + value + " -> " + heard)
+        }
+      }
+    }
+    compare(leaked, [], "no typed prefix publishes a character of the credential")
+    function v(text) { return Model.fieldAccessibleValue({ values: { playlist: text } }, "playlist") }
+    function stars(text) { return new Array(text.length + 1).join("*") }
+    compare(v("http://qqqqqq:zzzzzz@cdn.test/get.php"), "http://****@cdn.test/" + E)
+    compare(v("https://cdn.test:8443/"), "https://cdn.test:8443/")
+    compare(v("http://cdn.test?x=1"), "http://cdn.test?" + E)
+    compare(v("http://[2001:db8::1]:8080/x"), "http://[2001:db8::1]:8080/" + E)
+    compare(v("http://cdn.test:8080"), stars("http://cdn.test:8080"))
+    compare(v("http://qqqqqq:zz#zz@cdn.test/x"), stars("http://qqqqqq:zz#zz@cdn.test/x"))
+    compare(v("http://cdn" + String.fromCharCode(0xff1b) + "test/y"), stars("http://cdn;test/y"), "the NFKD fold refuses a fullwidth `;`")
+    compare(v("http://cdn.test/x#a" + String.fromCharCode(0x2029) + "b"), stars("http://cdn.test/x#a b"))
+    compare(v("file:///home/me/tv.m3u"), "file:///home/me/tv.m3u")
+    compare(v("file:///x?zzzzzz"), stars("file:///x?zzzzzz"))
+    compare(v("/home/me/tv.m3u"), "/home/me/tv.m3u")
+    compare(v("//qqqqqq:zzzzzz@cdn.test/x"), stars("//qqqqqq:zzzzzz@cdn.test/x"))
+    compare(v("~/qqqqqq@zzzzzz"), stars("~/qqqqqq@zzzzzz"))
+    compare(Model.fieldAccessibleDescription("playlist", "Playlist URL or path"), "")
+    compare(Model.fieldAccessibleDescription("password", "Password"), "Password")
+    compare(Model.sanitizePasteInput("playlist", "http://qqqqqq:zzz" + LS + "zzz@cdn.test/x" + String.fromCharCode(0x85), 4096), "http://qqqqqq:zzzzzz@cdn.test/x")
+    compare(Model.fieldAccessibleValue({ values: { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" } }, "label"), "cdn.test")
+    compare(Model.confirmRemoveMessage("http://qqqqqq:zzzzzz@cdn.test/get.php", false).indexOf("qq"), -1)
+    compare(Model.sourceTransient("removed", { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" }), "Removed cdn.test")
+  }
 }

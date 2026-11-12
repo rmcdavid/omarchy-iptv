@@ -5873,7 +5873,8 @@ Item {
     var rec = Model.findSource(root.userState.sources, root.activeSourceKey)
     if (!rec) return null
     var view = Model.sourceView(rec, root.activeSourceKey, root.nowSec, "")
-    return { id: view.id, label: view.label, host: view.host }
+    // D-SINK-98: the IPC status names the label as sourcesSummary does.
+    return { id: view.id, label: Model.sinkText(view.label), host: view.host }
   }
 
   // ------------------------------------------------------------ helpers

@@ -41,11 +41,39 @@ Window {
   readonly property bool wantChannels: host.scenario !== "firstrun"
   readonly property int scaleCount: host.scenario === "scale10k" ? 10000 : 3
 
-  property var sourceFixture: [
-    { key: "k1", label: "Provider", kind: "m3u", playlistUrl: host.playlistUrl,
-      epgUrl: "", addedAt: 1788000000, lastUsedAt: 1788900000,
-      channelCount: host.scaleCount, groupCount: 2 }
-  ]
+  // ---- D-SINK-97 / D-SINK-98 (the Sources scenarios) ----------------------
+  // The fake credentials are spelled from `q` and `z` alone, so a run of two
+  // of either letter anywhere on the bus is a piece of one. `typedPrefix` is
+  // a playlist URL typed up to, not including, its `@`; `typedEpg` a whole
+  // credentialed EPG URL typed and so revealed on screen; `storedPlaylist` a
+  // URL whose userinfo holds an unencoded `#`, opened in the edit form as a
+  // saved value; `credLabel` a label that is a credentialed URL the user
+  // pasted.
+  readonly property bool sourcesScenario: ["addtyped", "editstored", "sourcesrow", "removelabel"].indexOf(host.scenario) !== -1
+  readonly property string typedPrefix: "http://qqqqqq:zzzzzz"
+  readonly property string typedEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php?password=zzzzzz"
+  readonly property string storedPlaylist: "http://qqqqqq:zz#zz@cdn.test/x"
+  readonly property string cleanPlaylist: "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
+  readonly property string credLabel: "http://qqqqqq:zzzzzz@cdn.test/get.php"
+  // The record the service would hold, and its view built by the shipping
+  // Model.sourceView, so the row reads what the service would hand it. Its
+  // URL's RFC host is cdn.test, so what the rows grade is the label. The `#`
+  // URL is handed to the EDIT FORM alone (sourceForEdit, below): the state
+  // reader drops a record holding it (an invalid url), so no saved row can
+  // carry one, and the form's field is the sink the scenario is about.
+  readonly property var labelRecord: ({
+    key: "k9", url: host.cleanPlaylist,
+    epgUrl: "", kind: "http", label: host.credLabel, labelCustom: true, origin: "guide",
+    addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, channelCount: 3, groupCount: 2
+  })
+
+  property var sourceFixture: host.sourcesScenario
+    ? [Model.sourceView(host.labelRecord, "k9", 1789000000, "")]
+    : [
+      { key: "k1", label: "Provider", kind: "m3u", playlistUrl: host.playlistUrl,
+        epgUrl: "", addedAt: 1788000000, lastUsedAt: 1788900000,
+        channelCount: host.scaleCount, groupCount: 2 }
+    ]
 
   readonly property var channelFixture: {
     if (!host.wantChannels) return []
@@ -95,7 +123,7 @@ Window {
     property bool switching: false
     property var settingsInvalid: null
     property var sources: host.sourceFixture
-    property string activeSourceId: ""
+    property string activeSourceId: host.sourcesScenario ? "k9" : ""
     property string sourceHost: "prov.example"
     property var chnoIndex: null
     property int numberEntryMs: 1200
@@ -114,6 +142,9 @@ Window {
     function retrySource() {}
     function cancelProbe() {}
     function sourceForEdit(id) {
+      if (host.sourcesScenario)
+        return { label: host.labelRecord.label, epgUrl: host.labelRecord.epgUrl,
+                 playlistUrl: host.scenario === "editstored" ? host.storedPlaylist : host.labelRecord.url }
       return { label: "Provider", playlistUrl: host.playlistUrl, epgUrl: "" }
     }
     function buildXtreamSource() { return null }
@@ -191,6 +222,8 @@ Window {
       password: host.passwordValue,
       playlist: host.playlistUrl
     }
+    if (host.scenario === "addtyped") expected = { playlist: host.typedPrefix, epg: host.typedEpg }
+    else if (host.scenario === "editstored") expected = { label: host.credLabel, playlist: host.storedPlaylist }
     var ids = item.formFieldIds || []
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i]
@@ -216,6 +249,23 @@ Window {
       item.setFieldValue("server", host.serverPaste, true)
       item.setFieldValue("username", host.usernameValue, true)
       item.setFieldValue("password", host.passwordValue, true)
+    } else if (which === "addtyped") {
+      // D-SINK-97: typed by hand (typed: true, so revealed on screen), the
+      // playlist stopped before its `@` and the EPG whole.
+      item.openSources()
+      item.openAddForm()
+      item.setFieldValue("playlist", host.typedPrefix, true)
+      item.setFieldValue("epg", host.typedEpg, true)
+    } else if (which === "editstored") {
+      // D-SINK-97 / D-SINK-98: the edit form over the saved source, its
+      // playlist's userinfo holding a `#` and its label a credentialed URL.
+      item.openSources()
+      item.openEditForm()
+    } else if (which === "sourcesrow") {
+      item.openSources()
+    } else if (which === "removelabel") {
+      item.openSources()
+      item.startRemove()
     } else if (which === "query") {
       item.setQuery("bbc")
     } else if (which === "querynomatch") {

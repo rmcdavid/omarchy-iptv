@@ -231,8 +231,9 @@ function footerCounts(o) {
   if (str(o.lastUpdated) !== "") out += SEP + (o.stale ? "cached " + str(o.lastUpdated) + SEP + "offline" : "updated " + str(o.lastUpdated))
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
   // UX-SOURCES 5.3: with two or more saved sources the counts line carries
-  // the active source's label so a switch is visible at a glance.
-  if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = str(o.activeLabel) + SEP + out
+  // the active source's label so a switch is visible at a glance, through
+  // sinkText (D-SINK-98: a label may be a credentialed URL the user pasted).
+  if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = sinkText(str(o.activeLabel)) + SEP + out
   return out
 }
 

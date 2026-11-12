@@ -156,9 +156,48 @@ MUTATIONS = [
 
     ("password: its label is replaced by its value",
      "GuideProbe.qml",
-     "? root.fieldLabelText(fieldRow.fieldId)",
-     "? root.formValue(fieldRow.fieldId)",
+     "Accessible.description: Model.fieldAccessibleDescription(fieldRow.fieldId, root.fieldLabelText(fieldRow.fieldId))",
+     'Accessible.description: fieldRow.fieldId === "password" ? root.formValue(fieldRow.fieldId) : ""',
      ["xtream"]),
+
+    # D-SINK-97 and D-SINK-98: the Sources scenarios.
+    ("D-SINK-97: an address field's Description is its visual mask again",
+     "GuideProbe.qml",
+     "Accessible.description: Model.fieldAccessibleDescription(fieldRow.fieldId, root.fieldLabelText(fieldRow.fieldId))",
+     'Accessible.description: fieldRow.fieldId === "password" ? root.fieldLabelText(fieldRow.fieldId) : '
+     '(fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")',
+     ["sources"]),
+
+    ("D-SINK-97: an address field's Value is the visual mask again",
+     "Model.mjs",
+     "  if (ADDRESS_FIELDS.indexOf(id) !== -1) return addressAccessibleValue(value)\n",
+     "  if (ADDRESS_FIELDS.indexOf(id) !== -1 && /^[A-Za-z][A-Za-z0-9+.-]*:\\/\\//.test(value)) return maskUrl(value)\n"
+     "  if (ADDRESS_FIELDS.indexOf(id) !== -1) return addressAccessibleValue(value)\n",
+     ["sources"]),
+
+    ("D-SINK-98: the label field publishes the label raw",
+     "Model.mjs",
+     '  if (id === "label") return sinkText(value)\n',
+     '  if (id === "label") return value\n',
+     ["sources"]),
+
+    ("D-SINK-98: the Sources row draws and names the label raw",
+     "GuideProbe.qml",
+     "srow.source ? Model.sinkText(String(srow.source.label))",
+     "srow.source ? String(srow.source.label)",
+     ["sources"]),
+
+    ("D-SINK-98: the row's accessible name carries the raw label",
+     "Model.mjs",
+     'var out = sinkText(str(v.label)) + ", " + str(v.host)',
+     'var out = str(v.label) + ", " + str(v.host)',
+     ["sources"]),
+
+    ("D-SINK-98: the remove dialog quotes the raw label",
+     "Model.mjs",
+     "var quoted = QUOTE_OPEN + sinkText(str(label)) + QUOTE_CLOSE",
+     "var quoted = QUOTE_OPEN + str(label) + QUOTE_CLOSE",
+     ["sources"]),
 
     ("first run: the empty field reads back its placeholder as if it were content",
      "GuideProbe.qml",

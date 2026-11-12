@@ -151,6 +151,11 @@ TREE_FLOOR = {
     "querynomatch": 31,
     "scale10k": 50,
     "xtream": 42,
+    # D-SINK-97 / D-SINK-98, at their first run (2026-11-11).
+    "addtyped": 59,
+    "editstored": 59,
+    "sourcesrow": 53,
+    "removelabel": 53,
 }
 
 
@@ -600,6 +605,139 @@ def check_xtream():
           "%d of %d eye buttons publish checked=true" % (len(wrong), len(eyes)))
 
 
+# ---------------------------------------------------------------- sources form
+
+# D-SINK-97 and D-SINK-98: what the Sources form's address fields and its
+# label put on the bus, and every name composed from a label. host_guide.qml
+# holds the fixture; its credentials are spelled from `q` and `z` alone, so
+# a run of two of either letter on any node's Name, Description or Text is a
+# piece of one (nothing else these four scenarios publish holds `qq` or
+# `zz`; the querynomatch scenario's own query does, and is not read here).
+CRED_RUNS = ("qq", "zz")
+TYPED_PREFIX = "http://qqqqqq:zzzzzz"
+TYPED_EPG = "http://qqqqqq:zzzzzz@cdn.test/xmltv.php?password=zzzzzz"
+STORED_PLAYLIST = "http://qqqqqq:zz#zz@cdn.test/x"
+CRED_LABEL = "http://qqqqqq:zzzzzz@cdn.test/get.php"
+CLEAN_PLAYLIST = "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
+ELLIPSIS = "\u2026"
+
+
+def cred_leaks(nodes):
+    found = []
+    for n in nodes:
+        for field in ("name", "description", "text"):
+            value = n.get(field) or ""
+            if any(run in value for run in CRED_RUNS):
+                found.append("%s %r on its %s" % (n["role"], n.get("name") or "(unnamed)", field))
+    return found
+
+
+def field_node(nodes, name):
+    hits = pick(nodes, "text", name)
+    return hits[0] if len(hits) == 1 else None
+
+
+def check_field(cid, nodes, name, value, label):
+    """One field node: its Text is `value` and its Description is empty."""
+    node = field_node(nodes, name)
+    if node is None:
+        check(cid, False, label, "expected exactly one text node named %r, found %d"
+              % (name, len(pick(nodes, "text", name))))
+        return
+    text, desc = node.get("text") or "", node.get("description") or ""
+    # Printed through redact() (this log is a sink too), which can make a
+    # raw credentialed URL read as its host here; the flags say what the bus
+    # itself held.
+    check(cid, node.get("text") == value and not node.get("description"), label,
+          "publishes text %r and description %r (credential runs: text %s, description %s), "
+          "ruled %r and ''"
+          % (redact(text), redact(desc), any(r in text for r in CRED_RUNS),
+             any(r in desc for r in CRED_RUNS), value))
+
+
+def model_view_json():
+    """The view the host builds, asked of the shipping model (rule 12)."""
+    return ('M.sourceView({key: "k9", url: %s, epgUrl: "", kind: "http", label: %s, labelCustom: true, '
+            'origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, '
+            'channelCount: 3, groupCount: 2}, "k9", 1789000000, "")'
+            % (json.dumps(CLEAN_PLAYLIST), json.dumps(CRED_LABEL)))
+
+
+def check_sources():
+    # A playlist URL typed up to its `@`, and an EPG URL typed whole: both
+    # are revealed on screen, and the bus says scheme and host or stars.
+    nodes, rb = guide("addtyped")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-01", nodes, "Playlist URL or path", "*" * len(TYPED_PREFIX),
+                    "D-SINK-97: a URL typed up to its `@` is heard as stars, one per character, "
+                    "with no Description (its username and password were heard)")
+        check_field("L2-SRC-02", nodes, "EPG URL, optional", "http://****@cdn.test/" + ELLIPSIS,
+                    "D-SINK-97: a whole credentialed URL, typed and revealed, is heard as scheme, "
+                    "`****@` and host, with no Description")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-03", not leaked,
+              "D-SINK-97: nothing in the add form's tree carries a piece of the typed credential",
+              "; ".join(leaked))
+        intact = late.get("intact") or {}
+        check("L2-SRC-04", intact.get("playlist") is True and intact.get("epg") is True,
+              "the add form still holds what was typed, character for character",
+              "intact per field: %r" % intact)
+
+    # The edit form over a saved source whose userinfo holds a `#` and whose
+    # label is a credentialed URL.
+    nodes, rb = guide("editstored")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-05", nodes, "Playlist URL or path", "*" * len(STORED_PLAYLIST),
+                    "D-SINK-97: a stored URL whose userinfo holds an unencoded `#` is heard as "
+                    "stars, with no Description (the credential was heard in the host position)")
+        check_field("L2-SRC-06", nodes, "Label, optional", "cdn.test",
+                    "D-SINK-98: a label that is a credentialed URL is heard as its host")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-07", not leaked,
+              "D-SINK-97/98: nothing in the edit form's tree carries a piece of the stored credential",
+              "; ".join(leaked))
+        intact = late.get("intact") or {}
+        check("L2-SRC-08", intact.get("playlist") is True and intact.get("label") is True,
+              "the edit form still holds the stored values, character for character",
+              "intact per field: %r" % intact)
+
+    # The Sources row of a source whose label is a credentialed URL: its own
+    # name, and its edit and remove buttons'.
+    nodes, rb = guide("sourcesrow")
+    if nodes:
+        composed = model_says("M.sourceAccessibleName(%s)" % model_view_json())
+        row = check_one("L2-SRC-09", nodes, "list item", composed,
+                        "D-SINK-98: the Sources row is named by Model.sourceAccessibleName, the label "
+                        "said as its host")
+        check("L2-SRC-10", composed.startswith("cdn.test, cdn.test, ") and row is not None,
+              "D-SINK-98: the row's name opens with the label as its host (a literal witness "
+              "beside the composer)", "composed %r" % redact(composed))
+        buttons = [n["name"] for n in with_role(nodes, "push button")]
+        check("L2-SRC-11", "Edit cdn.test" in buttons and "Remove cdn.test" in buttons,
+              "D-SINK-98: the cursor row's edit and remove buttons name the label as its host",
+              "push buttons: %r" % [redact(b) for b in buttons])
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-12", not leaked,
+              "D-SINK-98: nothing in the Sources list's tree carries a piece of the label's credential",
+              "; ".join(leaked))
+
+    # The remove dialog for that source.
+    nodes, rb = guide("removelabel")
+    if nodes:
+        composed = model_says('M.confirmRemoveMessage(%s, true)' % json.dumps(CRED_LABEL))
+        literal = "Remove \u201ccdn.test\u201d? It is the active source; the guide returns to setup."
+        check("L2-SRC-13", composed == literal and len(pick(nodes, "dialog", literal)) == 1,
+              "D-SINK-98: the remove dialog names the label as its host (the composer, the literal "
+              "and the bus agree)",
+              "composed %r, dialogs %r" % (redact(composed), [redact(n["name"]) for n in with_role(nodes, "dialog")]))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-14", not leaked,
+              "D-SINK-98: nothing in the remove dialog's tree carries a piece of the label's credential",
+              "; ".join(leaked))
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -636,7 +774,8 @@ def main():
     only = set(sys.argv[1:])
     for name, fn in (("bar", check_bar), ("firstrun", check_firstrun),
                      ("banner", check_banner), ("query", check_query),
-                     ("scale", check_scale), ("xtream", check_xtream)):
+                     ("scale", check_scale), ("xtream", check_xtream),
+                     ("sources", check_sources)):
         if only and name not in only:
             continue
         fn()

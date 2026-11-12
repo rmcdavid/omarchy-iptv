@@ -2755,8 +2755,9 @@ Item {
     // is inside the pasted text (a tab in a password is refused by the
     // validator, never deleted into `pass`); a name field strips controls.
     // R33a: with the one stated exception -- a paste into a URL field joins
-    // its lines first (CR and LF removed, nothing else), so a URL a mail
-    // client wrapped is taken (Model.sanitizePasteInput).
+    // its lines first (its line terminators removed, nothing else; the
+    // seven of D-SINK-97), so a URL a mail client wrapped is taken
+    // (Model.sanitizePasteInput).
     var edit = Model.editInsert(value, range.start, range.end, Model.sanitizePasteInput(id, text, cap), cap)
     if (!edit.changed) return
     root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
@@ -4537,7 +4538,9 @@ Item {
                 readonly property var source: srow.isSource ? (root.sourceList[srow.index] || null) : null
                 readonly property bool hasCursor: srow.index === root.sourceCursor
                 readonly property bool active: !!(srow.source && srow.source.active)
-                readonly property string label: srow.source ? String(srow.source.label) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
+                // D-SINK-98: the label drawn and in the button names through
+                // Model.sinkText, so a pasted credentialed URL reads as its host.
+                readonly property string label: srow.source ? Model.sinkText(String(srow.source.label)) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
                 readonly property string detail: srow.source ? Model.sourceDetail(srow.source, root.narrow) : ""
                 readonly property string meta: srow.source && !root.narrow ? String(srow.source.lastUsedText) : ""
                 readonly property string leadGlyph: srow.isSource ? (srow.active ? Model.GLYPHS.check : "") : (srow.rowKind === "add" ? Model.GLYPHS.plus : Model.GLYPHS.key)
@@ -4938,6 +4941,8 @@ Item {
                 // which is Model.fieldAccessibleValue: masked whether or not
                 // the field is revealed, and nothing raises a text event for
                 // it. Read-only, so an assistive tool cannot write through it.
+                // D-SINK-97: an address field's Value is its scheme and host,
+                // a local path, or stars, and its Description is empty.
                 Item {
                   id: fieldA11y
                   readonly property string text: Model.fieldAccessibleValue(root.form, fieldRow.fieldId)
@@ -4952,10 +4957,11 @@ Item {
                   // was inert in both directions on Qt 6.11.2, measured twice
                   // independently, and left the password with NO label at all:
                   // it is not maskable, so this description resolved to the
-                  // empty string. It gets its label explicitly.
-                  Accessible.description: fieldRow.fieldId === "password"
-                    ? root.fieldLabelText(fieldRow.fieldId)
-                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  // empty string. It gets its label explicitly, and every
+                  // other field gets none (D-SINK-97: an address field's was
+                  // its visual mask, which carried what the Value carried, and
+                  // Qt raises a Description change as an event of its own).
+                  Accessible.description: Model.fieldAccessibleDescription(fieldRow.fieldId, root.fieldLabelText(fieldRow.fieldId))
                   Accessible.focusable: true
                   Accessible.focused: field.activeFocus
                 }

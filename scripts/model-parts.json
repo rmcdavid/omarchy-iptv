@@ -1050,7 +1050,13 @@
         "fieldMaskable",
         "fieldRevealed",
         "fieldMasked",
+        "ADDRESS_FIELDS",
         "fieldAccessibleValue",
+        "accessibleStars",
+        "hasAddressLineTerminator",
+        "addressAccessibleHost",
+        "addressAccessibleValue",
+        "fieldAccessibleDescription",
         "toggleReveal",
         "withFormReveal"
       ]
