@@ -174,8 +174,8 @@ export {
   URL_SPACE_CODES, isUrlSpaceAt, stripSpace, URL_DELIMITER_CODES,
   isUrlDelimiterAt, trailingPunctuationLength, SLASH_ALIKE_CODES,
   isSlashAlikeCode, isUrlFillerCode, isMarkStandInCode, urlAt, urlList,
-  redactionCanChange, credentialSpans, redactTokens, redactUrls, scrubUrls,
-  sinkText
+  redactionCanChange, SPACELESS_RANGES, isSpacelessCode, NAMED_SCHEMES,
+  credentialSpans, redactTokens, redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

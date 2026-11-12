@@ -73,16 +73,16 @@ class FixtureTest(unittest.TestCase):
     def test_the_fixture_is_ascii_and_whole(self):
         self.assertTrue(all(b < 0x80 for b in FIXTURE_BYTES))
         vectors = FIXTURE["vectors"]
-        self.assertGreaterEqual(len(vectors), 122)
+        self.assertGreaterEqual(len(vectors), 142)
         # Each half of the rule is there: broken marks that now redact,
         # tokens, the residuals, the accepted false positives, and the lines
         # the review of cbd6679 found changed that the caps keep.
         self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-95")]), 32)
-        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-96")]), 23)
+        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-96")]), 38)
         self.assertGreaterEqual(len([v for v in vectors if "residual" in v["why"]]), 17)
-        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("false positive")]), 10)
+        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("false positive")]), 16)
         self.assertGreaterEqual(len([v for v in vectors if "hand-written guide text" in v["why"]]), 19)
-        self.assertEqual(FIXTURE["fuzz"]["totals"], {"plain": 557, "deleting": 442, "fold": 557})
+        self.assertEqual(FIXTURE["fuzz"]["totals"], {"plain": 542, "deleting": 442, "fold": 542})
         self.assertEqual(len(FIXTURE["fuzz"]["leaks"]), 54)
 
     def test_every_vector_reads_as_the_fixture_says_at_every_helper_sink(self):
@@ -133,7 +133,9 @@ class FuzzTest(unittest.TestCase):
     BMP; here every 7th code point and all of ASCII are run (the node suite
     runs every BMP code unit against the same sets), so the two mirrors'
     leak sets are the fixture's. 0.18.0 leaked 1,142,679 of the 3,428,136
-    plain inputs; cbd6679, 567; this tree, 557."""
+    plain inputs; cbd6679, 567; 4d13d71, 557; this tree, 542 (the review of
+    4d13d71: a TAB, LF, VT, FF or CR in the userinfo's password no longer
+    leaks, the URL holding the colon and not the `@`)."""
 
     @classmethod
     def setUpClass(cls):
@@ -377,6 +379,134 @@ class CapsTest(unittest.TestCase):
 HOST_WITHHELD = helper.HOST_WITHHELD
 
 
+MODEL_SPACELESS = """
+const M = require("./Model.mjs")
+const out = []
+let open = -1
+for (let cp = 0; cp <= 0x110000; cp++) {
+  const s = cp <= 0x10ffff ? String.fromCodePoint(cp) : ""
+  const yes = cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff) && M.isSpacelessCode(cp) && !(cp <= 0xffff && M.isSlashAlikeCode(cp))
+  if (yes && open < 0) open = cp
+  if (!yes && open >= 0) { out.push([open, cp - 1]); open = -1 }
+}
+// And through the shipping cap: a surrogate pair is one code point.
+const P = String.fromCodePoint(0x1f600)
+process.stdout.write(JSON.stringify([out, [M.sinkText("q:z" + P + "z@h"), M.sinkText("q:z" + P + P + "z@h"),
+                                           M.sinkText("q:z" + String.fromCharCode(0xe9, 0xe9) + "z@h")]]))
+"""
+
+
+class SpacelessClassTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 0): the cap between a
+    credential's `:` and its `@` counted every COUNTED code point, so two
+    accented letters, two NBSP or two euro signs in a Latin, Cyrillic or
+    Greek password printed the whole credential at every sink of both
+    mirrors. It counts only the scripts written without spaces now, as
+    explicit ranges in both mirrors: here the helper's class
+    (_LAST_SPACELESS) and the model's (Model.isSpacelessCode, but the slash
+    look-alikes), over every code point, against each other and against the
+    lead's call as tests/url_reading_rule.py states it. Red on 4d13d71,
+    which has neither."""
+
+    def test_both_mirrors_count_the_same_code_points_and_the_rule_names_them(self):
+        def ranges(test):
+            out, start = [], -1
+            for c in range(0x110001):
+                yes = c <= 0x10FFFF and test(c)
+                if yes and start < 0:
+                    start = c
+                if not yes and start >= 0:
+                    out.append([start, c - 1])
+                    start = -1
+            return out
+        model, sinks = node(MODEL_SPACELESS, [])
+        helper_ranges = ranges(lambda c: not 0xD800 <= c <= 0xDFFF and helper._LAST_SPACELESS.match(chr(c)) is not None)
+        rule_ranges = ranges(lambda c: not 0xD800 <= c <= 0xDFFF and rule.spaceless(chr(c)))
+        self.assertEqual(helper_ranges, rule_ranges)
+        self.assertEqual(model, rule_ranges)
+        self.assertEqual(sinks, [HOST_WITHHELD, "q:z" + chr(0x1F600) * 2 + "z@h", HOST_WITHHELD])
+
+    def test_a_latin_password_is_withheld_and_a_han_one_is_the_stated_residual(self):
+        cases = [("Login user:p" + chr(0xE4) + "ssw" + chr(0xF6) + "rt@cdn.test", "Login " + HOST_WITHHELD),
+                 ("Login user:" + chr(0x5BC6) + chr(0x7801) + "@cdn.test", "Login user:" + chr(0x5BC6) + chr(0x7801) + "@cdn.test"),
+                 ("Login user:" + chr(0x5BC6) + "x@cdn.test", "Login " + HOST_WITHHELD)]
+        model = node(MODEL_SINKS, [t for t, _ in cases])
+        got = [(helper.redact_urls(t), helper.player_title_text(t), fold_redact(t), m[0]) for (t, _), m in zip(cases, model)]
+        self.assertEqual(got, [(w, w, w, w) for _, w in cases])
+
+
+class StoredSinkTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 1): a TAB, LF, VT, FF
+    or CR in the password of a URL's userinfo ended its run before the `@`,
+    so the plain sinks printed the username and the password's tail, the
+    fold turned the delimiter into a space and the guide stored
+    `http://qqqqqq zz@cdn.test/...`, while the scheme-less twin was withheld
+    everywhere. A colon a URL holds is a credential's when the URL's run
+    holds no `@` after it. Here the stored sinks: what clean_detail stores,
+    and what Model.sinkText shows of what clean_title stores. Red on
+    4d13d71: every case printed a letter of the credential there."""
+
+    CASES = ["News http://qqqqqq:zz\tzz@cdn.test/live/1.ts HD", "News http://qqqqqq:zz\nzz@cdn.test/live/1.ts HD",
+             "News rtmp://qqqqqq:zz\rzz@cdn.test/live/1.ts HD", "News http://\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD"]
+
+    def test_the_guide_stores_and_shows_the_credential_withheld(self):
+        titles = [helper.clean_title(t) for t in self.CASES]
+        shown = node(MODEL_SINKS, titles)
+        got = [(helper.clean_detail(t, helper.EPG_MAX_DESC), m[0]) for t, m in zip(self.CASES, shown)]
+        self.assertEqual(got, [("News " + HOST_WITHHELD + " HD", "News " + HOST_WITHHELD + " HD")] * 4)
+        # The cost, stated: a URL TAB-joined to a later word holding `@` is
+        # withheld with it.
+        self.assertEqual(helper.redact_urls("http://h.test:8080/x\tmail@x.test"), HOST_WITHHELD)
+
+
+class UsernameSweepTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 2): with a character
+    that is no scheme character in the username and a mark beside the
+    colon, the mark's P held the credential's colon, so the reading took the
+    username's last scheme segment for a URL's scheme and every sink of both
+    mirrors printed the username's head (`News qq_qqqq:<U+200B>//zzzzzz@
+    cdn.test HD` printed `News qq_cdn.test HD`). A URL with no named scheme,
+    after text in its token, with an `@` in its run and a `:` in its mark
+    or its run before that `@`, withholds the token. The review's sweep: the
+    25 printable ASCII characters that are neither scheme characters nor
+    `:`, `/`, `@` or a space, at five places in the username, before each of
+    ten marks; 1,250
+    inputs, every one printing the username's head on 4d13d71. And the
+    review's X// sweep with the mark BEFORE the colon (`qq_qqqq<X>//:zzzzzz
+    @...`), which the colon then opens the run of: every 7th BMP code point
+    for three such usernames, through the helper's three sinks and both of
+    the model's; 63,299 of 63,484 code points printed the username's head on
+    4d13d71 and on the lead's call as first written (a `:` in P only)."""
+
+    def test_no_sink_prints_the_username(self):
+        marks = ["", chr(0x200B), chr(0xE9), chr(0x301), chr(0xA0), chr(0x2028), chr(0x85), "\t", ":", chr(0xFF1A)]
+        texts = ["News " + "qqqqqq"[:k] + c + "qqqqqq"[k:] + ":" + x + "//zzzzzz@cdn.test/live/1.ts HD"
+                 for c in "!\"#$%&'()*,;<=>[\\]^_`{|}~" for k in range(1, 6) for x in marks]
+        self.assertEqual(len(texts), 1250)
+        model = node(MODEL_SINKS, texts)
+        bad = [(ascii(t), sink) for t, m in zip(texts, model)
+               for sink, out in (("redact_urls", helper.redact_urls(t)), ("player_title_text", helper.player_title_text(t)),
+                                 ("fold", fold_redact(t)), ("sinkText", m[0]), ("notifyArgv", m[1])) if leaks(out)]
+        self.assertEqual(bad[:4], [])
+
+    def test_no_sink_prints_the_username_when_the_mark_stands_before_the_colon(self):
+        texts = ["News " + user + chr(c) + "//:zzzzzz@cdn.test/live/1.ts HD" for user in ("qq_qqqq", "qq!qqqq", "qq~qqqq")
+                 for c in range(0x10000) if c % 7 == 0 and not 0xD800 <= c <= 0xDFFF and chr(c) not in "qzQZ"]
+        self.assertEqual(len(texts), 27213)
+        model = node(MODEL_SINKS, texts)
+        bad = [(ascii(t), sink) for t, m in zip(texts, model)
+               for sink, out in (("redact_urls", helper.redact_urls(t)), ("player_title_text", helper.player_title_text(t)),
+                                 ("fold", fold_redact(t)), ("sinkText", m[0]), ("notifyArgv", m[1])) if leaks(out)]
+        self.assertEqual(bad[:4], [])
+
+    def test_the_model_asks_the_helpers_named_schemes(self):
+        # Model.NAMED_SCHEMES is the helper's NAMED_SCHEMES, which the model
+        # prints none of and asks only here.
+        named = node('process.stdout.write(JSON.stringify(require("./Model.mjs").NAMED_SCHEMES))', [])
+        self.assertEqual(sorted(named), sorted(helper.NAMED_SCHEMES))
+        self.assertEqual(len(named), len(set(named)))
+
+
 class TokenSweepTest(unittest.TestCase):
     """The review of cbd6679 (its still-shows findings 1 and 2): `X//` with X
     any code point, inserted at every position of a scheme-less credential,
@@ -415,17 +545,23 @@ class TokenSweepTest(unittest.TestCase):
 
 def credential_holds_a_delimited_run(text):
     """Whether the text holds the residual the multi-insert sweep pins by
-    name: a URL inside a credential's span whose run a TAB, LF, VT, FF or CR
-    ends, as tests/url_reading_rule.py reads them (an empty run, most often).
-    The sinks that delete controls join that run to the password, so the URL
-    takes the credential's `:`, and the username's text before the URL's
-    scheme, or the URL's own run as a host, prints there while the plain
-    sinks withhold the credential: the six delimiters inside a URL's run
-    (R32a''', D-SINK-34), seen from the deleting side."""
-    urls = rule.urls(text)
-    for start, end, _ in rule.credentials(text, urls):
-        for url in urls:
-            if start <= url[0] < end and url[3] < len(text) and text[url[3]] in "\t\n\x0b\x0c\r":
+    name, as the review of 4d13d71 restated it: a URL whose run a TAB, LF,
+    VT, FF or CR ends, followed by text that is no delimiter, as
+    tests/url_reading_rule.py reads them (an empty run, most often). The
+    sinks that delete controls join that run to the text after it and print
+    that text's head as the host, credential text or not -- the username's
+    text before a URL's scheme when a credential holds the run, or the next
+    word (`News a://<TAB>qqqqqq:///x HD` prints `qqqqqq` there) -- while the
+    plain sinks withhold the credential or print `[url]`: the six delimiters
+    inside a URL's run (R32a''', D-SINK-34), seen from the deleting side.
+    The first version of this named only a URL inside a credential's span,
+    which is what the sweep's seed reached, not what the sinks do."""
+    for url in rule.urls(text):
+        end = url[3]
+        if end < len(text) and text[end] in "\t\n\x0b\x0c\r":
+            while end < len(text) and text[end] in "\t\n\x0b\x0c\r":
+                end += 1
+            if end < len(text) and text[end] != " ":
                 return True
     return False
 
@@ -473,9 +609,12 @@ class MultiInsertTest(unittest.TestCase):
 
     def test_the_invariants_hold_over_several_insertions(self):
         # The residual's own shapes, so its name is reached on every run.
-        residual = ["News qqqqq%qa:" + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test/live/1.ts HD",
-                    "News qqq;qqqa" + chr(0x2215) + "://\t:z.zzzzz@cdn.test/live/1.ts HD",
-                    "News qqqqq" + chr(0x1735) + "q" + chr(0x200b) + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test/live/1.ts HD"]
+        # (The review of 4d13d71 closed the three the first version named
+        # at the deleting sinks too, their URL's scheme being no named one
+        # after text in its token, and its seeds reached the last two.)
+        residual = ["News a://\nzzzzzz:///x HD",
+                    "News a://\tqqqqqq:///x HD",
+                    "News http&://cdn.test/live/qqqqa:" + chr(0x2215) * 2 + "\tqq:///zzzzzz/1.ts HD"]
         texts = multi_inputs(50000, 2026) + residual
         model = node(MODEL_SINKS, texts)
         bad = {}

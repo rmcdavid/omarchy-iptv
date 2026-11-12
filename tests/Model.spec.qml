@@ -1238,7 +1238,11 @@ TestCase {
     compare(Model.redactUrls("http://myuser:pa\u0085ss@h.test/x"), "h.test")
     compare(Model.redactUrls("x http://myuser:pa\u00a0ss@h.test/x y"), "x h.test y")
     compare(Model.redactUrls("http://myuser:pa\u2028ss@h.test/x"), "h.test")
-    compare(Model.redactUrls("http://myuser:pa\tss@h.test/x"), "myuser\tss@h.test/x")
+    // The review of 4d13d71: a tab ends the run before the `@`, so the URL
+    // holds the colon and not the `@`, and the token is withheld; a space
+    // still splits it (D-SINK-34).
+    compare(Model.redactUrls("http://myuser:pa\tss@h.test/x"), "[host withheld]")
+    compare(Model.redactUrls("http://myuser:pa ss@h.test/x"), "myuser ss@h.test/x")
     compare(Model.redactUrls("see http://h.test\u2028next"), "see h.test\u2028next")
     compare(Model.redactUrls("see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\"."), "see 'h.test', <a.test> and \"b.test\".")
     compare(Model.redactUrls("x http://[2001:db8::5]. y"), "x [2001:db8::5]. y")
@@ -1286,7 +1290,18 @@ TestCase {
       ["News http://:@qqqqqq:zzzzzz HD", "News [host withheld] HD"],
       ["Featuring://" + " The Band", "[url] The Band"],
       ["ESPN" + c(0xa0) + "//" + c(0xa0) + "HD", "ESPN" + c(0xa0) + "//" + c(0xa0) + "HD"],
-      ["UK: Sports", "UK: Sports"]
+      ["UK: Sports", "UK: Sports"],
+      // The review of 4d13d71: only the scripts written without spaces count
+      // between a credential's `:` and `@` (a surrogate pair one, two Han
+      // characters the stated residual); a URL whose run ends before its `@`
+      // holds the colon and not the `@`; a URL with no named scheme after
+      // text in its token, an `@` in its run and a `:` before it withholds it.
+      ["Login user:p" + c(0xe4) + "ssw" + c(0xf6) + "rt@cdn.test", "Login [host withheld]"],
+      ["Login user:" + c(0x5bc6) + c(0x7801) + "@cdn.test", "Login user:" + c(0x5bc6) + c(0x7801) + "@cdn.test"],
+      ["q:z" + c(0xd83d) + c(0xde00) + "z@h", "[host withheld]"],
+      ["q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h", "q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h"],
+      ["News http://qqqqqq:zz" + c(0x9) + "zz@cdn.test/x HD", "News [host withheld] HD"],
+      ["News qq_qqqq:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"]
     ]
     for (var i = 0; i < cases.length; i++) {
       compare(Model.redactUrls(cases[i][0]), cases[i][1], "redactUrls " + i)

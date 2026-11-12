@@ -87,12 +87,13 @@ def cut_reference(text, limit):
     """cut_free_text's rule for a group text, as stated (D-SINK-75, as the
     review of cbd6679 restated it): a cut that lands inside a space-run is
     kept, unless the run's first URL (url_reading_rule, from the run's
-    start) starts before it with its whole mark kept, or the run's
-    credential has its `@` past where the cut would end and its span
-    starting before it; then the cut drops back to that item's start, a
-    space just before it taken -- or to the last `;` that stands before the
-    run's first mark and its first `:` (when an `@` follows it), when that
-    is later -- and never ends in a `;`."""
+    start) starts before it with its whole mark kept, or the credential the
+    cut splits -- the run's first whose `:` stands after the last `@` the
+    cut keeps (the review of 4d13d71) -- has its span starting before it;
+    then the cut drops back to that item's start, a space just before it
+    taken -- or to the last `;` that stands before the run's first mark and
+    that credential's `:` (or, with none, the run's first `:` when an `@`
+    follows it), when that is later -- and never ends in a `;`."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
@@ -104,8 +105,8 @@ def cut_reference(text, limit):
     run_end = len(text) if run_end < 0 else run_end
     url = rule.first_url(text, low)
     bound = url[0] if url is not None and url[2] <= limit else limit
-    found = rule.credential(text, low, run_end, rule.urls(text, low))
-    if found is not None and found[1] >= bound and found[2] < bound:
+    found = rule.credential(text, low, run_end, rule.urls(text, low), max(low, text.rfind("@", low, bound) + 1))
+    if found is not None and found[2] < bound:
         bound = found[2]
     if bound == limit:
         return cut
@@ -113,7 +114,9 @@ def cut_reference(text, limit):
     mark = rule.mark_any(cut, low)
     keep = limit if mark < 0 else mark
     colon = text.find(":", low, run_end)
-    if colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
+    if found is not None:
+        keep = min(keep, found[0])
+    elif colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
         keep = min(keep, colon)
     semis = [i for i in range(low, keep) if cut[i] == ";"]
     if semis:

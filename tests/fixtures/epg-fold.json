@@ -2485,11 +2485,11 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (title) [the review of cbd6679: an empty run is a URL to both mirrors, so the helper prints `[redacted]` too, and a description stores that]",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (title) [the review of cbd6679: an empty run is a URL to both mirrors; the review of 4d13d71: the helper prints the model's `[url]` for it, so a description stores what the title shows]",
    "field": "title",
    "raw": "Featuring:\n// The Band",
    "stored": "Featuring:// The Band",
-   "helper": "[redacted] The Band",
+   "helper": "[url] The Band",
    "shell": "[url] The Band"
   },
   {
@@ -2764,12 +2764,12 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (description) [the review of cbd6679: an empty run is a URL to both mirrors, so the helper prints `[redacted]` too, and a description stores that]",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (description) [the review of cbd6679: an empty run is a URL to both mirrors; the review of 4d13d71: the helper prints the model's `[url]` for it, so a description stores what the title shows]",
    "field": "desc",
    "raw": "Featuring:\n// The Band",
-   "stored": "[redacted] The Band",
-   "helper": "[redacted] The Band",
-   "shell": "[redacted] The Band"
+   "stored": "[url] The Band",
+   "helper": "[url] The Band",
+   "shell": "[url] The Band"
   },
   {
    "kind": "ordinary",

@@ -510,10 +510,6 @@ def unique_label(label: str, existing: list[str]) -> str:
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
-# D-SINK-95: the run of `:`, FILLER and SLASH (every character but printable
-# ASCII, and `:` and `/`) a bare value's mark may go on through after the
-# whitespace that ended the value (parse_attrs).
-_MARK_REACH = re.compile(r"[^ -.0-9;-~]*")
 
 # Channel-number attributes, in precedence order (M2-03 1.1, ruling CN11).
 # `tvg-chno` is what every asset in this repo uses; the two aliases are read
@@ -593,7 +589,8 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
       before the value's end and the `@` that makes it one stands at or
       after it: the value then ends where the credential's span does, and
       a value that ran past its old end so is recorded in `past` as a URL's
-      is. The token's credential is asked once a token.
+      is. The token's credential is asked once a token, over one reading of
+      the line's URLs.
 
     Why: a URL takes the rest of its run (split_groups' shape, D-SINK-78),
     and that is what both redactors read as one URL: they end it only at the
@@ -639,7 +636,14 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     # (D-SINK-96, the bare branch below): a line holds no credential unless
     # it holds a `:` and an `@`.
     tokens = ":" in text and "@" in text
-    held: dict[int, tuple[int, int] | None] = {}
+    held: dict[int, tuple[int, int, int] | None] = {}
+    # The line's URLs, read once and only as far as a token asks (the
+    # review of 4d13d71): a reading made a token, from the token's start,
+    # read on to the next URL or the line's end for each, quadratic in a
+    # line of `a=x:y` attributes before an `@` (42.8 s on a 96,000-character
+    # #EXTINF line). A reading from the line's start finds the same URLs
+    # inside each token, since no walk, mark or run crosses a U+0020.
+    reading: UrlReading | None = None
     while pos < size:
         match = _ATTR_QUOTED.match(text, pos)
         if match is not None:
@@ -721,17 +725,27 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
                 # too (`http://qq<TAB>qqqq:zzzzzz@cdn.test/x`, D-SINK-34's
                 # class, which every redactor withholds whole since the
                 # credential is read across the URL): stored to the TAB, the
-                # value printed `qq` as its host.
+                # value printed `qq` as its host. Across a `,` the value grows
+                # only when a host follows the `@` it would take (host_shaped,
+                # the review of 4d13d71): growing on any `@` swallowed an
+                # ordinary title whose first word held one, and dropped the
+                # tvg-id before it (`tvg-id=uk:bbc1,KC@BUF 20:15` stored no
+                # tvg-id and the name `20:15`; `group-title=UK:Sports,NYY@BOS`
+                # lost its name), in 25 of 351 realistic names a form; a
+                # provider's credential names a host.
                 token_start = text.rfind(" ", 0, start) + 1
                 token_end = text.find(" ", end)
                 if token_end < 0:
                     token_end = size
                 if token_start not in held:
-                    found = token_credential(text, token_start, token_end, UrlReading(text, token_start, plain))
+                    if reading is None:
+                        reading = UrlReading(text, 0, plain)
+                    found = token_credential(text, token_start, token_end, reading)
                     held[token_start] = (None if found is None else
                                          (found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end])))
                 span = held[token_start]
-                if span is not None and span[0] >= grown and span[1] < grown < span[2]:
+                if (span is not None and span[0] >= grown and span[1] < grown < span[2]
+                        and (text[grown] != "," or host_shaped(text, span[0] + 1, token_end))):
                     grown = span[2]
             if grown != end:
                 # A bare value starts with no whitespace, so this is its
@@ -755,6 +769,35 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
         opens = False
         pos = end
     return attrs, text[pos:]
+
+
+_HOST_NAME_RUN = re.compile(r"[A-Za-z0-9.\-]*")
+_HOST_IPV6_RUN = re.compile(r"\[[0-9A-Fa-f:.]+\]")
+_HOST_PORT_RUN = re.compile(r":[0-9]+")
+
+
+def host_shaped(text: str, i: int, end: int) -> bool:
+    """Whether text[i:end] starts with a HOST and ends there or at a `/`,
+    `?`, `#` or `,`: two or more DNS labels whose last is letter-led and at
+    least two characters long, a dotted quad, or a bracketed IPv6 literal,
+    each with an optional `:` and digits. parse_attrs asks it of the text
+    after the `@` a bare value's growth across a `,` would take (the review
+    of 4d13d71): `qqqqqq:zz,zz@cdn.test,Name` grows, `UK:News,Sky@News HD`
+    does not. Reads one run of host characters from `i`, once a token."""
+    v6 = _HOST_IPV6_RUN.match(text, i, end)
+    if v6 is not None:
+        j = v6.end()
+    else:
+        j = _HOST_NAME_RUN.match(text, i, end).end()
+        labels = text[i:j].split(".")
+        quad = len(labels) == 4 and all(label.isdigit() and len(label) <= 3 for label in labels)
+        last = labels[-1]
+        if not quad and (len(labels) < 2 or not all(labels) or len(last) < 2 or not last[0].isalpha()):
+            return False
+    port = _HOST_PORT_RUN.match(text, j, end)
+    if port is not None:
+        j = port.end()
+    return j == end or text[j] in "/?#,"
 
 
 def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:

@@ -1008,38 +1008,34 @@
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\tzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a TAB in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a TAB in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u000bzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\u000bzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a VT in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a VT in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\fzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\fzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "an FF in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "an FF in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\rzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\rzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a CR in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a CR in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz\"zz@cdn.test/x\",Plain Title",
@@ -1056,8 +1052,7 @@
     "group-title": "http://qqqqqq:zz\tzz\"zz@cdn.test/x"
    },
    "title": "Plain Title",
-   "why": "a TAB before the quote: membership looks back to a space, so the URL is stored whole, and the plain redactors split it at the TAB",
-   "accepted": "D-SINK-34"
+   "why": "a TAB before the quote: membership looks back to a space, so the URL is stored whole; the plain redactors split it at the TAB until the review of 4d13d71, and withhold it whole since, the URL holding the colon and not the `@`"
   },
   {
    "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz@cdn.test/x\",Plain Title",

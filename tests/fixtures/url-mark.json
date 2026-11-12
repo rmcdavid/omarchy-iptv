@@ -284,13 +284,13 @@
    "py": "qqqqqq:zz zz@cdn.test"
   },
   {
-   "why": "accepted residual (R32a''', D-SINK-34): a TAB inside a URL's run is the one plain-versus-deleting difference left; the deleting sinks print the host ('cdn.test' / 'http://cdn.test') [0.18.0 the same]",
+   "why": "D-SINK-96 (the review of 4d13d71): a TAB inside a URL's password ends its run before the `@`, so the URL holds the colon and not the `@`, the token is a credential and every plain sink withholds it; the deleting sinks print the host [4d13d71 and 0.18.0 printed the username and the password's tail in the plain sinks, D-SINK-34's class]",
    "text": "http://qqqqqq:zz\tzz@cdn.test/x",
-   "js": "qqqqqq\tzz@cdn.test/x",
-   "py": "http://qqqqqq\tzz@cdn.test/x",
+   "js": "[host withheld]",
+   "py": "[host withheld]",
    "jsDeleting": "cdn.test",
    "pyDeleting": "http://cdn.test",
-   "pyFold": "http://qqqqqq zz@cdn.test/x"
+   "pyFold": "[host withheld]"
   },
   {
    "why": "residual: printable ASCII inside a mark with a path credential (printable ASCII is not 'odd'; keeps D-PERF-13 exact); with a userinfo the token arm withholds it [0.18.0 the same]",
@@ -374,10 +374,12 @@
    "py": "radio"
   },
   {
-   "why": "false positive: an empty run is a URL in both mirrors since the review of cbd6679 ('[url]', the helper's '[redacted]'), so the plain, deleting and folded sinks read one answer [0.18.0 unchanged; cbd6679 helper 'Featuring:<LF>// The Band', title and fold 'Featuring:// The Band']",
+   "why": "false positive: an empty run is a URL in both mirrors since the review of cbd6679 ('[url]', the helper's '[redacted]'), so the plain, deleting and folded sinks read one answer [0.18.0 unchanged; cbd6679 helper 'Featuring:<LF>// The Band', title and fold 'Featuring:// The Band'] [the review of 4d13d71: the helper prints the model's `[url]` for an empty run, so a stored description reads as the title]",
    "text": "Featuring:\n// The Band",
    "js": "[url] The Band",
-   "py": "[redacted] The Band"
+   "py": "[url] The Band",
+   "pyDeleting": "[url] The Band",
+   "pyFold": "[url] The Band"
   },
   {
    "why": "false positive: letter, filler, '://'; 'a' is no named scheme [0.18.0 unchanged; cbd6679 helper 'a://x']",
@@ -569,39 +571,39 @@
    "py": "News [host withheld] HD"
   },
   {
-   "why": "accepted residual (R32a''', D-SINK-34), one empty-run reading: a TAB right after the mark ends its run in the plain sinks, which print the path behind it; the deleting sinks read one run and print the host [cbd6679: helper withheld it, the model printed the path]",
+   "why": "D-SINK-96 (the review of 4d13d71): a TAB right after the mark gives an empty run, and the `@` after it is past the run, so the URL holds the colon and not the `@`, and the token is a credential every plain sink withholds; the deleting sinks read one run and print the host [4d13d71: the plain sinks printed the path behind the TAB, D-SINK-34's class; it stays for a path or query credential with no `@` after it]",
    "text": "News http://\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
-   "js": "News [url]\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
-   "py": "News http://[redacted]\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
    "jsDeleting": "News cdn.test HD",
    "pyDeleting": "News http://cdn.test HD",
-   "pyFold": "News http://[redacted] @cdn.test/live/qqqqqq/zzzzzz/1.ts HD"
+   "pyFold": "News [host withheld] HD"
   },
   {
-   "why": "accepted residual (R32a''', D-SINK-34): a TAB after an empty-run mark, and a path credential behind a second mark the walk cannot reach; the deleting sinks print the host [cbd6679: helper 'News a://cdn.test HD', model and fold the path]",
+   "why": "accepted residual (R32a''', D-SINK-34): a TAB after an empty-run mark, and a path credential behind a second mark the walk cannot reach; the deleting sinks print the host [cbd6679: helper 'News a://cdn.test HD', model and fold the path] [the review of 4d13d71: the helper prints the model's `[url]` for the empty run]",
    "text": "News a\u200b\u2215\u2215\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
    "js": "News [url]\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
-   "py": "News [redacted]\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "py": "News [url]\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
    "jsDeleting": "News [url] HD",
    "pyDeleting": "News [redacted] HD",
-   "pyFold": "News [redacted] :\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD"
+   "pyFold": "News [url] :\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD"
   },
   {
-   "why": "accepted residual (R32a''', D-SINK-34): the same with a query credential",
+   "why": "accepted residual (R32a''', D-SINK-34): the same with a query credential [the review of 4d13d71: the helper prints the model's `[url]` for the empty run]",
    "text": "News a\u200b\u2215\u2215\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
    "js": "News [url]\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
-   "py": "News [redacted]\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
+   "py": "News [url]\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
    "jsDeleting": "News [url] HD",
    "pyDeleting": "News [redacted] HD",
-   "pyFold": "News [redacted] :\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD"
+   "pyFold": "News [url] :\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD"
   },
   {
-   "why": "residual, stated (the review of cbd6679, from the multi-insert sweep): a URL inside a credential's span whose run a TAB, LF, VT, FF or CR ends (here an empty run): the plain sinks withhold the credential; the sinks that delete controls join the run to the password, the URL takes its `:`, and the username's text before the URL's scheme prints there (R32a''', D-SINK-34, from the deleting side) [cbd6679 the same in the deleting sinks; its model printed it in the plain ones too]",
+   "why": "residual, stated (the review of cbd6679, from the multi-insert sweep): a URL inside a credential's span whose run a TAB, LF, VT, FF or CR ends (here an empty run): the plain sinks withhold the credential; the sinks that delete controls join the run to the password, the URL takes its `:`, and the username's text before the URL's scheme prints there (R32a''', D-SINK-34, from the deleting side) [cbd6679 the same in the deleting sinks; its model printed it in the plain ones too] [the review of 4d13d71: the deleting sinks join the TAB away and read `qa:<U+2215><U+2215>` as a URL whose scheme is no named one, after text in its token, with a `:` in its P and an `@` in its run, and withhold the token]",
    "text": "News qqqqq%qa:\u2215\u2215\t:zzzzzz@cdn.test/live/1.ts HD",
    "js": "News [host withheld] HD",
    "py": "News [host withheld] HD",
-   "jsDeleting": "News qqqqq%cdn.test HD",
-   "pyDeleting": "News qqqqq%cdn.test HD"
+   "jsDeleting": "News [host withheld] HD",
+   "pyDeleting": "News [host withheld] HD"
   },
   {
    "why": "residual, stated (the review of cbd6679, from the multi-insert sweep): the same with a run that is not empty, which the deleting sinks join to the password, so the URL's run prints as its host",
@@ -624,10 +626,10 @@
    "py": "http\u00e9\u00e9[host withheld]"
   },
   {
-   "why": "residual, stated (the review of cbd6679, D-SINK-96's cap): two counted code points between the `:` and the `@` make no credential [0.18.0 the same]",
+   "why": "D-SINK-96 (the review of 4d13d71): only code points of the scripts written without spaces count against the cap between a credential's `:` and its `@`, so two accented letters make no difference and the token is withheld [4d13d71 printed it whole, residual 2]",
    "text": "qqqqqq:zz\u00e9\u00e9zz@cdn.test",
-   "js": "qqqqqq:zz\u00e9\u00e9zz@cdn.test",
-   "py": "qqqqqq:zz\u00e9\u00e9zz@cdn.test"
+   "js": "[host withheld]",
+   "py": "[host withheld]"
   },
   {
    "why": "residual, stated (D-SINK-96's cap): two counted code points inside the username start the span after them, and the head of the username prints [0.18.0 whole]",
@@ -773,6 +775,135 @@
    "js": "\u653e\u9001\u6642\u9593 21:00\u3000\u516c\u5f0f\uff38\u3000@nhk_pr",
    "py": "\u653e\u9001\u6642\u9593 21:00\u3000\u516c\u5f0f\uff38\u3000@nhk_pr",
    "pyFold": "\u653e\u9001\u6642\u9593 21:00 \u516c\u5f0f\uff38 @nhk_pr"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- accented letters in both halves -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "News j\u00fcrgen:m\u00fc\u00dfig@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- Cyrillic; the username's head before the last two counted code points still prints -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "Login \u043b\u043e\u0433\u0438\u043d:\u043f\u0430\u0440\u043e\u043b\u044c@cdn.test",
+   "js": "Login \u043b\u043e\u0433\u0438\u043d[host withheld]",
+   "py": "Login \u043b\u043e\u0433\u0438\u043d[host withheld]"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- a section and a pound sign -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "Login user:\u00a7ecret\u00a3@cdn.test",
+   "js": "Login [host withheld]",
+   "py": "Login [host withheld]"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- two accented letters -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "Login user:p\u00e4ssw\u00f6rt@cdn.test",
+   "js": "Login [host withheld]",
+   "py": "Login [host withheld]"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- two euro signs -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "Login user:pass\u20ac\u20ac@cdn.test",
+   "js": "Login [host withheld]",
+   "py": "Login [host withheld]"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): two characters above U+009F of a script written with spaces in a scheme-less password -- two NBSP -- no longer lift the cap, which counts only Han, kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms and astral code points [4d13d71 printed it whole at every sink]",
+   "text": "Login user:pa\u00a0ss\u00a0word@cdn.test",
+   "js": "Login [host withheld]",
+   "py": "Login [host withheld]"
+  },
+  {
+   "why": "residual, stated (the review of 4d13d71, D-SINK-96's cap): two code points of a script written without spaces between a credential's `:` and its `@` (a Han password) make no credential, and the WHOLE credential prints, username and password, at every sink of both mirrors",
+   "text": "Login user:\u5bc6\u7801@cdn.test",
+   "js": "Login user:\u5bc6\u7801@cdn.test",
+   "py": "Login user:\u5bc6\u7801@cdn.test"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a TAB inside a URL's password ends its run before the `@`, so the URL holds the colon and not the `@`, and the token is a credential every plain sink withholds, as its scheme-less twin was; the deleting sinks print the host [4d13d71 printed the username and the password's tail in the plain sinks]",
+   "text": "News http://qqqqqq:zz\tzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News cdn.test HD",
+   "pyDeleting": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a line feed inside a URL's password ends its run before the `@`, so the URL holds the colon and not the `@`, and the token is a credential every plain sink withholds, as its scheme-less twin was; the deleting sinks print the host [4d13d71 printed the username and the password's tail in the plain sinks]",
+   "text": "News http://qqqqqq:zz\nzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News cdn.test HD",
+   "pyDeleting": "News http://cdn.test HD"
+  },
+  {
+   "why": "false positive (the review of 4d13d71, the stated cost of a URL's colon read as a credential's when its run ends before the `@`): a URL TAB-joined to a later word holding `@` is withheld with it; the deleting sinks join the run and print the host",
+   "text": "http://h.test:8080/x\tmail@x.test",
+   "js": "[host withheld]",
+   "py": "[host withheld]",
+   "jsDeleting": "h.test",
+   "pyDeleting": "http://h.test"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a URL whose scheme is no named one, after text in its token, with a `:` in its mark's P and an `@` in its run, is a credential's username read as a scheme, and the token is withheld from its start (a non-scheme ASCII character in the username, a stand-in beside the colon) [4d13d71 printed the username's head before the host at every sink]",
+   "text": "News qq_qqqq:\u200b//zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a URL whose scheme is no named one, after text in its token, with a `:` in its mark's P and an `@` in its run, is a credential's username read as a scheme, and the token is withheld from its start (one counted code point in the username, one beside the colon) [4d13d71 printed the username's head before the host at every sink]",
+   "text": "News qq\u00e9q:\u00e9//zz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a URL whose scheme is no named one, after text in its token, with a `:` in its mark's P and an `@` in its run, is a credential's username read as a scheme, and the token is withheld from its start (the clean `://` form) [4d13d71 printed the username's head before the host at every sink]",
+   "text": "News qq_qqqq://zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "false positive (the lead's call under the owner's standing authority of 2026-11-09, the review of 4d13d71): the accepted cost of `abc:http://u:p@h` reaches a `Label:` glued to a URL whose path holds an `@`, withheld whole; counting only an `@` in the authority would print `qqqqqq:zz<X>//a/b@cdn.test`'s username",
+   "text": "Twitter:https://twitter.com/@BBCNews",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive (the lead's call under the owner's standing authority of 2026-11-09, the review of 4d13d71): the accepted cost of `abc:http://u:p@h` reaches a `Label:` glued to a URL whose query holds an `@`, withheld whole; counting only an `@` in the authority would print `qqqqqq:zz<X>//a/b@cdn.test`'s username",
+   "text": "Info:https://www.bbc.co.uk/contact?mail=tips@bbc.co.uk",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive (the review of 4d13d71, the one odd code point a stretch the caps leave): a list of single CJK characters behind an ASCII word reads as a URL, and its last item prints",
+   "text": "Audio:\u56fd/\u7ca4/\u82f1",
+   "js": "\u82f1",
+   "py": "\u82f1"
+  },
+  {
+   "why": "residual, stated (the review of 4d13d71, R32a''' D-SINK-34): a URL whose run a TAB ends joins the text after it at the sinks that delete controls, which print that text's head as the host, credential text or not, where the plain sinks print `[url]` for both empty-hosted URLs (the helper `[redacted]` for the second, whose run is `/x`)",
+   "text": "News a://\tqqqqqq:///x HD",
+   "js": "News [url]\t[url] HD",
+   "py": "News [url]\t[redacted] HD",
+   "jsDeleting": "News qqqqqq HD",
+   "pyDeleting": "News qqqqqq HD",
+   "pyFold": "News [url] [redacted] HD"
+  },
+  {
+   "why": "false positive (the review of 4d13d71): an empty run, or one of trailing punctuation alone, prints the model's `[url]` with no scheme in the helper too, so a stored description and a title read alike [4d13d71: the helper printed `file://[redacted]`]",
+   "text": "Use file:// instead.",
+   "js": "Use [url] instead.",
+   "py": "Use [url] instead."
+  },
+  {
+   "why": "false positive (the review of 4d13d71): an empty run, or one of trailing punctuation alone, prints the model's `[url]` with no scheme in the helper too, so a stored description and a title read alike [4d13d71: the helper printed `http://[redacted]`]",
+   "text": "(see http://).",
+   "js": "(see [url]).",
+   "py": "(see [url])."
+  },
+  {
+   "why": "D-SINK-96 (the review of 4d13d71): a URL whose scheme is no named one, after text in its token, with an `@` in its run and the credential's `:` opening that run, the mark before it, is a credential's username read as a scheme, and the token is withheld from its start (the lead's call named a `:` in P only; this is the nearest variant that closes this shape too) [4d13d71 printed the username's head before the host at every sink]",
+   "text": "News qq_qqqq\u200b//:zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
   }
  ],
  "fuzz": {
@@ -858,9 +989,9 @@
    ]
   },
   "totals": {
-   "plain": 557,
+   "plain": 542,
    "deleting": 442,
-   "fold": 557
+   "fold": 542
   },
   "leaks": {
    "userinfo@0": {
@@ -917,64 +1048,34 @@
    },
    "userinfo@14": {
     "plain": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ],
     "deleting": [
      32
     ],
     "fold": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ]
    },
    "userinfo@17": {
     "plain": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ],
     "deleting": [
      32
     ],
     "fold": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ]
    },
    "userinfo@20": {
     "plain": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ],
     "deleting": [
      32
     ],
     "fold": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ]
    },

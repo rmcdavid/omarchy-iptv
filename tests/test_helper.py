@@ -498,8 +498,10 @@ class SharedRedactionVectors(unittest.TestCase):
         """R32a''' (2026-10-22): a vector carrying `py` pins the EXACT helper
         output -- the restored sentence punctuation (`'`, `"`, `<`, `>`
         included, D-SINK-33) and the accepted costs that are seen rather
-        than described: D-SINK-34, a DELIMITER inside a password ends the
-        run, one split vector per delimiter and no other; D-SINK-35. Every
+        than described: D-SINK-34, a space inside a password ends the run,
+        one split vector and no other (since the review of 4d13d71 the other
+        five delimiters end it before the `@`, and the token is withheld
+        whole, one vector each); D-SINK-35. Every
         other union member inside a password has a vector asserting the
         HOST and never the username (D-SINK-36: under R32a'' this helper
         printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts`). The node
@@ -509,10 +511,16 @@ class SharedRedactionVectors(unittest.TestCase):
         bad = ["%s -> %r" % (v["why"], helper.redact_urls(v["text"])) for v in exact
                if helper.redact_urls(v["text"]) != v["py"]]
         self.assertEqual([], bad)
-        for ch in ["\t", "\n", "\x0b", "\x0c", "\r", " "]:
-            self.assertTrue(any(v.get("accepted") == "D-SINK-34" and "pa" + ch + "ss@" in v["text"] and v["host"] == "myuser"
-                                for v in exact), repr(ch))
-        self.assertEqual(6, sum(1 for v in exact if v.get("accepted") == "D-SINK-34"))
+        # The review of 4d13d71: a space is the one delimiter whose split
+        # still prints (D-SINK-34); the other five end the URL's run before
+        # its `@`, so the URL holds the colon and not the `@`, and the token
+        # is withheld whole.
+        self.assertTrue(any(v.get("accepted") == "D-SINK-34" and "pa ss@" in v["text"] and v["host"] == "myuser"
+                            for v in exact))
+        for ch in ["\t", "\n", "\x0b", "\x0c", "\r"]:
+            self.assertTrue(any("accepted" not in v and "pa" + ch + "ss@" in v["text"] and v["host"] == helper.HOST_WITHHELD
+                                and v["py"] == "Failed to open [host withheld]." for v in exact), repr(ch))
+        self.assertEqual(1, sum(1 for v in exact if v.get("accepted") == "D-SINK-34"))
         for ch in ["\ufeff", "\x85", "\x1c", "\x1d", "\x1e", "\x1f", "\u2028", "\xa0"]:
             self.assertTrue(any("accepted" not in v and "pa" + ch + "ss@" in v["text"] and v["host"] == "prov.test"
                                 and v["py"] == "Failed to open http://prov.test." and "myuser" in v["mustNotAppear"]

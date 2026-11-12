@@ -128,16 +128,45 @@ def deleted(text):
 def credential_before(source, cap):
     """What a cut at `cap` keeps of `source` when it loses the `@` of the
     credential in the run it cuts (url_reading_rule): the text before the
-    credential's span, a space just before it taken; or None."""
+    credential's span, a space just before it taken; or None. The
+    credential it cuts is the run's first whose `:` stands after the last
+    `@` the cut keeps -- before `cap`, or before the run's first URL when
+    the cut keeps that URL's whole mark and drops it (the review of
+    4d13d71: the run's FIRST credential, whose `@` a cut may keep, left the
+    next one's username to split_groups)."""
     if len(source) <= cap or source[cap] == " ":
         return None
     start = source.rfind(" ", 0, cap) + 1
     end = source.find(" ", cap)
     end = len(source) if end < 0 else end
-    found = rule.credential(source, start, end, rule.urls(source))
-    if found is None or found[1] < cap or found[2] >= cap:
+    url = rule.first_url(source, start)
+    bound = url[0] if url is not None and url[2] <= cap else cap
+    found = rule.credential(source, start, end, rule.urls(source), max(start, source.rfind("@", start, bound) + 1))
+    if found is None or found[2] >= bound:
         return None
     return source[:found[2] - 1 if found[2] > 0 and source[found[2] - 1] == " " else found[2]]
+
+
+def splits_before(source, cap, at):
+    """Whether a cut of `source` at `cap` splits a credential whose span
+    starts before `at` (credential_before)."""
+    kept = credential_before(source, cap)
+    return kept is not None and len(kept) < at
+
+
+def held_fold(text):
+    """fold_space inside a credential's withheld span, stated: the six
+    ASCII delimiters but the space become a TAB, the other controls it folds
+    are deleted, and the line and paragraph separators become U+00A0."""
+    out = []
+    for c in text:
+        if c in "\t\n\x0b\x0c\r":
+            out.append("\t")
+        elif c < " " or c in "\x7f\x85":
+            continue
+        else:
+            out.append("\xa0" if c in "\u2028\u2029" else c)
+    return "".join(out)
 
 
 def forms(cap, shapes, fold=False):
@@ -167,15 +196,23 @@ def forms(cap, shapes, fold=False):
         for pad in range(max(1, cap - len(url) - 3), cap + 2):
             for head, sep in (("N" * pad, " "), ((joined * pad)[:pad], " "), ("N" * pad, "\t")):
                 text = head + sep + url + " tail"
-                cut = (head + " " + kept_url + " tail" if fold else text)[:cap]
-                whole = kept_url if len(head) + 1 + len(kept_url) <= cap else ""
+                folded = head + " " + kept_url + " tail"
+                if fold and sep == "\t" and any(a <= len(head) < e for a, e, _ in rule.credentials(text)):
+                    # A TAB inside a credential's span stays (fold_space's
+                    # _fold_held): the URL after it, with no named scheme and
+                    # a userinfo, makes the TAB-joined token a credential
+                    # (the review of 4d13d71).
+                    folded = head + "\t" + held_fold(url) + " tail"
+                cut = (folded if fold else text)[:cap]
+                whole = (folded[len(head) + 1:-5] if fold else url)
+                whole = whole if len(head) + 1 + len(whole) <= cap else ""
                 if whole or "://" not in deleted(cut[len(head) + 1:]):
                     before = cut
                 elif cut[len(head)] == " ":
                     before = head
                 else:
                     before = ""
-                held = None if whole else credential_before(head + " " + kept_url + " tail" if fold else text, cap)
+                held = None if whole else credential_before(folded if fold else text, cap)
                 if held is not None:
                     before = held
                 out.append((text, (before.rstrip(), whole)))
@@ -435,6 +472,37 @@ class CutSweepTest(unittest.TestCase):
         self.assertEqual((parts > 4000, bad[:4]), (True, []))
 
 
+class SplitCredentialCutTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 3): the cut asked for
+    its run's FIRST credential, so a `;`-joined group text holding two,
+    cut inside the second, kept the first's `@` and did not drop back:
+    `qq:zz@a.test;qqqqqq:zzzzzz@cdn.test` cut at 26 kept
+    `qq:zz@a.test;qqqqqq:zzzzzz`, which split_groups split at its `;`, and
+    the group `qqqqqq:zzzzzz` printed at every sink. The cut drops back to
+    the span of the credential it splits -- the run's first whose `:`
+    stands after the last `@` it keeps -- and, with a separator, to the last
+    `;` before that credential's `:`. Red on 4d13d71."""
+
+    def test_a_cut_inside_the_second_credential_keeps_only_the_first_group(self):
+        text = "qq:zz@a.test;qqqqqq:zzzzzz@cdn.test"
+        self.assertEqual([helper.cut_free_text(text, limit, ";") for limit in (12, 13, 16, 20, 26)],
+                         ["", "qq:zz@a.test", "qq:zz@a.test", "qq:zz@a.test", "qq:zz@a.test"])
+        self.assertEqual(helper.split_groups(helper.cut_free_text(text, 26, ";")), ["qq:zz@a.test"])
+        # With no separator the whole run is the credential it splits.
+        self.assertEqual(helper.cut_free_text(text, 26), "")
+
+    def test_a_group_title_cut_at_its_cap_inside_the_second_credential(self):
+        title = "Sports " * 69 + "Live;qq:zz@a.test;qqqqqq:zzzzzz@cdn.test/live/1.ts"
+        self.assertEqual(len(title), 533)
+        doc = helper.parse_m3u('#EXTM3U\n#EXTINF:-1 group-title="%s",N\nhttp://stream.test/live/1.ts\n' % title)
+        groups = doc["channels"][0].get("groups", [doc["channels"][0]["group"]])
+        # The first group is its own cut at M3U_MAX_GROUP; 4d13d71 listed a
+        # third, `qqqqqq:zzzz`.
+        self.assertEqual((len(groups), groups[-1]), (2, "qq:zz@a.test"))
+        shown = [helper.redact_urls(g) for g in groups] + [helper.player_title_text(g) for g in groups]
+        self.assertEqual([g for g in shown if leaked(g)], [])
+
+
 class PlaylistCutTest(unittest.TestCase):
     """The name, the tvg-name, the group text and each group, cut at every
     offset of each URL shape, through parse_m3u."""
@@ -516,8 +584,14 @@ class PlaylistCutTest(unittest.TestCase):
             listed = [c.get("groups", [c["group"]]) for c in rows]
             self.assertTrue(all(gs[:4] == [ch * 100 for ch in "abcd"] for gs in listed))
             held_to_every_sink(self, [g for gs in listed for g in gs[4:]], helper.M3U_MAX_GROUP)
+            # The fifth group keeps what a cut of its own text keeps, unless
+            # the cut splits a credential whose span starts before it: a URL
+            # glued to the words before it, with no named scheme, behind
+            # the four groups in one token (the review of 4d13d71), whose
+            # cut drops back to the last `;` before its colon.
             held_to_every_sink(self, [gs[4] if len(gs) > 4 else "" for gs in listed], helper.M3U_MAX_GROUP,
-                               [k for _, k in cases])
+                               [("", "") if splits_before(head + t, helper.M3U_MAX_GROUP_TEXT, len(head)) else k
+                                for t, k in cases])
 
     def test_a_one_group_text_cut_after_a_url_keeps_its_group(self):
         text = "News http://cdn.test/live " + "W" * 600
@@ -612,9 +686,11 @@ class TitleCutTest(unittest.TestCase):
             self.assertGreater(len([v for v in stored if v]), len(cases) * 2 // 3, field)
             for value in stored:
                 self.assertEqual(leaked(value), [], (field, value[-60:]))
-            # What the cut keeps is stored as the helper redacts it.
-            held_to_every_sink(self, stored, cap, [(helper.redact_urls(before), helper.redact_urls(whole))
-                                                   for _, (before, whole) in cases])
+            # What the cut keeps is stored as the helper redacts it: the kept
+            # text, which holds the whole URL whenever one is kept, redacted
+            # in its place (a URL a credential's token holds is withheld with
+            # it, so it is not asked for alone; the review of 4d13d71).
+            held_to_every_sink(self, stored, cap, [(helper.redact_urls(before), "") for _, (before, _) in cases])
 
     def test_a_detail_the_redaction_lengthens_is_cut_again(self):
         # Each `a://b/c@d` is withheld whole (R32a'), which is six characters

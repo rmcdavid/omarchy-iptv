@@ -897,7 +897,15 @@ function nextUrlSlash(s, i, alike) {
 // its nearest ASCII word, and the text between the slashes could be any
 // number of characters, so a Chinese or Japanese guide line with an ASCII
 // word and, later, a slash list printed only its last item. The helper's
-// _WIDE_PAIR is the mirror.
+// _WIDE_PAIR is the mirror. What the caps leave, stated: one odd code point
+// a stretch still marks a URL, false positives the owner accepted
+// (2026-11-08) -- a name with one beside its `//` (`ESPN<U+200B>//<U+200B>HD`
+// prints `<U+200B>HD`), a list of single CJK, Korean or Cyrillic characters
+// behind an ASCII word (`Audio:<U+56FD>/<U+7CA4>/<U+82F1>` prints `<U+82F1>`,
+// `RU:<U+0420>/<U+0421>/<U+0424>` prints `<U+0424>`), and a fullwidth colon
+// glued to CJK prose (`file<U+FF1A>//<U+201D>...`), which prints the rest of
+// the paragraph, to the next ASCII space, as the host (the review of
+// 4d13d71).
 function wideCount(s, a, b) {
   var n = 0
   for (var i = a; i < b && n < 2; i++) {
@@ -950,7 +958,15 @@ function urlSchemeStart(s, at, low) {
 // same since the review of cbd6679 (it needed one character, so the plain,
 // deleting and folded sinks read different tokens around one). The scheme
 // is found before the run is read: reading the run first was quadratic on
-// `1://` repeated.
+// `1://` repeated. What a run a TAB, LF, VT, FF or CR ends leaves, empty or
+// not, stated (R32a''', D-SINK-34; the review of 4d13d71): sinkText prints
+// the text after it as text, so a path or query credential behind an empty
+// run prints (`http://<TAB>cdn.test/live/qqqqqq/...`) unless an `@` after it
+// makes the token a credential (eligibleColon); and the sinks that delete
+// controls (the notification, the helper's window title) join the run to
+// the text after it and print that text's head as the host, credential text
+// or not (`News a://<TAB>qqqqqq:///x HD` prints `News qqqqqq HD` there,
+// where sinkText prints `[url]` twice).
 function urlFrom(s, low, alike) {
   var n = s.length
   var dead = low
@@ -1043,22 +1059,58 @@ function urlHolding(urls, pos) {
   return i >= 0 && urls[i].runEnd > pos ? i : -1
 }
 
-// The first ASCII `:` in [lo, hi) that lies outside every URL span, or -1
-// (D-SINK-96: a colon a URL holds is that URL's).
+// The first ASCII `:` in [lo, hi) that is a credential's to take, or -1
+// (D-SINK-96): one outside every URL span, or one a URL holds whose run
+// holds no ASCII `@` after it. A colon whose `@` the same URL's run holds
+// is that URL's (`http://u:p@cdn.test/x`); but a URL whose run a TAB, LF,
+// VT, FF or CR ends before the `@` holds the colon and not the `@` (the
+// review of 4d13d71: `http://qqqqqq:zz<TAB>zz@cdn.test/x` printed `qqqqqq`
+// as its host, where its scheme-less twin was withheld). The cost, stated:
+// a URL TAB-joined to a later word holding `@` is withheld with it
+// (`http://h.test:8080/x<TAB>mail@x.test`). The helper's _eligible_colon is
+// the mirror.
 function eligibleColon(s, lo, hi, urls) {
   var c = s.indexOf(":", lo)
   while (c !== -1 && c < hi) {
     var i = urlHolding(urls, c)
     if (i === -1) return c
-    c = s.indexOf(":", urls[i].runEnd)
+    var at = s.indexOf("@", c + 1)
+    if (at === -1 || at >= urls[i].runEnd) return c
+    c = s.indexOf(":", at + 1)
   }
   return -1
 }
 
+// The code points the cap counts on a credential's PASSWORD side, between
+// its `:` and its `@` (the review of 4d13d71), as inclusive code point
+// ranges: the scripts written without spaces -- Han, the CJK symbols and
+// kana, Hangul, Thai, Lao, Myanmar, Khmer, the halfwidth and fullwidth
+// forms, and every astral code point -- with the three slash look-alikes
+// inside them (U+2F03, U+3033, U+FF0F) cut out, as COUNTED cuts them.
+// Counting every COUNTED code point there let two accented letters, two
+// NBSP or two euro signs in a Latin, Cyrillic or Greek password print the
+// whole credential. The helper's SPACELESS_RANGES is the mirror, held equal
+// over every code point.
+var SPACELESS_RANGES = [
+  [0x0e00, 0x0eff], [0x1000, 0x109f], [0x1100, 0x11ff], [0x1780, 0x17ff], [0x2e80, 0x2f02], [0x2f04, 0x2fdf],
+  [0x3000, 0x3032], [0x3034, 0x30ff], [0x3130, 0x318f], [0x31f0, 0x31ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff],
+  [0xa960, 0xa97f], [0xac00, 0xd7af], [0xd7b0, 0xd7ff], [0xf900, 0xfaff], [0xff00, 0xff0e], [0xff10, 0xffef],
+  [0x10000, 0x10ffff]]
+
+// Whether the code point `cp` is in SPACELESS_RANGES.
+function isSpacelessCode(cp) {
+  for (var r = 0; r < SPACELESS_RANGES.length; r++) {
+    if (cp < SPACELESS_RANGES[r][0]) return false
+    if (cp <= SPACELESS_RANGES[r][1]) return true
+  }
+  return false
+}
+
 // The ends of the last `want` COUNTED code points (above U+009F, no slash
-// look-alike, a surrogate pair one) in [lo, hi) outside every URL span, the
-// last first. The helper's _counted_ends is the mirror.
-function countedEnds(s, lo, hi, urls, want) {
+// look-alike, a surrogate pair one; with `spaceless`, only those
+// isSpacelessCode holds) in [lo, hi) outside every URL span, the last
+// first. The helper's _counted_ends is the mirror.
+function countedEnds(s, lo, hi, urls, want, spaceless) {
   var j = lastUrlBefore(urls, hi)
   var ends = []
   var top = hi
@@ -1073,11 +1125,16 @@ function countedEnds(s, lo, hi, urls, want) {
     for (var i = top - 1; i >= bottom && ends.length < want; i--) {
       var c = s.charCodeAt(i)
       if (c <= 0x9f || isSlashAlikeCode(c)) continue
-      ends.push(i + 1)
+      var end = i + 1
+      var cp = c
       if (c >= 0xdc00 && c <= 0xdfff && i - 1 >= bottom) {
         var h = s.charCodeAt(i - 1)
-        if (h >= 0xd800 && h <= 0xdbff) i--
+        if (h >= 0xd800 && h <= 0xdbff) {
+          i--
+          cp = 0x10000 + ((h - 0xd800) << 10) + (c - 0xdc00)
+        }
       }
+      if (!spaceless || isSpacelessCode(cp)) ends.push(end)
     }
     top = below
   }
@@ -1092,47 +1149,121 @@ function countedEnds(s, lo, hi, urls, want) {
 // redacted; the owner's decision (2026-11-08): withhold the shape, false
 // positives accepted (`Sport:Live@HD`, a `mailto:` address).
 //
-// The token holds a credential when an ASCII `:` OUTSIDE every URL span has
-// an ASCII `@` after it -- anywhere later in the token, a URL's run
-// included -- with at most one COUNTED code point (above U+009F, no slash
-// look-alike, a deleted control never) outside the URL spans between them.
-// The colon is the first such; the span starts at the token's start when
-// [ts, colon) holds at most one counted code point outside the URL spans,
-// and otherwise just after the last of them. Why each part:
+// The token holds a credential when an ASCII `:` that is a credential's
+// (eligibleColon: outside every URL span, or held by a URL whose run holds
+// no `@` after it) has an ASCII `@` after it -- anywhere later in the
+// token, a URL's run included -- with at most one code point of a script
+// written without spaces (COUNTED, and isSpacelessCode) outside the URL
+// spans between them. The colon is the first such; the span starts at the
+// token's start when [ts, colon) holds at most one COUNTED code point
+// (above U+009F, no slash look-alike, a deleted control never) outside the
+// URL spans, and otherwise just after the last of them. Why each part:
 //   - across URL spans: a mark the reading finds inside a password
 //     (`qqqqqq:zz<U+00E9>//zz@cdn.test`) started a URL inside the token, and
 //     the free piece before it held the `:` with no `@`, so every sink
 //     printed the username;
-//   - a colon a URL holds is the URL's: `http://u:p@cdn.test/x` is that
-//     URL's to print, and `abc:http://u:p@h/x` is withheld whole (the cost
-//     the lead accepted);
+//   - a colon whose `@` its own URL's run holds is that URL's:
+//     `http://u:p@cdn.test/x` is that URL's to print, and
+//     `abc:http://u:p@h/x` is withheld whole (the cost the lead accepted).
+//     That cost reaches past a userinfo, accepted too (the lead's call
+//     under the owner's standing authority of 2026-11-09): a `Label:` glued
+//     to a URL whose PATH or QUERY holds an `@` is withheld whole
+//     (`Twitter:https://twitter.com/@BBCNews`,
+//     `Info:https://www.bbc.co.uk/contact?mail=tips@bbc.co.uk`); counting
+//     only an `@` in the URL's authority would read
+//     `qqqqqq:zz<X>//a/b@cdn.test` as a URL with host `a` and print the
+//     username;
 //   - the cap: a space-less CJK description with a time and, later, a
 //     handle or an address was withheld whole; with it, a credential needs
-//     its `:` and `@` within one odd code point, and the prose before it
-//     keeps its text;
+//     its `:` and `@` within one such code point, and the prose before it
+//     keeps its text. It counts only the scripts written without spaces
+//     (the review of 4d13d71): counting every COUNTED code point let two
+//     accented letters, two NBSP or two euro signs in a Latin, Cyrillic or
+//     Greek password print the WHOLE credential;
 //   - the count skips URL text, so the odd characters of a mark inside the
-//     password (`qqqqqq:zz:<X>/<X>/zz@...`) do not count against it.
+//     password (`qqqqqq:zz:<X>/<X>/zz@...`) do not count against it;
+//   - and a URL in the token after text, with no NAMED scheme, an `@` in its
+//     run and a `:` in its mark or its run before that `@`, withholds the
+//     token from its start
+//     (unnamedSchemeCredential, the review of 4d13d71): its scheme is a
+//     username's tail, and its mark took the credential's colon.
 // Only U+0020 ends a token, so a TAB, a line break or NBSP inside one does
 // not split it, and the sinks that delete controls read the same tokens as
 // the plain ones; look-alike colons and at-signs do not count. What it
-// leaves, stated: a credential with two or more such code points between
-// its `:` and `@`, or before its `:` in the username, prints that much. The
-// helper's token_credential is the mirror.
+// leaves, stated: a credential with two or more code points of a script
+// written without spaces outside URLs between its `:` and its `@` is no
+// credential, and the WHOLE credential prints, username and password
+// (`qqqqqq:<U+5BC6><U+7801>@cdn.test`, a Han password); two or more COUNTED
+// code points before its `:` start the span after the last of them, so the
+// username's head prints before HOST_WITHHELD. The helper's
+// token_credential is the mirror.
 function tokenCredential(s, ts, te, urls) {
   var pos = ts
+  var held = unnamedSchemeCredential(s, ts, te, urls)
+  var found = null
   for (;;) {
     var colon = eligibleColon(s, pos, te, urls)
-    if (colon === -1) return null
+    if (colon === -1) break
     var at = s.indexOf("@", colon + 1)
-    if (at === -1 || at >= te) return null
-    var ends = countedEnds(s, colon + 1, at, urls, 2)
+    if (at === -1 || at >= te) break
+    var ends = countedEnds(s, colon + 1, at, urls, 2, true)
     if (ends.length === 2) {
       colon = eligibleColon(s, ends[1], at, urls)
       if (colon === -1) { pos = at + 1; continue }
     }
     var before = countedEnds(s, ts, colon, urls, 2)
-    return { colon: colon, at: at, start: before.length < 2 ? ts : before[0] }
+    found = { colon: colon, at: at, start: before.length < 2 ? ts : before[0] }
+    break
   }
+  if (held === null) return found
+  if (found === null || held.colon < found.colon) return { colon: held.colon, at: held.at, start: ts }
+  return { colon: found.colon, at: found.at, start: ts }
+}
+
+// The schemes the helper prints (its NAMED_SCHEMES, D-SINK-94), which
+// unnamedSchemeCredential asks; the model prints none. url-mark.json's
+// namedSchemes holds both lists to one.
+var NAMED_SCHEMES = ["acestream", "data", "file", "ftp", "ftps", "http", "https", "magnet", "mms", "mmsh", "mmst",
+                     "rtmp", "rtmpe", "rtmps", "rtmpt", "rtp", "rtsp", "sftp", "smb", "srt", "tcp", "tls", "udp"]
+
+// { colon, at } -- the first `:` of its mark or its run before the run's
+// first `@`, and that `@` -- for the first URL starting in the token
+// [ts, te) after `ts` whose scheme (its printable ASCII, lower-cased) is no
+// NAMED one, whose run holds an ASCII `@` and whose mark or run holds an
+// ASCII `:` before it; or null (the review of 4d13d71). Such a URL is a
+// credential's username read as a scheme: `qq_qqqq:<U+200B>//zzzzzz@
+// cdn.test` read `qqqq` as the scheme and its mark took the credential's
+// colon, and in `qq_qqqq<U+200B>//:zzzzzz@cdn.test` the colon opens the
+// run; every sink printed `qq_` before the host. The lead's call named a
+// `:` in P only; the run's `:` before its `@` is the nearest variant that
+// closes the second shape too, and it moved none of the 3,705 realistic
+// strings. With nothing before its scheme in the token it prints no username
+// (`qqqqqq://zzzzzz@cdn.test` prints `cdn.test`), and a named scheme is a
+// URL's (`1http://u:p@h` prints its host). tokenCredential withholds the
+// token from its start, as `abc:http://u:p@h` is. The helper's
+// _unnamed_scheme_credential is the mirror.
+//
+// Linear: the next `@` is searched for once and kept while the URLs pass it,
+// so no search reads past a run more than once, and each URL is walked for
+// its colon only up to that `@`, inside its own span.
+function unnamedSchemeCredential(s, ts, te, urls) {
+  var at = -2
+  for (var i = lastUrlBefore(urls, ts + 1) + 1; i < urls.length && urls[i].start < te; i++) {
+    var u = urls[i]
+    if (at !== -1 && at < u.markEnd) at = s.indexOf("@", u.markEnd)
+    if (at === -1) return null
+    if (at >= u.runEnd) continue
+    var colon = u.markStart
+    while (colon < at && s.charCodeAt(colon) !== 58) colon++
+    if (colon === at) continue
+    var scheme = ""
+    for (var k = u.start; k < u.markStart; k++) {
+      var c = s.charCodeAt(k)
+      if (c >= 0x20 && c <= 0x7e) scheme += s.charAt(k)
+    }
+    if (NAMED_SCHEMES.indexOf(scheme.toLowerCase()) === -1) return { colon: colon, at: at }
+  }
+  return null
 }
 
 // Every D-SINK-96 credential of `s`, given its URLs, as { start, end,
@@ -1334,7 +1465,8 @@ export {
   SLASH_ALIKE_CODES, SLASH_ALIKE_RE, isSlashAlikeCode, slashAlikeCut,
   isUrlSlashCode, isCrossableCode, isUrlFillerCode, isMarkStandInCode,
   nextUrlSlash, wideCount, urlSchemeStart, urlFrom, urlAt, urlList,
-  redactionCanChange, lastUrlBefore, urlHolding, eligibleColon, countedEnds,
-  tokenCredential, credentialSpans, redactTokens, urlShown, redactUrls,
-  scrubUrls, sinkText
+  redactionCanChange, lastUrlBefore, urlHolding, eligibleColon,
+  SPACELESS_RANGES, isSpacelessCode, countedEnds, tokenCredential,
+  NAMED_SCHEMES, unnamedSchemeCredential, credentialSpans, redactTokens,
+  urlShown, redactUrls, scrubUrls, sinkText
 }

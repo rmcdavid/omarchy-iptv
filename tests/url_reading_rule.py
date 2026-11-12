@@ -25,12 +25,19 @@ none is no URL. The run is from the mark's end to the first of the six
 delimiters, and may be empty.
 
 A credential is a token -- a run of characters other than U+0020 -- holding
-an ASCII `:` outside every URL span with an ASCII `@` after it in the token
-and at most one COUNTED code point (above U+009F, no slash look-alike)
+an ASCII `:` that is a credential's -- outside every URL span, or inside one
+whose run holds no `@` after it (the review of 4d13d71) -- with an ASCII `@`
+after it in the token and at most one code point of a script written
+without spaces (SPACELESS, the review of 4d13d71; no slash look-alike)
 outside the URL spans between them; the first such `:` decides. It is
 withheld from the token's start, or, when the token holds two or more
-counted code points outside the URL spans before that `:`, from just after
-the last of them, to the token's end less its trailing punctuation.
+COUNTED code points (above U+009F, no slash look-alike) outside the URL
+spans before that `:`, from just after the last of them, to the token's
+end less its trailing punctuation. And a URL starting in the token after
+its start, whose scheme (its printable ASCII, lower-cased) is no NAMED one,
+whose run holds an `@` and whose mark or run holds a `:` before that `@`,
+makes the token a credential withheld from its start (the review of
+4d13d71).
 """
 
 DELIMITERS = "\t\n\x0b\x0c\r "
@@ -41,6 +48,16 @@ SLASH_ALIKES = frozenset(map(chr, (0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27C
 SPACES_ABOVE_C1 = frozenset(map(chr, (0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F, 0x205F,
                                       0x3000, 0xFEFF)))
 TRAILING = ".,;:!?)]'\"<>"
+# The scripts written without spaces, as the review of 4d13d71's lead call
+# names them: Han, CJK symbols and kana, Hangul, Thai and Lao, Myanmar,
+# Khmer, the halfwidth and fullwidth forms, and every astral code point.
+SPACELESS = ((0x2E80, 0x2FDF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x3000, 0x30FF),
+             (0x31F0, 0x31FF), (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF),
+             (0xD7B0, 0xD7FF), (0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0xFF00, 0xFFEF),
+             (0x10000, 0x10FFFF))
+# The schemes the helper prints (D-SINK-94's list).
+NAMED = frozenset(("http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt", "file", "ftp", "ftps",
+                   "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"))
 WITHHELD = "[host withheld]"
 
 
@@ -78,6 +95,10 @@ def wide(c):
 
 def counted(c):
     return ord(c) > 0x9F and c not in SLASH_ALIKES
+
+
+def spaceless(c):
+    return counted(c) and any(a <= ord(c) <= b for a, b in SPACELESS)
 
 
 def scheme_start(text, at, low):
@@ -152,21 +173,45 @@ def trailing_keep(text):
     return k
 
 
-def credential(text, i, j, url_list):
+def credential(text, i, j, url_list, pos=None):
     """For the token text[i:j]: (its credential's `:`, that `:`'s `@`, the
-    withheld span's start), or None."""
-    def inside(x):
-        return any(u[0] <= x < u[3] for u in url_list)
-    for c in range(i, j):
-        if text[c] != ":" or inside(c):
+    withheld span's start), or None; with `pos`, the first whose `:` is at
+    or after `pos` (the span's start still judged from `i`)."""
+    lo = i if pos is None else pos
+
+    def holder(x):
+        for u in url_list:
+            if u[0] <= x < u[3]:
+                return u
+        return None
+
+    found = None
+    for c in range(lo, j):
+        if text[c] != ":":
+            continue
+        u = holder(c)
+        if u is not None and "@" in text[c + 1:u[3]]:
             continue
         a = text.find("@", c + 1, j)
         if a < 0:
-            return None
-        if sum(1 for x in range(c + 1, a) if counted(text[x]) and not inside(x)) <= 1:
-            before = [x for x in range(i, c) if counted(text[x]) and not inside(x)]
-            return c, a, (i if len(before) <= 1 else before[-1] + 1)
-    return None
+            break
+        if sum(1 for x in range(c + 1, a) if spaceless(text[x]) and holder(x) is None) <= 1:
+            before = [x for x in range(i, c) if counted(text[x]) and holder(x) is None]
+            found = (c, a, i if len(before) <= 1 else before[-1] + 1)
+            break
+    held = None
+    for u in url_list:
+        if i < u[0] < j and u[0] >= lo and "@" in text[u[2]:u[3]]:
+            at = text.index("@", u[2])
+            scheme = "".join(ch for ch in text[u[0]:u[1]] if " " <= ch <= "~").lower()
+            if ":" in text[u[1]:at] and scheme not in NAMED:
+                held = (text.index(":", u[1]), at)
+                break
+    if held is None:
+        return found
+    if found is None or held[0] < found[0]:
+        return held[0], held[1], i
+    return found[0], found[1], i
 
 
 def credentials(text, url_list=None):

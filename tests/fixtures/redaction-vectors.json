@@ -1,5 +1,5 @@
 {
- "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): the run and the authority end at the six ASCII delimiters -- space, tab, LF, CR, FF, VT (`delimiters` in tests/fixtures/url-whitespace.json) -- in both mirrors and at NOTHING else: every other whitespace or control code point is URL text, so a password holding U+FEFF, NBSP, U+2028, U+0085 or an information separator redacts to the HOST (under R32a'' the run ended at the 30-point union the READERS refuse, and each mirror took the other's worse case); `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost, confined to the six delimiters -- a space, a tab or a line break INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per delimiter; and one vector per non-ASCII union member asserts the HOST and never the username; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port. F-SINK-15 (2026-10-29): a DISPLAY sink's authority is hostPortOf's -- up to the first '/', '?' or '#', its userinfo at the LAST '@', whitespace or not -- so every vector whose text STARTS with a scheme is a display input too (sourceLabel and hostOf in the node suite, the helper's source_host in the python one), whitespace in its userinfo included; sourceLabel used to end the userinfo at JS whitespace as well and printed the username. D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL to both mirrors. The helper asked `\\b` of the scheme's start, so it found a start only at a letter that was the run's first character with no word character before the run, or that followed a `+`, `.` or `-` inside it; a run with neither (`1http`, `2024http`, or `http` right after `_` or any non-ASCII letter, digit or numeral) went out whole. The model never asked it. The vectors carry such runs alone, long, and after an earlier URL. The review of cbd6679 (2026-11-12): the helper prints `scheme://` only for a scheme NAMED_SCHEMES lists (D-SINK-94's sibling); for any other it prints what the model prints, so five D-SINK-74 vectors whose scheme took in the letters glued before it carry the bare host in `py` now.",
+ "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): the run and the authority end at the six ASCII delimiters -- space, tab, LF, CR, FF, VT (`delimiters` in tests/fixtures/url-whitespace.json) -- in both mirrors and at NOTHING else: every other whitespace or control code point is URL text, so a password holding U+FEFF, NBSP, U+2028, U+0085 or an information separator redacts to the HOST (under R32a'' the run ended at the 30-point union the READERS refuse, and each mirror took the other's worse case); `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost, confined to the six delimiters -- a space, a tab or a line break INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per delimiter; and one vector per non-ASCII union member asserts the HOST and never the username; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port. F-SINK-15 (2026-10-29): a DISPLAY sink's authority is hostPortOf's -- up to the first '/', '?' or '#', its userinfo at the LAST '@', whitespace or not -- so every vector whose text STARTS with a scheme is a display input too (sourceLabel and hostOf in the node suite, the helper's source_host in the python one), whitespace in its userinfo included; sourceLabel used to end the userinfo at JS whitespace as well and printed the username. D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL to both mirrors. The helper asked `\\b` of the scheme's start, so it found a start only at a letter that was the run's first character with no word character before the run, or that followed a `+`, `.` or `-` inside it; a run with neither (`1http`, `2024http`, or `http` right after `_` or any non-ASCII letter, digit or numeral) went out whole. The model never asked it. The vectors carry such runs alone, long, and after an earlier URL. The review of cbd6679 (2026-11-12): the helper prints `scheme://` only for a scheme NAMED_SCHEMES lists (D-SINK-94's sibling); for any other it prints what the model prints, so five D-SINK-74 vectors whose scheme took in the letters glued before it carry the bare host in `py` now. The review of 4d13d71 (2026-11-12): a tab, a line feed, a VT, an FF or a CR inside a password ends the run before the `@`, so the URL holds the colon and not the `@`, and both mirrors withhold the token whole; D-SINK-34's printed vectors are the space ones now, and the other five carry `[host withheld]`. And a URL whose scheme is no named one, after text in its token, with a `:` in its mark and an `@` in its run, withholds the token: four D-SINK-74 vectors carry `[host withheld]`.",
  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
  "vectors": [
   {
@@ -579,16 +579,17 @@
    "py": "Failed to open http://prov.test."
   },
   {
-   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a tab inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; under R32a'' every union member did this, and now only the six do",
+   "why": "R32a''' / D-SINK-34 (a tab inside the password), closed by the review of 4d13d71: the delimiter ends the RUN there in both mirrors, before the `@`, so the URL holds the colon and not the `@`, the token is a credential, and both mirrors withhold it whole where they printed the username and the password's tail; a space still splits the token (the next vector)",
    "text": "Failed to open http://myuser:pa\tss@prov.test/live/1.ts.",
-   "host": "myuser",
+   "host": "[host withheld]",
    "mustNotAppear": [
     ":pa",
-    "pa\t"
+    "pa\t",
+    "myuser",
+    "ss@"
    ],
-   "js": "Failed to open myuser\tss@prov.test/live/1.ts.",
-   "py": "Failed to open http://myuser\tss@prov.test/live/1.ts.",
-   "accepted": "D-SINK-34"
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
    "why": "R32a'' (D-SINK-33): ' inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `'ss@prov.test/live/1.ts`",
@@ -759,12 +760,12 @@
    "py": "see 'http://h.test', <http://a.test> and \"http://b.test\"."
   },
   {
-   "why": "R32a'': a run that is nothing but punctuation prints the empty-host token and the punctuation",
+   "why": "R32a'': a run that is nothing but punctuation prints the empty-host token and the punctuation [the review of 4d13d71: the helper prints the model's `[url]` with no scheme there too]",
    "text": "x http://. y",
    "host": "",
    "mustNotAppear": [],
    "js": "x [url]. y",
-   "py": "x http://[redacted]. y"
+   "py": "x [url]. y"
   },
   {
    "why": "R32a'': a bracketed literal keeps its `]` at a sentence end, and the `.` is put back",
@@ -788,52 +789,56 @@
    "py": "Failed to open http://prov.example.test."
   },
   {
-   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a line feed inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "why": "R32a''' / D-SINK-34 (a line feed inside the password), closed by the review of 4d13d71: the delimiter ends the RUN there in both mirrors, before the `@`, so the URL holds the colon and not the `@`, the token is a credential, and both mirrors withhold it whole where they printed the username and the password's tail; a space still splits the token (the next vector)",
    "text": "Failed to open http://myuser:pa\nss@prov.test/live/1.ts.",
-   "host": "myuser",
+   "host": "[host withheld]",
    "mustNotAppear": [
     ":pa",
-    "pa\n"
+    "pa\n",
+    "myuser",
+    "ss@"
    ],
-   "js": "Failed to open myuser\nss@prov.test/live/1.ts.",
-   "py": "Failed to open http://myuser\nss@prov.test/live/1.ts.",
-   "accepted": "D-SINK-34"
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a vertical tab inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "why": "R32a''' / D-SINK-34 (a vertical tab inside the password), closed by the review of 4d13d71: the delimiter ends the RUN there in both mirrors, before the `@`, so the URL holds the colon and not the `@`, the token is a credential, and both mirrors withhold it whole where they printed the username and the password's tail; a space still splits the token (the next vector)",
    "text": "Failed to open http://myuser:pa\u000bss@prov.test/live/1.ts.",
-   "host": "myuser",
+   "host": "[host withheld]",
    "mustNotAppear": [
     ":pa",
-    "pa\u000b"
+    "pa\u000b",
+    "myuser",
+    "ss@"
    ],
-   "js": "Failed to open myuser\u000bss@prov.test/live/1.ts.",
-   "py": "Failed to open http://myuser\u000bss@prov.test/live/1.ts.",
-   "accepted": "D-SINK-34"
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a form feed inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "why": "R32a''' / D-SINK-34 (a form feed inside the password), closed by the review of 4d13d71: the delimiter ends the RUN there in both mirrors, before the `@`, so the URL holds the colon and not the `@`, the token is a credential, and both mirrors withhold it whole where they printed the username and the password's tail; a space still splits the token (the next vector)",
    "text": "Failed to open http://myuser:pa\fss@prov.test/live/1.ts.",
-   "host": "myuser",
+   "host": "[host withheld]",
    "mustNotAppear": [
     ":pa",
-    "pa\f"
+    "pa\f",
+    "myuser",
+    "ss@"
    ],
-   "js": "Failed to open myuser\fss@prov.test/live/1.ts.",
-   "py": "Failed to open http://myuser\fss@prov.test/live/1.ts.",
-   "accepted": "D-SINK-34"
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a carriage return inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "why": "R32a''' / D-SINK-34 (a carriage return inside the password), closed by the review of 4d13d71: the delimiter ends the RUN there in both mirrors, before the `@`, so the URL holds the colon and not the `@`, the token is a credential, and both mirrors withhold it whole where they printed the username and the password's tail; a space still splits the token (the next vector)",
    "text": "Failed to open http://myuser:pa\rss@prov.test/live/1.ts.",
-   "host": "myuser",
+   "host": "[host withheld]",
    "mustNotAppear": [
     ":pa",
-    "pa\r"
+    "pa\r",
+    "myuser",
+    "ss@"
    ],
-   "js": "Failed to open myuser\rss@prov.test/live/1.ts.",
-   "py": "Failed to open http://myuser\rss@prov.test/live/1.ts.",
-   "accepted": "D-SINK-34"
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
    "why": "F-SINK-15: an ideographic space (U+3000) inside the password of a bare URL. Free text: URL text, not a delimiter (R32a'''), so the host prints. Display: sourceLabel ended its userinfo at JS whitespace and printed `http://u`, the username, where hostPortOf, validateSourceUrl and the helper's urllib read `cdn.test`",
@@ -984,52 +989,52 @@
    "py": "Failed to open http://a.test, then Sports_http://prov.test."
   },
   {
-   "why": "D-SINK-74: a digit before a scheme that holds a digit after its first letter (`1s3`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
+   "why": "D-SINK-74: a digit before a scheme that holds a digit after its first letter (`1s3`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does] [the review of 4d13d71: a URL whose scheme is no named one, after text in its token, with a `:` in its mark and an `@` in its run, is a credential's username read as a scheme, and the token is withheld whole]",
    "text": "Failed to open 1s3://u5er:p4ss@prov.test/live/1.ts.",
-   "host": "prov.test",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "u5er",
     "p4ss",
     "live/1.ts"
    ],
-   "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1prov.test."
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "D-SINK-74: `_` and a digit before an upper-case scheme that holds a digit (`_1A2HTTP`); the helper lowercases from the first letter [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
+   "why": "D-SINK-74: `_` and a digit before an upper-case scheme that holds a digit (`_1A2HTTP`); the helper lowercases from the first letter [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does] [the review of 4d13d71: a URL whose scheme is no named one, after text in its token, with a `:` in its mark and an `@` in its run, is a credential's username read as a scheme, and the token is withheld whole]",
    "text": "Failed to open _1A2HTTP://u5er:p4ss@prov.test/live/1.ts.",
-   "host": "prov.test",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "u5er",
     "p4ss",
     "live/1.ts"
    ],
-   "js": "Failed to open _1prov.test.",
-   "py": "Failed to open _1prov.test."
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "D-SINK-74: a digit before a scheme holding `.` (`1A.HTTP`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
+   "why": "D-SINK-74: a digit before a scheme holding `.` (`1A.HTTP`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does] [the review of 4d13d71: a URL whose scheme is no named one, after text in its token, with a `:` in its mark and an `@` in its run, is a credential's username read as a scheme, and the token is withheld whole]",
    "text": "Failed to open 1A.HTTP://u5er:p4ss@prov.test/live/1.ts.",
-   "host": "prov.test",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "u5er",
     "p4ss",
     "live/1.ts"
    ],
-   "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1prov.test."
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
-   "why": "D-SINK-74: `1a.b`, which the old helper rule redacted too (from its `b`): the start is the first letter now [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
+   "why": "D-SINK-74: `1a.b`, which the old helper rule redacted too (from its `b`): the start is the first letter now [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does] [the review of 4d13d71: a URL whose scheme is no named one, after text in its token, with a `:` in its mark and an `@` in its run, is a credential's username read as a scheme, and the token is withheld whole]",
    "text": "Failed to open 1a.b://u5er:p4ss@prov.test/live/1.ts.",
-   "host": "prov.test",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "u5er",
     "p4ss",
     "live/1.ts"
    ],
-   "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1prov.test."
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open [host withheld]."
   },
   {
    "why": "D-SINK-74: 300 digits before the scheme's only letters, past every window the run search doubles through to 256",

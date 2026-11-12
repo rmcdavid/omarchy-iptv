@@ -4254,9 +4254,15 @@ checkCall("R32a''': every vector carrying an exact `js` output gets it; there is
   const inPassword = function (v, ch) { return v.text.indexOf("pa" + ch + "ss@") >= 0 }
   return [exact.length >= 20,
           exact.filter(function (v) { return Model.redactUrls(v.text) !== v.js }).map(function (v) { return v.why + " -> " + JSON.stringify(Model.redactUrls(v.text)) }),
-          ["\t", "\n", "\u000b", "\u000c", "\r", " "].every(function (ch) {
-            return exact.some(function (v) { return v.accepted === "D-SINK-34" && inPassword(v, ch) && v.host === "myuser" }) }),
-          exact.filter(function (v) { return v.accepted === "D-SINK-34" }).length === 6,
+          // The review of 4d13d71: a space is the one delimiter whose split
+          // still prints (D-SINK-34); the other five end the URL's run before
+          // its `@`, so the URL holds the colon and not the `@`, and the
+          // token is withheld whole.
+          [" "].every(function (ch) {
+            return exact.some(function (v) { return v.accepted === "D-SINK-34" && inPassword(v, ch) && v.host === "myuser" }) })
+            && ["\t", "\n", "\u000b", "\u000c", "\r"].every(function (ch) {
+              return exact.some(function (v) { return v.accepted === undefined && inPassword(v, ch) && v.host === "[host withheld]" && v.js === "Failed to open [host withheld]." }) }),
+          exact.filter(function (v) { return v.accepted === "D-SINK-34" }).length === 1,
           ["\ufeff", "\u0085", "\u001c", "\u001d", "\u001e", "\u001f", "\u2028", "\u00a0"].every(function (ch) {
             return exact.some(function (v) { return v.accepted === undefined && inPassword(v, ch) && v.host === "prov.test" && v.js === "Failed to open prov.test." && v.mustNotAppear.indexOf("myuser") >= 0 }) }),
           ["'", "\"", "<", ">"].every(function (ch) { return exact.some(function (v) { return v.text.indexOf("pa" + ch + "ss@") >= 0 && v.host === "prov.test" }) }),
@@ -4368,7 +4374,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       if (deleting(v.text) !== wantDeleting) bad.push([v.why, "notifyReasonText", deleting(v.text)])
       if (!leaks(wantDeleting) && leaks(body(v.text))) bad.push([v.why, "notifyArgv", body(v.text)])
     })
-    return [marks.vectors.length >= 122, bad]
+    return [marks.vectors.length >= 142, bad]
   }, [true, []])
   checkCall("D-SINK-95: SLASH_ALIKE_CODES is the fixture's list, and over every code unit isSlashAlikeCode, isUrlFillerCode and isMarkStandInCode hold exactly where the rule recomputed from url-mark.json and url-whitespace.json says, and a CROSSABLE code unit between a scheme and a letterless segment before its `:` is crossed (Model.urlAt)", function () {
     const wrong = []
@@ -4404,14 +4410,24 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   checkCall("D-SINK-96 (as the review of cbd6679 restated it): Model.credentialSpans withholds a run of code units other than U+0020 across its URLs, from its start or after the last of two or more counted code points before its `:`, when a `:` outside every URL has an `@` after it with at most one counted code point outside the URLs between them", function () {
     const spans = function (s) { return Model.credentialSpans(s).map(function (h) { return [h.start, h.end, h.tokenEnd] }) }
     const E = String.fromCharCode(0xe9), C = String.fromCharCode(0x4e2d), P = String.fromCharCode(0xd83d, 0xde00)
+    const Z = String.fromCharCode(0x200b)
     return [spans("News qqqqqq:zz" + E + "//zz@cdn.test/x HD"), spans("http://u:p@cdn.test/x"), spans("abc:http://u:p@h"),
             spans("q:zz" + E + E + "zz@h"), spans(C + C + "qqq:z" + E + "z@h"), spans(P + P + "q:z@h."), spans("x:y z@w"),
             spans("(u:p@h)."), spans("a:b@[::1]"), spans("q:z:" + E + "/" + E + "/z@h"),
             // A surrogate pair is one code point: one between the `:` and the
             // `@`, or one in the username, is withheld with the credential.
-            spans("q:z" + P + "z@h"), spans(P + "qq:z@h")]
-  }, [[[5, 30, 30]], [], [[0, 16, 16]], [], [[2, 11, 11]], [[4, 9, 10]], [], [[0, 6, 8]], [[0, 9, 9]], [[0, 11, 11]],
-      [[0, 8, 8]], [[0, 8, 8]]])
+            spans("q:z" + P + "z@h"), spans(P + "qq:z@h"),
+            // The review of 4d13d71: only the scripts written without spaces
+            // count between the `:` and the `@` (two accented letters above
+            // are withheld, two Han characters are the stated residual); a
+            // colon a URL holds is a credential's when the URL's run holds no
+            // `@` after it; and a URL with no named scheme after text in its
+            // token, an `@` in its run and a `:` in its P or its run before
+            // that `@` withholds the token.
+            spans("q:zz" + C + C + "zz@h"), spans("http://q:z\tz@h/x"), spans("qq_qqqq:" + Z + "//zzzzzz@cdn.test"),
+            spans("1http://u:p@h/x"), spans("q:z" + P + P + "z@h")]
+  }, [[[5, 30, 30]], [], [[0, 16, 16]], [[0, 10, 10]], [[2, 11, 11]], [[4, 9, 10]], [], [[0, 6, 8]], [[0, 9, 9]], [[0, 11, 11]],
+      [[0, 8, 8]], [[0, 8, 8]], [], [[0, 16, 16]], [[0, 26, 26]], [], []])
   checkCall("D-SINK-96: Model.redactTokens withholds every credential token of a text read as free text, ended by U+0020 alone, with its trailing punctuation put back, and nothing else", function () {
     return [Model.redactTokens("News qqqqqq:zzzzzz@cdn.test/live/1.ts HD"), Model.redactTokens("(u:p@h)."), Model.redactTokens("a@b:c"),
             Model.redactTokens("u:p\t@h x"), Model.redactTokens("x:y z@w"), Model.redactTokens(":@"), Model.redactTokens("a:b@[::1]"),
@@ -4423,7 +4439,9 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   // the notification's body: the leak sets are the fixture's exactly, which
   // tests/test_url_marks.py holds the helper to as well, so the two mirrors
   // leak at the same inputs. 0.18.0 leaked 1,142,679 of the 3,428,136 plain
-  // inputs; cbd6679, 567; this tree, 557.
+  // inputs; cbd6679, 567; 4d13d71, 557; this tree, 542 (the review of
+  // 4d13d71: a TAB, LF, VT, FF or CR in the userinfo's password no longer
+  // leaks, the URL holding the colon and not the `@`).
   checkCall("D-SINK-95, D-SINK-96: the position fuzz -- every BMP code unit at 54 positions -- leaks exactly the fixture's sets through sinkText and through the notification's body: printable ASCII and the six delimiters only", function () {
     const fuzz = marks.fuzz
     const bad = []
@@ -4449,7 +4467,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       })
     })
     return [plain, del, bad.slice(0, 6)]
-  }, [557, 442, []])
+  }, [542, 442, []])
   // The review of cbd6679 (its still-shows findings 1 and 2): `X//` with X
   // any code unit, inserted at every position of a scheme-less credential,
   // started a URL inside it, so the token arm, which read only the text
@@ -4509,10 +4527,17 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       "x" + String.fromCharCode(0x200b, 0x2215, 0x2215), String.fromCharCode(0x200b, 0x2215, 0x2215) + "\t",
       "a:" + String.fromCharCode(0x2215, 0x2215) + "\t", "a" + String.fromCharCode(0x2215) + "://\t",
       String.fromCharCode(0xe9) + "//", ":" + String.fromCharCode(0xe9) + "/" + String.fromCharCode(0xe9) + "/"])
+    // The residual as the review of 4d13d71 restated it: a URL whose run a
+    // TAB, LF, VT, FF or CR ends, followed by text that is no delimiter; the
+    // deleting sinks join the run to that text and print its head as the
+    // host, credential text or not. The first version named only a URL
+    // inside a credential's span, which is what this seed reached.
     const named = function (s) {
-      const urls = Model.urlList(s)
-      return Model.credentialSpans(s, urls).some(function (h) {
-        return urls.some(function (u) { return h.start <= u.start && u.start < h.end && /^[\t\n\v\f\r]$/.test(s.charAt(u.runEnd)) })
+      return Model.urlList(s).some(function (u) {
+        let e = u.runEnd
+        if (!/^[\t\n\v\f\r]$/.test(s.charAt(e))) return false
+        while (/^[\t\n\v\f\r]$/.test(s.charAt(e))) e++
+        return e < s.length && s.charAt(e) !== " "
       })
     }
     let x = 2026
@@ -4521,8 +4546,10 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
     const bad = []
     // The residual's own shapes, so the name is reached on every run.
     const D2 = String.fromCharCode(0x2215, 0x2215), Z = String.fromCharCode(0x200b)
-    const residual = ["qqqqq%qa:" + D2 + "\t:zzzzzz@cdn.test/live/1.ts", "qqq;qqqa" + String.fromCharCode(0x2215) + "://\t:z.zzzzz@cdn.test/live/1.ts",
-                      "qqqqq" + String.fromCharCode(0x1735) + "q" + Z + D2 + "\t:zzzzzz@cdn.test/live/1.ts"]
+    // (The review of 4d13d71 closed the three the first version named at
+    // the deleting sinks too, and its seeds reached the last two.)
+    const residual = ["a://\nzzzzzz:///x", "a://\tqqqqqq:///x",
+                      "http&://cdn.test/live/qqqqa:" + D2 + "\tqq:///zzzzzz/1.ts"]
     for (let i = 0; i < 40000 + residual.length; i++) {
       let s = residual[i - 40000]
       if (i < 40000) {
@@ -4773,8 +4800,25 @@ function hostAsRuled(whole) {
 }
 // Every credential of `s` given the matches' spans, a code unit at a time:
 // [start, end, token end].
-function credentialsAsRuled(s, spans) {
+// The review of 4d13d71: the count between a credential's `:` and its `@`
+// is of the scripts written without spaces alone (these code point ranges,
+// spelt here and nowhere else, less the look-alikes); a `:` a match holds
+// is a credential's when the match's run holds no `@` after it; and a match
+// after the token's start whose scheme (its printable ASCII, lower-cased) is
+// none of these, with an `@` in its run and a `:` in its P or its run before
+// that `@`, withholds the token from its start.
+const SPACELESS_AS_RULED = [[0x2e80, 0x2fdf], [0x3400, 0x4dbf], [0x4e00, 0x9fff], [0xf900, 0xfaff], [0x3000, 0x30ff],
+  [0x31f0, 0x31ff], [0x1100, 0x11ff], [0x3130, 0x318f], [0xa960, 0xa97f], [0xac00, 0xd7af], [0xd7b0, 0xd7ff],
+  [0x0e00, 0x0eff], [0x1000, 0x109f], [0x1780, 0x17ff], [0xff00, 0xffef], [0x10000, 0x10ffff]]
+const NAMED_AS_RULED = ["http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt", "file", "ftp", "ftps",
+  "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"]
+function credentialsAsRuled(s, matches) {
+  const spans = matches.map(function (x) { return [x.index, x.index + x[0].length] })
   const outside = function (i) { return !spans.some(function (sp) { return sp[0] <= i && i < sp[1] }) }
+  const holder = function (i) {
+    for (let k = 0; k < matches.length; k++) if (spans[k][0] <= i && i < spans[k][1]) return k
+    return -1
+  }
   // Whether unit i starts a counted code point: above U+009F, no look-alike,
   // and not the low half of a pair.
   const counted = function (i) {
@@ -4788,24 +4832,36 @@ function credentialsAsRuled(s, spans) {
   while ((t = re.exec(s)) !== null) {
     const i = t.index
     const j = i + t[0].length
+    let start = -1
     for (let c = i; c < j; c++) {
-      if (s.charAt(c) !== ":" || !outside(c)) continue
+      if (s.charAt(c) !== ":") continue
+      const k = holder(c)
+      if (k !== -1 && s.substring(c + 1, spans[k][1]).indexOf("@") !== -1) continue
       const at = s.indexOf("@", c + 1)
       if (at === -1 || at >= j) break
       let n = 0
-      for (let x = c + 1; x < at; x++) if (counted(x)) n++
+      for (let x = c + 1; x < at; x++) {
+        if (!counted(x)) continue
+        const cp = s.codePointAt(x)
+        if (SPACELESS_AS_RULED.some(function (r) { return r[0] <= cp && cp <= r[1] })) n++
+      }
       if (n > 1) continue
       const before = []
       for (let x = i; x < c; x++) if (counted(x)) before.push(x)
-      let start = i
+      start = i
       if (before.length > 1) {
         const last = before[before.length - 1]
         const c0 = s.charCodeAt(last)
         start = last + (c0 >= 0xd800 && c0 <= 0xdbff && last + 1 < s.length && s.charCodeAt(last + 1) >= 0xdc00 && s.charCodeAt(last + 1) <= 0xdfff ? 2 : 1)
       }
-      out.push([start, j - trailingAsRuled(s.substring(start, j))[2].length, j])
       break
     }
+    if (matches.some(function (x) {
+      const scheme = x[1].replace(/[^ -~]/g, "").toLowerCase()
+      return x.index > i && x.index < j && x[4].indexOf("@") !== -1 && (x[2] + x[4].substring(0, x[4].indexOf("@"))).indexOf(":") !== -1 &&
+        NAMED_AS_RULED.indexOf(scheme) === -1
+    })) start = i
+    if (start !== -1) out.push([start, j - trailingAsRuled(s.substring(start, j))[2].length, j])
   }
   return out
 }
@@ -4820,7 +4876,7 @@ function asRuledParts(text) {
     matches.push(m)
     if (m[0].length === 0) URL_RUN_AS_RULED.lastIndex++
   }
-  const held = credentialsAsRuled(s, matches.map(function (x) { return [x.index, x.index + x[0].length] }))
+  const held = credentialsAsRuled(s, matches)
   let out = ""
   let pos = 0
   let wide = false

@@ -853,9 +853,34 @@ _MARK_STAND_IN = re.compile("[^\x00-\x9f" + _SPACE_ABOVE_C1 + SLASH_ALIKE_CHARS 
 # A pair of SLASHes with only FILLER between them, behind a run of `:` and
 # FILLER (the mark's P) that a SCHEME character or a look-alike precedes:
 # the only shape a mark the reading accepts can take, since the scheme walk
-# needs a letter before P, or a look-alike to cross.
-_URL_CANDIDATE = re.compile("[A-Za-z0-9+.\\-" + SLASH_ALIKE_CHARS + "]([^ -9;-~" + SLASH_ALIKE_CHARS
-                            + "]+)[/" + SLASH_ALIKE_CHARS + "][^ -~" + SLASH_ALIKE_CHARS + "]*[/"
+# needs a letter before P, or a look-alike to cross. Since the review of
+# 4d13d71 it takes only the candidates the reading could accept, so a run
+# of them it rejects costs one native search and not one Python step each
+# (`x:@` and `a!.<U+200B><U+2215><U+2215>` repeated took 0.6 s a million
+# characters in next_url, read whole by parse_attrs' quoted value): the
+# stretches of P between its colons, and the FILLER between the slashes,
+# each hold at most one WIDE code point (_WIDE_STRETCH, the caps next_url
+# also asks), and P stands after a SCHEME segment that holds a letter
+# (matched from its last letter), after a letterless one a CROSSABLE
+# character precedes, or after a look-alike that a SCHEME character or a
+# deleted control precedes -- the only segments a scheme walk can leave
+# with a letter. Each branch opens with a character class, so the engine
+# skips to the next possible lead natively. The same URLs: the url-mark
+# suite (dev branch) holds next_url to the reading stated one character at
+# a time, which asks every pair.
+_WIDE_STRETCH = "[\x00-\x1f\x7f-\x9f]*+(?:[^\x00-\x9f" + SLASH_ALIKE_CHARS + "][\x00-\x1f\x7f-\x9f]*+)?+"
+# The run of `:`, FILLER and SLASH (every character but printable ASCII, and
+# `:` and `/`) a mark may go on through: from a bare value's end
+# (parse_attrs, D-SINK-95), and from next_url's `stop`.
+_MARK_REACH = re.compile(r"[^ -.0-9;-~]*")
+# Two WIDE FILLER code points with only deleted controls between them: a
+# stretch no mark may hold (next_url's bound past its `stop`).
+_FILLER_WIDE_PAIR = re.compile("[^\x00-\x9f" + SLASH_ALIKE_CHARS + "][\x00-\x1f\x7f-\x9f]*+[^\x00-\x9f"
+                               + SLASH_ALIKE_CHARS + "]")
+_URL_CANDIDATE = re.compile("(?:[A-Za-z][0-9+.\\-]*+|[0-9+.\\-](?<=[^ -~][0-9+.\\-])[0-9+.\\-]*+|[" + SLASH_ALIKE_CHARS
+                            + "](?<=[A-Za-z0-9+.\\-\x00-\x1f\x7f-\x9f][" + SLASH_ALIKE_CHARS + "]))((?=[^ -9;-~"
+                            + SLASH_ALIKE_CHARS + "])" + _WIDE_STRETCH + "(?::"
+                            + _WIDE_STRETCH + ")*+)[/" + SLASH_ALIKE_CHARS + "]" + _WIDE_STRETCH + "[/"
                             + SLASH_ALIKE_CHARS + "]")
 # The run of SCHEME and CROSSABLE characters that ENDS at a given position,
 # by the window match _SCHEME_RUN_RE takes (D-PERF-6): the stretch a scheme
@@ -876,7 +901,16 @@ _CROSSABLE = re.compile("[^ -~]")
 # <CJK>/<CJK>` printed only its last word in both mirrors; with them that
 # reading needs two odd code points side by side, which no fuzz input the
 # round measured holds. Two wide code points with only deleted controls
-# between them are one stretch too wide (_WIDE_PAIR).
+# between them are one stretch too wide (_WIDE_PAIR). What the caps leave,
+# stated: one odd code point a stretch still marks a URL, false positives
+# the owner accepted (2026-11-08) -- a name with one beside its `//`
+# (`ESPN<U+200B>//<U+200B>HD` prints `<U+200B>HD`), a list of single CJK,
+# Korean or Cyrillic characters behind an ASCII word
+# (`Audio:<U+56FD>/<U+7CA4>/<U+82F1>` prints `<U+82F1>`, `RU:<U+0420>/
+# <U+0421>/<U+0424>` prints `<U+0444>`), and a fullwidth colon glued to CJK
+# prose (`file<U+FF1A>//<U+201D>...`), which prints the rest of the
+# paragraph, to the next ASCII space, as a lowercased host (the review of
+# 4d13d71).
 _WIDE_PAIR = re.compile("[^\x00-\x9f][\x00-\x1f\x7f-\x9f]*+[^\x00-\x9f]")
 # Where a scheme walk cannot pass: a printable character that is neither a
 # scheme character nor CROSSABLE, or the second of two wide code points in
@@ -891,6 +925,24 @@ _CREDENTIAL_TOKEN = re.compile("(?<![^ ])[^ :]*+:[^ @]*+@[^ ]*+")
 # `@`: above U+009F and no slash look-alike (D-SINK-96's cap, the review of
 # cbd6679); _LAST_COUNTED is the last one before a given position.
 _LAST_COUNTED = re.compile(".*[^\x00-\x9f" + SLASH_ALIKE_CHARS + "]", re.S)
+# The code points the cap counts on a credential's PASSWORD side, between its
+# `:` and its `@` (the review of 4d13d71): COUNTED code points of the scripts
+# written without spaces, where a sentence before a handle or an address is
+# one token -- Han, the CJK symbols and kana, Hangul, Thai, Lao, Myanmar,
+# Khmer, the halfwidth and fullwidth forms, and every astral code point --
+# with the three slash look-alikes inside these ranges (U+2F03, U+3033,
+# U+FF0F) cut out, as COUNTED cuts them. Counting every COUNTED code point
+# there let two accented letters, two NBSP or two euro signs in a Latin,
+# Cyrillic or Greek password print the whole credential at every sink of
+# both mirrors (`News j<U+00FC>rgen:m<U+00FC><U+00DF>ig@cdn.test/...`). The
+# username side still counts every COUNTED code point (_LAST_COUNTED).
+# Model.SPACELESS_RANGES is the mirror, held equal over every code point.
+SPACELESS_RANGES = (
+    (0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1100, 0x11FF), (0x1780, 0x17FF), (0x2E80, 0x2F02), (0x2F04, 0x2FDF),
+    (0x3000, 0x3032), (0x3034, 0x30FF), (0x3130, 0x318F), (0x31F0, 0x31FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF),
+    (0xA960, 0xA97F), (0xAC00, 0xD7AF), (0xD7B0, 0xD7FF), (0xF900, 0xFAFF), (0xFF00, 0xFF0E), (0xFF10, 0xFFEF),
+    (0x10000, 0x10FFFF))
+_LAST_SPACELESS = re.compile(".*[" + "".join(chr(a) + "-" + chr(b) for a, b in SPACELESS_RANGES) + "]", re.S)
 # fold_space's class inside a URL's scheme and mark: the line and
 # paragraph separators, which become RUN_REPLACEMENT there.
 _MARK_SEPARATORS = re.compile("[\U00002028\U00002029]")
@@ -944,6 +996,17 @@ def _scheme_start(text: str, at: int, low: int) -> int:
     return _ASCII_LETTER.search(text, span if crossed is None else crossed.end(), letter + 1).start()
 
 
+def _slash_at_or_after(text: str, at: int) -> int:
+    """The first SLASH (`/` or a look-alike) at or after `at`, or the
+    text's length: one native search for each, the look-alike's no further
+    than the `/`."""
+    slash = text.find("/", at)
+    if slash < 0:
+        slash = len(text)
+    alike = _SLASH_ALIKE.search(text, at, slash)
+    return slash if alike is None else alike.start()
+
+
 def next_url(text: str, search: int, resume: int, plain: bool | None = None,
              stop: int | None = None) -> tuple[int, int, int, int] | None:
     """D-SINK-95: the first URL the redactors read in `text` at or after
@@ -954,7 +1017,10 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
     and FILLER ending at the pair's first slash, never reaching below
     `resume`, and the pair is a MARK when P holds a `:` or a STAND_IN and
     each FILLER stretch of P between its colons holds at most one WIDE code
-    point (the caps, _WIDE_PAIR; the review of cbd6679). The mark starts at
+    point (the caps, _WIDE_STRETCH in _URL_CANDIDATE; the review of
+    cbd6679), and only a pair whose P stands where a scheme walk can leave
+    with a letter is a candidate at all (_URL_CANDIDATE, the review of
+    4d13d71; exact, since every other walk finds none). The mark starts at
     P and ends after the pair's second slash. Its scheme is found by
     _scheme_start, never below the later of `resume` and the start of the
     last P whose walk found none (the dead bound, which keeps the walk
@@ -971,7 +1037,16 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
     scheme for an empty run moved no bound, which was quadratic on `a` and
     `<U+200B><U+2215><U+2215><TAB>` repeated (13 s at 40,001 characters).
     The scheme is found before the run is read: reading the run first was
-    quadratic on `1://` repeated.
+    quadratic on `1://` repeated. What a run a TAB, LF, VT, FF or CR ends
+    leaves, empty or not, stated (R32a''', D-SINK-34; the review of
+    4d13d71): the plain sinks print the text after it as text, so a path
+    or query credential behind an empty run prints there
+    (`http://<TAB>cdn.test/live/qqqqqq/...`) unless an `@` after it makes
+    the token a credential (_eligible_colon); and the sinks that delete
+    controls (the window title, the notification) join the run to the text
+    after it and print that text's head as the host, credential text or not
+    (`News a://<TAB>qqqqqq:///x HD` prints `News qqqqqq HD` there, where
+    the plain sinks print `[url]` twice).
 
     `plain` is whether the text is printable ASCII (asked once a text by
     the caller, or here): there no FILLER, STAND_IN or look-alike can
@@ -1000,8 +1075,40 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
             j = text.find("://", j + 1)
         return None
     dead = resume
+    # With `stop`, the candidates are searched for no further than the
+    # first of: the second SLASH at or after it, the end of the run of `:`,
+    # FILLER and SLASH that starts at it (_MARK_REACH), and the end of the
+    # first pair of wide FILLER code points in that run (_FILLER_WIDE_PAIR).
+    # A candidate whose P starts at or before `stop` ends at one of those
+    # slashes, inside that run, holding no such pair (the caps), so the
+    # search finds it, and the first one it finds past `stop` ends the
+    # reading as it would have. Without that end the search read on to the
+    # text's end once candidates the reading rejects were no longer
+    # candidates (the review of 4d13d71).
+    end = len(text)
+    if stop is not None:
+        end = min(end, _slash_at_or_after(text, _slash_at_or_after(text, stop) + 1) + 1)
+        end = _MARK_REACH.match(text, stop, end).end()
+        pair = _FILLER_WIDE_PAIR.search(text, stop, end)
+        end = max(stop + 1, end if pair is None else pair.end())
+    asked = -1
+    first = 0
     while True:
-        found = _URL_CANDIDATE.search(text, search)
+        if asked != dead:
+            # A walk finds a scheme only from an ASCII letter at or after its
+            # bound, so no candidate whose lead stands before the first such
+            # letter is asked, and with none the reading is done (the
+            # review's shortcut, asked before the search since the review of
+            # 4d13d71: once _URL_CANDIDATE stopped taking the candidates no
+            # walk accepts, the search read on to the text's end where the
+            # first rejected one had ended it). Asked again only when the
+            # bound moves, so the stretches it reads are disjoint.
+            asked = dead
+            letter = _ASCII_LETTER.search(text, dead, end)
+            if letter is None:
+                return None
+            first = letter.start()
+        found = _URL_CANDIDATE.search(text, max(search, first), end)
         if found is None:
             return None
         mark, slash = found.span(1)
@@ -1013,20 +1120,8 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
         search = mark
         if text.find(":", mark, slash) < 0 and _MARK_STAND_IN.search(text, mark, slash) is None:
             continue
-        if (_WIDE_PAIR.search(text, mark, slash) is not None
-                or _WIDE_PAIR.search(text, slash + 1, mark_end - 1) is not None):
-            continue
-        if _ASCII_LETTER.search(text, dead, mark) is None:
-            # No letter for this walk, back to its bound: it finds none, and
-            # so does every candidate whose P starts at or before the next
-            # letter, which the search goes on from.
-            dead = mark
-            letter = _ASCII_LETTER.search(text, mark)
-            if letter is None:
-                return None
-            if letter.start() > search:
-                search = letter.start()
-            continue
+        # The caps (a WIDE pair in a stretch of P, or between the slashes)
+        # are _URL_CANDIDATE's own since the review of 4d13d71.
         start = _scheme_start(text, mark, dead)
         if start < 0:
             dead = mark
@@ -1079,12 +1174,22 @@ class UrlReading:
     """next_url's URLs of `text` from `low`, in order, read only as far as a
     caller asks (need): credential_spans asks which URL holds a position,
     and cut_free_text asks no further than the token it judges. `starts`
-    holds each URL's scheme start, for bisect."""
+    holds each URL's scheme start, for bisect. `stop`, when given, ends the
+    reading at the first mark past it, as next_url's own `stop` does: a
+    caller that judges only [low, reach) passes the first walk barrier at or
+    after `reach`, since no URL whose mark starts past one has its scheme
+    start before it (cut_free_text; the review of 4d13d71 measured its
+    credential's reading going on to the text's end, 2.1 s on a 4 MB
+    description)."""
 
-    def __init__(self, text: str, low: int, plain: bool | None = None, whole: bool = False) -> None:
+    def __init__(self, text: str, low: int, plain: bool | None = None, whole: bool = False,
+                 stop: int | None = None) -> None:
         self.text = text
         self.low = low
         self.plain = text.isascii() and text.isprintable() if plain is None else plain
+        # Passed to next_url: the reading ends at the first mark that starts
+        # past it (cut_free_text, the review of 4d13d71).
+        self.stop = stop
         self.urls: list[tuple[int, int, int, int]] = []
         self.starts: list[int] = []
         self.done = False
@@ -1096,7 +1201,7 @@ class UrlReading:
         urls = self.urls
         while not self.done and (not urls or urls[-1][0] <= pos):
             low = urls[-1][3] if urls else self.low
-            url = next_url(self.text, low, low, self.plain)
+            url = next_url(self.text, low, low, self.plain, self.stop)
             if url is None:
                 self.done = True
             else:
@@ -1112,22 +1217,38 @@ class UrlReading:
 
 
 def _eligible_colon(text: str, lo: int, hi: int, reading: UrlReading) -> int:
-    """The first ASCII `:` in [lo, hi) that lies outside every URL span, or
-    -1 (D-SINK-96: a colon a URL holds is that URL's)."""
+    """The first ASCII `:` in [lo, hi) that is a credential's to take, or -1
+    (D-SINK-96): one outside every URL span, or one a URL holds whose run
+    holds no ASCII `@` after it. A colon whose `@` the same URL's run holds
+    is that URL's, so `http://u:p@cdn.test/x` is the URL's to print. But a
+    URL whose run a TAB, LF, VT, FF or CR ends before the `@` holds the
+    colon and not the `@` (the review of 4d13d71):
+    `http://qqqqqq:zz<TAB>zz@cdn.test/x` printed `qqqqqq` as its host in the
+    plain sinks, and `qqqqqq` and the password's tail in the folded and
+    stored ones, where its scheme-less twin was withheld; that colon is the
+    credential's now, and the token is withheld whole. The cost, stated: a
+    URL TAB-joined to a later word holding `@` is withheld with it
+    (`http://h.test:8080/x<TAB>mail@x.test`). Each `@` is searched for once,
+    in the run after a colon, and the search goes on after it."""
     colon = text.find(":", lo, hi)
     while colon >= 0:
         i = reading.holding(colon)
         if i < 0:
             return colon
-        colon = text.find(":", reading.urls[i][3], hi)
+        at = text.find("@", colon + 1, reading.urls[i][3])
+        if at < 0:
+            return colon
+        colon = text.find(":", at + 1, hi)
     return -1
 
 
-def _counted_ends(text: str, lo: int, hi: int, reading: UrlReading, want: int) -> list[int]:
+def _counted_ends(text: str, lo: int, hi: int, reading: UrlReading, want: int,
+                  last: "re.Pattern[str]" = _LAST_COUNTED) -> list[int]:
     """The ends of the last `want` COUNTED code points (above U+009F, no
-    slash look-alike) in [lo, hi) that lie outside every URL span, the last
-    first. Walks the stretches between the URLs from the right, each with
-    one native match a code point found."""
+    slash look-alike; or, with `last` _LAST_SPACELESS, of the scripts
+    written without spaces) in [lo, hi) that lie outside every URL span,
+    the last first. Walks the stretches between the URLs from the right,
+    each with one native match a code point found."""
     reading.need(hi)
     urls = reading.urls
     j = bisect.bisect_left(reading.starts, hi) - 1
@@ -1141,7 +1262,7 @@ def _counted_ends(text: str, lo: int, hi: int, reading: UrlReading, want: int) -
         else:
             bottom = below = lo
         while bottom < top and len(ends) < want:
-            found = _LAST_COUNTED.match(text, bottom, top)
+            found = last.match(text, bottom, top)
             if found is None:
                 break
             ends.append(found.end())
@@ -1150,54 +1271,124 @@ def _counted_ends(text: str, lo: int, hi: int, reading: UrlReading, want: int) -
     return ends
 
 
-def token_credential(text: str, ts: int, te: int, reading: UrlReading) -> tuple[int, int, int] | None:
+def token_credential(text: str, ts: int, te: int, reading: UrlReading,
+                     pos: int | None = None) -> tuple[int, int, int] | None:
     """D-SINK-96 for the token [ts, te) (a run of characters other than
-    U+0020), as the review of cbd6679 restated it: (its credential's colon,
-    that colon's `@`, where the withheld span starts), or None.
+    U+0020), as the reviews of cbd6679 and 4d13d71 restated it: (its
+    credential's colon, that colon's `@`, where the withheld span starts),
+    or None. `pos`, when given, asks for the first credential whose colon
+    is at or after it (cut_free_text reads a token's credentials in turn);
+    the span's start is still judged from `ts`.
 
-    The token holds a credential when an ASCII `:` OUTSIDE every URL span
-    has an ASCII `@` after it -- anywhere later in the token, a URL's run
-    included -- with at most one COUNTED code point (above U+009F, no slash
-    look-alike, a deleted control never) outside the URL spans between
-    them. The colon is the first such; the span starts at the token's start
-    when [ts, colon) holds at most one counted code point outside the URL
-    spans, and otherwise just after the last of them, so a sentence of CJK
-    prose before a credential keeps its text. Why each part:
+    The token holds a credential when an ASCII `:` that is a credential's
+    (_eligible_colon: outside every URL span, or held by a URL whose run
+    holds no `@` after it) has an ASCII `@` after it -- anywhere later in
+    the token, a URL's run included -- with at most one code point of a
+    script written without spaces (_LAST_SPACELESS: COUNTED, and Han, kana,
+    Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms or astral)
+    outside the URL spans between them. The colon is the first such; the
+    span starts at the token's start when [ts, colon) holds at most one
+    COUNTED code point (above U+009F, no slash look-alike, a deleted
+    control never) outside the URL spans, and otherwise just after the last
+    of them, so a sentence of CJK prose before a credential keeps its text.
+    Why each part:
     - across URL spans, not only the free pieces between them: a mark the
       reading finds inside a password (`qqqqqq:zz<U+00E9>//zz@cdn.test`)
       started a URL inside the token, so the piece before it held the `:`
       with no `@`, and every sink printed the username;
-    - a colon a URL holds is the URL's, so `http://u:p@cdn.test/x` is that
-      URL's to print, and `abc:http://u:p@h/x` is withheld whole (the cost
-      the lead accepted);
-    - the cap (the review's changes-too-much finding): a space-less CJK
-      description holding a time and, later, a handle or an address
-      (`<CJK>20:00<CJK>...@<CJK>`) was withheld whole; with it, a
-      credential needs its `:` and `@` within one odd code point of each
-      other;
+    - a colon whose `@` its own URL's run holds is that URL's, so
+      `http://u:p@cdn.test/x` is that URL's to print, and
+      `abc:http://u:p@h/x` is withheld whole (the cost the lead accepted).
+      That cost reaches past a userinfo, accepted too (the lead's call under
+      the owner's standing authority of 2026-11-09): a `Label:` glued to a
+      URL whose PATH or QUERY holds an `@` is withheld whole
+      (`Twitter:https://twitter.com/@BBCNews`,
+      `Info:https://www.bbc.co.uk/contact?mail=tips@bbc.co.uk`); counting
+      only an `@` in the URL's authority would read
+      `qqqqqq:zz<X>//a/b@cdn.test` as a URL with host `a` and print the
+      username;
+    - the cap (the review of cbd6679's changes-too-much finding): a
+      space-less CJK description holding a time and, later, a handle or an
+      address (`<CJK>20:00<CJK>...@<CJK>`) was withheld whole; with it, a
+      credential needs its `:` and `@` within one such code point of each
+      other. It counts only the scripts written without spaces (the review
+      of 4d13d71): counting every COUNTED code point let two accented
+      letters, two NBSP or two euro signs in a Latin, Cyrillic or Greek
+      password print the WHOLE credential;
     - the count skips URL text, so the odd characters of a mark inside the
-      password (`qqqqqq:zz:<X>/<X>/zz@...`) do not count against it.
-    What it leaves, stated: a credential with two or more such code points
-    between its `:` and `@`, or before its `:` in the username, prints that
-    much (the username's ASCII tail is still withheld in the second case).
+      password (`qqqqqq:zz:<X>/<X>/zz@...`) do not count against it;
+    - and a URL in the token after text, with no NAMED scheme, an `@` in its
+      run and a `:` in its mark or its run before that `@`, withholds the
+      token from its start
+      (_unnamed_scheme_credential, the review of 4d13d71): its scheme is a
+      username's tail, and its mark took the credential's colon.
+    What it leaves, stated: a credential with two or more code points of a
+    script written without spaces outside URLs between its `:` and its `@`
+    is no credential, and the WHOLE credential prints, username and
+    password (`qqqqqq:<U+5BC6><U+7801>@cdn.test`, a Han password); two or
+    more COUNTED code points before its `:` start the span after the last
+    of them, so the username's head prints before HOST_WITHHELD.
     Model.tokenCredential is the mirror. Each `@` is asked once, from the
     first eligible colon after the last one, so the work is linear."""
-    pos = ts
+    if pos is None:
+        pos = ts
+    held = _unnamed_scheme_credential(text, ts, te, reading, pos)
+    found = None
     while True:
         colon = _eligible_colon(text, pos, te, reading)
         if colon < 0:
-            return None
+            break
         at = text.find("@", colon + 1, te)
         if at < 0:
-            return None
-        ends = _counted_ends(text, colon + 1, at, reading, 2)
+            break
+        ends = _counted_ends(text, colon + 1, at, reading, 2, _LAST_SPACELESS)
         if len(ends) == 2:
             colon = _eligible_colon(text, ends[1], at, reading)
             if colon < 0:
                 pos = at + 1
                 continue
         before = _counted_ends(text, ts, colon, reading, 2)
-        return colon, at, (ts if len(before) < 2 else before[0])
+        found = colon, at, (ts if len(before) < 2 else before[0])
+        break
+    if held is None:
+        return found
+    if found is None or held[0] < found[0]:
+        return held[0], held[1], ts
+    return found[0], found[1], ts
+
+
+def _unnamed_scheme_credential(text: str, ts: int, te: int, reading: UrlReading,
+                               pos: int) -> tuple[int, int] | None:
+    """(the first `:` of its mark or its run before the run's first `@`,
+    that `@`) for the first URL starting in the token [ts, te), after `ts`
+    and at or after `pos`, whose scheme is no NAMED one, whose run holds an
+    ASCII `@` and whose mark or run holds an ASCII `:` before it; or None
+    (the review of 4d13d71). Such a URL is a credential's username read as
+    a scheme: `qq_qqqq:<U+200B>//zzzzzz@cdn.test` read `qqqq` as the scheme
+    and its mark took the credential's colon, and in
+    `qq_qqqq<U+200B>//:zzzzzz@cdn.test` the colon opens the run; every sink
+    of both mirrors printed `qq_` before the host. The lead's call named a
+    `:` in P only; the run's `:` before its `@` is the nearest variant that
+    closes the second shape too (63,299 of 63,484 code points leaked the
+    username there), and it moved none of the 3,705 realistic strings. A
+    URL like it with nothing before its scheme in the token prints no
+    username (`qqqqqq://zzzzzz@cdn.test` prints `cdn.test`), and a named
+    scheme is a URL's (`1http://u:p@h` prints its host, D-SINK-74's pin).
+    The token is withheld from its start, as `abc:http://u:p@h` is.
+    Model.unnamedSchemeCredential is the mirror."""
+    reading.need(te)
+    urls = reading.urls
+    i = bisect.bisect_left(reading.starts, max(ts + 1, pos))
+    while i < len(urls) and urls[i][0] < te:
+        start, mark, mark_end, end = urls[i]
+        i += 1
+        at = text.find("@", mark_end, end)
+        if at < 0:
+            continue
+        colon = text.find(":", mark, at)
+        if colon >= 0 and _CROSSABLE.sub("", text[start:mark]).lower() not in NAMED_SCHEMES:
+            return colon, at
+    return None
 
 
 def credential_spans(text: str, reading: UrlReading) -> list[tuple[int, int, int]]:
@@ -1349,9 +1540,9 @@ def fold_space(text: str) -> str:
     feed and a carriage return among them -- prose with a word's `:` at the
     end of a line and `//` at the start of the next (`Featuring:<LF>// The
     Band`) is stored as `Featuring:// The Band`, which every sink reads as
-    a URL with an empty run (`[url] The Band`, the helper's `[redacted] The
-    Band`); the raw text reads the same since the review of cbd6679 gave
-    both mirrors one empty-run reading. That is the price of
+    a URL with an empty run (`[url] The Band`, in both mirrors since the
+    review of 4d13d71); the raw text reads the same since the review of
+    cbd6679 gave both mirrors one empty-run reading. That is the price of
     `http:<LF>//user:pw@host` being redacted, where the raw text and the
     old fold printed it whole.
 
@@ -1835,7 +2026,8 @@ def _url_shown(s: str, url: tuple[int, int, int, int], plain: bool) -> str:
     """What redact_urls prints for one URL no credential holds: the scheme
     and `://` when the scheme is one NAMED_SCHEMES lists, then the host,
     HOST_WITHHELD, or `[redacted]` for none, then the run's trailing
-    punctuation.
+    punctuation; an empty run, or one of trailing punctuation alone, prints
+    `[url]` and that punctuation, with no scheme, as the model does.
 
     The scheme is printed from a list (the review of cbd6679, D-SINK-94's
     sibling by rule 15): the printed scheme is the text from the scheme's
@@ -1852,6 +2044,13 @@ def _url_shown(s: str, url: tuple[int, int, int, int], plain: bool) -> str:
     # `http://[2001:db8::5].` with no host to show (R32a; a D-SINK-23
     # sibling lane S recorded). The scheme and the mark hold no `[`.
     keep = _trailing_cut(run)
+    if keep == 0:
+        # An empty run, or one of sentence punctuation alone, prints the
+        # model's word with no scheme (the review of 4d13d71): the helper
+        # printed `file://[redacted]` and `[redacted]` where the model
+        # printed `[url]`, so a stored description and the guide title over
+        # the same text read differently.
+        return "[url]" + run
     host, withheld = run_host_parts(run[:keep], True)
     shown = HOST_WITHHELD if withheld else host or "[redacted]"
     scheme = (s[start:mark] if plain else _CROSSABLE.sub("", s[start:mark])).lower()
@@ -1881,7 +2080,7 @@ def redact_urls(text: Any) -> str:
     slash look-alike (D-SINK-95: a URL whose slashes are all look-alikes
     printed its path as the host, and so did
     `http://cdn.test<U+FF0F>live<U+FF0F>...` in 0.18.0), or HOST_WITHHELD,
-    or `[redacted]` when there is none, an empty run included. A text
+    or `[redacted]` when there is none, and `[url]` for an empty run. A text
     redaction_can_change refuses is returned as it is, which is exact.
 
     F-SINK-11. Linear: the pattern this replaced,
@@ -2019,31 +2218,53 @@ def cut_free_text(text: str, limit: int, separator: str = "") -> str:
     barrier = _WALK_BARRIER.search(text, limit)
     url = next_url(text, low, low, plain, len(text) if barrier is None else barrier.end() - 1)
     bound = url[0] if url is not None and url[2] <= limit else limit
-    # The run's credential, when the `@` that makes it one is not kept: what
-    # the cut keeps of it is a username, or a part of one. It is asked no
-    # further than a window past the limit: a credential found there is the
-    # run's first, since every colon before it has its `@` there too; and a
-    # run with an `@` past the window after a `:` and none found before it
-    # drops whole, as every run did before the review of cbd6679, rather
-    # than read a million characters of URLs to learn which.
+    # The credential the cut splits, when the `@` that makes it one is not
+    # kept: what the cut keeps of it is a username, or a part of one. It is
+    # the run's first credential whose colon stands after the last `@` the
+    # cut keeps (the review of 4d13d71: asking for the run's FIRST
+    # credential found `qq:zz@a.test`, whose `@` is kept, so
+    # `qq:zz@a.test;qqqqqq:zzzzzz@cdn.test` cut at 26 kept
+    # `qq:zz@a.test;qqqqqq:zzzzzz`, which split_groups split at its `;`, and
+    # the group `qqqqqq:zzzzzz` printed). Every credential whose colon stands
+    # before that `@` has its own `@` kept, and every one after it has not.
+    # It is asked no further than a window past the limit, and its URLs are
+    # read no further than the first walk barrier past the window (the
+    # review of 4d13d71: the reading went on to the text's end, 2.1 s on a
+    # 4 MB description through clean_detail; no URL whose mark starts past a
+    # barrier has its scheme start before it). A run with an `@` past the
+    # window after such a `:` and none found before it drops whole, as
+    # every run did before the review of cbd6679, rather than read a
+    # million characters of URLs to learn which.
     colon = text.find(":", low, run_end)
+    split = -1
     if colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
         reach = min(run_end, limit + max(limit, CUT_CREDENTIAL_WINDOW))
-        found = token_credential(text, low, reach, UrlReading(text, low, plain))
+        past = _WALK_BARRIER.search(text, reach)
+        reading = UrlReading(text, low, plain, stop=len(text) if past is None else past.end() - 1)
+        after = text.rfind("@", low, bound) + 1
+        found = token_credential(text, low, reach, reading, max(low, after))
         if found is not None:
-            if found[1] >= bound and found[2] < bound:
+            split = found[0]
+            if found[2] < bound:
                 bound = found[2]
-        elif reach < run_end and text.find("@", max(colon + 1, reach), run_end) >= 0:
-            bound = low
+        else:
+            rest = text.find(":", max(low, after), run_end)
+            if rest >= 0 and reach < run_end and text.find("@", max(rest + 1, reach), run_end) >= 0:
+                split = rest
+                bound = low
     if bound == limit:
         return cut
     end = bound - 1 if bound > 0 and text[bound - 1] == " " else bound
     if separator:
         # Up to the later of that and the last `;` before what split_groups
-        # keeps in one group, and never ending in a `;`.
+        # keeps in one group, and never ending in a `;`: before the run's
+        # first mark, and before the colon of the credential the cut
+        # splits, or of the run's first `:` with an `@` after it.
         mark = url_mark_any(cut, low)
         keep = limit if mark < 0 else mark
-        if colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
+        if split >= 0:
+            keep = min(keep, split)
+        elif colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
             keep = min(keep, colon)
         end = max(end, cut.rfind(separator, low, keep))
         if end > low and cut[end - 1] == separator:

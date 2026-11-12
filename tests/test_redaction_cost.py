@@ -152,32 +152,60 @@ def trailing_as_ruled(raw):
     return raw, trailing
 
 
+# The review of 4d13d71 (2026-11-12): the count between a credential's `:`
+# and its `@` is of the scripts written without spaces alone (these code
+# point ranges, less the look-alikes); a `:` a match holds is a
+# credential's when the match's run holds no `@` after it; and a match after
+# the token's start whose scheme (its printable ASCII, lower-cased) is no
+# NAMED one, with an `@` in its run and a `:` in its mark or its run before
+# that `@`, withholds the token from its start. And an empty run, or one of trailing punctuation
+# alone, prints `[url]` with no scheme.
+_SPACELESS_AS_RULED = ((0x2E80, 0x2FDF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x3000, 0x30FF),
+                       (0x31F0, 0x31FF), (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF),
+                       (0xD7B0, 0xD7FF), (0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0xFF00, 0xFFEF),
+                       (0x10000, 0x10FFFF))
+
+
 def credentials_as_ruled(s, matches):
     """(start, end) of every withheld span: the rule above, a character at a
     time."""
     spans = [m.span() for m in matches]
 
-    def outside(i):
-        return not any(a <= i < b for a, b in spans)
+    def holder(i):
+        for m in matches:
+            if m.start() <= i < m.end():
+                return m
+        return None
 
     def counted(i):
-        return ord(s[i]) > 0x9F and s[i] not in _SA_AS_RULED and outside(i)
+        return ord(s[i]) > 0x9F and s[i] not in _SA_AS_RULED and holder(i) is None
+
+    def spaceless(i):
+        return counted(i) and any(a <= ord(s[i]) <= b for a, b in _SPACELESS_AS_RULED)
 
     out = []
     for token in re.finditer("[^ ]+", s):
         i, j = token.span()
+        start = -1
         for c in range(i, j):
-            if s[c] != ":" or not outside(c):
+            if s[c] != ":":
+                continue
+            m = holder(c)
+            if m is not None and "@" in s[c + 1:m.end()]:
                 continue
             at = s.find("@", c + 1, j)
             if at < 0:
                 break
-            if sum(1 for x in range(c + 1, at) if counted(x)) > 1:
+            if sum(1 for x in range(c + 1, at) if spaceless(x)) > 1:
                 continue
             before = [x for x in range(i, c) if counted(x)]
             start = i if len(before) <= 1 else before[-1] + 1
-            out.append((start, start + len(trailing_as_ruled(s[start:j])[0]), j))
             break
+        if any(i < m.start() < j and "@" in m.group(3) and ":" in m.group(2) + m.group(3).split("@")[0]
+               and re.sub("[^ -~]", "", m.group(1)).lower() not in _NAMED_AS_RULED for m in matches):
+            start = i
+        if start >= 0:
+            out.append((start, start + len(trailing_as_ruled(s[start:j])[0]), j))
     return out
 
 
@@ -195,8 +223,11 @@ def redact_urls_as_ruled(text):
                 pos = b
         run, trailing = trailing_as_ruled(match.group(3))
         scheme = re.sub("[^ -~]", "", match.group(1)).lower()
-        shown = host_as_ruled(run) or "[redacted]"
-        out.append(s[pos:match.start()] + (scheme + "://" if scheme in _NAMED_AS_RULED else "") + shown + trailing)
+        if run:
+            shown = host_as_ruled(run) or "[redacted]"
+            out.append(s[pos:match.start()] + (scheme + "://" if scheme in _NAMED_AS_RULED else "") + shown + trailing)
+        else:
+            out.append(s[pos:match.start()] + "[url]" + trailing)
         pos = match.end()
     for a, b, _ in held:
         if a >= pos:
@@ -467,7 +498,11 @@ class GluedSchemeTests(unittest.TestCase):
     prints the host alone, as the model does, where it printed itself; and a
     `:` right before the scheme makes the whole token a credential
     (D-SINK-96 across the URL, `abc:http://u:p@h` withheld whole), which the
-    sweep below expects."""
+    sweep below expects. Since the review of 4d13d71 a scheme that is no
+    named one, after text in its token, with an `@` in its run and a `:` in
+    its mark or its run before that `@`, withholds the token: it is a
+    credential's username read as a scheme (`1s3://u:p@h` is withheld
+    whole)."""
 
     CRED = "http://u5er:p4ss@prov.test/live/1.ts"
     # Scheme-legal non-letters, more of them than a scan that gives up after
@@ -489,10 +524,13 @@ class GluedSchemeTests(unittest.TestCase):
             # back past its 64-, 128- and 256-character windows to find it.
             ("A" + "0" * 300 + self.CRED[4:], "prov.test"),
             ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x prov.test"),
-            # Digits or `+.-` inside the scheme, after its first letter.
-            ("1s3" + self.CRED[4:], "1prov.test"),
-            ("_1A2HTTP" + self.CRED[4:], "_1prov.test"),
-            ("1A.HTTP" + self.CRED[4:], "1prov.test"),
+            # Digits or `+.-` inside the scheme, after its first letter: no
+            # named scheme, after text in its token, with a userinfo -- a
+            # credential's username read as a scheme, withheld whole since
+            # the review of 4d13d71.
+            ("1s3" + self.CRED[4:], HOST_WITHHELD),
+            ("_1A2HTTP" + self.CRED[4:], HOST_WITHHELD),
+            ("1A.HTTP" + self.CRED[4:], HOST_WITHHELD),
             # An ASCII name before the glue character: the run starts after it.
             ("ESPN" + chr(0x9891) + chr(0x9053) + "HTTP" + self.CRED[4:], "ESPN" + chr(0x9891) + chr(0x9053) + "http://prov.test"),
             ("CANAL" + chr(0xc9) + self.CRED, "CANAL" + chr(0xc9) + "http://prov.test"),
@@ -689,6 +727,13 @@ class MarkBudgetTests(unittest.TestCase):
         # characters: the cut reads it only in a window past its limit.
         "one credential across many URLs": lambda n: "q:" + ("a" + chr(0x200B) + "//b\t") * (n // 6) + "@h",
         "credential across URLs repeated": lambda n: ("q:z" + chr(0xE9) + "//z@h ") * (n // 9),
+        # The review of 4d13d71 (its cost finding 1): a `:` and an `@` with no
+        # URL after them sent the cut's credential reading on to the text's
+        # end (2.2 s at 4M through clean_detail); and the candidates the
+        # reading rejects cost one Python step each until _URL_CANDIDATE
+        # stopped taking them.
+        "x:@, then a!. ZW division slash twice repeated": lambda n: "x:@" + ("a!." + chr(0x200B) + chr(0x2215) * 2) * (n // 6),
+        "x:@, then ZW e-acute division slash repeated": lambda n: "x:@" + (chr(0x200B) + chr(0xE9) + chr(0x2215)) * (n // 3),
     }
 
     def best(self, f, text, k):
@@ -765,6 +810,28 @@ class EpgPathBudgetTests(unittest.TestCase):
                         slow[(name, size, fname)] = round(cost * 1000, 1)
         self.assertEqual(slow, {})
 
+
+
+class M3uPathBudgetTests(unittest.TestCase):
+    """The review of 4d13d71 (its cost finding 1, the M3U side): parse_m3u
+    with one channel whose title, or whose quoted group-title, is `x:@` and
+    then `a!+<U+200B><U+2215><U+2215>` repeated took 2.4 s and 4.7 s at 4M
+    characters (0.18.0: 13 and 20 ms): the title's cut read its
+    credential's URLs to the text's end, and parse_attrs' quoted value read
+    its run with one Python step a candidate. Each stays at most 150 ms at
+    1M characters and 600 ms at 4M, best of three, as the guide's path
+    does."""
+
+    def test_one_channel_whose_title_or_quoted_group_is_the_shape(self):
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            shape = "x:@" + ("a!+" + chr(0x200B) + chr(0x2215) * 2) * (size // 6)
+            for form, line in (("title", "#EXTINF:-1," + shape), ("quoted group-title", '#EXTINF:-1 group-title="%s",N' % shape)):
+                doc = "#EXTM3U\n" + line + "\nhttp://stream.test/live/1.ts\n"
+                cost = MarkBudgetTests.best(None, helper.parse_m3u, doc, 3)
+                if cost >= ceiling:
+                    slow[(form, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
 
 if __name__ == "__main__":
     unittest.main()
