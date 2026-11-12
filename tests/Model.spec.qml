@@ -2941,7 +2941,10 @@ TestCase {
     compare(Model.fieldAccessibleDescription("playlist", "Playlist URL or path"), "")
     compare(Model.fieldAccessibleDescription("password", "Password"), "Password")
     compare(Model.sanitizePasteInput("playlist", "http://qqqqqq:zzz" + LS + "zzz@cdn.test/x" + String.fromCharCode(0x85), 4096), "http://qqqqqq:zzzzzz@cdn.test/x")
-    compare(Model.fieldAccessibleValue({ values: { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" } }, "label"), "cdn.test")
+    // Round 4c (E1): the field holding such a label is stars; the stored
+    // label is heard as its host.
+    compare(Model.fieldAccessibleValue({ values: { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" } }, "label"), stars("http://qqqqqq:zzzzzz@cdn.test/get.php"))
+    compare(Model.labelSinkText("http://qqqqqq:zzzzzz@cdn.test/get.php"), "cdn.test")
     compare(Model.confirmRemoveMessage("http://qqqqqq:zzzzzz@cdn.test/get.php", false).indexOf("qq"), -1)
     compare(Model.sourceTransient("removed", { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" }), "Removed cdn.test")
   }
@@ -2963,13 +2966,15 @@ TestCase {
       ["http:/" + String.fromCharCode(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["http" + String.fromCharCode(0xff1a, 0xff0f, 0xff0f) + "qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz" + String.fromCharCode(0xff20) + "cdn.test", Model.HOST_WITHHELD],
       ["http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "cdn.test:8080"],
-      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD + " " + Model.HOST_WITHHELD],
+      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD],
       ["My" + String.fromCharCode(0xa0) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["My" + String.fromCharCode(0xfeff) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
       ["My" + String.fromCharCode(0x3000) + "TV", "My" + String.fromCharCode(0x3000) + "TV"]
     ]
     for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
-    compare(Model.fieldAccessibleValue({ values: { label: "qqqqqq:zzzzzz@cdn.test" } }, "label"), "cdn.test")
+    // Round 4c (E1): a label that reads as an address holds its field, so the
+    // field is stars; the stored label reads as its host (above).
+    compare(Model.fieldAccessibleValue({ values: { label: "qqqqqq:zzzzzz@cdn.test" } }, "label"), "**********************")
     compare(Model.confirmRemoveMessage("//qqqqqq:zzzzzz@cdn.test/x", true).indexOf("qq"), -1)
     compare(Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").code, "label_taken")
     var st = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: "qqqqqq:zzzzzz@cdn.test", origin: "guide" }, 100)
@@ -2982,5 +2987,60 @@ TestCase {
     compare(Model.formProbeFailureLine(form, "Could not resolve host", "qqqqqq", ""), "Could not resolve host from " + Model.HOST_WITHHELD)
     compare(Model.formLabelPlaceholder(form), Model.HOST_WITHHELD)
     compare(Model.formLabelPlaceholder({ kind: "url", values: { label: "", playlist: "http://cdn.test/x", epg: "" } }), "cdn.test")
+  }
+
+  // Round 4c in the shell's engine: the stored label's reading (E2, its
+  // U+0020 token edge, its clauses and its host's shape), the held field
+  // (E1), the dotted username withheld (E4), the edit that keeps its label
+  // (E5), and an address field's scheme and host rule (E8). node runs the
+  // sweeps and the oracle; this holds V4 to the same answers.
+  function test_round4cInV4() {
+    var W = Model.HOST_WITHHELD
+    var E = Model.ELLIPSIS
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["1.5/2 HD", "1.5/2 HD"], ["ESPN 2.0/3.0", "ESPN 2.0/3.0"], ["time 10:30/11:30", "time 10:30/11:30"],
+      ["U.S./News", "U.S./News"], ["v1.2/beta", "v1.2/beta"], ["News?lang=en", "News?lang=en"], ["Rock&Roll=Live", "Rock&Roll=Live"],
+      ["TV & Movies?=", "TV & Movies?="], ["Q&A=fun", "Q&A=fun"], ["x;y=1", "x;y=1"], ["Kids&Family=TV.m3u", "Kids&Family=TV.m3u"],
+      ["list;v=2.m3u", "list;v=2.m3u"], ["C:/TV", "C:/TV"], ["C:" + BS + "TV", "C:" + BS + "TV"], ["News//Sport", "News//Sport"],
+      ["Sky.UK/Sports", "Sky.UK"], ["//cdn.test/x", "cdn.test"], ["get.php?username=qqqqqq&password=zzzzzz", W],
+      ["Sport:Live@HD", W], ["Fox:News@9", W], ["mailto:qqqqqq@zzzzzz", W], ["qqqqqq:zz@zz", W], ["qqqqqq:zzzzzz@cdn.test,qqqqqq", W],
+      ["qqqqqq:zzzzzz@cdn.test!zzzzzz", W], ["qqqqqq:zzzzzz@cdn.test#zzzzzz", "cdn.test"], ["http://nas/x", W],
+      ["rtmp://qqqqqq:zzzzzz@cdn.test:1935/live", W], ["1.2.3.4/x", "1.2.3.4"], ["[::1]:8080/x", "[::1]:8080"],
+      ["qqqqqq:zzzzzz" + String.fromCharCode(0xfeff) + "@cdn.test", "cdn.test"],
+      ["qqqqqq:" + String.fromCharCode(0x2028) + "zzzzzz@cdn.test", "cdn.test"],
+      ["cdn.test/x" + String.fromCharCode(0xa0) + "tv.test/y", "cdn.test"],
+      ["//qqqqqq" + String.fromCharCode(0xff1f) + "zzzzzz@cdn.test/x", "cdn.test"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    // E1, through the form.
+    var st = Model.openAddForm(Model.guideState("all"))
+    compare(st.form.labelHeld, false)
+    st = Model.withFormValue(st, "label", "qqqqqq:zzzzzz@cdn.test", { typed: false })
+    st = Model.withFormValue(st, "label", "qqqqqqzzzzzz@cdn.test", { typed: true })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*********************")
+    st = Model.withFormValue(st, "label", "", { typed: true })
+    st = Model.withFormValue(st, "label", "My TV", { typed: true })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "My TV")
+    compare(Model.openEditForm(Model.guideState("all"), "k", { label: "cdn.test/get.php?username=qqqqqq", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld, true)
+    compare(Model.labelHeldAfter(true, ""), false)
+    compare(Model.labelReadsAsAddress("My TV"), false)
+    // E4.
+    var form = { kind: "url", values: { label: "", playlist: "http://qqqqqq.test:12#zzzzzz@cdn.test/x", epg: "" }, probing: true, probeHost: "qqqqqq.test", probeKind: "url" }
+    compare(Model.formFetchingLine(form), "Fetching from " + W + E)
+    compare(Model.formLabelPlaceholder(form), W)
+    compare(Model.addressAtAfterAuthority("http://qqqqqq.test/zzzzzz@cdn.test/get.php"), true)
+    compare(Model.addressAtAfterAuthority("http://cdn.test/get.php"), false)
+    // E5.
+    compare(Model.validateLabel("1.5/3 HD", [{ label: "1.5/2 HD", id: "a" }, { label: "1.5/3 HD", id: "b" }], "b").ok, true)
+    compare(Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/c.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }, { label: "x", id: "b" }], "b").code, "label_taken")
+    // E8.
+    function v(text) { return Model.fieldAccessibleValue({ values: { playlist: text } }, "playlist") }
+    function stars(text) { return new Array(text.length + 1).join("*") }
+    compare(v("qqqqqq://zz@cdn.test/x"), stars("qqqqqq://zz@cdn.test/x"))
+    compare(v("rtsp://cdn.test:554/live"), stars("rtsp://cdn.test:554/live"))
+    compare(v("http://cdn.test!zzzzzz/x"), stars("http://cdn.test!zzzzzz/x"))
+    compare(v("http://nas/x"), "http://nas/" + E)
+    compare(v("http://[fe80::1%25qqqqqq]/x"), stars("http://[fe80::1%25qqqqqq]/x"))
   }
 }

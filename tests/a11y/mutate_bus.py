@@ -177,7 +177,7 @@ MUTATIONS = [
 
     ("D-SINK-98: the label field publishes the label raw",
      "Model.mjs",
-     '  if (id === "label") return labelSinkText(value)\n',
+     '  if (id === "label") return labelHeldAfter(f.labelHeld, value) ? accessibleStars(value) : labelSinkText(value)\n',
      '  if (id === "label") return value\n',
      ["sources"]),
 
@@ -240,6 +240,61 @@ MUTATIONS = [
      "Model.mjs",
      "  return derived !== \"\" && formHostWithheld(f) ? HOST_WITHHELD : derived\n",
      "  return derived\n",
+     ["sources"]),
+
+    # Round 4c.
+    ("D-SINK-98 (round 4c, E1): the label field ignores its hold",
+     "Model.mjs",
+     '  if (id === "label") return labelHeldAfter(f.labelHeld, value) ? accessibleStars(value) : labelSinkText(value)\n',
+     '  if (id === "label") return labelSinkText(value)\n',
+     ["sources"]),
+
+    ("D-SINK-98 (round 4c, E2): labelSinkText cuts tokens at JS \\s again",
+     "Model.mjs",
+     '  var tokens = s.split(" ")\n  var hosts = []\n',
+     '  var tokens = s.split(/\\s+/)\n  var hosts = []\n',
+     ["sources"]),
+
+    ("D-SINK-99 (round 4c, E4): the form withholds its lines' host for urlHostWithheld alone",
+     "Model.mjs",
+     "  return urlHostWithheld(text) || addressAtAfterAuthority(text)\n",
+     "  return urlHostWithheld(text)\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4c, E3): a row's buttons leave the bus only when the row is not the cursor's (the review's mutant)",
+     "GuideProbe.qml",
+     "                        Accessible.ignored: !sactions.visible\n",
+     "                        Accessible.ignored: !srow.hasCursor\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4c, E6): the closed remove dialog stays on the bus",
+     "GuideProbe.qml",
+     "          Accessible.ignored: !visible\n          Accessible.role: Accessible.Dialog\n          Accessible.name: root.confirmMessage\n",
+     "          Accessible.role: Accessible.Dialog\n          Accessible.name: root.confirmMessage\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4c, E6): the closed form's Cancel button stays on the bus",
+     "GuideProbe.qml",
+     "                Accessible.ignored: !visible\n                Accessible.role: Accessible.Button\n                Accessible.name: root.copy.buttonCancel\n",
+     "                Accessible.role: Accessible.Button\n                Accessible.name: root.copy.buttonCancel\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4c, E6): the Sources rows stay on the bus outside the Sources view",
+     "GuideProbe.qml",
+     "                Accessible.ignored: !visible\n                Accessible.role: Accessible.ListItem\n                Accessible.name: srow.source ? Model.sourceAccessibleName(srow.source) : srow.label\n",
+     "                Accessible.role: Accessible.ListItem\n                Accessible.name: srow.source ? Model.sourceAccessibleName(srow.source) : srow.label\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4c, E6): an eye button on a field that cannot be masked stays on the bus",
+     "GuideProbe.qml",
+     "                  Accessible.ignored: !visible\n                  Accessible.role: Accessible.Button\n                  Accessible.name: fieldRow.masked",
+     "                  Accessible.role: Accessible.Button\n                  Accessible.name: fieldRow.masked",
+     ["xtream"]),
+
+    ("D-A11Y-12 (round 4c, E6): the channel-number alert stays on the bus while no number is entered",
+     "GuideProbe.qml",
+     "                Accessible.ignored: !visible\n                Accessible.role: Accessible.AlertMessage\n                Accessible.name: \"Entering channel number \"",
+     "                Accessible.role: Accessible.AlertMessage\n                Accessible.name: \"Entering channel number \"",
      ["sources"]),
 
     ("first run: the empty field reads back its placeholder as if it were content",

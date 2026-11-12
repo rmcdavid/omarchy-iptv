@@ -22,7 +22,8 @@ import {
   capCodePoints, sourceErrorMessage, validateSourceUrl, isUrlField,
   isSourceKey, findSource, findSourceByUrl, allocateSourceKey, deriveLabel,
   uniqueLabel, validateLabel, maskUrl, accessibleStars,
-  addressAccessibleValue, labelSinkText, sourceView, sourceViews
+  addressAccessibleValue, labelSinkText, labelReadsAsAddress, sourceView,
+  sourceViews
 } from "./sources.mjs"
 
 // ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
@@ -1158,7 +1159,8 @@ function cacheStale(status, refreshMinutes, nowSec) {
 //          original: the values the edit form opened with, focus: element id,
 //          revealed: { playlist, epg } (true = raw value shown / typed),
 //          error: null | { code, field, message }, probing, probeHost,
-//          probeKind, parent: the form to return to (Xtream from a URL form) }
+//          probeKind, labelHeld (labelHeldAfter), parent: the form to return
+//          to (Xtream from a URL form) }
 
 function formFields(form) {
   var f = form || {}
@@ -1196,14 +1198,19 @@ function copyValues(kind, values) {
   return out
 }
 
+// `labelHeld` is copied through labelHeldAfter, so a form that reaches
+// here without the flag -- a fresh one (formState), or one a caller built --
+// is held exactly when its label reads as an address, and a copy of a form
+// made by the transitions below is the form unchanged.
 function copyForm(form) {
   var f = form || {}
   var kind = f.kind === "xtream" ? "xtream" : "url"
+  var values = copyValues(kind, f.values)
   return {
     kind: kind,
     origin: f.origin === "firstRun" ? "firstRun" : "sources",
     sourceId: str(f.sourceId),
-    values: copyValues(kind, f.values),
+    values: values,
     original: copyValues(kind, f.original),
     focus: str(f.focus),
     revealed: { playlist: !!(f.revealed && f.revealed.playlist), epg: !!(f.revealed && f.revealed.epg) },
@@ -1211,6 +1218,7 @@ function copyForm(form) {
     probing: f.probing === true,
     probeHost: str(f.probeHost),
     probeKind: str(f.probeKind),
+    labelHeld: labelHeldAfter(f.labelHeld, values.label),
     parent: f.parent ? copyForm(f.parent) : null
   }
 }
@@ -1339,7 +1347,9 @@ function withFormPatch(st, patch) {
 
 // Set a field value (already sanitized by the caller for typing; capped
 // here). Typing reveals the field (`opts.typed`), a paste re-masks it; an
-// error on that field clears.
+// error on that field clears. The one place a form's value changes once the
+// form exists, so the label's held flag moves here (labelHeldAfter) on every
+// write: a key, a paste, a deletion, Ctrl+U, Esc's clear.
 function withFormValue(st, field, value, opts) {
   var cur = copyGuide(st)
   if (!cur.form || !isFormField(cur.form, field)) return cur
@@ -1347,9 +1357,37 @@ function withFormValue(st, field, value, opts) {
   var id = str(field)
   var f = cur.form
   f.values[id] = capLength(str(value), formCapacity(id))
+  if (id === "label") f.labelHeld = labelHeldAfter(f.labelHeld, f.values.label)
   if (isUrlField(id)) f.revealed[id] = o.typed === true && f.values[id] !== ""
   if (f.error && f.error.field === id) f.error = null
   return cur
+}
+
+// D-SINK-98, round 4c (the lead's call under the owner's standing authority
+// of 2026-11-09). Whether the label FIELD is held, from whether it was held
+// and the value it now holds: never once it is empty, and otherwise held
+// while it was held or once the value reads as an address
+// (labelReadsAsAddress). A pure function of the two, asked on every write of
+// the label (withFormValue) and when a form is made or copied (copyForm): a
+// new add form is not held, an edit form is held when its stored label reads
+// as an address, and closing the form drops it with the form. While held,
+// the field's Value is stars (fieldAccessibleValue). Why: a label that has
+// read as an address is one edit from a credential the label rule cannot
+// tell from a name -- one Backspace on the `:` of `qqqqqq:zzzzzz@cdn.test`
+// leaves `qqqqqqzzzzzz@cdn.test`, and deleting `cdn.test/get.php?username=
+// qqqqqq&` from a pasted query leaves `password=zzzzzz` -- and round 4b's
+// sweep measured 933 of 10,920 such edit states publishing the run. The
+// cost, stated: once the value has read as an address in this form session,
+// a screen-reader user hears the field as stars, its length only, until
+// they empty it. What is typed before it first reads as one (`qqqqqq:zzzzzz`
+// on the way to its `@`) is heard as typed, the stated residual. The hold is
+// the field's alone: a label saved while held is stored as typed and drawn
+// and heard through labelSinkText (model/sources.mjs), with that rule's
+// residual -- a stored label with no address shape is published as typed.
+function labelHeldAfter(held, value) {
+  var v = str(value)
+  if (v === "") return false
+  return held === true || labelReadsAsAddress(v)
 }
 
 function withFormFocus(st, id) {
@@ -1416,7 +1454,9 @@ function fieldMasked(form, field) {
 // heard as its host or hosts, the way every composed source name carrying
 // it is (sourceAccessibleName, confirmRemoveMessage, sourceTransient,
 // sourceErrorMessage, footerCounts, sourcesSummary, activeSourceSummary, the
-// Sources row).
+// Sources row) -- until the field is HELD (round 4c, labelHeldAfter, the
+// lead's call under the same authority), and then it is one `*` per
+// character, so no edit of a label that has read as an address is heard.
 //
 // Anything else -- the username, the password, and any field added later --
 // is one `*` per character, so a reader still hears that the field is
@@ -1427,7 +1467,7 @@ function fieldAccessibleValue(form, field) {
   var f = form || {}
   var id = str(field)
   var value = f.values ? str(f.values[id]) : ""
-  if (id === "label") return labelSinkText(value)
+  if (id === "label") return labelHeldAfter(f.labelHeld, value) ? accessibleStars(value) : labelSinkText(value)
   if (ADDRESS_FIELDS.indexOf(id) !== -1) return addressAccessibleValue(value)
   return accessibleStars(value)
 }
@@ -1469,7 +1509,8 @@ export {
   FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
   formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
   openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
-  fieldRevealed, fieldMasked, ADDRESS_FIELDS, fieldAccessibleValue,
-  fieldAccessibleDescription, toggleReveal, withFormReveal
+  withFormPatch, withFormValue, labelHeldAfter, withFormFocus, moveFormFocus,
+  fieldMaskable, fieldRevealed, fieldMasked, ADDRESS_FIELDS,
+  fieldAccessibleValue, fieldAccessibleDescription, toggleReveal,
+  withFormReveal
 }

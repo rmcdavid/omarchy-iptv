@@ -11,8 +11,8 @@ import {
 import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sanitizeUrlInput,
   sourceErrorMessage, HOST_WITHHELD, urlHostWithheld, validateSourceUrl,
-  normalizeSourceUrl, deriveLabel, validateLabel, fetchingLine,
-  probeFailureLine, CLIPBOARD_MAX_CHARS
+  normalizeSourceUrl, deriveLabel, validateLabel, addressAtAfterAuthority,
+  fetchingLine, probeFailureLine, CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
   isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
@@ -296,6 +296,19 @@ function withFormProbing(st, probing, opts) {
 // qqqqqq` after it. The probe host is read from the playlist field (the
 // server on the Xtream form), so the predicate is urlHostWithheld over that
 // field's text as it holds it, the one the form warns by (sourceUrlWarning).
+// Round 4c (the lead's call under the owner's standing authority of
+// 2026-11-09): or an `@` after the authority's closing `/`, `?` or `#`
+// (addressAtAfterAuthority), the test the field's own Value stars by, so the
+// field and the lines read one text alike. urlHostWithheld holds only for a
+// dotless host or a port that is not digits, and a dotted username with a
+// password that starts with digits is neither: for
+// `http://qqqqqq.test:12#zzzzzz@cdn.test/x` the Value was stars while the
+// lines said `Fetching from qqqqqq.test...` and the placeholder
+// `qqqqqq.test:12`, measured on the bus. R32a's warning and the label a save
+// stores are unchanged (the owner's ruling): the stored label is still the
+// RFC host, `qqqqqq.test:12`, R32a's stated residual, and so are the two
+// lines that name a STORED label, the `Added ...` transient once the record
+// is listed and `Already in Sources as ...`.
 function formProbeField(form) {
   return form && form.kind === "xtream" ? "server" : "playlist"
 }
@@ -303,7 +316,8 @@ function formProbeField(form) {
 function formHostWithheld(form) {
   var f = form || {}
   if (!f.values || typeof f.values !== "object") return false
-  return urlHostWithheld(sanitizeUrlInput(str(f.values[formProbeField(f)]), MAX_SOURCE_URL + 1))
+  var text = sanitizeUrlInput(str(f.values[formProbeField(f)]), MAX_SOURCE_URL + 1)
+  return urlHostWithheld(text) || addressAtAfterAuthority(text)
 }
 
 // `host`, or HOST_WITHHELD while the form's probe field holds a withheld URL.

@@ -203,8 +203,8 @@ export {
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, sanitizeInput,
   sanitizeUrlInput, trimEdgeSpace, codePointLength, capCodePoints,
   sanitizeTyping, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
-  persistFailureMessage, refusalMessage, isIpv6Literal, HOST_FORMAT_RANGES,
-  hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
+  persistFailureMessage, refusalMessage, SOURCE_URL_SCHEMES, isIpv6Literal,
+  HOST_FORMAT_RANGES, hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
   WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
   sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, formAdviceLine,
   looksLikeHost, validateSourceUrl, normalizeSourceUrl, ADDRESS_CLASSES,
@@ -216,7 +216,8 @@ export {
   epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
-  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, labelSinkText,
+  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, labelHost,
+  addressAtAfterAuthority, labelSinkText, labelReadsAsAddress,
   encodeQueryValue, xtreamUrls, validateXtream, pluralGroups, countsLine,
   formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
   EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
@@ -238,9 +239,10 @@ export {
   DESTINATION_RULES, cacheBeforeDestinationRules, cacheStale, formFields,
   isFormField, formLimit, formCapacity, copyForm, formState, formFocusOrder,
   formHasText, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormValue, withFormFocus, moveFormFocus,
-  fieldMaskable, fieldRevealed, fieldMasked, fieldAccessibleValue,
-  fieldAccessibleDescription, toggleReveal, withFormReveal
+  openXtreamForm, closeForm, withFormValue, labelHeldAfter, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
+  fieldAccessibleValue, fieldAccessibleDescription, toggleReveal,
+  withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

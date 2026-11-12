@@ -50,7 +50,8 @@ Window {
   // saved value; `credLabel` a label that is a credentialed URL the user
   // pasted.
   readonly property bool sourcesScenario: ["addtyped", "editstored", "sourcesrow", "removelabel",
-    "srvtyped", "srvpasted", "editlabel", "labelrow", "labelremove", "probing", "probefail"].indexOf(host.scenario) !== -1
+    "srvtyped", "srvpasted", "editlabel", "labelrow", "labelremove", "probing", "probefail",
+    "rbcolon", "rbpass", "rbfeffrow", "rbnbsp", "rbfeffguide", "rbdotted", "rbdottedfail"].indexOf(host.scenario) !== -1
   readonly property string typedPrefix: "http://qqqqqq:zzzzzz"
   readonly property string typedEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php?password=zzzzzz"
   readonly property string storedPlaylist: "http://qqqqqq:zz#zz@cdn.test/x"
@@ -70,6 +71,19 @@ Window {
   readonly property string editEpg: "/home/u/epg.xml"
   readonly property string rowLabel: "qqqqqq:zzzzzz@cdn.test"
   readonly property string typoPlaylist: "http://qqqqqq#zzzzzz@cdn.test/x"
+  // ---- round 4c (D-SINK-98 E1/E2, D-SINK-99 E4, D-A11Y-12 E6) ----
+  // `colonTyped` typed key by key into the Label field and then one
+  // Backspace on its `:`; `passPasted` pasted and then the range before
+  // `password=` deleted; `feffLabel` and `lineLabel` stored labels holding a
+  // U+FEFF, and a U+2028 and a U+00A0, inside the token; `dottedPlaylist` a
+  // dotted username before a later `@`, submitted so its probe runs.
+  readonly property string colonTyped: "qqqqqq:zzzzzz@cdn.test"
+  readonly property string colonEdited: "qqqqqqzzzzzz@cdn.test"
+  readonly property string passPasted: "cdn.test/get.php?username=qqqqqq&password=zzzzzz"
+  readonly property string passEdited: "password=zzzzzz"
+  readonly property string feffLabel: "qqqqqq:zzzzzz" + String.fromCharCode(0xfeff) + "@cdn.test"
+  readonly property string lineLabel: "qqqqqq:" + String.fromCharCode(0x2028) + "zzzzzz" + String.fromCharCode(0xa0) + "@cdn.test"
+  readonly property string dottedPlaylist: "http://qqqqqq.test:12#zzzzzz@cdn.test/x"
   // The record the service would hold, and its view built by the shipping
   // Model.sourceView, so the row reads what the service would hand it. Its
   // URL's RFC host is cdn.test, so what the rows grade is the label. The `#`
@@ -78,7 +92,10 @@ Window {
   // carry one, and the form's field is the sink the scenario is about.
   readonly property var labelRecord: ({
     key: "k9", url: host.cleanPlaylist,
-    epgUrl: "", kind: "http", label: (host.scenario === "labelrow" || host.scenario === "labelremove") ? host.rowLabel : host.credLabel,
+    epgUrl: "", kind: "http",
+    label: (host.scenario === "labelrow" || host.scenario === "labelremove") ? host.rowLabel
+      : (host.scenario === "rbfeffrow" || host.scenario === "rbfeffguide") ? host.feffLabel
+      : host.scenario === "rbnbsp" ? host.lineLabel : host.credLabel,
     labelCustom: true, origin: "guide",
     addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, channelCount: 3, groupCount: 2
   })
@@ -152,7 +169,7 @@ Window {
     function removeRecent() {}
     function requestClipboard() {}
     // The probing scenarios' add is accepted, so the form's probe starts.
-    function addSource() { return (host.scenario === "probing" || host.scenario === "probefail") ? { ok: true, id: "k10" } : undefined }
+    function addSource() { return ["probing", "probefail", "rbdotted", "rbdottedfail"].indexOf(host.scenario) !== -1 ? { ok: true, id: "k10" } : undefined }
     function removeSource() {}
     function updateSource() {}
     function switchSource() {}
@@ -229,6 +246,8 @@ Window {
       formProbing: item.formProbing,
       placeholderWithheld: item.formActive ? item.fieldPlaceholder("label") === Model.HOST_WITHHELD : null,
       placeholderHasRun: item.formActive ? /[qz]{2,}/.test(item.fieldPlaceholder("label")) : null,
+      // D-SINK-98 round 4c (E1): whether the label field is held.
+      labelHeld: item.formActive ? item.form.labelHeld === true : null,
       // CLAUDE.md rule 5 applies to this harness's own log too. The checker
       // needs to know the stored value is UNCHANGED, not what it is, so the
       // readback publishes a fingerprint (Model.sourceKey, the shipping
@@ -253,6 +272,9 @@ Window {
     else if (host.scenario === "srvpasted") expected = { server: host.srvPasted }
     else if (host.scenario === "editlabel") expected = { label: host.editLabel, playlist: host.editPlaylist, epg: host.editEpg }
     else if (host.scenario === "probing" || host.scenario === "probefail") expected = { playlist: host.typoPlaylist }
+    else if (host.scenario === "rbcolon") expected = { label: host.colonEdited }
+    else if (host.scenario === "rbpass") expected = { label: host.passEdited }
+    else if (host.scenario === "rbdotted" || host.scenario === "rbdottedfail") expected = { playlist: host.dottedPlaylist }
     var ids = item.formFieldIds || []
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i]
@@ -314,11 +336,43 @@ Window {
       item.setFieldValue("playlist", host.typoPlaylist, true)
       item.submitForm()
       if (which === "probefail") item.onProbeFinished({ ok: false, id: "k10", reason: "Could not resolve host", host: "" })
+    } else if (which === "rbcolon" || which === "rbpass") {
+      // Round 4c (E1): the Label field through the shipping key and paste
+      // paths -- handleFormKey with the events a key press delivers, and
+      // pasteFromProcess with the clipboard's answer.
+      item.openSources()
+      item.openAddForm()
+      item.fieldFocused("label")
+      var noMatch = function () { return false }
+      if (which === "rbcolon") {
+        for (var c = 0; c < host.colonTyped.length; c++)
+          item.handleFormKey({ key: 0, modifiers: Qt.NoModifier, text: host.colonTyped.charAt(c), matches: noMatch })
+        item.fieldItem("label").cursorPosition = host.colonTyped.indexOf(":") + 1
+        item.handleFormKey({ key: Qt.Key_Backspace, modifiers: Qt.NoModifier, text: "", matches: noMatch })
+      } else {
+        item.pasteFromProcess(host.passPasted)
+        item.fieldItem("label").select(0, host.passPasted.indexOf("password="))
+        item.handleFormKey({ key: Qt.Key_Delete, modifiers: Qt.NoModifier, text: "", matches: noMatch })
+      }
+    } else if (which === "rbfeffrow" || which === "rbnbsp") {
+      // Round 4c (E2): a stored label holding an invisible or a space
+      // character inside its token -- its row, the row's buttons and the
+      // remove dialog at once.
+      item.openSources()
+      item.startRemove()
+    } else if (which === "rbdotted" || which === "rbdottedfail") {
+      // Round 4c (E4): a dotted username before a later `@`, submitted.
+      item.openSources()
+      item.openAddForm()
+      item.setFieldValue("playlist", host.dottedPlaylist, true)
+      item.submitForm()
+      if (which === "rbdottedfail") item.onProbeFinished({ ok: false, id: "k10", reason: "Could not resolve host", host: "" })
     } else if (which === "query") {
       item.setQuery("bbc")
     } else if (which === "querynomatch") {
       item.setQuery("zzzznothing")
     }
+    // rbfeffguide is the plain guide over the stored label (round 4c, E6).
     // firstrun, banner and scale10k need no driving: the fixture above is
     // the state, which is the point -- a scenario poked into place after
     // open() is not the state the user arrives in.

@@ -75,18 +75,6 @@ def model_try(expr):
         return None
 
 
-def redact(text):
-    """CLAUDE.md rule 5: this harness's own output is a sink too."""
-    if text is None:
-        return None
-    src = ('var M = require(%s); process.stdout.write(M.redactUrls(%s));'
-           % (json.dumps(os.path.join(REPO, "Model.mjs")), json.dumps(str(text))))
-    out = subprocess.check_output(["node", "-e", src]).decode()
-    for tok in TOKENS:
-        out = out.replace(tok, "<" + tok + " redacted>")
-    return out
-
-
 # ---------------------------------------------------------------- scenarios
 
 _CACHE = {}
@@ -156,31 +144,44 @@ def bar(name):
 # It may not lose them. Raise a floor when a scenario grows; never lower one
 # to make a run green.
 TREE_FLOOR = {
-    "firstrun": 30,
-    "banner": 34,
-    "query": 32,
-    "querynomatch": 31,
-    "scale10k": 50,
-    "xtream": 42,
-    # D-SINK-97 / D-SINK-98, at their first run (2026-11-11): 59, 59, 53 and
-    # 53. Lowered the same day by round 4b, by exactly the nodes D-A11Y-12
-    # took off the bus, and for no other reason: the Sources list's two
-    # hidden rows each published an Edit and a Remove button (4 nodes), and
-    # behind a form the cursor row's pair is hidden too (6). Measured by
-    # dumping both runs' node lists: they differ by those buttons alone.
-    "addtyped": 53,
-    "editstored": 53,
-    "sourcesrow": 49,
-    "removelabel": 49,
-    # Round 4b (D-SINK-97, -98, -99, D-A11Y-12), at their first run
-    # (2026-11-11).
-    "srvtyped": 55,
-    "srvpasted": 55,
-    "editlabel": 53,
-    "labelrow": 49,
-    "labelremove": 49,
-    "probing": 53,
-    "probefail": 53,
+    # Round 4c (D-A11Y-12, 2026-11-11): every floor below is re-levelled to
+    # the size measured that day, because the round took off the bus every
+    # named node the guide does not show -- the closed remove dialog, the
+    # closed form and its buttons, the Sources list and its rows outside the
+    # Sources view, the eye buttons of fields that cannot be masked, the
+    # closed Tracks, Programme and Keys panels and their contents, the
+    # channel-number alert, the empty banner, screen title, search line and
+    # empty state, and the channel list's rows behind Sources -- and for no
+    # other reason. Measured by dumping each scenario's node list on 93d034b
+    # and on this tree: the lists differ by those nodes alone (none added,
+    # none moved), except the Label field's Value in editstored and
+    # editlabel, which is stars now (D-SINK-98, E1). Round 4b's floors were
+    # 30, 34, 32, 31, 50, 42, then 53, 53, 49, 49, 55, 55, 53, 49, 49, 53, 53.
+    "firstrun": 14,
+    "banner": 21,
+    "query": 16,
+    "querynomatch": 15,
+    "scale10k": 55,
+    "xtream": 23,
+    "addtyped": 24,
+    "editstored": 23,
+    "sourcesrow": 21,
+    "removelabel": 22,
+    "srvtyped": 23,
+    "srvpasted": 23,
+    "editlabel": 22,
+    "labelrow": 21,
+    "labelremove": 22,
+    "probing": 24,
+    "probefail": 24,
+    # Round 4c's own scenarios, at their first run (2026-11-11).
+    "rbcolon": 23,
+    "rbpass": 23,
+    "rbfeffrow": 22,
+    "rbnbsp": 22,
+    "rbfeffguide": 20,
+    "rbdotted": 24,
+    "rbdottedfail": 24,
 }
 
 
@@ -400,7 +401,7 @@ def check_firstrun():
     if field:
         check("L2-FR-03", field[0].get("text") == "",
               "first run: the empty field reads as empty, not as its placeholder",
-              "value %r" % redact(field[0].get("text")))
+              "value %r" % shown(field[0].get("text")))
 
     # UX-SOURCES 7.1 "Buttons": the first-run verb is Load, not Save.
     check("L2-FR-04", pick(nodes, "push button", "Load"),
@@ -419,14 +420,14 @@ def check_banner():
     check("L2-BAN-01", expected != "" and alerts,
           "banner: the failure a user must act on is an AlertMessage carrying its text",
           "expected %r, alert names on the bus: %r"
-          % (redact(expected), [redact(n["name"]) for n in with_role(nodes, "alert message")]))
+          % (shown(expected), [shown(n["name"]) for n in with_role(nodes, "alert message")]))
 
     # UX.md 7.1 "Footer status": StaticText, and the two channels a reader
     # can use for it must agree.
     footer = [n for n in with_role(nodes, "label") if n["name"] == late.get("footerStatusText")]
     check("L2-BAN-02", late.get("footerStatusText") and footer,
           "banner: the footer status reaches the bus as a StaticText",
-          "expected %r" % redact(late.get("footerStatusText")))
+          "expected %r" % shown(late.get("footerStatusText")))
     # UX.md 7.2: cached / offline is carried by FOOTER WORDS, not by a tint.
     # (An earlier version of this check compared the footer node's name with
     # its AT-SPI Text and was tautological: measured on this Qt, a
@@ -441,7 +442,7 @@ def check_banner():
           and "offline" not in healthy_heard,
           "banner: a reader is told in words that the data is stale, and is "
           "not told so when it is fresh",
-          "stale footer %r vs healthy footer %r" % (redact(heard), redact(healthy_heard)))
+          "stale footer %r vs healthy footer %r" % (shown(heard), shown(healthy_heard)))
 
     # CLAUDE.md rule 5: the banner is built from a service failure reason and
     # the footer from cache state; neither may carry a provider URL.
@@ -659,13 +660,20 @@ CRED_RUN_RE = re.compile("[qz]{2,}")
 
 def shown(text):
     """F-HARNESS-106: what a detail line prints of a published string -- the
-    text the bus held, with only the fixture's credential runs masked. It was
-    redact(), which rewrites any URL to its host, so a PASS line named a value
-    the bus did not hold (L2-SRC-02 printed 'cdn.test' for
-    'http://****@cdn.test/' and an ellipsis)."""
+    text the bus held, with only the fixture's credentials masked: a run of
+    two or more q or z, and (round 4c, for the checks outside the Sources
+    scenarios that print through it since) the four tokens. It was redact(),
+    which rewrites any URL to its host, so a PASS line named a value the bus
+    did not hold (L2-SRC-02 printed 'cdn.test' for 'http://****@cdn.test/' and
+    an ellipsis); round 4c took its last four callers (L2-FR-03, L2-BAN-01,
+    -02 and -03) and the function with them. CLAUDE.md rule 5: this harness's
+    own output is a sink too."""
     if text is None:
         return None
-    return CRED_RUN_RE.sub("<cred>", str(text))
+    out = CRED_RUN_RE.sub("<cred>", str(text))
+    for tok in TOKENS:
+        out = out.replace(tok, "<" + tok + " masked>")
+    return out
 
 
 def cred_leaks(nodes):
@@ -743,8 +751,11 @@ def check_sources():
                     "D-SINK-97: a URL held in the edit form whose userinfo holds an unencoded `#` "
                     "is heard as stars, with no Description (the credential was heard in the "
                     "host position)")
-        check_field("L2-SRC-06", nodes, "Label, optional", "cdn.test",
-                    "D-SINK-98: a label that is a credentialed URL is heard as its host")
+        # Round 4c (E1): the edit form over a label that reads as an address
+        # is held from the start, so the field is stars (round 4b: its host).
+        check_field("L2-SRC-06", nodes, "Label, optional", "*" * len(CRED_LABEL),
+                    "D-SINK-98: the edit form's label field over a credentialed URL is held, and heard as "
+                    "stars, one per character")
         leaked = cred_leaks(nodes)
         check("L2-SRC-07", not leaked,
               "D-SINK-97/98: nothing in the edit form's tree carries a piece of the stored credential",
@@ -790,6 +801,7 @@ def check_sources():
               "; ".join(leaked))
 
     check_sources_4b()
+    check_sources_4c()
 
 
 # D-A11Y-12: a row's Edit and Remove buttons are on the bus only while the
@@ -800,11 +812,17 @@ ROW_BUTTON_RE = re.compile("^(Edit|Remove) ")
 
 
 def check_row_buttons(cid, nodes, label):
+    """`label` None: no row's Edit or Remove button may be on the bus at all
+    (round 4c, E3: behind a form the cursor row's pair is hidden too)."""
     found = [n for n in with_role(nodes, "push button") if ROW_BUTTON_RE.match(n.get("name") or "")]
     names = sorted(n["name"] for n in found)
-    check(cid, names == sorted(["Edit " + label, "Remove " + label]),
+    want = [] if label is None else sorted(["Edit " + label, "Remove " + label])
+    check(cid, names == want,
           "D-A11Y-12: only the cursor source row's Edit and Remove buttons are on the bus, not the "
-          "hidden pairs of the other rows (`Edit Add source`, `Remove Add Xtream login`)",
+          "hidden pairs of the other rows (`Edit Add source`, `Remove Add Xtream login`)"
+          if label is not None else
+          "D-A11Y-12: behind a form, no row's Edit or Remove button is on the bus -- the cursor "
+          "row's pair is hidden there too",
           "row buttons on the bus: %r" % [(shown(n["name"]), n.get("state_names")) for n in found])
 
 
@@ -843,8 +861,9 @@ def check_sources_4b():
     nodes, rb = guide("editlabel")
     if nodes:
         late = rb.get("LATE") or {}
-        check_field("L2-SRC-21", nodes, "Label, optional", "cdn.test",
-                    "D-SINK-98: a label whose scheme lost a `/` (`http:/...`) is heard as its host")
+        check_field("L2-SRC-21", nodes, "Label, optional", "*" * len(EDIT_LABEL),
+                    "D-SINK-98: the edit form's label field over a label whose scheme lost a `/` "
+                    "(`http:/...`) is held, and heard as stars (round 4c, E1)")
         check_field("L2-SRC-22", nodes, "Playlist URL or path", "*" * len(EDIT_PLAYLIST),
                     "D-SINK-97: a URL edited down to a local path is heard as stars (it was heard whole)")
         check_field("L2-SRC-23", nodes, "EPG URL, optional", "*" * len(EDIT_EPG),
@@ -920,6 +939,164 @@ def check_sources_4b():
         leaked = cred_leaks(nodes)
         check("L2-SRC-%02d" % (int(cid[-2:]) + 2), not leaked,
               "D-SINK-99: nothing in the form's tree carries a piece of the withheld URL's credential",
+              "; ".join(leaked))
+
+
+# Round 4c (D-SINK-98 E1/E2, D-SINK-99 E4, D-A11Y-12 E3/E6), mirroring
+# host_guide.qml.
+COLON_EDITED = "qqqqqqzzzzzz@cdn.test"
+PASS_EDITED = "password=zzzzzz"
+DOTTED_PLAYLIST = "http://qqqqqq.test:12#zzzzzz@cdn.test/x"
+HIDDEN_PANELS = ("Audio and subtitles", "Programme", "Keys")
+FORM_BUTTONS = ("Saved sources, 1", "Use Xtream login instead", "Cancel", "Save", "Load")
+
+
+def hidden_on_bus(nodes, label, form_open=False, sources_open=False):
+    """E6: the nodes a reader is offered that the guide does not show. In
+    the plain guide that is any dialog but the card, the Sources list and its
+    rows, a row button, a form button, a closed panel's list or label, the
+    channel-number alert, the empty banner, the empty screen title and the
+    empty state; with the Sources view open and no form, a form button, a
+    dialog but the card, the empty banner and result line, the empty state
+    and the search line the Sources title replaces."""
+    out = []
+    for n in nodes:
+        role, name = n["role"], n.get("name") or ""
+        if role == "dialog" and name != "IPTV guide" and not form_open:
+            out.append(("dialog", name))
+        elif role == "push button" and name in FORM_BUTTONS and not form_open:
+            out.append(("push button", name))
+        elif role == "alert message" and (name.startswith("Entering channel number") or (name == "" and not form_open)):
+            out.append(("alert message", name))
+        elif role == "heading" and name == "":
+            out.append((role, name))
+        elif role == "label" and name.startswith("No channels in"):
+            out.append((role, name))
+        elif sources_open and role == "text" and name == "Search channels":
+            out.append((role, name))
+        elif role in ("list", "label") and name in HIDDEN_PANELS:
+            out.append((role, name))
+        elif not sources_open and role == "list" and name == "Sources":
+            out.append((role, name))
+        elif not sources_open and role == "list item" and (name in ("Add source", "Add Xtream login")
+                                                           or name.startswith(label + ", ")):
+            out.append((role, name))
+        elif not sources_open and role == "push button" and ROW_BUTTON_RE.match(name):
+            out.append((role, name))
+    return out
+
+
+def check_sources_4c():
+    # E3: behind a form, no row's Edit or Remove button.
+    for name, cid in (("addtyped", "L2-SRC-38"), ("editlabel", "L2-SRC-39")):
+        nodes, rb = guide(name)
+        if nodes:
+            check_row_buttons(cid, nodes, None)
+
+    # E6: the plain guide offers no Sources list item, remove dialog, form
+    # button or closed panel, and Sources with no form offers no form button.
+    nodes, rb = guide("query")
+    if nodes:
+        found = hidden_on_bus(nodes, "Provider")
+        check("L2-SRC-40", not found,
+              "D-A11Y-12: the plain guide puts nothing it does not show on the bus -- no remove dialog, "
+              "form or form button, no Sources list or row, no closed panel, no channel-number alert",
+              "hidden nodes on the bus: %r" % [(r, shown(n)) for r, n in found])
+    nodes, rb = guide("sourcesrow")
+    if nodes:
+        found = hidden_on_bus(nodes, "cdn.test", sources_open=True)
+        check("L2-SRC-41", not found,
+              "D-A11Y-12: the Sources view with no form open puts no form, form button or closed "
+              "dialog on the bus", "hidden nodes on the bus: %r" % [(r, shown(n)) for r, n in found])
+
+    # E1: the Label field through the key path (one Backspace on the `:` of
+    # a typed `user:pass@host`) and the paste path (the range before
+    # `password=` deleted from a pasted query): held, so heard as stars.
+    for name, cid, edited, what in (
+            ("rbcolon", "L2-SRC-42", COLON_EDITED, "one Backspace on the `:` of a typed `user:pass@host`"),
+            ("rbpass", "L2-SRC-44", PASS_EDITED, "the range before `password=` deleted from a pasted query")):
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        late = rb.get("LATE") or {}
+        check_field(cid, nodes, "Label, optional", "*" * len(edited),
+                    "D-SINK-98 (round 4c, E1): the Label field after %s is held and heard as stars "
+                    "(round 4b heard the credential)" % what)
+        leaked = cred_leaks(nodes)
+        nxt = "L2-SRC-%02d" % (int(cid[-2:]) + 1)
+        check(nxt, not leaked and (late.get("intact") or {}).get("label") is True and late.get("labelHeld") is True,
+              "D-SINK-98 (round 4c, E1): nothing in the form's tree carries a piece of the credential, the "
+              "field holds the edited label, and the form reports it held",
+              "; ".join(leaked) or "intact %r, labelHeld %r" % (late.get("intact"), late.get("labelHeld")))
+
+    # E2: a stored label holding U+FEFF, or U+2028 and U+00A0, inside its
+    # token: its row, the row's two buttons and the remove dialog read the
+    # host (round 4b split it at JS `\s` and passed it raw).
+    for name, cid, label in (
+            ("rbfeffrow", "L2-SRC-46", "qqqqqq:zzzzzz\ufeff@cdn.test"),
+            ("rbnbsp", "L2-SRC-49", "qqqqqq:\u2028zzzzzz\u00a0@cdn.test")):
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        view = ('M.sourceView({key: "k9", url: %s, epgUrl: "", kind: "http", label: %s, labelCustom: true, '
+                'origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, '
+                'channelCount: 3, groupCount: 2}, "k9", 1789000000, "")'
+                % (json.dumps(CLEAN_PLAYLIST), json.dumps(label)))
+        composed = model_try("M.sourceAccessibleName(%s)" % view)
+        rows = pick(nodes, "list item", composed) if composed else []
+        check(cid, (composed or "").startswith("cdn.test, cdn.test, ") and len(rows) == 1,
+              "D-SINK-98 (round 4c, E2): the row of a stored label with an invisible or a space character "
+              "inside its token is named by Model.sourceAccessibleName with the label as its host",
+              "composed %r, rows %d" % (shown(composed), len(rows)))
+        dialog = "Remove \u201ccdn.test\u201d? It is the active source; the guide returns to setup."
+        buttons = [n["name"] for n in with_role(nodes, "push button") if ROW_BUTTON_RE.match(n.get("name") or "")]
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 1),
+              sorted(buttons) == ["Edit cdn.test", "Remove cdn.test"] and len(pick(nodes, "dialog", dialog)) == 1,
+              "D-SINK-98 (round 4c, E2): its Edit and Remove buttons and the remove dialog name the host",
+              "row buttons %r, dialogs %r" % ([shown(b) for b in buttons], [shown(n["name"]) for n in with_role(nodes, "dialog")]))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 2), not leaked,
+              "D-SINK-98 (round 4c, E2): nothing in the tree carries a piece of that label's credential",
+              "; ".join(leaked))
+
+    # E6 with that label stored: the plain guide holds no Sources node at
+    # all, so nothing of the label reaches the bus however it reads.
+    nodes, rb = guide("rbfeffguide")
+    if nodes:
+        found = hidden_on_bus(nodes, "cdn.test")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-52", not found and not leaked,
+              "D-A11Y-12 (round 4c, E6): the plain guide over a stored credentialed label holds no Sources "
+              "node and no piece of the label",
+              "hidden nodes %r; %s" % ([(r, shown(n)) for r, n in found], "; ".join(leaked)))
+
+    # E4: a dotted username before a later `@`, submitted: the fetching
+    # line, and once the probe fails the failure line, name the host as
+    # withheld, and so does the label's placeholder.
+    for name, cid, literal, what in (
+            ("rbdotted", "L2-SRC-53", "Fetching from " + HOST_WITHHELD + ELLIPSIS, "the fetching line"),
+            ("rbdottedfail", "L2-SRC-56", "Could not resolve host from " + HOST_WITHHELD, "the probe's failure line")):
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        late = rb.get("LATE") or {}
+        form = ('{kind: "url", values: {label: "", playlist: %s, epg: ""}, probing: true, probeHost: "qqqqqq.test", '
+                'probeKind: "url"}' % json.dumps(DOTTED_PLAYLIST))
+        composed = model_try("M.formFetchingLine(%s)" % form if name == "rbdotted" else
+                             'M.formProbeFailureLine(%s, "Could not resolve host", "qqqqqq.test", "")' % form)
+        alerts = [n["name"] for n in with_role(nodes, "alert message")]
+        check(cid, composed == literal and alerts.count(literal) == 1,
+              "D-SINK-99 (round 4c, E4): for a dotted username before a later `@`, %s names the host as "
+              "`%s` (the composer, the literal and the bus agree)" % (what, HOST_WITHHELD),
+              "composed %r, alerts %r" % (shown(composed), [shown(a) for a in alerts]))
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 1),
+              late.get("placeholderWithheld") is True and late.get("placeholderHasRun") is False,
+              "D-SINK-99 (round 4c, E4): and the label's placeholder reads `%s`" % HOST_WITHHELD,
+              "probe readback: placeholderWithheld %r, placeholderHasRun %r, formProbing %r"
+              % (late.get("placeholderWithheld"), late.get("placeholderHasRun"), late.get("formProbing")))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 2), not leaked,
+              "D-SINK-99 (round 4c, E4): nothing in the form's tree carries a piece of the dotted URL's credential",
               "; ".join(leaked))
 
 
@@ -1004,15 +1181,21 @@ def main():
 
 
 # The failures shipping code is known to produce, by id. Every one is a filed
-# defect, not harness noise:
-#   L2-XT-11             the eye buttons all publish checked=true on a form
-#                        where no field can be masked at all
-# A run that matches this set exactly is GREEN, because that is what "no
-# regression" means for a harness whose baseline is deliberately red.
+# defect, not harness noise. A run that matches this set exactly is GREEN,
+# because that is what "no regression" means for a harness whose baseline is
+# deliberately red.
 # L2-XT-05 / L2-XT-06 (D-A11Y-1, the Xtream server and username publishing
 # provider credentials as their accessible Value) left the set on 2026-10-31,
 # when the drawn field went off the bus and a masked sibling took its place.
-BASELINE = ["L2-XT-11"]
+# L2-XT-11 (the eye buttons publishing checked=true on a form where no field
+# can be masked) left it on 2026-11-11, round 4c (D-A11Y-12's siblings): an
+# eye button is on the bus only while it is shown, and it is shown only on a
+# field that can be masked, so the Xtream form puts none there. Measured in a
+# nested headless cage: the xtream scenario held four `Hide query` buttons,
+# all checked, on 93d034b and holds none on this tree, and L2-XT-11 passes.
+# The set is empty; D-A11Y-10's four failures (L2-Q-04-LIT, L2-Q-06,
+# L2-SC-03-LIT, L2-SC-06) were never in it and still read off it.
+BASELINE = []
 
 
 if __name__ == "__main__":
