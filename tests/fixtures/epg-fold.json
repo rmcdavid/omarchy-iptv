@@ -2685,8 +2685,8 @@
    "field": "desc",
    "raw": "News http://qqqqqq.qq:\u007f/zzzzzz@cdn.test/x tail",
    "stored": "News http://[host withheld] tail",
-   "helper": "News http://[redacted] withheld] tail",
-   "shell": "News [url] withheld] tail"
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -2694,8 +2694,8 @@
    "field": "desc",
    "raw": "News http://qqqqqq.qq:12\u007f34/zzzzzz@cdn.test/x tail",
    "stored": "News http://[host withheld] tail",
-   "helper": "News http://[redacted] withheld] tail",
-   "shell": "News [url] withheld] tail"
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -2703,8 +2703,8 @@
    "field": "desc",
    "raw": "News http://qqqqqq.qq:\u0085?zzzzzz@cdn.test/x tail",
    "stored": "News http://[host withheld] tail",
-   "helper": "News http://[redacted] withheld] tail",
-   "shell": "News [url] withheld] tail"
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -2712,8 +2712,8 @@
    "field": "desc",
    "raw": "News http://qqqqqq.qq:\u007f//zzzzzz@cdn.test/x tail",
    "stored": "News http://[host withheld] tail",
-   "helper": "News http://[redacted] withheld] tail",
-   "shell": "News [url] withheld] tail"
+   "helper": "News http://[host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",

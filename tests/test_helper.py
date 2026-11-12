@@ -472,6 +472,25 @@ class SharedRedactionVectors(unittest.TestCase):
                     bad.append("%s -> leaked %r: %s" % (v["why"], frag, out))
         self.assertEqual([], bad)
 
+    def test_d_epg_18_redacting_a_redacted_text_changes_nothing(self):
+        """D-EPG-18 (2026-11-12): what redact_urls prints is read again by a
+        redactor -- a programme description is stored redacted and redacted
+        where it is shown, a helper line is redacted by the shell -- so its
+        output must read as itself. The withheld token holds a space, which
+        ends a run, and a second pass printed `http://[redacted] withheld]`
+        for every vector whose host is withheld (12 of the 88 the fixture
+        held that day). The node suite holds Model.redactUrls over each
+        `py` output to the vector's `js` the same way."""
+        vectors = self.vectors()
+        self.assertGreaterEqual(sum(1 for v in vectors if helper.HOST_WITHHELD in helper.redact_urls(v["text"])), 12)
+        bad = []
+        for v in vectors:
+            once = helper.redact_urls(v["text"])
+            twice = helper.redact_urls(once)
+            if twice != once:
+                bad.append("%s -> %r then %r" % (v["why"], once, twice))
+        self.assertEqual([], bad)
+
     def test_f_sink_15_the_display_reading_prints_the_rfc_host_on_every_bare_http_vector(self):
         """F-SINK-15 (2026-10-29): the DISPLAY side of the shared fixture, which
         only the node suite ran (sourceLabel, hostOf). The helper's display

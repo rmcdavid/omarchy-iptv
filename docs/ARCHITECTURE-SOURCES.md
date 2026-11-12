@@ -583,7 +583,12 @@ acceptance rule, no control character ever types) and a paste through
    WITHHELD and the one token `[host withheld]` prints in its place
    (`Model.HOST_WITHHELD`, the helper's `HOST_WITHHELD`; the model prints the
    bare token as it prints a bare host, the helper `scheme://[host withheld]`
-   as it prints `scheme://host`). So `http://myuser:pa#ss@cdn.test/x` redacts
+   as it prints `scheme://host`). [2026-11-12, D-EPG-18: the token holds a
+   space, and a space ends a run, so a redactor reading a redactor's output
+   -- the panel over a stored description, the shell over a helper line --
+   read `[host` as an unclosed bracket and showed `[url] withheld]`. Both
+   now read a `://` followed by exactly the token as the token, and go on
+   right after its `]`, where the text is read as it was before.] So `http://myuser:pa#ss@cdn.test/x` redacts
    to `[host withheld]`: never `myuser`, the username the RFC reading prints
    (D-SINK-28, round 2), and never `cdn.test`, the host after the later `@`
    that round 3's last-`@`-of-the-run scan printed -- because that same scan,

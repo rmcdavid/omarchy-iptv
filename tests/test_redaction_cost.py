@@ -66,7 +66,11 @@ helper = load_helper()
 # scheme right after an accented or CJK letter were no URL to either and the
 # suite pinned the leak; Model.redactUrls never had it and printed the host.
 _WS = "\t\n\x0b\x0c\r "
-_AS_RULED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
+# D-EPG-18 (2026-11-12): one more clause, an alternative the pattern tries
+# first: a `://` followed by exactly the withheld token is a URL a redactor
+# already printed, and it is printed as it stands, nothing past its `]`
+# consumed.
+_AS_RULED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://(?:\[host withheld\]|[^" + _WS + "]+)")
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
 _PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
@@ -97,6 +101,8 @@ def host_as_ruled(raw):
 def redact_urls_as_ruled(text):
     def replace(match):
         raw = match.group(0)
+        if raw[match.end(1) - match.start() + 3:] == HOST_WITHHELD:
+            return "%s://%s" % (match.group(1).lower(), HOST_WITHHELD)
         bracket = "[" in raw
         trailing = ""
         while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
@@ -168,6 +174,13 @@ EDGES = [
     "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://nas:8000/me@h/x",
     "http://nas:8080?u=me@b", "http://u:p@nas/x", "http://nas", "http://nas/x", "http://[::1]/me@x",
     "http://h.test=p&x=1/y", "http://h.test;s=p", "x http://nas/a@b. y", "http://nas/a@b\u2028c",
+    # D-EPG-18: the withheld token after a `://`, exact and not, with text,
+    # an `@` and a second URL after it, and with no scheme before it.
+    "http://[host withheld]", "x http://[host withheld]. y", "http://[host withheld]:p@h.test/x",
+    "http://[host withheld]@h.test/x", "a://[host withheld]://b.test/c", "http://[host withheld",
+    "http://[Host withheld]", "http://[host  withheld]", "://[host withheld]", "1://[host withheld] http://u:p@h.test/a",
+    "HTTP://[host withheld]http://u:p@h.test/a", "http://u:p@[host withheld]/x",
+    "http://[host withheld]a://u:p@h.test/x",
 ]
 
 

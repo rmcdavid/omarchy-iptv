@@ -18461,7 +18461,7 @@ The test gaps, closed (F5, F6 and F19 seen red under a mutation; F17 by removing
 
 The docs, corrected where they overstated (each in the rows, here and in docs/ARCHITECTURE.md, the README, docs/UX-SOURCES.md and CLAUDE.md): F3, a URL that itself holds `",` with a glued, NBSP-separated or missing close is still cut there, as in every release (one skeptic held the suggested close-at-last-quote fix wrong, measured: it changed 5 of 7 well-formed titles holding a quote and added 720 leaks); F4, a shell before 0.16.0 sets no origin, so both helper backstops are off for it until it restarts; F7, the README's guide-hint paragraph; F8, the D-SINK-80 hint example; F12, a dotted username is looked up as before; F13 (split), a failed stamp refetch; F14, inactive sources refetch at their swap; F15, a URL tvg-id loses the row's whole guide; F16 (split), references saved on an old id keep it; F20, the red-first counts; F21, three fixture strings still said "D-SINK-82's companion"; F22 (split), the fold's C1 wording; F23, CLAUDE.md said the helper reads a list's first entry; F24, a TAB is not split by every tokenizer.
 
-The withheld-token re-redaction seen while writing F9's fixture cases is D-EPG-18 (open, P4, cosmetic, since 0.15.0): a description stored as `http://[host withheld]` is redacted again by the panel and drawn as `[url] withheld]`.
+The withheld-token re-redaction seen while writing F9's fixture cases is D-EPG-18 (open, P4, cosmetic, since 0.15.0): a description stored as `http://[host withheld]` is redacted again by the panel and drawn as `[url] withheld]`. [2026-11-12: fixed on dev; both redactors print the token again, see the board row.]
 
 **Mutations.** 18, each on a copy of the tree, sealed or relinked, every one red:
 

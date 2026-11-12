@@ -1437,6 +1437,22 @@ def redact_urls(text: Any) -> str:
             # of their own; +1 keeps that from being load-bearing.
             j = s.find("://", j + 1)
             continue
+        if s.startswith(HOST_WITHHELD, j + 3):
+            # D-EPG-18: a URL this function already redacted with its host
+            # withheld. The token holds a space, which ends a run, so a
+            # second pass read `[host` as an unclosed bracket and printed
+            # `[redacted] withheld]` (Model.redactUrls, over text the helper
+            # stored redacted: `[url] withheld]`). The token is printed
+            # again as it stands and the scan goes on right after it, so
+            # everything past its `]` is read exactly as it was before this
+            # branch existed: as text after the space that ended the run.
+            end = j + 3 + len(HOST_WITHHELD)
+            out.append(s[copied:start])
+            out.append("%s://%s" % (s[start:j].lower(), HOST_WITHHELD))
+            copied = end
+            resume = end
+            j = s.find("://", resume)
+            continue
         end = tail.end()
         raw = s[start:end]
         # Sentence punctuation after a URL is put back. A `]` is kept when the

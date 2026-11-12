@@ -186,8 +186,10 @@ class FixtureTest(unittest.TestCase):
             if shown != c["helper"]:
                 bad.append((c["why"], "redact_urls", shown))
             # D-EPG-18: a withheld host is stored as `http://[host withheld]`,
-            # which a second redaction reads as a bracketed host.
-            if c["field"] != "title" and stored != c["helper"] and helper.HOST_WITHHELD not in stored:
+            # and a second redaction prints that token as it stands (it read
+            # it as a bracketed host: `http://[redacted] withheld]`), so the
+            # rule has no exception left.
+            if c["field"] != "title" and stored != c["helper"]:
                 bad.append((c["why"], "stored unredacted", stored))
             for sink, out in (("redact_urls", shown), ("player_title_text", helper.player_title_text(stored))):
                 if leaked(out):

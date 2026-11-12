@@ -1078,6 +1078,79 @@
    ],
    "js": "Failed to open CANAL\u00c9prov.test.",
    "py": "Failed to open CANAL\u00c9http://prov.test."
+  },
+  {
+   "why": "D-EPG-18: a URL already redacted with its host withheld, redacted again, reads as it did (a programme description is stored redacted and redacted where it is shown); the token's space ended the run and the rest read `withheld]`",
+   "text": "Failed to open http://[host withheld].",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "withheld] withheld"
+   ],
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open http://[host withheld]."
+  },
+  {
+   "why": "D-EPG-18: the same as a bare token, with a capital scheme, which is lowered as any scheme is",
+   "text": "See HTTPS://[host withheld]",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "HTTPS"
+   ],
+   "js": "See [host withheld]",
+   "py": "See https://[host withheld]"
+  },
+  {
+   "why": "D-EPG-18: a URL after the token is still redacted",
+   "text": "See http://[host withheld] then http://u5er:p4ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "live/1.ts",
+    "[redacted]",
+    "[url]"
+   ],
+   "js": "See [host withheld] then prov.test.",
+   "py": "See http://[host withheld] then http://prov.test."
+  },
+  {
+   "why": "D-EPG-18: a URL glued to the token's `]` is still redacted",
+   "text": "See http://[host withheld]http://u5er:p4ss@prov.test/live/1.ts",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "live/1.ts",
+    "[redacted]",
+    "[url]"
+   ],
+   "js": "See [host withheld]prov.test",
+   "py": "See http://[host withheld]http://prov.test"
+  },
+  {
+   "why": "D-EPG-18: only the exact token is kept; a near miss is an unclosed bracket, as it always was",
+   "text": "See http://[host withhold] x",
+   "host": "withhold] x",
+   "mustNotAppear": [
+    "[host"
+   ],
+   "js": "See [url] withhold] x",
+   "py": "See http://[redacted] withhold] x"
+  },
+  {
+   "why": "D-EPG-18: text glued to the token's `]` is text after the space that ended the run, printed as it was before the token was recognised (then behind `[redacted] withheld]`): the token never widens what a run covers",
+   "text": "See http://[host withheld]tail/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]"
+   ],
+   "js": "See [host withheld]tail/x",
+   "py": "See http://[host withheld]tail/x"
   }
  ]
 }

@@ -813,6 +813,22 @@ function redactUrls(text) {
       j = s.indexOf("://", j + 1)
       continue
     }
+    // D-EPG-18: a URL a redactor already printed with its host withheld,
+    // as the helper prints it, `scheme://[host withheld]` (a programme
+    // description is stored redacted and redacted again where it is shown).
+    // The token holds a space, which ends a run, so this pass read `[host`
+    // as an unclosed bracket and printed `[url] withheld]`. The token is
+    // printed as this function prints a withheld host, and the scan goes on
+    // right after it, so everything past its `]` is read exactly as it was
+    // before this branch existed: as text after the space that ended the run.
+    if (s.substring(j + 3, j + 3 + HOST_WITHHELD.length) === HOST_WITHHELD) {
+      var tokenEnd = j + 3 + HOST_WITHHELD.length
+      out += s.substring(copied, p) + HOST_WITHHELD
+      copied = tokenEnd
+      resume = tokenEnd
+      j = s.indexOf("://", resume)
+      continue
+    }
     // The run: to the first ASCII delimiter (R32a''', isUrlDelimiterAt: the
     // six; it was the old `[^\s]*` tail, JS `\s`, until 2026-10-22, and the
     // 30-point union for one round after that), then the sentence

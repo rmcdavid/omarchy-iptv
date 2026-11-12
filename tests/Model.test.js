@@ -4181,6 +4181,30 @@ checkCall("D-SINK-1: every shared vector keeps its host and loses every credenti
     return v.mustNotAppear.some(function (frag) { return out.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.redactUrls(v.text) })
 }, [])
+// D-EPG-18 (2026-11-12): what a redactor prints is read by a redactor again.
+// The helper stores a programme description redacted and the panel redacts
+// it where it is shown; a helper line is redacted again before a notice. A
+// withheld host is the token `[host withheld]`, whose space ends a run, so
+// the second pass read `[host` as an unclosed bracket and the panel showed
+// `[url] withheld]`. Held two ways over the shared vectors: this redactor
+// over its own output, and over the helper's (`py`, which the python suite
+// holds redact_urls to), where it must print what it prints for the text.
+checkCall("D-EPG-18: Model.redactUrls over its own output, and over the helper's output for every vector that pins one, prints what it prints for the text itself; at least twelve vectors withhold a host", function () {
+  const own = redactionVectors.vectors.filter(function (v) {
+    const once = Model.redactUrls(v.text)
+    return Model.redactUrls(once) !== once
+  }).map(function (v) { return "own: " + v.why + " -> " + JSON.stringify(Model.redactUrls(Model.redactUrls(v.text))) })
+  // One difference is left and is not this defect: for a URL with no host
+  // the helper prints `[redacted]`, which reads here as a closed bracket and
+  // is printed as it stands, where this redactor's own word is `[url]`.
+  const piped = redactionVectors.vectors.filter(function (v) {
+    return v.py !== undefined && Model.redactUrls(v.py).split("[redacted]").join("[url]") !== Model.redactUrls(v.text)
+  }).map(function (v) { return "helper's: " + v.why + " -> " + JSON.stringify(Model.redactUrls(v.py)) })
+  const withheld = redactionVectors.vectors.filter(function (v) {
+    return Model.redactUrls(v.text).indexOf(Model.HOST_WITHHELD) !== -1
+  }).length
+  return [own.concat(piped), withheld >= 12]
+}, [[], true])
 // ---- R32a''' (D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): TWO
 // whitespace classes for two purposes ----
 //
@@ -4402,10 +4426,16 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // of the rule. Deliberately a copy rather than an import -- the shipping
 // file must not carry a second redactor for a test's benefit, and a copy
 // that drifts is caught the moment a vector disagrees.
-const URL_RUN_AS_RULED = /[a-z][a-z0-9+.-]*:\/\/([^\t\n\v\f\r ]*)/gi
+// D-EPG-18 (2026-11-12): one more clause, stated here as an alternative the
+// pattern tries first: a `://` followed by exactly the withheld token is a
+// URL a redactor already printed, and it is the token again, nothing past
+// its `]` consumed. The scheme's letters are spelt in both cases now and the
+// `i` flag is gone, because the token is matched as written.
+const URL_RUN_AS_RULED = /[A-Za-z][A-Za-z0-9+.-]*:\/\/(\[host withheld\]|[^\t\n\v\f\r ]*)/g
 function redactUrlsAsShipped(text) {
   return String(text === undefined || text === null ? "" : text)
     .replace(URL_RUN_AS_RULED, function (all, whole) {
+      if (whole === "[host withheld]") return whole
       const cut = whole.match(whole.indexOf("[") >= 0 ? /^([\s\S]*?)([.,;:!?)'"<>]*)$/ : /^([\s\S]*?)([.,;:!?)\]'"<>]*)$/)
       const run = cut[1]
       const trailing = cut[2]
@@ -4481,7 +4511,14 @@ function redactUrlsBeforeDSink23(text) {
     "http://myuser:pa\u001css@h.test/x", "http://myuser:pa\ufeffss@h.test/x", "http://user.name:pa/ss@h.test/x",
     "http://me@mail.test:pa&x=1/ss@h.test/x", "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y",
     "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".", "http://.", "x http://. y",
-    "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b"]
+    "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b",
+    // D-EPG-18: the withheld token after a `://`, exact and not, with text,
+    // an `@` and a second URL after it, and with no scheme before it.
+    "http://[host withheld]", "x http://[host withheld]. y", "http://[host withheld]:p@h.test/x",
+    "http://[host withheld]@h.test/x", "a://[host withheld]://b.test/c", "http://[host withheld",
+    "http://[Host withheld]", "http://[host  withheld]", "://[host withheld]", "1://[host withheld] http://u:p@h.test/a",
+    "HTTP://[host withheld]http://u:p@h.test/a", "http://u:p@[host withheld]/x",
+    "http://[host withheld]a://u:p@h.test/x"]
   for (let i = 0; i < corpus.length; i++) edges.push(corpus[i])
   for (let seed = 1; seed <= 3000; seed++) {
     for (let len = 0; len <= 40; len += 7) edges.push(generated(len, seed))
