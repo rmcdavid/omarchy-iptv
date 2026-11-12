@@ -28,6 +28,16 @@ finds (tests/url_reading_rule.py), whose mark any odd character may break,
 and a credential token in the free text between URLs keeps its characters,
 its controls made U+00A0 -- not U+FFFD, a STAND_IN, which inside a token
 would make a mark the raw text lacked (FoldSweepTest, red with U+FFFD).
+
+The review of cbd6679 (2026-11-12): a credential is read across the URLs in
+its token, with at most one counted code point between its `:` and its `@`,
+so U+00A0, which is counted, cannot stand for a control any more: two of them
+lifted the cap. Inside a credential's withheld span the ASCII delimiters but
+the space become a TAB (each ends a URL's run and none ends a token), the
+other controls the plain fold takes are deleted (none is counted, a STAND_IN
+or a delimiter), and U+2028 and U+2029 become U+00A0 (FILLER, counted, no
+STAND_IN, as they are), so the stored credential reads as the raw one
+(FoldSpaceTest's credential test, red with U+00A0 for a control).
 """
 import calendar
 import contextlib
@@ -93,33 +103,44 @@ def plain_fold(text):
     return "".join(out)
 
 
-def fold_free(text):
-    """Free text, outside every URL: the plain fold, but a D-SINK-96 token
-    (as the raw text reads one) keeps its characters, with each of the run's
-    controls made U+00A0."""
-    out, pos = [], 0
-    for start, end in rule.tokens(text):
-        out.append(plain_fold(text[pos:start]))
-        out.append("".join(NB if run_fold(c) == REPL else c for c in text[start:end]))
-        pos = end
-    out.append(plain_fold(text[pos:]))
-    return "".join(out)
+def held_fold(c):
+    """What the fold makes of a character inside a credential's withheld
+    span: a delimiter but the space becomes a TAB, another control the plain
+    fold takes is deleted, a line or paragraph separator becomes U+00A0."""
+    if c in "\t\n\x0b\x0c\r":
+        return "\t"
+    if (is_control(c) and folds(c)) or c == NEL:
+        return ""
+    return NB if c in (LS, PS) else c
 
 
 def fold_reference(text):
-    """The rule, as stated (D-SINK-79; D-SINK-95 and D-SINK-96): a URL is
-    what the redactors' reading finds (url_reading_rule, no run needed), and
-    runs to the first of the six delimiters after its mark. From its scheme
-    to its mark's end the controls both mirrors delete are deleted and the
-    line and paragraph separators become U+FFFD; after the mark, run_fold.
-    Outside every URL, fold_free."""
+    """The rule, as stated (D-SINK-79; D-SINK-95 and D-SINK-96, as the
+    review of cbd6679 restated them): a URL is what the redactors' reading
+    finds (url_reading_rule), and runs to the first of the six delimiters
+    after its mark; a credential is what url_reading_rule withholds, read on
+    the raw text, from its span's start to its token's end, a URL inside it
+    with it. Inside a credential, held_fold. Inside a URL no credential
+    holds, from its scheme to its mark's end the controls both mirrors
+    delete are deleted and the line and paragraph separators become U+FFFD;
+    after the mark, run_fold. Everywhere else, the plain fold."""
+    urls = rule.urls(text)
+    held = rule.credentials(text, urls)
     out, pos = [], 0
-    for start, _, mark_end, end in rule.urls(text):
-        out.append(fold_free(text[pos:start]))
-        out.append("".join(REPL if c in (LS, PS) else c for c in text[start:mark_end] if not is_control(c)))
-        out.append("".join(run_fold(c) for c in text[mark_end:end]))
-        pos = end
-    out.append(fold_free(text[pos:]))
+    items = [("held", start, token_end) for start, _, token_end in held]
+    items += [("url", u[0], u) for u in urls if not any(a <= u[0] < t for a, _, t in held)]
+    items.sort(key=lambda item: item[1])
+    for kind, start, rest in items:
+        out.append(plain_fold(text[pos:start]))
+        if kind == "held":
+            out.append("".join(held_fold(c) for c in text[start:rest]))
+            pos = rest
+        else:
+            _, _, mark_end, end = rest
+            out.append("".join(REPL if c in (LS, PS) else c for c in text[start:mark_end] if not is_control(c)))
+            out.append("".join(run_fold(c) for c in text[mark_end:end]))
+            pos = end
+    out.append(plain_fold(text[pos:]))
     return "".join(out)
 
 
@@ -235,7 +256,9 @@ class FoldSpaceTest(unittest.TestCase):
         self.assertEqual(helper.clean_title(text), "A x://b" + NB + "c" + REPL + "d")
         # The redaction keeps the host, U+00A0 and all, and the plain fold
         # after it makes that a space: no credential is left for it to split.
-        self.assertEqual(helper.clean_detail(text, 400), "A x://b c" + REPL + "d")
+        # `x` is no named scheme, so the helper prints the host alone (the
+        # review of cbd6679).
+        self.assertEqual(helper.clean_detail(text, 400), "A b c" + REPL + "d")
 
     def test_d_sink_95_and_96_a_detail_with_a_broken_mark_or_a_token_is_stored_redacted(self):
         # clean_detail's exit was `"://" not in text`, so a detail whose mark
@@ -245,6 +268,23 @@ class FoldSpaceTest(unittest.TestCase):
                          "Watch http://cdn.test now")
         self.assertEqual(helper.clean_detail("Backup qqqqqq:zzzzzz@cdn.test/x", 400), "Backup " + helper.HOST_WITHHELD)
         self.assertEqual(helper.clean_detail("UK: Sports", 400), "UK: Sports")
+
+    def test_a_credentials_controls_keep_it_one(self):
+        """The review of cbd6679: a credential is withheld when at most one
+        counted code point stands between its `:` and its `@`, and a control
+        counts for none. Stored with U+00A0 for each control, as the first
+        fold of a credential wrote it, two of them made a credential no
+        redactor withheld, and every sink printed `qqqqqq:zz`; a space
+        splits it, and U+FFFD makes a mark before a `//`. Kept as the raw
+        text reads it, every sink withholds it."""
+        for raw in ("News qqqqqq:zz\t\tzz@cdn.test/x HD", "News qqqqqq:zz" + LS + "\x01\x01zz@cdn.test/x HD",
+                    "News qqqqqq:zz\n\r//zz@cdn.test/x HD", "News qqqqqq:zz" + DEL + NEL + "zz@cdn.test/x HD",
+                    "News qqqqqq:zz\t" + chr(0xe9) + "//\tzz@cdn.test/x HD"):
+            for out in (helper.redact_urls(helper.fold_space(raw)), helper.player_title_text(helper.fold_space(raw)),
+                        helper.redact_urls(helper.clean_title(raw)), helper.clean_detail(raw, helper.EPG_MAX_DESC)):
+                self.assertEqual(out, "News " + helper.HOST_WITHHELD + " HD", repr(raw))
+        self.assertEqual(helper.fold_space("x qqqqqq:zz\t\n" + LS + "\x01zz@cdn.test/x  y"),
+                         "x qqqqqq:zz\t\t" + NB + "zz@cdn.test/x y")
 
     def test_clean_field_keeps_the_plain_fold_for_text_already_redacted(self):
         # clean_detail's last step and the xmltv_ns episode: no credential
@@ -380,7 +420,13 @@ class LinearTest(unittest.TestCase):
               lambda n: "a:b@ " * (n // 5),
               lambda n: ("a:b@c\thttp://x\t") * (n // 15),
               lambda n: ("1" + chr(0x200b) + chr(0x2215) + chr(0x2215)) * (n // 4),
-              lambda n: "http:/" + chr(0x200b) * n]
+              lambda n: "http:/" + chr(0x200b) * n,
+              # The review of cbd6679: empty runs before a delimiter, the
+              # look-alike pair, and credentials across URLs.
+              lambda n: "a" + (chr(0x200b) + chr(0x2215) * 2 + "\t") * (n // 4),
+              lambda n: (chr(0x200b) + chr(0x2215)) * (n // 2),
+              lambda n: ("q:z" + chr(0xe9) + "//z@h ") * (n // 9),
+              lambda n: "q:" + ("a" + chr(0x200b) + "//b\t") * (n // 6) + "@h"]
 
     def best(self, text):
         times = []

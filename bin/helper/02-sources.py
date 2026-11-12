@@ -587,6 +587,14 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
       and that mark's end. Each test reads only the value and the mark
       characters after it.
 
+      D-SINK-96 (the review of cbd6679, 2026-11-12): and a bare value
+      holding a `:`, as grown so far, takes the rest of its U+0020 token's
+      credential (token_credential) when that credential's span starts
+      before the value's end and the `@` that makes it one stands at or
+      after it: the value then ends where the credential's span does, and
+      a value that ran past its old end so is recorded in `past` as a URL's
+      is. The token's credential is asked once a token.
+
     Why: a URL takes the rest of its run (split_groups' shape, D-SINK-78),
     and that is what both redactors read as one URL: they end it only at the
     six delimiters, so a URL stored whole redacts to its host whatever `"`,
@@ -627,6 +635,11 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     # that is printable ASCII holds only the narrow marks (D-SINK-95).
     urls = "/" in text or (not text.isascii() and _SLASH_ALIKE.search(text) is not None)
     plain = text.isascii() and text.isprintable()
+    # A token's credential span, by the token's start, asked once a token
+    # (D-SINK-96, the bare branch below): a line holds no credential unless
+    # it holds a `:` and an `@`.
+    tokens = ":" in text and "@" in text
+    held: dict[int, tuple[int, int] | None] = {}
     while pos < size:
         match = _ATTR_QUOTED.match(text, pos)
         if match is not None:
@@ -644,7 +657,7 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
             if urls and not plain and not inside:
                 window = text[low:quote]
                 inside = (not (window.isascii() and window.isprintable())
-                          and next_url(window, 0, 0, False, False) is not None)
+                          and next_url(window, 0, 0, False) is not None)
             if inside:
                 run = _URL_DELIMITER.search(text, quote)
                 run_end = run.start() if run is not None else size
@@ -685,21 +698,49 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
                 reach = end
                 if end < size and not (" " <= text[end] <= "~"):
                     reach = _MARK_REACH.match(text, end).end()
-                url = next_url(text[start:reach], 0, 0, False, None)
+                url = next_url(text[start:reach], 0, 0)
                 if url is not None:
                     inside = True
                     grow = max(end, start + url[2])
+            grown = end
             if inside:
                 run = _URL_DELIMITER.search(text, grow)
                 grown = run.start() if run is not None else size
-                if grown != end:
-                    # A bare value starts with no whitespace, so this is its
-                    # offset in the stored value. A list opening is judged in
-                    # the LINE at the old end, delimiters after the comma
-                    # allowed, as hint_first_entry reads one (`A, B`).
-                    old = end - start
-                    opens = _HINT_LIST_COMMA.match(text, end) is not None
-                end = grown
+            if tokens and text.find(":", start, grown) >= 0:
+                # D-SINK-96 (the review of cbd6679): a value holding a `:`
+                # whose token's credential (token_credential, read on the
+                # U+0020 token around it) starts before the value's end and
+                # has its `@` past it takes the credential to its span's end.
+                # Cut at its `,`, whitespace or `"`, the value kept the
+                # username and the password's head (`group-title=qqqqqq:zz,
+                # zz@cdn.test,Name` listed group `qqqqqq:zz`, and the name
+                # `zz@cdn.test,Name` read as no credential), as a URL's run did
+                # before D-SINK-80, whose growth and cost this takes: the title
+                # is swallowed and the name falls back. A URL value whose run
+                # a TAB, VT, FF or CR ends inside such a credential takes it
+                # too (`http://qq<TAB>qqqq:zzzzzz@cdn.test/x`, D-SINK-34's
+                # class, which every redactor withholds whole since the
+                # credential is read across the URL): stored to the TAB, the
+                # value printed `qq` as its host.
+                token_start = text.rfind(" ", 0, start) + 1
+                token_end = text.find(" ", end)
+                if token_end < 0:
+                    token_end = size
+                if token_start not in held:
+                    found = token_credential(text, token_start, token_end, UrlReading(text, token_start, plain))
+                    held[token_start] = (None if found is None else
+                                         (found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end])))
+                span = held[token_start]
+                if span is not None and span[0] >= grown and span[1] < grown < span[2]:
+                    grown = span[2]
+            if grown != end:
+                # A bare value starts with no whitespace, so this is its
+                # offset in the stored value. A list opening is judged in
+                # the LINE at the old end, delimiters after the comma
+                # allowed, as hint_first_entry reads one (`A, B`).
+                old = end - start
+                opens = _HINT_LIST_COMMA.match(text, end) is not None
+            end = grown
             value = text[start:end]
         key = match.group(1).lower()
         stripped = value.strip()

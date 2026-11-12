@@ -1,5 +1,5 @@
 {
- "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): the run and the authority end at the six ASCII delimiters -- space, tab, LF, CR, FF, VT (`delimiters` in tests/fixtures/url-whitespace.json) -- in both mirrors and at NOTHING else: every other whitespace or control code point is URL text, so a password holding U+FEFF, NBSP, U+2028, U+0085 or an information separator redacts to the HOST (under R32a'' the run ended at the 30-point union the READERS refuse, and each mirror took the other's worse case); `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost, confined to the six delimiters -- a space, a tab or a line break INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per delimiter; and one vector per non-ASCII union member asserts the HOST and never the username; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port. F-SINK-15 (2026-10-29): a DISPLAY sink's authority is hostPortOf's -- up to the first '/', '?' or '#', its userinfo at the LAST '@', whitespace or not -- so every vector whose text STARTS with a scheme is a display input too (sourceLabel and hostOf in the node suite, the helper's source_host in the python one), whitespace in its userinfo included; sourceLabel used to end the userinfo at JS whitespace as well and printed the username. D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL to both mirrors. The helper asked `\\b` of the scheme's start, so it found a start only at a letter that was the run's first character with no word character before the run, or that followed a `+`, `.` or `-` inside it; a run with neither (`1http`, `2024http`, or `http` right after `_` or any non-ASCII letter, digit or numeral) went out whole. The model never asked it. The vectors carry such runs alone, long, and after an earlier URL.",
+ "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): the run and the authority end at the six ASCII delimiters -- space, tab, LF, CR, FF, VT (`delimiters` in tests/fixtures/url-whitespace.json) -- in both mirrors and at NOTHING else: every other whitespace or control code point is URL text, so a password holding U+FEFF, NBSP, U+2028, U+0085 or an information separator redacts to the HOST (under R32a'' the run ended at the 30-point union the READERS refuse, and each mirror took the other's worse case); `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost, confined to the six delimiters -- a space, a tab or a line break INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per delimiter; and one vector per non-ASCII union member asserts the HOST and never the username; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port. F-SINK-15 (2026-10-29): a DISPLAY sink's authority is hostPortOf's -- up to the first '/', '?' or '#', its userinfo at the LAST '@', whitespace or not -- so every vector whose text STARTS with a scheme is a display input too (sourceLabel and hostOf in the node suite, the helper's source_host in the python one), whitespace in its userinfo included; sourceLabel used to end the userinfo at JS whitespace as well and printed the username. D-SINK-74 (2026-11-04): a scheme glued to a word character is a URL to both mirrors. The helper asked `\\b` of the scheme's start, so it found a start only at a letter that was the run's first character with no word character before the run, or that followed a `+`, `.` or `-` inside it; a run with neither (`1http`, `2024http`, or `http` right after `_` or any non-ASCII letter, digit or numeral) went out whole. The model never asked it. The vectors carry such runs alone, long, and after an earlier URL. The review of cbd6679 (2026-11-12): the helper prints `scheme://` only for a scheme NAMED_SCHEMES lists (D-SINK-94's sibling); for any other it prints what the model prints, so five D-SINK-74 vectors whose scheme took in the letters glued before it carry the bare host in `py` now.",
  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
  "vectors": [
   {
@@ -984,7 +984,7 @@
    "py": "Failed to open http://a.test, then Sports_http://prov.test."
   },
   {
-   "why": "D-SINK-74: a digit before a scheme that holds a digit after its first letter (`1s3`)",
+   "why": "D-SINK-74: a digit before a scheme that holds a digit after its first letter (`1s3`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
    "text": "Failed to open 1s3://u5er:p4ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
@@ -993,10 +993,10 @@
     "live/1.ts"
    ],
    "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1s3://prov.test."
+   "py": "Failed to open 1prov.test."
   },
   {
-   "why": "D-SINK-74: `_` and a digit before an upper-case scheme that holds a digit (`_1A2HTTP`); the helper lowercases from the first letter",
+   "why": "D-SINK-74: `_` and a digit before an upper-case scheme that holds a digit (`_1A2HTTP`); the helper lowercases from the first letter [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
    "text": "Failed to open _1A2HTTP://u5er:p4ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
@@ -1005,10 +1005,10 @@
     "live/1.ts"
    ],
    "js": "Failed to open _1prov.test.",
-   "py": "Failed to open _1a2http://prov.test."
+   "py": "Failed to open _1prov.test."
   },
   {
-   "why": "D-SINK-74: a digit before a scheme holding `.` (`1A.HTTP`)",
+   "why": "D-SINK-74: a digit before a scheme holding `.` (`1A.HTTP`) [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
    "text": "Failed to open 1A.HTTP://u5er:p4ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
@@ -1017,10 +1017,10 @@
     "live/1.ts"
    ],
    "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1a.http://prov.test."
+   "py": "Failed to open 1prov.test."
   },
   {
-   "why": "D-SINK-74: `1a.b`, which the old helper rule redacted too (from its `b`): the start is the first letter now",
+   "why": "D-SINK-74: `1a.b`, which the old helper rule redacted too (from its `b`): the start is the first letter now [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
    "text": "Failed to open 1a.b://u5er:p4ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
@@ -1029,7 +1029,7 @@
     "live/1.ts"
    ],
    "js": "Failed to open 1prov.test.",
-   "py": "Failed to open 1a.b://prov.test."
+   "py": "Failed to open 1prov.test."
   },
   {
    "why": "D-SINK-74: 300 digits before the scheme's only letters, past every window the run search doubles through to 256",
@@ -1044,7 +1044,7 @@
    "py": "Failed to open 999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999http://prov.test."
   },
   {
-   "why": "D-SINK-74: the run's first letter 300 characters before `://` (`A` then 300 zeros): the run search has to look back past its 256-character window to find it",
+   "why": "D-SINK-74: the run's first letter 300 characters before `://` (`A` then 300 zeros): the run search has to look back past its 256-character window to find it [the review of cbd6679: the scheme is no named one, so the helper prints the host alone, as the model does]",
    "text": "Failed to open A000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000://u5er:p4ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
@@ -1053,7 +1053,7 @@
     "live/1.ts"
    ],
    "js": "Failed to open prov.test.",
-   "py": "Failed to open a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000://prov.test."
+   "py": "Failed to open prov.test."
   },
   {
    "why": "D-SINK-74: an ASCII name before a CJK name glued to the scheme (`ESPN` U+9891 U+9053): the run starts after the CJK letters",

@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-95 and D-SINK-96 (2026-11-11): where both free-text redactors read a URL and a credential token, one fixture for the two mirrors (CLAUDE.md: a rule in two languages gets one shared fixture), run by tests/test_url_marks.py (bin/helper's next_url, redact_urls, player_title_text, fold_space) and tests/Model.test.js (Model.urlAt, Model.redactUrls, Model.sinkText). `slashAlike` is the list both mirrors' SLASH_ALIKE constant must equal (Model.SLASH_ALIKE_CODES, SLASH_ALIKE_CHARS). The classes, recomputed by both suites from this file and url-whitespace.json over every code unit (node) and every code point (python): CROSSABLE is everything outside U+0020..U+007E; FILLER is CROSSABLE but no slash look-alike; STAND_IN is FILLER above U+009F that is not a member of url-whitespace.json's `codePoints` union (`standInExcludes`). `vectors`: `text`, the model's output `js` (Model.redactUrls and sinkText) and the helper's `py` (redact_urls); `jsDeleting` and `pyDeleting` where the sinks that delete control characters first (Model.notifyArgv's name, player_title_text) read otherwise; `pyFold` where fold_space then redact_urls reads otherwise. `fuzz`: every BMP code point but the surrogates and `qzQZ`, inserted at each listed position of each url, wrapped as `wrap` says; `leaks` is the exact set of code points whose output still holds a `q` or a `z`, per sink (`plain`: the redactors; `deleting`: after the controls are deleted; `fold`: fold_space then redact_urls, the helper's only). Measured on 2026-11-11 against 0.18.0's 1,142,679 plain.",
+ "about": "D-SINK-95 and D-SINK-96 (2026-11-11): where both free-text redactors read a URL and a credential token, one fixture for the two mirrors (CLAUDE.md: a rule in two languages gets one shared fixture), run by tests/test_url_marks.py (bin/helper's next_url, redact_urls, player_title_text, fold_space) and tests/Model.test.js (Model.urlAt, Model.redactUrls, Model.sinkText). `slashAlike` is the list both mirrors' SLASH_ALIKE constant must equal (Model.SLASH_ALIKE_CODES, SLASH_ALIKE_CHARS). The classes, recomputed by both suites from this file and url-whitespace.json over every code unit (node) and every code point (python): CROSSABLE is everything outside U+0020..U+007E; FILLER is CROSSABLE but no slash look-alike; STAND_IN is FILLER above U+009F that is not a member of url-whitespace.json's `codePoints` union (`standInExcludes`). Since the review of cbd6679 (2026-11-12): a WIDE code point is one above U+009F (a surrogate pair one), and each stretch the reading crosses holds at most one -- a FILLER stretch of a mark's P between its colons, the FILLER between its slashes, each CROSSABLE run the scheme walk crosses; an empty run is a URL in both mirrors; the helper prints a scheme only from NAMED_SCHEMES; a credential is a run of characters other than U+0020 across its URLs, holding an ASCII `:` outside every URL with an ASCII `@` after it and at most one COUNTED code point (above U+009F, no slash look-alike) outside the URLs between them, withheld from the run's start or after the last counted code point before the `:` when there are two or more; and a non-numeric port behind a userinfo is withheld at a redactor's print. `vectors`: `text`, the model's output `js` (Model.redactUrls and sinkText) and the helper's `py` (redact_urls); `jsDeleting` and `pyDeleting` where the sinks that delete control characters first (Model.notifyReasonText, which Model.notifyArgv composes the body with, and player_title_text) read otherwise; `pyFold` where fold_space then redact_urls reads otherwise. `fuzz`: every BMP code point but the surrogates and `qzQZ`, inserted at each listed position of each url, wrapped as `wrap` says; `leaks` is the exact set of code points whose output still holds a `q` or a `z`, per sink (`plain`: the redactors; `deleting`: after the controls are deleted; `fold`: fold_space then redact_urls, the helper's only). Measured on 2026-11-11 against 0.18.0's 1,142,679 plain, and again on 2026-11-12 after the review of cbd6679 (567 plain at cbd6679: the five delimiters TAB..CR inside the username at positions 10 and 13 no longer leak, the token being read across the URL the delimiter ends).",
  "credentialsAreFake": "Every credential here is the fake qqqqqq / zzzzzz on cdn.test, under the reserved .test TLD.",
  "slashAlike": [
   "U+1735",
@@ -41,10 +41,10 @@
    "py": "http://cdn.test"
   },
   {
-   "why": "D-SINK-95: a line break before the colon; P is LF+colon and the scheme run before it is the word, so the word goes with the URL, as the deleting sinks already read 'Line://' [0.18.0 whole]",
+   "why": "D-SINK-95: a line break before the colon; P is LF+colon and the scheme run before it is the word, so the word goes with the URL, as the deleting sinks already read 'Line://'; the helper prints no scheme it does not name (the review of cbd6679, D-SINK-94's sibling) [0.18.0 whole; cbd6679 helper 'line://cdn.test']",
    "text": "Line\n://cdn.test/live/qqqqqq/zzzzzz/1.ts",
    "js": "cdn.test",
-   "py": "line://cdn.test"
+   "py": "cdn.test"
   },
   {
    "why": "D-SINK-95: U+0085 between the slashes, query credential [0.18.0 whole]",
@@ -179,19 +179,19 @@
    "py": "http://cdn.test"
   },
   {
-   "why": "D-SINK-95: a control before a letterless segment: the walk crosses it, so plain 'http1://' agrees with the deleting sinks [0.18.0 whole in the plain sinks, redacted in the deleting ones: two answers]",
+   "why": "D-SINK-95: a control before a letterless segment: the walk crosses it, so plain 'http1://' agrees with the deleting sinks; 'http1' is no named scheme, so the helper prints the host alone [0.18.0 whole in the plain sinks, redacted in the deleting ones; cbd6679 helper 'http1://cdn.test']",
    "text": "http\u00011://cdn.test/live/qqqqqq/zzzzzz/1.ts",
    "js": "cdn.test",
-   "py": "http1://cdn.test"
+   "py": "cdn.test"
   },
   {
-   "why": "unchanged: a control between scheme letters: the nearest letter segment 'tp' starts the scheme in the plain sinks, the deleting sinks read 'http'; both redact, as in 0.18.0",
+   "why": "a control between scheme letters: the nearest letter segment 'tp' starts the scheme in the plain sinks, the deleting sinks read 'http'; both redact, as in 0.18.0, and the helper's plain sinks print no 'tp://', which no list names [cbd6679 helper 'ht<U+0001>tp://cdn.test']",
    "text": "ht\u0001tp://cdn.test/live/qqqqqq/zzzzzz/1.ts",
    "js": "ht\u0001cdn.test",
-   "py": "ht\u0001tp://cdn.test",
+   "py": "ht\u0001cdn.test",
    "jsDeleting": "cdn.test",
    "pyDeleting": "http://cdn.test",
-   "pyFold": "ht tp://cdn.test"
+   "pyFold": "ht cdn.test"
   },
   {
    "why": "unchanged (D-SINK-74): '_' is printable and no scheme character, so the glued prefix keeps its place",
@@ -242,16 +242,16 @@
    "py": "[host withheld]"
   },
   {
-   "why": "D-SINK-96 on the free text before a URL; the URL arm prints its host as before [0.18.0: model 'qqqqqq:zzzzzz@cdn.test,h.test']",
+   "why": "D-SINK-96 across a URL (the review of cbd6679): the token runs to the next space whatever URL it holds, so the URL glued after the credential is withheld with it [0.18.0: model 'qqqqqq:zzzzzz@cdn.test,h.test'; cbd6679 '[host withheld],h.test']",
    "text": "qqqqqq:zzzzzz@cdn.test,http://h.test/x",
-   "js": "[host withheld],h.test",
-   "py": "[host withheld],http://h.test"
+   "js": "[host withheld]",
+   "py": "[host withheld]"
   },
   {
-   "why": "D-SINK-96: a token glued before a scheme: the free piece ends at the scheme start, so the token is withheld and the URL redacted [0.18.0: 'Login qqqqqq:zzzzzz@cdn.test']",
+   "why": "D-SINK-96 across a URL: a token glued before a scheme is withheld with the URL it runs into [0.18.0: 'Login qqqqqq:zzzzzz@cdn.test'; cbd6679 'Login [host withheld]cdn.test']",
    "text": "Login qqqqqq:zzzzzz@xhttp://cdn.test/live/1.ts",
-   "js": "Login [host withheld]cdn.test",
-   "py": "Login [host withheld]xhttp://cdn.test"
+   "js": "Login [host withheld]",
+   "py": "Login [host withheld]"
   },
   {
    "why": "D-SINK-96 behind a mark with no scheme letter: no URL, so the token arm withholds the whole token [0.18.0 whole]",
@@ -272,10 +272,10 @@
    "py": "[host withheld]"
   },
   {
-   "why": "unchanged: the token arm never reads text a URL covers, so 'abc:' stays",
+   "why": "D-SINK-96 across a URL, the cost the lead accepted (the review of cbd6679): a `:` before a URL whose run holds an `@` is a credential's, so the token is withheld whole [cbd6679 'abc:cdn.test']",
    "text": "abc:http://qqqqqq:zzzzzz@cdn.test/x",
-   "js": "abc:cdn.test",
-   "py": "abc:http://cdn.test"
+   "js": "[host withheld]",
+   "py": "[host withheld]"
   },
   {
    "why": "accepted residual: a SPACE splits a scheme-less credential as it splits a URL (D-SINK-34's shape) [0.18.0 the same]",
@@ -368,43 +368,40 @@
    "py": "[host withheld]"
   },
   {
-   "why": "false positive: word, colon, TAB, '//' is a mark; the deleting sinks already read 'TV://radio' [0.18.0 unchanged in the plain sinks]",
+   "why": "false positive: word, colon, TAB, '//' is a mark; the deleting sinks already read 'TV://radio'; 'tv' is no named scheme, so the helper prints the host alone [0.18.0 unchanged in the plain sinks; cbd6679 helper 'tv://radio']",
    "text": "TV:\t//radio",
    "js": "radio",
-   "py": "tv://radio"
+   "py": "radio"
   },
   {
-   "why": "false positive: the model reads an empty run as a URL ('[url]'); the helper needs a run character, so it is unchanged (the pre-existing split epg-fold.json pins); the player title reads 'Featuring:// The Band' [0.18.0 unchanged]",
+   "why": "false positive: an empty run is a URL in both mirrors since the review of cbd6679 ('[url]', the helper's '[redacted]'), so the plain, deleting and folded sinks read one answer [0.18.0 unchanged; cbd6679 helper 'Featuring:<LF>// The Band', title and fold 'Featuring:// The Band']",
    "text": "Featuring:\n// The Band",
    "js": "[url] The Band",
-   "py": "Featuring:\n// The Band",
-   "jsDeleting": "[url] The Band",
-   "pyDeleting": "Featuring:// The Band",
-   "pyFold": "Featuring:// The Band"
+   "py": "[redacted] The Band"
   },
   {
-   "why": "false positive: letter, filler, '://' [0.18.0 unchanged]",
+   "why": "false positive: letter, filler, '://'; 'a' is no named scheme [0.18.0 unchanged; cbd6679 helper 'a://x']",
    "text": "A\u200b://x",
    "js": "x",
-   "py": "a://x"
+   "py": "x"
   },
   {
-   "why": "false positive of the broad class: a non-ASCII word between ASCII slashes after 'UK:' is FILLER; the named-class design kept it [0.18.0 unchanged]",
+   "why": "unchanged (the review of cbd6679, the caps): a word of two odd characters between the slashes is no mark, so a Cyrillic slash list after 'UK:' keeps its text [cbd6679 '\u0424', a false positive]",
    "text": "UK:\u041d\u043e\u0432/\u0421\u043f/\u0424",
-   "js": "\u0424",
-   "py": "uk://\u0444"
+   "js": "UK:\u041d\u043e\u0432/\u0421\u043f/\u0424",
+   "py": "UK:\u041d\u043e\u0432/\u0421\u043f/\u0424"
   },
   {
-   "why": "false positive: CJK letters glued after an ASCII word stand in for the colon [0.18.0 unchanged]",
+   "why": "unchanged (the review of cbd6679, the caps): two odd characters in place of the colon are no mark [cbd6679 'BS', a false positive]",
    "text": "NHK\u7dcf\u5408//BS",
-   "js": "BS",
-   "py": "nhk://bs"
+   "js": "NHK\u7dcf\u5408//BS",
+   "py": "NHK\u7dcf\u5408//BS"
   },
   {
-   "why": "false positive measured in the public corpus (zh_CN): ASCII word, fullwidth parenthesis, slash list [0.18.0 unchanged]",
+   "why": "unchanged (the review of cbd6679, the caps): measured in the public corpus (zh_CN), ASCII word, fullwidth parenthesis and a slash list of two-character words is no mark [cbd6679 '\u5173\u95ed\uff09']",
    "text": "KDF\uff08\u5f00\u542f/\u5355\u4e00/\u5173\u95ed\uff09",
-   "js": "\u5173\u95ed\uff09",
-   "py": "kdf://\u5173\u95ed\uff09"
+   "js": "KDF\uff08\u5f00\u542f/\u5355\u4e00/\u5173\u95ed\uff09",
+   "py": "KDF\uff08\u5f00\u542f/\u5355\u4e00/\u5173\u95ed\uff09"
   },
   {
    "why": "unchanged: a colon, no slash, no '@'",
@@ -490,6 +487,292 @@
    "text": "http:/\u2044/qqqqqq:zzzzzz@cdn.test/x",
    "js": "[url]",
    "py": "http://[redacted]"
+  },
+  {
+   "why": "D-SINK-96 across a URL (the review of cbd6679): an odd character and '//' inside the password started a URL inside the token, and the free piece before it held the `:` with no `@` [cbd6679: model 'News qqqqqq:cdn.test HD', helper 'News qqqqqq:zz://cdn.test HD']",
+   "text": "News qqqqqq:zz\u00e9//zz@cdn.test/x HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: U+200B and '//' inside the password [cbd6679 'News qqqqqq:cdn.test HD']",
+   "text": "News qqqqqq:zz\u200b//zz@cdn.test/x HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: a second `:` and '//' inside the password [cbd6679 'News qqqqqq:cdn.test HD']",
+   "text": "News qqqqqq:zz://zz@cdn.test/x HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: an odd character and a look-alike pair inside the password [cbd6679 'News qqqqqq:cdn.test HD']",
+   "text": "News qqqqqq:zz\u00e9\u2215\u2215zz@cdn.test/x HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: the two odd characters of a mark inside the password are URL text, which the cap does not count [cbd6679 'News qqqqqq:cdn.test HD']",
+   "text": "News qqqqqq:zz:\u00e9/\u00e9/zz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: the reviewer's X ':/' X '/' form [cbd6679 'News qqqqqq:cdn.test HD']",
+   "text": "News qqqqqq:zz\u00e9:/\u00e9/zz@cdn.test/x HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-95 (the review of cbd6679, D-SINK-94's sibling): a mark right after the username's colon makes the username the scheme, which the helper printed; it prints only a named scheme now [cbd6679 helper 'News qqqqqq://cdn.test HD', model 'News cdn.test HD']",
+   "text": "News qqqqqq:\u200b//zzzzzz@cdn.test HD",
+   "js": "News cdn.test HD",
+   "py": "News cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95, D-SINK-94's sibling: the lead's first pin [cbd6679 helper 'qqqqqq://cdn.test']",
+   "text": "qqqqqq:\u200b//zzzzzz@cdn.test",
+   "js": "cdn.test",
+   "py": "cdn.test"
+  },
+  {
+   "why": "D-SINK-95, D-SINK-94's sibling: the lead's second pin, a look-alike pair [cbd6679 helper 'qqqqqq://cdn.test']",
+   "text": "qqqqqq:\u2215\u2215zzzzzz@cdn.test",
+   "js": "cdn.test",
+   "py": "cdn.test"
+  },
+  {
+   "why": "D-SINK-95, D-SINK-94's sibling, from the two-insertion fuzz [cbd6679 helper 'News qqqqqq://cdn.test HD']",
+   "text": "News qqqqqq:\u2215\u2215zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News cdn.test HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL, one empty-run reading (the review of cbd6679): the empty-run URL is in the token, so the password's `:` after it is the credential's [cbd6679: model 'News qqqqqq:[url]<TAB>zzzzzz@cdn.test HD', notification 'News qqqqqq:cdn.test HD', title 'News qqqqqq:http://cdn.test HD']",
+   "text": "News qqqqqq:http://\tzzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 and the redactors' print (the review of cbd6679): the plain sinks withhold the token; the sinks that delete controls read the run ':@qqqqqq:zzzzzz', whose non-numeric port behind a userinfo is withheld now [cbd6679: notification 'News qqqqqq HD', title 'News http://qqqqqq HD']",
+   "text": "News http://\t:@qqqqqq:zzzzzz HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News [host withheld] HD",
+   "pyDeleting": "News http://[host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 across a URL: a look-alike before '://' and an empty run inside the password [cbd6679: model 'News qqqqqq:[url]<TAB>@cdn.test/live/1.ts HD', title 'News qqqqqq:zzzzzz://cdn.test HD']",
+   "text": "News qqqqqq:zzzzzz\u2215://\t@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "accepted residual (R32a''', D-SINK-34), one empty-run reading: a TAB right after the mark ends its run in the plain sinks, which print the path behind it; the deleting sinks read one run and print the host [cbd6679: helper withheld it, the model printed the path]",
+   "text": "News http://\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News [url]\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "py": "News http://[redacted]\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "jsDeleting": "News cdn.test HD",
+   "pyDeleting": "News http://cdn.test HD",
+   "pyFold": "News http://[redacted] @cdn.test/live/qqqqqq/zzzzzz/1.ts HD"
+  },
+  {
+   "why": "accepted residual (R32a''', D-SINK-34): a TAB after an empty-run mark, and a path credential behind a second mark the walk cannot reach; the deleting sinks print the host [cbd6679: helper 'News a://cdn.test HD', model and fold the path]",
+   "text": "News a\u200b\u2215\u2215\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News [url]\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "py": "News [redacted]\t:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "jsDeleting": "News [url] HD",
+   "pyDeleting": "News [redacted] HD",
+   "pyFold": "News [redacted] :\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD"
+  },
+  {
+   "why": "accepted residual (R32a''', D-SINK-34): the same with a query credential",
+   "text": "News a\u200b\u2215\u2215\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
+   "js": "News [url]\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
+   "py": "News [redacted]\t:\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD",
+   "jsDeleting": "News [url] HD",
+   "pyDeleting": "News [redacted] HD",
+   "pyFold": "News [redacted] :\u200b//cdn.test/get.php?username=qqqqqq&password=zzzzzz HD"
+  },
+  {
+   "why": "residual, stated (the review of cbd6679, from the multi-insert sweep): a URL inside a credential's span whose run a TAB, LF, VT, FF or CR ends (here an empty run): the plain sinks withhold the credential; the sinks that delete controls join the run to the password, the URL takes its `:`, and the username's text before the URL's scheme prints there (R32a''', D-SINK-34, from the deleting side) [cbd6679 the same in the deleting sinks; its model printed it in the plain ones too]",
+   "text": "News qqqqq%qa:\u2215\u2215\t:zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News qqqqq%cdn.test HD",
+   "pyDeleting": "News qqqqq%cdn.test HD"
+  },
+  {
+   "why": "residual, stated (the review of cbd6679, from the multi-insert sweep): the same with a run that is not empty, which the deleting sinks join to the password, so the URL's run prints as its host",
+   "text": "News http://qqqqa.\u2215://)\tqq:zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News qqqqa. HD",
+   "pyDeleting": "News http://qqqqa. HD"
+  },
+  {
+   "why": "residual, stated (the review of cbd6679, the caps): two odd characters in one stretch of a mark make no mark, so a path credential behind it prints; a userinfo behind it is a credential token [0.18.0 the same]",
+   "text": "http\u00e9\u00e9://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "http\u00e9\u00e9://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "http\u00e9\u00e9://cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "D-SINK-96: two odd characters in one stretch of a mark make no mark, and the userinfo behind it is a credential token, withheld whole [0.18.0 whole]",
+   "text": "http\u00e9\u00e9://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "http\u00e9\u00e9[host withheld]",
+   "py": "http\u00e9\u00e9[host withheld]"
+  },
+  {
+   "why": "residual, stated (the review of cbd6679, D-SINK-96's cap): two counted code points between the `:` and the `@` make no credential [0.18.0 the same]",
+   "text": "qqqqqq:zz\u00e9\u00e9zz@cdn.test",
+   "js": "qqqqqq:zz\u00e9\u00e9zz@cdn.test",
+   "py": "qqqqqq:zz\u00e9\u00e9zz@cdn.test"
+  },
+  {
+   "why": "residual, stated (D-SINK-96's cap): two counted code points inside the username start the span after them, and the head of the username prints [0.18.0 whole]",
+   "text": "qq\u00e9q\u00e9qq:zz@cdn.test",
+   "js": "qq\u00e9q\u00e9[host withheld]",
+   "py": "qq\u00e9q\u00e9[host withheld]"
+  },
+  {
+   "why": "D-SINK-96's cap: one counted code point in the username, or one between the `:` and the `@`, is withheld whole [0.18.0 whole]",
+   "text": "\u00e9qqqqqq:zz\u00e9zz@cdn.test",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "D-SINK-96's cap: CJK prose before a credential keeps its text, the credential is withheld [0.18.0 whole]",
+   "text": "\u6bcf\u665aqqqqqq:zzzzzz@cdn.test",
+   "js": "\u6bcf\u665a[host withheld]",
+   "py": "\u6bcf\u665a[host withheld]"
+  },
+  {
+   "why": "false positive the owner accepted, unchanged by the cap: a Latin token [0.18.0 unchanged]",
+   "text": "NBA:LAL@BOS",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive the owner accepted, unchanged by the cap: a time, a parenthesis and a handle [0.18.0 unchanged]",
+   "text": "(20:15)KC@BUF",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-cast-ascii', which cbd6679 changed",
+   "text": "\u300a\u6743\u529b\u7684\u6e38\u620f\u300b\uff08Game of Thrones\uff09\u662fHBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\u00b7\u514b\u62c9\u514b/\u57fa\u7279\u00b7\u54c8\u7075\u987f/\u5f7c\u7279\u00b7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u7684\u4e89\u9738\u3002",
+   "js": "\u300a\u6743\u529b\u7684\u6e38\u620f\u300b\uff08Game of Thrones\uff09\u662fHBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\u00b7\u514b\u62c9\u514b/\u57fa\u7279\u00b7\u54c8\u7075\u987f/\u5f7c\u7279\u00b7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u7684\u4e89\u9738\u3002",
+   "py": "\u300a\u6743\u529b\u7684\u6e38\u620f\u300b\uff08Game of Thrones\uff09\u662fHBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\u00b7\u514b\u62c9\u514b/\u57fa\u7279\u00b7\u54c8\u7075\u987f/\u5f7c\u7279\u00b7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u7684\u4e89\u9738\u3002"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-genre-ascii', which cbd6679 changed",
+   "text": "CCTV-8\u7535\u89c6\u5267\u9891\u9053\u64ad\u51fa\u3002\u7c7b\u578b\uff1a\u5267\u60c5/\u7231\u60c5/\u5bb6\u5ead\u3002\u517140\u96c6\u3002",
+   "js": "CCTV-8\u7535\u89c6\u5267\u9891\u9053\u64ad\u51fa\u3002\u7c7b\u578b\uff1a\u5267\u60c5/\u7231\u60c5/\u5bb6\u5ead\u3002\u517140\u96c6\u3002",
+   "py": "CCTV-8\u7535\u89c6\u5267\u9891\u9053\u64ad\u51fa\u3002\u7c7b\u578b\uff1a\u5267\u60c5/\u7231\u60c5/\u5bb6\u5ead\u3002\u517140\u96c6\u3002"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-cartoon', which cbd6679 changed",
+   "text": "\u5c11\u513f\u52a8\u753b\uff1aPeppa Pig\u5c0f\u732a\u4f69\u5947/\u6c6a\u6c6a\u961f\u7acb\u5927\u529f/\u8d85\u7ea7\u98de\u4fa0",
+   "js": "\u5c11\u513f\u52a8\u753b\uff1aPeppa Pig\u5c0f\u732a\u4f69\u5947/\u6c6a\u6c6a\u961f\u7acb\u5927\u529f/\u8d85\u7ea7\u98de\u4fa0",
+   "py": "\u5c11\u513f\u52a8\u753b\uff1aPeppa Pig\u5c0f\u732a\u4f69\u5947/\u6c6a\u6c6a\u961f\u7acb\u5927\u529f/\u8d85\u7ea7\u98de\u4fa0"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-ad', which cbd6679 changed",
+   "text": "\u672c\u8282\u76ee\u7531VIP\u4f1a\u5458\u72ec\u5bb6\u64ad\u51fa\uff0c\u66f4\u591a\u7cbe\u5f69\u8bf7\u5173\u6ce8\u592e\u89c6\u9891/\u6296\u97f3/\u5feb\u624b\u3002",
+   "js": "\u672c\u8282\u76ee\u7531VIP\u4f1a\u5458\u72ec\u5bb6\u64ad\u51fa\uff0c\u66f4\u591a\u7cbe\u5f69\u8bf7\u5173\u6ce8\u592e\u89c6\u9891/\u6296\u97f3/\u5feb\u624b\u3002",
+   "py": "\u672c\u8282\u76ee\u7531VIP\u4f1a\u5458\u72ec\u5bb6\u64ad\u51fa\uff0c\u66f4\u591a\u7cbe\u5f69\u8bf7\u5173\u6ce8\u592e\u89c6\u9891/\u6296\u97f3/\u5feb\u624b\u3002"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-mv', which cbd6679 changed",
+   "text": "MV\u7cbe\u9009\uff1a\u5468\u6770\u4f26/\u6797\u4fca\u6770/\u9093\u7d2b\u68cb \u91d1\u66f2\u56de\u987e",
+   "js": "MV\u7cbe\u9009\uff1a\u5468\u6770\u4f26/\u6797\u4fca\u6770/\u9093\u7d2b\u68cb \u91d1\u66f2\u56de\u987e",
+   "py": "MV\u7cbe\u9009\uff1a\u5468\u6770\u4f26/\u6797\u4fca\u6770/\u9093\u7d2b\u68cb \u91d1\u66f2\u56de\u987e"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-year-ascii', which cbd6679 changed",
+   "text": "CCTV5\u8f6c\u64ad\uff0c2024\u5e74\u5df4\u9ece\u5965\u8fd0\u4f1a\u7cbe\u5f69\u56de\u987e\uff1a\u6e38\u6cf3/\u8df3\u6c34/\u4e52\u4e53\u7403",
+   "js": "CCTV5\u8f6c\u64ad\uff0c2024\u5e74\u5df4\u9ece\u5965\u8fd0\u4f1a\u7cbe\u5f69\u56de\u987e\uff1a\u6e38\u6cf3/\u8df3\u6c34/\u4e52\u4e53\u7403",
+   "py": "CCTV5\u8f6c\u64ad\uff0c2024\u5e74\u5df4\u9ece\u5965\u8fd0\u4f1a\u7cbe\u5f69\u56de\u987e\uff1a\u6e38\u6cf3/\u8df3\u6c34/\u4e52\u4e53\u7403"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'ja-slash-ascii', which cbd6679 changed",
+   "text": "NHK\u30b9\u30da\u30b7\u30e3\u30eb\u300c\u4eba\u4f53\u300d\u3002\u51fa\u6f14\uff1a\u5c71\u7530\u592a\u90ce\uff0f\u9234\u6728\u82b1\u5b50\uff0f\u4f50\u85e4\u6b21\u90ce",
+   "js": "NHK\u30b9\u30da\u30b7\u30e3\u30eb\u300c\u4eba\u4f53\u300d\u3002\u51fa\u6f14\uff1a\u5c71\u7530\u592a\u90ce\uff0f\u9234\u6728\u82b1\u5b50\uff0f\u4f50\u85e4\u6b21\u90ce",
+   "py": "NHK\u30b9\u30da\u30b7\u30e3\u30eb\u300c\u4eba\u4f53\u300d\u3002\u51fa\u6f14\uff1a\u5c71\u7530\u592a\u90ce\uff0f\u9234\u6728\u82b1\u5b50\uff0f\u4f50\u85e4\u6b21\u90ce"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'ja-news', which cbd6679 changed",
+   "text": "NHK\u30cb\u30e5\u30fc\u30b97\u25bd\u56fd\u5185\u5916\u306e\u30cb\u30e5\u30fc\u30b9\uff0f\u6c17\u8c61\u60c5\u5831\uff0f\u30b9\u30dd\u30fc\u30c4",
+   "js": "NHK\u30cb\u30e5\u30fc\u30b97\u25bd\u56fd\u5185\u5916\u306e\u30cb\u30e5\u30fc\u30b9\uff0f\u6c17\u8c61\u60c5\u5831\uff0f\u30b9\u30dd\u30fc\u30c4",
+   "py": "NHK\u30cb\u30e5\u30fc\u30b97\u25bd\u56fd\u5185\u5916\u306e\u30cb\u30e5\u30fc\u30b9\uff0f\u6c17\u8c61\u60c5\u5831\uff0f\u30b9\u30dd\u30fc\u30c4"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'ja-bs', which cbd6679 changed",
+   "text": "BS\u65e5\u30c6\u30ec\u958b\u5c40\u8a18\u5ff5\u7279\u756a\uff0f\u30c9\u30e9\u30de\uff0f\u30d0\u30e9\u30a8\u30c6\u30a3\u30fc",
+   "js": "BS\u65e5\u30c6\u30ec\u958b\u5c40\u8a18\u5ff5\u7279\u756a\uff0f\u30c9\u30e9\u30de\uff0f\u30d0\u30e9\u30a8\u30c6\u30a3\u30fc",
+   "py": "BS\u65e5\u30c6\u30ec\u958b\u5c40\u8a18\u5ff5\u7279\u756a\uff0f\u30c9\u30e9\u30de\uff0f\u30d0\u30e9\u30a8\u30c6\u30a3\u30fc"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'ko-glued', which cbd6679 changed",
+   "text": "tvN\uc608\ub2a5/\ub4dc\ub77c\ub9c8/\uc2a4\ud398\uc15c",
+   "js": "tvN\uc608\ub2a5/\ub4dc\ub77c\ub9c8/\uc2a4\ud398\uc15c",
+   "py": "tvN\uc608\ub2a5/\ub4dc\ub77c\ub9c8/\uc2a4\ud398\uc15c"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-title-1', which cbd6679 changed",
+   "text": "CCTV\u65b0\u95fb/\u8054\u64ad/\u76f4\u64ad",
+   "js": "CCTV\u65b0\u95fb/\u8054\u64ad/\u76f4\u64ad",
+   "py": "CCTV\u65b0\u95fb/\u8054\u64ad/\u76f4\u64ad"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'zh-title-2', which cbd6679 changed",
+   "text": "F1\u5927\u5956\u8d5b/\u6392\u4f4d\u8d5b/\u76f4\u64ad",
+   "js": "F1\u5927\u5956\u8d5b/\u6392\u4f4d\u8d5b/\u76f4\u64ad",
+   "py": "F1\u5927\u5956\u8d5b/\u6392\u4f4d\u8d5b/\u76f4\u64ad"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the caps on D-SINK-95's reading): hand-written guide text 'ja-title-1', which cbd6679 changed",
+   "text": "M\u30b9\u30c6\uff0f\u3046\u305f\u30b3\u30f3\uff0f\u7d05\u767d",
+   "js": "M\u30b9\u30c6\uff0f\u3046\u305f\u30b3\u30f3\uff0f\u7d05\u767d",
+   "py": "M\u30b9\u30c6\uff0f\u3046\u305f\u30b3\u30f3\uff0f\u7d05\u767d"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'zh-weibo', a time and a handle or an address far apart",
+   "text": "\u6bcf\u5468\u4e00\u81f3\u5468\u4e9420:00\u64ad\u51fa\uff0c\u6b22\u8fce\u5173\u6ce8\u5fae\u535a@\u592e\u89c6\u65b0\u95fb",
+   "js": "\u6bcf\u5468\u4e00\u81f3\u5468\u4e9420:00\u64ad\u51fa\uff0c\u6b22\u8fce\u5173\u6ce8\u5fae\u535a@\u592e\u89c6\u65b0\u95fb",
+   "py": "\u6bcf\u5468\u4e00\u81f3\u5468\u4e9420:00\u64ad\u51fa\uff0c\u6b22\u8fce\u5173\u6ce8\u5fae\u535a@\u592e\u89c6\u65b0\u95fb"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'zh-weibo-2', a time and a handle or an address far apart",
+   "text": "\u672c\u8282\u76ee\u4e8e\u6bcf\u665a19:30\u5728CCTV-1\u9996\u64ad\uff0c\u66f4\u591a\u8d44\u8baf\u8bf7\u5173\u6ce8\u5b98\u65b9\u5fae\u535a@CCTV\u65b0\u95fb\u3002",
+   "js": "\u672c\u8282\u76ee\u4e8e\u6bcf\u665a19:30\u5728CCTV-1\u9996\u64ad\uff0c\u66f4\u591a\u8d44\u8baf\u8bf7\u5173\u6ce8\u5b98\u65b9\u5fae\u535a@CCTV\u65b0\u95fb\u3002",
+   "py": "\u672c\u8282\u76ee\u4e8e\u6bcf\u665a19:30\u5728CCTV-1\u9996\u64ad\uff0c\u66f4\u591a\u8d44\u8baf\u8bf7\u5173\u6ce8\u5b98\u65b9\u5fae\u535a@CCTV\u65b0\u95fb\u3002"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'zh-time-mail', a time and a handle or an address far apart",
+   "text": "\u6bcf\u665a19:30\u64ad\u51fa\uff0c\u6295\u7a3f\u90ae\u7bb1cctv@cctv.com",
+   "js": "\u6bcf\u665a19:30\u64ad\u51fa\uff0c\u6295\u7a3f\u90ae\u7bb1cctv@cctv.com",
+   "py": "\u6bcf\u665a19:30\u64ad\u51fa\uff0c\u6295\u7a3f\u90ae\u7bb1cctv@cctv.com"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'ja-x', a time and a handle or an address far apart",
+   "text": "\u6bce\u9031\u6708\u66dc21:00\u653e\u9001\u3002\u756a\u7d44\u516c\u5f0fX(\u65e7Twitter)@nhk_pr",
+   "js": "\u6bce\u9031\u6708\u66dc21:00\u653e\u9001\u3002\u756a\u7d44\u516c\u5f0fX(\u65e7Twitter)@nhk_pr",
+   "py": "\u6bce\u9031\u6708\u66dc21:00\u653e\u9001\u3002\u756a\u7d44\u516c\u5f0fX(\u65e7Twitter)@nhk_pr"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'ja-mail', a time and a handle or an address far apart",
+   "text": "\u756a\u7d44\u306e\u611f\u60f3\u306f21:00\u307e\u3067\u306b\u30e1\u30fc\u30eb\u3067info@nhk.or.jp\u3078",
+   "js": "\u756a\u7d44\u306e\u611f\u60f3\u306f21:00\u307e\u3067\u306b\u30e1\u30fc\u30eb\u3067info@nhk.or.jp\u3078",
+   "py": "\u756a\u7d44\u306e\u611f\u60f3\u306f21:00\u307e\u3067\u306b\u30e1\u30fc\u30eb\u3067info@nhk.or.jp\u3078"
+  },
+  {
+   "why": "unchanged (the review of cbd6679, the cap on D-SINK-96's token): hand-written guide text 'ja-ideo-space', a time and a handle or an address far apart",
+   "text": "\u653e\u9001\u6642\u9593 21:00\u3000\u516c\u5f0f\uff38\u3000@nhk_pr",
+   "js": "\u653e\u9001\u6642\u9593 21:00\u3000\u516c\u5f0f\uff38\u3000@nhk_pr",
+   "py": "\u653e\u9001\u6642\u9593 21:00\u3000\u516c\u5f0f\uff38\u3000@nhk_pr",
+   "pyFold": "\u653e\u9001\u6642\u9593 21:00 \u516c\u5f0f\uff38 @nhk_pr"
   }
  ],
  "fuzz": {
@@ -575,7 +858,7 @@
    ]
   },
   "totals": {
-   "plain": 567,
+   "plain": 557,
    "deleting": 442,
    "fold": 557
   },
@@ -612,11 +895,6 @@
    },
    "userinfo@10": {
     "plain": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ],
     "deleting": [
@@ -628,11 +906,6 @@
    },
    "userinfo@13": {
     "plain": [
-     9,
-     10,
-     11,
-     12,
-     13,
      32
     ],
     "deleting": [

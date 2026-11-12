@@ -11,7 +11,8 @@
   "`panel` what programmeDetail shows (null: absent). The credential is spelt in letters nothing",
   "else here holds: any of `secret` in a sink is a leak. ASCII only: every other character is a",
   "JSON escape.",
-  "D-SINK-95 and D-SINK-96 (2026-11-11) moved five expected values, each `why` saying so."
+  "D-SINK-95 and D-SINK-96 (2026-11-11) moved five expected values, each `why` saying so.",
+  "The review of cbd6679 (2026-11-12) moved eight expected values, each `why` saying why."
  ],
  "secret": "qz",
  "host": "cdn.test",
@@ -2457,20 +2458,20 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (title)",
+   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (title) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "title",
    "raw": "News \u00e9://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
    "stored": "News \u00e9://a?u=http://qqqqqq:zzzzzz@cdn.test/x tail",
-   "helper": "News \u00e9://a?u=http://cdn.test tail",
-   "shell": "News \u00e9://a?u=cdn.test tail"
+   "helper": "News [host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
-   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (title)",
+   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (title) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "title",
    "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
    "stored": "News x\u0661://a?u=http:\ufffd//qqqqqq:zzzzzz@cdn.test/x tail",
-   "helper": "News x://[host withheld] tail",
+   "helper": "News [host withheld] tail",
    "shell": "News [host withheld] tail"
   },
   {
@@ -2484,21 +2485,21 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (title)",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (title) [the review of cbd6679: an empty run is a URL to both mirrors, so the helper prints `[redacted]` too, and a description stores that]",
    "field": "title",
    "raw": "Featuring:\n// The Band",
    "stored": "Featuring:// The Band",
-   "helper": "Featuring:// The Band",
+   "helper": "[redacted] The Band",
    "shell": "[url] The Band"
   },
   {
    "kind": "ordinary",
-   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (title)",
+   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (title) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "title",
    "raw": "Go 1://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
    "stored": "Go 1://a?u=http://qqqqqq:zzzzzz@cdn.test/x now",
-   "helper": "Go 1://a?u=http://cdn.test now",
-   "shell": "Go 1://a?u=cdn.test now"
+   "helper": "Go [host withheld] now",
+   "shell": "Go [host withheld] now"
   },
   {
    "kind": "ordinary",
@@ -2736,21 +2737,21 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (description)",
+   "why": "recheck: a non-ASCII letter before a `://` is no scheme letter, so the URL behind it starts its own run (description) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "desc",
    "raw": "News \u00e9://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
-   "stored": "News \u00e9://a?u=http://cdn.test tail",
-   "helper": "News \u00e9://a?u=http://cdn.test tail",
-   "shell": "News \u00e9://a?u=cdn.test tail"
+   "stored": "News [host withheld] tail",
+   "helper": "News [host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
-   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (description)",
+   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (description) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "desc",
    "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
-   "stored": "News x://[host withheld] tail",
-   "helper": "News x://[redacted] withheld] tail",
-   "shell": "News [url] withheld] tail"
+   "stored": "News [host withheld] tail",
+   "helper": "News [host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -2763,21 +2764,21 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (description)",
+   "why": "recheck, the stated cost: a word's `:` at a line's end and `//` after it are joined into a mark, and the shell drops the word (description) [the review of cbd6679: an empty run is a URL to both mirrors, so the helper prints `[redacted]` too, and a description stores that]",
    "field": "desc",
    "raw": "Featuring:\n// The Band",
-   "stored": "Featuring:// The Band",
-   "helper": "Featuring:// The Band",
-   "shell": "[url] The Band"
+   "stored": "[redacted] The Band",
+   "helper": "[redacted] The Band",
+   "shell": "[redacted] The Band"
   },
   {
    "kind": "ordinary",
-   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (description)",
+   "why": "F9 recheck: a URL behind a `://` with no scheme letter starts its own run, its mark written (description) [the review of cbd6679: the `:` of the letterless `://` is outside every URL and the URL behind it holds an `@`, so the token is a credential, withheld whole: the cost the lead accepted for `abc:http://u:p@h`]",
    "field": "desc",
    "raw": "Go 1://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x now",
-   "stored": "Go 1://a?u=http://cdn.test now",
-   "helper": "Go 1://a?u=http://cdn.test now",
-   "shell": "Go 1://a?u=cdn.test now"
+   "stored": "Go [host withheld] now",
+   "helper": "Go [host withheld] now",
+   "shell": "Go [host withheld] now"
   },
   {
    "kind": "cut",

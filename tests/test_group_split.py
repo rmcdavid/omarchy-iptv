@@ -84,34 +84,43 @@ def split_reference(text):
 
 
 def cut_reference(text, limit):
-    """cut_free_text's rule for a group text, as stated: a cut that lands
-    inside a space-run is kept, unless the part of the run it keeps holds a
-    mark (rule.mark_any), or the start of a token whose `@` it loses -- a
-    token read in the run's free text, before the first URL the reading
-    finds in it; then the run is dropped back to the last `;` that stands
-    before the mark and the token's `:` (or the cut, when that `:` is past
-    it), or to its space."""
+    """cut_free_text's rule for a group text, as stated (D-SINK-75, as the
+    review of cbd6679 restated it): a cut that lands inside a space-run is
+    kept, unless the run's first URL (url_reading_rule, from the run's
+    start) starts before it with its whole mark kept, or the run's
+    credential has its `@` past where the cut would end and its span
+    starting before it; then the cut drops back to that item's start, a
+    space just before it taken -- or to the last `;` that stands before the
+    run's first mark and its first `:` (when an `@` follows it), when that
+    is later -- and never ends in a `;`."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
     if text[limit] == " ":
         return cut
     start = cut.rfind(" ")
+    low = start + 1
     run_end = text.find(" ", limit)
     run_end = len(text) if run_end < 0 else run_end
-    url = rule.first_url(text[:run_end], start + 1)
-    free_end = run_end if url is None else url[0]
-    colon = text.find(":", start + 1, free_end)
-    at = text.find("@", colon + 1, free_end) if colon >= 0 else -1
-    mark = rule.mark_any(cut, start + 1)
-    if mark < 0:
-        if at < limit:
-            return cut
-        bound = min(colon, limit)
-    else:
-        bound = min(mark, colon) if at >= 0 else mark
-    semis = [i for i in range(start + 1, bound) if cut[i] == ";"]
-    return cut[:max([start] + semis[-1:] + [0])] if semis else cut[:max(start, 0)]
+    url = rule.first_url(text, low)
+    bound = url[0] if url is not None and url[2] <= limit else limit
+    found = rule.credential(text, low, run_end, rule.urls(text, low))
+    if found is not None and found[1] >= bound and found[2] < bound:
+        bound = found[2]
+    if bound == limit:
+        return cut
+    end = bound - 1 if bound > 0 and text[bound - 1] == " " else bound
+    mark = rule.mark_any(cut, low)
+    keep = limit if mark < 0 else mark
+    colon = text.find(":", low, run_end)
+    if colon >= 0 and text.find("@", colon + 1, run_end) >= 0:
+        keep = min(keep, colon)
+    semis = [i for i in range(low, keep) if cut[i] == ";"]
+    if semis:
+        end = max(end, semis[-1])
+    if end > low and cut[end - 1] == ";":
+        end -= 1
+    return cut[:max(end, 0)]
 
 
 def parse(rows):
@@ -244,13 +253,21 @@ class RuleTest(unittest.TestCase):
 
     def test_a_cut_group_text_never_ends_inside_a_url(self):
         # The property itself, without the reference: when the run the kept
-        # text ends with holds a `://`, the text went on from there with a
-        # space, or not at all, so no redactor is handed a cut URL.
+        # text ends with holds a URL, as the plain sinks read it or as the
+        # sinks that delete controls do, the text went on from there with a
+        # space, or not at all, so no redactor is handed a cut URL. (A `://`
+        # with no scheme letter before it is no URL to any sink, and since
+        # the review of cbd6679 the cut keeps the run up to the first item
+        # it would cut.)
+        checked = 0
         for text, rng in self.texts(7800, 40000):
             if text:
                 kept = helper.cut_free_text(text, rng.randint(0, len(text)), helper.GROUP_SEPARATOR)
-                if "://" in deleted(kept[kept.rfind(" ") + 1:]):
+                run = kept[kept.rfind(" ") + 1:]
+                if rule.urls(run) or rule.urls(deleted(run)):
+                    checked += 1
                     self.assertTrue(len(kept) == len(text) or text[len(kept)] == " ", (repr(text), repr(kept)))
+        self.assertGreater(checked, 1000)
 
 
 class LinearTest(unittest.TestCase):

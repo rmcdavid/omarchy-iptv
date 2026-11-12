@@ -1,25 +1,36 @@
-"""D-SINK-95 and D-SINK-96 (2026-11-11): the redactors' reading of a URL in
-free text, and of a credential token, stated one character at a time for
-the suites that hold a parser, a cut or the fold to it (test_attr_grammar,
-test_group_split, test_epg_fold, test_cut_urls).
+"""D-SINK-95 and D-SINK-96 (2026-11-11, restated by the review of cbd6679 on
+2026-11-12): the redactors' reading of a URL in free text, and of a
+credential token, stated one character at a time for the suites that hold a
+parser, a cut or the fold to it (test_attr_grammar, test_group_split,
+test_epg_fold, test_cut_urls, test_url_marks).
 
 Every class here is this file's own literal, never the helper's or the
 model's, and the walk keeps no `dead` bound: the shipping readings bound
-their scheme walk by where the last failed one started, which is claimed to
-change no answer, and these suites check that claim on every text they
-generate. tests/test_url_marks.py and tests/fixtures/url-mark.json hold both
-shipping readings to the same answers; tests/test_redaction_cost.py states
-the same rule a second way, as one pattern.
+their scheme walk by where the last failed one started, and skip a walk
+with no letter before it, both claimed to change no answer, and these
+suites check that claim on every text they generate.
+tests/test_url_marks.py and tests/fixtures/url-mark.json hold both shipping
+readings to the same answers; tests/test_redaction_cost.py states the same
+rule a second way.
 
-The reading. Every pair of SLASHes with only FILLER between them is asked,
-left to right; P is the run of `:` and FILLER that ends at the pair's first
-slash, never reaching below `low`; the pair is a MARK when P holds a `:` or
-a STAND_IN. Its scheme starts at the first letter of the nearest SCHEME
-segment before P that holds a letter, crossing CROSSABLE runs between
-letterless segments, and never below `low`; a mark with none is no URL. The
-run is from the mark's end to the first of the six delimiters. A token is a
-run of characters other than U+0020 in the free text between URLs; it is
-withheld when it holds a `:` with an `@` after it.
+The reading. Every pair of SLASHes whose FILLER between them holds at most
+one WIDE code point (above U+009F) is asked, left to right; P is the run of
+`:` and FILLER that ends at the pair's first slash, never reaching below
+`low`; the pair is a MARK when P holds a `:` or a STAND_IN and each FILLER
+stretch of P between its colons holds at most one WIDE code point. Its
+scheme starts at the first letter of the nearest SCHEME segment before P
+that holds a letter, crossing CROSSABLE runs that hold at most one WIDE code
+point each between letterless segments, and never below `low`; a mark with
+none is no URL. The run is from the mark's end to the first of the six
+delimiters, and may be empty.
+
+A credential is a token -- a run of characters other than U+0020 -- holding
+an ASCII `:` outside every URL span with an ASCII `@` after it in the token
+and at most one COUNTED code point (above U+009F, no slash look-alike)
+outside the URL spans between them; the first such `:` decides. It is
+withheld from the token's start, or, when the token holds two or more
+counted code points outside the URL spans before that `:`, from just after
+the last of them, to the token's end less its trailing punctuation.
 """
 
 DELIMITERS = "\t\n\x0b\x0c\r "
@@ -61,6 +72,14 @@ def deleted(c):
     return ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F
 
 
+def wide(c):
+    return ord(c) > 0x9F
+
+
+def counted(c):
+    return ord(c) > 0x9F and c not in SLASH_ALIKES
+
+
 def scheme_start(text, at, low):
     k = at
     while True:
@@ -70,18 +89,16 @@ def scheme_start(text, at, low):
         for q in range(k, seg_end):
             if letter(text[q]):
                 return q
-        crossed = False
+        cross_end = k
         while k > low and crossable(text[k - 1]):
             k -= 1
-            crossed = True
-        if not crossed:
+        if k == cross_end or sum(1 for c in text[k:cross_end] if wide(c)) > 1:
             return -1
 
 
-def first_url(text, low=0, need_body=False):
+def first_url(text, low=0):
     """(scheme start, mark start, mark end, run end) of the first URL at or
-    after `low`, or None. `need_body`: an empty run is no URL (the
-    helper's redactor)."""
+    after `low`, or None."""
     n = len(text)
     k = low
     while k < n and not slash(text[k]):
@@ -97,61 +114,78 @@ def first_url(text, low=0, need_body=False):
             while k < n and not slash(text[k]):
                 k += 1
             continue
-        a = k
-        while a > low and (text[a - 1] == ":" or filler(text[a - 1])):
-            a -= 1
-        p = text[a:k]
-        if ":" in p or any(stand_in(c) for c in p):
-            start = scheme_start(text, a, low)
-            if start >= 0:
-                end = m + 1
-                while end < n and text[end] not in DELIMITERS:
-                    end += 1
-                if end > m + 1 or not need_body:
+        if sum(1 for c in text[k + 1:m] if wide(c)) <= 1:
+            a = k
+            while a > low and (text[a - 1] == ":" or filler(text[a - 1])):
+                a -= 1
+            p = text[a:k]
+            narrow = all(sum(1 for c in piece if wide(c)) <= 1 for piece in p.split(":"))
+            if narrow and (":" in p or any(stand_in(c) for c in p)):
+                start = scheme_start(text, a, low)
+                if start >= 0:
+                    end = m + 1
+                    while end < n and text[end] not in DELIMITERS:
+                        end += 1
                     return start, a, m + 1, end
         k = m
     return None
 
 
-def urls(text, need_body=False, low=0):
+def urls(text, low=0):
     """Every URL the reading finds, each from the end of the run before it."""
     out = []
     while True:
-        url = first_url(text, low, need_body)
+        url = first_url(text, low)
         if url is None:
             return out
         out.append(url)
         low = url[3]
 
 
-def tokens(text, start=0, end=None):
-    """(start, end) of every withheld token in text[start:end], one piece of
-    free text."""
-    end = len(text) if end is None else end
+def trailing_keep(text):
+    """How much of `text` to keep before its trailing punctuation (a `]` is
+    kept when the text holds a `[`)."""
+    bracket = "[" in text
+    k = len(text)
+    while k and text[k - 1] in TRAILING and not (bracket and text[k - 1] == "]"):
+        k -= 1
+    return k
+
+
+def credential(text, i, j, url_list):
+    """For the token text[i:j]: (its credential's `:`, that `:`'s `@`, the
+    withheld span's start), or None."""
+    def inside(x):
+        return any(u[0] <= x < u[3] for u in url_list)
+    for c in range(i, j):
+        if text[c] != ":" or inside(c):
+            continue
+        a = text.find("@", c + 1, j)
+        if a < 0:
+            return None
+        if sum(1 for x in range(c + 1, a) if counted(text[x]) and not inside(x)) <= 1:
+            before = [x for x in range(i, c) if counted(text[x]) and not inside(x)]
+            return c, a, (i if len(before) <= 1 else before[-1] + 1)
+    return None
+
+
+def credentials(text, url_list=None):
+    """(span start, span end, token end) of every credential in `text`."""
+    url_list = urls(text) if url_list is None else url_list
     out = []
-    i = start
-    while i < end:
+    i, n = 0, len(text)
+    while i < n:
         if text[i] == " ":
             i += 1
             continue
         j = i
-        while j < end and text[j] != " ":
+        while j < n and text[j] != " ":
             j += 1
-        colon = text.find(":", i, j)
-        if colon >= 0 and text.find("@", colon + 1, j) >= 0:
-            out.append((i, j))
+        found = credential(text, i, j, url_list)
+        if found is not None:
+            start = found[2]
+            out.append((start, start + trailing_keep(text[start:j]), j))
         i = j
-    return out
-
-
-def free_pieces(text, need_body=False):
-    """The free text between the URLs: [(start, end)]."""
-    out = []
-    pos = 0
-    for url in urls(text, need_body):
-        out.append((pos, url[0]))
-        pos = url[3]
-    out.append((pos, len(text)))
     return out
 
 
@@ -180,7 +214,7 @@ def mark_any(text, low=0):
     """The first mark either reading protects (url_mark_any), or -1."""
     narrow = narrow_mark(text, low)
     url = first_url(text, low)
-    wide = -1 if url is None else url[1]
-    if narrow < 0 or wide < 0:
-        return max(narrow, wide)
-    return min(narrow, wide)
+    wide_mark = -1 if url is None else url[1]
+    if narrow < 0 or wide_mark < 0:
+        return max(narrow, wide_mark)
+    return min(narrow, wide_mark)

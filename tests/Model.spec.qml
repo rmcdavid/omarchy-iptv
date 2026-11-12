@@ -1270,7 +1270,21 @@ TestCase {
       ["News qqqqqq:zzzzzz@cdn.test/live/1.ts HD", "News [host withheld] HD"],
       ["Backup qqqqqq:zz" + c(0x9) + "zz@cdn.test/x", "Backup [host withheld]"],
       ["(qqqqqq:zzzzzz@cdn.test).", "[host withheld])."],
-      ["abc:http://qqqqqq:zzzzzz@cdn.test/x", "abc:cdn.test"],
+      // The review of cbd6679: a credential is read across the URLs in its
+      // token (so `abc:` before a URL with a userinfo withholds the token),
+      // with one counted code point at most between its `:` and `@`, a
+      // surrogate pair one; each stretch of a mark holds one wide code point;
+      // a non-numeric port behind a userinfo is withheld; an empty run is a URL.
+      ["abc:http://qqqqqq:zzzzzz@cdn.test/x", "[host withheld]"],
+      ["News qqqqqq:zz" + c(0xe9) + "//zz@cdn.test/x HD", "News [host withheld] HD"],
+      ["News qqqqqq:zz:" + c(0xe9) + "/" + c(0xe9) + "/zz@cdn.test HD", "News [host withheld] HD"],
+      [c(0x4e2d) + c(0x4e2d) + "qqq:z" + c(0xe9) + "z@h", c(0x4e2d) + c(0x4e2d) + "[host withheld]"],
+      [c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "q:z@h.", c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "[host withheld]."],
+      [c(0x6bcf) + c(0x665a) + "19:30" + c(0x64ad) + c(0x51fa) + "cctv@cctv.test", c(0x6bcf) + c(0x665a) + "19:30" + c(0x64ad) + c(0x51fa) + "cctv@cctv.test"],
+      ["NHK" + c(0x7dcf) + c(0x5408) + "//BS", "NHK" + c(0x7dcf) + c(0x5408) + "//BS"],
+      ["http" + c(0xd83d) + c(0xde00) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test"],
+      ["News http://:@qqqqqq:zzzzzz HD", "News [host withheld] HD"],
+      ["Featuring://" + " The Band", "[url] The Band"],
       ["ESPN" + c(0xa0) + "//" + c(0xa0) + "HD", "ESPN" + c(0xa0) + "//" + c(0xa0) + "HD"],
       ["UK: Sports", "UK: Sports"]
     ]

@@ -233,7 +233,7 @@ def sweep():
                                 head, title = head + sep + "Plain Title", None
                             meta = {"attr": attr, "form": form, "cut": cut, "quoted": quoted, "first": first,
                                     "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS,
-                                    "token": cut in ACCEPTED_CUTS and form == "scheme"}
+                                    "token": cut in ACCEPTED_CUTS and (form == "scheme" or (form == "user" and cut != " "))}
                             out.append((meta, head, title))
     return out
 
@@ -308,13 +308,17 @@ class SweepTest(unittest.TestCase):
         # grammar can close -- except the scheme form, whose credential after
         # the delimiter is a D-SINK-96 token every redactor withholds, so its
         # URL as written prints nothing of it (it printed all of it until
-        # 2026-11-11; the next test holds its row at every sink).
+        # 2026-11-11; the next test holds its row at every sink); and, since
+        # the review of cbd6679 read a credential across the URL in its token,
+        # the user form with a delimiter but the space (`http://qq<TAB>qqqq:
+        # zzzzzz@cdn.test/x`: the URL ends at the TAB, and the `:` after it
+        # makes the token a credential, withheld whole).
         tokens = 0
         for meta, _, _ in self.rows:
             if meta["accepted"]:
                 tokens += meta["token"]
                 self.assertEqual(bool(leaked(helper.redact_urls(meta["url"]))), not meta["token"], meta)
-        self.assertEqual(tokens, 280)
+        self.assertEqual(tokens, 504)
 
     def test_d_sink_96_the_scheme_form_shows_no_credential_at_any_sink(self):
         # D-SINK-34's class, closed for the shape where the delimiter stands
@@ -329,7 +333,7 @@ class SweepTest(unittest.TestCase):
                 bad.append((meta, "id", channel["id"]))
         outs = shell_sinks([shell_row(d, c) for _, d, c in kept])
         bad += [(m, sink, out) for (m, _, _), row in zip(kept, outs) for sink, out in row if leaked(out)]
-        self.assertEqual((len(kept), bad[:4]), (280, []))
+        self.assertEqual((len(kept), bad[:4]), (504, []))
 
     def test_no_field_shows_a_credential_at_a_shell_sink(self):
         kept = [(m, d, c) for m, d, c in self.rows if not m["accepted"]]
@@ -429,6 +433,19 @@ def reference(text, trace):
                     if text[j] in DELIMITERS:
                         end = j
                         break
+            # D-SINK-96 (the review of cbd6679): a value holding a `:` takes
+            # the rest of its token's credential when the credential starts
+            # before the value's end and its `@` stands at or after it.
+            if ":" in text[vs:end]:
+                ts = text.rfind(" ", 0, vs) + 1
+                te = text.find(" ", end)
+                te = n if te < 0 else te
+                found = rule.credential(text, ts, te, rule.urls(text))
+                if found is not None and found[1] >= end and found[2] < end:
+                    we = found[2] + rule.trailing_keep(text[found[2]:te])
+                    if we > end:
+                        trace.append("bare-credential")
+                        end = we
             value = text[vs:end]
         value = value.strip()
         if value or key not in attrs:
@@ -455,7 +472,9 @@ class RuleTest(unittest.TestCase):
     KEYS = ["a", "tvg-id", "K.b_c", "t" + chr(0xe9), "", "a "]
     # And how its value starts, a URL most of the time.
     STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//",
-              "http:" + chr(0x200b) + "//", "http" + chr(0x7f) + "://", "http:" + chr(0x2215) * 2]
+              "http:" + chr(0x200b) + "//", "http" + chr(0x7f) + "://", "http:" + chr(0x2215) * 2,
+              # The review of cbd6679: a credential the value's end cuts.
+              "qq:zz", "q:z\tz@", "http://q\tq:z"]
 
     def lines(self, seed, count):
         rng = random.Random(seed)
@@ -476,9 +495,9 @@ class RuleTest(unittest.TestCase):
         for text in self.lines(80, 40000):
             self.assertEqual(helper.parse_attrs(text), reference(text, trace), ascii(text))
         # Not vacuous: every branch of the rule was taken, often.
-        counts = {b: trace.count(b) for b in ("quoted-inside", "quoted-unterminated", "bare-inside")}
+        counts = {b: trace.count(b) for b in ("quoted-inside", "quoted-unterminated", "bare-inside", "bare-credential")}
         self.assertTrue(counts["quoted-inside"] > 4000 and counts["bare-inside"] > 3000
-                        and counts["quoted-unterminated"] > 1000, counts)
+                        and counts["quoted-unterminated"] > 1000 and counts["bare-credential"] > 300, counts)
 
     def test_the_reference_answers_the_fixture(self):
         # So the reference is the rule the fixture states, and not only the
@@ -495,6 +514,52 @@ class RuleTest(unittest.TestCase):
                 rest = rest.lstrip()
                 got = [attrs, (rest[1:] if rest.startswith(",") else rest).strip()]
             self.assertEqual(got, [c["attrs"], c["title"]], c["why"])
+
+
+class CredentialValueTest(unittest.TestCase):
+    """The review of cbd6679 (its still-shows finding 4): a bare value ends at
+    its first `,`, whitespace or `"`, so one cut inside a scheme-less
+    credential stored the username and the password's head as the value
+    and the rest as the title -- `group-title=qqqqqq:zz,zz@cdn.test,Name`
+    listed the group `qqqqqq:zz` and named the row `zz@cdn.test,Name`,
+    neither of which a redactor reads as a credential, so the group axis,
+    the row, the bar and the notifications showed it. The value takes the
+    credential's whole span now, as a URL takes its run (D-SINK-80): the
+    title is swallowed and the name falls back. Red on cbd6679: every line
+    below showed a letter of the credential at some sink."""
+
+    LINES = ["#EXTINF:-1 group-title=qqqqqq:zz,zz@cdn.test,Name",
+             "#EXTINF:-1 group-title=qqqqqq:zz\tzz@cdn.test,Name",
+             '#EXTINF:-1 group-title=qqqqqq:zz"zz@cdn.test,Name',
+             "#EXTINF:-1 tvg-name=qqqqqq:zz,zz@cdn.test,Name",
+             "#EXTINF:-1 tvg-chno=7 group-title=http://qq\tqqqq:zzzzzz@cdn.test/x,Name"]
+
+    def test_no_sink_shows_a_letter_of_the_credential(self):
+        bad = []
+        rows = [parse_line(line) for line in self.LINES]
+        for line, (doc, channel) in zip(self.LINES, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(line, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(line, sink, out) for line, row in zip(self.LINES, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+
+    def test_the_value_takes_the_credential_whole(self):
+        _, channel = parse_line(self.LINES[0])
+        self.assertEqual((channel["group"], channel["name"]), ("qqqqqq:zz,zz@cdn.test,Name", "Channel 1"))
+        _, channel = parse_line(self.LINES[3])
+        self.assertEqual(channel["name"], "qqqqqq:zz,zz@cdn.test,Name")
+        # An ordinary bare value with a `:` and a title after it is read as
+        # it always was, and so is one whose credential the comma does not
+        # cut.
+        _, channel = parse_line("#EXTINF:-1 group-title=UK:Sports,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("UK:Sports", "Name"))
+        _, channel = parse_line("#EXTINF:-1 group-title=News,Sport:Live@HD")
+        self.assertEqual((channel["group"], channel["name"]), ("News", "Sport:Live@HD"))
+        # And a value whose `@` it holds already keeps its title: the
+        # credential the value holds is withheld at its sinks.
+        _, channel = parse_line("#EXTINF:-1 tvg-chno=7 group-title=a:b@c Name")
+        self.assertEqual((channel["group"], channel["name"]), ("a:b@c", "Name"))
 
 
 class TvgIdTest(unittest.TestCase):

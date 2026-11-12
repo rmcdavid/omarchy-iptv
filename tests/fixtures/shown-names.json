@@ -1,5 +1,5 @@
 {
-  "note": "F-SINK-14 (2026-10-29): ONE rule for every place a provider's channel name or group is SHOWN. The guide's row put the name through Model.sinkText (F-SINK-10) while the bar label, the bar tooltip, the bar's accessible name, the notification body, the IPC status and channel replies, the guide footer while playing, the group column and its accessible name, the header's scope label, the empty-scope and no-matches titles, the group-word hint and the player's window title took it raw, so a name holding a credentialed URL printed the whole URL on all of them while the row beside them printed its host. `name` is what a playlist wrote; `js` is EXACTLY what Model.sinkText shows, and every composer in tests/Model.test.js must show it (inside its own words); `py` is EXACTLY what the helper's redact_urls shows, which apply_channel sets as mpv's `title` (after the `$>` prefix, S-01) and `force-media-title`, driven by tests/test_mpv.py through the shipping `play` verb. The two renderings differ on purpose, as they do in redaction-vectors.json: the helper keeps the scheme. `mustNotAppear` holds for both. Ids are NOT redacted (a group scope id keys hidden groups and saved scopes in state.json, and `play` takes a channel id back), and the node suite asserts that too.",
+  "note": "F-SINK-14 (2026-10-29): ONE rule for every place a provider's channel name or group is SHOWN. The guide's row put the name through Model.sinkText (F-SINK-10) while the bar label, the bar tooltip, the bar's accessible name, the notification body, the IPC status and channel replies, the guide footer while playing, the group column and its accessible name, the header's scope label, the empty-scope and no-matches titles, the group-word hint and the player's window title took it raw, so a name holding a credentialed URL printed the whole URL on all of them while the row beside them printed its host. `name` is what a playlist wrote; `js` is EXACTLY what Model.sinkText shows, and every composer in tests/Model.test.js must show it (inside its own words); `py` is EXACTLY what the helper's redact_urls shows, which apply_channel sets as mpv's `title` (after the `$>` prefix, S-01) and `force-media-title`, driven by tests/test_mpv.py through the shipping `play` verb. The two renderings differ on purpose, as they do in redaction-vectors.json: the helper keeps the scheme. `mustNotAppear` holds for both. Ids are NOT redacted (a group scope id keys hidden groups and saved scopes in state.json, and `play` takes a channel id back), and the node suite asserts that too. `jsScope`, where present, is what Model.sinkText shows for the scope id `g:` + `name` when that is not `g:` + `js`: since the review of cbd6679 a credential is read across a URL in its token, so `g:` before a URL whose run holds an `@` makes the whole id a credential, withheld (the cost the lead accepted for `abc:http://u:p@h`).",
   "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
   "names": [
     {
@@ -41,6 +41,7 @@
       "why": "a name that IS a URL of another scheme, with a port (the guide shows a generated name for it, Model.displayName; the composers and the helper still redact what they are handed)",
       "name": "rtmp://u5er:S3CRET@cdn.test:1935/live",
       "js": "cdn.test",
+      "jsScope": "[host withheld]",
       "py": "rtmp://cdn.test",
       "mustNotAppear": ["u5er", "S3CRET", "1935", "/live"]
     },
@@ -62,6 +63,7 @@
       "why": "D-SINK-74: a scheme glued to `_` -- the helper's redaction asked a word boundary of the scheme's start and set the whole URL as the window title",
       "name": "Sports_http://u5er:S3CRET@cdn.test/x",
       "js": "Sports_cdn.test",
+      "jsScope": "[host withheld]",
       "py": "Sports_http://cdn.test",
       "mustNotAppear": ["u5er", "S3CRET", "/x"]
     },

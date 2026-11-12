@@ -556,7 +556,7 @@ var HOST_WITHHELD = "[host withheld]"
 // retried. The helper's `run_host_parts` is the mirror. D-SINK-95: the host
 // it RETURNS stops at its first slash look-alike (slashAlikeCut); `withheld`
 // is asked of the host before that cut, so urlHostWithheld does not move.
-function runHostParts(body) {
+function runHostParts(body, printing) {
   var s = str(body)
   var sp = urlDelimiterIndex(s)
   if (sp !== -1) s = s.substring(0, sp)
@@ -579,6 +579,16 @@ function runHostParts(body) {
   var laterAt = rest.indexOf("@") !== -1
   var dotless = host !== "" && host.indexOf(".") === -1
   var badPort = port !== "" && !/^[0-9]+$/.test(port)
+  // `printing` (the redactors' print path, the review of cbd6679): a
+  // non-numeric port behind a userinfo is withheld too, with no later `@`
+  // needed. `http://<TAB>:@qqqqqq:zzzzzz` is withheld whole by the plain
+  // sinks (a credential token), and with the tab deleted the sinks that
+  // delete controls read the run `:@qqqqqq:zzzzzz`: host `qqqqqq`, port
+  // `zzzzzz`, which they printed. The predicate the Sources form warns with
+  // (urlHostWithheld, below) passes no `printing`, so it does not move, nor
+  // does the host a stored record shows. The helper's run_host_parts is the
+  // mirror.
+  if (printing === true && badPort && authority.indexOf("@") !== -1) return { host: slashAlikeCut(host), withheld: true }
   return { host: slashAlikeCut(host), withheld: laterAt && (dotless || badPort) }
 }
 

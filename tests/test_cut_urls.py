@@ -22,6 +22,14 @@ fragment of it in an output is a leak, the username's first letter included.
 D-SINK-95 and D-SINK-96 (2026-11-11): the run is also dropped when the part
 the cut keeps holds a mark the redactors' reading finds behind a scheme, or
 a scheme-less token's `:` without the `@` after it (CutSweepTest).
+
+The review of cbd6679 (2026-11-12): the cut drops back no further than the
+start of the item it would cut -- the run's first URL, when the cut keeps its
+mark, or the run's credential (url_reading_rule), when the cut loses its
+`@` -- with a space just before it, so a space-less Chinese or Japanese
+description keeps the prose before a false positive where the first version
+stored it empty (ProseCutTest), and the sinks that delete controls read the
+start the cut drops to (DeletingStartTest).
 """
 import calendar
 import json
@@ -30,6 +38,7 @@ import subprocess
 import time
 import unittest
 
+import url_reading_rule as rule
 from helper_loader import load_helper
 
 helper = load_helper()
@@ -116,6 +125,21 @@ def deleted(text):
     return "".join(c for c in text if not (ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f))
 
 
+def credential_before(source, cap):
+    """What a cut at `cap` keeps of `source` when it loses the `@` of the
+    credential in the run it cuts (url_reading_rule): the text before the
+    credential's span, a space just before it taken; or None."""
+    if len(source) <= cap or source[cap] == " ":
+        return None
+    start = source.rfind(" ", 0, cap) + 1
+    end = source.find(" ", cap)
+    end = len(source) if end < 0 else end
+    found = rule.credential(source, start, end, rule.urls(source))
+    if found is None or found[1] < cap or found[2] >= cap:
+        return None
+    return source[:found[2] - 1 if found[2] > 0 and source[found[2] - 1] == " " else found[2]]
+
+
 def forms(cap, shapes, fold=False):
     """(text, kept) for every cut of each shape at `cap`. The URL comes after
     a space, after a space behind words joined by C1 controls (which no fold
@@ -151,10 +175,14 @@ def forms(cap, shapes, fold=False):
                     before = head
                 else:
                     before = ""
+                held = None if whole else credential_before(head + " " + kept_url + " tail" if fold else text, cap)
+                if held is not None:
+                    before = held
                 out.append((text, (before.rstrip(), whole)))
             text = "N" * pad + url + "tail"
             seen = "N" * pad + kept_url + "tail"
-            out.append((text, ("" if "://" in deleted(seen[:cap]) else seen[:cap].rstrip(), "")))
+            held = credential_before(seen, cap)
+            out.append((text, ("" if "://" in deleted(seen[:cap]) else (seen[:cap] if held is None else held).rstrip(), "")))
     return out
 
 
@@ -274,13 +302,19 @@ class CutFreeTextTest(unittest.TestCase):
     def test_a_cut_inside_a_url_drops_its_run_and_the_space_before_it(self):
         self.assertEqual(helper.cut_free_text("News " + PLAIN, len(PLAIN)), "News")
         for delim in "\t\n\x0b\x0c\r":
-            # Not a run end, so the run reaches back to the text's start.
-            self.assertEqual(helper.cut_free_text("News" + delim + PLAIN, len(PLAIN)), "", repr(delim))
+            # Not a run end, so the run reaches back to the text's start,
+            # and the cut drops back to the URL's start, the delimiter kept
+            # (the review of cbd6679: no further than the item it cuts; the
+            # callers trim it).
+            self.assertEqual(helper.cut_free_text("News" + delim + PLAIN, len(PLAIN)), "News" + delim, repr(delim))
 
     def test_the_run_reaches_back_past_a_no_break_space(self):
-        # URL text to the redactors (R32a'''), so the run starts at the space.
+        # URL text to the redactors (R32a'''), so the run starts at the space,
+        # and the cut drops back to the URL's start, which the no-break space
+        # is no part of (the review of cbd6679: no further than the item it
+        # cuts).
         text = "Live News" + chr(0xa0) + PLAIN
-        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Live")
+        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Live News" + chr(0xa0))
 
     def test_a_control_inside_the_colon_slash_slash_still_marks_a_url(self):
         # Any of the class both mirrors delete: C0, DEL and C1.
@@ -332,7 +366,10 @@ class CutFreeTextTest(unittest.TestCase):
         # last one is dropped, and the groups before it stay.
         text = "Sports;News;" + PLAIN
         self.assertEqual(helper.cut_free_text(text, len(text) - 20, helper.GROUP_SEPARATOR), "Sports;News")
-        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "")
+        # With no separator a `;` is text, and the cut drops back to the
+        # URL's start (the review of cbd6679: no further than the item it
+        # cuts), which the run before it does not reach.
+        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Sports;News;")
 
     def test_a_group_text_cut_at_a_semicolon_inside_a_url_drops_its_run(self):
         # D-SINK-78: the first version ended a run at every `;`, so a cut at
@@ -580,13 +617,15 @@ class TitleCutTest(unittest.TestCase):
                                                    for _, (before, whole) in cases])
 
     def test_a_detail_the_redaction_lengthens_is_cut_again(self):
-        # Each `a://b/c@d` is withheld whole (R32a'), which is ten characters
-        # longer than it was, so the cut after the redaction is what holds it.
+        # Each `a://b/c@d` is withheld whole (R32a'), which is six characters
+        # longer than it was (`a` is no named scheme, so no `a://` is
+        # printed since the review of cbd6679), so the cut after the
+        # redaction is what holds it.
         text = " ".join(["a://b/c@d"] * 40)
         for field, cap in (("desc", helper.EPG_MAX_DESC), ("category", helper.EPG_MAX_CATEGORY),
                            ("episode", helper.EPG_MAX_EPISODE)):
             stored = self.titles([text], field)[0]
-            self.assertEqual((len(stored), stored[:19]), (cap, "a://" + helper.HOST_WITHHELD), field)
+            self.assertEqual((len(stored), stored[:19]), (cap, helper.HOST_WITHHELD + " [ho"), field)
 
     def test_a_title_is_folded_and_trimmed_before_it_is_cut(self):
         url_at_cap = "N" * (helper.EPG_MAX_TITLE - len(PLAIN) - 1) + " " + PLAIN
@@ -606,6 +645,93 @@ class TitleCutTest(unittest.TestCase):
         titles = self.titles(["News " + PLAIN + " " + "N" * 300])
         self.assertEqual(helper.redact_urls(titles[0]), "News http://cdn.test " + "N" * (helper.EPG_MAX_TITLE - 45))
         self.assertEqual(shell_sinks(titles)[0][0], "News cdn.test " + "N" * (helper.EPG_MAX_TITLE - 45))
+
+
+# The review of cbd6679's cut cases: a space-less description or title
+# whose cut held a false positive was stored empty. Built from the review's
+# own text: its prefixes, and the filler its probe wrote.
+CJK_432 = 'HBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\xb7\u514b\u62c9\u514b/\u57fa\u7279\xb7\u54c8\u7075\u987f/\u5f7c\u7279\xb7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c'
+CJK_417 = '\u6bcf\u665a20:00\u64ad\u51fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u6b22\u8fce\u5173\u6ce8\u5fae\u535a@\u592e\u89c6\u65b0\u95fb'
+CJK_248 = '20:00\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69@\u592e\u89c6'
+CJK_GOT = '\u300a\u6743\u529b\u7684\u6e38\u620f\u300b\uff08Game of Thrones\uff09\u662fHBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\xb7\u514b\u62c9\u514b/\u57fa\u7279\xb7\u54c8\u7075\u987f/\u5f7c\u7279\xb7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c'
+CJK_PROSE = '\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2'
+
+
+class ProseCutTest(unittest.TestCase):
+    """The review of cbd6679 (its changes-too-much finding 3): the cut
+    dropped a run it cut back to the run's last space, so a space-less
+    Chinese or Japanese description or title whose cut held a false
+    positive -- a wide mark, or a `:` and an `@` far apart -- was stored
+    EMPTY until the next fetch, and one with a single space before it kept
+    its first words. The caps make the review's four texts no false positive
+    at all, so each is stored to its cap; and a cut drops back no further
+    than the start of the item it cuts, so the prose before a real one is
+    kept. Red on cbd6679: each review text stored "" (the last, 15
+    characters), and each item below dropped its prose."""
+
+    def test_the_reviews_texts_are_stored_to_their_cap(self):
+        cases = [(CJK_432, CJK_432[:400], CJK_432[:200]), (CJK_417, CJK_417[:400], CJK_417[:200]),
+                 (CJK_248, CJK_248, CJK_248[:200]), (CJK_GOT, CJK_GOT[:400], CJK_GOT[:200])]
+        got = [(helper.clean_detail(t, helper.EPG_MAX_DESC), helper.clean_title(t)) for t, _, _ in cases]
+        self.assertEqual(got, [(d, t) for _, d, t in cases])
+
+    def test_the_cut_keeps_the_prose_before_the_item_it_cuts(self):
+        mark = "ESPN" + chr(0x200b) + "//" + chr(0x200b) + "HD"
+        credential = "qqqqqq:zzzzzz" + "x" * 200 + "@cdn.test"
+        kept = CJK_PROSE + "Sport:Live@HD" + CJK_PROSE
+        self.assertEqual([helper.cut_free_text(CJK_PROSE + mark + CJK_PROSE, 400),
+                          helper.cut_free_text(CJK_PROSE + credential, 400),
+                          helper.cut_free_text(CJK_PROSE + "x" + chr(0x4e2d) * 2 + credential, 400),
+                          helper.cut_free_text(kept, 400),
+                          helper.clean_detail(CJK_PROSE + mark + CJK_PROSE, helper.EPG_MAX_DESC),
+                          helper.clean_title(CJK_PROSE[:150] + mark + CJK_PROSE)],
+                         [CJK_PROSE, CJK_PROSE, CJK_PROSE + "x" + chr(0x4e2d) * 2, kept[:400], CJK_PROSE, CJK_PROSE[:150]])
+        # The credential the cut keeps whole is withheld at every sink, and
+        # the prose before it shows.
+        self.assertEqual(helper.redact_urls(kept[:400]), CJK_PROSE + helper.HOST_WITHHELD)
+
+
+class DeletingStartTest(unittest.TestCase):
+    """The review of cbd6679: the cut drops back to the start of the item it
+    cuts as the plain reading finds it, and the sinks that delete controls
+    first (the player's title, the notification) must read no item in what
+    it keeps of that run either -- a deleted control is no WIDE code point
+    and no STAND_IN, so it moves no mark, and the scheme a deleting sink
+    reads starts no later -- or they would print half of one. Over prose
+    holding controls before items holding them, cut at every offset inside
+    the item: what the cut keeps of its run reads as plain text at the sinks
+    that delete controls whenever it does at the plain ones, and no sink
+    shows a letter of the credential the whole text does not."""
+
+    def test_what_the_cut_keeps_of_its_run_reads_alike_at_every_sink(self):
+        prefixes = ["", "News ", CJK_PROSE[:40], "ab" + chr(1) + "cd", "x" + chr(0x7f) + "y" + chr(0xa0),
+                    "1" + chr(0x85), "Q\t", chr(0x4e2d) + "\t" + chr(0x4e2d), "N" + chr(0x9b) + "N"]
+        items = [PLAIN, "ht" + chr(1) + "tp://qqqqqq:zzzzzz@cdn.test/x", "http" + chr(1) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+                 "http:\t//qqqqqq:zzzzzz@cdn.test/x", "qqqqqq:zz\tzz@cdn.test/x", "qqqqqq:zz" + chr(1) + chr(0xe9) + "zz@cdn.test",
+                 "1://qqqqqq:zzzzzz@cdn.test", "ab" + chr(1) + "cd://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+                 "x" + chr(0x200b) + "//qqqqqq:zzzzzz@cdn.test", "http://x/\tqqqqqq:zz@cdn.test",
+                 "a" + chr(0x200b) + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test",
+                 # Two C1 controls beside the colon: no WIDE code point, so a
+                 # mark to every sink.
+                 "http:" + chr(0x85) + chr(0x9b) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+        tails = ["", " tail", CJK_PROSE[:20]]
+        bad, checked = [], 0
+        for prefix in prefixes:
+            for item in items:
+                for tail in tails:
+                    text = prefix + item + tail
+                    whole = {"plain": leaked(helper.redact_urls(text)), "deleting": leaked(helper.player_title_text(text))}
+                    for limit in range(len(prefix), len(prefix) + len(item)):
+                        stored = helper.cut_free_text(text, limit)
+                        run = stored[stored.rfind(" ") + 1:]
+                        if helper.redact_urls(run) == run and helper.player_title_text(run) != deleted(run):
+                            bad.append(("deleting reads an item", ascii(text), limit))
+                        for sink, out in (("plain", helper.redact_urls(stored)), ("deleting", helper.player_title_text(stored))):
+                            if leaked(out) and not whole[sink]:
+                                bad.append((sink, ascii(text), limit, ascii(out)))
+                        checked += 1
+        self.assertEqual(bad[:4], [])
+        self.assertGreater(checked, 5000)
 
 
 if __name__ == "__main__":

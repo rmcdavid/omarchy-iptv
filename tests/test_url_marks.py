@@ -18,9 +18,18 @@ the slash look-alike list and the three classes over every code point (by
 what next_url reads, not by a pattern), the position fuzz against the
 fixture's exact leak sets, and the two mirrors' URL and token spans over a
 generated corpus, with node computing the model's.
+
+The review of cbd6679 (2026-11-12) restated three parts, each red there: a
+credential is read across the URLs in its token, with at most one counted
+code point between its `:` and its `@` (TokenSweepTest, CapsTest); each
+stretch the mark's reading crosses holds one WIDE code point (CapsTest); and
+an empty run is a URL to both mirrors, so the plain, deleting and folded
+sinks agree over several insertions (MultiInsertTest). The helper prints a
+scheme only from NAMED_SCHEMES (the fixture's vectors).
 """
 import json
 import os
+import re
 import subprocess
 import unittest
 
@@ -64,14 +73,16 @@ class FixtureTest(unittest.TestCase):
     def test_the_fixture_is_ascii_and_whole(self):
         self.assertTrue(all(b < 0x80 for b in FIXTURE_BYTES))
         vectors = FIXTURE["vectors"]
-        self.assertGreaterEqual(len(vectors), 77)
+        self.assertGreaterEqual(len(vectors), 122)
         # Each half of the rule is there: broken marks that now redact,
-        # tokens, the residuals and the accepted false positives.
-        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-95")]), 25)
-        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-96")]), 9)
-        self.assertGreaterEqual(len([v for v in vectors if "residual" in v["why"]]), 8)
+        # tokens, the residuals, the accepted false positives, and the lines
+        # the review of cbd6679 found changed that the caps keep.
+        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-95")]), 32)
+        self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("D-SINK-96")]), 23)
+        self.assertGreaterEqual(len([v for v in vectors if "residual" in v["why"]]), 17)
         self.assertGreaterEqual(len([v for v in vectors if v["why"].startswith("false positive")]), 10)
-        self.assertEqual(FIXTURE["fuzz"]["totals"], {"plain": 567, "deleting": 442, "fold": 557})
+        self.assertGreaterEqual(len([v for v in vectors if "hand-written guide text" in v["why"]]), 19)
+        self.assertEqual(FIXTURE["fuzz"]["totals"], {"plain": 557, "deleting": 442, "fold": 557})
         self.assertEqual(len(FIXTURE["fuzz"]["leaks"]), 54)
 
     def test_every_vector_reads_as_the_fixture_says_at_every_helper_sink(self):
@@ -122,7 +133,7 @@ class FuzzTest(unittest.TestCase):
     BMP; here every 7th code point and all of ASCII are run (the node suite
     runs every BMP code unit against the same sets), so the two mirrors'
     leak sets are the fixture's. 0.18.0 leaked 1,142,679 of the 3,428,136
-    plain inputs; this tree, 567."""
+    plain inputs; cbd6679, 567; this tree, 557."""
 
     @classmethod
     def setUpClass(cls):
@@ -180,13 +191,17 @@ class FuzzTest(unittest.TestCase):
 
 def corpus(count=40000):
     """The span test's strings: scheme characters, `:`, `/`, `@`, spaces,
-    controls, STAND_INs, look-alikes and composite tokens, by a fixed
-    generator, so both runs read the same 40,000 strings."""
+    controls, STAND_INs, look-alikes, astral characters and composite tokens,
+    by a fixed generator, so both runs read the same strings. The review of
+    cbd6679 added the astral characters, two odd characters side by side (the
+    caps), an empty-run mark before a delimiter and a mark inside a password."""
     alpha = list("ahHt1.+-:/@ ?#&=;,)'\"[]_qz") + [chr(c) for c in (
         0x09, 0x0A, 0x01, 0x7F, 0x85, 0x9B, 0xA0, 0x200B, 0x34F, 0x338, 0xFEFF, 0x2028, 0x3000, 0xE9, 0x65E5,
-        0xFF1A, 0xFE55, 0x2215, 0xFF0F, 0x2044, 0x3164, 0xFFFD)]
+        0xFF1A, 0xFE55, 0x2215, 0xFF0F, 0x2044, 0x3164, 0xFFFD, 0x1F600, 0xE0001, 0x10FFFF)]
     composites = ["http://", "http:" + chr(0x200B) + "//", "http" + chr(0xFF1A) + "//", "http:" + chr(0x2215) * 2,
-                  "a:b@", "1://", ":" + chr(1) + "//", "qqqqqq:zzzzzz@cdn.test/x", "http" + chr(0x2215) + "://"]
+                  "a:b@", "1://", ":" + chr(1) + "//", "qqqqqq:zzzzzz@cdn.test/x", "http" + chr(0x2215) + "://",
+                  chr(0x4E2D) * 2, "x" + chr(0x200B) + chr(0x2215) * 2 + "\t", chr(0xE9) + "//",
+                  ":" + chr(0xE9) + "/" + chr(0xE9) + "/"]
     out = []
     for i in range(count):
         x, text = i + 1, []
@@ -197,68 +212,82 @@ def corpus(count=40000):
     return out
 
 
+def utf16(text):
+    """Each code point index of `text` as a UTF-16 index, and the end."""
+    out = [0]
+    for ch in text:
+        out.append(out[-1] + (2 if ord(ch) > 0xFFFF else 1))
+    return out
+
+
 def helper_spans(text):
-    """The helper's reading in the model's terms (an empty run is a URL):
-    every URL's (start, mark start, mark end, run end), and the token arm's
-    output for each piece of free text between them."""
-    urls, pieces, low = [], [], 0
-    while True:
-        url = helper.next_url(text, low, low, False)
-        if url is None:
-            break
-        urls.append(list(url))
-        pieces.append(helper.redact_tokens(text[low:url[0]]))
-        low = url[3]
-    pieces.append(helper.redact_tokens(text[low:]))
-    return [urls, pieces]
+    """The helper's URLs (scheme start, mark start, mark end, run end) and
+    credential spans (start, end, token end), in UTF-16 indices."""
+    reading = helper.UrlReading(text, 0, None, True)
+    held = helper.credential_spans(text, reading)
+    at = utf16(text)
+    return [[[at[x] for x in url] for url in reading.urls], [[at[x] for x in span] for span in held]]
+
+
+def rule_spans(text):
+    at = utf16(text)
+    return [[[at[x] for x in url] for url in rule.urls(text)], [[at[x] for x in span] for span in rule.credentials(text)]]
 
 
 MODEL_SPANS = """
 const M = require("./Model.mjs")
 const texts = JSON.parse(require("fs").readFileSync(0, "utf8"))
 process.stdout.write(JSON.stringify(texts.map(function (s) {
-  const urls = [], pieces = []
-  let low = 0
-  for (;;) {
-    const u = M.urlAt(s, low)
-    if (u === null) break
-    urls.push([u.start, u.markStart, u.markEnd, u.runEnd])
-    pieces.push(M.redactTokens(s.substring(low, u.start)))
-    low = u.runEnd
-  }
-  pieces.push(M.redactTokens(s.substring(low)))
-  return [urls, pieces]
+  const urls = M.urlList(s)
+  return [urls.map(function (u) { return [u.start, u.markStart, u.markEnd, u.runEnd] }),
+          M.credentialSpans(s, urls).map(function (h) { return [h.start, h.end, h.tokenEnd] })]
+})))
+"""
+
+MODEL_SINKS = """
+const M = require("./Model.mjs")
+const texts = JSON.parse(require("fs").readFileSync(0, "utf8"))
+process.stdout.write(JSON.stringify(texts.map(function (s) {
+  const a = M.notifyArgv("streamFailed", { name: s, reason: s })
+  return [M.sinkText(s), a[a.length - 1]]
 })))
 """
 
 
+def node(script, texts):
+    done = subprocess.run(["node", "-e", script], input=json.dumps(texts), capture_output=True, text=True, cwd=ROOT,
+                          timeout=600)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr[-800:])
+    return json.loads(done.stdout)
+
+
 class SpanTest(unittest.TestCase):
-    def test_both_mirrors_read_the_same_urls_and_tokens(self):
-        """Over 40,000 generated strings (BMP only, so a code point and a
-        code unit index alike): the helper's next_url and the model's
-        Model.urlAt find the same URLs at the same places, and the helper's
-        redact_tokens and Model.redactTokens withhold the same tokens in the
-        free text between them; and tests/url_reading_rule.py, which keeps no
-        dead bound, reads the same URLs, so that bound changes no answer."""
+    def test_both_mirrors_read_the_same_urls_and_credentials(self):
+        """Over 40,000 generated strings, astral characters among them: the
+        helper's reading (next_url through UrlReading) and the model's
+        (Model.urlList) find the same URLs at the same places, and the helper's
+        credential_spans and Model.credentialSpans withhold the same spans,
+        compared in UTF-16 indices; and tests/url_reading_rule.py, which keeps
+        no dead bound and takes no shortcut, reads the same, so neither changes
+        an answer."""
         texts = corpus()
-        done = subprocess.run(["node", "-e", MODEL_SPANS], input=json.dumps(texts), capture_output=True,
-                              text=True, cwd=ROOT, timeout=600)
-        self.assertEqual(done.returncode, 0, done.stderr[-800:])
-        model = json.loads(done.stdout)
+        model = node(MODEL_SPANS, texts)
         differ = [ascii(t) for t, m in zip(texts, model) if helper_spans(t) != m]
         self.assertEqual((len(model), differ[:4]), (40000, []))
-        rule_differ = [ascii(t) for t in texts if [list(u) for u in rule.urls(t)] != helper_spans(t)[0]]
+        rule_differ = [ascii(t) for t in texts[:20000] if rule_spans(t) != helper_spans(t)]
         self.assertEqual(rule_differ[:4], [])
         # Not vacuous: the corpus reaches marks a look-alike or a STAND_IN
-        # makes, and tokens.
+        # makes, credentials, and astral characters inside both.
         found = [helper_spans(t) for t in texts[:4000]]
         self.assertGreater(sum(len(f[0]) for f in found), 1000)
-        self.assertGreater(sum(p.count(helper.HOST_WITHHELD) for f in found for p in f[1]), 500)
+        self.assertGreater(sum(len(f[1]) for f in found), 500)
+        self.assertGreater(sum(1 for t in texts if any(ord(c) > 0xFFFF for c in t)), 10000)
 
     def test_the_printable_ascii_path_is_the_general_one(self):
         """next_url answers printable ASCII by str.find over `://` and a
         walk back over its colons; the general path, asked of the same text,
-        gives the same URLs, with a run needed and without."""
+        gives the same URLs."""
         alpha = list("ahHt1.+-:/@ ?#&=;,)'\"[]_qz") + ["http://", "a:b@", "1://", ":://", "::", "x:/", "//"]
         checked = 0
         for i in range(20000):
@@ -268,20 +297,207 @@ class SpanTest(unittest.TestCase):
                 text.append(alpha[(x >> 4) % len(alpha)])
             text = "".join(text)
             self.assertTrue(text.isascii() and text.isprintable())
-            for need_body in (False, True):
-                walks = []
-                for plain in (True, False):
-                    urls, low = [], 0
-                    while True:
-                        url = helper.next_url(text, low, low, need_body, plain)
-                        if url is None:
-                            break
-                        urls.append(url)
-                        low = url[3]
-                    walks.append(urls)
-                self.assertEqual(walks[0], walks[1], (ascii(text), need_body))
-                checked += len(walks[0])
+            walks = []
+            for plain in (True, False):
+                urls, low = [], 0
+                while True:
+                    url = helper.next_url(text, low, low, plain)
+                    if url is None:
+                        break
+                    urls.append(url)
+                    low = url[3]
+                walks.append(urls)
+            self.assertEqual(walks[0], walks[1], ascii(text))
+            checked += len(walks[0])
         self.assertGreater(checked, 5000)
+
+
+class CapsTest(unittest.TestCase):
+    """The review of cbd6679 (its changes-too-much findings 1 and 2): with no
+    limit on the mark's reading, a space-less Chinese, Japanese, Korean or
+    Cyrillic line with one ASCII word before a slash-separated list printed
+    only its last item, and a description holding a time and, later, a
+    handle or an address was withheld whole. Each stretch the reading crosses
+    holds one WIDE code point now, and a credential's `:` and `@` at most one
+    counted one between them. Red on cbd6679: every hand-written line below
+    changed there."""
+
+    LINES = [
+        chr(0x4E2D) + "CCTV5" + "".join(map(chr, (0x8F6C, 0x64AD, 0xFF0C))) + "2024" + chr(0x5E74) + chr(0xFF1A)
+        + chr(0x6E38) + chr(0x6CF3) + "/" + chr(0x8DF3) + chr(0x6C34) + "/" + chr(0x4E52) + chr(0x4E53),
+        "MV" + chr(0x7CBE) + chr(0x9009) + chr(0xFF1A) + chr(0x5468) + chr(0x6770) + "/" + chr(0x6797) + chr(0x4FCA)
+        + "/" + chr(0x9093) + chr(0x7D2B) + " " + chr(0x91D1),
+        "NHK" + chr(0x30B9) + chr(0x30DA) + chr(0x3002) + chr(0x51FA) + chr(0xFF1A) + chr(0x5C71) + chr(0x7530)
+        + chr(0xFF0F) + chr(0x9234) + chr(0x6728) + chr(0xFF0F) + chr(0x4F50) + chr(0x85E4),
+        "tvN" + chr(0xB4DC) + chr(0xB77C) + "/" + chr(0xC608) + chr(0xB2A5) + "/HD",
+        "RU:" + chr(0x041A) + chr(0x0438) + "/" + chr(0x0424) + chr(0x0438) + "/" + chr(0x0421) + chr(0x0435),
+        chr(0x6BCF) + chr(0x665A) + "19:30" + chr(0x64AD) + chr(0x51FA) + chr(0xFF0C) + chr(0x6295) + chr(0x7A3F)
+        + "cctv@cctv.test",
+        chr(0x653E) + chr(0x9001) + " 21:00" + chr(0x3000) + chr(0x516C) + chr(0x5F0F) + chr(0x3000) + "@nhk_pr",
+        "NHK" + chr(0x7DCF) + chr(0x5408) + "//BS",
+    ]
+
+    def test_cjk_and_cyrillic_lines_keep_their_text_in_both_mirrors(self):
+        model = node(MODEL_SINKS, self.LINES)
+        got = [(ascii(t), helper.redact_urls(t), helper.player_title_text(t), fold_redact(t), m[0])
+               for t, m in zip(self.LINES, model)]
+        # The fold is the plain fold here: a line holding no URL and no
+        # credential has its whitespace runs folded to a space, U+3000 among
+        # them.
+        self.assertEqual(got, [(ascii(t), t, t, re.sub(r"[\s\x00-\x1f\x7f]+", " ", t), t) for t in self.LINES])
+
+    def test_one_odd_code_point_a_stretch_still_marks_a_url_and_two_do_not(self):
+        cred = "qqqqqq:zzzzzz@cdn.test/x"
+        path = "cdn.test/live/qqqqqq/zzzzzz/1.ts"
+        z, e = chr(0x200B), chr(0xE9)
+        cases = [
+            # P: one odd code point beside the colon, on either side, or one in each stretch.
+            ("http" + z + ":" + z + "//" + path, "http://cdn.test"),
+            ("http" + e + e + "://" + path, "http" + e + e + "://" + path),
+            ("http" + z + chr(1) + z + "://" + path, "http" + z + chr(1) + z + "://" + path),
+            # Between the slashes.
+            ("http:/" + e + "/" + path, "http://cdn.test"),
+            ("http:/" + e + e + "/" + path, "http:/" + e + e + "/" + path),
+            ("http:/" + e + chr(1) + chr(0x85) + "/" + path, "http://cdn.test"),
+            # A crossed run.
+            ("http" + e + "1://" + path, "cdn.test"),
+            ("http" + e + e + "1://" + path, "http" + e + e + "1://" + path),
+            # An astral character is one code point to both mirrors.
+            ("http" + chr(0x1F600) + "://" + path, "http://cdn.test"),
+            ("http" + chr(0x1F600) * 2 + "://" + path, "http" + chr(0x1F600) * 2 + "://" + path),
+            # A userinfo behind a mark too wide is a credential token.
+            ("http" + e + e + "://" + cred, "http" + e + e + HOST_WITHHELD),
+        ]
+        self.assertEqual([(ascii(t), helper.redact_urls(t)) for t, _ in cases], [(ascii(t), w) for t, w in cases])
+        model = node(MODEL_SINKS, [t for t, _ in cases])
+        leaks_ = [(ascii(t), helper.redact_urls(t) != w, leaks(m[0]) != leaks(w)) for (t, w), m in zip(cases, model)]
+        self.assertEqual([x for x in leaks_ if x[1] or x[2]], [])
+
+
+HOST_WITHHELD = helper.HOST_WITHHELD
+
+
+class TokenSweepTest(unittest.TestCase):
+    """The review of cbd6679 (its still-shows findings 1 and 2): `X//` with X
+    any code point, inserted at every position of a scheme-less credential,
+    started a URL inside it, so the token arm, which read only the text
+    between URLs, saw the username with no `@`, and every sink of both
+    mirrors printed it (63,300 of 63,484 code points at each password
+    position); the helper also printed a username as the scheme. With the
+    credential read across URLs and the scheme printed from a list, the only
+    leak left is U+0020 inside the credential (`qqqqqq:z //zz@...`): a space
+    ends a token as it ends a URL's run, the accepted residual. Also the
+    `:` X `/` X `/` and X `:/` X `/` forms. node runs every BMP code unit;
+    here every 31st BMP code point and all of ASCII, the slash look-alikes and
+    the reader's spaces."""
+
+    TOKEN = "qqqqqq:zzzzzz@cdn.test/live/1.ts"
+    FORMS = {"X//": lambda c: c + "//", ":X/X/": lambda c: ":" + c + "/" + c + "/",
+             "X:/X/": lambda c: c + ":/" + c + "/"}
+
+    def test_no_insertion_but_a_space_inside_the_credential_leaks(self):
+        codes = sorted({c for c in range(0x10000) if not 0xD800 <= c <= 0xDFFF and chr(c) not in "qzQZ"
+                        and (c < 0x80 or c % 31 == 0)} | set(map(ord, helper.SLASH_ALIKE_CHARS))
+                       | set(map(ord, helper.URL_SPACE_CHARS)))
+        got = {}
+        for name, form in self.FORMS.items():
+            for pos in range(len(self.TOKEN) + 1):
+                for c in codes:
+                    text = "News " + self.TOKEN[:pos] + form(chr(c)) + self.TOKEN[pos:] + " HD"
+                    for sink, f in (("redact_urls", helper.redact_urls), ("player_title_text", helper.player_title_text),
+                                    ("fold", fold_redact)):
+                        if leaks(f(text)):
+                            got.setdefault((name, sink, c), []).append(pos)
+        want = {(name, sink, 0x20): list(range(1, 14)) for name in self.FORMS
+                for sink in ("redact_urls", "player_title_text", "fold")}
+        self.assertEqual(got, want)
+
+
+def credential_holds_a_delimited_run(text):
+    """Whether the text holds the residual the multi-insert sweep pins by
+    name: a URL inside a credential's span whose run a TAB, LF, VT, FF or CR
+    ends, as tests/url_reading_rule.py reads them (an empty run, most often).
+    The sinks that delete controls join that run to the password, so the URL
+    takes the credential's `:`, and the username's text before the URL's
+    scheme, or the URL's own run as a host, prints there while the plain
+    sinks withhold the credential: the six delimiters inside a URL's run
+    (R32a''', D-SINK-34), seen from the deleting side."""
+    urls = rule.urls(text)
+    for start, end, _ in rule.credentials(text, urls):
+        for url in urls:
+            if start <= url[0] < end and url[3] < len(text) and text[url[3]] in "\t\n\x0b\x0c\r":
+                return True
+    return False
+
+
+MULTI_BASES = ["http://qqqqqq:zzzzzz@cdn.test/live/1.ts", "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+               "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "qqqqqq:zzzzzz@cdn.test/live/1.ts"]
+MULTI_PIECES = [chr(c) for c in (0x200B, 0x34F, 0x338, 0xA0, 0x3000, 0x2028, 1, 0x7F, 0x85, 9, 10, 13, 11, 12, 0xFFFD,
+                                 0xFF1A, 0x1F600, 0xE0001, 0x9F, 0xA1, 0x2060, 0xFEFF, 0xFF20, 0x2215, 0xFF0F, 0x2044,
+                                 0x1735)] + [
+    ":", "/", "//", "://", "@", " ", "a", "1", "http", "a://", "1://", ":/", ".", ",", ")", "]", "[", "'", '"', "<",
+    ">", "!", "?", ";", "=", "&", "#", "%", "x" + chr(0x200B) + chr(0x2215) * 2, chr(0x200B) + chr(0x2215) * 2 + "\t",
+    "a:" + chr(0x2215) * 2 + "\t", "a" + chr(0x2215) + "://\t", chr(0xE9) + "//", ":" + chr(0xE9) + "/" + chr(0xE9) + "/"]
+
+
+def multi_inputs(count, seed):
+    """`count` strings: one to three pieces inserted into one of the four
+    credentialed texts, wrapped `News ... HD`, by a seeded generator both
+    suites share in spirit (the review of cbd6679's multi-insert fuzz)."""
+    x = seed
+    out = []
+    for _ in range(count):
+        x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+        text = MULTI_BASES[(x >> 8) % 4]
+        for _ in range(1 + (x >> 4) % 3):
+            x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+            at = (x >> 8) % (len(text) + 1)
+            text = text[:at] + MULTI_PIECES[(x >> 3) % len(MULTI_PIECES)] + text[at:]
+        out.append("News " + text + " HD")
+    return out
+
+
+class MultiInsertTest(unittest.TestCase):
+    """The review of cbd6679 (its still-shows finding 3 and cost-parity
+    finding 2): the invariants held on single insertions only. Two or three
+    pieces -- marks, fillers, stand-ins, look-alikes, the six delimiters, `@`,
+    `:` and astral characters -- in the four credentialed texts broke all
+    three: the model printed what the helper withheld around an empty run,
+    and the deleting sinks and fold-then-redact printed what the plain ones
+    did not (1,133, 1,594 and 1,683 of 200,000 on cbd6679). Over 50,000 such
+    strings: the helper's and the model's plain sinks leak at exactly the
+    same inputs, the sinks that delete controls (player_title_text, the
+    notification) only where the plain ones do but for the residual
+    credential_holds_a_delimited_run names, and fold-then-redact only where
+    the plain sinks do."""
+
+    def test_the_invariants_hold_over_several_insertions(self):
+        # The residual's own shapes, so its name is reached on every run.
+        residual = ["News qqqqq%qa:" + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test/live/1.ts HD",
+                    "News qqq;qqqa" + chr(0x2215) + "://\t:z.zzzzz@cdn.test/live/1.ts HD",
+                    "News qqqqq" + chr(0x1735) + "q" + chr(0x200b) + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test/live/1.ts HD"]
+        texts = multi_inputs(50000, 2026) + residual
+        model = node(MODEL_SINKS, texts)
+        bad = {}
+        pinned = 0
+        for text, (model_plain, model_body) in zip(texts, model):
+            plain = leaks(helper.redact_urls(text))
+            checks = {"helper plain != model plain": plain != leaks(model_plain),
+                      "fold beyond plain": leaks(fold_redact(text)) and not plain}
+            deleting = leaks(helper.player_title_text(text)) or leaks(model_body)
+            if deleting and not plain:
+                if credential_holds_a_delimited_run(text):
+                    pinned += 1
+                else:
+                    checks["deleting beyond plain"] = True
+            for name, failed in checks.items():
+                if failed:
+                    bad.setdefault(name, []).append(ascii(text))
+        self.assertEqual({k: v[:3] for k, v in bad.items()}, {})
+        # Not vacuous: the plain sinks leak on some (the stated residuals),
+        # and the pinned residual is reached.
+        self.assertGreater(sum(1 for t in texts if leaks(helper.redact_urls(t))), 1000)
+        self.assertGreaterEqual(pinned, len(residual))
 
 
 if __name__ == "__main__":

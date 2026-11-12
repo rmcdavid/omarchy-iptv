@@ -68,26 +68,42 @@ helper = load_helper()
 # D-SINK-95 and D-SINK-96 (2026-11-11): the reading as ONE leftmost pattern,
 # its classes spelt here and nowhere else -- X (CROSSABLE) everything outside
 # U+0020..U+007E; F (FILLER) X but the slash look-alikes; K (STAND_IN) F above
-# U+009F but the reader's space union; S (SLASH) `/` or a look-alike:
-#   scheme  a letter, scheme characters, then optionally X and a run of X and
-#           letterless scheme characters (the walk crosses only out of a
-#           letterless segment);
-#   mark    a run of `:` and F holding a `:` or a K, then S, F*, S;
-#   run     to the first of the six delimiters, at least one character.
-# Matched left to right without overlap, and the text between matches is free
-# text, whose tokens holding a `:` with an `@` after it are withheld.
+# U+009F but the reader's space union; S (SLASH) `/` or a look-alike; and,
+# since the review of cbd6679 (2026-11-12), D the deleted controls and W a
+# WIDE code point (above U+009F), at most one of which any stretch the
+# reading crosses may hold:
+#   scheme  a letter and scheme characters, then crossable runs of at most
+#           one W, each followed by letterless scheme characters, the last
+#           possibly by the mark (the walk crosses only out of a letterless
+#           segment);
+#   mark    the whole run of `:` and F before the first S (nothing of it
+#           before it), whose stretches between colons hold at most one W,
+#           holding a `:` or being one K; then S, F holding at most one W, S;
+#   run     to the first of the six delimiters, possibly empty.
+# Matched left to right without overlap. A credential is a run of characters
+# other than U+0020 that holds a `:` outside every match with an `@` after it,
+# with at most one counted character (W but no look-alike) outside the
+# matches between them (credentials_as_ruled); it is withheld from the run's
+# start, or after the last counted character before that `:` when there are
+# two or more, and a match inside it prints nothing. A match prints its scheme
+# and `://` only when the scheme is a NAMED one, then its host.
 _WS = "\t\n\x0b\x0c\r "
 _SA_AS_RULED = "".join(map(chr, (0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27CB, 0x29F8, 0x2F03, 0x3033, 0x31D3,
                                  0xFF0F)))
-_X = "[^ -~]"
-_F = "[^ -~" + _SA_AS_RULED + "]"
+_D = "[\x00-\x1f\x7f-\x9f]"
+_W = "[^\x00-\x9f]"
+_WF = "[^\x00-\x9f" + _SA_AS_RULED + "]"
 _K = ("[^\x00-\x9f" + "".join(map(chr, (0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F, 0x205F,
                                           0x3000, 0xFEFF))) + _SA_AS_RULED + "]")
 _S = "[/" + _SA_AS_RULED + "]"
-_AS_RULED = re.compile("([A-Za-z][A-Za-z0-9+.\\-]*(?:" + _X + "(?:" + _X + "|[0-9+.\\-])*)?)"
-                       "(?::|" + _F + ")*(?::|" + _K + ")(?::|" + _F + ")*" + _S + _F + "*" + _S
-                       + "([^" + _WS + "]+)")
-_TOKEN_AS_RULED = re.compile("(?<![^ ])[^ :]*:[^ @]*@[^ ]*")
+_CROSS = "(?:" + _D + "*" + _W + _D + "*|" + _D + "+)"
+_STRETCH = "(?:" + _D + "*(?:" + _WF + _D + "*)?)"
+_AS_RULED = re.compile("([A-Za-z][A-Za-z0-9+.\\-]*(?:" + _CROSS + "[0-9+.\\-]+)*" + _CROSS + "?)"
+                       "(?<![^ -9;-~" + _SA_AS_RULED + "])"
+                       "(" + _STRETCH + "(?::" + _STRETCH + ")+|" + _D + "*" + _K + _D + "*)"
+                       + _S + _STRETCH + _S + "([^" + _WS + "]*)")
+_NAMED_AS_RULED = {"http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt", "file", "ftp", "ftps",
+                   "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"}
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
 _PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
@@ -109,7 +125,12 @@ def host_as_ruled(body):
     host = hostport if end is None else hostport[:end.start()]
     port = _PORT_AS_RULED.match(hostport)
     port = port.group(1) if port else ""
-    if "@" in rest and ((host and "." not in host) or (port and not port.isdigit())):
+    bad_port = port and not port.isdigit()
+    if "@" in rest and ((host and "." not in host) or bad_port):
+        return HOST_WITHHELD
+    # The review of cbd6679: a non-numeric port behind a userinfo is withheld
+    # too, at a redactor's print.
+    if bad_port and "@" in authority:
         return HOST_WITHHELD
     return look_alike_cut(host.lower())
 
@@ -131,20 +152,57 @@ def trailing_as_ruled(raw):
     return raw, trailing
 
 
-def withhold_as_ruled(match):
-    return HOST_WITHHELD + trailing_as_ruled(match.group(0))[1]
+def credentials_as_ruled(s, matches):
+    """(start, end) of every withheld span: the rule above, a character at a
+    time."""
+    spans = [m.span() for m in matches]
+
+    def outside(i):
+        return not any(a <= i < b for a, b in spans)
+
+    def counted(i):
+        return ord(s[i]) > 0x9F and s[i] not in _SA_AS_RULED and outside(i)
+
+    out = []
+    for token in re.finditer("[^ ]+", s):
+        i, j = token.span()
+        for c in range(i, j):
+            if s[c] != ":" or not outside(c):
+                continue
+            at = s.find("@", c + 1, j)
+            if at < 0:
+                break
+            if sum(1 for x in range(c + 1, at) if counted(x)) > 1:
+                continue
+            before = [x for x in range(i, c) if counted(x)]
+            start = i if len(before) <= 1 else before[-1] + 1
+            out.append((start, start + len(trailing_as_ruled(s[start:j])[0]), j))
+            break
+    return out
 
 
 def redact_urls_as_ruled(text):
     s = "" if text is None else str(text)
+    matches = list(_AS_RULED.finditer(s))
+    held = credentials_as_ruled(s, matches)
     out, pos = [], 0
-    for match in _AS_RULED.finditer(s):
-        out.append(_TOKEN_AS_RULED.sub(withhold_as_ruled, s[pos:match.start()]))
-        run, trailing = trailing_as_ruled(match.group(2))
-        scheme = re.sub(_X, "", match.group(1)).lower()
-        out.append("%s://%s%s" % (scheme, host_as_ruled(run) or "[redacted]", trailing))
+    for match in matches:
+        if any(a <= match.start() < t for a, _, t in held):
+            continue
+        for a, b, _ in held:
+            if pos <= a < match.start():
+                out.append(s[pos:a] + HOST_WITHHELD)
+                pos = b
+        run, trailing = trailing_as_ruled(match.group(3))
+        scheme = re.sub("[^ -~]", "", match.group(1)).lower()
+        shown = host_as_ruled(run) or "[redacted]"
+        out.append(s[pos:match.start()] + (scheme + "://" if scheme in _NAMED_AS_RULED else "") + shown + trailing)
         pos = match.end()
-    out.append(_TOKEN_AS_RULED.sub(withhold_as_ruled, s[pos:]))
+    for a, b, _ in held:
+        if a >= pos:
+            out.append(s[pos:a] + HOST_WITHHELD)
+            pos = b
+    out.append(s[pos:])
     return "".join(out)
 
 
@@ -168,7 +226,13 @@ ALPHABET = list("ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>") +
     # separator stands before a `//`.
     "http:" + chr(0x200B) + "//", "http" + chr(0xFF1A) + "//", "http:" + chr(0x2215) * 2, "http" + chr(0x2215) + "://",
     "http" + chr(0xE0001) + "://", ":" + chr(1) + "//", "a:b@", "1://", "qqqqqq:zz" + chr(0x2028) + "//zz@",
-    chr(0x200B), chr(0xFF1A), chr(0x2215), chr(0x7F)]
+    chr(0x200B), chr(0xFF1A), chr(0x2215), chr(0x7F),
+    # The review of cbd6679 (2026-11-12): a mark with an empty run before a
+    # delimiter, two odd characters in one stretch (P, between the slashes,
+    # a crossed run), a mark inside a password, and a colon and an at-sign
+    # around a delimiter.
+    "a" + chr(0x200B) + chr(0x2215) * 2 + "\t", ":" + chr(0xE9) + "/" + chr(0xE9) + "/", chr(0x4E2D) * 2,
+    "qqqqqq:zz" + chr(0xE9) + "//zz@", "\t:@", chr(0xE9) * 2 + "//", "http" + chr(0xE9) * 2 + "://"]
 
 
 def generated(length, seed):
@@ -222,6 +286,16 @@ EDGES = [
     "http" + chr(0xE0001) + "://cdn.test/live/q/z/1.ts", ":" + chr(1) + "//cdn.test/x", "a:b@", "1://", "x a:b@c y",
     "qqqqqq:zz" + chr(0x2028) + "//zz@cdn.test/x", "http://cdn.test" + chr(0xFF0F) + "live" + chr(0xFF0F) + "q",
     "http:/" + chr(0x2215) + "/cdn.test/x", "abc:http://u:p@h.test/x", "http@://u:p@h.test/x", "(u:p@h.test).",
+    # The review of cbd6679 (2026-11-12): every input its findings quote.
+    "News qqqqqq:zz" + chr(0xE9) + "//zz@cdn.test/x HD", "News qqqqqq:zz" + chr(0x200B) + "//zz@cdn.test/x HD",
+    "News qqqqqq:zz://zz@cdn.test/x HD", "News qqqqqq:zz" + chr(0xE9) + chr(0x2215) * 2 + "zz@cdn.test/x HD",
+    "News qqqqqq:zz" + chr(0xE9) + ":/" + chr(0xE9) + "/zz@cdn.test/x HD",
+    "News qqqqqq:" + chr(0x200B) + "//zzzzzz@cdn.test HD", "qqqqqq:" + chr(0x2215) * 2 + "zzzzzz@cdn.test",
+    "News qqqqqq:http://\tzzzzzz@cdn.test HD", "News http://\t:@qqqqqq:zzzzzz HD",
+    "News http://\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+    "News a" + chr(0x200B) + chr(0x2215) * 2 + "\t:" + chr(0x200B) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+    "News qqqqqq:zzzzzz" + chr(0x2215) + "://\t@cdn.test/live/1.ts HD", "Featuring:\n// The Band",
+    "NHK" + chr(0x7DCF) + chr(0x5408) + "//BS", "a" + chr(0x4E2D) * 300 + ":b@c", "http://me@h.test:pa x",
 ]
 
 
@@ -344,6 +418,25 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         self.assertEqual(helper.run_host_parts("u:p@h.test:8080/x"), ("h.test", False))
         self.assertEqual(helper.run_host_parts("[2001:db8::7]:8080/me@x"), ("[2001:db8::7]", False))
 
+    def test_a_non_numeric_port_behind_a_userinfo_is_withheld_where_a_redactor_prints_only(self):
+        """The review of cbd6679 (its still-shows finding 3): the sinks that
+        delete controls read `http://<TAB>:@qqqqqq:zzzzzz` as the run
+        `:@qqqqqq:zzzzzz`, host `qqqqqq` and port `zzzzzz`, and printed the
+        username. A redactor's print withholds a non-numeric port behind a
+        userinfo now; the predicate the Sources form warns with, and the host
+        a stored record shows, do not move. Red on cbd6679: the print gave
+        `qqqqqq`."""
+        self.assertEqual(helper.run_host_parts(":@qqqqqq:zzzzzz", True), ("qqqqqq", True))
+        self.assertEqual(helper.run_host_parts(":@qqqqqq:zzzzzz"), ("qqqqqq", False))
+        self.assertEqual(helper.host_withheld("http://:@qqqqqq:zzzzzz"), False)
+        self.assertEqual(helper.host_withheld("http://me@h.test:pa"), False)
+        self.assertEqual(helper.run_host("http://me@h.test:pa"), HOST_WITHHELD)
+        self.assertEqual(helper.redact_urls("News http://:@qqqqqq:zzzzzz HD"), "News http://[host withheld] HD")
+        self.assertEqual(helper.player_title_text("News http://\t:@qqqqqq:zzzzzz HD"), "News http://[host withheld] HD")
+        # A numeric port, or none, behind a userinfo prints as it did.
+        self.assertEqual(helper.redact_urls("http://u:p@h.test:8080/x"), "http://h.test")
+        self.assertEqual(helper.redact_urls("http://u:p@nas"), "http://nas")
+
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):
             self.assertEqual(helper.redact_urls(value),
@@ -366,7 +459,15 @@ class GluedSchemeTests(unittest.TestCase):
     Red on dev 9cce189: every shape below printed the username and the
     password except four. The `a1` control and the two whose first letter
     starts their 300-character run were redacted then too (those two pin the
-    run search's window), and `1A.HTTP` printed `1A.http://prov.test`."""
+    run search's window), and `1A.HTTP` printed `1A.http://prov.test`.
+
+    Since the review of cbd6679 (D-SINK-94's sibling, rule 15) the scheme
+    prints only when NAMED_SCHEMES lists it, so a scheme that took in the
+    letters glued before it (`a1http`, `s3`, `a2http`, `a.http`, `a000...`)
+    prints the host alone, as the model does, where it printed itself; and a
+    `:` right before the scheme makes the whole token a credential
+    (D-SINK-96 across the URL, `abc:http://u:p@h` withheld whole), which the
+    sweep below expects."""
 
     CRED = "http://u5er:p4ss@prov.test/live/1.ts"
     # Scheme-legal non-letters, more of them than a scan that gives up after
@@ -386,12 +487,12 @@ class GluedSchemeTests(unittest.TestCase):
             ("9" * 200 + self.CRED, "9" * 200 + "http://prov.test"),
             # The first letter far before `://`: the run search has to look
             # back past its 64-, 128- and 256-character windows to find it.
-            ("A" + "0" * 300 + self.CRED[4:], "a" + "0" * 300 + "://prov.test"),
-            ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x a" + "9" * 300 + "http://prov.test"),
+            ("A" + "0" * 300 + self.CRED[4:], "prov.test"),
+            ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x prov.test"),
             # Digits or `+.-` inside the scheme, after its first letter.
-            ("1s3" + self.CRED[4:], "1s3://prov.test"),
-            ("_1A2HTTP" + self.CRED[4:], "_1a2http://prov.test"),
-            ("1A.HTTP" + self.CRED[4:], "1a.http://prov.test"),
+            ("1s3" + self.CRED[4:], "1prov.test"),
+            ("_1A2HTTP" + self.CRED[4:], "_1prov.test"),
+            ("1A.HTTP" + self.CRED[4:], "1prov.test"),
             # An ASCII name before the glue character: the run starts after it.
             ("ESPN" + chr(0x9891) + chr(0x9053) + "HTTP" + self.CRED[4:], "ESPN" + chr(0x9891) + chr(0x9053) + "http://prov.test"),
             ("CANAL" + chr(0xc9) + self.CRED, "CANAL" + chr(0xc9) + "http://prov.test"),
@@ -405,7 +506,7 @@ class GluedSchemeTests(unittest.TestCase):
             (self.EARLIER + "1" + self.CRED, "see http://a.test 1http://prov.test"),
             (self.EARLIER + "Sports_" + self.CRED, "see http://a.test Sports_http://prov.test"),
             # A letter at the run's start was always a URL, and still is.
-            ("a1" + self.CRED, "a1http://prov.test"),
+            ("a1" + self.CRED, "prov.test"),
             # The scheme is lowercased from where it starts, so a scan that
             # started at a LATER letter would print `_Http`.
             ("Sports_HTTP" + self.CRED[4:], "Sports_http://prov.test"),
@@ -433,8 +534,13 @@ class GluedSchemeTests(unittest.TestCase):
             forms = ((chr(c), chr(c) in letters), (chr(c) + "1", chr(c) in letters),
                      (chr(c) + self.LONG, chr(c) in letters), ("ESPN" + chr(c), chr(c) in legal))
             for prefix, whole in forms:
-                if whole:
-                    shown = (prefix + "HTTP").lower() + "://prov.test"
+                if c == 0x3A:
+                    # `:` and then the scheme: one credential token, the
+                    # URL's userinfo its `@` (the review of cbd6679).
+                    shown = HOST_WITHHELD
+                elif whole:
+                    # The scheme took in the prefix and is no named one.
+                    shown = "prov.test"
                 else:
                     shown = prefix + "http://prov.test"
                 for before, kept in (("", ""), (self.EARLIER, "see http://a.test ")):
@@ -462,7 +568,9 @@ class PathologicalOutputTests(unittest.TestCase):
         # collapses to `prov.example.test` there -- the two renderings differ
         # on purpose and the shared fixture pins the property, not the text.)
         out = helper.redact_urls(run_of(20000) + CRED)
-        self.assertEqual(out, run_of(20000) + "http://prov.example.test")
+        # Since the review of cbd6679 a scheme prints only from NAMED_SCHEMES,
+        # so the two renderings now agree on this one.
+        self.assertEqual(out, "prov.example.test")
         for fragment in ("u5er", "p4ss", "1.ts"):
             self.assertNotIn(fragment, out)
 
@@ -495,7 +603,7 @@ class PathologicalOutputTests(unittest.TestCase):
         # survives. A cap leaves a run with no letter, which is no URL, and the
         # credential goes out whole.
         out = helper.redact_urls("A" + "0" * 20000 + CRED[4:])
-        self.assertEqual(out, "a" + "0" * 20000 + "://prov.example.test")
+        self.assertEqual(out, "prov.example.test")
 
 
 class RedactionBudgetTests(unittest.TestCase):
@@ -549,7 +657,18 @@ class MarkBudgetTests(unittest.TestCase):
     `1://` repeated was quadratic in the shipped redactor, which read each
     URL's run before its scheme: 2.2 s at 40,000 characters. The look-alike
     shape is quadratic without the dead bound on the scheme walk: 842 ms at
-    10,000 characters in the prototype."""
+    10,000 characters in the prototype.
+
+    The review of cbd6679 added five. `a` and then `<U+200B><U+2215><U+2215>`
+    and a delimiter repeated (and its LF, digit-led and delimiter-led units)
+    was quadratic in redact_urls, whose reading needed a run: a walk that
+    found a scheme for an empty run moved no bound, so every later walk
+    crossed back to the `a` (13 s at 40,001 characters; 785 ms at 10,000
+    under the heavy lock); red on cbd6679 here. `<U+200B><U+2215>` repeated
+    was linear but the slowest unit, a regex call per candidate (60 ms at
+    40,000, and 1.5 s at 1M on the guide's path, EpgPathBudgetTests). The
+    candidate with no letter before it is not walked now, and no candidate
+    before the next letter is asked."""
 
     Z, D, DEL = chr(0x200B), chr(0x2215), chr(0x7F)
     SHAPES = {
@@ -561,6 +680,15 @@ class MarkBudgetTests(unittest.TestCase):
         "1 ZW division slash twice, repeated": lambda n: ("1" + chr(0x200B) + chr(0x2215) * 2) * (n // 4),
         "token TAB url TAB repeated": lambda n: "a:b@c\thttp://x\t" * (n // 15),
         "ZW //a TAB repeated, then :": lambda n: (chr(0x200B) + "//a\t") * (n // 5) + ":",
+        "a, then ZW division slash twice TAB repeated": lambda n: "a" + (chr(0x200B) + chr(0x2215) * 2 + "\t") * (n // 4),
+        "a, then ZW fullwidth solidus twice LF repeated": lambda n: "a" + (chr(0x200B) + chr(0xFF0F) * 2 + "\n") * (n // 4),
+        "a, then 1 ZW division slash twice TAB repeated": lambda n: "a" + ("1" + chr(0x200B) + chr(0x2215) * 2 + "\t") * (n // 5),
+        "a, then TAB ZW division slash twice repeated": lambda n: "a" + ("\t" + chr(0x200B) + chr(0x2215) * 2) * (n // 4),
+        "ZW division slash repeated": lambda n: (chr(0x200B) + chr(0x2215)) * (n // 2),
+        # One credential whose `@` ends the text, across one URL every six
+        # characters: the cut reads it only in a window past its limit.
+        "one credential across many URLs": lambda n: "q:" + ("a" + chr(0x200B) + "//b\t") * (n // 6) + "@h",
+        "credential across URLs repeated": lambda n: ("q:z" + chr(0xE9) + "//z@h ") * (n // 9),
     }
 
     def best(self, f, text, k):
@@ -588,6 +716,54 @@ class MarkBudgetTests(unittest.TestCase):
                 if large >= max(8.0 * small, 0.005):
                     bad[(name, fname)] = "%.2f ms -> %.2f ms" % (small * 1000, large * 1000)
         self.assertEqual(bad, {})
+
+
+class LetterlessBudgetTests(unittest.TestCase):
+    """The review of cbd6679 (its cost finding 3): every look-alike pair is a
+    candidate mark, and each was walked for a scheme, so `<U+200B><U+2215>`
+    repeated cost about 1.5 us a character in redact_urls (1.5 s at 1M). A
+    walk with no ASCII letter between its bound and its P finds no scheme,
+    so it is not taken now, and the search goes on from the next letter: a
+    million characters of the look-alike shapes with no letter in them cost
+    at most 150 ms, best of three. Red on cbd6679, and on this tree without
+    the shortcut."""
+
+    def test_a_text_with_no_letter_costs_no_walk(self):
+        z, d = chr(0x200B), chr(0x2215)
+        shapes = {"ZW division slash repeated": (z + d) * 500000,
+                  "1 ZW division slash twice repeated": ("1" + z + d + d) * 250000,
+                  "TAB ZW division slash twice repeated, after one letter": "a" + ("\t" + z + d + d) * 250000}
+        slow = {}
+        for name, text in shapes.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                cost = MarkBudgetTests.best(None, f, text, 3)
+                if cost >= 0.150:
+                    slow[(name, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+
+class EpgPathBudgetTests(unittest.TestCase):
+    """The review of cbd6679 (its cost finding 3): the guide's cleaners ran
+    fold_space over a whole <title> or <desc> before their cut, and
+    element_text caps nothing, so `<U+200B><U+2215>` repeated cost 1,551 ms
+    at 1M characters through clean_detail and 6,263 ms at 4M, where 0.18.0
+    took 31 and 123. They cut the raw text first now (EPG_RAW_FACTOR, by
+    cut_free_text, which drops no more than the item it would cut), so every
+    budget shape stays at most 150 ms at 1M characters and 600 ms at 4M,
+    best of three, through clean_detail at the description's cap and
+    clean_title. Red on cbd6679 on the look-alike shapes."""
+
+    def test_every_budget_shape_through_the_guides_cleaners(self):
+        slow = {}
+        for name, shape in MarkBudgetTests.SHAPES.items():
+            for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+                text = shape(size)
+                for fname, f in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC)),
+                                 ("clean_title", helper.clean_title)):
+                    cost = MarkBudgetTests.best(None, f, text, 3)
+                    if cost >= ceiling:
+                        slow[(name, size, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
 
 
 if __name__ == "__main__":

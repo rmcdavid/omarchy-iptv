@@ -168,13 +168,14 @@ export {
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
-  playerRestartArgv, playerPauseArgv, notifyArgv, markupEscape,
-  NOTIFY_POST_TIMEOUT_MS, notifyReplaceId, notifyReplyId, notifyPost,
-  notifyAnswered, sourceLabel, hostOf, URL_SPACE_CODES, isUrlSpaceAt,
-  stripSpace, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  trailingPunctuationLength, SLASH_ALIKE_CODES, isSlashAlikeCode,
-  isUrlFillerCode, isMarkStandInCode, urlAt, redactionCanChange, redactTokens,
-  redactUrls, scrubUrls, sinkText
+  playerRestartArgv, playerPauseArgv, notifyNameText, notifyReasonText,
+  notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS, notifyReplaceId,
+  notifyReplyId, notifyPost, notifyAnswered, sourceLabel, hostOf,
+  URL_SPACE_CODES, isUrlSpaceAt, stripSpace, URL_DELIMITER_CODES,
+  isUrlDelimiterAt, trailingPunctuationLength, SLASH_ALIKE_CODES,
+  isSlashAlikeCode, isUrlFillerCode, isMarkStandInCode, urlAt, urlList,
+  redactionCanChange, credentialSpans, redactTokens, redactUrls, scrubUrls,
+  sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
