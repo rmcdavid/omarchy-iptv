@@ -1121,7 +1121,7 @@ calls it with the width left after the group column is hidden, `gap` =
 | Failed this session (row trail), banner, notifications | 󰀦 | U+F0026 | nf-md-alert |
 | Loading (empty state) | 󰇘 | U+F01D8 | nf-md-dots_horizontal |
 | Refresh (notification glyph) | 󰑐 | U+F0450 | nf-md-refresh |
-| Recent (notification); behind live (bar lead glyph, M5-01, 4.8) | 󰋚 | U+F02DA | nf-md-history |
+| Behind live (bar lead glyph, M5-01, 4.8). [2026-11-12, D-DOC-30: this cell also read "Recent (notification)", a use that does not exist: no notification carries this glyph and the guide's Recent column draws none.] | 󰋚 | U+F02DA | nf-md-history |
 | Paused (bar lead glyph; already `GLYPHS.tvPause`, confirmed in the installed font by fc-query) | 󰿑 | U+F0FD1 | nf-md-television_pause |
 
 Do not use color to distinguish these; each carries meaning by shape. Bar
@@ -1216,6 +1216,7 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Footer status, playing behind live (M5-01) | `1:32 behind live`; paused: `paused · 0:42 behind live` (`Model.playbackStateText`; empty at live, absent until the player reports a zero point) |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
 | Footer status, view flip (2.4b) | `Channel wall` on the way in, `Channel list` on the way back. The name of the view arrived at, not the key or the verb: `Ctrl+G` is one key doing two things and the transient is the only thing that says which one happened, on a card where the change itself is unmissable |
+| Footer status, channel logos (M2-04, 3 s) | `Channel logos on · fetching now` once the consent dialog is confirmed and the setting is saved; `Channel logos off` when `g` on the Sources screen (`Model.SOURCE_KEYS.logos`) turns them off. Turning off has no dialog, so the transient is the only acknowledgement it gets. If the setting cannot be saved, the footer shows the refusal instead and neither string appears. (Added 2026-11-12, D-DOC-6: both strings shipped with M2-04 and no document named them.) |
 | Footer status, rewind transient (M5-01, 3 s) | `Back 10 s · 1:32 behind live`; at the floor `As far back as it goes · 6:52 behind live`; on `g` at the edge `Live`, or after a deep rewind `At the edge of the buffer · 0:27 behind live` |
 | Footer status, bounded search | `First 200 of 1,240 - keep typing` |
 | Footer status, EPG pending | `Guide data loading...` |
