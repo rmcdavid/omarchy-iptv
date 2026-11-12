@@ -918,7 +918,7 @@ if [[ -n $BASELINE ]]; then
   [[ -f $EXPORT_DIR/Service.qml && -f $EXPORT_DIR/bin/omarchy-iptv ]] && qa_model_files "$EXPORT_DIR" >/dev/null \
     || { echo "$BASELINE holds no Service.qml / readable model / bin/omarchy-iptv" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported to $EXPORT_DIR"
 fi
 
 if [[ $MODE == live ]]; then

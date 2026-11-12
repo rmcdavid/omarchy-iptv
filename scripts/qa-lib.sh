@@ -757,6 +757,23 @@ qa_tree_count() {
   find "$dir" "$@" 2>/dev/null | wc -l | tr -d ' '
 }
 
+# qa_ref_commit <repo> <ref>: the short name of the COMMIT a ref names.
+# F-HARNESS-53: the baseline-capable scenarios printed
+# `rev-parse --short "$BASELINE"`, which for an annotated tag is the tag
+# object: `--baseline v0.15.0` read `v0.15.0 (a204f9b)` where the commit
+# exported is e710341, so a transcript named an object no log shows. A ref
+# that names no commit (a tree, a blob, a typo) prints `no-commit` and
+# returns 1, so a transcript line is never built from an empty answer.
+qa_ref_commit() {
+  local repo=$1 ref=$2 sha
+  if sha=$(git -C "$repo" rev-parse --verify --quiet --short "$ref^{commit}" 2>/dev/null) && [[ -n $sha ]]; then
+    printf '%s\n' "$sha"
+    return 0
+  fi
+  printf 'no-commit\n'
+  return 1
+}
+
 # qa_same_file <src> <dst>: byte-identical, both present. C1 discarded the
 # status of the cp that stages the tree under test, so a failed copy left the
 # PREVIOUS run's Model.js in place while the rest of the tree moved on.

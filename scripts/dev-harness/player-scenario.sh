@@ -884,7 +884,7 @@ if [[ -n $BASELINE ]]; then
   EXPORT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-baseline-XXXXXX")
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "could not export $BASELINE" >&2; exit 2; }
   PLUGIN_ROOT="$EXPORT_DIR"
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported"
 fi
 
 # F-M3-1 half (b). The transcript opens HERE: after argument parsing, the traps

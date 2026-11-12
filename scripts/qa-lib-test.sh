@@ -469,6 +469,47 @@ st "qa_same_file sees a missing copy"        1 qa_same_file "$TMP/src.js" "$TMP/
 cp "$TMP/src.js" "$TMP/dst.js"
 st "qa_same_file accepts a good copy"        0 qa_same_file "$TMP/src.js" "$TMP/dst.js"
 
+# ================================================= qa_ref_commit (F-HARNESS-53)
+
+section "qa_ref_commit / F-HARNESS-53: a baseline is named by its commit, not its tag object"
+
+REFREPO="$TMP/refrepo"
+mkdir -p "$REFREPO"
+refgit() {
+  git -C "$REFREPO" -c user.name=qa -c user.email=qa@example.invalid \
+    -c commit.gpgsign=false -c tag.gpgsign=false "$@"
+}
+refgit init -q
+printf 'one\n' >"$REFREPO/f"
+refgit add f
+refgit commit -q -m one
+refgit tag -a v9.9.9 -m "an annotated tag"
+refgit tag light
+REF_COMMIT=$(refgit rev-parse --short HEAD)
+REF_TAGOBJ=$(refgit rev-parse --short v9.9.9)
+REF_TREE=$(refgit rev-parse 'HEAD^{tree}')
+
+ck "the fixture's annotated tag is an object of its own" '[[ -n $REF_TAGOBJ && $REF_TAGOBJ != "$REF_COMMIT" ]]'
+# The shipped form, verbatim from the seven scenarios.
+old_ref_name() { git -C "$1" rev-parse --short "$2"; }
+is "the shipped form named the tag object"      "$(old_ref_name "$REFREPO" v9.9.9)" "$REF_TAGOBJ"
+is "qa_ref_commit names an annotated tag's commit"  "$(qa_ref_commit "$REFREPO" v9.9.9)" "$REF_COMMIT"
+is "qa_ref_commit names a lightweight tag's commit" "$(qa_ref_commit "$REFREPO" light)"  "$REF_COMMIT"
+is "qa_ref_commit names HEAD's commit"              "$(qa_ref_commit "$REFREPO" HEAD)"   "$REF_COMMIT"
+st "qa_ref_commit accepts a ref that names a commit" 0 qa_ref_commit "$REFREPO" v9.9.9
+st "qa_ref_commit refuses a ref that does not exist" 1 qa_ref_commit "$REFREPO" no-such-ref
+is "and says so rather than printing nothing"       "$(qa_ref_commit "$REFREPO" no-such-ref)" "no-commit"
+st "qa_ref_commit refuses a tree"                    1 qa_ref_commit "$REFREPO" "$REF_TREE"
+is "and names no object for it"                     "$(qa_ref_commit "$REFREPO" "$REF_TREE")" "no-commit"
+st "qa_ref_commit refuses a directory that is no repository" 1 qa_ref_commit "$TMP/never-a-repo" HEAD
+
+# The join: every scenario line that names a baseline's object goes through
+# the function. A grep over shape (rule 15), beside the calls above.
+REF_BARE=$(grep -l -- 'rev-parse --short "\$BASELINE")' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
+is "no scenario names a baseline by a bare rev-parse" "$REF_BARE" "0"
+REF_USERS=$(grep -l -- 'baseline tree \$BASELINE (\$(qa_ref_commit "\$ROOT" "\$BASELINE"))' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
+is "the seven scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "7"
+
 # ====================================================== qa_wait_nonempty (C6)
 
 section "qa_wait_nonempty / C6: the port file read after a flat sleep"
@@ -3492,7 +3533,8 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # the empty one's read apart, because cage 0.3.1 exits 1 on an unset
 # XDG_RUNTIME_DIR before it makes a display and never aborts (2). Red on
 # cce5548's qa-lib.sh: both read "unset or empty ... cage aborts".
-EXPECTED=649
+# 649 -> 662 on 2026-11-12: qa_ref_commit's thirteen (F-HARNESS-53).
+EXPECTED=662
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

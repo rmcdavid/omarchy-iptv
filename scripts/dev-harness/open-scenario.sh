@@ -168,7 +168,7 @@ if [[ -n $BASELINE ]]; then
   chmod 0700 "$EXPORT_DIR"
   git -C "$ROOT" archive "$BASELINE" | tar -x -C "$EXPORT_DIR" || { echo "could not export $BASELINE" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported to $EXPORT_DIR"
 fi
 if [[ $MODE == live ]]; then
   qa_transcript_start open || exit 2

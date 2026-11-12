@@ -291,7 +291,7 @@ if [[ -n $BASELINE ]]; then
   [[ -f $EXPORT_DIR/Guide.qml ]] && qa_model_files "$EXPORT_DIR" >/dev/null || { echo "$BASELINE holds no Guide.qml / model" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
   export OMARCHY_IPTV_PLUGIN_ROOT=$EXPORT_DIR
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported to $EXPORT_DIR"
 fi
 
 if [[ $MODE == live ]]; then

@@ -332,7 +332,7 @@ if [[ -n $BASELINE ]]; then
   fi
   [[ -f $EXPORT_DIR/bin/omarchy-iptv ]] || { echo "$BASELINE holds no bin/omarchy-iptv" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
   PLUGIN_ROOT=$EXPORT_DIR
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported to $EXPORT_DIR"
 fi
 HELPER="$PLUGIN_ROOT/bin/omarchy-iptv"
 

@@ -418,7 +418,7 @@ if [[ -n $BASELINE ]]; then
     exit 2
   fi
   PLUGIN_ROOT="$EXPORT_DIR"
-  TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
+  TREE_LINE="== baseline tree $BASELINE ($(qa_ref_commit "$ROOT" "$BASELINE")) exported"
 fi
 PRE_TLS_LINE=""
 if [[ $MODE == windowless ]]; then
