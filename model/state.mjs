@@ -775,6 +775,10 @@ function stateSession(state) {
 // that the channel the record names died with no shell attached to notice:
 // mark it failed in the guide, silently, and clear the record. A toast for
 // something that stopped minutes ago, possibly on another login, is noise.
+// [D-PLY-33, 2026-10-28: no longer the whole decision. The service applies
+// the mark prepared here only if Model.deathReport says an unattended death
+// marks, and it does not, so `mark` now means "a record was found and is
+// retired" and `failed` is not applied; nothing is told, as before.]
 //
 // The answer depends on whether the state file has landed yet, because the
 // two arrive in either order: the probe fires from Component.onCompleted and
