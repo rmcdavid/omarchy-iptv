@@ -161,14 +161,17 @@ def clean_detail(text: str | None, limit: int) -> str:
     # redaction keeps the plain fold, since no credential is left for it to
     # split.
     text = cut_free_text(fold_space(text or "").strip(), limit)
-    if "://" not in text:
+    if not redaction_can_change(text):
         # The common case, and the hot one. redact_urls cannot rewrite text
-        # without "://", so this guard changes no answer. It was worth 2.7 s of
-        # a 6.3 s 48,000-programme fetch with a 600-character description on
-        # every programme, back when the old pattern retried at every word
-        # boundary and prose is all word boundaries; redact_urls takes the same
-        # exit itself now (F-SINK-11), so this one is a call it does not make
-        # rather than a stall it avoids. Kept: one `in` beats one call.
+        # redaction_can_change refuses, so this guard changes no answer. It was
+        # worth 2.7 s of a 6.3 s 48,000-programme fetch with a 600-character
+        # description on every programme, back when the old pattern retried at
+        # every word boundary and prose is all word boundaries; redact_urls
+        # takes the same exit itself now (F-SINK-11), so this one is a call it
+        # does not make rather than a stall it avoids. It was `"://" not in
+        # text` until D-SINK-95 and D-SINK-96 (2026-11-11), which stored a URL
+        # whose mark an odd character breaks, and a scheme-less
+        # `user:pass@host`, unredacted in epg-now.json.
         return text
     return clean_field(redact_urls(text), limit)
 

@@ -10,7 +10,8 @@
   "helper stores for the field, `helper` is redact_urls of it, `shell` Model.sinkText of it, and",
   "`panel` what programmeDetail shows (null: absent). The credential is spelt in letters nothing",
   "else here holds: any of `secret` in a sink is a leak. ASCII only: every other character is a",
-  "JSON escape."
+  "JSON escape.",
+  "D-SINK-95 and D-SINK-96 (2026-11-11) moved five expected values, each `why` saying so."
  ],
  "secret": "qz",
  "host": "cdn.test",
@@ -2375,12 +2376,12 @@
   },
   {
    "kind": "ordinary",
-   "why": "the stated residual: DEL between a scheme and its `:` folds, and no redactor reads a URL there (title)",
+   "why": "D-SINK-95 (2026-11-11; the stated residual until then): DEL between a scheme and its `:` is the mark's filler, so the fold deletes it and every redactor reads the URL (title)",
    "field": "title",
    "raw": "Watch http\u007f://cdn.test/x now",
-   "stored": "Watch http ://cdn.test/x now",
-   "helper": "Watch http ://cdn.test/x now",
-   "shell": "Watch http ://cdn.test/x now"
+   "stored": "Watch http://cdn.test/x now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
   },
   {
    "kind": "ordinary",
@@ -2465,12 +2466,12 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck: a non-ASCII digit after a letter before a `://` is no scheme letter, so the URL behind it starts its own run (title)",
+   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (title)",
    "field": "title",
    "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
-   "stored": "News x\u0661://a?u=http://qqqqqq:zzzzzz@cdn.test/x tail",
-   "helper": "News x\u0661://a?u=http://cdn.test tail",
-   "shell": "News x\u0661://a?u=cdn.test tail"
+   "stored": "News x\u0661://a?u=http:\ufffd//qqqqqq:zzzzzz@cdn.test/x tail",
+   "helper": "News x://[host withheld] tail",
+   "shell": "News [host withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -2654,12 +2655,12 @@
   },
   {
    "kind": "ordinary",
-   "why": "the stated residual: DEL between a scheme and its `:` folds, and no redactor reads a URL there (description)",
+   "why": "D-SINK-95 (2026-11-11; the stated residual until then): DEL between a scheme and its `:` is the mark's filler, so the fold deletes it and every redactor reads the URL (description)",
    "field": "desc",
    "raw": "Watch http\u007f://cdn.test/x now",
-   "stored": "Watch http ://cdn.test/x now",
-   "helper": "Watch http ://cdn.test/x now",
-   "shell": "Watch http ://cdn.test/x now"
+   "stored": "Watch http://cdn.test now",
+   "helper": "Watch http://cdn.test now",
+   "shell": "Watch cdn.test now"
   },
   {
    "kind": "ordinary",
@@ -2744,12 +2745,12 @@
   },
   {
    "kind": "ordinary",
-   "why": "recheck: a non-ASCII digit after a letter before a `://` is no scheme letter, so the URL behind it starts its own run (description)",
+   "why": "D-SINK-95 (2026-11-11; the review's recheck read it as no scheme letter until then): a non-ASCII digit between a letter and a `://` is FILLER in the mark, so the URL starts at the letter and takes the one behind it, whose host is withheld (description)",
    "field": "desc",
    "raw": "News x\u0661://a?u=http:\u007f//qqqqqq:zzzzzz@cdn.test/x tail",
-   "stored": "News x\u0661://a?u=http://cdn.test tail",
-   "helper": "News x\u0661://a?u=http://cdn.test tail",
-   "shell": "News x\u0661://a?u=cdn.test tail"
+   "stored": "News x://[host withheld] tail",
+   "helper": "News x://[redacted] withheld] tail",
+   "shell": "News [url] withheld] tail"
   },
   {
    "kind": "ordinary",
@@ -3627,8 +3628,8 @@
   },
   {
    "text": "a:\u00a0//b",
-   "folded": "a: //b",
-   "why": "U+00A0 is no control, so `:<U+00A0>//` is no mark"
+   "folded": "a:\u00a0//b",
+   "why": "D-SINK-95 (2026-11-11): U+00A0 is FILLER, so `:<U+00A0>//` is a mark, and the fold keeps it"
   },
   {
    "text": "x://a\u00a0b c",

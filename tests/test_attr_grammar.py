@@ -19,6 +19,12 @@ case's row held to the helper's sinks; a sweep of URL shapes, cut characters,
 attributes, forms and positions through parse_m3u, held to the helper's sinks
 and, in node, to the shell's; the rule against a reference written from its
 statement over random lines; and linear time.
+
+D-SINK-95 and D-SINK-96 (2026-11-11): a URL's run is also one the redactors'
+reading finds behind a mark any odd character may break
+(tests/url_reading_rule.py), and the sweep's scheme form with a delimiter
+after its `//` is no longer D-SINK-34's cost: the token after the delimiter
+is withheld at every sink.
 """
 import json
 import os
@@ -28,6 +34,7 @@ import subprocess
 import time
 import unittest
 
+import url_reading_rule as rule
 from helper_loader import load_helper
 
 helper = load_helper()
@@ -225,7 +232,8 @@ def sweep():
                                 head = "#EXTINF:-1 " + (pair + " " + others if first else others + " " + pair)
                                 head, title = head + sep + "Plain Title", None
                             meta = {"attr": attr, "form": form, "cut": cut, "quoted": quoted, "first": first,
-                                    "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS}
+                                    "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS,
+                                    "token": cut in ACCEPTED_CUTS and form == "scheme"}
                             out.append((meta, head, title))
     return out
 
@@ -297,10 +305,31 @@ class SweepTest(unittest.TestCase):
     def test_the_accepted_class_is_the_redactors_own(self):
         # Excluded above, counted, and each one's URL as written already
         # prints a fragment through the redactor: D-SINK-34's cost, which no
-        # grammar can close.
+        # grammar can close -- except the scheme form, whose credential after
+        # the delimiter is a D-SINK-96 token every redactor withholds, so its
+        # URL as written prints nothing of it (it printed all of it until
+        # 2026-11-11; the next test holds its row at every sink).
+        tokens = 0
         for meta, _, _ in self.rows:
             if meta["accepted"]:
-                self.assertTrue(leaked(helper.redact_urls(meta["url"])), meta)
+                tokens += meta["token"]
+                self.assertEqual(bool(leaked(helper.redact_urls(meta["url"]))), not meta["token"], meta)
+        self.assertEqual(tokens, 280)
+
+    def test_d_sink_96_the_scheme_form_shows_no_credential_at_any_sink(self):
+        # D-SINK-34's class, closed for the shape where the delimiter stands
+        # right after `//`: whatever the grammar stores, no helper sink and
+        # no shell sink shows a letter of the credential.
+        kept = [(m, d, c) for m, d, c in self.rows if m["token"]]
+        bad = []
+        for meta, doc, channel in kept:
+            for field, value in shown_fields(doc, channel):
+                bad += [(meta, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((meta, "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for _, d, c in kept])
+        bad += [(m, sink, out) for (m, _, _), row in zip(kept, outs) for sink, out in row if leaked(out)]
+        self.assertEqual((len(kept), bad[:4]), (280, []))
 
     def test_no_field_shows_a_credential_at_a_shell_sink(self):
         kept = [(m, d, c) for m, d, c in self.rows if not m["accepted"]]
@@ -356,7 +385,8 @@ def reference(text, trace):
             if q == -1:
                 break
             s = max(vs, text.rfind(" ", vs, q) + 1)
-            if "://" not in deleted(text[s:q]):
+            # D-SINK-95: or the redactors' reading finds a URL there.
+            if "://" not in deleted(text[s:q]) and not rule.urls(text[s:q]):
                 value, end = text[vs:q], q + 1
             else:
                 e = n
@@ -382,6 +412,15 @@ def reference(text, trace):
             if ve == vs:
                 break
             ends = [x for x in (mark_end(text, j) for j in range(vs, ve)) if x != -1]
+            # D-SINK-95: or the reading finds a URL over the value and, when
+            # FILLER ended it, the run of `:`, FILLER and SLASH after it.
+            reach = ve
+            if ve < n and rule.filler(text[ve]):
+                while reach < n and (text[reach] == ":" or rule.filler(text[reach]) or rule.slash(text[reach])):
+                    reach += 1
+            url = rule.first_url(text[vs:reach])
+            if url is not None:
+                ends.append(vs + url[2])
             end = ve
             if ends:
                 trace.append("bare-inside")
@@ -407,13 +446,16 @@ class RuleTest(unittest.TestCase):
     # Python ends a bare value at and no redactor ends a URL at.
     ALPHABET = ["x", "Z", "=", '"', ",", " ", "\t", ":", "/", "://", "http://", ":\x01/\x00/", "@", "-",
                 chr(0xa0), chr(0x3000), chr(0x85), chr(0x1c), "\x0b", "\r", "\x00", '",', '" ', "a=",
-                "::", ":\x01", "\x9f/", "//", ":" + chr(0x85) + "//"]
+                "::", ":\x01", "\x9f/", "//", ":" + chr(0x85) + "//",
+                # D-SINK-95: a STAND_IN, a look-alike slash and the marks they make.
+                chr(0x200b), chr(0x2215), "http:" + chr(0x200b) + "//", "a" + chr(0xa0) + "://", ":" + chr(0x2215) * 2]
     # How an attribute starts: nothing, a space or other whitespace, then a
     # key (or something no key is) and `=`, quoted or bare.
     OPENERS = ["", " ", "\t", chr(0xa0), "  "]
     KEYS = ["a", "tvg-id", "K.b_c", "t" + chr(0xe9), "", "a "]
     # And how its value starts, a URL most of the time.
-    STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//"]
+    STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//",
+              "http:" + chr(0x200b) + "//", "http" + chr(0x7f) + "://", "http:" + chr(0x2215) * 2]
 
     def lines(self, seed, count):
         rng = random.Random(seed)
@@ -470,6 +512,16 @@ class TvgIdTest(unittest.TestCase):
             self.assertNotIn("tvgId", channel, ascii(line))
             self.assertFalse(channel["id"].startswith("t:"), ascii(line))
             self.assertEqual(leaked(channel["id"]), [], ascii(line))
+
+    def test_d_sink_95_and_96_a_tvg_id_holding_a_broken_mark_or_a_token_is_dropped(self):
+        # A mark the redactors' reading finds behind a scheme (url_mark_any),
+        # or a `:` with an `@` after it: kept, the raw `t:` id would carry the
+        # credential to every sink that shows an id, none of which redacts one.
+        for tvg in ("qqqqqq:zzzzzz@cdn.test", "http:" + chr(0x200B) + "//qqqqqq:zzzzzz@cdn.test/x",
+                    "http" + chr(0xFF1A) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts", "x:" + chr(0x2215) * 2 + "qqqqqq/zzzzzz"):
+            channel = self.row('#EXTINF:-1 tvg-id="%s",Plain Title' % tvg)
+            self.assertNotIn("tvgId", channel, ascii(tvg))
+            self.assertEqual(leaked(channel["id"]), [], ascii(tvg))
 
     def test_a_tvg_id_with_an_at_sign_or_a_colon_but_no_url_is_kept(self):
         for tvg in ("CNN.us@HD", "news:sports", "a:/b", "a//b", "bbc.uk@SD:1"):

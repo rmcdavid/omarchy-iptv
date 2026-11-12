@@ -16,7 +16,7 @@ import {
 } from "./mpv.mjs"
 import {
   hostOf, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex,
-  redactUrls
+  slashAlikeCut, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -553,7 +553,9 @@ var HOST_WITHHELD = "[host withheld]"
 // source-urls fixture pins that shape in both mirrors (measured: each
 // mutation goes red, 2026-10-22).
 // Every scan is one index walk or one single-class search; nothing here is
-// retried. The helper's `run_host_parts` is the mirror.
+// retried. The helper's `run_host_parts` is the mirror. D-SINK-95: the host
+// it RETURNS stops at its first slash look-alike (slashAlikeCut); `withheld`
+// is asked of the host before that cut, so urlHostWithheld does not move.
 function runHostParts(body) {
   var s = str(body)
   var sp = urlDelimiterIndex(s)
@@ -564,7 +566,7 @@ function runHostParts(body) {
   var hostport = authority.substring(authority.lastIndexOf("@") + 1)
   if (hostport.charAt(0) === "[") {
     var close = hostport.indexOf("]")
-    return { host: close === -1 ? "" : hostport.substring(0, close + 1), withheld: false }
+    return { host: slashAlikeCut(close === -1 ? "" : hostport.substring(0, close + 1)), withheld: false }
   }
   var end = hostport.search(/[:;=&]/)
   var host = end === -1 ? hostport : hostport.substring(0, end)
@@ -577,7 +579,7 @@ function runHostParts(body) {
   var laterAt = rest.indexOf("@") !== -1
   var dotless = host !== "" && host.indexOf(".") === -1
   var badPort = port !== "" && !/^[0-9]+$/.test(port)
-  return { host: host, withheld: laterAt && (dotless || badPort) }
+  return { host: slashAlikeCut(host), withheld: laterAt && (dotless || badPort) }
 }
 
 // R32a': the predicate alone, over a whole URL (or any text holding one).

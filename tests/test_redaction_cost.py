@@ -65,16 +65,36 @@ helper = load_helper()
 # had one, and this oracle copied it, so `1http://u:p@h/x`, `_http://...` and a
 # scheme right after an accented or CJK letter were no URL to either and the
 # suite pinned the leak; Model.redactUrls never had it and printed the host.
+# D-SINK-95 and D-SINK-96 (2026-11-11): the reading as ONE leftmost pattern,
+# its classes spelt here and nowhere else -- X (CROSSABLE) everything outside
+# U+0020..U+007E; F (FILLER) X but the slash look-alikes; K (STAND_IN) F above
+# U+009F but the reader's space union; S (SLASH) `/` or a look-alike:
+#   scheme  a letter, scheme characters, then optionally X and a run of X and
+#           letterless scheme characters (the walk crosses only out of a
+#           letterless segment);
+#   mark    a run of `:` and F holding a `:` or a K, then S, F*, S;
+#   run     to the first of the six delimiters, at least one character.
+# Matched left to right without overlap, and the text between matches is free
+# text, whose tokens holding a `:` with an `@` after it are withheld.
 _WS = "\t\n\x0b\x0c\r "
-_AS_RULED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
+_SA_AS_RULED = "".join(map(chr, (0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27CB, 0x29F8, 0x2F03, 0x3033, 0x31D3,
+                                 0xFF0F)))
+_X = "[^ -~]"
+_F = "[^ -~" + _SA_AS_RULED + "]"
+_K = ("[^\x00-\x9f" + "".join(map(chr, (0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F, 0x205F,
+                                          0x3000, 0xFEFF))) + _SA_AS_RULED + "]")
+_S = "[/" + _SA_AS_RULED + "]"
+_AS_RULED = re.compile("([A-Za-z][A-Za-z0-9+.\\-]*(?:" + _X + "(?:" + _X + "|[0-9+.\\-])*)?)"
+                       "(?::|" + _F + ")*(?::|" + _K + ")(?::|" + _F + ")*" + _S + _F + "*" + _S
+                       + "([^" + _WS + "]+)")
+_TOKEN_AS_RULED = re.compile("(?<![^ ])[^ :]*:[^ @]*@[^ ]*")
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
 _PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
 HOST_WITHHELD = "[host withheld]"
 
 
-def host_as_ruled(raw):
-    body = raw[raw.find("://") + 3:]
+def host_as_ruled(body):
     cut = _AUTHORITY_END_AS_RULED.search(body)
     authority = body if cut is None else body[:cut.start()]
     rest = "" if cut is None else body[cut.start():]
@@ -84,28 +104,48 @@ def host_as_ruled(raw):
     hostport = authority[authority.rfind("@") + 1:]
     if hostport.startswith("["):
         close = hostport.find("]")
-        return hostport[:close + 1].lower() if close != -1 else ""
+        return look_alike_cut(hostport[:close + 1].lower() if close != -1 else "")
     end = _HOST_END_AS_RULED.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
     port = _PORT_AS_RULED.match(hostport)
     port = port.group(1) if port else ""
     if "@" in rest and ((host and "." not in host) or (port and not port.isdigit())):
         return HOST_WITHHELD
-    return host.lower()
+    return look_alike_cut(host.lower())
+
+
+def look_alike_cut(host):
+    """D-SINK-95: the printed host stops at its first slash look-alike."""
+    for i, c in enumerate(host):
+        if c in _SA_AS_RULED:
+            return host[:i]
+    return host
+
+
+def trailing_as_ruled(raw):
+    bracket = "[" in raw
+    trailing = ""
+    while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
+        trailing = raw[-1] + trailing
+        raw = raw[:-1]
+    return raw, trailing
+
+
+def withhold_as_ruled(match):
+    return HOST_WITHHELD + trailing_as_ruled(match.group(0))[1]
 
 
 def redact_urls_as_ruled(text):
-    def replace(match):
-        raw = match.group(0)
-        bracket = "[" in raw
-        trailing = ""
-        while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
-            trailing = raw[-1] + trailing
-            raw = raw[:-1]
-        host = host_as_ruled(raw)
-        return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
-
-    return _AS_RULED.sub(replace, "" if text is None else str(text))
+    s = "" if text is None else str(text)
+    out, pos = [], 0
+    for match in _AS_RULED.finditer(s):
+        out.append(_TOKEN_AS_RULED.sub(withhold_as_ruled, s[pos:match.start()]))
+        run, trailing = trailing_as_ruled(match.group(2))
+        scheme = re.sub(_X, "", match.group(1)).lower()
+        out.append("%s://%s%s" % (scheme, host_as_ruled(run) or "[redacted]", trailing))
+        pos = match.end()
+    out.append(_TOKEN_AS_RULED.sub(withhold_as_ruled, s[pos:]))
+    return "".join(out)
 
 
 # D-PERF-6 (R32e): the scheme-run search as it shipped before, kept as the
@@ -121,7 +161,14 @@ _SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 # trailing punctuation (R32a''), several kinds of whitespace, and non-ASCII.
 # Every class the scan asks the engine is ASCII-only -- no `\w` or `\s` is
 # left in it -- so non-ASCII is plain text to it.
-ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>"
+ALPHABET = list("ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>") + [
+    # D-SINK-95 and D-SINK-96 (2026-11-11): a STAND_IN, a look-alike colon and
+    # slashes, a crossed control and an astral character before a mark, a
+    # control inside one, a token, a letterless mark and a token whose line
+    # separator stands before a `//`.
+    "http:" + chr(0x200B) + "//", "http" + chr(0xFF1A) + "//", "http:" + chr(0x2215) * 2, "http" + chr(0x2215) + "://",
+    "http" + chr(0xE0001) + "://", ":" + chr(1) + "//", "a:b@", "1://", "qqqqqq:zz" + chr(0x2028) + "//zz@",
+    chr(0x200B), chr(0xFF1A), chr(0x2215), chr(0x7F)]
 
 
 def generated(length, seed):
@@ -168,6 +215,13 @@ EDGES = [
     "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://nas:8000/me@h/x",
     "http://nas:8080?u=me@b", "http://u:p@nas/x", "http://nas", "http://nas/x", "http://[::1]/me@x",
     "http://h.test=p&x=1/y", "http://h.test;s=p", "x http://nas/a@b. y", "http://nas/a@b\u2028c",
+    # D-SINK-95 and D-SINK-96 (2026-11-11): the composites, alone and before a
+    # credential.
+    "http:" + chr(0x200B) + "//qqqqqq:zzzzzz@cdn.test/x", "http" + chr(0xFF1A) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+    "http:" + chr(0x2215) * 2 + "cdn.test/live/qqqqqq/zzzzzz/1.ts", "http" + chr(0x2215) + "://cdn.test/live/q/z/1.ts",
+    "http" + chr(0xE0001) + "://cdn.test/live/q/z/1.ts", ":" + chr(1) + "//cdn.test/x", "a:b@", "1://", "x a:b@c y",
+    "qqqqqq:zz" + chr(0x2028) + "//zz@cdn.test/x", "http://cdn.test" + chr(0xFF0F) + "live" + chr(0xFF0F) + "q",
+    "http:/" + chr(0x2215) + "/cdn.test/x", "abc:http://u:p@h.test/x", "http@://u:p@h.test/x", "(u:p@h.test).",
 ]
 
 
@@ -484,6 +538,56 @@ class RedactionBudgetTests(unittest.TestCase):
         # Four times the input. Linear predicts 4x, quadratic predicts 16x.
         self.assertLess(large, max(8.0 * small, 0.050),
                         "%.4f ms at 10,000 -> %.4f ms at 40,000" % (small * 1000, large * 1000))
+
+
+
+class MarkBudgetTests(unittest.TestCase):
+    """D-SINK-95 and D-SINK-96 (2026-11-11): the wide reading and the token
+    arm are linear too, through redact_urls and fold_space. Each shape at
+    40,000 characters under 100 ms, best of three, and four times the input
+    costs under eight times the time (plus a 5 ms floor), best of five.
+    `1://` repeated was quadratic in the shipped redactor, which read each
+    URL's run before its scheme: 2.2 s at 40,000 characters. The look-alike
+    shape is quadratic without the dead bound on the scheme walk: 842 ms at
+    10,000 characters in the prototype."""
+
+    Z, D, DEL = chr(0x200B), chr(0x2215), chr(0x7F)
+    SHAPES = {
+        "1:// repeated": lambda n: ("1://" * (n // 4 + 1))[:n],
+        "1111111:/DEL/ repeated": lambda n: ("1111111:/" + chr(0x7F) + "/") * (n // 11),
+        "a:b@ repeated": lambda n: "a:b@ " * (n // 5),
+        "ZW 1 repeated, then ://x": lambda n: (chr(0x200B) + "1") * (n // 2) + "://x",
+        "http:/ and a run of ZW": lambda n: "http:/" + chr(0x200B) * n,
+        "1 ZW division slash twice, repeated": lambda n: ("1" + chr(0x200B) + chr(0x2215) * 2) * (n // 4),
+        "token TAB url TAB repeated": lambda n: "a:b@c\thttp://x\t" * (n // 15),
+        "ZW //a TAB repeated, then :": lambda n: (chr(0x200B) + "//a\t") * (n // 5) + ":",
+    }
+
+    def best(self, f, text, k):
+        best = float("inf")
+        for _ in range(k):
+            started = time.perf_counter()
+            f(text)
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    def test_every_shape_at_40000_characters_under_100ms(self):
+        slow = {}
+        for name, shape in self.SHAPES.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                cost = self.best(f, shape(40000), 3)
+                if cost >= 0.100:
+                    slow[(name, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_the_cost_does_not_square_when_the_input_doubles(self):
+        bad = {}
+        for name, shape in self.SHAPES.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                small, large = self.best(f, shape(10000), 5), self.best(f, shape(40000), 5)
+                if large >= max(8.0 * small, 0.005):
+                    bad[(name, fname)] = "%.2f ms -> %.2f ms" % (small * 1000, large * 1000)
+        self.assertEqual(bad, {})
 
 
 if __name__ == "__main__":

@@ -99,6 +99,55 @@
       "js": "ESPN\u9891\u9053cdn.test",
       "py": "ESPN\u9891\u9053http://cdn.test",
       "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-95: a character drawn with no width inside the `://` -- every sink printed the URL whole",
+      "name": "News http:\u200b//u5er:S3CRET@cdn.test/live/1.ts HD",
+      "js": "News cdn.test HD",
+      "py": "News http://cdn.test HD",
+      "mustNotAppear": ["u5er", "S3CRET", "live/1.ts"]
+    },
+    {
+      "why": "D-SINK-95: a fullwidth colon in place of the colon, Xtream's path credential",
+      "name": "Sports http\uff1a//cdn.test/live/u5er/S3CRET/1.ts",
+      "js": "Sports cdn.test",
+      "py": "Sports http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/live"]
+    },
+    {
+      "why": "D-SINK-95: a control inside the `://` -- the window title deleted it and redacted while every other sink printed it whole",
+      "name": "News http:\u0001//u5er:S3CRET@cdn.test/x",
+      "js": "News cdn.test",
+      "py": "News http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-95: division slashes for both slashes and in the path: the printed host stops at the first look-alike",
+      "name": "Live http:\u2215\u2215cdn.test\u2215live\u2215u5er\u2215S3CRET",
+      "js": "Live cdn.test",
+      "py": "Live http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET"]
+    },
+    {
+      "why": "D-SINK-95: a clean `://` with fullwidth path slashes, whose path printed as the host in 0.18.0",
+      "name": "Live http://cdn.test\uff0flive\uff0fu5er\uff0fS3CRET",
+      "js": "Live cdn.test",
+      "py": "Live http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET"]
+    },
+    {
+      "why": "D-SINK-96: a scheme-less `user:pass@host` in the name, never redacted until then",
+      "name": "Backup u5er:S3CRET@cdn.test/live/1.ts",
+      "js": "Backup [host withheld]",
+      "py": "Backup [host withheld]",
+      "mustNotAppear": ["u5er", "S3CRET", "live/1.ts"]
+    },
+    {
+      "why": "D-SINK-96: sentence punctuation after a withheld token is put back",
+      "name": "Feed (u5er:S3CRET@cdn.test).",
+      "js": "Feed [host withheld]).",
+      "py": "Feed [host withheld]).",
+      "mustNotAppear": ["u5er", "S3CRET", "cdn.test"]
     }
   ]
 }

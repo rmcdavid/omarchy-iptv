@@ -1,0 +1,2529 @@
+{
+ "about": "D-SINK-95 and D-SINK-96 (2026-11-11): where both free-text redactors read a URL and a credential token, one fixture for the two mirrors (CLAUDE.md: a rule in two languages gets one shared fixture), run by tests/test_url_marks.py (bin/helper's next_url, redact_urls, player_title_text, fold_space) and tests/Model.test.js (Model.urlAt, Model.redactUrls, Model.sinkText). `slashAlike` is the list both mirrors' SLASH_ALIKE constant must equal (Model.SLASH_ALIKE_CODES, SLASH_ALIKE_CHARS). The classes, recomputed by both suites from this file and url-whitespace.json over every code unit (node) and every code point (python): CROSSABLE is everything outside U+0020..U+007E; FILLER is CROSSABLE but no slash look-alike; STAND_IN is FILLER above U+009F that is not a member of url-whitespace.json's `codePoints` union (`standInExcludes`). `vectors`: `text`, the model's output `js` (Model.redactUrls and sinkText) and the helper's `py` (redact_urls); `jsDeleting` and `pyDeleting` where the sinks that delete control characters first (Model.notifyArgv's name, player_title_text) read otherwise; `pyFold` where fold_space then redact_urls reads otherwise. `fuzz`: every BMP code point but the surrogates and `qzQZ`, inserted at each listed position of each url, wrapped as `wrap` says; `leaks` is the exact set of code points whose output still holds a `q` or a `z`, per sink (`plain`: the redactors; `deleting`: after the controls are deleted; `fold`: fold_space then redact_urls, the helper's only). Measured on 2026-11-11 against 0.18.0's 1,142,679 plain.",
+ "credentialsAreFake": "Every credential here is the fake qqqqqq / zzzzzz on cdn.test, under the reserved .test TLD.",
+ "slashAlike": [
+  "U+1735",
+  "U+2041",
+  "U+2044",
+  "U+2215",
+  "U+2571",
+  "U+27CB",
+  "U+29F8",
+  "U+2F03",
+  "U+3033",
+  "U+31D3",
+  "U+FF0F"
+ ],
+ "standInExcludes": "url-whitespace.json codePoints above U+009F",
+ "vectors": [
+  {
+   "why": "D-SINK-95: a C0 control inside the mark. The window title and the notification already deleted it and redacted; now the row, wall, bar, a11y name and IPC reply read the same URL [0.18.0 showed it whole there]",
+   "text": "News http:\u0001//qqqqqq:zzzzzz@cdn.test/x HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: DEL between scheme and colon, Xtream path credential (FILLER in P) [0.18.0 whole in the plain sinks]",
+   "text": "News http\u007f://cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: a C1 control (U+009B) inside the mark [0.18.0 whole in the plain sinks]",
+   "text": "News http:\u009b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: a TAB inside the mark is FILLER; the six delimiters still end the RUN (R32a''' unchanged) [0.18.0 whole]",
+   "text": "http:\t//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: a line break before the colon; P is LF+colon and the scheme run before it is the word, so the word goes with the URL, as the deleting sinks already read 'Line://' [0.18.0 whole]",
+   "text": "Line\n://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "line://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+0085 between the slashes, query credential [0.18.0 whole]",
+   "text": "http:/\u0085/cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+034F COMBINING GRAPHEME JOINER before the colon (the task's example) [0.18.0 whole in every sink]",
+   "text": "News http\u034f://qqqqqq:zzzzzz@cdn.test/x HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: U+200B inside the mark, path credential [0.18.0 whole in every sink]",
+   "text": "News http:\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: U+FEFF is FILLER but no STAND_IN (it is in the reader's space union); the colon makes P valid [0.18.0 whole]",
+   "text": "http\ufeff://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+202E RIGHT-TO-LEFT OVERRIDE inside the mark [0.18.0 whole]",
+   "text": "http:\u202e//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+0338 COMBINING LONG SOLIDUS OVERLAY between the slashes (the task's example) [0.18.0 whole]",
+   "text": "http:/\u0338/cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: NBSP after the colon (FILLER, no STAND_IN; the colon validates) [0.18.0 whole]",
+   "text": "http:\u00a0//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+3000 before the colon [0.18.0 whole]",
+   "text": "http\u3000://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+2028 inside the mark (FILLER, a space, no STAND_IN) [0.18.0 whole]",
+   "text": "http:\u2028//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: astral U+E0001 before the colon: two surrogate units to the model, one code point to the helper, both FILLER and STAND_IN, so one answer [0.18.0 whole]",
+   "text": "http\udb40\udc01://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: an emoji inside the mark [0.18.0 whole]",
+   "text": "http:\ud83d\ude00//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: a visible non-ASCII letter before the colon. Every character outside printable ASCII is FILLER (the owner's 'any odd character'); the named-class design leaked this [0.18.0 whole]",
+   "text": "http\u00e9://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: a CJK character between the slashes [0.18.0 whole]",
+   "text": "http:/\u65e5/cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: U+FF1A FULLWIDTH COLON in PLACE of the colon: P holds a STAND_IN and no ASCII colon (the task's example) [0.18.0 whole]",
+   "text": "News http\uff1a//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-95: U+200B in place of the colon is a STAND_IN, an odd character before '//' [0.18.0 whole]",
+   "text": "http\u200b//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: P may hold any number of colons [0.18.0 whole: its scan found no scheme letter before the second colon]",
+   "text": "http:://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: two U+2215 DIVISION SLASH in place of both slashes; SLASH_ALIKE members are slash members (the measured shape, here with a path credential the token arm cannot reach) [0.18.0 whole; the canonical design leaked it]",
+   "text": "http:\u2215\u2215cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: fullwidth colon and two fullwidth solidi, a CJK input-method shape [0.18.0 whole; canonical design leaked it]",
+   "text": "http\uff1a\uff0f\uff0fcdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: a division slash inserted between ASCII slashes ends the mark at itself, so the run is '/cdn.test/...' with no authority: the host courtesy is lost and nothing leaks; the player title reads the same [0.18.0 whole]",
+   "text": "http:/\u2215/cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "[url]",
+   "py": "http://[redacted]"
+  },
+  {
+   "why": "D-SINK-95: a slash look-alike between scheme and colon: the scheme walk crosses CROSSABLE (look-alikes included) when the segment before P is letterless [0.18.0 whole; in-place design leaked it]",
+   "text": "http\u2215://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: every slash a look-alike: the printed host is cut at its first SLASH_ALIKE, otherwise the path printed as the host [0.18.0 whole]",
+   "text": "http:\u2215\u2215cdn.test\u2215live\u2215qqqqqq\u2215zzzzzz\u22151.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "sibling of D-SINK-95 found by shape: a clean '://' with fullwidth path slashes; 0.18.0's own output printed the whole path, credentials included, as the host. Closed by the same host cut [0.18.0 model 'cdn.test\uff0flive\uff0fqqqqqq...']",
+   "text": "http://cdn.test\uff0flive\uff0fqqqqqq\uff0fzzzzzz\uff0f1.ts",
+   "js": "cdn.test",
+   "py": "http://cdn.test"
+  },
+  {
+   "why": "D-SINK-95: a control before a letterless segment: the walk crosses it, so plain 'http1://' agrees with the deleting sinks [0.18.0 whole in the plain sinks, redacted in the deleting ones: two answers]",
+   "text": "http\u00011://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "cdn.test",
+   "py": "http1://cdn.test"
+  },
+  {
+   "why": "unchanged: a control between scheme letters: the nearest letter segment 'tp' starts the scheme in the plain sinks, the deleting sinks read 'http'; both redact, as in 0.18.0",
+   "text": "ht\u0001tp://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "ht\u0001cdn.test",
+   "py": "ht\u0001tp://cdn.test",
+   "jsDeleting": "cdn.test",
+   "pyDeleting": "http://cdn.test",
+   "pyFold": "ht tp://cdn.test"
+  },
+  {
+   "why": "unchanged (D-SINK-74): '_' is printable and no scheme character, so the glued prefix keeps its place",
+   "text": "Sports_http://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "Sports_cdn.test",
+   "py": "Sports_http://cdn.test"
+  },
+  {
+   "why": "unchanged (D-SINK-74): the nearest segment before the mark holds a letter, so the walk never crosses into 'ESPN'",
+   "text": "ESPN\u200bHTTP://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "ESPN\u200bcdn.test",
+   "py": "ESPN\u200bhttp://cdn.test"
+  },
+  {
+   "why": "D-SINK-96: the task's scheme-less credential [0.18.0 whole]",
+   "text": "News qqqqqq:zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96: a password holding '@' [0.18.0 whole]",
+   "text": "qqqqqq:zz@zz@cdn.test/x",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "D-SINK-96: trailing punctuation is put back (the redactor's set and ']' rule); the leading '(' goes with the token [0.18.0 whole]",
+   "text": "(qqqqqq:zzzzzz@cdn.test).",
+   "js": "[host withheld]).",
+   "py": "[host withheld])."
+  },
+  {
+   "why": "D-SINK-96: only U+0020 ends a token, so a TAB inside the password does not split it and the plain and deleting sinks read one answer [0.18.0 whole; the canonical design leaked it in the plain sinks only]",
+   "text": "Backup qqqqqq:zz\tzz@cdn.test/x",
+   "js": "Backup [host withheld]",
+   "py": "Backup [host withheld]"
+  },
+  {
+   "why": "D-SINK-96: NBSP is token text [0.18.0 whole]",
+   "text": "Backup qqqqqq:zz\u00a0zz@cdn.test/x",
+   "js": "Backup [host withheld]",
+   "py": "Backup [host withheld]"
+  },
+  {
+   "why": "D-SINK-96: an empty username [0.18.0 whole]",
+   "text": ":zzzzzz@cdn.test",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "D-SINK-96 on the free text before a URL; the URL arm prints its host as before [0.18.0: model 'qqqqqq:zzzzzz@cdn.test,h.test']",
+   "text": "qqqqqq:zzzzzz@cdn.test,http://h.test/x",
+   "js": "[host withheld],h.test",
+   "py": "[host withheld],http://h.test"
+  },
+  {
+   "why": "D-SINK-96: a token glued before a scheme: the free piece ends at the scheme start, so the token is withheld and the URL redacted [0.18.0: 'Login qqqqqq:zzzzzz@cdn.test']",
+   "text": "Login qqqqqq:zzzzzz@xhttp://cdn.test/live/1.ts",
+   "js": "Login [host withheld]cdn.test",
+   "py": "Login [host withheld]xhttp://cdn.test"
+  },
+  {
+   "why": "D-SINK-96 behind a mark with no scheme letter: no URL, so the token arm withholds the whole token [0.18.0 whole]",
+   "text": "1\u200b://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "an ASCII space in the mark: no URL (no sink deletes a space); the userinfo after it is a token [0.18.0 whole]",
+   "text": "News http: //qqqqqq:zzzzzz@cdn.test/x HD",
+   "js": "News http: [host withheld] HD",
+   "py": "News http: [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96: the predicate is a ':' with an '@' AFTER it, not the token's first '@' [0.18.0 whole]",
+   "text": "http@://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "unchanged: the token arm never reads text a URL covers, so 'abc:' stays",
+   "text": "abc:http://qqqqqq:zzzzzz@cdn.test/x",
+   "js": "abc:cdn.test",
+   "py": "abc:http://cdn.test"
+  },
+  {
+   "why": "accepted residual: a SPACE splits a scheme-less credential as it splits a URL (D-SINK-34's shape) [0.18.0 the same]",
+   "text": "qqqqqq:zz zz@cdn.test",
+   "js": "qqqqqq:zz zz@cdn.test",
+   "py": "qqqqqq:zz zz@cdn.test"
+  },
+  {
+   "why": "accepted residual (R32a''', D-SINK-34): a TAB inside a URL's run is the one plain-versus-deleting difference left; the deleting sinks print the host ('cdn.test' / 'http://cdn.test') [0.18.0 the same]",
+   "text": "http://qqqqqq:zz\tzz@cdn.test/x",
+   "js": "qqqqqq\tzz@cdn.test/x",
+   "py": "http://qqqqqq\tzz@cdn.test/x",
+   "jsDeleting": "cdn.test",
+   "pyDeleting": "http://cdn.test",
+   "pyFold": "http://qqqqqq zz@cdn.test/x"
+  },
+  {
+   "why": "residual: printable ASCII inside a mark with a path credential (printable ASCII is not 'odd'; keeps D-PERF-13 exact); with a userinfo the token arm withholds it [0.18.0 the same]",
+   "text": "http!://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "http!://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "http!://cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "residual: a fullwidth scheme holds no ASCII letter [0.18.0 the same]",
+   "text": "\uff48\uff54\uff54\uff50://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "\uff48\uff54\uff54\uff50://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "\uff48\uff54\uff54\uff50://cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "residual: a control in PLACE of the colon; DELETED is no STAND_IN because the deleting sinks read 'http//', which is no mark, so one answer [0.18.0 the same]",
+   "text": "http\u0001//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "http\u0001//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "http\u0001//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "jsDeleting": "http//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "pyDeleting": "http//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "pyFold": "http //cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "residual: a slash look-alike in PLACE of the colon (look-alikes are slash members, not STAND_INs, which keeps the pair walk linear) [0.18.0 the same]",
+   "text": "http\u2215//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "http\u2215//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "http\u2215//cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "residual found by shape, pre-existing, for the lead to file: a fullwidth '@' in a URL's userinfo prints the username as host [0.18.0 the same]",
+   "text": "http://qqqqqq:zzzzzz\uff20cdn.test/x",
+   "js": "qqqqqq",
+   "py": "http://qqqqqq"
+  },
+  {
+   "why": "residual: a look-alike colon inside a scheme-less token is not counted (counting U+FF1A and U+FF20 would withhold whole space-less Japanese sentences) [0.18.0 the same]",
+   "text": "qqqqqq\uff1azzzzzz@cdn.test",
+   "js": "qqqqqq\uff1azzzzzz@cdn.test",
+   "py": "qqqqqq\uff1azzzzzz@cdn.test"
+  },
+  {
+   "why": "residual: an entity-spelt colon is several characters; with a userinfo the token arm withholds it [0.18.0 the same]",
+   "text": "http&#58;//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "js": "http&#58;//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+   "py": "http&#58;//cdn.test/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "why": "false positive the owner accepted (2026-11-08) [0.18.0 unchanged]",
+   "text": "Sport:Live@HD",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive: a time glued to '@' [0.18.0 unchanged]",
+   "text": "Kickoff 20:00@Wembley",
+   "js": "Kickoff [host withheld]",
+   "py": "Kickoff [host withheld]"
+  },
+  {
+   "why": "false positive: a mailto address [0.18.0 unchanged]",
+   "text": "mailto:me@x.test",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive: NBSP is token text [0.18.0 unchanged]",
+   "text": "Twitter\u00a0:\u00a0@France2",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive: an LF does not end a token, so the line break joins it [0.18.0 unchanged]",
+   "text": "Time:\n9pm@BBC",
+   "js": "[host withheld]",
+   "py": "[host withheld]"
+  },
+  {
+   "why": "false positive: word, colon, TAB, '//' is a mark; the deleting sinks already read 'TV://radio' [0.18.0 unchanged in the plain sinks]",
+   "text": "TV:\t//radio",
+   "js": "radio",
+   "py": "tv://radio"
+  },
+  {
+   "why": "false positive: the model reads an empty run as a URL ('[url]'); the helper needs a run character, so it is unchanged (the pre-existing split epg-fold.json pins); the player title reads 'Featuring:// The Band' [0.18.0 unchanged]",
+   "text": "Featuring:\n// The Band",
+   "js": "[url] The Band",
+   "py": "Featuring:\n// The Band",
+   "jsDeleting": "[url] The Band",
+   "pyDeleting": "Featuring:// The Band",
+   "pyFold": "Featuring:// The Band"
+  },
+  {
+   "why": "false positive: letter, filler, '://' [0.18.0 unchanged]",
+   "text": "A\u200b://x",
+   "js": "x",
+   "py": "a://x"
+  },
+  {
+   "why": "false positive of the broad class: a non-ASCII word between ASCII slashes after 'UK:' is FILLER; the named-class design kept it [0.18.0 unchanged]",
+   "text": "UK:\u041d\u043e\u0432/\u0421\u043f/\u0424",
+   "js": "\u0424",
+   "py": "uk://\u0444"
+  },
+  {
+   "why": "false positive: CJK letters glued after an ASCII word stand in for the colon [0.18.0 unchanged]",
+   "text": "NHK\u7dcf\u5408//BS",
+   "js": "BS",
+   "py": "nhk://bs"
+  },
+  {
+   "why": "false positive measured in the public corpus (zh_CN): ASCII word, fullwidth parenthesis, slash list [0.18.0 unchanged]",
+   "text": "KDF\uff08\u5f00\u542f/\u5355\u4e00/\u5173\u95ed\uff09",
+   "js": "\u5173\u95ed\uff09",
+   "py": "kdf://\u5173\u95ed\uff09"
+  },
+  {
+   "why": "unchanged: a colon, no slash, no '@'",
+   "text": "UK: Sports",
+   "js": "UK: Sports",
+   "py": "UK: Sports"
+  },
+  {
+   "why": "unchanged: a scheme character after the colon is no mark, and there is no '@'",
+   "text": "UK:Sports/News//HD",
+   "js": "UK:Sports/News//HD",
+   "py": "UK:Sports/News//HD"
+  },
+  {
+   "why": "unchanged: an '@' with no ':' before it",
+   "text": "user@example.test",
+   "js": "user@example.test",
+   "py": "user@example.test"
+  },
+  {
+   "why": "unchanged: D-SINK-80's '@' that is no URL",
+   "text": "CNN.us@HD",
+   "js": "CNN.us@HD",
+   "py": "CNN.us@HD"
+  },
+  {
+   "why": "unchanged: NBSP is FILLER but no STAND_IN and there is no colon, so P is invalid",
+   "text": "ESPN\u00a0//\u00a0HD",
+   "js": "ESPN\u00a0//\u00a0HD",
+   "py": "ESPN\u00a0//\u00a0HD",
+   "pyFold": "ESPN // HD"
+  },
+  {
+   "why": "unchanged: ASCII spaces around '//'",
+   "text": "ESPN // HD",
+   "js": "ESPN // HD",
+   "py": "ESPN // HD"
+  },
+  {
+   "why": "unchanged ordinary text",
+   "text": "News/Weather 18:00",
+   "js": "News/Weather 18:00",
+   "py": "News/Weather 18:00"
+  },
+  {
+   "why": "unchanged: colons and a slash, no mark, no '@'",
+   "text": "Info: 10:30/11:30",
+   "js": "Info: 10:30/11:30",
+   "py": "Info: 10:30/11:30"
+  },
+  {
+   "why": "unchanged: '//' after an ASCII letter with no colon or STAND_IN before it",
+   "text": "Movies: 4K/HDR//Dolby",
+   "js": "Movies: 4K/HDR//Dolby",
+   "py": "Movies: 4K/HDR//Dolby"
+  },
+  {
+   "why": "unchanged: a Cyrillic slash list with no ASCII scheme letter",
+   "text": "\u041d\u043e\u0432\u043e\u0441\u0442\u0438/\u0421\u043f\u043e\u0440\u0442/\u041a\u0438\u043d\u043e",
+   "js": "\u041d\u043e\u0432\u043e\u0441\u0442\u0438/\u0421\u043f\u043e\u0440\u0442/\u041a\u0438\u043d\u043e",
+   "py": "\u041d\u043e\u0432\u043e\u0441\u0442\u0438/\u0421\u043f\u043e\u0440\u0442/\u041a\u0438\u043d\u043e"
+  },
+  {
+   "why": "unchanged: a mark with no scheme letter is skipped and the next one redacted",
+   "text": "1://x http://qqqqqq:zzzzzz@cdn.test/live/1.ts",
+   "js": "1://x cdn.test",
+   "py": "1://x http://cdn.test"
+  },
+  {
+   "why": "unchanged: the ordinary URL",
+   "text": "News http://qqqqqq:zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News cdn.test HD",
+   "py": "News http://cdn.test HD"
+  },
+  {
+   "why": "unchanged: an empty authority",
+   "text": "file:///etc/x",
+   "js": "[url]",
+   "py": "file://[redacted]"
+  },
+  {
+   "why": "D-SINK-95: a fraction slash between ASCII slashes before a userinfo: the run has no authority, nothing leaks [0.18.0 whole]",
+   "text": "http:/\u2044/qqqqqq:zzzzzz@cdn.test/x",
+   "js": "[url]",
+   "py": "http://[redacted]"
+  }
+ ],
+ "fuzz": {
+  "wrap": [
+   "News ",
+   " HD"
+  ],
+  "skip": "qzQZ",
+  "urls": {
+   "userinfo": [
+    "http://qqqqqq:zzzzzz@cdn.test/live/1.ts",
+    [
+     0,
+     2,
+     4,
+     5,
+     6,
+     7,
+     10,
+     13,
+     14,
+     17,
+     20,
+     21,
+     24,
+     30
+    ]
+   ],
+   "path": [
+    "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+    [
+     0,
+     2,
+     4,
+     5,
+     6,
+     7,
+     11,
+     15,
+     16,
+     21,
+     24,
+     27,
+     28,
+     31,
+     34
+    ]
+   ],
+   "query": [
+    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+    [
+     0,
+     2,
+     4,
+     5,
+     6,
+     7,
+     11,
+     15,
+     23,
+     24,
+     33,
+     36,
+     39,
+     40,
+     49,
+     52
+    ]
+   ],
+   "token": [
+    "qqqqqq:zzzzzz@cdn.test/live/1.ts",
+    [
+     0,
+     3,
+     6,
+     7,
+     10,
+     13,
+     14,
+     17,
+     25
+    ]
+   ]
+  },
+  "totals": {
+   "plain": 567,
+   "deleting": 442,
+   "fold": 557
+  },
+  "leaks": {
+   "userinfo@0": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@2": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@4": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@5": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@6": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@7": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@10": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "userinfo@13": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "userinfo@14": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "userinfo@17": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "userinfo@20": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "userinfo@21": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@24": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "userinfo@30": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "path@0": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "path@2": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "path@4": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "path@5": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "path@6": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "path@7": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@11": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@15": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@16": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@21": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@24": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@27": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@28": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@31": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "path@34": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "query@0": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "query@2": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "query@4": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     44,
+     47,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "query@5": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "query@6": {
+    "plain": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "deleting": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ],
+    "fold": [
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     123,
+     124,
+     125,
+     126
+    ]
+   },
+   "query@7": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@11": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@15": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@23": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@24": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@33": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@36": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@39": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@40": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@49": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "query@52": {
+    "plain": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     9,
+     10,
+     11,
+     12,
+     13,
+     32
+    ]
+   },
+   "token@0": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "token@3": {
+    "plain": [
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "token@6": {
+    "plain": [
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "token@7": {
+    "plain": [
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "token@10": {
+    "plain": [
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "token@13": {
+    "plain": [
+     32
+    ],
+    "deleting": [
+     32
+    ],
+    "fold": [
+     32
+    ]
+   },
+   "token@14": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "token@17": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   },
+   "token@25": {
+    "plain": [],
+    "deleting": [],
+    "fold": []
+   }
+  }
+ }
+}

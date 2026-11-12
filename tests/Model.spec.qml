@@ -1253,6 +1253,38 @@ TestCase {
     compare(Model.sourceUrlWarning("http://user.name:2024/ab@host.test/x"), "")
   }
 
+  // D-SINK-95 and D-SINK-96 (2026-11-11), in V4: the reading's classes are
+  // code-unit comparisons and one character class built from
+  // SLASH_ALIKE_CODES, which this engine must read as node does; a sample of
+  // the shared url-mark fixture (node and the helper run all of it).
+  function test_dSink95MarkAndDSink96TokenInV4() {
+    function c(code) { return String.fromCharCode(code) }
+    var cases = [
+      ["News http:" + c(0x1) + "//qqqqqq:zzzzzz@cdn.test/x HD", "News cdn.test HD"],
+      ["News http" + c(0x34f) + "://qqqqqq:zzzzzz@cdn.test/x HD", "News cdn.test HD"],
+      ["News http:" + c(0x200b) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD", "News cdn.test HD"],
+      ["News http" + c(0xff1a) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD", "News cdn.test HD"],
+      ["http:" + c(0x2215) + c(0x2215) + "cdn.test" + c(0x2215) + "live" + c(0x2215) + "qqqqqq", "cdn.test"],
+      ["http" + c(0xdb40) + c(0xdc01) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test"],
+      ["http://cdn.test" + c(0xff0f) + "live" + c(0xff0f) + "qqqqqq", "cdn.test"],
+      ["News qqqqqq:zzzzzz@cdn.test/live/1.ts HD", "News [host withheld] HD"],
+      ["Backup qqqqqq:zz" + c(0x9) + "zz@cdn.test/x", "Backup [host withheld]"],
+      ["(qqqqqq:zzzzzz@cdn.test).", "[host withheld])."],
+      ["abc:http://qqqqqq:zzzzzz@cdn.test/x", "abc:cdn.test"],
+      ["ESPN" + c(0xa0) + "//" + c(0xa0) + "HD", "ESPN" + c(0xa0) + "//" + c(0xa0) + "HD"],
+      ["UK: Sports", "UK: Sports"]
+    ]
+    for (var i = 0; i < cases.length; i++) {
+      compare(Model.redactUrls(cases[i][0]), cases[i][1], "redactUrls " + i)
+      compare(Model.sinkText(cases[i][0]), cases[i][1], "sinkText " + i)
+    }
+    compare(Model.redactionCanChange("Kino" + c(0x2215) + "Filme"), true)
+    compare(Model.redactionCanChange("Sports:News"), false)
+    compare(Model.isMarkStandInCode(0x200b), true)
+    compare(Model.isMarkStandInCode(0xa0), false)
+    compare(Model.isUrlFillerCode(0x2215), false)
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.
@@ -2624,7 +2656,9 @@ TestCase {
     var linked = []
     for (var k = 0; k < NotifyHosts.CASES.length; k++)
       if (linksIn(hostCard("Stream failed", escapeOnce(NotifyHosts.CASES[k].display)).bodyRich).length) linked.push(NotifyHosts.CASES[k].id)
-    compare(JSON.stringify(linked), JSON.stringify(["H01", "H02", "H03", "H04", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"]),
+    // H04's mailto anchor is a D-SINK-96 token the plugin withholds before
+    // any escape, so its display holds no anchor to draw (2026-11-11).
+    compare(JSON.stringify(linked), JSON.stringify(["H01", "H02", "H03", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"]),
             "0.17.0's escape: the 4.5.0 card draws a live link for these cases, as node measures")
   }
 

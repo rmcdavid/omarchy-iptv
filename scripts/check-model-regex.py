@@ -92,6 +92,9 @@ helper_guard = _load("check-helper-regex")
 BUILT = {
     '"^" + GENERATED_NAME_WORD.toLowerCase() + " [0-9]+$"':
         "linear: anchored, a literal prefix, one digit run then $ (GENERATED_NAME_RE, text.mjs)",
+    '"[" + String.fromCharCode.apply(null, SLASH_ALIKE_CODES) + "]"':
+        "linear: one character class of the slash look-alikes, no quantifier, not global; test() once a "
+        "text (SLASH_ALIKE_RE, privacy.mjs, D-SINK-95)",
 }
 
 # `RegExp(` with or without `new`, bare or through the global object

@@ -18,6 +18,12 @@ or not). Here: the
 helper's split, its parse through a group-title and through an #EXTGRP line,
 the helper's own sinks, and the rule itself against a definition of it over
 random texts, for the split and for the group text's cut.
+
+D-SINK-95 and D-SINK-96 (2026-11-11): a mark is also one the redactors'
+reading finds behind a scheme, which any odd character may break
+(tests/url_reading_rule.py), and a `;` after a run's first `:` and before
+its last `@` stands inside the credential token a redactor withholds; the
+split keeps both, and the cut drops a run cut inside either.
 """
 import json
 import os
@@ -25,6 +31,7 @@ import random
 import time
 import unittest
 
+import url_reading_rule as rule
 from helper_loader import load_helper
 
 helper = load_helper()
@@ -43,10 +50,27 @@ def deleted(text):
     return "".join(c for c in text if not (ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f))
 
 
+def run_of(text, i):
+    """The space-run around `i`: (its start, its end)."""
+    end = text.find(" ", i)
+    return text.rfind(" ", 0, i) + 1, len(text) if end < 0 else end
+
+
 def separates(text, i):
-    """The rule, as stated: the `;` at `i` separates unless a `://`, its
-    controls deleted, stands between it and the last ASCII space before it."""
-    return "://" not in deleted(text[text.rfind(" ", 0, i) + 1:i])
+    """The rule, as stated: the `;` at `i` separates unless, within its
+    space-run, a mark either reading protects starts before it (a `://`
+    with its controls deleted, or a D-SINK-95 mark behind a scheme), or it
+    stands after the run's first `:` and before the run's last `@`
+    (D-SINK-96)."""
+    start, end = run_of(text, i)
+    run, k = text[start:end], i - start
+    if "://" in deleted(run[:k]):
+        return False
+    url = rule.first_url(run)
+    if url is not None and url[1] < k:
+        return False
+    colon, at = run.find(":"), run.rfind("@")
+    return not (0 <= colon < k < at)
 
 
 def split_reference(text):
@@ -60,18 +84,34 @@ def split_reference(text):
 
 
 def cut_reference(text, limit):
-    """cut_free_text's rule for a group text: a run ends at a space or at a
-    `;` that separates, and a run the cut lands in is dropped, with what
-    ends it before, when its part before the cut holds a `://`."""
+    """cut_free_text's rule for a group text, as stated: a cut that lands
+    inside a space-run is kept, unless the part of the run it keeps holds a
+    mark (rule.mark_any), or the start of a token whose `@` it loses -- a
+    token read in the run's free text, before the first URL the reading
+    finds in it; then the run is dropped back to the last `;` that stands
+    before the mark and the token's `:` (or the cut, when that `:` is past
+    it), or to its space."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
-    if text[limit] == " " or (text[limit] == ";" and separates(text, limit)):
+    if text[limit] == " ":
         return cut
-    start = max([cut.rfind(" ")] + [i for i, c in enumerate(cut) if c == ";" and separates(text, i)])
-    if "://" in deleted(cut[start + 1:]):
-        return cut[:max(start, 0)]
-    return cut
+    start = cut.rfind(" ")
+    run_end = text.find(" ", limit)
+    run_end = len(text) if run_end < 0 else run_end
+    url = rule.first_url(text[:run_end], start + 1)
+    free_end = run_end if url is None else url[0]
+    colon = text.find(":", start + 1, free_end)
+    at = text.find("@", colon + 1, free_end) if colon >= 0 else -1
+    mark = rule.mark_any(cut, start + 1)
+    if mark < 0:
+        if at < limit:
+            return cut
+        bound = min(colon, limit)
+    else:
+        bound = min(mark, colon) if at >= 0 else mark
+    semis = [i for i in range(start + 1, bound) if cut[i] == ";"]
+    return cut[:max([start] + semis[-1:] + [0])] if semis else cut[:max(start, 0)]
 
 
 def parse(rows):
@@ -130,20 +170,19 @@ class FixtureTest(unittest.TestCase):
         # The memo's whole purpose: a persistent #EXTGRP is split once, not
         # once a channel. A memo written and never read passes the test
         # above; this counts the splits.
-        split = helper.GROUP_PART
+        split = helper.group_parts
         calls = []
 
-        class Counting:
-            def findall(self, text):
-                calls.append(text)
-                return split.findall(text)
+        def counting(text):
+            calls.append(text)
+            return split(text)
 
         helper.SPLIT_GROUPS_LAST.clear()
-        helper.GROUP_PART = Counting()
+        helper.group_parts = counting
         try:
             answers = [helper.split_groups("News http://cdn.test/x;y ;Kids") for _ in range(2)]
         finally:
-            helper.GROUP_PART = split
+            helper.group_parts = split
         self.assertEqual((answers, len(calls)), ([["News http://cdn.test/x;y", "Kids"]] * 2, 1))
 
     def test_no_stored_group_shows_a_credential_at_a_helper_sink(self):
@@ -182,7 +221,10 @@ class RuleTest(unittest.TestCase):
     # at each class the rule tells apart -- C0, DEL and C1, which a `://`
     # may hold, and U+00A0, U+2028 and U+3000, which it may not.
     ALPHABET = ["a", "h", ":", "/", ";", " ", "\t", "\x00", "\x0b", "\x0c", "\x1f", "\x7f", "\x85", "\x9f",
-                "\xa0", "\u2028", "\u3000", "@", "://", ":/", "http://", ";;", " ;"]
+                "\xa0", "\u2028", "\u3000", "@", "://", ":/", "http://", ";;", " ;",
+                # D-SINK-95 and D-SINK-96: a STAND_IN, a look-alike slash, the
+                # marks they make, and a token.
+                chr(0x200b), chr(0x2215), "http:" + chr(0x200b) + "//", "a:" + chr(0x2215) * 2, "a:b@"]
 
     def texts(self, seed, count):
         rng = random.Random(seed)

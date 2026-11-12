@@ -18,6 +18,10 @@ player's title, player_title_text, and the shell's notification body,
 Model.notifyArgv), where a tab inside a URL does not end its run. The
 credential is spelt in letters nothing else here holds (`q` and `z`), so ANY
 fragment of it in an output is a leak, the username's first letter included.
+
+D-SINK-95 and D-SINK-96 (2026-11-11): the run is also dropped when the part
+the cut keeps holds a mark the redactors' reading finds behind a scheme, or
+a scheme-less token's `:` without the `@` after it (CutSweepTest).
 """
 import calendar
 import json
@@ -285,13 +289,17 @@ class CutFreeTextTest(unittest.TestCase):
             text = "News " + head + "qqqqqq:zzzzzz@cdn.test/x"
             self.assertEqual(helper.cut_free_text(text, 20), "News", repr(head))
 
-    def test_a_character_no_mirror_deletes_does_not_join_a_url(self):
-        # A no-break space or a zero-width character is URL text to both
-        # redactors, so `http:/` and `/qqq` around it are no URL to any sink,
-        # cut or not, and the cut keeps the run.
-        for ch in (chr(0xa0), chr(0x200b), chr(0xfeff)):
+    def test_d_sink_95_a_character_no_mirror_deletes_still_marks_a_url(self):
+        # A no-break space or a zero-width character between the slashes is
+        # FILLER to the redactors' reading since D-SINK-95, so `http:/<c>/`
+        # is a URL's mark to every sink and a cut inside the URL drops its
+        # run; until then it was no URL to any sink, and the cut kept the run
+        # (and the reading printed the username where it was cut). A
+        # printable character there is still no mark, and the run is then a
+        # D-SINK-96 token the cut loses the `@` of, so it is dropped too.
+        for ch in (chr(0xa0), chr(0x200b), chr(0xfeff), "!"):
             text = "News http:/" + ch + "/qqqqqq:zzzzzz@cdn.test/x"
-            self.assertEqual(helper.cut_free_text(text, 16), text[:16], repr(ch))
+            self.assertEqual(helper.cut_free_text(text, 16), "News", repr(ch))
 
     def test_controls_before_the_run_do_not_move_it(self):
         # The run starts at the last space of the text as it is, and only the
@@ -352,6 +360,42 @@ class CutFreeTextTest(unittest.TestCase):
         text = "News " + PLAIN + " more;Kids"
         for limit in (len("News " + PLAIN + " mo"), len("News " + PLAIN)):
             self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_SEPARATOR), text[:limit])
+
+
+class CutSweepTest(unittest.TestCase):
+    """D-SINK-95 and D-SINK-96 (2026-11-11): no cut hands a redactor half a
+    URL whose mark an odd character breaks, or half a scheme-less token.
+    Twelve shapes behind four prefixes, cut at every offset, with no
+    separator and with the group text's `;`, then split as the group text
+    is, then through the plain and the deleting redaction: no part shows a
+    letter of the credential: 0 of 4,217 parts. Red on the shipped cut and
+    split (dev a8e8174, with this tree's redactors): 696 of 4,684 parts
+    leak, 1,392 part-and-sink pairs."""
+
+    Z, FC, D = chr(0x200b), chr(0xff1a), chr(0x2215)
+    SHAPES = ["http:" + Z + "//qqqqqq:zzzzzz@cdn.test/x", "qqqqqq:zzzzzz@cdn.test/live/1.ts",
+              "http" + FC + "//cdn.test/live/qqqqqq/zzzzzz/1.ts", "xqqqqqq:zzzzzz@xhttp://cdn.test/x",
+              "http:" + D + D + "cdn.test/live/qqqqqq/zzzzzz/1.ts", "qqqqqq:pa;ss@cdn.test/x",
+              "http:" + Z + "//qqqqqq:pa;ss@cdn.test/x", "http" + chr(0x7f) + "://cdn.test/live/qq;qq/zz/1.ts",
+              "qqqqqq:zz@zz@cdn.test/x", "http://qqqqqq:zzzzzz@cdn.test/x", "1" + Z + "://qqqqqq:zzzzzz@cdn.test/x",
+              "http" + D + "://cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+    PREFIXES = ["", "Title ", "A;", "Sports;B "]
+
+    def test_no_cut_part_shows_a_credential(self):
+        parts, bad = 0, []
+        for shape in self.SHAPES:
+            for prefix in self.PREFIXES:
+                text = prefix + shape + " tail"
+                for limit in range(1, len(text)):
+                    for separator in ("", helper.GROUP_SEPARATOR):
+                        kept = helper.cut_free_text(text, limit, separator)
+                        for group in (helper.split_groups(kept) if separator else [kept]):
+                            parts += 1
+                            for sink in (helper.redact_urls, helper.player_title_text):
+                                out = sink(group)
+                                if "q" in out or "z" in out:
+                                    bad.append((ascii(text), limit, separator, ascii(out)))
+        self.assertEqual((parts > 4000, bad[:4]), (True, []))
 
 
 class PlaylistCutTest(unittest.TestCase):

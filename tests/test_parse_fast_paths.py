@@ -5,7 +5,8 @@ Each shortcut is an early exit or a native form of one step of the playlist
 parse, for a text that holds none of what the slower step looks for: the
 `://` search on a text with no control character (url_mark_start), the ASCII
 fold (fold_text's translate table), the native group split where no `;`
-stands in a URL's run (GROUP_URL_SEPARATOR), bound_groups' slice, and the
+can stand in a URL's run or a credential token (group_split_protects,
+D-SINK-95 and D-SINK-96), bound_groups' slice, and the
 id substitution's exit for a list with no `u:` row. Every test here calls the
 shipping function and holds it to the pattern or the loop it replaced, over
 texts built from the characters each step reads; the last class proves the
@@ -119,46 +120,56 @@ class AsciiFoldTest(unittest.TestCase):
 
 
 class SplitAndBoundTest(unittest.TestCase):
-    def test_the_split_takes_the_native_path_only_where_no_semicolon_is_in_a_url(self):
-        # GROUP_PART runs exactly where a `;` stands in a URL's run, and the
-        # answer is the rule's either way (test_group_split holds that).
-        split = helper.GROUP_PART
+    def test_the_split_takes_the_native_path_only_where_no_semicolon_can_be_kept(self):
+        # group_parts runs only where group_split_protects says a `;` could
+        # stand in a mark's run or a token, and the answer is the rule's
+        # either way (test_group_split holds that).
+        split = helper.group_parts
         calls = []
 
-        class Counting:
-            def findall(self, text):
-                calls.append(text)
-                return split.findall(text)
+        def counting(text):
+            calls.append(text)
+            return split(text)
 
         cases = [
             ("News http://cdn.test/g1 ;Kids ;http://h.test/x", False),   # every `;` opens its run
-            ("x;a:// y;b", False),                                       # searched: no `;` after a `://`
-            ("<1>" + ":" * 40 + ";/", False),                            # a `/` and a `;`, no `://`
+            ("<1>" + ":" * 40 + ";/", False),                            # a `/` and a `;`, no mark
             ("Sports;News", False),
+            ("a:// ;" * 80, False),                                      # D-PERF-13's shape
+            ("x;a:// y;b", True),                                        # asked: a `;` that opens no run
             ("http://qqqqqq:zz;zz@cdn.test/x", True),
             ("News ; http://u:p;w@h.test/x ;Kids", True),
             ("a://b;c", True),
             ("Sports;http://h.test/a;b", True),
+            ("qqqqqq:zz;zz@cdn.test/x", True),                           # D-SINK-96: a token
+            ("http:" + chr(0x200b) + "//cdn.test/a;b", True),            # D-SINK-95: a broken mark
+            ("Kino;Filme:" + chr(0x2215) + "x", False),                  # a look-alike, no mark
         ]
-        helper.GROUP_PART = Counting()
+        helper.group_parts = counting
         try:
-            for text, url_semicolon in cases:
+            for text, asked in cases:
                 calls.clear()
                 helper.SPLIT_GROUPS_LAST.clear()
                 helper.split_groups(text)
-                self.assertEqual(bool(calls), url_semicolon, text)
+                self.assertEqual(bool(calls), asked, ascii(text))
         finally:
-            helper.GROUP_PART = split
+            helper.group_parts = split
 
-    def test_the_url_separator_search_is_the_rule(self):
-        # GROUP_URL_SEPARATOR over " " + text finds a `;` that a `://` (its
-        # controls deleted) stands before, back to the last ASCII space.
-        def deleted(text):
-            return "".join(c for c in text if not (ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f))
+    def test_the_native_split_is_taken_only_where_every_semicolon_separates(self):
+        # Where group_split_protects says no `;` can be kept, the native
+        # split is the rule's answer: every `;` separates, as the rule
+        # (tests/url_reading_rule.py, as test_group_split states it) reads.
+        import test_group_split as rule
 
+        def native(text):
+            return list(dict.fromkeys(p.strip() for p in text.split(";") if p.strip()))
+
+        native_taken = 0
         for text, _ in texts(78, 30000, 24):
-            want = any(c == ";" and "://" in deleted(text[text.rfind(" ", 0, i) + 1:i]) for i, c in enumerate(text))
-            self.assertEqual(helper.GROUP_URL_SEPARATOR.search(" " + text) is not None, want, repr(text))
+            if not helper.group_split_protects(text):
+                native_taken += 1
+                self.assertEqual(rule.split_reference(text), native(text), repr(text))
+        self.assertGreater(native_taken, 10000)
 
     def old_bound(self, groups, bounds):
         """bound_groups' loop as it stood at 8ff582f, the oracle."""

@@ -172,7 +172,9 @@ export {
   NOTIFY_POST_TIMEOUT_MS, notifyReplaceId, notifyReplyId, notifyPost,
   notifyAnswered, sourceLabel, hostOf, URL_SPACE_CODES, isUrlSpaceAt,
   stripSpace, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  trailingPunctuationLength, redactUrls, scrubUrls, sinkText
+  trailingPunctuationLength, SLASH_ALIKE_CODES, isSlashAlikeCode,
+  isUrlFillerCode, isMarkStandInCode, urlAt, redactionCanChange, redactTokens,
+  redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

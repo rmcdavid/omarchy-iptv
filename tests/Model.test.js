@@ -4311,6 +4311,166 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
           Model.redactUrls("x A" + "0".repeat(20000) + cred.substring(4)) === "x prov.test"]
 }, [true, true])
 
+// ---- D-SINK-95 and D-SINK-96 (2026-11-11): one reading of a URL and of a credential token ----
+//
+// Both redactors found a credential only behind an unbroken `scheme://`. Any
+// character that is not a scheme character between the scheme and its `:`,
+// or inside the `://` -- a control, a character drawn with no width, a
+// combining mark, a fullwidth colon, a slash look-alike -- hid the whole URL,
+// so the guide row, the channel wall, the bar, the accessible names and the
+// IPC replies showed the username and the password, while the window title
+// and the notification, which delete controls first, read a URL there
+// (D-SINK-95). And a `user:pass@host` with no scheme was never redacted
+// (D-SINK-96). tests/fixtures/url-mark.json is the one fixture both suites
+// run; tests/test_url_marks.py runs it against the helper, and compares the
+// two mirrors' URL and token spans over a generated corpus.
+;(function () {
+  const marks = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/url-mark.json"), "utf8"))
+  const spaces = new Set(urlWhitespace.codePoints.map(function (e) { return parseInt(e.code.substring(2), 16) }))
+  const alike = new Set(marks.slashAlike.map(function (u) { return parseInt(u.substring(2), 16) }))
+  const CONTROLS = new RegExp("[" + String.fromCharCode(0) + "-" + String.fromCharCode(0x1f) + String.fromCharCode(0x7f) + "-" + String.fromCharCode(0x9f) + "]", "g")
+  const deleting = function (s) { return Model.sinkText(String(s).replace(CONTROLS, "")) }
+  const leaks = function (s) { return s.indexOf("q") !== -1 || s.indexOf("z") !== -1 }
+  const crossable = function (c) { return c < 0x20 || c > 0x7e }
+  const filler = function (c) { return crossable(c) && !alike.has(c) }
+  const standIn = function (c) { return filler(c) && c > 0x9f && !spaces.has(c) }
+  checkCall("D-SINK-95, D-SINK-96: every url-mark vector reads as the fixture says through Model.redactUrls, sinkText and the sinks that delete controls first", function () {
+    const bad = []
+    marks.vectors.forEach(function (v) {
+      const want = v.js
+      const wantDeleting = v.jsDeleting !== undefined ? v.jsDeleting : v.js
+      if (Model.redactUrls(v.text) !== want) bad.push([v.why, "redactUrls", Model.redactUrls(v.text)])
+      if (Model.sinkText(v.text) !== want) bad.push([v.why, "sinkText", Model.sinkText(v.text)])
+      if (deleting(v.text) !== wantDeleting) bad.push([v.why, "deleting", deleting(v.text)])
+      const body = Model.notifyArgv("streamFailed", { name: v.text, reason: "r" })
+      if (!leaks(want) && leaks(body[body.length - 1])) bad.push([v.why, "notifyArgv", body[body.length - 1]])
+    })
+    return [marks.vectors.length >= 77, bad]
+  }, [true, []])
+  checkCall("D-SINK-95: SLASH_ALIKE_CODES is the fixture's list, and over every code unit isSlashAlikeCode, isUrlFillerCode and isMarkStandInCode hold exactly where the rule recomputed from url-mark.json and url-whitespace.json says, and a CROSSABLE code unit between a scheme and a letterless segment before its `:` is crossed (Model.urlAt)", function () {
+    const wrong = []
+    for (let c = 0; c <= 0xffff; c++) {
+      const ch = String.fromCharCode(c)
+      if (Model.isSlashAlikeCode(c) !== alike.has(c)) wrong.push("alike U+" + c.toString(16))
+      if (Model.isUrlFillerCode(c) !== filler(c)) wrong.push("filler U+" + c.toString(16))
+      if (Model.isMarkStandInCode(c) !== standIn(c)) wrong.push("standIn U+" + c.toString(16))
+      const u = Model.urlAt("http" + ch + "1://b", 0)
+      if ((u !== null && u.start === 0 && !/[A-Za-z0-9+.-]/.test(ch)) !== crossable(c)) wrong.push("crossable U+" + c.toString(16))
+      if (Model.redactionCanChange(ch) !== (c === 0x2f || alike.has(c))) wrong.push("canChange U+" + c.toString(16))
+      if (wrong.length > 6) break
+    }
+    return [Model.SLASH_ALIKE_CODES.slice().sort(function (a, b) { return a - b }).join(","),
+            Array.from(alike).sort(function (a, b) { return a - b }).join(","), wrong]
+  }, [Array.from(alike).sort(function (a, b) { return a - b }).join(","), Array.from(alike).sort(function (a, b) { return a - b }).join(","), []])
+  checkCall("D-SINK-95: Model.urlAt reads the mark, the scheme and the run -- a STAND_IN or a control inside or before the mark, look-alike slashes, an astral character before the colon, a crossed control, the dead bound's text -- and finds none behind a space, a printable character or a letterless segment", function () {
+    const at = function (s, from) { const u = Model.urlAt(s, from || 0); return u === null ? null : [u.start, u.markStart, u.markEnd, u.runEnd] }
+    const Z = String.fromCharCode(0x200b), D = String.fromCharCode(0x2215)
+    return [at("x http:" + Z + "//a b"), at("http" + String.fromCharCode(0x7f) + "://a"), at("http:" + D + D + "a"),
+            at("http" + String.fromCharCode(0xdb40, 0xdc01) + "://a"), at("http" + String.fromCharCode(1) + "1://a"),
+            at("http: //a"), at("http!://a"), at("1://a"), at("1" + Z + D + D + "x" + Z + "//a"), at("a://b c://d", 5),
+            at("Featuring:\n// The Band")]
+  }, [[2, 6, 10, 11], [0, 4, 8, 9], [0, 4, 7, 8], [0, 4, 9, 10], [0, 6, 9, 10], null, null, null, [4, 5, 8, 9], [6, 7, 10, 11], [0, 9, 13, 13]])
+  checkCall("D-SINK-96: Model.redactTokens withholds every token holding a `:` with an `@` after it, ended by U+0020 alone, with its trailing punctuation put back, and nothing else", function () {
+    return [Model.redactTokens("News qqqqqq:zzzzzz@cdn.test/live/1.ts HD"), Model.redactTokens("(u:p@h)."), Model.redactTokens("a@b:c"),
+            Model.redactTokens("u:p\t@h x"), Model.redactTokens("x:y z@w"), Model.redactTokens(":@"), Model.redactTokens("a:b@[::1]"),
+            Model.redactionCanChange("Sports:News"), Model.redactionCanChange("a@b"), Model.redactionCanChange("a:b@c"), Model.redactionCanChange("Kino/Filme")]
+  }, ["News [host withheld] HD", "[host withheld]).", "a@b:c", "[host withheld] x", "x:y z@w", "[host withheld]", "[host withheld]",
+      false, false, true, true])
+  // Every BMP code unit (but the surrogates and qzQZ) at each of the
+  // fixture's 54 positions of four credentialed texts, through the plain
+  // sinks and the sinks that delete controls first: the leak sets are the
+  // fixture's exactly, which tests/test_url_marks.py holds the helper to as
+  // well, so the two mirrors leak at the same inputs. 0.18.0 leaked
+  // 1,142,679 of the 3,428,136 plain inputs; the rule leaves 567.
+  checkCall("D-SINK-95, D-SINK-96: the position fuzz -- every BMP code unit at 54 positions -- leaks exactly the fixture's sets through sinkText and through the sinks that delete controls first: printable ASCII and the six delimiters only", function () {
+    const fuzz = marks.fuzz
+    const bad = []
+    let plain = 0
+    let del = 0
+    Object.keys(fuzz.urls).forEach(function (name) {
+      const url = fuzz.urls[name][0]
+      fuzz.urls[name][1].forEach(function (pos) {
+        const got = { plain: [], deleting: [] }
+        for (let c = 0; c < 0x10000; c++) {
+          if (c >= 0xd800 && c <= 0xdfff) continue
+          const ch = String.fromCharCode(c)
+          if (fuzz.skip.indexOf(ch) !== -1) continue
+          const s = fuzz.wrap[0] + url.slice(0, pos) + ch + url.slice(pos) + fuzz.wrap[1]
+          if (leaks(Model.sinkText(s))) got.plain.push(c)
+          if (leaks(deleting(s))) got.deleting.push(c)
+        }
+        const want = fuzz.leaks[name + "@" + pos]
+        if (got.plain.join(",") !== want.plain.join(",")) bad.push(name + "@" + pos + " plain " + got.plain.length)
+        if (got.deleting.join(",") !== want.deleting.join(",")) bad.push(name + "@" + pos + " deleting " + got.deleting.length)
+        plain += got.plain.length
+        del += got.deleting.length
+      })
+    })
+    return [plain, del, bad.slice(0, 6)]
+  }, [567, 442, []])
+  // D-SINK-95 and D-SINK-96 kept linear: each shape at 40,000 characters
+  // under 100 ms, best of three, and four times the input under eight times
+  // the cost (plus a 5 ms floor), best of five. The look-alike shape is
+  // quadratic without the dead bound on the scheme walk (53 ms at 2,500
+  // characters, 842 at 10,000, in the prototype); the last two are quadratic
+  // for a token scan that searches for the next `:` and `@` per token rather
+  // than caching them across the pieces of one string.
+  checkCall("D-SINK-95, D-SINK-96: the reading and the token arm are linear on every budget shape", function () {
+    const Z = String.fromCharCode(0x200b), D = String.fromCharCode(0x2215), DEL = String.fromCharCode(0x7f)
+    const shapes = {
+      "1:// repeated": function (n) { return "1://".repeat(n / 4) },
+      "1111111:/DEL/ repeated": function (n) { return ("1111111:/" + DEL + "/").repeat(Math.floor(n / 11)) },
+      "a:b@ repeated": function (n) { return "a:b@ ".repeat(n / 5) },
+      "ZW 1 repeated, then ://x": function (n) { return (Z + "1").repeat(n / 2) + "://x" },
+      "http:/ and a run of ZW": function (n) { return "http:/" + Z.repeat(n) },
+      "1 ZW division slash twice, repeated": function (n) { return ("1" + Z + D + D).repeat(n / 4) },
+      "token TAB url TAB repeated": function (n) { return "a:b@c\thttp://x\t".repeat(Math.floor(n / 15)) },
+      "ZW //a TAB repeated, then :": function (n) { return (Z + "//a\t").repeat(n / 5) + ":" }
+    }
+    const best = function (s, k) {
+      let b = Infinity
+      for (let i = 0; i < k; i++) {
+        const t0 = process.hrtime.bigint()
+        Model.redactUrls(s)
+        b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6)
+      }
+      return b
+    }
+    const slow = []
+    Object.keys(shapes).forEach(function (name) {
+      const large = best(shapes[name](40000), 3)
+      const small = best(shapes[name](10000), 5)
+      if (large >= 100 || best(shapes[name](40000), 5) >= Math.max(8 * small, 5)) slow.push(name + " " + small.toFixed(2) + " -> " + large.toFixed(2) + " ms")
+    })
+    return slow
+  }, [])
+  // The token arm's cache, at a size where a native search per piece shows:
+  // many pieces of free text between URLs whose marks hold no `:`, and the
+  // text's only `:` (or `@`) at its end, so a scan that searched again from
+  // each piece read to the end every time. Measured 2026-11-11 without the
+  // cache: 24 -> 401 ms and 11 -> 181 ms (x16); with it 9 -> 30 and 4 -> 17.
+  checkCall("D-SINK-96: the token arm searches for the next `:` and `@` once across all the pieces of one string -- at 400,000 characters it costs under eight times its cost at 100,000", function () {
+    const Z = String.fromCharCode(0x200b)
+    const shapes = {
+      "ZW //a TAB repeated, then :": function (n) { return (Z + "//a\t").repeat(n / 5) + ":" },
+      "a://b c:d repeated, then @": function (n) { return "a://b c:d ".repeat(n / 10) + "@" }
+    }
+    const best = function (s) {
+      let b = Infinity
+      for (let i = 0; i < 3; i++) {
+        const t0 = process.hrtime.bigint()
+        Model.redactUrls(s)
+        b = Math.min(b, Number(process.hrtime.bigint() - t0) / 1e6)
+      }
+      return b
+    }
+    return Object.keys(shapes).filter(function (name) {
+      const small = best(shapes[name](100000)), large = best(shapes[name](400000))
+      return large >= Math.max(8 * small, 5)
+    })
+  }, [])
+})()
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect
@@ -4402,25 +4562,73 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // of the rule. Deliberately a copy rather than an import -- the shipping
 // file must not carry a second redactor for a test's benefit, and a copy
 // that drifts is caught the moment a vector disagrees.
-const URL_RUN_AS_RULED = /[a-z][a-z0-9+.-]*:\/\/([^\t\n\v\f\r ]*)/gi
+// D-SINK-95 and D-SINK-96 (2026-11-11) moved it a fourth time: the URL is the
+// reading as ONE leftmost pattern (a scheme that may cross CROSSABLE
+// characters out of a letterless segment, a mark whose `:` any odd character
+// may stand beside or for, and slash look-alikes), and the text between the
+// URLs is free text whose `a:b@c` tokens are withheld. Its classes are code-unit
+// ranges spelt here and nowhere else, with no `u` flag: X (CROSSABLE) is
+// everything outside U+0020..U+007E, F (FILLER) X but the slash look-alikes,
+// K (STAND_IN) F above U+009F but the reader's space union, S (SLASH) `/` or a
+// look-alike; the printed host stops at its first look-alike.
+const SA_AS_RULED = String.fromCharCode(0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27cb, 0x29f8, 0x2f03, 0x3033, 0x31d3, 0xff0f)
+const SPACES_AS_RULED = String.fromCharCode(0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff)
+const X_AS_RULED = "[^ -~]"
+const F_AS_RULED = "[^ -~" + SA_AS_RULED + "]"
+const K_AS_RULED = "[^\\x00-\\x9f" + SPACES_AS_RULED + SA_AS_RULED + "]"
+const S_AS_RULED = "[/" + SA_AS_RULED + "]"
+const URL_RUN_AS_RULED = new RegExp("([A-Za-z][A-Za-z0-9+.-]*(?:" + X_AS_RULED + "(?:" + X_AS_RULED + "|[0-9+.-])*)?)" +
+  "((?::|" + F_AS_RULED + ")*(?::|" + K_AS_RULED + ")(?::|" + F_AS_RULED + ")*" + S_AS_RULED + F_AS_RULED + "*" + S_AS_RULED + ")" +
+  "([^\\t\\n\\v\\f\\r ]*)", "g")
+const TOKEN_AS_RULED = /(?<![^ ])[^ :]*:[^ @]*@[^ ]*/g
+function trailingAsRuled(whole) {
+  return whole.match(whole.indexOf("[") >= 0 ? /^([\s\S]*?)([.,;:!?)'"<>]*)$/ : /^([\s\S]*?)([.,;:!?)\]'"<>]*)$/)
+}
+function alikeCutAsRuled(host) {
+  for (let i = 0; i < host.length; i++) if (SA_AS_RULED.indexOf(host.charAt(i)) !== -1) return host.substring(0, i)
+  return host
+}
+function hostAsRuled(whole) {
+  const cut = trailingAsRuled(whole)
+  const run = cut[1]
+  const trailing = cut[2]
+  const m = run.match(/^([^\/?#]*)([\s\S]*)$/)
+  const hostport = m[1].replace(/^[\s\S]*@/, "")
+  if (hostport.charAt(0) === "[") {
+    const lit = hostport.match(/^\[[^\]]*\]/)
+    return (lit ? alikeCutAsRuled(lit[0]) || "[url]" : "[url]") + trailing
+  }
+  const host = hostport.replace(/[:;=&][\s\S]*$/, "")
+  const port = (hostport.match(/^[^:;=&]*:([^;=&]*)/) || ["", ""])[1]
+  const laterAt = m[2].indexOf("@") !== -1
+  if (laterAt && ((host !== "" && host.indexOf(".") === -1) || (port !== "" && !/^[0-9]+$/.test(port)))) return "[host withheld]" + trailing
+  const shown = alikeCutAsRuled(host)
+  return (shown !== "" ? shown : "[url]") + trailing
+}
+// The rule's answer, and whether it read a URL the base pattern cannot (a
+// mark or a scheme that is not a plain `scheme://`) or withheld a token.
+function asRuledParts(text) {
+  const s = String(text === undefined || text === null ? "" : text)
+  let out = ""
+  let pos = 0
+  let wide = false
+  let token = false
+  const gap = function (piece) {
+    return piece.replace(TOKEN_AS_RULED, function (m) { token = true; return "[host withheld]" + trailingAsRuled(m)[2] })
+  }
+  URL_RUN_AS_RULED.lastIndex = 0
+  let m
+  while ((m = URL_RUN_AS_RULED.exec(s)) !== null) {
+    out += gap(s.substring(pos, m.index)) + hostAsRuled(m[3])
+    if (m[2] !== "://" || /[^ -~]/.test(m[1])) wide = true
+    for (const ch of m[3]) if (SA_AS_RULED.indexOf(ch) !== -1) wide = true
+    pos = m.index + m[0].length
+  }
+  return { out: out + gap(s.substring(pos)), wide: wide, token: token }
+}
 function redactUrlsAsShipped(text) {
-  return String(text === undefined || text === null ? "" : text)
-    .replace(URL_RUN_AS_RULED, function (all, whole) {
-      const cut = whole.match(whole.indexOf("[") >= 0 ? /^([\s\S]*?)([.,;:!?)'"<>]*)$/ : /^([\s\S]*?)([.,;:!?)\]'"<>]*)$/)
-      const run = cut[1]
-      const trailing = cut[2]
-      const m = run.match(/^([^\/?#]*)([\s\S]*)$/)
-      const hostport = m[1].replace(/^[\s\S]*@/, "")
-      if (hostport.charAt(0) === "[") {
-        const lit = hostport.match(/^\[[^\]]*\]/)
-        return (lit ? lit[0] : "[url]") + trailing
-      }
-      const host = hostport.replace(/[:;=&][\s\S]*$/, "")
-      const port = (hostport.match(/^[^:;=&]*:([^;=&]*)/) || ["", ""])[1]
-      const laterAt = m[2].indexOf("@") !== -1
-      if (laterAt && ((host !== "" && host.indexOf(".") === -1) || (port !== "" && !/^[0-9]+$/.test(port)))) return "[host withheld]" + trailing
-      return (host !== "" ? host : "[url]") + trailing
-    })
+  return asRuledParts(text).out
 }
 // The pattern as F-SINK-11 left it, BEFORE D-SINK-23 and R32a: kept to show
 // the two differ exactly where R32a says they should, and nowhere else.
@@ -4437,13 +4645,22 @@ function redactUrlsBeforeDSink23(text) {
   // R32a''': U+00A0, U+2028 and U+FEFF are JS whitespace and NOT delimiters
   // any more, and U+0085 and U+001C never were either, so the generator
   // reaches runs the base ended and the rule continues through.
-  const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeff\u0085\u001cx[]%&=,;'\"<>"
+  const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeff\u0085\u001cx[]%&=,;'\"<>".split("").concat([
+    // D-SINK-95 and D-SINK-96 (2026-11-11): a STAND_IN, a look-alike colon and
+    // slashes, a crossed control and an astral character before a mark, a
+    // control inside one, a token, a letterless mark and a token whose line
+    // separator stands before a `//`.
+    "http:" + String.fromCharCode(0x200b) + "//", "http" + String.fromCharCode(0xff1a) + "//",
+    "http:" + String.fromCharCode(0x2215, 0x2215), "http" + String.fromCharCode(0x2215) + "://",
+    "http" + String.fromCharCode(0xdb40, 0xdc01) + "://", ":" + String.fromCharCode(1) + "//", "a:b@", "1://",
+    "qqqqqq:zz" + String.fromCharCode(0x2028) + "//zz@", String.fromCharCode(0x200b), String.fromCharCode(0xff1a),
+    String.fromCharCode(0x2215), String.fromCharCode(0x7f)])
   function generated(length, seed) {
     let out = ""
     let x = seed
     for (let i = 0; i < length; i++) {
       x = (x * 1103515245 + 12345) & 0x7fffffff
-      out += ALPHABET.charAt(x % ALPHABET.length)
+      out += ALPHABET[x % ALPHABET.length]
     }
     return out
   }
@@ -4481,7 +4698,14 @@ function redactUrlsBeforeDSink23(text) {
     "http://myuser:pa\u001css@h.test/x", "http://myuser:pa\ufeffss@h.test/x", "http://user.name:pa/ss@h.test/x",
     "http://me@mail.test:pa&x=1/ss@h.test/x", "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y",
     "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".", "http://.", "x http://. y",
-    "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b"]
+    "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b",
+    // D-SINK-95 and D-SINK-96 (2026-11-11): the composites, alone and before a
+    // credential.
+    "http:" + String.fromCharCode(0x200b) + "//qqqqqq:zzzzzz@cdn.test/x", "http" + String.fromCharCode(0xff1a) + "//cdn.test/live/q/z/1.ts",
+    "http:" + String.fromCharCode(0x2215, 0x2215) + "cdn.test/live/q/z/1.ts", "http" + String.fromCharCode(0x2215) + "://cdn.test/live/q/z/1.ts",
+    "http" + String.fromCharCode(0xdb40, 0xdc01) + "://cdn.test/live/q/z/1.ts", ":" + String.fromCharCode(1) + "//cdn.test/x", "a:b@", "1://",
+    "x a:b@c y", "qqqqqq:zz" + String.fromCharCode(0x2028) + "//zz@cdn.test/x", "http://cdn.test" + String.fromCharCode(0xff0f) + "live",
+    "http:/" + String.fromCharCode(0x2215) + "/cdn.test/x", "abc:http://u:p@h.test/x", "http@://u:p@h.test/x", "(u:p@h.test)."]
   for (let i = 0; i < corpus.length; i++) edges.push(corpus[i])
   for (let seed = 1; seed <= 3000; seed++) {
     for (let len = 0; len <= 40; len += 7) edges.push(generated(len, seed))
@@ -4508,23 +4732,26 @@ function redactUrlsBeforeDSink23(text) {
     // the rule 14 shape this whole file is about.
     return [edges.length > 18000, bad]
   }, [true, []])
-  checkCall("R32a' / R32a'' / R32a''' (D-SINK-23, D-SINK-28, D-SINK-29, D-SINK-32..36): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, a dotless host or a non-numeric port has an at-sign after its authority, a run ends in sentence punctuation, or a run holds a JS `\\s` member that is not one of the six ASCII delimiters", function () {
+  checkCall("R32a' / R32a'' / R32a''' (D-SINK-23, D-SINK-28, D-SINK-29, D-SINK-32..36), D-SINK-95, D-SINK-96: the base pattern and the rule disagree ONLY where a mark or a scheme is no plain `scheme://`, a token is withheld, an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, a dotless host or a non-numeric port has an at-sign after its authority, a run ends in sentence punctuation, or a run holds a JS `\\s` member that is not one of the six ASCII delimiters", function () {
     // Every disagreement must carry, inside some URL run (the text after a
     // `://` up to whitespace), an `@` after a `?` or `#` and before any `/`
     // (the base's userinfo search crossed into a pathless query), a `&`, `=`
     // or `;` inside what the base read as the host, a `[` right after the
     // userinfo, a dotless host followed by the authority's end and a later
-    // `@` (withheld), a `:` after the host whose port text holds a non-digit
+    // `@` (withheld; a `[` past the host's first character is host text, which a
+    // generated D-SINK-95 corpus string reached), a `:` after the host whose port text holds a non-digit
     // before the authority's end and a later `@` (R32a'', the second arm),
     // a character of `.,;:!?)]'"<>` ending the run (R32a'', put back now), or
     // a JS `\s` member that is NOT one of the six ASCII delimiters inside
     // the run as the rule reads it (R32a''': the base's `[^\s]*` tail ended
-    // the run at NBSP, U+2028 or U+FEFF; the rule runs through them). An
+    // the run at NBSP, U+2028 or U+FEFF; the rule runs through them); or a
+    // URL whose mark or scheme is no plain `scheme://` (D-SINK-95), or a
+    // withheld `a:b@c` token in the text between URLs (D-SINK-96). An
     // `@` after a `/` alone is NOT a disagreement any more: the RFC
     // authority never crosses a `/` (D-SINK-29). Anything else that differs
     // is a change this round did not mean to make. Every `\s` below is the
     // base's own class, which is what the base's run ended at.
-    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s:@\[]*:[^\/?#\s;=&]*[^0-9\/?#\s;=&][^\/?#\s]*[\/?#][^\s]*@|:\/\/[^\s]*[.,;:!?)\]'"<>](?=\s|$)|:\/\/[^\t\n\v\f\r ]*[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]/.test(s)
+    const explained = s => asRuledParts(s).wide || asRuledParts(s).token || /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[][^\/?#\s.:;=&@]*(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s:@\[]*:[^\/?#\s;=&]*[^0-9\/?#\s;=&][^\/?#\s]*[\/?#][^\s]*@|:\/\/[^\s]*[.,;:!?)\]'"<>](?=\s|$)|:\/\/[^\t\n\v\f\r ]*[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]/.test(s)
     let differ = 0
     const unexplained = []
     for (let i = 0; i < edges.length; i++) {
@@ -4995,8 +5222,11 @@ function redactUrlsBeforeDSink23(text) {
   // leaks, which is why D-SINK-49 held there; on 4.5.0 exactly these cases
   // fail, each with a link to open, a tag, or an entity read twice. The list
   // is the measurement (2026-11-06), so a harness that stopped seeing any of
-  // them goes red here before it can call a broken escape green.
-  checkCall("D-SINK-85: 0.17.0's single escape through the same harness -- the 4.0.6 card draws every case as written, and the 4.5.0 card opens a link for 12 of the 37 (N06, N07, N10 and N20 among them) and misdraws 12 more: tags drawn as tags, entity words decoded, a refused anchor's label shown bare", function () {
+  // them goes red here before it can call a broken escape green. Since
+  // D-SINK-96 (2026-11-11) two displays hold no markup to misread: H04's
+  // mailto anchor (N10) and H22's credentialed URL are tokens the plugin
+  // withholds before any escape, so 11 and 11 are left of the 12 and 12.
+  checkCall("D-SINK-85: 0.17.0's single escape through the same harness -- the 4.0.6 card draws every case as written, and the 4.5.0 card opens a link for 11 of the 37 (N06, N07 and N20 among them; N10's anchor is a D-SINK-96 token the plugin withholds) and misdraws 11 more: tags drawn as tags, entity words decoded, a refused anchor's label shown bare", function () {
     hosts()
     const once = function (t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
     const links = [], misdrawn = [], old = []
@@ -5009,8 +5239,8 @@ function redactUrlsBeforeDSink23(text) {
       if (drawn(Old.styledBody(once(plain), "IPTV", "")) !== plain) old.push(c.id)
     }
     return [links, misdrawn, old]
-  }, [["H01", "H02", "H03", "H04", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"],
-      ["H11", "H12", "H13", "H14", "H15", "H16", "H17", "H18", "H22", "H24", "H26", "H28"], []])
+  }, [["H01", "H02", "H03", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"],
+      ["H11", "H12", "H13", "H14", "H15", "H16", "H17", "H18", "H24", "H26", "H28"], []])
 })()
 
 // ---- F-SINK-16 (2026-10-29): the IPC replies escape the C1 controls.
@@ -20350,13 +20580,13 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
 
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2) is refreshed once whatever its age; one written under them (3, the stream host-name rules) or later is not", () =>
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3) is refreshed once whatever its age; one written under them (4, the D-SINK-95 and D-SINK-96 reading) or later is not", () =>
     [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 3 }),
      Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 4 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
      Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null),
      Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
      Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }), Model.DESTINATION_RULES],
-    [true, false, false, true, false, false, true, true, 3])
+    [true, true, false, true, false, false, true, true, 4])
 
   // Service.qml's own functions (tests/service-harness.js): every URL-carrying
   // spawn says where its URL came from, through the one assignment, reset
@@ -20407,7 +20637,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2), and leaves one written under them", () => {
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3), and leaves one written under them", () => {
     const runs = status => {
       const h = boot([rec(LAN)])
       h.root.playlistStatus = status
@@ -20419,8 +20649,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const now = Math.floor(Date.now() / 1000)
     return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 }),
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 }),
-            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 3 })]
-  }, [1, 1, 1, 0])
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 3 }),
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 4 })]
+  }, [1, 1, 1, 1, 0])
 })()
 
 // ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----

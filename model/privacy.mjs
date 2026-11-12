@@ -594,8 +594,17 @@ function hostOf(url) {
 // and the host excludes `@` entirely. Both changes are needed: either alone
 // still leaks.
 //
-// F-SINK-11. The scan is ANCHORED ON "://" and never re-reads a run of
-// scheme-legal characters, so the cost is linear in the length of the text.
+// D-SINK-95 and D-SINK-96 (2026-11-11). The URLs are urlFrom's reading (see
+// it, below): a scheme behind a mark that any odd character may break, where
+// this read only an unbroken `://`, so a provider's name, group or programme
+// text printed the username and the password in every sink that runs it. The
+// text between URLs is free text, and a token of it shaped `a:b@c` is withheld
+// (withholdTokens), where a `user:pass@host` with no scheme went out whole.
+// What follows is the history of the URL arm, whose host rule is unchanged.
+//
+// F-SINK-11. The scan is ANCHORED ON the slashes of a mark (it was `://`
+// until D-SINK-95) and never re-reads a run of scheme-legal characters, so
+// the cost is linear in the length of the text.
 //
 // What was wrong. The pattern was
 // `/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi`. On a run of
@@ -787,41 +796,251 @@ function isLetterCode(c) {
   return (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
 }
 
+// D-SINK-95 (2026-11-11): where a free-text redactor reads a URL. Until then
+// a credential was found only behind an unbroken `scheme://`: any character
+// that is not a scheme character, between the scheme and its `:` or inside
+// the `://`, hid the whole URL from both redactors -- a control (which the
+// window title and the notification delete before they redact, so they read
+// a URL where the row did not), a character drawn with no width, a
+// combining mark, a fullwidth colon or a slash look-alike -- and the guide
+// row, the channel wall, the bar, the accessible names and the IPC replies
+// printed the username and the password. The owner's decision (2026-11-08):
+// any odd character before or inside the `//` is a URL's mark, false
+// positives accepted. The helper's next_url is the mirror, over code
+// points; this reads UTF-16 code units, and every rule works on runs, so an
+// astral character (two surrogates here, one code point there) reads the
+// same in both. The shared url-mark fixture (dev branch) holds both to one
+// answer.
+//
+// The classes, none of them a Unicode table and none an engine's `\s`:
+//   SCHEME     [A-Za-z0-9+.-] (isSchemeRestCode); a scheme starts at an
+//              ASCII letter (isLetterCode).
+//   SLASH      `/`, or one of SLASH_ALIKE_CODES.
+//   CROSSABLE  every code unit outside U+0020..U+007E: the controls, every
+//              non-ASCII code unit, a surrogate, lone or paired.
+//   FILLER     CROSSABLE but no slash look-alike (isUrlFillerCode).
+//   STAND_IN   FILLER above U+009F that is not in the reader's space union
+//              (URL_SPACE_CODES): a character that stands in for the colon
+//              (isMarkStandInCode).
+// The deleted controls (CONTROL_RE) are no STAND_IN, because the sinks that
+// delete them would read no colon there, and the spaces are none because
+// `ESPN<NBSP>//<NBSP>HD` is a name.
+//
+// The slash look-alikes a provider's text draws as `/`: each reads as a
+// slash, and the host a redactor prints is cut at the first of them
+// (runHostParts). The helper's SLASH_ALIKE_CHARS is the mirror. U+30CE,
+// U+4E3F and U+2CC6 are left out: they are common letters.
+var SLASH_ALIKE_CODES = [0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27cb, 0x29f8, 0x2f03, 0x3033, 0x31d3, 0xff0f]
+// Whether a text holds one, natively: one character class built from the
+// list, never global (no lastIndex), so it is asked with test() alone.
+var SLASH_ALIKE_RE = new RegExp("[" + String.fromCharCode.apply(null, SLASH_ALIKE_CODES) + "]")
+
+function isSlashAlikeCode(c) {
+  return c >= 0x1735 && SLASH_ALIKE_CODES.indexOf(c) !== -1
+}
+
+// D-SINK-95: `host` up to its first slash look-alike. The authority still
+// ends only at an ASCII `/`, `?` or `#`, so a URL whose slashes are all
+// look-alikes, or a clean `://` with fullwidth path slashes, printed its
+// path -- credentials and all -- as the host; runHostParts cuts the host it
+// returns here instead, after its withheld predicate has read the whole one.
+// The helper's slash_alike_cut is the mirror.
+function slashAlikeCut(host) {
+  for (var i = 0; i < host.length; i++) if (isSlashAlikeCode(host.charCodeAt(i))) return host.substring(0, i)
+  return host
+}
+
+function isUrlSlashCode(c) {
+  return c === 0x2f || isSlashAlikeCode(c)
+}
+
+function isCrossableCode(c) {
+  return c < 0x20 || c > 0x7e
+}
+
+function isUrlFillerCode(c) {
+  return (c < 0x20 || c > 0x7e) && !isSlashAlikeCode(c)
+}
+
+function isMarkStandInCode(c) {
+  return c > 0x9f && !isSlashAlikeCode(c) && URL_SPACE_CODES.indexOf(c) === -1
+}
+
+// The first SLASH at or after `i`, or -1; a text with no look-alike asks
+// the engine.
+function nextUrlSlash(s, i, alike) {
+  if (!alike) return s.indexOf("/", i)
+  for (; i < s.length; i++) if (isUrlSlashCode(s.charCodeAt(i))) return i
+  return -1
+}
+
+// D-SINK-95: where the scheme of a mark whose P starts at `at` starts, or
+// -1, never below `low`. The SCHEME segment ending at `at` starts it at its
+// first letter when it holds one (D-SINK-74's pins stay exact: a
+// letter-holding segment is never crossed); when it holds none and a
+// CROSSABLE run stands before it, the walk crosses that run and asks the
+// next segment, so `http<U+0001>1://` reads `http1` as the deleting sinks
+// do.
+function urlSchemeStart(s, at, low) {
+  var k = at
+  for (;;) {
+    var segEnd = k
+    while (k > low && isSchemeRestCode(s.charCodeAt(k - 1))) k--
+    for (var q = k; q < segEnd; q++) if (isLetterCode(s.charCodeAt(q))) return q
+    var crossed = false
+    while (k > low && isCrossableCode(s.charCodeAt(k - 1))) { k--; crossed = true }
+    if (!crossed) return -1
+  }
+}
+
+// The reading, from `low`, given whether the text holds a look-alike.
+//
+// Each pair of SLASHes with only FILLER between them, left to right, is
+// asked: P is the run of `:` and FILLER ending at the pair's first slash,
+// never reaching below `low`, and the pair is a MARK when P holds a `:` or
+// a STAND_IN. The mark starts at P and ends after the pair's second slash.
+// Its scheme is urlSchemeStart's, never below the later of `low` and the
+// start of the last P whose walk found none (`dead`, which keeps the walk
+// linear once look-alikes are crossable and changes no answer). A mark with
+// no scheme is no URL, and the walk goes on with the next pair, whose first
+// slash is this pair's second. The run is from the mark's end to the first
+// of the six delimiters (isUrlDelimiterAt, R32a''' unchanged), or the end;
+// an empty run is a URL here, which prints `[url]` (the helper needs one
+// character, the pre-existing split epg-fold.json pins). The scheme is
+// found before the run is read: reading the run first was quadratic on
+// `1://` repeated.
+function urlFrom(s, low, alike) {
+  var n = s.length
+  var dead = low
+  var k = nextUrlSlash(s, low, alike)
+  while (k !== -1) {
+    var m = k + 1
+    while (m < n && isUrlFillerCode(s.charCodeAt(m))) m++
+    if (m >= n) return null
+    if (!isUrlSlashCode(s.charCodeAt(m))) { k = nextUrlSlash(s, m + 1, alike); continue }
+    var a = k
+    var mark = false
+    while (a > low) {
+      var c = s.charCodeAt(a - 1)
+      if (c === 58) mark = true
+      else if (!isUrlFillerCode(c)) break
+      else if (!mark && isMarkStandInCode(c)) mark = true
+      a--
+    }
+    if (mark) {
+      var start = urlSchemeStart(s, a, dead)
+      if (start === -1) dead = a
+      else {
+        var end = m + 1
+        while (end < n && !isUrlDelimiterAt(s, end)) end++
+        return { start: start, markStart: a, markEnd: m + 1, runEnd: end }
+      }
+    }
+    k = m
+  }
+  return null
+}
+
+// D-SINK-95: the first URL the redactors read in `text` at or after `from`,
+// as { start, markStart, markEnd, runEnd } (the scheme's start, the mark's
+// start and end, the run's end), or null.
+function urlAt(text, from) {
+  var s = str(text)
+  var low = Number(from) > 0 ? Math.floor(Number(from)) : 0
+  return urlFrom(s, low, SLASH_ALIKE_RE.test(s))
+}
+
+// Whether redactUrls can rewrite `text`: it holds a SLASH (a mark needs
+// two), or both an ASCII `:` and `@` (a D-SINK-96 token needs them). Exact,
+// so a caller may skip the call on false (sinkText); the helper's
+// redaction_can_change is the mirror.
+function redactionCanChange(text) {
+  var s = typeof text === "string" ? text : str(text)
+  if (s.indexOf("/") !== -1 || SLASH_ALIKE_RE.test(s)) return true
+  return s.indexOf(":") !== -1 && s.indexOf("@") !== -1
+}
+
+// D-SINK-96 (2026-11-11): the token arm. A token is a maximal run of code
+// units other than U+0020 inside one piece of free text (the ends of the
+// piece end it too); it is withheld when it holds an ASCII `:` with an
+// ASCII `@` somewhere after it -- `a:b@c`, each part possibly empty -- and
+// printed as HOST_WITHHELD and its trailing punctuation. A provider's text
+// holding `qqqqqq:zzzzzz@cdn.test/live/1.ts` with no scheme in front of it
+// was never redacted. The owner's decision (2026-11-08): withhold the
+// shape, false positives accepted (`Sport:Live@HD`, a `mailto:` address).
+// Only U+0020 ends a token, so a TAB, a line break or NBSP inside one does
+// not split it, and the sinks that delete controls read the same tokens as
+// the plain ones; look-alike colons and at-signs do not count. The helper's
+// redact_tokens is the mirror.
+//
+// Linear over every piece of one string: the next `:` and the next `@` are
+// searched once and CACHED in `scan` across the pieces, which are visited
+// left to right, and each token's edges are walked once, inside its piece.
+// A search per token, or an edge walk not bounded by the piece, is
+// quadratic over many pieces.
+function tokenScan(s) {
+  return { s: s, colon: -2, at: -2 }
+}
+
+function withholdTokens(scan, from, to) {
+  var s = scan.s
+  var out = ""
+  var copied = from
+  var prev = from
+  var i = from
+  for (;;) {
+    if (scan.colon !== -1 && scan.colon < i) scan.colon = s.indexOf(":", i)
+    var c = scan.colon
+    if (c === -1 || c >= to) break
+    var ts = c
+    while (ts > prev && s.charCodeAt(ts - 1) !== 32) ts--
+    var te = c
+    while (te < to && s.charCodeAt(te) !== 32) te++
+    if (scan.at !== -1 && scan.at <= c) scan.at = s.indexOf("@", c + 1)
+    if (scan.at === -1) break
+    if (scan.at < te) {
+      var token = s.substring(ts, te)
+      var put = trailingPunctuationLength(token)
+      out += s.substring(copied, ts) + HOST_WITHHELD + token.substring(token.length - put)
+      copied = te
+    }
+    prev = i = te
+  }
+  return out + s.substring(copied, to)
+}
+
+// The token arm over a whole text as ONE piece of free text: what
+// redactUrls does to the text between its URLs.
+function redactTokens(text) {
+  var s = str(text)
+  return withholdTokens(tokenScan(s), 0, s.length)
+}
+
 function redactUrls(text) {
   var s = str(text)
-  var j = s.indexOf("://")
-  if (j === -1) return s               // the old pattern cannot match: same answer
-  var n = s.length
+  // Exact: with no SLASH there is no mark, and with no `:` or no `@` no
+  // token, so nothing below could change the text.
+  if (!redactionCanChange(s)) return s
+  var alike = SLASH_ALIKE_RE.test(s)
+  var scan = tokenScan(s)
   var out = ""
   var copied = 0                       // everything before this is already in `out`
-  // The engine's lastIndex: no match may start before it. `j` is only ever
-  // searched from `resume` or from a position already at or past it, so there
-  // is no `j < resume` case to guard -- and a guard for a case that cannot
-  // happen is a branch no test can go red for.
-  var resume = 0
-  while (j !== -1) {
-    // The leftmost start the old pattern would have taken for this "://":
-    // back over the scheme-legal run, then forward to its first letter.
-    var b = j
-    while (b > resume && isSchemeRestCode(s.charCodeAt(b - 1))) b--
-    var p = b
-    while (p < j && !isLetterCode(s.charCodeAt(p))) p++
-    if (p >= j) {
-      // No letter in the run, so the pattern has no match ending here.
-      // j+1 and j+2 cannot begin a "://" of their own; +1 keeps that from
-      // being load-bearing.
-      j = s.indexOf("://", j + 1)
-      continue
-    }
+  for (;;) {
+    // The URLs are urlFrom's reading (D-SINK-95), each from the end of the
+    // run before it: the engine's lastIndex, as it was.
+    var u = urlFrom(s, copied, alike)
+    if (u === null) break
+    // The free text before the URL loses its credential tokens (D-SINK-96);
+    // the text a URL covers is never read for one, so `abc:http://...`
+    // keeps its `abc:`.
+    out += withholdTokens(scan, copied, u.start)
     // The run: to the first ASCII delimiter (R32a''', isUrlDelimiterAt: the
     // six; it was the old `[^\s]*` tail, JS `\s`, until 2026-10-22, and the
     // 30-point union for one round after that), then the sentence
     // punctuation stripped off its end and put back after the host, so
     // `... http://h.test/x.` prints `h.test.` as the helper does.
-    var end = j + 3
-    while (end < n && !isUrlDelimiterAt(s, end)) end++
-    var put = trailingPunctuationLength(s.substring(j + 3, end))
-    var runEnd = end - put
+    var put = trailingPunctuationLength(s.substring(u.markEnd, u.runEnd))
+    var runEnd = u.runEnd - put
     // R32a' (D-SINK-29, 2026-10-22; D-SINK-23, D-SINK-28). This is a
     // FREE-TEXT redactor, not a parser: the string is an mpv error, a helper
     // line, a notification body, and the one job here is that NOTHING of a
@@ -851,8 +1070,9 @@ function redactUrls(text) {
     // with a path `@` (`http://nas:8000/files/me@home/x`) withholds `nas`;
     // `localhost` gets no exemption. The predicate is Model.urlHostWithheld,
     // the same one the Sources form warns with, and the helper's
-    // redact_urls (run_host) is the same rule; the shared fixture holds both
-    // to it. runHostParts is one pass over the run.
+    // redact_urls (run_host_parts) is the same rule; the shared fixture
+    // holds both to it. runHostParts is one pass over the run, and since
+    // D-SINK-95 the host it returns stops at its first slash look-alike.
     // R32a'' (2026-10-22, D-SINK-32, D-SINK-33): `'"<>` never end a run (a
     // password may hold them) and are trailing punctuation instead; and
     // the predicate has a second arm, a NON-NUMERIC port followed by a
@@ -865,14 +1085,12 @@ function redactUrls(text) {
     // tab INSIDE a password splits the run, so `http://myuser:pa ss@cdn.test/x`
     // prints `myuser ss@cdn.test/x` -- the fixture pins that output for
     // each delimiter and the host for every other whitespace code point.
-    var parts = runHostParts(s.substring(j + 3, runEnd))
+    var parts = runHostParts(s.substring(u.markEnd, runEnd))
     var host = parts.withheld ? HOST_WITHHELD : parts.host
-    out += s.substring(copied, p) + (host !== "" ? host : "[url]") + s.substring(runEnd, end)
-    copied = end
-    resume = end
-    j = s.indexOf("://", resume)
+    out += (host !== "" ? host : "[url]") + s.substring(runEnd, u.runEnd)
+    copied = u.runEnd
   }
-  return out + s.substring(copied)
+  return out + withholdTokens(scan, copied, s.length)
 }
 
 // Older name kept for callers; same behaviour.
@@ -893,8 +1111,11 @@ function scrubUrls(text) {
 // `indexOf` instead of one call, and the NAME, which is the part that was
 // always load-bearing -- it is how the four composers below cannot drift
 // about where redaction happens. The exit is EXACT and not an approximation:
-// redactUrls cannot rewrite text with no "://" in it, and the node suite
-// asserts the two agree over every input it is given.
+// redactUrls cannot rewrite text redactionCanChange refuses -- no SLASH, and
+// not both a `:` and an `@` -- and the node suite asserts the two agree over
+// every input it is given. It was `indexOf("://")` until D-SINK-95 and
+// D-SINK-96, which skipped every URL whose mark an odd character breaks and
+// every scheme-less `user:pass@host`.
 //
 // WHY AT THE SINK and not at one caller. The strings these sinks compose come
 // from an XMLTV programme title and an M3U channel name, both written by the
@@ -906,7 +1127,7 @@ function scrubUrls(text) {
 // raw title in is still safe, which a fix at one caller does not give.
 function sinkText(value) {
   var s = str(value)
-  return s.indexOf("://") === -1 ? s : redactUrls(s)
+  return redactionCanChange(s) ? redactUrls(s) : s
 }
 export {
   CONFIG_SHIELD_UNKNOWN, CONFIG_SHIELD_PRIVATE, CONFIG_SHIELD_EXPOSED,
@@ -919,5 +1140,9 @@ export {
   notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
   isUrlSpaceAt, urlSpaceIndex, stripSpace, URL_DELIMITER_CODES,
   isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
-  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
+  isSchemeRestCode, isLetterCode, SLASH_ALIKE_CODES, SLASH_ALIKE_RE,
+  isSlashAlikeCode, slashAlikeCut, isUrlSlashCode, isCrossableCode,
+  isUrlFillerCode, isMarkStandInCode, nextUrlSlash, urlSchemeStart, urlFrom,
+  urlAt, redactionCanChange, tokenScan, withholdTokens, redactTokens,
+  redactUrls, scrubUrls, sinkText
 }
