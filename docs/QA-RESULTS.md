@@ -18974,6 +18974,7 @@ One independent reviewer, read only in the worktree, measuring in scratch pairs 
 - Evidence: tests/fixtures/saved-searches.json gains five `terms` rows, eight `records` and a `lists` section, run by both suites; tests/test_state.py also drives `state favorite add` over a state.json that holds the half pair the old cut wrote. Against 575d817 with the new tests: 2 node checks FAIL and 2 python tests FAIL. Eight mutants, of the two cuts and their four callers, each red in the suite that owns it.
 - D-STATE-8, measured while fixing it and NOT fixed: the same `state favorite add` over four state files, each holding one escaped high surrogate (U+D83D) in a different place: a hidden group's name, a favourite's id, a recent's name, and the middle of a saved query. All four answered `internal` with a UnicodeEncodeError and left the file as it was. The helper's readers keep the half and its UTF-8 writer cannot encode it.
 - Not measured: what Qt's write path stores for a string holding half a pair; the shell's side of D-STATE-8.
+- [2026-11-12: D-STATE-8's helper side is fixed on dev: a half pair is written back as the escape it was read from, to the file and to the reply; see the board row. The shell's side stays unmeasured.]
 
 ### D-SINK-93 and D-SINK-94: what the network and scheme refusals say (the lead, 2026-11-11)
 

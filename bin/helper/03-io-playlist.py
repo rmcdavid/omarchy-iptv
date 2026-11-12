@@ -1281,9 +1281,31 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
         raise
 
 
+def escape_half_pairs(text: str) -> str:
+    """JSON text with every lone surrogate written as its JSON escape
+    (D-STATE-8). A str holds a surrogate code point only as HALF a pair --
+    the decoder joins a whole escaped pair into one character -- and half a
+    pair has no UTF-8 form, so the escape it was read from is the only way to
+    write it. Outside a string JSON holds none, so every one replaced here
+    stands inside a string, where the escape reads back as the same half."""
+    return "".join(ch if not 0xD800 <= ord(ch) <= 0xDFFF else "%su%04x" % (chr(92), ord(ch)) for ch in text)
+
+
 def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None:
     # json.dumps (one-shot C encoder) is several times faster than json.dump.
-    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", private_dir)
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    try:
+        write_text_atomic(path, text, private_dir)
+    except UnicodeEncodeError:
+        # D-STATE-8: a text read from a JSON file as half a surrogate pair (a
+        # hand edit, another writer) cannot be encoded, and the write ended
+        # `internal`: every state verb that writes, over a state.json holding
+        # one anywhere. The failed attempt left nothing behind
+        # (write_text_atomic removes its temporary file), and the second
+        # writes each half as the escape it was read from, so the file is
+        # valid UTF-8 JSON and every reader reads what it read before. Only
+        # on this path, so a write that never met one costs what it did.
+        write_text_atomic(path, escape_half_pairs(text), private_dir)
 
 
 def json_string(text: str) -> str:
@@ -1380,7 +1402,19 @@ def read_json(path: str) -> Any:
 
 
 def emit(payload: Any) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    text = json.dumps(payload, ensure_ascii=False) + "\n"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        # D-STATE-8, the reply's half: a verb that prints what a JSON file
+        # held (`state show`, and every state verb's reply) met the same half
+        # pair on stdout, after its write had landed, and answered `internal`.
+        # Asked of the text and not of the stream, whose error handler is the
+        # locale's: under C it is surrogateescape, which writes some halves
+        # as raw bytes that are not UTF-8. A reply is small; the write of a
+        # whole cache file (write_json_atomic) pays for no such check.
+        text = escape_half_pairs(text)
+    sys.stdout.write(text)
     sys.stdout.flush()
 
 

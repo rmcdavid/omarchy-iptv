@@ -685,6 +685,77 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual([r["query"] for r in written["savedSearches"]], ["a" + emoji * 31, "bbc"])
         self.path.read_text(encoding="utf-8").encode("utf-8")
 
+    def test_a_half_pair_anywhere_in_the_state_is_written_back_as_it_was_read(self):
+        """D-STATE-8: JSON may hold half a surrogate pair as an escape, and a
+        hand edit or another writer can leave one anywhere a text is kept.
+        The readers keep it, and the write, which is UTF-8, could not encode
+        it: every state verb that writes answered `internal` over such a
+        file. Now the half is written as the escape it was read from, so the
+        file stays valid UTF-8 JSON and every reader reads what it read
+        before. Built from code points so this source stays ASCII."""
+        import json, subprocess, sys
+        high, low = chr(0xd83d), chr(0xde00)
+        where = {
+            "a hidden group's name": {"hiddenGroups": ["News " + high + " HD"]},
+            "a favourite's id": {"favorites": ["n:" + high + "x"]},
+            "a recent's name": {"recents": [{"id": "t:a", "name": "A" + low + "B", "at": 5}]},
+            "inside a saved query": {"savedSearches": [{"query": "a" + high + "b", "at": 5}]},
+            "a low half before a high one": {"hiddenGroups": [low + high]},
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for label, part in where.items():
+            before = dict({"version": 2, "favorites": []}, **part)
+            self.path.write_text(json.dumps(before), encoding="ascii")
+            code, payload, stderr = self.state("favorite", "add", "t:x.test")
+            self.assertEqual((code, stderr), (0, ""), label)
+            data = self.path.read_bytes()
+            text = data.decode("utf-8")                    # valid UTF-8, or this raises
+            written = json.loads(text)
+            self.assertIn("t:x.test", written["favorites"], label)
+            for key, value in part.items():
+                kept = written[key]
+                if key == "favorites":
+                    kept = [f for f in kept if f != "t:x.test"]
+                self.assertEqual(kept, helper.normalize_state(before)[key], label)
+                self.assertEqual(kept, value, label)
+            # And the file is read again: `show` prints it, a second write lands.
+            code, payload, stderr = self.state("show")
+            self.assertEqual((code, stderr), (0, ""), label)
+            self.assertEqual(payload["state"]["favorites"], written["favorites"], label)
+            code, _, stderr = self.state("favorite", "remove", "t:x.test")
+            self.assertEqual((code, stderr), (0, ""), label)
+            self.assertEqual(json.loads(self.path.read_bytes().decode("utf-8")).get(next(iter(part))),
+                             written[next(iter(part))] if next(iter(part)) != "favorites"
+                             else [f for f in written["favorites"] if f != "t:x.test"], label)
+        # The reply on a real stdout, which an in-process StringIO is more
+        # forgiving than: the verb's own process, its bytes read as UTF-8.
+        # C.UTF-8 and C: under C the stream's own handler would write a half
+        # in U+DC80..U+DCFF as a raw byte.
+        half = chr(0xdc80)
+        self.path.write_text(json.dumps({"version": 2, "favorites": [], "hiddenGroups": ["G" + half + "x"]}),
+                             encoding="ascii")
+        for locale in ("C.UTF-8", "C"):
+            for verb in (["favorite", "add", "t:z.test"], ["show"]):
+                proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, *verb],
+                                      capture_output=True, timeout=30,
+                                      env={"PATH": os.environ.get("PATH", ""), "LC_ALL": locale, "LANG": locale})
+                self.assertEqual((proc.returncode, proc.stderr), (0, b""), (locale, verb))
+                reply = json.loads(proc.stdout.decode("utf-8"))
+                self.assertEqual(reply["state"]["hiddenGroups"], ["G" + half + "x"], (locale, verb))
+                self.assertEqual(reply["state"]["favorites"], ["t:z.test"], (locale, verb))
+        self.assertEqual(helper.escape_half_pairs("plain " + chr(0x1f600) + " text"), "plain " + chr(0x1f600) + " text")
+        self.assertEqual(helper.escape_half_pairs(json.dumps("a" + high, ensure_ascii=False)),
+                         '"a' + chr(92) + 'ud83d"')
+        # A whole pair is one character and is written raw, as it always was.
+        emoji = high + low
+        self.path.write_text(json.dumps({"version": 2, "favorites": [], "hiddenGroups": ["Fun " + emoji]}),
+                             encoding="ascii")
+        code, _, stderr = self.state("favorite", "add", "t:y.test")
+        self.assertEqual((code, stderr), (0, ""))
+        raw = self.path.read_bytes()
+        self.assertIn(chr(0x1f600).encode("utf-8"), raw)
+        self.assertNotIn(b"ud83d", raw.lower())
+
     def test_saved_searches_are_bounded_and_de_duplicated_on_the_folded_terms(self):
         many = [{"query": "term%d" % i, "at": 0} for i in range(helper.MAX_SAVED_SEARCHES + 10)]
         self.assertEqual(len(helper.normalize_state({"savedSearches": many})["savedSearches"]),
