@@ -140,7 +140,7 @@ class FixtureTest(unittest.TestCase):
                  "stored": [c for c in CASES if "stored" in c],
                  "header": [c for c in CASES if c["line"].startswith("#EXTM3U")]}
         self.assertEqual((len(CASES), {k: len(v) for k, v in kinds.items()}),
-                         (104, {"leak": 64, "cost": 9, "accepted": 4, "stored": 38, "header": 9}))
+                         (109, {"leak": 66, "cost": 10, "accepted": 4, "stored": 43, "header": 9}))
         self.assertTrue(all(not leaked(c["line"]) for c in kinds["cost"]))
         self.assertEqual(SECRET, "qz")
 
@@ -376,12 +376,16 @@ def mark_end(text, i):
 
 def host_follows(text, i, end):
     """Whether text[i:end] opens with a HOST, as the review of 4d13d71's lead
-    call states one: two or more DNS labels whose last is letter-led and at
-    least two characters, a dotted quad, or a bracketed IPv6 literal, each
-    with an optional `:` and digits, then `end` (the token's end) or a `/`,
-    `?`, `#` or `,`."""
-    name = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."
+    call states one and the review of 2942e41's widens it: two or more
+    labels whose last is letter-led and at least two characters, a dotted
+    quad, or a bracketed IPv6 literal, each with an optional `:` and digits;
+    or one letter-led label of two or more characters with a `:` and digits;
+    a label of ASCII letters, digits, `-` and `_` or any non-ASCII
+    character but whitespace, and one trailing dot allowed; then `end` (the
+    token's end), a `/`, `?`, `#` or `,`, or whitespace."""
+    name = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._"
     j = i
+    single = False
     if j < end and text[j] == "[":
         k = j + 1
         while k < end and text[k] in "0123456789abcdefABCDEF:.":
@@ -391,22 +395,24 @@ def host_follows(text, i, end):
         j = k + 1
     else:
         k = j
-        while k < end and text[k] in name:
+        while k < end and (text[k] in name or (ord(text[k]) > 0x7f and not text[k].isspace())):
             k += 1
-        labels = text[j:k].split(".")
+        run = text[j:k]
+        labels = (run[:-1] if run.endswith(".") else run).split(".")
         quad = len(labels) == 4 and all(0 < len(x) <= 3 and all(c in "0123456789" for c in x) for x in labels)
-        named = (len(labels) >= 2 and all(labels) and len(labels[-1]) >= 2
-                 and labels[-1][0] in name[:52])
-        if not (quad or named):
+        named = len(labels) >= 2 and all(labels) and len(labels[-1]) >= 2 and labels[-1][0].isalpha()
+        single = len(labels) == 1 and len(labels[0]) >= 2 and labels[0][0].isalpha()
+        if not (quad or named or single):
             return False
         j = k
-    if j < end and text[j] == ":":
+    if j < end and text[j] == ":" and j + 1 < end and text[j + 1] in "0123456789":
         k = j + 1
         while k < end and text[k] in "0123456789":
             k += 1
-        if k > j + 1:
-            j = k
-    return j == end or text[j] in "/?#,"
+        j = k
+    elif single:
+        return False
+    return j == end or text[j] in "/?#," or text[j].isspace()
 
 
 def reference(text, trace):
@@ -480,13 +486,20 @@ def reference(text, trace):
                 ts = text.rfind(" ", 0, vs) + 1
                 te = text.find(" ", end)
                 te = n if te < 0 else te
-                found = rule.credential(text, ts, te, rule.urls(text))
-                # Across a `,`, only when a host follows the `@` (the review
-                # of 4d13d71).
-                if (found is not None and found[1] >= end and found[2] < end
-                        and (text[end] != "," or host_follows(text, found[1] + 1, te))):
+                urls = rule.urls(text)
+                found = rule.credential(text, ts, te, urls)
+                # Across a `,`, only when a host follows an `@` it would take
+                # (the review of 4d13d71; any such `@`, the review of
+                # 2942e41); and across whitespace the same, when the
+                # credential's colon is a URL's own (the review of 2942e41).
+                if found is not None and found[1] >= end and found[2] < end:
                     we = found[2] + rule.trailing_keep(text[found[2]:te])
-                    if we > end:
+                    own = any(u[0] <= found[0] < u[3] for u in urls)
+                    gated = text[end] == "," or (own and text[end].isspace())
+                    if gated:
+                        trace.append("bare-gated")
+                    if we > end and (not gated or any(text[a] == "@" and host_follows(text, a + 1, te)
+                                                      for a in range(end, we))):
                         trace.append("bare-credential")
                         end = we
             value = text[vs:end]
@@ -640,6 +653,85 @@ class HostShapedGrowthTest(unittest.TestCase):
                                                                     "KC@BUF", "8:30", "cdn.test(x")],
                          [True, False, False, True, True, False, False, False, False])
 
+    def test_the_host_shapes_the_review_of_2942e41_named(self):
+        # A single letter-led label with a port, a trailing dot, an underscore,
+        # a non-ASCII label and a host whitespace ends are hosts; a bare
+        # single label, a one-letter one with a port and a digit-led one with
+        # a port are not (`Sky@News`, `Live@8:30` and `Breakfast@9:00` must
+        # not grow).
+        shapes = {"localhost:8080": True, "iptv:80": True, "cdn.test.": True, "cdn_test.com": True,
+                  chr(0x43F) + chr(0x440) + chr(0x438) + chr(0x43C) + chr(0x435) + chr(0x440) + "." + chr(0x440) + chr(0x444): True,
+                  "cdn.test\tx": True, "cdn.test" + chr(0xA0) + "x": True, "localhost.:80": True,
+                  "localhost": False, "iptv": False, "localhost.": False, "x:80": False, "8:30": False, "9:00": False,
+                  "localhost:": False, "localhost:80x": False, "cdn.1test": False, "1.2.3": False}
+        self.assertEqual({t: helper.host_shaped(t, 0, len(t)) for t in shapes}, shapes)
+
+    def test_a_credential_whose_host_the_review_of_2942e41_named_is_taken_whole(self):
+        # Red on 2942e41: each stored the username and the password's head as
+        # the group or the tvg-id, and every sink printed them.
+        hosts = ["localhost:8080", "iptv:80", "cdn.test.", "cdn_test.com", "cdn.test\tx",
+                 chr(0x43F) + chr(0x440) + chr(0x438) + chr(0x43C) + chr(0x435) + chr(0x440) + "." + chr(0x440) + chr(0x444)]
+        lines = ["#EXTINF:-1 %s=qqqqqq:zz,zz@%s,Name" % (key, host) for key in ("group-title", "tvg-id") for host in hosts]
+        # And a password holding an `@` is judged on every `@` the growth
+        # would take, not on its own tail.
+        lines.append("#EXTINF:-1 group-title=qqqqqq:zz,z@z@cdn.test,Name")
+        rows = [parse_line(line) for line in lines]
+        bad = []
+        for line, (doc, channel) in zip(lines, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(ascii(line), field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]) or "tvgId" in channel:
+                bad.append((ascii(line), "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(ascii(line), sink, out) for line, row in zip(lines, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+
+    def test_what_a_host_that_is_no_host_shape_leaves_stated(self):
+        # The residual: a bare single label (or a digit-led last label, a
+        # three-part number, a port with no digits or with text after them)
+        # is no host, so the value is cut at the `,`: the username and the
+        # password before it print in the group or the tvg-id, and the rest
+        # of the password and the host in the name.
+        _, channel = parse_line("#EXTINF:-1 group-title=qqqqqq:zz,zz@localhost,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("qqqqqq:zz", "zz@localhost,Name"))
+        _, channel = parse_line("#EXTINF:-1 tvg-id=qqqqqq:zz,zz@iptv,Name")
+        self.assertEqual((channel.get("tvgId"), channel["name"]), ("qqqqqq:zz", "zz@iptv,Name"))
+
+
+class TabGrowthTest(unittest.TestCase):
+    """The review of 2942e41 (its changes-too-much finding 2): a URL's own
+    colon is a credential's when the URL's run ends before the `@` (the
+    review of 4d13d71's eligibility), the run ends at a TAB, and a bare value
+    grew across a TAB unconditionally, so a TAB-separated URL attribute took
+    every attribute after it and the title's head whenever a word later in
+    its U+0020 token held an `@`. Growth across whitespace from a URL's own
+    colon is gated now as growth across a `,` is: only when a host follows
+    an `@` it would take. Each line below reads as a8e8174 read it; red on
+    2942e41. The stated cost is pinned in attr-grammar.json: a later word
+    whose `@` a host follows still takes the URL attribute with it."""
+
+    LINES = [("#EXTINF:-1 tvg-logo=http://logo.test/a.png\ttvg-name=Sky@News,Sky News",
+              ("Sky News", helper.UNGROUPED, "http://logo.test/a.png", "Sky@News", None)),
+             ("#EXTINF:-1 tvg-id=bbc1.uk\ttvg-logo=http://logo.test:8080/a.png\tgroup-title=News@UK,BBC One",
+              ("BBC One", "News@UK", "http://logo.test:8080/a.png", None, "bbc1.uk")),
+             ("#EXTINF:-1 tvg-logo=http://logo.test/a.png\tgroup-title=Sports,Live@8",
+              ("Live@8", "Sports", "http://logo.test/a.png", None, None)),
+             ("#EXTINF:-1 tvg-logo=http://logo.test:8080/a.png\tgroup-title=Sports,Breakfast@9:00",
+              ("Breakfast@9:00", "Sports", "http://logo.test:8080/a.png", None, None))]
+
+    def test_a_tab_separated_url_attribute_keeps_what_follows_it(self):
+        got = [tuple(parse_line(line)[1].get(k) for k in ("name", "group", "logo", "tvgName", "tvgId")) for line, _ in self.LINES]
+        self.assertEqual(got, [want for _, want in self.LINES])
+
+    def test_a_password_a_tab_cuts_inside_a_url_is_still_taken_whole(self):
+        # The review of 4d13d71's pins: the URL's colon, the TAB (or VT, FF,
+        # CR) and the `@` a host follows.
+        for sep in "\t\x0b\x0c\r":
+            _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz%szz@cdn.test/x,Name" % sep)
+            self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz%szz@cdn.test/x,Name" % sep, "Channel 1"))
+        _, channel = parse_line("#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@cdn.test/x,")
+        self.assertEqual((channel["name"], channel.get("tvgName")), ("http://qqqqqq:zz\tzz@cdn.test/x", None))
+
 
 class TabInPasswordValueTest(unittest.TestCase):
     """The review of 4d13d71 (its still-shows finding 1): a TAB in the
@@ -746,9 +838,25 @@ class LinearTest(unittest.TestCase):
             times.append(time.thread_time() - t0)
         return min(times)
 
+    # The review of 2942e41 (its cost finding 1): a bare value's U+0020
+    # token bounds were searched for once a value, so values a TAB separates,
+    # one token, read the whole line each: quadratic (12.6 s for
+    # `a=x:@<TAB>` repeated to 1.6M characters, 33.9 s with two Han before
+    # each TAB). They are found once a token now. At 8,000 and 32,000
+    # characters the line's own linear work hides the square (a ratio of 5.2
+    # and 6.2 on 2942e41), so these are held at 100,000 and 400,000, where
+    # 2942e41 gives 11.9 and 13.2.
+    LONG_SHAPES = [lambda n: "a=x:@\t" * (n // 6),
+                   lambda n: ("a=x:" + chr(0x65E5) + chr(0x672C) + "\t") * (n // 7) + "@"]
+
     def test_parse_attrs_is_linear_on_every_shape(self):
         for shape in self.SHAPES:
             small, large = self.best(shape(8000)), self.best(shape(32000))
+            self.assertLess(large, 8 * small + 0.002, ascii(shape(16)[:16]))
+
+    def test_parse_attrs_is_linear_when_tabs_separate_the_values(self):
+        for shape in self.LONG_SHAPES:
+            small, large = self.best(shape(100000)), self.best(shape(400000))
             self.assertLess(large, 8 * small + 0.002, ascii(shape(16)[:16]))
 
 

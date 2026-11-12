@@ -741,6 +741,7 @@
         "countedEnds",
         "tokenCredential",
         "NAMED_SCHEMES",
+        "OPENING_CHARS",
         "unnamedSchemeCredential",
         "credentialSpans",
         "redactTokens",

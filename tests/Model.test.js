@@ -4374,7 +4374,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       if (deleting(v.text) !== wantDeleting) bad.push([v.why, "notifyReasonText", deleting(v.text)])
       if (!leaks(wantDeleting) && leaks(body(v.text))) bad.push([v.why, "notifyArgv", body(v.text)])
     })
-    return [marks.vectors.length >= 142, bad]
+    return [marks.vectors.length >= 150, bad]
   }, [true, []])
   checkCall("D-SINK-95: SLASH_ALIKE_CODES is the fixture's list, and over every code unit isSlashAlikeCode, isUrlFillerCode and isMarkStandInCode hold exactly where the rule recomputed from url-mark.json and url-whitespace.json says, and a CROSSABLE code unit between a scheme and a letterless segment before its `:` is crossed (Model.urlAt)", function () {
     const wrong = []
@@ -4515,8 +4515,13 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   // a TAB, LF, VT, FF or CR ends (an empty run, most often), which the
   // deleting sinks join to the password, so the URL takes the credential's
   // `:` and the username's head before the URL's scheme, or the URL's run as
-  // a host, prints there. tests/test_url_marks.py holds the helper's sinks
-  // and this mirror's to the same inputs.
+  // a host, prints there; or, when the joined run takes the credential's `:`
+  // and `@` as its own userinfo, the token is no credential there and the
+  // URLs before it in the token print their hosts, which are the username's
+  // text (the review of 2942e41: `News http://q.qqqa<U+2215>://<TAB>qq:zzzzzz@
+  // cdn.test/live/1.ts HD` prints `News q.qqqa HD` in the notification,
+  // pinned in url-mark.json). tests/test_url_marks.py holds the helper's
+  // sinks and this mirror's to the same inputs.
   checkCall("D-SINK-95, D-SINK-96: over several insertions the notification leaks only where sinkText does, but for the named residual", function () {
     const bases = ["http://qqqqqq:zzzzzz@cdn.test/live/1.ts", "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
                    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "qqqqqq:zzzzzz@cdn.test/live/1.ts"]
@@ -4530,8 +4535,11 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
     // The residual as the review of 4d13d71 restated it: a URL whose run a
     // TAB, LF, VT, FF or CR ends, followed by text that is no delimiter; the
     // deleting sinks join the run to that text and print its head as the
-    // host, credential text or not. The first version named only a URL
-    // inside a credential's span, which is what this seed reached.
+    // host, credential text or not; or, when the joined run takes the
+    // credential's `:` and `@` as its own userinfo, the URLs before it in
+    // the token print their hosts, the username's text (the review of
+    // 2942e41). The first version named only a URL inside a credential's
+    // span, which is what this seed reached.
     const named = function (s) {
       return Model.urlList(s).some(function (u) {
         let e = u.runEnd
@@ -4549,7 +4557,11 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
     // (The review of 4d13d71 closed the three the first version named at
     // the deleting sinks too, and its seeds reached the last two.)
     const residual = ["a://\nzzzzzz:///x", "a://\tqqqqqq:///x",
-                      "http&://cdn.test/live/qqqqa:" + D2 + "\tqq:///zzzzzz/1.ts"]
+                      "http&://cdn.test/live/qqqqa:" + D2 + "\tqq:///zzzzzz/1.ts",
+                      // The review of 2942e41: the joined run takes the
+                      // credential's `:` and `@`, and the URL before it
+                      // prints its host, the username's text.
+                      "http://q.qqqa" + String.fromCharCode(0x2215) + "://\tqq:zzzzzz@cdn.test/live/1.ts"]
     for (let i = 0; i < 40000 + residual.length; i++) {
       let s = residual[i - 40000]
       if (i < 40000) {
@@ -4858,8 +4870,12 @@ function credentialsAsRuled(s, matches) {
     }
     if (matches.some(function (x) {
       const scheme = x[1].replace(/[^ -~]/g, "").toLowerCase()
+      // The review of 2942e41: a named scheme counts when its mark is not
+      // the clean `://` or its run opens with a `:`, and no URL counts that
+      // only opening brackets and quotes stand before in the token.
       return x.index > i && x.index < j && x[4].indexOf("@") !== -1 && (x[2] + x[4].substring(0, x[4].indexOf("@"))).indexOf(":") !== -1 &&
-        NAMED_AS_RULED.indexOf(scheme) === -1
+        (NAMED_AS_RULED.indexOf(scheme) === -1 || x[2] + x[3] !== "://" || x[4].charAt(0) === ":") &&
+        !/^[([{<"'`]*$/.test(s.substring(i, x.index))
     })) start = i
     if (start !== -1) out.push([start, j - trailingAsRuled(s.substring(start, j))[2].length, j])
   }

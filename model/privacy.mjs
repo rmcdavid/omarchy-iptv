@@ -966,7 +966,12 @@ function urlSchemeStart(s, at, low) {
 // controls (the notification, the helper's window title) join the run to
 // the text after it and print that text's head as the host, credential text
 // or not (`News a://<TAB>qqqqqq:///x HD` prints `News qqqqqq HD` there,
-// where sinkText prints `[url]` twice).
+// where sinkText prints `[url]` twice), or, when the joined run takes the
+// credential's `:` and `@` as its own userinfo, the token is no credential
+// there and the URLs before it in the token print their hosts, which are
+// the username's text (the review of 2942e41: `News http://q.qqqa<U+2215>://
+// <TAB>qq:zzzzzz@cdn.test/live/1.ts HD` prints `News q.qqqa HD` there, where
+// sinkText withholds the token).
 function urlFrom(s, low, alike) {
   var n = s.length
   var dead = low
@@ -1226,30 +1231,51 @@ function tokenCredential(s, ts, te, urls) {
 var NAMED_SCHEMES = ["acestream", "data", "file", "ftp", "ftps", "http", "https", "magnet", "mms", "mmsh", "mmst",
                      "rtmp", "rtmpe", "rtmps", "rtmpt", "rtp", "rtsp", "sftp", "smb", "srt", "tcp", "tls", "udp"]
 
+// The opening brackets and quotes: text of these alone before a scheme in
+// its token holds no username (unnamedSchemeCredential, the review of
+// 2942e41). The helper's _OPENING_RUN is the mirror.
+var OPENING_CHARS = "([{<\"'`"
+
 // { colon, at } -- the first `:` of its mark or its run before the run's
 // first `@`, and that `@` -- for the first URL starting in the token
-// [ts, te) after `ts` whose scheme (its printable ASCII, lower-cased) is no
-// NAMED one, whose run holds an ASCII `@` and whose mark or run holds an
-// ASCII `:` before it; or null (the review of 4d13d71). Such a URL is a
-// credential's username read as a scheme: `qq_qqqq:<U+200B>//zzzzzz@
+// [ts, te) after `ts`, after text in its token that is not opening brackets
+// and quotes alone, whose run holds an ASCII `@` and whose mark or run
+// holds an ASCII `:` before it, and whose scheme (its printable ASCII,
+// lower-cased) is no NAMED one or whose mark is not the clean `://` (it
+// holds a FILLER or a STAND_IN, a look-alike slash or another colon) or
+// whose run opens with a `:`; or null (the review of 4d13d71). Such a URL is
+// a credential's username read as a scheme: `qq_qqqq:<U+200B>//zzzzzz@
 // cdn.test` read `qqqq` as the scheme and its mark took the credential's
 // colon, and in `qq_qqqq<U+200B>//:zzzzzz@cdn.test` the colon opens the
 // run; every sink printed `qq_` before the host. The lead's call named a
 // `:` in P only; the run's `:` before its `@` is the nearest variant that
 // closes the second shape too, and it moved none of the 3,705 realistic
-// strings. With nothing before its scheme in the token it prints no username
-// (`qqqqqq://zzzzzz@cdn.test` prints `cdn.test`), and a named scheme is a
-// URL's (`1http://u:p@h` prints its host). tokenCredential withholds the
-// token from its start, as `abc:http://u:p@h` is. The helper's
-// _unnamed_scheme_credential is the mirror.
+// strings. A named scheme counts when its mark is not clean (the review of
+// 2942e41): `qq_tcp:<U+200B>//zzzzzz@cdn.test` printed `qq_cdn.test` here
+// and `qq_tcp://cdn.test` in the helper. With nothing before its scheme in
+// the token it prints no username (`qqqqqq://zzzzzz@cdn.test` prints
+// `cdn.test`), nor after opening brackets and quotes alone (the review of
+// 2942e41: `(ssh://git@github.com/x)` printed `[host withheld])`); and a
+// named scheme behind a clean `://` is a URL's (`1http://u:p@h` prints its
+// host). What that leaves, stated: a username ending in a named scheme
+// after a non-scheme character, before a password that starts with the
+// clean `://` (`qq_tcp://zzzzzz@cdn.test`, case-blind), prints its head
+// here (`qq_cdn.test`) and whole in the helper (`qq_tcp://cdn.test`), as
+// `1http://u:p@h` does. tokenCredential withholds the token from its start,
+// as `abc:http://u:p@h` is. The helper's _unnamed_scheme_credential is the
+// mirror.
 //
 // Linear: the next `@` is searched for once and kept while the URLs pass it,
-// so no search reads past a run more than once, and each URL is walked for
-// its colon only up to that `@`, inside its own span.
+// so no search reads past a run more than once, each URL is walked for its
+// colon only up to that `@`, inside its own span, and the opening run is
+// read once a call.
 function unnamedSchemeCredential(s, ts, te, urls) {
   var at = -2
+  var opening = ts
+  while (opening < te && OPENING_CHARS.indexOf(s.charAt(opening)) !== -1) opening++
   for (var i = lastUrlBefore(urls, ts + 1) + 1; i < urls.length && urls[i].start < te; i++) {
     var u = urls[i]
+    if (u.start <= opening) continue
     if (at !== -1 && at < u.markEnd) at = s.indexOf("@", u.markEnd)
     if (at === -1) return null
     if (at >= u.runEnd) continue
@@ -1261,7 +1287,8 @@ function unnamedSchemeCredential(s, ts, te, urls) {
       var c = s.charCodeAt(k)
       if (c >= 0x20 && c <= 0x7e) scheme += s.charAt(k)
     }
-    if (NAMED_SCHEMES.indexOf(scheme.toLowerCase()) === -1) return { colon: colon, at: at }
+    if (NAMED_SCHEMES.indexOf(scheme.toLowerCase()) === -1 || s.substring(u.markStart, u.markEnd) !== "://"
+        || s.charCodeAt(u.markEnd) === 58) return { colon: colon, at: at }
   }
   return null
 }
@@ -1467,6 +1494,6 @@ export {
   nextUrlSlash, wideCount, urlSchemeStart, urlFrom, urlAt, urlList,
   redactionCanChange, lastUrlBefore, urlHolding, eligibleColon,
   SPACELESS_RANGES, isSpacelessCode, countedEnds, tokenCredential,
-  NAMED_SCHEMES, unnamedSchemeCredential, credentialSpans, redactTokens,
-  urlShown, redactUrls, scrubUrls, sinkText
+  NAMED_SCHEMES, OPENING_CHARS, unnamedSchemeCredential, credentialSpans,
+  redactTokens, urlShown, redactUrls, scrubUrls, sinkText
 }

@@ -37,7 +37,9 @@ end less its trailing punctuation. And a URL starting in the token after
 its start, whose scheme (its printable ASCII, lower-cased) is no NAMED one,
 whose run holds an `@` and whose mark or run holds a `:` before that `@`,
 makes the token a credential withheld from its start (the review of
-4d13d71).
+4d13d71); so does one whose scheme is NAMED when its mark is not exactly
+`://` or its run opens with a `:`, and none does when the text before it
+in the token is opening brackets and quotes alone (the review of 2942e41).
 """
 
 DELIMITERS = "\t\n\x0b\x0c\r "
@@ -59,6 +61,8 @@ SPACELESS = ((0x2E80, 0x2FDF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFA
 NAMED = frozenset(("http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt", "file", "ftp", "ftps",
                    "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"))
 WITHHELD = "[host withheld]"
+# The opening brackets and quotes (the review of 2942e41).
+OPENING = frozenset("([{<\"'`")
 
 
 def scheme_char(c):
@@ -204,7 +208,8 @@ def credential(text, i, j, url_list, pos=None):
         if i < u[0] < j and u[0] >= lo and "@" in text[u[2]:u[3]]:
             at = text.index("@", u[2])
             scheme = "".join(ch for ch in text[u[0]:u[1]] if " " <= ch <= "~").lower()
-            if ":" in text[u[1]:at] and scheme not in NAMED:
+            if (":" in text[u[1]:at] and (scheme not in NAMED or text[u[1]:u[2]] != "://" or text[u[2]:u[2] + 1] == ":")
+                    and any(ch not in OPENING for ch in text[i:u[0]])):
                 held = (text.index(":", u[1]), at)
                 break
     if held is None:

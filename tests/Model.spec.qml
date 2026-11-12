@@ -1301,7 +1301,15 @@ TestCase {
       ["q:z" + c(0xd83d) + c(0xde00) + "z@h", "[host withheld]"],
       ["q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h", "q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h"],
       ["News http://qqqqqq:zz" + c(0x9) + "zz@cdn.test/x HD", "News [host withheld] HD"],
-      ["News qq_qqqq:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"]
+      ["News qq_qqqq:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      // The review of 2942e41: a named scheme counts too when its mark is not
+      // the clean `://` (case-blind); a URL only an opening bracket or quote
+      // stands before in its token prints its host; and a named scheme behind
+      // the clean `://` is still a URL's, the stated residual.
+      ["News qq_tcp:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      ["News qq_HTTPS" + c(0x200b) + "//:zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      ["Clone (ssh://git@github.com/x) now", "Clone (github.com) now"],
+      ["News qq!acestream://zzzzzz@cdn.test/live/1.ts HD", "News qq!cdn.test HD"]
     ]
     for (var i = 0; i < cases.length; i++) {
       compare(Model.redactUrls(cases[i][0]), cases[i][1], "redactUrls " + i)

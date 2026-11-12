@@ -644,6 +644,7 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     # #EXTINF line). A reading from the line's start finds the same URLs
     # inside each token, since no walk, mark or run crosses a U+0020.
     reading: UrlReading | None = None
+    token_start = token_end = -1
     while pos < size:
         match = _ATTR_QUOTED.match(text, pos)
         if match is not None:
@@ -726,27 +727,60 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
                 # class, which every redactor withholds whole since the
                 # credential is read across the URL): stored to the TAB, the
                 # value printed `qq` as its host. Across a `,` the value grows
-                # only when a host follows the `@` it would take (host_shaped,
+                # only when a host follows an `@` it would take (host_shaped,
                 # the review of 4d13d71): growing on any `@` swallowed an
                 # ordinary title whose first word held one, and dropped the
                 # tvg-id before it (`tvg-id=uk:bbc1,KC@BUF 20:15` stored no
                 # tvg-id and the name `20:15`; `group-title=UK:Sports,NYY@BOS`
                 # lost its name), in 25 of 351 realistic names a form; a
-                # provider's credential names a host.
-                token_start = text.rfind(" ", 0, start) + 1
-                token_end = text.find(" ", end)
-                if token_end < 0:
-                    token_end = size
+                # provider's credential names a host. Any `@` it would take,
+                # not only the first after the colon (the review of 2942e41),
+                # so a password holding an `@` is not judged on its own tail.
+                # And across whitespace (a TAB, or any other) the same holds
+                # when the credential's colon is a URL's own (_eligible_colon:
+                # its run ends before the `@`), the review of 2942e41: the
+                # value had grown there unconditionally, so a TAB-separated
+                # URL attribute took every attribute after it and the title's
+                # head whenever a word later in the token held an `@`
+                # (`tvg-logo=http://logo.test/a.png<TAB>tvg-name=Sky@News,Sky
+                # News` lost its logo, its tvg-name and the name's head).
+                # Growth across whitespace whose colon stands outside every
+                # URL is unconditional, as it was. The cost, stated: a
+                # TAB-separated URL attribute before a later word whose `@` a
+                # host follows is still taken whole with it
+                # (`tvg-logo=http://logo.test:8080/a.png<TAB>group-title=
+                # mail@x.test,Name` stores no logo, no group and the name
+                # `Channel 1`).
+                # The token's bounds, found once a token (the review of
+                # 2942e41): values only move forward, and one that starts
+                # before the token's end is in the same token. Found for each
+                # value, the two searches read the whole line when TABs
+                # separate its values, quadratic (12.6 s for parse_attrs on
+                # `a=x:@<TAB>` repeated to 1.6M characters).
+                if start >= token_end:
+                    token_start = text.rfind(" ", 0, start) + 1
+                    token_end = text.find(" ", end)
+                    if token_end < 0:
+                        token_end = size
                 if token_start not in held:
                     if reading is None:
                         reading = UrlReading(text, 0, plain)
                     found = token_credential(text, token_start, token_end, reading)
+                    # (its `@`, the span's start, the span's end, whether its
+                    # colon is a URL's own, the last `@` in the span a host
+                    # follows: -2 until a gated growth asks).
                     held[token_start] = (None if found is None else
-                                         (found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end])))
+                                         [found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end]),
+                                          reading.holding(found[0]) >= 0, -2])
                 span = held[token_start]
-                if (span is not None and span[0] >= grown and span[1] < grown < span[2]
-                        and (text[grown] != "," or host_shaped(text, span[0] + 1, token_end))):
-                    grown = span[2]
+                if span is not None and span[0] >= grown and span[1] < grown < span[2]:
+                    if text[grown] == "," or (span[3] and text[grown].isspace()):
+                        if span[4] == -2:
+                            span[4] = last_hosted_at(text, span[1], span[2], token_end)
+                        if span[4] >= grown:
+                            grown = span[2]
+                    else:
+                        grown = span[2]
             if grown != end:
                 # A bare value starts with no whitespace, so this is its
                 # offset in the stored value. A list opening is judged in
@@ -771,33 +805,73 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     return attrs, text[pos:]
 
 
-_HOST_NAME_RUN = re.compile(r"[A-Za-z0-9.\-]*")
+# A host name's characters, as host_shaped reads them: ASCII letters, digits,
+# `-`, `.` and `_`, and every non-ASCII code point but whitespace (an IDN
+# label as the provider wrote it).
+_HOST_NAME_RUN = re.compile(r"[^\x00-\x2c/:-@\[-\^`{-\x7f\s]*")
 _HOST_IPV6_RUN = re.compile(r"\[[0-9A-Fa-f:.]+\]")
 _HOST_PORT_RUN = re.compile(r":[0-9]+")
 
 
 def host_shaped(text: str, i: int, end: int) -> bool:
-    """Whether text[i:end] starts with a HOST and ends there or at a `/`,
-    `?`, `#` or `,`: two or more DNS labels whose last is letter-led and at
-    least two characters long, a dotted quad, or a bracketed IPv6 literal,
-    each with an optional `:` and digits. parse_attrs asks it of the text
-    after the `@` a bare value's growth across a `,` would take (the review
-    of 4d13d71): `qqqqqq:zz,zz@cdn.test,Name` grows, `UK:News,Sky@News HD`
-    does not. Reads one run of host characters from `i`, once a token."""
+    """Whether text[i:end] starts with a HOST and ends there, at a `/`,
+    `?`, `#` or `,`, or at whitespace: two or more labels whose last is
+    letter-led and at least two characters long, a dotted quad, or a
+    bracketed IPv6 literal, each with an optional `:` and digits; or ONE
+    letter-led label of two or more characters with a `:` and digits
+    (`localhost:8080`, `iptv:80`). A label holds ASCII letters, digits,
+    `-` and `_`, or any non-ASCII code point but whitespace (an IDN label),
+    and one trailing dot ends the name (`cdn.test.`). parse_attrs asks it
+    of the text after each `@` a bare value's growth across a `,`, or across
+    whitespace from a URL's own colon, would take (the review of 4d13d71):
+    `qqqqqq:zz,zz@cdn.test,Name` grows, `UK:News,Sky@News HD` does not. The
+    review of 2942e41 widened it: a single label with a port, a trailing
+    dot, an underscore, a non-ASCII label and a host whitespace ends were
+    not hosts, so `qqqqqq:zz,zz@localhost:8080,Name` stored the group
+    `qqqqqq:zz` and every sink printed it. What it leaves, stated: a bare
+    single label is no host (`Sky@News` must not grow), nor is a digit-led
+    one with a port (`Live@8:30`, `Breakfast@9:00`), a digit-led last label
+    (`cdn.1test`), three numbers (`1.2.3`), or a `:` with no digits or with
+    text after them (`cdn.test:`, `cdn.test:80x`), so
+    `qqqqqq:zz,zz@localhost,Name` prints the username and the password
+    before the `,` in the group or the tvg-id, and the rest of the password
+    and the host in the name. And its cost: a letter-led word with a port
+    after an `@` is a host, so a bare value holding a `:` before a title
+    word like `NYY@BOS_19:10` takes the title. Reads one run of host
+    characters from `i`."""
     v6 = _HOST_IPV6_RUN.match(text, i, end)
+    single = False
     if v6 is not None:
         j = v6.end()
     else:
         j = _HOST_NAME_RUN.match(text, i, end).end()
-        labels = text[i:j].split(".")
-        quad = len(labels) == 4 and all(label.isdigit() and len(label) <= 3 for label in labels)
+        name = text[i:j]
+        labels = (name[:-1] if name.endswith(".") else name).split(".")
+        quad = len(labels) == 4 and all(label.isascii() and label.isdigit() and len(label) <= 3 for label in labels)
         last = labels[-1]
-        if not quad and (len(labels) < 2 or not all(labels) or len(last) < 2 or not last[0].isalpha()):
+        if not quad and (not all(labels) or len(last) < 2 or not last[0].isalpha()):
             return False
+        single = not quad and len(labels) == 1
     port = _HOST_PORT_RUN.match(text, j, end)
     if port is not None:
         j = port.end()
-    return j == end or text[j] in "/?#,"
+    elif single:
+        return False
+    return j == end or text[j] in "/?#," or text[j].isspace()
+
+
+def last_hosted_at(text: str, lo: int, hi: int, end: int) -> int:
+    """The last ASCII `@` in [lo, hi) after which host_shaped(text, its
+    position + 1, end) holds, or -1. parse_attrs asks it once a token: a
+    growth would take every `@` from where it starts to the span's end, so
+    it grows when this is at or after that start. Each host read stops at
+    the next `@`, so the reads are disjoint."""
+    at = text.rfind("@", lo, hi)
+    while at >= 0:
+        if host_shaped(text, at + 1, end):
+            return at
+        at = text.rfind("@", lo, at)
+    return -1
 
 
 def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:

@@ -73,7 +73,7 @@ class FixtureTest(unittest.TestCase):
     def test_the_fixture_is_ascii_and_whole(self):
         self.assertTrue(all(b < 0x80 for b in FIXTURE_BYTES))
         vectors = FIXTURE["vectors"]
-        self.assertGreaterEqual(len(vectors), 142)
+        self.assertGreaterEqual(len(vectors), 150)
         # Each half of the rule is there: broken marks that now redact,
         # tokens, the residuals, the accepted false positives, and the lines
         # the review of cbd6679 found changed that the caps keep.
@@ -553,9 +553,15 @@ def credential_holds_a_delimited_run(text):
     text before a URL's scheme when a credential holds the run, or the next
     word (`News a://<TAB>qqqqqq:///x HD` prints `qqqqqq` there) -- while the
     plain sinks withhold the credential or print `[url]`: the six delimiters
-    inside a URL's run (R32a''', D-SINK-34), seen from the deleting side.
-    The first version of this named only a URL inside a credential's span,
-    which is what the sweep's seed reached, not what the sinks do."""
+    inside a URL's run (R32a''', D-SINK-34), seen from the deleting side;
+    or, when the joined run takes the credential's `:` and `@` as its own
+    userinfo, the token is no credential there and the URLs before it in the
+    token print their hosts, which are the username's text (the review of
+    2942e41: `News http://q.qqqa<U+2215>://<TAB>qq:zzzzzz@cdn.test/live/1.ts
+    HD` prints `News http://q.qqqa HD` there, pinned in url-mark.json; five
+    of the six its seeds 11 and 12 reached were this case). The first
+    version of this named only a URL inside a credential's span, which is
+    what the sweep's seed reached, not what the sinks do."""
     for url in rule.urls(text):
         end = url[3]
         if end < len(text) and text[end] in "\t\n\x0b\x0c\r":
@@ -614,7 +620,11 @@ class MultiInsertTest(unittest.TestCase):
         # after text in its token, and its seeds reached the last two.)
         residual = ["News a://\nzzzzzz:///x HD",
                     "News a://\tqqqqqq:///x HD",
-                    "News http&://cdn.test/live/qqqqa:" + chr(0x2215) * 2 + "\tqq:///zzzzzz/1.ts HD"]
+                    "News http&://cdn.test/live/qqqqa:" + chr(0x2215) * 2 + "\tqq:///zzzzzz/1.ts HD",
+                    # The review of 2942e41: the joined run takes the
+                    # credential's `:` and `@`, and the URL before it prints
+                    # its host, the username's text.
+                    "News http://q.qqqa" + chr(0x2215) + "://\tqq:zzzzzz@cdn.test/live/1.ts HD"]
         texts = multi_inputs(50000, 2026) + residual
         model = node(MODEL_SINKS, texts)
         bad = {}

@@ -243,11 +243,17 @@ REVIEWED = [
     (r"[^ -.0-9;-~]*", "provider",
      "linear: matched at one given position, one class run and nothing after it, once a bare value that "
      "FILLER ended, over the `:`, FILLER and SLASH run after it (_MARK_REACH, parse_attrs, D-SINK-95); and "
-     "once a next_url call that has a `stop`, from it (the end of its candidate search, the review of 4d13d71)"),
-    (r"[A-Za-z0-9.\-]*", "provider",
-     "linear: matched at one given position, one class run and nothing after it, once a token whose bare "
-     "value's growth across a `,` would take an `@` (_HOST_NAME_RUN, host_shaped, parse_attrs, the review of "
-     "4d13d71)"),
+     "once a _stop_end call, from the `stop` (the end of next_url's candidate search, the review of 4d13d71), "
+     "which a UrlReading asks once and a next_url call with a `stop` and no `stop_end` once (the review of "
+     "2942e41)"),
+    (r"[^\x00-\x2c/:-@\[-\^`{-\x7f\s]*", "provider",
+     "linear: matched at one given position, one class run and nothing after it, once an `@` a bare value's "
+     "gated growth would take, from it, once a token; the class holds no `@`, so the runs read after the "
+     "`@`s of one token are disjoint (_HOST_NAME_RUN, host_shaped, last_hosted_at, parse_attrs, the reviews "
+     "of 4d13d71 and 2942e41)"),
+    ("[(\\[{<\"'`]*", "provider",
+     "linear: matched at one given position, one class run and nothing after it, once a "
+     "_unnamed_scheme_credential call, from its token's start (_OPENING_RUN, the review of 2942e41)"),
     (r"\[[0-9A-Fa-f:.]+\]", "provider",
      "linear: matched at one given position: a literal `[`, one class run ended by the `]` it cannot hold, "
      "so it backs off at most once; once a host_shaped call (_HOST_IPV6_RUN)"),

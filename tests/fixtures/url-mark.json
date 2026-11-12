@@ -904,6 +904,56 @@
    "text": "News qq_qqqq\u200b//:zzzzzz@cdn.test HD",
    "js": "News [host withheld] HD",
    "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL whose scheme is a NAMED one after text in its token, with a mark that is not the clean `://` (a stand-in beside the colon), an `@` in its run and the credential's `:` in its mark, is a credential's username read as a scheme, and the token is withheld from its start [2942e41 printed `qq_tcp://cdn.test` in the helper and `qq_cdn.test` in the model]",
+   "text": "News qq_tcp:\u200b//zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL whose scheme is a NAMED one after text in its token, with a mark that is not the clean `://` (one counted code point beside the colon), an `@` in its run and the credential's `:` in its mark, is a credential's username read as a scheme, and the token is withheld from its start [2942e41 printed `qq!acestream://cdn.test` in the helper and `qq!cdn.test` in the model]",
+   "text": "News qq!acestream:\u00e9//zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL whose scheme is a NAMED one, matched case-blind, after text in its token, whose run opens with the credential's `:` before its `@`, is a credential's username read as a scheme, and the token is withheld from its start [2942e41 printed `qq_https://cdn.test` in the helper and `qq_cdn.test` in the model]",
+   "text": "News qq_HTTPS\u200b//:zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL whose scheme is a NAMED one after text in its token, behind the clean `://`, whose run opens with the credential's `:` before its `@`, is a credential's username read as a scheme, and the token is withheld from its start [2942e41 printed `qq_tcp://cdn.test` in the helper and `qq_cdn.test` in the model]",
+   "text": "News qq_tcp://:zzzzzz@cdn.test HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD"
+  },
+  {
+   "why": "residual, stated (the review of 2942e41): a username ending in a NAMED scheme after a character that is no scheme character, before a password that starts with the clean `://`, reads as that scheme's URL, as `1http://u:p@h` does (D-SINK-74's pin): the helper prints the whole username before the host, the model its head; the password prints at no sink",
+   "text": "News qq!acestream://zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News qq!cdn.test HD",
+   "py": "News qq!acestream://cdn.test HD"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL with no named scheme that only an opening bracket stands before in its token holds no username, and prints its host as 4d13d71 printed it [2942e41 withheld it with the bracket and left the closing one: `Clone [host withheld]) now`]",
+   "text": "Clone (ssh://git@github.com/x) now",
+   "js": "Clone (github.com) now",
+   "py": "Clone (github.com) now"
+  },
+  {
+   "why": "D-SINK-96 (the review of 2942e41): a URL with no named scheme that only an opening angle bracket stands before in its token holds no username, and prints its host as 4d13d71 printed it [2942e41 printed `Join [host withheld]>`]",
+   "text": "Join <irc://nick@irc.libera.chat>",
+   "js": "Join <irc.libera.chat>",
+   "py": "Join <irc.libera.chat>"
+  },
+  {
+   "why": "residual, stated (the review of 2942e41, R32a''' D-SINK-34): a URL whose run a TAB ends, joined by the sinks that delete controls to the credential after it, takes that credential's `:` and `@` as its own userinfo, so there the token is no credential and the URL before it in the token prints its host, which is the username's text; the plain and folded sinks withhold the token",
+   "text": "News http://q.qqqa\u2215://\tqq:zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News q.qqqa HD",
+   "pyDeleting": "News http://q.qqqa HD"
   }
  ],
  "fuzz": {

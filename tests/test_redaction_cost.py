@@ -159,7 +159,10 @@ def trailing_as_ruled(raw):
 # the token's start whose scheme (its printable ASCII, lower-cased) is no
 # NAMED one, with an `@` in its run and a `:` in its mark or its run before
 # that `@`, withholds the token from its start. And an empty run, or one of trailing punctuation
-# alone, prints `[url]` with no scheme.
+# alone, prints `[url]` with no scheme. The review of 2942e41: so does a
+# match whose scheme is a NAMED one when its mark is not the clean `://` or
+# its run opens with a `:`; and a match before which only opening brackets
+# and quotes stand in the token withholds nothing.
 _SPACELESS_AS_RULED = ((0x2E80, 0x2FDF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x3000, 0x30FF),
                        (0x31F0, 0x31FF), (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF),
                        (0xD7B0, 0xD7FF), (0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0xFF00, 0xFFEF),
@@ -201,8 +204,13 @@ def credentials_as_ruled(s, matches):
             before = [x for x in range(i, c) if counted(x)]
             start = i if len(before) <= 1 else before[-1] + 1
             break
+        # The review of 2942e41: a named scheme counts when its mark is not
+        # the clean `://` or its run opens with a `:`, and no match counts
+        # that only opening brackets and quotes stand before in the token.
         if any(i < m.start() < j and "@" in m.group(3) and ":" in m.group(2) + m.group(3).split("@")[0]
-               and re.sub("[^ -~]", "", m.group(1)).lower() not in _NAMED_AS_RULED for m in matches):
+               and (re.sub("[^ -~]", "", m.group(1)).lower() not in _NAMED_AS_RULED
+                    or s[m.start(2):m.start(3)] != "://" or m.group(3).startswith(":"))
+               and re.fullmatch("[(\\[{<\"'`]*", s[i:m.start()]) is None for m in matches):
             start = i
         if start >= 0:
             out.append((start, start + len(trailing_as_ruled(s[start:j])[0]), j))
@@ -787,6 +795,33 @@ class LetterlessBudgetTests(unittest.TestCase):
         self.assertEqual(slow, {})
 
 
+def window_of_urls(limit, size):
+    """The review of 2942e41 (its cost finding 0): `x:@<U+00E9><TAB>`, then
+    `ab://c<TAB>` to the end of the credential window of a cut at `limit`
+    (limit + max(limit, CUT_CREDENTIAL_WINDOW)), one walk barrier `!`, then
+    `y` to `size` characters: every URL in the window, and a tail with no
+    SLASH after the barrier."""
+    reach = limit + max(limit, helper.CUT_CREDENTIAL_WINDOW)
+    head = "x:@" + chr(0xE9) + "\t"
+    text = head + "ab://c\t" * ((reach - len(head)) // 7)
+    text += "z" * (reach - len(text))
+    return text + "!" + "y" * (size - len(text) - 1)
+
+
+def best_under(f, text, ceiling):
+    """MarkBudgetTests.best of three, ended after one run that costs ten
+    times `ceiling`: red already, and a shape the code squares would
+    otherwise take minutes to say so."""
+    best = float("inf")
+    for _ in range(3):
+        started = time.perf_counter()
+        f(text)
+        best = min(best, time.perf_counter() - started)
+        if best >= 10 * ceiling:
+            break
+    return best
+
+
 class EpgPathBudgetTests(unittest.TestCase):
     """The review of cbd6679 (its cost finding 3): the guide's cleaners ran
     fold_space over a whole <title> or <desc> before their cut, and
@@ -810,6 +845,26 @@ class EpgPathBudgetTests(unittest.TestCase):
                         slow[(name, size, fname)] = round(cost * 1000, 1)
         self.assertEqual(slow, {})
 
+    def test_a_window_of_urls_before_a_tail_with_no_slash(self):
+        # The review of 2942e41 (its cost finding 0): the cut's credential
+        # reading, stopped at the first walk barrier past its window, asked
+        # next_url's stop bound once a URL, and the bound searched for two
+        # SLASHes from the stop to the text's end before the mark run bounded
+        # it, so a window full of URLs before a long tail with no SLASH
+        # (window_of_urls) cost one pass over the tail a URL: 53.9 s at 1M
+        # characters through clean_detail (4d13d71: 0.1 ms) and 24.2 s
+        # through clean_title. The bound is asked once a reading now, and
+        # searched for only inside the mark run. Red on 2942e41.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for fname, f, limit in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC),
+                                     helper.EPG_MAX_DESC * helper.EPG_RAW_FACTOR),
+                                    ("clean_title", helper.clean_title, helper.EPG_MAX_TITLE * helper.EPG_RAW_FACTOR)):
+                cost = best_under(f, window_of_urls(limit, size), ceiling)
+                if cost >= ceiling:
+                    slow[(fname, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
 
 
 class M3uPathBudgetTests(unittest.TestCase):
@@ -829,6 +884,22 @@ class M3uPathBudgetTests(unittest.TestCase):
             for form, line in (("title", "#EXTINF:-1," + shape), ("quoted group-title", '#EXTINF:-1 group-title="%s",N' % shape)):
                 doc = "#EXTM3U\n" + line + "\nhttp://stream.test/live/1.ts\n"
                 cost = MarkBudgetTests.best(None, helper.parse_m3u, doc, 3)
+                if cost >= ceiling:
+                    slow[(form, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_a_window_of_urls_in_the_title_or_quoted_group_title(self):
+        # The review of 2942e41 (its cost finding 0), the M3U side: the same
+        # window (window_of_urls) cost 4.4 s at 1M characters through the
+        # title's cut and the quoted group-title's (4d13d71: 0.7 and 0.3 ms).
+        # Red on 2942e41.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for form, line in (("title", "#EXTINF:-1," + window_of_urls(helper.M3U_MAX_NAME, size)),
+                               ("quoted group-title", '#EXTINF:-1 group-title="%s",N'
+                                % window_of_urls(helper.M3U_MAX_GROUP_TEXT, size))):
+                doc = "#EXTM3U\n" + line + "\nhttp://stream.test/live/1.ts\n"
+                cost = best_under(helper.parse_m3u, doc, ceiling)
                 if cost >= ceiling:
                     slow[(form, size)] = round(cost * 1000, 1)
         self.assertEqual(slow, {})

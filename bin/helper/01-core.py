@@ -996,19 +996,39 @@ def _scheme_start(text: str, at: int, low: int) -> int:
     return _ASCII_LETTER.search(text, span if crossed is None else crossed.end(), letter + 1).start()
 
 
-def _slash_at_or_after(text: str, at: int) -> int:
-    """The first SLASH (`/` or a look-alike) at or after `at`, or the
-    text's length: one native search for each, the look-alike's no further
-    than the `/`."""
-    slash = text.find("/", at)
+def _slash_at_or_after(text: str, at: int, hi: int) -> int:
+    """The first SLASH (`/` or a look-alike) in [at, hi), or `hi`: one
+    native search for each, the look-alike's no further than the `/`."""
+    slash = text.find("/", at, hi)
     if slash < 0:
-        slash = len(text)
+        slash = hi
     alike = _SLASH_ALIKE.search(text, at, slash)
     return slash if alike is None else alike.start()
 
 
+def _stop_end(text: str, stop: int) -> int:
+    """Where next_url's search for candidates ends when it is given `stop`:
+    the first of the second SLASH at or after `stop`, the end of the run of
+    `:`, FILLER and SLASH that starts at `stop` (_MARK_REACH), and the end
+    of the first pair of wide FILLER code points in that run
+    (_FILLER_WIDE_PAIR), and never before `stop` + 1. A function of the
+    text and `stop` alone, so a UrlReading asks it once (the review of
+    2942e41: asked once a next_url call, with the slashes searched for from
+    `stop` to the text's end before the run bounded them, the cut's
+    credential reading cost one pass over the rest of the text for each URL
+    in its window, 53.9 s on one description of a million characters
+    through clean_detail). The run is matched first and the slashes are
+    searched for only inside it, which is the same end, since it is never
+    past the run's: so a text with no slash after `stop` costs the run, and
+    a run of FILLER as long as the text costs one pass, once a reading."""
+    reach = _MARK_REACH.match(text, stop).end()
+    end = min(reach, _slash_at_or_after(text, _slash_at_or_after(text, stop, reach) + 1, reach) + 1)
+    pair = _FILLER_WIDE_PAIR.search(text, stop, end)
+    return max(stop + 1, end if pair is None else pair.end())
+
+
 def next_url(text: str, search: int, resume: int, plain: bool | None = None,
-             stop: int | None = None) -> tuple[int, int, int, int] | None:
+             stop: int | None = None, stop_end: int | None = None) -> tuple[int, int, int, int] | None:
     """D-SINK-95: the first URL the redactors read in `text` at or after
     `resume`, as (scheme start, mark start, mark end, run end), or None.
 
@@ -1046,7 +1066,13 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
     controls (the window title, the notification) join the run to the text
     after it and print that text's head as the host, credential text or not
     (`News a://<TAB>qqqqqq:///x HD` prints `News qqqqqq HD` there, where
-    the plain sinks print `[url]` twice).
+    the plain sinks print `[url]` twice), or, when the joined run takes the
+    credential's `:` and `@` as its own userinfo, the token is no
+    credential there and the URLs before it in the token print their hosts,
+    which are the username's text (the review of 2942e41:
+    `News http://q.qqqa<U+2215>://<TAB>qq:zzzzzz@cdn.test/live/1.ts HD`
+    prints `News http://q.qqqa HD` there, where the plain sinks withhold
+    the token).
 
     `plain` is whether the text is printable ASCII (asked once a text by
     the caller, or here): there no FILLER, STAND_IN or look-alike can
@@ -1056,7 +1082,9 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
     are looked for, `resume` the low bound; every caller passes the same.
     `stop`, when given, ends the search at the first mark that starts past
     it: cut_free_text asks only for a URL whose scheme starts before its
-    limit, and no such URL has its mark past a walk barrier after it."""
+    limit, and no such URL has its mark past a walk barrier after it.
+    `stop_end` is _stop_end(text, stop) when the caller holds it (a
+    UrlReading asks it once a reading); without it, it is asked here."""
     if plain is None:
         plain = text.isascii() and text.isprintable()
     if plain:
@@ -1075,22 +1103,19 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
             j = text.find("://", j + 1)
         return None
     dead = resume
-    # With `stop`, the candidates are searched for no further than the
-    # first of: the second SLASH at or after it, the end of the run of `:`,
-    # FILLER and SLASH that starts at it (_MARK_REACH), and the end of the
-    # first pair of wide FILLER code points in that run (_FILLER_WIDE_PAIR).
-    # A candidate whose P starts at or before `stop` ends at one of those
-    # slashes, inside that run, holding no such pair (the caps), so the
-    # search finds it, and the first one it finds past `stop` ends the
-    # reading as it would have. Without that end the search read on to the
-    # text's end once candidates the reading rejects were no longer
-    # candidates (the review of 4d13d71).
+    # With `stop`, the candidates are searched for no further than
+    # _stop_end: the first of the second SLASH at or after it, the end of
+    # the run of `:`, FILLER and SLASH that starts at it (_MARK_REACH), and
+    # the end of the first pair of wide FILLER code points in that run
+    # (_FILLER_WIDE_PAIR). A candidate whose P starts at or before `stop`
+    # ends at one of those slashes, inside that run, holding no such pair
+    # (the caps), so the search finds it, and the first one it finds past
+    # `stop` ends the reading as it would have. Without that end the search
+    # read on to the text's end once candidates the reading rejects were no
+    # longer candidates (the review of 4d13d71).
     end = len(text)
     if stop is not None:
-        end = min(end, _slash_at_or_after(text, _slash_at_or_after(text, stop) + 1) + 1)
-        end = _MARK_REACH.match(text, stop, end).end()
-        pair = _FILLER_WIDE_PAIR.search(text, stop, end)
-        end = max(stop + 1, end if pair is None else pair.end())
+        end = _stop_end(text, stop) if stop_end is None else stop_end
     asked = -1
     first = 0
     while True:
@@ -1188,8 +1213,12 @@ class UrlReading:
         self.low = low
         self.plain = text.isascii() and text.isprintable() if plain is None else plain
         # Passed to next_url: the reading ends at the first mark that starts
-        # past it (cut_free_text, the review of 4d13d71).
+        # past it (cut_free_text, the review of 4d13d71). Its search end is
+        # asked once, here, and handed to every next_url call (the review of
+        # 2942e41: asked a call, it read the rest of the text once for each
+        # URL in the cut's window).
         self.stop = stop
+        self.stop_end = None if stop is None or self.plain else _stop_end(text, stop)
         self.urls: list[tuple[int, int, int, int]] = []
         self.starts: list[int] = []
         self.done = False
@@ -1201,7 +1230,7 @@ class UrlReading:
         urls = self.urls
         while not self.done and (not urls or urls[-1][0] <= pos):
             low = urls[-1][3] if urls else self.low
-            url = next_url(self.text, low, low, self.plain, self.stop)
+            url = next_url(self.text, low, low, self.plain, self.stop, self.stop_end)
             if url is None:
                 self.done = True
             else:
@@ -1357,36 +1386,58 @@ def token_credential(text: str, ts: int, te: int, reading: UrlReading,
     return found[0], found[1], ts
 
 
+# The opening brackets and quotes: text of these alone before a scheme in its
+# token holds no username (_unnamed_scheme_credential, the review of 2942e41).
+_OPENING_RUN = re.compile("[(\\[{<\"'`]*")
+
+
 def _unnamed_scheme_credential(text: str, ts: int, te: int, reading: UrlReading,
                                pos: int) -> tuple[int, int] | None:
     """(the first `:` of its mark or its run before the run's first `@`,
     that `@`) for the first URL starting in the token [ts, te), after `ts`
-    and at or after `pos`, whose scheme is no NAMED one, whose run holds an
-    ASCII `@` and whose mark or run holds an ASCII `:` before it; or None
-    (the review of 4d13d71). Such a URL is a credential's username read as
-    a scheme: `qq_qqqq:<U+200B>//zzzzzz@cdn.test` read `qqqq` as the scheme
-    and its mark took the credential's colon, and in
+    and at or after `pos`, after text in its token that is not opening
+    brackets and quotes alone, whose run holds an ASCII `@` and whose mark
+    or run holds an ASCII `:` before it, and whose scheme is no NAMED one or
+    whose mark is not the clean `://` (it holds a FILLER or a STAND_IN, a
+    look-alike slash or another colon) or whose run opens with a `:`; or
+    None (the review of 4d13d71). Such a URL is a credential's username
+    read as a scheme: `qq_qqqq:<U+200B>//zzzzzz@cdn.test` read `qqqq` as the
+    scheme and its mark took the credential's colon, and in
     `qq_qqqq<U+200B>//:zzzzzz@cdn.test` the colon opens the run; every sink
     of both mirrors printed `qq_` before the host. The lead's call named a
     `:` in P only; the run's `:` before its `@` is the nearest variant that
     closes the second shape too (63,299 of 63,484 code points leaked the
     username there), and it moved none of the 3,705 realistic strings. A
-    URL like it with nothing before its scheme in the token prints no
-    username (`qqqqqq://zzzzzz@cdn.test` prints `cdn.test`), and a named
-    scheme is a URL's (`1http://u:p@h` prints its host, D-SINK-74's pin).
-    The token is withheld from its start, as `abc:http://u:p@h` is.
-    Model.unnamedSchemeCredential is the mirror."""
+    named scheme counts when its mark is not clean (the review of 2942e41):
+    `qq_tcp:<U+200B>//zzzzzz@cdn.test` printed `qq_tcp://cdn.test` in the
+    helper and `qq_cdn.test` in the model. A URL like it with nothing
+    before its scheme in the token prints no username
+    (`qqqqqq://zzzzzz@cdn.test` prints `cdn.test`), nor does one after
+    opening brackets and quotes alone (the review of 2942e41:
+    `(ssh://git@github.com/x)` printed `[host withheld])`, where only the
+    bracket stood before the scheme); and a named scheme behind a clean
+    `://` is a URL's (`1http://u:p@h` prints its host, D-SINK-74's pin).
+    What that leaves, stated: a username ending in a named scheme after a
+    non-scheme character, before a password that starts with the clean
+    `://` (`qq_tcp://zzzzzz@cdn.test`, case-blind), prints whole in the
+    helper (`qq_tcp://cdn.test`) and its head in the model (`qq_cdn.test`),
+    as `1http://u:p@h` does. The token is withheld from its start, as
+    `abc:http://u:p@h` is. Model.unnamedSchemeCredential is the mirror."""
     reading.need(te)
     urls = reading.urls
+    opening = _OPENING_RUN.match(text, ts, te).end()
     i = bisect.bisect_left(reading.starts, max(ts + 1, pos))
     while i < len(urls) and urls[i][0] < te:
         start, mark, mark_end, end = urls[i]
         i += 1
+        if start <= opening:
+            continue
         at = text.find("@", mark_end, end)
         if at < 0:
             continue
         colon = text.find(":", mark, at)
-        if colon >= 0 and _CROSSABLE.sub("", text[start:mark]).lower() not in NAMED_SCHEMES:
+        if colon >= 0 and (_CROSSABLE.sub("", text[start:mark]).lower() not in NAMED_SCHEMES
+                           or text[mark:mark_end] != "://" or text.startswith(":", mark_end)):
             return colon, at
     return None
 
