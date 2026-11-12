@@ -86,6 +86,20 @@ def launch_argv(pins=True):
 HTTPS_PROFILE = [{"name": "protocol.https", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
 
 
+def record_requests(client):
+    """Every request `client` sends from here on, with the error it drew."""
+    seen = []
+    send = client.request
+
+    def request(command, allow_close=False):
+        reply = send(command, allow_close)
+        seen.append((list(command), reply.get("error")))
+        return reply
+
+    client.request = request
+    return seen
+
+
 class StubAgainstTheShippingReadBack(unittest.TestCase):
     def player(self, **kw):
         stub = StubPlayer(**kw)
@@ -123,3 +137,40 @@ class StubAgainstTheShippingReadBack(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class StubAgainstTheShippingWrites(unittest.TestCase):
+    """F-HARNESS-74: the stub answers `property not found` to a write of a
+    name it does not list, as mpv does to one it does not have. The join the
+    list needs: every property the SHIPPING helper writes -- a zap, the
+    migration of an older player, the carry across a replacement -- is one
+    the stub takes, so a helper write the list has not heard of goes red
+    here, in the gate, rather than in a scenario that holds the display."""
+
+    def player(self, **kw):
+        stub = StubPlayer(**kw)
+        self.addCleanup(stub.close)
+        return stub
+
+    def test_the_stub_takes_every_property_the_shipping_helper_writes(self):
+        stub = self.player(argv=launch_argv(pins=False))
+        seen = record_requests(stub.client)
+        helper.migrate_tls(stub.client)
+        helper.apply_carry(stub.client, {"volume": 37.0, "mute": True, "fullscreen": False}, 2.0)
+        target = {"url": "http://127.0.0.1:9/a.ts", "name": "A", "id": "t:a", "group": "", "headers": {}}
+        helper.apply_channel(stub.client, target, stash=None, owner=None, label="test",
+                             vouched_pid=stub.proc.pid)
+        writes = [(c[1], err) for c, err in seen if c[0] in ("set_property", "set_property_string")]
+        names = sorted(set(name for name, _ in writes))
+        # The run reached the writes it is about: the title pair, the track
+        # pair, the three header properties, the carry and a user-data key.
+        for name in ("title", "force-media-title", "aid", "sid", "user-agent", "http-header-fields", "referrer",
+                     "volume", "mute", "fullscreen", "pause"):
+            self.assertIn(name, names)
+        self.assertTrue(any(name.startswith("user-data/") for name in names), names)
+        self.assertEqual([w for w in writes if w[1] != "success"], [])
+        # And the stub is not answering success to everything: the same
+        # connection, a name mpv does not have.
+        self.assertEqual(stub.client.try_command("set_property", "no-such-property", 1), (False, None))
+        self.assertEqual(seen[-1][1], "property not found")

@@ -237,6 +237,22 @@ CHOICE_FALSE = {"drag-and-drop": "no"}
 # `player-operation-mode` is `property not found` for a read and for a write,
 # while its option-info answers set-from-commandline (measured, lane-p1c).
 CLI_ONLY = ("player-operation-mode",)
+# F-HARNESS-74: the properties a write may CREATE in this stub's plain store,
+# beyond the options modelled above, `pause` and anything under `user-data/`.
+# A write of any other name used to be stored and answered success, where mpv
+# answers `property not found` (measured: the transcripts' `no-such-property`
+# step), so a helper that set a property mpv does not have looked fine here.
+# Enumerated from what sets them: the helper's apply_channel (the title pair,
+# the track pair, the three neutral header properties) and its carry across
+# a replacement (volume, mute, fullscreen), and player-scenario's own
+# `set volume`. Each is a property mpv 0.41.0 has. A new write needs its name
+# here, and that is the point.
+WRITABLE = frozenset((
+    "title", "force-media-title",
+    "aid", "sid",
+    "user-agent", "http-header-fields", "referrer",
+    "volume", "mute", "fullscreen",
+))
 # mpv's alias of a modelled option: its option-info answers as its target's
 # does (measured: load-osd-console with load-console, True on the pinned
 # argv and False on sec-int's), and a token naming it sets the target.
@@ -720,6 +736,9 @@ class Stub(object):
                 self.values[name] = stored
                 self.unset.discard(name)
                 return None
+            if name != "pause" and not name.startswith("user-data/") and name not in WRITABLE:
+                # F-HARNESS-74: mpv has no such property; nothing is stored.
+                return ERR_NOT_FOUND
             self.unset.discard(name)
             if name == "pause":
                 self.set_pause(value)
@@ -1415,9 +1434,6 @@ def self_test():
              "the stub names itself (VERSION), so a log line says which player answered"),
             (lambda c: c[0] == "get_property" and c[1].startswith("option-info/") and c[1].count("/") == 1,
              "the whole option-info node; the helper reads two of its fields, which ARE modelled"),
-            (lambda c: c[:2] == ["set_property", "no-such-property"],
-             "the stub STORES a write of a name it does not model where mpv refuses it: "
-             "more forgiving, and kept so because it cannot list every property mpv has"),
             (lambda c: c[0] == "quit", "the stub exits on quit"),
         )
 
@@ -1600,6 +1616,34 @@ def self_test():
             self.assertEqual(stub.get("option-info/user-agent/default-value"), ("libmpv", None))
             self.assertEqual(self.reply(stub, "set_property", "option-info/tls-verify/set-from-commandline", False)["error"],
                              "error accessing property")
+
+        def test_a_write_of_a_property_mpv_does_not_have_is_refused_and_stores_nothing(self):
+            # F-HARNESS-74. mpv's own answer is in the transcripts (the
+            # `no-such-property` step, replayed above since this rule); here
+            # the stub is asked directly, by both write verbs, and the read
+            # that follows must not find a value the write left behind.
+            stub = self.stub("pinned")
+            before = self.reply(stub, "get_property", "no-such-property")
+            for verb in ("set_property", "set_property_string"):
+                self.assertEqual(self.reply(stub, verb, "no-such-property", "x"),
+                                 {"error": "property not found", "data": None})
+            self.assertEqual(self.reply(stub, "get_property", "no-such-property"), before)
+            self.assertNotEqual(before["error"], "success")
+            # A misspelt real name is the case this guards: one letter off.
+            self.assertEqual(self.reply(stub, "set_property", "force-media-titel", "x")["error"], "property not found")
+            self.assertEqual(self.reply(stub, "set_property", "user-data", {})["error"], "property not found")
+
+        def test_every_property_the_helper_and_the_scenarios_write_is_stored(self):
+            # The other side of F-HARNESS-74's list: each name on it takes a
+            # write and reads it back, as do `pause` and a `user-data/` key.
+            stub = self.stub("pinned")
+            self.assertEqual(sorted(WRITABLE), ["aid", "force-media-title", "fullscreen", "http-header-fields", "mute",
+                                                "referrer", "sid", "title", "user-agent", "volume"])
+            for name in sorted(WRITABLE) + ["user-data/omarchy-iptv-probe"]:
+                self.assertEqual(self.reply(stub, "set_property", name, "v-" + name)["error"], "success", name)
+                self.assertEqual(self.reply(stub, "get_property", name), {"error": "success", "data": "v-" + name}, name)
+            self.assertEqual(self.reply(stub, "set_property", "pause", True)["error"], "success")
+            self.assertEqual(self.reply(stub, "get_property", "pause"), {"error": "success", "data": True})
 
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(SeekSemantics),
