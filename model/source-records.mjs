@@ -1389,14 +1389,28 @@ function withFormValue(st, field, value, opts) {
 // one of those shapes in this form session, a screen-reader user hears the
 // field as stars, its length only, until they empty it -- `IPTV@Home`,
 // `Me@BBC.co.uk`, `1.5/2 HD`, `Sports: Live/HD`, `News//Sport`, `Q&A=fun`
-// after its `=`. What remains heard, measured after round 4d, is what
-// holds none of them: a typed prefix before the value first holds -- a
-// username, `user:pass` before its `@` or `/`, `username=qqqqqq` before its
-// `&` -- and the same text pasted whole, which no shape tells from a name. The
-// hold is the field's alone: a label saved while held is stored as typed and
-// drawn and heard through labelSinkText (model/sources.mjs), with that
-// rule's residual -- a stored label with no address shape is published as
-// typed.
+// after its `=` -- and an Edit form over a stored label that holds one
+// opens held: `Sports: Live/HD` opens as 15 stars, where the row, its
+// buttons and the remove dialog give it as typed (17 of round 4c's 27
+// required-unchanged labels, 11 of 28 more ordinary ones, none of the 71
+// deriveLabel gives for the fixtures; round 4e's narrower shape (v) let
+// `Dr. Who/Torchwood` and `St. Louis/KC` go). What remains heard, measured
+// after round 4e, is what holds none of them. Typed: a prefix before the
+// value first holds -- a username, `qqqqqq:zzzzzz` before its `@` or `/`,
+// `mailto:qqqqqq` before its `@` (17 states over the reviews' 13 labels),
+// and `username=qqqqqq&password`, until the `=` after its `&`. Pasted
+// whole, 600 of round 4b's 10,603 corpus values with round 4e's 35 encoded
+// ones, in four classes: no delimiter at all (140: a username, a password,
+// a host), `user:pass` with nothing of `/`, a backslash or `@` after its
+// `:` (185), `key=value` with no `?`, `;` or `&` before its `=` (165, the
+// remnant `password=zzzzzz`), and a path with no `.` before its `/` (110, the
+// remnant `/live/qqqqqq/zzzzzz/1.ts`) -- deletion remnants as well as
+// prefixes, which no shape tells from a name. A credential's URL pasted
+// percent- or entity-encoded is no longer among them (round 4e, I1: its
+// escapes are decoded before the shapes are asked). The hold is the
+// field's alone: a label saved while held is stored as typed and drawn and
+// heard through labelSinkText (model/sources.mjs), with that rule's
+// residual -- a stored label with no address shape is published as typed.
 function labelHeldAfter(held, value) {
   var v = str(value)
   if (v === "") return false

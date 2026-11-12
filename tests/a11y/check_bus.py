@@ -156,6 +156,19 @@ TREE_CEIL_4D = {
     "rbfeffrow": 19, "rbnbsp": 19, "rbfeffguide": 17, "rbdotted": 21, "rbdottedfail": 21,
     "rvpaste": 20, "rvpaste2": 20, "rvparen": 19, "rvfrsrc": 13, "wall": 11,
 }
+# Round 4e (D-SINK-98 I1-I3, D-A11Y-12 I8/I9, 2026-11-12, the lead's call
+# under the owner's standing authority of 2026-11-09): the reviews'
+# scenarios, each at the size measured on its first run in a nested headless
+# cage -- the encoded label pasted, stored and edited; the stored labels
+# whose host/path ends in punctuation and whose `//` follows the host; the
+# Keys, Tracks and Programme panels open over the list, and Keys over the
+# wall (the still-on-bus review measured 144, 21, 20 and 138 on 095f33f,
+# each three tiles fewer than on c00be80). rvfrsrc's row is a Model.sourceView
+# view since round 4e (I9), one node as before.
+TREE_CEIL_4E = {
+    "rvpct": 20, "rvpctrow": 19, "rvpctedit": 20, "rvcore": 19, "rvdslash": 19,
+    "rvhelp": 144, "rvtracks": 21, "rvdetail": 20, "wallhelp": 138,
+}
 
 TREE_FLOOR = {
     # Round 4d (D-A11Y-12, 2026-11-12, the lead's call under the owner's
@@ -200,6 +213,7 @@ TREE_FLOOR = {
     "rvfrsrc": TREE_CEIL_4D["rvfrsrc"],
     "wall": TREE_CEIL_4D["wall"],
 }
+TREE_FLOOR.update(TREE_CEIL_4E)
 
 # F-HARNESS-106's sibling, round 4d (D-A11Y-12, the lead's call under the
 # owner's standing authority of 2026-11-09): a CEILING beside every floor.
@@ -212,6 +226,7 @@ TREE_FLOOR = {
 # and F7). A ceiling is raised only with the node it admits named in the
 # commit, never to make a run green.
 TREE_CEIL = dict(TREE_CEIL_4D)
+TREE_CEIL.update(TREE_CEIL_4E)
 
 
 def check_tree_size(name, nodes):
@@ -843,6 +858,7 @@ def check_sources():
     check_sources_4b()
     check_sources_4c()
     check_sources_4d()
+    check_sources_4e()
 
 
 # D-A11Y-12: a row's Edit and Remove buttons are on the bus only while the
@@ -1237,6 +1253,105 @@ def check_sources_4d():
               "D-A11Y-12 (round 4d, F7): the wall, shown, is one channel list and keeps each of its three tiles on the "
               "bus exactly once",
               "tiles %r, channel lists %d" % (counts, len(walls)))
+
+
+# Round 4e (2026-11-12), each the lead's call under the owner's standing
+# authority of 2026-11-09, each a finding of the two reviews of round 4d.
+PCT_LABEL = "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fget.php"
+CORE_LABEL = "Server cdn.test/. Login qqqqqq zzzzzz"
+DSLASH_LABEL = "cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts"
+# The panel each scenario opens, by its dialog's name.
+PANELS = (("rvhelp", "L2-PANEL-01", "Keys", "the Keys panel over the list"),
+          ("rvtracks", "L2-PANEL-02", "Audio and subtitles", "the Tracks panel over the list"),
+          ("rvdetail", "L2-PANEL-03", "Programme", "the Programme panel over the list"),
+          ("wallhelp", "L2-PANEL-04", "Keys", "the Keys panel over the wall"))
+
+
+def stored_row(label, host):
+    """The Sources row, its two buttons and the remove dialog of a stored
+    label, each named by the shipping model with `host` as the label read."""
+    view = ('M.sourceView({key: "k9", url: %s, epgUrl: "", kind: "http", label: %s, labelCustom: true, '
+            'origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, '
+            'channelCount: 3, groupCount: 2}, "k9", 1789000000, "")' % (json.dumps(CLEAN_PLAYLIST), json.dumps(label)))
+    return model_try("M.sourceAccessibleName(%s)" % view)
+
+
+def check_stored_label(name, cids, label, host, what):
+    nodes, rb = guide(name)
+    if not nodes:
+        return
+    composed = stored_row(label, host)
+    rows = pick(nodes, "list item", composed) if composed else []
+    buttons = [n["name"] for n in with_role(nodes, "push button") if ROW_BUTTON_RE.match(n.get("name") or "")]
+    dialog = "Remove \u201c%s\u201d? It is the active source; the guide returns to setup." % host
+    check(cids[0], (composed or "").startswith(host + ", cdn.test, ") and len(rows) == 1
+          and sorted(buttons) == ["Edit " + host, "Remove " + host] and len(pick(nodes, "dialog", dialog)) == 1,
+          "D-SINK-98 (round 4e, %s): the row of %s is named by Model.sourceAccessibleName with the label as %s, "
+          "and its Edit and Remove buttons and the remove dialog name %s" % (what.split(":")[0], what.split(": ", 1)[1], host, host),
+          "composed %r, rows %d, buttons %r, dialogs %r" % (shown(composed), len(rows), [shown(b) for b in buttons],
+                                                          [shown(n["name"]) for n in with_role(nodes, "dialog")]))
+    leaked = cred_leaks(nodes)
+    check(cids[1], not leaked, "D-SINK-98 (round 4e, %s): nothing in the tree carries a piece of that label's credential"
+          % what.split(":")[0], "; ".join(leaked))
+
+
+def check_sources_4e():
+    # I1: the encoded URL pasted whole into an empty Label field is held.
+    nodes, rb = guide("rvpct")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-69", nodes, "Label, optional", "*" * len(PCT_LABEL),
+                    "D-SINK-98 (round 4e, I1): a credential URL percent-encoded whole, pasted into the Label field, "
+                    "is held and heard as stars (round 4d heard it in full)")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-70", not leaked and (late.get("intact") or {}).get("label") is True and late.get("labelHeld") is True,
+              "D-SINK-98 (round 4e, I1): nothing in the form's tree carries a piece of it, the field holds it whole, "
+              "and the form reports it held",
+              "; ".join(leaked) or "intact %r, labelHeld %r" % (late.get("intact"), late.get("labelHeld")))
+    # I1: stored, it reads as its host in the row, its buttons and the dialog.
+    check_stored_label("rvpctrow", ("L2-SRC-71", "L2-SRC-72"), PCT_LABEL, "cdn.test",
+                       "I1: a stored percent-encoded credential URL")
+    # I1: an edit form over it opens held.
+    nodes, rb = guide("rvpctedit")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-73", nodes, "Label, optional", "*" * len(PCT_LABEL),
+                    "D-SINK-98 (round 4e, I1): the edit form over that stored label opens held, its Label heard as stars")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-74", not leaked and (late.get("intact") or {}).get("label") is True and late.get("labelHeld") is True,
+              "D-SINK-98 (round 4e, I1): nothing in the edit form's tree carries a piece of it, and the form holds it whole and held",
+              "; ".join(leaked) or "intact %r, labelHeld %r" % (late.get("intact"), late.get("labelHeld")))
+    # I2: a host/path whose core loses its path to the trailing run.
+    check_stored_label("rvcore", ("L2-SRC-75", "L2-SRC-76"), CORE_LABEL, "cdn.test",
+                       "I2: a stored label whose host/path ends in punctuation, its credential in later words")
+    # I3: a `//` straight after the host.
+    check_stored_label("rvdslash", ("L2-SRC-77", "L2-SRC-78"), DSLASH_LABEL, "cdn.test:8080",
+                       "I3: a stored label whose `//` follows its host, a dotted username after it")
+    # I9: rvfrsrc's row is the view the shipping model builds.
+    nodes, rb = guide("rvfrsrc")
+    if nodes:
+        composed = model_try(
+            'M.sourceAccessibleName(M.sourceView({key: "k1", url: "http://cdn.test/get.php", epgUrl: "", kind: "http", '
+            'label: "Provider", labelCustom: true, origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, '
+            'fetchedAt: 1788900000, channelCount: 3, groupCount: 2}, "k1", 1789000000, ""))')
+        rows = pick(nodes, "list item", composed) if composed else []
+        check("L2-SRC-79", (composed or "").startswith("Provider, cdn.test, ") and len(rows) == 1,
+              "D-A11Y-12 (round 4e, I9): with Sources opened from the first-run form, its row is the one "
+              "Model.sourceView and Model.sourceAccessibleName give for the stored record",
+              "composed %r, rows %d" % (shown(composed), len(rows)))
+    # I8: the Keys, Tracks and Programme panels, open: the panel is on the
+    # bus once, and each channel once -- the list's rows behind a panel over
+    # the list, the wall's tiles behind one over the wall -- never a hidden
+    # tile beside a row (c00be80 held both).
+    for name, cid, panel, what in PANELS:
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        counts = dict((t, len(pick(nodes, "list item", t))) for t in WALL_TILES)
+        panels = pick(nodes, "dialog", panel)
+        check(cid, len(panels) == 1 and all(c == 1 for c in counts.values()),
+              "D-A11Y-12 (round 4e, I8): with %s, the panel is on the bus once and each channel once" % what,
+              "panel dialogs %d, channel nodes %r" % (len(panels), counts))
 
 
 # ---------------------------------------------------------------- main

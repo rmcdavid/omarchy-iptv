@@ -52,7 +52,7 @@ Window {
   readonly property bool sourcesScenario: ["addtyped", "editstored", "sourcesrow", "removelabel",
     "srvtyped", "srvpasted", "editlabel", "labelrow", "labelremove", "probing", "probefail",
     "rbcolon", "rbpass", "rbfeffrow", "rbnbsp", "rbfeffguide", "rbdotted", "rbdottedfail",
-    "rvpaste", "rvpaste2", "rvparen"].indexOf(host.scenario) !== -1
+    "rvpaste", "rvpaste2", "rvparen", "rvpct", "rvpctrow", "rvpctedit", "rvdslash", "rvcore"].indexOf(host.scenario) !== -1
   readonly property string typedPrefix: "http://qqqqqq:zzzzzz"
   readonly property string typedEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php?password=zzzzzz"
   readonly property string storedPlaylist: "http://qqqqqq:zz#zz@cdn.test/x"
@@ -97,6 +97,15 @@ Window {
   readonly property string parenLabel: "Provider (cdn.test:8080/qqqqqq/zzzzzz)"
   readonly property string frPlaylist: "http://qqqqqq:12/zzzzzz@cdn.test/get.php"
   readonly property string frEpg: "http://qqqqqq:zzzzzz@cdn.test/xmltv.php"
+  // ---- round 4e (D-SINK-98 I1-I3, D-A11Y-12 I8/I9), the reviews' scenarios ----
+  // `pctLabel` a credential URL percent-encoded whole, pasted into the
+  // Label field (rvpct), stored (rvpctrow) and opened in an edit form
+  // (rvpctedit); `coreLabel` a stored label whose host/path ends in
+  // punctuation, with the credential in later words; `dslashLabel` a stored
+  // label whose `//` follows its host, with a dotted username after it.
+  readonly property string pctLabel: "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fget.php"
+  readonly property string coreLabel: "Server cdn.test/. Login qqqqqq zzzzzz"
+  readonly property string dslashLabel: "cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts"
   // The record the service would hold, and its view built by the shipping
   // Model.sourceView, so the row reads what the service would hand it. Its
   // URL's RFC host is cdn.test, so what the rows grade is the label. The `#`
@@ -109,13 +118,23 @@ Window {
     label: (host.scenario === "labelrow" || host.scenario === "labelremove") ? host.rowLabel
       : (host.scenario === "rbfeffrow" || host.scenario === "rbfeffguide") ? host.feffLabel
       : host.scenario === "rbnbsp" ? host.lineLabel
-      : host.scenario === "rvparen" ? host.parenLabel : host.credLabel,
+      : host.scenario === "rvparen" ? host.parenLabel
+      : (host.scenario === "rvpctrow" || host.scenario === "rvpctedit") ? host.pctLabel
+      : host.scenario === "rvcore" ? host.coreLabel
+      : host.scenario === "rvdslash" ? host.dslashLabel : host.credLabel,
     labelCustom: true, origin: "guide",
     addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, channelCount: 3, groupCount: 2
   })
 
+  // Round 4e (I9): the first-run scenario that opens Sources (rvfrsrc)
+  // lists a view built by the shipping Model.sourceView too, labelled
+  // `Provider`, so the row it puts on the bus is the one a service hands the
+  // guide (round 4d listed the hand-built record below, its host empty).
   property var sourceFixture: host.sourcesScenario
     ? [Model.sourceView(host.labelRecord, "k9", 1789000000, "")]
+    : host.scenario === "rvfrsrc"
+    ? [Model.sourceView({ key: "k1", url: "http://cdn.test/get.php", epgUrl: "", kind: "http", label: "Provider", labelCustom: true, origin: "guide",
+                          addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, channelCount: 3, groupCount: 2 }, "k1", 1789000000, "")]
     : [
       { key: "k1", label: "Provider", kind: "m3u", playlistUrl: host.playlistUrl,
         epgUrl: "", addedAt: 1788000000, lastUsedAt: 1788900000,
@@ -292,6 +311,7 @@ Window {
     else if (host.scenario === "rvpaste") expected = { label: host.pasteNbsp }
     else if (host.scenario === "rvpaste2") expected = { label: host.pasteSpace }
     else if (host.scenario === "rvfrsrc") expected = { playlist: host.frPlaylist, epg: host.frEpg }
+    else if (host.scenario === "rvpct" || host.scenario === "rvpctedit") expected = { label: host.pctLabel }
     var ids = item.formFieldIds || []
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i]
@@ -404,6 +424,29 @@ Window {
       item.setFieldValue("playlist", host.frPlaylist, false)
       item.setFieldValue("epg", host.frEpg, true)
       item.openSources()
+    } else if (which === "rvpct") {
+      // Round 4e (I1): the percent-encoded credential URL pasted whole into
+      // an empty Label field through the shipping paste path.
+      item.openSources()
+      item.openAddForm()
+      item.fieldFocused("label")
+      item.pasteFromProcess(host.pctLabel)
+    } else if (which === "rvpctrow" || which === "rvcore" || which === "rvdslash") {
+      // Round 4e (I1-I3): the stored label -- its row, the row's buttons and
+      // the remove dialog at once.
+      item.openSources()
+      item.startRemove()
+    } else if (which === "rvpctedit") {
+      // Round 4e (I1): the edit form over the stored encoded label.
+      item.openSources()
+      item.openEditForm()
+    } else if (which === "rvhelp" || which === "wallhelp") {
+      // Round 4e (I8): the Keys panel open over the list, and over the wall.
+      if (which === "wallhelp") item.toggleWall()
+      item.openHelp()
+    } else if (which === "rvtracks" || which === "rvdetail") {
+      // Round 4e (I8): the Tracks and Programme panels open over the list.
+      item.setGuide(Model.withMode(item.guide, which === "rvtracks" ? "tracks" : "detail"))
     } else if (which === "wall") {
       // Round 4d (F7): the wall view shown, as its key shows it.
       item.toggleWall()

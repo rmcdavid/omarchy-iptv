@@ -35,11 +35,20 @@ BASE_JSON = os.path.join(HERE, "lane2_baseline.json")
 CASE_JSON = os.path.join(HERE, "lane2_case.json")
 
 # (label, file in tree/, old, new, scenario groups to re-run)
+#
+# Round 4e (I7, the lead's call under the owner's standing authority of
+# 2026-11-09): an anchor that matches nothing is a mutation nobody ran, and
+# three did for weeks while every run reported them only as SKIPPED -- the
+# two bar mutants since the bar's call grew `paused` and `behindS` over three
+# lines, and the round-4b label mutant since round 4d ended labelSinkText in
+# two lines. Both bar mutants and that one are re-anchored on today's text,
+# and main() now exits non-zero when any mutation is SKIPPED or invisible.
 MUTATIONS = [
     ("bar: Accessible.name no longer comes from Model.barAccessibleName",
      "BarWidget.qml",
      "Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,\n"
-     "                                             chno: root.nowPlayingChno, error: root.hasError })",
+     "                                             chno: root.nowPlayingChno, error: root.hasError, paused: root.paused,\n"
+     "                                             behindS: root.behindLiveS })",
      'Accessible.name: "IPTV"',
      ["bar"]),
 
@@ -112,7 +121,8 @@ MUTATIONS = [
     ("bar: the Nerd Font glyph is handed to the reader as the name",
      "BarWidget.qml",
      "Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,\n"
-     "                                             chno: root.nowPlayingChno, error: root.hasError })",
+     "                                             chno: root.nowPlayingChno, error: root.hasError, paused: root.paused,\n"
+     "                                             behindS: root.behindLiveS })",
      "Accessible.name: root.glyph",
      ["bar"]),
 
@@ -211,7 +221,7 @@ MUTATIONS = [
 
     ("D-SINK-98 (round 4b): the label reads through sinkText again, so a label without `://` passes raw",
      "Model.mjs",
-     "  return hosts.length > 0 ? hosts.join(\" \") : sinkText(s)\n",
+     "  if (hosts.length > 0) return hosts.join(\" \")\n  return sinkText(s) !== s ? HOST_WITHHELD : s\n",
      "  return sinkText(s)\n",
      ["sources"]),
 
@@ -331,6 +341,31 @@ MUTATIONS = [
      "    b--\n  }\n  return s\n}\n",
      ["sources"]),
 
+    # Round 4e.
+    ("D-SINK-98 (round 4e, I1): the fold decodes no escape",
+     "Model.mjs",
+     "  var d = labelDecode(s)\n  return d === s ? s : labelFoldNfkd(d)\n",
+     "  return s\n",
+     ["sources"]),
+
+    ("D-SINK-98 (round 4e, I2): a token's raw text is not asked beside its core",
+     "Model.mjs",
+     "  if (labelShapeReadsAsAddress(t) || labelShapeReadsAsAddress(raw)) return true\n",
+     "  if (labelShapeReadsAsAddress(t)) return true\n",
+     ["sources"]),
+
+    ("D-SINK-98 (round 4e, I3): a `//` at the first `/` is asked whatever the head before it",
+     "Model.mjs",
+     "  if (slash !== -1 && t.charAt(slash + 1) === \"/\" && head.indexOf(\"@\") === -1 && labelHost(head) === \"\") {\n",
+     "  if (slash !== -1 && t.charAt(slash + 1) === \"/\") {\n",
+     ["sources"]),
+
+    ("D-A11Y-12 (round 4e, I9): rvfrsrc lists the hand-built record again (the harness's own fixture, not shipping code)",
+     "host2.qml",
+     "    : host.scenario === \"rvfrsrc\"\n",
+     "    : host.scenario === \"never\"\n",
+     ["sources"]),
+
     ("first run: the empty field reads back its placeholder as if it were content",
      "GuideProbe.qml",
      "text: root.fieldDisplay(fieldRow.fieldId)",
@@ -371,6 +406,7 @@ def build_tree():
 
 def main():
     only = sys.argv[1:]
+    unproven = []
     print("=== baseline on shipping code (all scenarios)")
     build_tree()
     base = run_check([], BASE_JSON, keep_tree=True)
@@ -390,11 +426,13 @@ def main():
                 filename = model_files.file_containing(TREE, old)
             except model_files.ModelLayoutError as error:
                 print("    SKIPPED: %s" % error)
+                unproven.append("SKIPPED " + label)
                 continue
         path = os.path.join(TREE, filename)
         text = open(path).read()
         if old not in text:
             print("    SKIPPED: pattern not found in %s" % filename)
+            unproven.append("SKIPPED " + label)
             continue
         count = text.count(old)
         open(path, "w").write(text.replace(old, new))
@@ -406,12 +444,22 @@ def main():
         print("    mutated %s (%d site%s), re-ran %s"
               % (filename, count, "" if count == 1 else "s", groups))
         print("    NEWLY RED:   %s" % (newly_red or "NOTHING -- this mutation is invisible"))
+        if not newly_red:
+            unproven.append("INVISIBLE " + label)
         if newly_green:
             print("    newly green: %s" % newly_green)
         print()
 
     build_tree()
     print("tree rebuilt clean")
+    # Round 4e (I7): a mutation that did not run, or that no check saw, is
+    # a red run, not a line to read past.
+    if unproven:
+        print("\n%d mutation(s) proved nothing:" % len(unproven))
+        for u in unproven:
+            print("  " + u)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

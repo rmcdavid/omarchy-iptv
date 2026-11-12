@@ -3069,4 +3069,30 @@ TestCase {
     compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************")
     compare(Model.openEditForm(Model.guideState("all"), "k", { label: "username=qqqqqq&password=zzzzzz", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld, true)
   }
+
+  // Round 4e (D-SINK-98; each the lead's call under the owner's standing
+  // authority of 2026-11-09): the escapes decoded (a replace with a
+  // function, parseInt and String.fromCodePoint in V4), a token's raw text
+  // beside its core, the leftmost authority before a `//`, no host for an
+  // a:b@c token whose head holds no `@`, and shape (v) asked per token.
+  function test_round4eInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", "cdn.test"], ["http%3a%2f%2fqqqqqq%3azzzzzz%40cdn.test%2fx", "cdn.test"],
+      ["http&#58;&#47;&#47;qqqqqq&#58;zzzzzz&#64;cdn.test&#47;x", "cdn.test"], ["http&#x3a;&#x2f;&#x2f;qqqqqq&#x3a;zzzzzz&#x40;cdn.test&#x2f;x", "cdn.test"],
+      ["qqqqqq" + BS + "u003azzzzzz" + BS + "u0040cdn.test", "cdn.test"], ["News%2FSport", "News%2FSport"], ["&#37;2F&#37;2Fcdn.test", "&#37;2F&#37;2Fcdn.test"],
+      ["Server cdn.test/. Login qqqqqq zzzzzz", "cdn.test"], ["cdn.test/, qqqqqq/zzzzzz", "cdn.test"], ["(v1.2/beta)", "(v1.2/beta)"],
+      ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["qqqqqq:zzzzzz@cdn.test//zzzzzz.zz/1.ts", "cdn.test"],
+      ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["qqqqqq:zzzzzz@zz//cdn.test/x", W],
+      ["qqqqqq.test:12/zzzzzz@cdn.test/get.php", W], ["'cdn.test/qqqqqq/zzzzzz'", "cdn.test"], ["x(p://qqqqqq:zzzzzz @cdn.test)", W]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    var holds = ["/live/qqqqqq.qq/zzzzzz/1.ts", "Pluto.tv/US", "a%2F%2Fb", "a&#47;&#47;b", "a" + String.fromCharCode(0xff05) + "2F" + String.fromCharCode(0xff05) + "2Fb"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["Dr. Who/Torchwood", "e.g. Sports/News", "News%2FSport", "%252F%252F", "&#47;home"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+    var st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", { typed: false })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************************")
+  }
 }
