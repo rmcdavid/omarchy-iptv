@@ -774,6 +774,30 @@ qa_ref_commit() {
   return 1
 }
 
+# qa_extract <file> <start-ERE> <end-ERE> [max-lines]: the text of every
+# range that opens at a line matching <start> and closes at the first LATER
+# line matching <end>, both lines included -- `sed -n '/start/,/end/p'`,
+# except that it prints NOTHING and returns 1 unless every range it opened
+# also closed, inside <max-lines> (default 60), and at least one opened.
+# F-HARNESS-56: sed prints an unclosed range to the end of the file, and the
+# suite then sourced that text, so a scenario whose end anchor had moved
+# would have handed the shell its whole top level, which starts a harness
+# (the held F-HARNESS-46 test did exactly that on b43c4a4). Text taken out
+# of a script to be RUN goes through here; the patterns are EREs, so a
+# literal `(`, `)`, `{` or `}` is written with a backslash.
+qa_extract() {
+  local file=$1
+  [[ -f $file && -r $file ]] || return 1
+  QA_X_START=$2 QA_X_END=$3 QA_X_MAX=${4:-60} awk '
+    BEGIN { s = ENVIRON["QA_X_START"]; e = ENVIRON["QA_X_END"]; max = ENVIRON["QA_X_MAX"] + 0 }
+    !open { if ($0 ~ s) { open = 1; len = 1; found = 1; buf[++n] = $0 } ; next }
+    { buf[++n] = $0; len++
+      if (len > max) { bad = 1; exit }
+      if ($0 ~ e) open = 0 }
+    END { if (bad || open || !found) exit 1
+          for (i = 1; i <= n; i++) print buf[i] }' "$file"
+}
+
 # qa_same_file <src> <dst>: byte-identical, both present. C1 discarded the
 # status of the cp that stages the tree under test, so a failed copy left the
 # PREVIOUS run's Model.js in place while the rest of the tree moved on.

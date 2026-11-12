@@ -510,6 +510,56 @@ is "no scenario names a baseline by a bare rev-parse" "$REF_BARE" "0"
 REF_USERS=$(grep -l -- 'baseline tree \$BASELINE (\$(qa_ref_commit "\$ROOT" "\$BASELINE"))' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
 is "the seven scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "7"
 
+# ================================================== qa_extract (F-HARNESS-56)
+
+section "qa_extract / F-HARNESS-56: text taken out of a script to be run is taken whole or not at all"
+
+XS="$TMP/extract-src.sh"
+XMARK="$TMP/extract-toplevel-ran"
+# A scenario in miniature: two functions, then a top level with an effect.
+cat >"$XS" <<XEOF
+one()  { printf 'one\n'; }
+two()  { printf 'two\n'; }
+after() { :; }
+: >"$XMARK"
+XEOF
+# The same file after an edit renamed the END anchor (after -> later).
+XS_MOVED="$TMP/extract-moved.sh"
+sed 's/^after() /later() /' "$XS" >"$XS_MOVED"
+
+is "qa_extract prints the range, both ends included" \
+   "$(qa_extract "$XS" '^one\(\)  \{' '^after\(\)')" "$(head -n 3 "$XS")"
+st "and answers 0 for it" 0 qa_extract "$XS" '^one\(\)  \{' '^after\(\)'
+is "it is sed's answer where the range closes" \
+   "$(qa_extract "$XS" '^one\(\)  \{' '^after\(\)')" "$(sed -n '/^one()  {/,/^after()/p' "$XS")"
+
+# The hazard, run rather than described: the shipped form over the moved
+# file hands the top level to whoever sources it.
+rm -f "$XMARK"
+( sed -n '/^one()  {/,/^after()/p' "$XS_MOVED" >"$TMP/x-old.sh"; . "$TMP/x-old.sh" ) >/dev/null 2>&1
+ck "the shipped sed form ran the file's top level when its end anchor had moved" '[[ -e $XMARK ]]'
+rm -f "$XMARK"
+( qa_extract "$XS_MOVED" '^one\(\)  \{' '^after\(\)' >"$TMP/x-new.sh"; . "$TMP/x-new.sh" ) >/dev/null 2>&1
+ck "qa_extract hands over nothing to run" '[[ ! -e $XMARK ]]'
+is "an unclosed range prints nothing" "$(qa_extract "$XS_MOVED" '^one\(\)  \{' '^after\(\)')" ""
+st "and answers 1" 1 qa_extract "$XS_MOVED" '^one\(\)  \{' '^after\(\)'
+st "a start that is not there answers 1"   1 qa_extract "$XS" '^none\(\)' '^after\(\)'
+is "and prints nothing"                    "$(qa_extract "$XS" '^none\(\)' '^after\(\)')" ""
+st "an end that only stands BEFORE the start does not close it" 1 qa_extract "$XS" '^two\(\)' '^one\(\)'
+st "an end on the start's own line does not close it"           1 qa_extract "$XS" '^: >' '^: >'
+st "a range longer than the bound answers 1" 1 qa_extract "$XS" '^one\(\)  \{' '^after\(\)' 2
+is "and prints nothing, not its head"        "$(qa_extract "$XS" '^one\(\)  \{' '^after\(\)' 2)" ""
+st "a range of exactly the bound is taken"   0 qa_extract "$XS" '^one\(\)  \{' '^after\(\)' 3
+st "a file that is not there answers 1"      1 qa_extract "$TMP/never.sh" '^one' '^after'
+# Several ranges, as `seed_scratch_*` are taken: all of them or none.
+XM="$TMP/extract-multi.sh"
+printf 'f_a() {\n  :\n}\nmiddle=1\nf_b() {\n  :\n}\ntail=1\n' >"$XM"
+is "every closed range is printed, and nothing between them" \
+   "$(qa_extract "$XM" '^f_[a-z]\(\) \{' '^\}')" "$(printf 'f_a() {\n  :\n}\nf_b() {\n  :\n}')"
+printf 'f_a() {\n  :\n}\nmiddle=1\nf_b() {\n  :\ntail=1\n' >"$XM"
+is "one unclosed range among them withholds them all" "$(qa_extract "$XM" '^f_[a-z]\(\) \{' '^\}')" ""
+st "and answers 1" 1 qa_extract "$XM" '^f_[a-z]\(\) \{' '^\}'
+
 # ====================================================== qa_wait_nonempty (C6)
 
 section "qa_wait_nonempty / C6: the port file read after a flat sleep"
@@ -587,7 +637,10 @@ section "the floor / B4: a check that stops executing must turn the run red"
 PS="$ROOT/scripts/dev-harness/player-scenario.sh"
 FRAME="$TMP/frame.sh"
 # The shipped counters, extracted verbatim - not a copy of them.
-sed -n '/^ok()  { printf/,/^ck()  { checks=/p' "$PS" >"$FRAME"
+# F-HARNESS-56: taken whole (both anchors found, inside 20 lines) or not at
+# all, because it is sourced below.
+qa_extract "$PS" '^ok\(\)  \{ printf' '^ck\(\)  \{ checks=' 20 >"$FRAME"
+is "the counting frame was taken whole" "$?" "0"
 is "the counting frame was extracted from the real scenario" \
    "$(qa_count '^(is|ck)\(\)' "$FRAME")" "2"
 
@@ -2737,7 +2790,9 @@ st "and says so with 2" 2 qa_outcome NOFIELD 2026-10-07T05:00
 # than retyped, the way the counting frame and shell.qml's focusWalk are.
 TLS="$ROOT/scripts/dev-harness/tls-scenario.sh"
 HITS="$TMP/hits-frame.sh"
-sed -n '/^hits()     {/,/^tls_refusals()/p' "$TLS" >"$HITS"
+# F-HARNESS-56: whole or not at all, as the counting frame is.
+qa_extract "$TLS" '^hits\(\)     \{' '^tls_refusals\(\)' 60 >"$HITS"
+is "the hit counters were taken whole" "$?" "0"
 is "the hit counters were extracted from the real scenario, not copied" \
    "$(qa_count '^(hits|all_hits|ctl_hits|chunks|closed|self_hits)\(\)' "$HITS")" "6"
 TOKEN=abc123
@@ -3046,7 +3101,8 @@ is "and sets XDG_CONFIG_HOME somewhere that does not exist, so every run re-prov
 # Rule 14: the two lines above are bookkeeping and say so; this is the
 # measurement.
 SEED="$TMP/seed-frame.sh"
-sed -n '/^seed_scratch_config() {/,/^}/p' "$RS" >"$SEED"
+qa_extract "$RS" '^seed_scratch_config\(\) \{' '^\}' 40 >"$SEED"
+is "seed_scratch_config was taken whole" "$?" "0"
 is "seed_scratch_config was extracted from the real run.sh, not retyped" \
    "$(qa_count '^seed_scratch_config\(\) \{$' "$SEED")" "1"
 SEEDROOT="$TMP/seedscratch"
@@ -3534,7 +3590,9 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # XDG_RUNTIME_DIR before it makes a display and never aborts (2). Red on
 # cce5548's qa-lib.sh: both read "unset or empty ... cage aborts".
 # 649 -> 662 on 2026-11-12: qa_ref_commit's thirteen (F-HARNESS-53).
-EXPECTED=662
+# 662 -> 683 the same day: qa_extract's eighteen and the three extractions
+# that are sourced here taken whole (F-HARNESS-56).
+EXPECTED=683
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
