@@ -220,12 +220,12 @@ function innerCharSentence(noun, withSpace) {
   return "Remove the " + (withSpace ? "space, " : "") + "tab, line break or control character inside the " + noun
 }
 
-// D-SINK-98: a label in a sentence is sinkText of it (fieldAccessibleValue
+// D-SINK-98: a label in a sentence is labelSinkText of it (round 4b; it
 // says why), here as in every composer that names a source by its label.
 function sourceErrorMessage(code, opts) {
   var o = opts || {}
   var c = str(code)
-  var label = sinkText(str(o.label))
+  var label = labelSinkText(str(o.label))
   var quoted = QUOTE_OPEN + label + QUOTE_CLOSE
   var schemeText = "Start with http://, https://, or / for a local file"
   var invalidText = "Invalid URL" + SEP + "check the host"
@@ -1493,11 +1493,36 @@ function defaultSourceLabel(url, kind, existingLabels) {
 }
 
 // SR22: the cap counts code points; over-cap labels are refused, never cut.
+// D-SINK-98, round 4b (the lead's call under the owner's standing authority
+// of 2026-11-09): a label is also `label_taken` when it READS as another
+// source's label reads (labelReadTaken), so two rows never draw and sound
+// alike -- `http://qqqqqq:zzzzzz@cdn.test/a.m3u` and `.../b.m3u` were both
+// accepted, and both rows read `cdn.test`. The refusal names the label as it
+// reads (sourceErrorMessage).
 function validateLabel(label, existing, selfId) {
   var text = sanitizeInput(label)
   if (codePointLength(text) > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
-  if (labelTaken(text, existing, selfId)) return { ok: false, code: "label_taken", field: "label", message: sourceErrorMessage("label_taken", { label: text }), label: text }
+  if (labelTaken(text, existing, selfId) || labelReadTaken(text, existing, selfId)) return { ok: false, code: "label_taken", field: "label", message: sourceErrorMessage("label_taken", { label: text }), label: text }
   return { ok: true, code: "ok", field: "", message: "", label: text }
+}
+
+// Whether `label` reads, through labelSinkText, as one of `existing` reads,
+// case-insensitively as labelTaken compares (labelKey); `existing` and
+// `selfId` as labelTaken takes them. An empty label takes nothing.
+function labelReadTaken(label, existing, selfId) {
+  var want = labelKey(labelSinkText(sanitizeInput(label)))
+  if (want === "") return false
+  var list = asList(existing)
+  var self = str(selfId)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (item === null || item === undefined) continue
+    var raw = typeof item === "object" ? item.label : item
+    var id = typeof item === "object" ? str(item.id !== undefined ? item.id : item.key) : ""
+    if (self !== "" && id === self) continue
+    if (labelKey(labelSinkText(sanitizeInput(raw))) === want) return true
+  }
+  return false
 }
 
 // ---- masking (SR4, UX-SOURCES 4.4)
@@ -1558,6 +1583,242 @@ function maskUrl(url) {
   }
   var fragment = after.charAt(0) === "#" ? "#" + MASK : ""
   return m[1] + "://" + authority + path + query + fragment
+}
+
+// ---- what an address and a label publish (D-SINK-97, D-SINK-98)
+//
+// The accessible Value of the Sources form's address fields
+// (fieldAccessibleValue in model/source-records.mjs) and the reading of a
+// source's LABEL wherever one is composed. Here and not in the form's part
+// because the label's reading (labelSinkText) is asked by every composer in
+// this part that names a source by its label, and both read the same host
+// rule (rule c, below).
+
+function accessibleStars(value) {
+  return new Array(str(value).length + 1).join("*")
+}
+
+// D-SINK-97 rule a: LF, VT, FF, CR, U+0085, U+2028 and U+2029. A value that
+// holds one is stars whatever else it holds: the readers below cut at `/`,
+// `?` and `#` and none of them at a line, and maskUrl gave a URL with one
+// after its `#` back whole.
+function hasAddressLineTerminator(text) {
+  var s = str(text)
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if ((c >= 10 && c <= 13) || c === 0x85 || c === 0x2028 || c === 0x2029) return true
+  }
+  return false
+}
+
+// D-SINK-97 rule c's host: `host[:port]` as typed when it parses, else "".
+// A name must be non-empty and pass hostNameRefused, the predicate both
+// source validators refuse a name by (so a `:` that is not the port's, an
+// `@`, `%`, `;`, `=`, `&`, a bracket, a backslash, whitespace or a format
+// character is stars). A leading bracket is an IPv6 literal, which is not a
+// name (hostNameRefused refuses its brackets and colons by design), so it
+// passes only as hex digits, colons and dots inside its pair. A port, if
+// there is a `:`, is digits.
+function addressAccessibleHost(hostport) {
+  var hp = str(hostport)
+  var host = hp
+  var port = null
+  if (hp.charAt(0) === "[") {
+    var close = hp.indexOf("]")
+    if (close === -1) return ""
+    host = hp.substring(0, close + 1)
+    var tail = hp.substring(close + 1)
+    if (tail !== "") {
+      if (tail.charAt(0) !== ":") return ""
+      port = tail.substring(1)
+    }
+    if (!/^\[[0-9A-Fa-f:.]+\]$/.test(host)) return ""
+  } else {
+    var colon = hp.indexOf(":")
+    if (colon !== -1) {
+      host = hp.substring(0, colon)
+      port = hp.substring(colon + 1)
+    }
+    if (host === "" || hostNameRefused(host)) return ""
+  }
+  if (port !== null && !/^[0-9]+$/.test(port)) return ""
+  return hp
+}
+
+// D-SINK-97 rule c, the parse alone: for a value that rule c publishes, its
+// scheme as typed, whether it carries a userinfo, the host[:port] that
+// parsed, and the text from the authority's closing character on; null where
+// rule c gives stars. The rule, in its order:
+//   a. a line terminator anywhere: null (stars);
+//   b. `//` must follow the scheme's `:`, and the authority must be CLOSED
+//      by a `/`, `?` or `#` -- so `http://qqqqqq:zzzzzz` typed so far, and
+//      `http://cdn.test:8080` with nothing after it, are stars, a stated cost
+//      on the server field -- with no `@` after it (R32a's typo signal:
+//      `http://qqqqqq:zz#zz@cdn.test/x` is a userinfo holding a `#`), not
+//      withheld by urlHostWithheld, and a host that parses
+//      (addressAccessibleHost);
+//   c. except that a `file:` URL's authority may be EMPTY, its host then ""
+//      (D-SINK-97, round 4b: the lead's call under the owner's standing
+//      authority of 2026-11-09, reading the owner's answer of 2026-11-08,
+//      "scheme and host only, stars otherwise", literally). Until then a
+//      `file:` URL was published as typed when it held no `@`, `?` or `#`,
+//      and its edit states were not: `file://qqqqqq:zzzzzz@cdn.test/x`
+//      published a piece of the credential at 13 of its 31 typed prefixes.
+// urlHostWithheld refuses nothing here today that the `@` test has not
+// refused already: the run it reads is a prefix of this one, so its later
+// `@` is one in `after` (a mutant without it is equivalent, measured). It is
+// asked because the rule names it, so a predicate that widens binds here.
+function addressAuthorityParts(value) {
+  var s = str(value)
+  if (hasAddressLineTerminator(s)) return null
+  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)
+  if (!m) return null
+  var rest = s.substring(m[0].length)
+  if (rest.substring(0, 2) !== "//") return null
+  var body = rest.substring(2)
+  var cut = body.search(/[\/?#]/)
+  if (cut === -1) return null
+  var authority = body.substring(0, cut)
+  var after = body.substring(cut)
+  if (after.indexOf("@") !== -1 || urlHostWithheld(s)) return null
+  if (authority === "" && m[1].toLowerCase() === "file") return { scheme: m[1], userinfo: false, host: "", after: after }
+  var at = authority.lastIndexOf("@")
+  var host = addressAccessibleHost(authority.substring(at + 1))
+  if (host === "") return null
+  return { scheme: m[1], userinfo: at !== -1, host: host, after: after }
+}
+
+// D-SINK-97: an address field's accessible Value, by the owner's rule of
+// 2026-11-08, "scheme and host only, stars otherwise": what rule c parses is
+// published as `scheme://[****@]host[:port]` and the authority's closing
+// character with an ellipsis, or `/` alone when the path is just `/` --
+// `****@` stands for any userinfo, and nothing of the path, the query or the
+// fragment is said -- and anything else is one `*` per character. So
+// `file:///home/u/tv.m3u` is heard as `file:///` and an ellipsis, and a bare
+// local path (`/...`, `~/...`) is stars. Until round 4b a local path was
+// published as typed when it held no `?`, `#` or `@` (rule d), and Home then
+// Delete on `http://cdn.test/live/qqqqqq/zzzzzz/1.ts` left
+// `/cdn.test/live/qqqqqq/zzzzzz/1.ts`, which it published whole. The cost,
+// stated: a screen-reader user hears a local path as its length in stars.
+// Nothing drawn changes.
+function addressAccessibleValue(value) {
+  var s = str(value)
+  var p = addressAuthorityParts(s)
+  if (p === null) return accessibleStars(s)
+  return p.scheme + "://" + (p.userinfo ? MASK + "@" : "") + p.host + (p.after === "/" ? "/" : p.after.charAt(0) + ELLIPSIS)
+}
+
+// D-SINK-98, round 4b (the lead's call under the owner's standing authority
+// of 2026-11-09). A source's LABEL as every sink hears and draws it: the
+// label field's accessible Value, the Sources row (drawn, its name and its
+// two buttons' names), the remove dialog, the transients, the error line,
+// the footer and both IPC summaries. Until round 4b those went through
+// sinkText, which acts only on text holding a literal `://`, so deleting the
+// scheme of a pasted credentialed label published it raw in one keystroke,
+// and `qqqqqq:zzzzzz@cdn.test`, `//qqqqqq:zzzzzz@cdn.test/x`,
+// `cdn.test/get.php?username=qqqqqq&password=zzzzzz`, `http:/qqqqqq:...`, a
+// `mailto:` with a query, `http:` and two backslashes, the fullwidth colon
+// and solidus forms and `http:/<U+200B>/...` all passed raw.
+//
+// The rule: when ANY whitespace-separated token of the label (JS `\s`) reads
+// as an address (labelTokenReadsAsAddress), the whole label is the host or
+// hosts its address tokens name, joined by a space, each one
+// addressAccessibleHost accepts, or HOST_WITHHELD where a token names none
+// (labelTokenHost). Otherwise the label passes, and sinkText runs over it,
+// so a free-text redactor's later rules still apply. An ordinary label --
+// `My TV`, `Sports: Live`, `BBC 1/2`, `News & Weather`, `IPTV@Home`,
+// `cdn.test:8080`, `tv.m3u`, every label deriveLabel and uniqueLabel give --
+// is unchanged, drawn and heard. The costs, stated: a label whose text has
+// an address's shape is drawn and heard as hosts alone (`Sport:Live@HD` reads
+// `[host withheld]`, accepted on 2026-11-08); and a label that holds a
+// credential without an address's shape -- a username typed alone, `user:pass`
+// with no `@`, `pass@host` with no `:` before its `@`, a path with no dotted
+// first part -- is drawn and heard as typed, because nothing tells it from
+// a name.
+function labelSinkText(text) {
+  var s = str(text)
+  var tokens = s.split(/\s+/)
+  var hosts = []
+  for (var i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "" && labelTokenReadsAsAddress(tokens[i])) hosts.push(labelTokenHost(tokens[i]))
+  }
+  return hosts.length > 0 ? hosts.join(" ") : sinkText(s)
+}
+
+// A token reads as an address when it, or its fold (labelFold), holds `//`,
+// `:/` or `:\`; or an `@` with a `:` anywhere before its last `@` (the
+// owner's 2026-11-08 shape a:b@c); or a `?`, `;` or `&` with a `=` after
+// it; or a first `/` with something after it and a `.` or `:` before it
+// (SR12's looksLikeHost, with a path). `IPTV@Home` (no `:` before the `@`),
+// `BBC 1/2` (no dot before the `/`) and `cdn.test:8080` (no `/`) do not.
+function labelTokenReadsAsAddress(token) {
+  var t = str(token)
+  if (labelShapeReadsAsAddress(t)) return true
+  var f = labelFold(t)
+  return f !== t && labelShapeReadsAsAddress(f)
+}
+
+function labelShapeReadsAsAddress(t) {
+  if (t.indexOf("//") !== -1 || t.indexOf(":/") !== -1 || t.indexOf(":\\") !== -1) return true
+  var at = t.lastIndexOf("@")
+  if (at > 0 && t.lastIndexOf(":", at - 1) !== -1) return true
+  var p = t.search(/[?;&]/)
+  if (p !== -1 && t.indexOf("=", p + 1) !== -1) return true
+  var slash = t.indexOf("/")
+  return slash !== -1 && slash + 1 < t.length && /[.:]/.test(t.substring(0, slash))
+}
+
+// The token as it would be read once copied out of the label: NFKD, so a
+// fullwidth `:` or `/` is the ASCII one, then the format characters
+// (HOST_FORMAT_RANGES) removed, so `http:/<U+200B>/` is `http://`. Asked only
+// to CLASSIFY: a host is never taken from the fold, so a token that reads as
+// an address only folded names HOST_WITHHELD unless its own text names a
+// host. An ASCII token pays nothing.
+function labelFold(token) {
+  var s = str(token)
+  if (!NON_ASCII_RE.test(s)) return s
+  var d = s.normalize("NFKD")
+  var out = []
+  for (var i = 0; i < d.length; i++) {
+    var c = d.charCodeAt(i)
+    var n = 1
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < d.length) {
+      var e = d.charCodeAt(i + 1)
+      if (e >= 0xdc00 && e <= 0xdfff) {
+        c = 0x10000 + (c - 0xd800) * 0x400 + (e - 0xdc00)
+        n = 2
+      }
+    }
+    if (!isHostFormatCode(c)) out.push(d.substring(i, i + n))
+    i += n - 1
+  }
+  return out.join("")
+}
+
+// The host an address token names, from its own text, or HOST_WITHHELD:
+//   `scheme://...`  the host rule c publishes (addressAuthorityParts), and
+//                   only where rule c would not give stars;
+//   a:b@c           the text after the last `@`, to the first of `/`, `?`,
+//                   `#` or `;`;
+//   host/path       the text before the first `/`;
+// each kept only when addressAccessibleHost accepts it. Anything else --
+// `?k=v` with no `/`, a token that reads as an address only once folded --
+// names none.
+function labelTokenHost(token) {
+  var t = str(token)
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(t)) {
+    var parts = addressAuthorityParts(t)
+    return parts !== null && parts.host !== "" ? parts.host : HOST_WITHHELD
+  }
+  var at = t.lastIndexOf("@")
+  if (at > 0 && t.lastIndexOf(":", at - 1) !== -1) {
+    var tail = t.substring(at + 1)
+    var end = tail.search(/[\/?#;]/)
+    return addressAccessibleHost(end === -1 ? tail : tail.substring(0, end)) || HOST_WITHHELD
+  }
+  var slash = t.indexOf("/")
+  if (slash > 0) return addressAccessibleHost(t.substring(0, slash)) || HOST_WITHHELD
+  return HOST_WITHHELD
 }
 
 // ---- Xtream Codes (ARCHITECTURE-SOURCES 3.4 / D10, UX-SOURCES 1.8, 5.4)
@@ -1799,10 +2060,10 @@ function sourceDetail(view, narrow) {
   return joinParts(parts)
 }
 
-// UX-SOURCES 7.1 row name. D-SINK-98: the label through sinkText.
+// UX-SOURCES 7.1 row name. D-SINK-98: the label through labelSinkText.
 function sourceAccessibleName(view) {
   var v = view || {}
-  var out = sinkText(str(v.label)) + ", " + str(v.host)
+  var out = labelSinkText(str(v.label)) + ", " + str(v.host)
   out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.active) out += ", active"
   var epg = epgHintRowText(v)
@@ -1847,9 +2108,9 @@ function confirmLogosMessage(survey) {
 }
 
 // Confirm dialog message (UX-SOURCES 5.7). D-SINK-98: the label through
-// sinkText.
+// labelSinkText.
 function confirmRemoveMessage(label, active) {
-  var quoted = QUOTE_OPEN + sinkText(str(label)) + QUOTE_CLOSE
+  var quoted = QUOTE_OPEN + labelSinkText(str(label)) + QUOTE_CLOSE
   if (active) return "Remove " + quoted + "? It is the active source; the guide returns to setup."
   return "Remove " + quoted + "? Its cache is deleted too."
 }
@@ -1915,11 +2176,11 @@ function probeFailureLine(reason, host, kind, code) {
 // Footer transients (UX-SOURCES 5.3). `added` names the new source by its
 // label (`Added list.m3u`, `Added tv.example.net`), never `local file`;
 // `host` is the fallback when the caller has no label. D-SINK-98: the label
-// through sinkText.
+// through labelSinkText.
 function sourceTransient(event, opts) {
   var o = opts || {}
   var counts = Number(o.channelCount) >= 0 ? countsLine(o.channelCount, o.groupCount) : ""
-  var label = sinkText(str(o.label))
+  var label = labelSinkText(str(o.label))
   if (event === "loaded") return counts
   if (event === "added") return "Added " + (label !== "" ? label : str(o.host)) + (counts !== "" ? SEP + counts : "")
   if (event === "saved") return "Saved" + (counts !== "" ? SEP + counts : "")
@@ -2041,13 +2302,17 @@ export {
   isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
   randomSourceKey, sourceCacheDir, cutHostParams, hostPortOf, deriveLabel,
   labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
-  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
-  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT,
-  epgHintRowText, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost,
-  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
-  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
+  labelReadTaken, maskQuery, maskUrl, accessibleStars,
+  hasAddressLineTerminator, addressAccessibleHost, addressAuthorityParts,
+  addressAccessibleValue, labelSinkText, labelTokenReadsAsAddress,
+  labelShapeReadsAsAddress, labelFold, labelTokenHost, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 }

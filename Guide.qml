@@ -2256,13 +2256,15 @@ Item {
       root.refocus()
       return
     }
+    // D-SINK-99: the host these lines name is HOST_WITHHELD while the form
+    // holds a withheld URL (Model.formLineHost), read before the form closes.
     if (r.ok === true) {
       var event = root.form.sourceId !== "" ? "saved" : (root.firstRunForm ? "loaded" : "added")
-      root.finishForm(event, { id: id, host: String(r.host || root.form.probeHost), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
+      root.finishForm(event, { id: id, host: Model.formLineHost(root.form, String(r.host || root.form.probeHost)), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
       return
     }
     var field = root.form.kind === "xtream" ? "server" : "playlist"
-    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind, String(r.code || "")) })
+    root.failForm({ code: "probe", field: field, message: Model.formProbeFailureLine(root.form, r.reason, String(r.host || root.form.probeHost), String(r.code || "")) })
   }
 
   // A probe outside a form: Enter / Space on a never-fetched source, or an
@@ -2633,18 +2635,12 @@ Item {
   }
 
   // The Label placeholder live-updates to the label Model.deriveLabel would
-  // give the current Playlist / Server value (UX-SOURCES 1.5, 5.1).
+  // give the current Playlist / Server value (UX-SOURCES 1.5, 5.1), or
+  // HOST_WITHHELD while that value's host is withheld (D-SINK-99); the model
+  // decides (Model.formLabelPlaceholder).
   function fieldPlaceholder(id) {
     if (id === "label") {
-      var f = root.form
-      var derived = ""
-      if (f && f.kind === "xtream") {
-        var s = Model.validateSourceUrl(f.values.server)
-        if (s.ok && s.kind === "http") derived = Model.deriveLabel(s.url)
-      } else if (f) {
-        var p = Model.validateSourceUrl(f.values.playlist)
-        if (p.ok) derived = Model.deriveLabel(p.url, p.kind)
-      }
+      var derived = Model.formLabelPlaceholder(root.form)
       return derived !== "" ? derived : root.copy.placeholderOptional
     }
     if (id === "playlist") return root.copy.placeholderPlaylist
@@ -4539,8 +4535,9 @@ Item {
                 readonly property bool hasCursor: srow.index === root.sourceCursor
                 readonly property bool active: !!(srow.source && srow.source.active)
                 // D-SINK-98: the label drawn and in the button names through
-                // Model.sinkText, so a pasted credentialed URL reads as its host.
-                readonly property string label: srow.source ? Model.sinkText(String(srow.source.label)) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
+                // Model.labelSinkText, so a label with an address's shape
+                // reads as its host or hosts.
+                readonly property string label: srow.source ? Model.labelSinkText(String(srow.source.label)) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
                 readonly property string detail: srow.source ? Model.sourceDetail(srow.source, root.narrow) : ""
                 readonly property string meta: srow.source && !root.narrow ? String(srow.source.lastUsedText) : ""
                 readonly property string leadGlyph: srow.isSource ? (srow.active ? Model.GLYPHS.check : "") : (srow.rowKind === "add" ? Model.GLYPHS.plus : Model.GLYPHS.key)
@@ -4639,6 +4636,12 @@ Item {
                     }
 
                     // Edit / remove buttons on the cursor row only (UX-SOURCES 4.1).
+                    // D-A11Y-12: and on the bus only there. A hidden Item stays
+                    // in Qt's accessibility tree, so every other row's pair --
+                    // `Edit Add source`, `Remove Add Xtream login` -- was on
+                    // the bus beside the one the cursor row draws, with the
+                    // same states (the a11y probe, round 4b); `ignored` takes
+                    // a button off the bus while its row does not show it.
                     Row {
                       id: sactions
                       visible: srow.hasCursor && srow.isSource
@@ -4653,6 +4656,7 @@ Item {
                         fontFamily: root.fontFamily
                         Accessible.role: Accessible.Button
                         Accessible.name: root.copy.tooltipEdit + " " + srow.label
+                        Accessible.ignored: !sactions.visible
                         onClicked: root.openEditForm()
                       }
 
@@ -4664,6 +4668,7 @@ Item {
                         fontFamily: root.fontFamily
                         Accessible.role: Accessible.Button
                         Accessible.name: root.copy.tooltipRemove + " " + srow.label
+                        Accessible.ignored: !sactions.visible
                         onClicked: root.startRemove()
                       }
                     }
@@ -5006,7 +5011,7 @@ Item {
               readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
-                if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
+                if (root.formProbing && root.form) return Model.formFetchingLine(root.form)
                 return warningText
               }
 

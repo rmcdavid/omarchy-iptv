@@ -2928,9 +2928,14 @@ TestCase {
     compare(v("http://qqqqqq:zz#zz@cdn.test/x"), stars("http://qqqqqq:zz#zz@cdn.test/x"))
     compare(v("http://cdn" + String.fromCharCode(0xff1b) + "test/y"), stars("http://cdn;test/y"), "the NFKD fold refuses a fullwidth `;`")
     compare(v("http://cdn.test/x#a" + String.fromCharCode(0x2029) + "b"), stars("http://cdn.test/x#a b"))
-    compare(v("file:///home/me/tv.m3u"), "file:///home/me/tv.m3u")
-    compare(v("file:///x?zzzzzz"), stars("file:///x?zzzzzz"))
-    compare(v("/home/me/tv.m3u"), "/home/me/tv.m3u")
+    // Round 4b (D2): a file: URL takes the host rule, its authority may be
+    // empty, and a bare local path is stars.
+    compare(v("file:///home/me/tv.m3u"), "file:///" + E)
+    compare(v("file:///x?zzzzzz"), "file:///" + E)
+    compare(v("file://qqqqqq:zzzzzz@cdn.test/x"), "file://****@cdn.test/" + E)
+    compare(v("file:/x"), stars("file:/x"))
+    compare(v("/home/me/tv.m3u"), stars("/home/me/tv.m3u"))
+    compare(v("/cdn.test/live/qqqqqq/zzzzzz/1.ts"), stars("/cdn.test/live/qqqqqq/zzzzzz/1.ts"))
     compare(v("//qqqqqq:zzzzzz@cdn.test/x"), stars("//qqqqqq:zzzzzz@cdn.test/x"))
     compare(v("~/qqqqqq@zzzzzz"), stars("~/qqqqqq@zzzzzz"))
     compare(Model.fieldAccessibleDescription("playlist", "Playlist URL or path"), "")
@@ -2939,5 +2944,43 @@ TestCase {
     compare(Model.fieldAccessibleValue({ values: { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" } }, "label"), "cdn.test")
     compare(Model.confirmRemoveMessage("http://qqqqqq:zzzzzz@cdn.test/get.php", false).indexOf("qq"), -1)
     compare(Model.sourceTransient("removed", { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" }), "Removed cdn.test")
+  }
+
+  // Round 4b in the shell's engine: the label's reading (D1), whose token
+  // split is V4's `\s` and whose fold is V4's String.prototype.normalize;
+  // the line terminators (D4); the withheld form lines (D5); the IPC active
+  // source (D3). node runs the sweeps; this holds V4 to the same answers.
+  function test_labelSinkTextInV4() {
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["My TV", "My TV"], ["Sports: Live", "Sports: Live"], ["BBC 1/2", "BBC 1/2"], ["IPTV@Home", "IPTV@Home"],
+      ["cdn.test:8080", "cdn.test:8080"], ["tv.m3u", "tv.m3u"], ["Caf" + String.fromCharCode(0xe9), "Caf" + String.fromCharCode(0xe9)],
+      ["qqqqqq:zzzzzz@cdn.test", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"], ["http:/qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["mailto:qqqqqq@cdn.test?password=zzzzzz", "cdn.test"], ["http:" + BS + BS + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http" + String.fromCharCode(0xff1a) + "//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http:" + String.fromCharCode(0xff0f, 0xff0f) + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http:/" + String.fromCharCode(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http" + String.fromCharCode(0xff1a, 0xff0f, 0xff0f) + "qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz" + String.fromCharCode(0xff20) + "cdn.test", Model.HOST_WITHHELD],
+      ["http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "cdn.test:8080"],
+      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD + " " + Model.HOST_WITHHELD],
+      ["My" + String.fromCharCode(0xa0) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["My" + String.fromCharCode(0xfeff) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["My" + String.fromCharCode(0x3000) + "TV", "My" + String.fromCharCode(0x3000) + "TV"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    compare(Model.fieldAccessibleValue({ values: { label: "qqqqqq:zzzzzz@cdn.test" } }, "label"), "cdn.test")
+    compare(Model.confirmRemoveMessage("//qqqqqq:zzzzzz@cdn.test/x", true).indexOf("qq"), -1)
+    compare(Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").code, "label_taken")
+    var st = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: "qqqqqq:zzzzzz@cdn.test", origin: "guide" }, 100)
+    compare(Model.activeSourceSummary(st.state, st.key, 200).label, "cdn.test")
+    compare(Model.typedText(String.fromCharCode(0x2028), false), "")
+    compare(Model.typedText(String.fromCharCode(0x2029), false), "")
+    compare(Model.sanitizePasteInput("label", "a" + String.fromCharCode(0x2028) + "b" + String.fromCharCode(0x2029) + "c", 64), "abc")
+    var form = { kind: "url", values: { label: "", playlist: "http://qqqqqq#zzzzzz@cdn.test/x", epg: "" }, probing: true, probeHost: "qqqqqq", probeKind: "url" }
+    compare(Model.formFetchingLine(form), "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS)
+    compare(Model.formProbeFailureLine(form, "Could not resolve host", "qqqqqq", ""), "Could not resolve host from " + Model.HOST_WITHHELD)
+    compare(Model.formLabelPlaceholder(form), Model.HOST_WITHHELD)
+    compare(Model.formLabelPlaceholder({ kind: "url", values: { label: "", playlist: "http://cdn.test/x", epg: "" } }), "cdn.test")
   }
 }

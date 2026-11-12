@@ -177,26 +177,69 @@ MUTATIONS = [
 
     ("D-SINK-98: the label field publishes the label raw",
      "Model.mjs",
-     '  if (id === "label") return sinkText(value)\n',
+     '  if (id === "label") return labelSinkText(value)\n',
      '  if (id === "label") return value\n',
      ["sources"]),
 
     ("D-SINK-98: the Sources row draws and names the label raw",
      "GuideProbe.qml",
-     "srow.source ? Model.sinkText(String(srow.source.label))",
+     "srow.source ? Model.labelSinkText(String(srow.source.label))",
      "srow.source ? String(srow.source.label)",
      ["sources"]),
 
     ("D-SINK-98: the row's accessible name carries the raw label",
      "Model.mjs",
-     'var out = sinkText(str(v.label)) + ", " + str(v.host)',
+     'var out = labelSinkText(str(v.label)) + ", " + str(v.host)',
      'var out = str(v.label) + ", " + str(v.host)',
      ["sources"]),
 
     ("D-SINK-98: the remove dialog quotes the raw label",
      "Model.mjs",
-     "var quoted = QUOTE_OPEN + sinkText(str(label)) + QUOTE_CLOSE",
+     "var quoted = QUOTE_OPEN + labelSinkText(str(label)) + QUOTE_CLOSE",
      "var quoted = QUOTE_OPEN + str(label) + QUOTE_CLOSE",
+     ["sources"]),
+
+    # Round 4b.
+    ("D-A11Y-12: a hidden row's Edit and Remove buttons stay on the bus",
+     "GuideProbe.qml",
+     "                        Accessible.ignored: !sactions.visible\n",
+     "",
+     ["sources"]),
+
+    ("D-SINK-98 (round 4b): the label reads through sinkText again, so a label without `://` passes raw",
+     "Model.mjs",
+     "  return hosts.length > 0 ? hosts.join(\" \") : sinkText(s)\n",
+     "  return sinkText(s)\n",
+     ["sources"]),
+
+    ("D-SINK-98 (round 4b): the Sources row draws and names the label through sinkText",
+     "GuideProbe.qml",
+     "srow.source ? Model.labelSinkText(String(srow.source.label))",
+     "srow.source ? Model.sinkText(String(srow.source.label))",
+     ["sources"]),
+
+    ("D-SINK-97 (round 4b): a bare local path is published as typed again",
+     "Model.mjs",
+     "  if (p === null) return accessibleStars(s)\n",
+     "  if (p === null) return /^(\\/(?!\\/)|~\\/)[^?#@]*$/.test(s) ? s : accessibleStars(s)\n",
+     ["sources"]),
+
+    ("D-SINK-99: the fetching line names the probe host as the form holds it",
+     "GuideProbe.qml",
+     "if (root.formProbing && root.form) return Model.formFetchingLine(root.form)",
+     "if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)",
+     ["sources"]),
+
+    ("D-SINK-99: the probe's failure line names the probe host as the form holds it",
+     "GuideProbe.qml",
+     "message: Model.formProbeFailureLine(root.form, r.reason, String(r.host || root.form.probeHost), String(r.code || \"\"))",
+     "message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind, String(r.code || \"\"))",
+     ["sources"]),
+
+    ("D-SINK-99: the label placeholder names the withheld host's derived label",
+     "Model.mjs",
+     "  return derived !== \"\" && formHostWithheld(f) ? HOST_WITHHELD : derived\n",
+     "  return derived\n",
      ["sources"]),
 
     ("first run: the empty field reads back its placeholder as if it were content",

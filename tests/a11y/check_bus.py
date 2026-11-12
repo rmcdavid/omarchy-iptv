@@ -18,6 +18,7 @@ there is no id a human is expected to copy between documents (rule 13).
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -62,6 +63,16 @@ def model_says(expr):
     src = ('var M = require(%s); process.stdout.write(String(%s));'
            % (json.dumps(os.path.join(REPO, "Model.mjs")), expr))
     return subprocess.check_output(["node", "-e", src]).decode()
+
+
+def model_try(expr):
+    """model_says, or None when the shipping model cannot answer (a name it
+    does not export: a red run over older code then fails its checks one by
+    one instead of stopping the harness)."""
+    try:
+        return model_says(expr)
+    except subprocess.CalledProcessError:
+        return None
 
 
 def redact(text):
@@ -151,11 +162,25 @@ TREE_FLOOR = {
     "querynomatch": 31,
     "scale10k": 50,
     "xtream": 42,
-    # D-SINK-97 / D-SINK-98, at their first run (2026-11-11).
-    "addtyped": 59,
-    "editstored": 59,
-    "sourcesrow": 53,
-    "removelabel": 53,
+    # D-SINK-97 / D-SINK-98, at their first run (2026-11-11): 59, 59, 53 and
+    # 53. Lowered the same day by round 4b, by exactly the nodes D-A11Y-12
+    # took off the bus, and for no other reason: the Sources list's two
+    # hidden rows each published an Edit and a Remove button (4 nodes), and
+    # behind a form the cursor row's pair is hidden too (6). Measured by
+    # dumping both runs' node lists: they differ by those buttons alone.
+    "addtyped": 53,
+    "editstored": 53,
+    "sourcesrow": 49,
+    "removelabel": 49,
+    # Round 4b (D-SINK-97, -98, -99, D-A11Y-12), at their first run
+    # (2026-11-11).
+    "srvtyped": 55,
+    "srvpasted": 55,
+    "editlabel": 53,
+    "labelrow": 49,
+    "labelremove": 49,
+    "probing": 53,
+    "probefail": 53,
 }
 
 
@@ -620,15 +645,38 @@ STORED_PLAYLIST = "http://qqqqqq:zz#zz@cdn.test/x"
 CRED_LABEL = "http://qqqqqq:zzzzzz@cdn.test/get.php"
 CLEAN_PLAYLIST = "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
 ELLIPSIS = "\u2026"
+# Round 4b, mirroring host_guide.qml.
+SRV_TYPED = "http://qqqqqq:zzzzzz"
+SRV_PASTED = "http://qqqqqq:zz#zz@cdn.test:8080/get.php"
+EDIT_LABEL = "http:/qqqqqq:zzzzzz@cdn.test/get.php"
+EDIT_PLAYLIST = "/cdn.test/live/qqqqqq/zzzzzz/1.ts"
+EDIT_EPG = "/home/u/epg.xml"
+ROW_LABEL = "qqqqqq:zzzzzz@cdn.test"
+TYPO_PLAYLIST = "http://qqqqqq#zzzzzz@cdn.test/x"
+HOST_WITHHELD = "[host withheld]"
+CRED_RUN_RE = re.compile("[qz]{2,}")
+
+
+def shown(text):
+    """F-HARNESS-106: what a detail line prints of a published string -- the
+    text the bus held, with only the fixture's credential runs masked. It was
+    redact(), which rewrites any URL to its host, so a PASS line named a value
+    the bus did not hold (L2-SRC-02 printed 'cdn.test' for
+    'http://****@cdn.test/' and an ellipsis)."""
+    if text is None:
+        return None
+    return CRED_RUN_RE.sub("<cred>", str(text))
 
 
 def cred_leaks(nodes):
+    # The node is named through shown() (F-HARNESS-106): its name can be the
+    # very field that holds the run, and this log is a sink too.
     found = []
     for n in nodes:
         for field in ("name", "description", "text"):
             value = n.get(field) or ""
             if any(run in value for run in CRED_RUNS):
-                found.append("%s %r on its %s" % (n["role"], n.get("name") or "(unnamed)", field))
+                found.append("%s %r on its %s" % (n["role"], shown(n.get("name") or "(unnamed)"), field))
     return found
 
 
@@ -645,14 +693,14 @@ def check_field(cid, nodes, name, value, label):
               % (name, len(pick(nodes, "text", name))))
         return
     text, desc = node.get("text") or "", node.get("description") or ""
-    # Printed through redact() (this log is a sink too), which can make a
-    # raw credentialed URL read as its host here; the flags say what the bus
-    # itself held.
+    # Printed through shown() (this log is a sink too): the text the bus
+    # held, its credential runs masked (F-HARNESS-106); the flags say whether
+    # it held one.
     check(cid, node.get("text") == value and not node.get("description"), label,
           "publishes text %r and description %r (credential runs: text %s, description %s), "
           "ruled %r and ''"
-          % (redact(text), redact(desc), any(r in text for r in CRED_RUNS),
-             any(r in desc for r in CRED_RUNS), value))
+          % (shown(text), shown(desc), any(r in text for r in CRED_RUNS),
+             any(r in desc for r in CRED_RUNS), shown(value)))
 
 
 def model_view_json():
@@ -689,9 +737,12 @@ def check_sources():
     nodes, rb = guide("editstored")
     if nodes:
         late = rb.get("LATE") or {}
+        # A value HELD IN THE FORM (sourceForEdit hands it over), not a
+        # stored one: the state reader drops a record holding this URL.
         check_field("L2-SRC-05", nodes, "Playlist URL or path", "*" * len(STORED_PLAYLIST),
-                    "D-SINK-97: a stored URL whose userinfo holds an unencoded `#` is heard as "
-                    "stars, with no Description (the credential was heard in the host position)")
+                    "D-SINK-97: a URL held in the edit form whose userinfo holds an unencoded `#` "
+                    "is heard as stars, with no Description (the credential was heard in the "
+                    "host position)")
         check_field("L2-SRC-06", nodes, "Label, optional", "cdn.test",
                     "D-SINK-98: a label that is a credentialed URL is heard as its host")
         leaked = cred_leaks(nodes)
@@ -713,11 +764,12 @@ def check_sources():
                         "said as its host")
         check("L2-SRC-10", composed.startswith("cdn.test, cdn.test, ") and row is not None,
               "D-SINK-98: the row's name opens with the label as its host (a literal witness "
-              "beside the composer)", "composed %r" % redact(composed))
+              "beside the composer)", "composed %r" % shown(composed))
         buttons = [n["name"] for n in with_role(nodes, "push button")]
         check("L2-SRC-11", "Edit cdn.test" in buttons and "Remove cdn.test" in buttons,
               "D-SINK-98: the cursor row's edit and remove buttons name the label as its host",
-              "push buttons: %r" % [redact(b) for b in buttons])
+              "push buttons: %r" % [shown(b) for b in buttons])
+        check_row_buttons("L2-SRC-15", nodes, "cdn.test")
         leaked = cred_leaks(nodes)
         check("L2-SRC-12", not leaked,
               "D-SINK-98: nothing in the Sources list's tree carries a piece of the label's credential",
@@ -731,10 +783,143 @@ def check_sources():
         check("L2-SRC-13", composed == literal and len(pick(nodes, "dialog", literal)) == 1,
               "D-SINK-98: the remove dialog names the label as its host (the composer, the literal "
               "and the bus agree)",
-              "composed %r, dialogs %r" % (redact(composed), [redact(n["name"]) for n in with_role(nodes, "dialog")]))
+              "composed %r, dialogs %r" % (shown(composed), [shown(n["name"]) for n in with_role(nodes, "dialog")]))
         leaked = cred_leaks(nodes)
         check("L2-SRC-14", not leaked,
               "D-SINK-98: nothing in the remove dialog's tree carries a piece of the label's credential",
+              "; ".join(leaked))
+
+    check_sources_4b()
+
+
+# D-A11Y-12: a row's Edit and Remove buttons are on the bus only while the
+# row shows them, which is the cursor SOURCE row alone. The detail lists the
+# AT-SPI states of every such button the bus holds, so a run over code that
+# leaves the hidden pairs on the bus records what a reader is told of them.
+ROW_BUTTON_RE = re.compile("^(Edit|Remove) ")
+
+
+def check_row_buttons(cid, nodes, label):
+    found = [n for n in with_role(nodes, "push button") if ROW_BUTTON_RE.match(n.get("name") or "")]
+    names = sorted(n["name"] for n in found)
+    check(cid, names == sorted(["Edit " + label, "Remove " + label]),
+          "D-A11Y-12: only the cursor source row's Edit and Remove buttons are on the bus, not the "
+          "hidden pairs of the other rows (`Edit Add source`, `Remove Add Xtream login`)",
+          "row buttons on the bus: %r" % [(shown(n["name"]), n.get("state_names")) for n in found])
+
+
+def check_sources_4b():
+    # The Xtream server field: typed up to its `@` (stars), pasted whole with
+    # a `#` in its userinfo (stars), and the xtream scenario's ordinary
+    # credentialed server (scheme, host and port).
+    nodes, rb = guide("srvtyped")
+    if nodes:
+        check_field("L2-SRC-16", nodes, "Server URL", "*" * len(SRV_TYPED),
+                    "D-SINK-97: a server URL typed up to its `@` is heard as stars, one per character, "
+                    "with no Description")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-17", not leaked,
+              "D-SINK-97: nothing in the Xtream form's tree carries a piece of the typed server's "
+              "credential", "; ".join(leaked))
+    nodes, rb = guide("srvpasted")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-18", nodes, "Server URL", "*" * len(SRV_PASTED),
+                    "D-SINK-97: a server URL pasted with a `#` in its userinfo is heard as stars, "
+                    "with no Description")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-19", not leaked and (late.get("intact") or {}).get("server") is True,
+              "D-SINK-97: nothing in the tree carries a piece of the pasted server's credential, and "
+              "the form still holds it whole", "; ".join(leaked) or "intact %r" % (late.get("intact"),))
+    nodes, rb = guide("xtream")
+    if nodes:
+        check_field("L2-SRC-20", nodes, "Server URL", "http://prov.example:8080/" + ELLIPSIS,
+                    "D-SINK-97: an ordinary credentialed server URL is heard as scheme, host and port "
+                    "and the closing character, with no Description")
+
+    # The edit form over a label with its scheme's second `/` deleted, a
+    # playlist edited down to a local path holding the credential, and an
+    # ordinary local path in the EPG field.
+    nodes, rb = guide("editlabel")
+    if nodes:
+        late = rb.get("LATE") or {}
+        check_field("L2-SRC-21", nodes, "Label, optional", "cdn.test",
+                    "D-SINK-98: a label whose scheme lost a `/` (`http:/...`) is heard as its host")
+        check_field("L2-SRC-22", nodes, "Playlist URL or path", "*" * len(EDIT_PLAYLIST),
+                    "D-SINK-97: a URL edited down to a local path is heard as stars (it was heard whole)")
+        check_field("L2-SRC-23", nodes, "EPG URL, optional", "*" * len(EDIT_EPG),
+                    "D-SINK-97: an ordinary local path is heard as stars, one per character")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-24", not leaked,
+              "D-SINK-97/98: nothing in the edit form's tree carries a piece of the credential",
+              "; ".join(leaked))
+        intact = late.get("intact") or {}
+        check("L2-SRC-25", all(intact.get(f) is True for f in ("label", "playlist", "epg")),
+              "the edit form still holds the label, the playlist and the EPG, character for character",
+              "intact per field: %r" % intact)
+
+    # A saved source whose label has no scheme at all: its row, the row's
+    # two buttons, and the remove dialog.
+    nodes, rb = guide("labelrow")
+    if nodes:
+        view = ('M.sourceView({key: "k9", url: %s, epgUrl: "", kind: "http", label: %s, labelCustom: true, '
+                'origin: "guide", addedAt: 1788000000, lastUsed: 1788900000, fetchedAt: 1788900000, '
+                'channelCount: 3, groupCount: 2}, "k9", 1789000000, "")'
+                % (json.dumps(CLEAN_PLAYLIST), json.dumps(ROW_LABEL)))
+        composed = model_try("M.sourceAccessibleName(%s)" % view)
+        row = check_one("L2-SRC-26", nodes, "list item", composed,
+                        "D-SINK-98: a row whose label is `user:pass@host` is named by "
+                        "Model.sourceAccessibleName, the label said as its host")
+        check("L2-SRC-27", (composed or "").startswith("cdn.test, cdn.test, ") and row is not None,
+              "D-SINK-98: and the name opens with the host (a literal witness beside the composer)",
+              "composed %r" % shown(composed))
+        check_row_buttons("L2-SRC-28", nodes, "cdn.test")
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-29", not leaked,
+              "D-SINK-98: nothing in the Sources list's tree carries a piece of the no-scheme "
+              "label's credential", "; ".join(leaked))
+    nodes, rb = guide("labelremove")
+    if nodes:
+        composed = model_try('M.confirmRemoveMessage(%s, true)' % json.dumps(ROW_LABEL))
+        literal = "Remove \u201ccdn.test\u201d? It is the active source; the guide returns to setup."
+        check("L2-SRC-30", composed == literal and len(pick(nodes, "dialog", literal)) == 1,
+              "D-SINK-98: the remove dialog names a no-scheme label as its host",
+              "composed %r, dialogs %r" % (shown(composed), [shown(n["name"]) for n in with_role(nodes, "dialog")]))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-31", not leaked,
+              "D-SINK-98: nothing in the remove dialog's tree carries a piece of the no-scheme "
+              "label's credential", "; ".join(leaked))
+
+    # D-SINK-99: a URL the form warns about (R32a), submitted. While its
+    # probe runs, and once it fails, the lines the form composes from the
+    # probe host name it as withheld; the label's placeholder does too (the
+    # probe reports a flag, never the placeholder's text).
+    for name, cid, line_expr, literal, what in (
+            ("probing", "L2-SRC-32", 'M.formFetchingLine({kind: "url", values: {label: "", playlist: %s, epg: ""}, '
+             'probing: true, probeHost: "qqqqqq", probeKind: "url"})' % json.dumps(TYPO_PLAYLIST),
+             "Fetching from " + HOST_WITHHELD + ELLIPSIS, "the fetching line"),
+            ("probefail", "L2-SRC-35", 'M.formProbeFailureLine({kind: "url", values: {label: "", playlist: %s, epg: ""}, '
+             'probing: true, probeHost: "qqqqqq", probeKind: "url"}, "Could not resolve host", "qqqqqq", "")'
+             % json.dumps(TYPO_PLAYLIST),
+             "Could not resolve host from " + HOST_WITHHELD, "the probe's failure line")):
+        nodes, rb = guide(name)
+        if not nodes:
+            continue
+        late = rb.get("LATE") or {}
+        composed = model_try(line_expr)
+        alerts = [n["name"] for n in with_role(nodes, "alert message")]
+        check(cid, composed == literal and alerts.count(literal) == 1,
+              "D-SINK-99: %s names the withheld host as `%s`, not the username (the composer, "
+              "the literal and the bus agree)" % (what, HOST_WITHHELD),
+              "composed %r, alerts %r" % (shown(composed), [shown(a) for a in alerts]))
+        nxt = "L2-SRC-%02d" % (int(cid[-2:]) + 1)
+        check(nxt, late.get("placeholderWithheld") is True and late.get("placeholderHasRun") is False,
+              "D-SINK-99: the label field's placeholder reads `%s` while the form holds the URL" % HOST_WITHHELD,
+              "probe readback: placeholderWithheld %r, placeholderHasRun %r, formProbing %r"
+              % (late.get("placeholderWithheld"), late.get("placeholderHasRun"), late.get("formProbing")))
+        leaked = cred_leaks(nodes)
+        check("L2-SRC-%02d" % (int(cid[-2:]) + 2), not leaked,
+              "D-SINK-99: nothing in the form's tree carries a piece of the withheld URL's credential",
               "; ".join(leaked))
 
 

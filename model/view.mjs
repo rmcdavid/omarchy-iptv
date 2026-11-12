@@ -32,7 +32,8 @@ import {
 } from "./epg.mjs"
 import {
   PAUSE_KEY, TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY,
-  BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, isUrlField, maskUrl
+  BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, isUrlField, maskUrl,
+  labelSinkText
 } from "./sources.mjs"
 import {
   isFormField, formHasText
@@ -232,8 +233,9 @@ function footerCounts(o) {
   else if (o.stale) out += SEP + "cached" + SEP + "offline"
   // UX-SOURCES 5.3: with two or more saved sources the counts line carries
   // the active source's label so a switch is visible at a glance, through
-  // sinkText (D-SINK-98: a label may be a credentialed URL the user pasted).
-  if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = sinkText(str(o.activeLabel)) + SEP + out
+  // labelSinkText (D-SINK-98: a label may be a credentialed URL the user
+  // pasted, or one with its scheme deleted).
+  if (str(o.activeLabel) !== "" && Number(o.sourceCount) > 1) out = labelSinkText(str(o.activeLabel)) + SEP + out
   return out
 }
 
