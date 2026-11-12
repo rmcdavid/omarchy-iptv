@@ -19,10 +19,16 @@
 # session, which the rest of the gate does not. The FIDELITY half has no such
 # needs and IS in the gate; see tests/a11y/test_fidelity.py.
 #
-# THE BASELINE IS A SET, NOT A COUNT, AND THIS SCRIPT GRADES AGAINST IT. Three
-# checks fail on shipping code and all three are filed defects; a run matching
-# exactly that set exits 0. Anything else -- a new failure, or a recorded one
-# that started passing -- exits 1 and names it.
+# THE BASELINE IS A SET, NOT A COUNT, AND THIS SCRIPT GRADES AGAINST IT. It is
+# BASELINE in tests/a11y/check_bus.py, and every failure it ever held was a
+# filed defect; a run matching exactly that set exits 0. Anything else -- a
+# new failure, or a recorded one that started passing -- exits 1 and names
+# it. Measured on 2026-11-12 (round 4d, in a nested headless cage): the set is
+# EMPTY and no check fails. L2-XT-11 left it in round 4c; D-A11Y-10's four
+# (L2-Q-04-LIT, L2-Q-06, L2-SC-03-LIT, L2-SC-06), which were never in it and
+# read off it, pass since the hidden wall's tiles left the bus (round 4d).
+# This header said "three checks fail" from the harness's first baseline
+# until then.
 #
 # It did not always. 0.7.8 added one unguarded service call to Guide.open(),
 # the fake service here has no such method, open() threw, and every guide

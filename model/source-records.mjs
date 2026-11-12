@@ -21,7 +21,9 @@ import {
   FORM_LIMITS, CONTROL_RE, capLength, sanitizeInput, sanitizeUrlInput,
   capCodePoints, sourceErrorMessage, validateSourceUrl, isUrlField,
   isSourceKey, findSource, findSourceByUrl, allocateSourceKey, deriveLabel,
-  uniqueLabel, validateLabel, maskUrl, sourceView, sourceViews
+  uniqueLabel, validateLabel, maskUrl, accessibleStars,
+  addressAccessibleValue, labelSinkText, labelHoldsField, sourceView,
+  sourceViews
 } from "./sources.mjs"
 
 // ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
@@ -1053,14 +1055,27 @@ function sourceForEdit(state, key) {
   }
 }
 
-// IPC `status` list: label / host / counts, never a URL.
+// IPC `status` list: label / host / counts, never a URL -- the label through
+// labelSinkText (D-SINK-98), since a label may be one the user pasted.
 function sourcesSummary(state, activeKey) {
   var views = sourceViews(state, activeKey, 0, null)
   var out = []
   for (var i = 0; i < views.length; i++) {
-    out.push({ id: views[i].id, key: views[i].id, label: views[i].label, host: views[i].host, active: views[i].active, channelCount: views[i].channelCount, lastUsed: views[i].lastUsedAt })
+    out.push({ id: views[i].id, key: views[i].id, label: labelSinkText(views[i].label), host: views[i].host, active: views[i].active, channelCount: views[i].channelCount, lastUsed: views[i].lastUsedAt })
   }
   return out
+}
+
+// IPC `status`'s `activeSource`: the active record's id, label and host, or
+// null when no record is active -- the label through labelSinkText, as
+// sourcesSummary names it (D-SINK-98). Lifted out of Service.qml in round 4b
+// (rules 12 and 14), where the composition could be checked only by a grep
+// of the source.
+function activeSourceSummary(state, activeKey, nowSec) {
+  var rec = findSource(state ? state.sources : [], activeKey)
+  if (!rec) return null
+  var view = sourceView(rec, activeKey, nowSec, "")
+  return { id: view.id, label: labelSinkText(view.label), host: view.host }
 }
 
 // Full bar entry for `shell.updateEntryInline`: every own key of `entry`
@@ -1146,7 +1161,8 @@ function cacheStale(status, refreshMinutes, nowSec) {
 //          original: the values the edit form opened with, focus: element id,
 //          revealed: { playlist, epg } (true = raw value shown / typed),
 //          error: null | { code, field, message }, probing, probeHost,
-//          probeKind, parent: the form to return to (Xtream from a URL form) }
+//          probeKind, labelHeld (labelHeldAfter), parent: the form to return
+//          to (Xtream from a URL form) }
 
 function formFields(form) {
   var f = form || {}
@@ -1184,14 +1200,19 @@ function copyValues(kind, values) {
   return out
 }
 
+// `labelHeld` is copied through labelHeldAfter, so a form that reaches
+// here without the flag -- a fresh one (formState), or one a caller built --
+// is held exactly when its label reads as an address, and a copy of a form
+// made by the transitions below is the form unchanged.
 function copyForm(form) {
   var f = form || {}
   var kind = f.kind === "xtream" ? "xtream" : "url"
+  var values = copyValues(kind, f.values)
   return {
     kind: kind,
     origin: f.origin === "firstRun" ? "firstRun" : "sources",
     sourceId: str(f.sourceId),
-    values: copyValues(kind, f.values),
+    values: values,
     original: copyValues(kind, f.original),
     focus: str(f.focus),
     revealed: { playlist: !!(f.revealed && f.revealed.playlist), epg: !!(f.revealed && f.revealed.epg) },
@@ -1199,6 +1220,7 @@ function copyForm(form) {
     probing: f.probing === true,
     probeHost: str(f.probeHost),
     probeKind: str(f.probeKind),
+    labelHeld: labelHeldAfter(f.labelHeld, values.label),
     parent: f.parent ? copyForm(f.parent) : null
   }
 }
@@ -1327,7 +1349,9 @@ function withFormPatch(st, patch) {
 
 // Set a field value (already sanitized by the caller for typing; capped
 // here). Typing reveals the field (`opts.typed`), a paste re-masks it; an
-// error on that field clears.
+// error on that field clears. The one place a form's value changes once the
+// form exists, so the label's held flag moves here (labelHeldAfter) on every
+// write: a key, a paste, a deletion, Ctrl+U, Esc's clear.
 function withFormValue(st, field, value, opts) {
   var cur = copyGuide(st)
   if (!cur.form || !isFormField(cur.form, field)) return cur
@@ -1335,9 +1359,85 @@ function withFormValue(st, field, value, opts) {
   var id = str(field)
   var f = cur.form
   f.values[id] = capLength(str(value), formCapacity(id))
+  if (id === "label") f.labelHeld = labelHeldAfter(f.labelHeld, f.values.label)
   if (isUrlField(id)) f.revealed[id] = o.typed === true && f.values[id] !== ""
   if (f.error && f.error.field === id) f.error = null
   return cur
+}
+
+// D-SINK-98, round 4c (the lead's call under the owner's standing authority
+// of 2026-11-09). Whether the label FIELD is held, from whether it was held
+// and the value it now holds: never once it is empty, and otherwise held
+// while it was held or once the value holds the field (labelHoldsField,
+// round 4d). A pure function of the two, asked on every write of the label
+// (withFormValue) and when a form is made or copied (copyForm): a new add
+// form is not held, an edit form is held when its stored label holds the
+// field, and closing the form drops it with the form. While held, the
+// field's Value is stars (fieldAccessibleValue). Why: a label that has read
+// as an address is one edit from a credential the label rule cannot tell
+// from a name -- one Backspace on the `:` of `qqqqqq:zzzzzz@cdn.test` leaves
+// `qqqqqqzzzzzz@cdn.test`, and deleting `cdn.test/get.php?username=qqqqqq&`
+// from a pasted query leaves `password=zzzzzz` -- and round 4b's sweep
+// measured 933 of 10,920 such edit states publishing the run. Round 4d (the
+// lead's call under the same authority): the hold is separate from the
+// stored reading and broad, because it costs only the field's Value --
+// labelHoldsField is labelReadsAsAddress OR labelMayCarryCredential, the
+// five delimiters a credential's URL puts after a username or a password,
+// asked over the whole value. Round 4c held by labelReadsAsAddress alone,
+// and 603 of round 4b's 10,603 pasted values that hold one of those
+// delimiters were heard in full
+// (`qqqqqq:zz zz@cdn.test`, `http<U+00A0>://qqqqqq:zz zz@cdn.test/x`,
+// `username=qqqqqq&password=zzzzzz`). The cost, stated: once the value holds
+// one of those shapes in this form session, a screen-reader user hears the
+// field as stars, its length only, until they empty it -- `IPTV@Home`,
+// `Me@BBC.co.uk`, `1.5/2 HD`, `Sports: Live/HD`, `News//Sport`, `Q&A=fun`
+// after its `=` -- and an Edit form over a stored label that holds one
+// opens held: `Sports: Live/HD` opens as 15 stars, where the row, its
+// buttons and the remove dialog give it as typed (17 of round 4c's 27
+// required-unchanged labels, 11 of 28 more ordinary ones, none of the 71
+// deriveLabel gives for the fixtures; round 4e's narrower shape (v) let
+// `Dr. Who/Torchwood` and `St. Louis/KC` go, and round 4f's whole-value
+// arm holds again a label with two `/` after its first `.`, as round 4d
+// did: `U.S. / Canada / Mexico`, `Sat.1 / ProSieben / Kabel 1`, `Mr. Robot
+// / S01 / HD`, 14 of 17 such labels the round-4f review wrote, each held
+// on round 4d with more typed states heard as stars). What remains heard, measured
+// after round 4e, is what holds none of them. Typed: a prefix before the
+// value first holds -- a username, `qqqqqq:zzzzzz` before its `@` or `/`,
+// `mailto:qqqqqq` before its `@` (17 states over the reviews' 13 labels),
+// and `username=qqqqqq&password`, until the `=` after its `&`. Pasted
+// whole, 11,777 of 58,817 corpus values (round 4b's 10,603, round 4e's 35
+// encoded, and round 4f's 14 encoded and 48,199 scheme-less stream paths),
+// in five classes: no delimiter at all (140: a username, a password,
+// a host), `user:pass` with nothing of `/`, a backslash or `@` after its
+// `:` (185), `key=value` with no `?`, `;` or `&` before its `=` (165, the
+// remnant `password=zzzzzz`), a path with no `.` before its `/` (10,427, the
+// remnant `/live/qqqqqq/zzzzzz/1.ts`), and one `/` alone whose `.` is in
+// another U+0020 token (860, `cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts`, none
+// of those holding both a username's run and a password's; but a user/pass
+// pair written after a host and a space, `cdn.test qqqqqq/zzzzzz` or
+// `Provider cdn.test qqqqqq/zzzzzz`, is this class and is heard whole, as
+// on round 4e -- round 4d held it -- the lead's call at the round 4f merge
+// under the owner's standing authority of 2026-11-09 to accept it beside
+// `Username: qqqqqq Password: zzzzzz`) -- deletion remnants as
+// well as prefixes, which no shape tells from a name. Round 4e asked shape
+// (v) per token alone and so heard `cdn.test /live/qqqqqq/zzzzzz/1.ts`, a
+// credential path pasted with one U+0020 before its path, whole; since
+// round 4f (K1, the lead's call under the owner's standing authority of
+// 2026-11-09) two `/` after its first `.` hold it again, as round 4d did.
+// A credential's URL pasted percent- or entity-encoded is no longer among
+// them (round 4e, I1; round 4f, K4: a numeric entity with no `;` and the
+// eight delimiters' HTML names too). Still not decoded, so heard as typed
+// when nothing else holds the value: `\xHH`, `%u00HH`, `\U000000HH`, octal
+// `\072`, `+` for `/`, a name HTML does not spell so (`&COLON;`), a
+// `;`-less hex entity followed by a hex digit (`&#x40cdn.test` is U+40CD
+// and `n.test`), and every double escape. The hold is the
+// field's alone: a label saved while held is stored as typed and drawn and
+// heard through labelSinkText (model/sources.mjs), with that rule's
+// residual -- a stored label with no address shape is published as typed.
+function labelHeldAfter(held, value) {
+  var v = str(value)
+  if (v === "") return false
+  return held === true || labelHoldsField(v)
 }
 
 function withFormFocus(st, id) {
@@ -1381,25 +1481,54 @@ function fieldMasked(form, field) {
 // D-A11Y-1. The text a form field publishes on the accessibility bus, which
 // is NOT what it draws: the drawn field is kept off the bus and a sibling
 // node publishes this instead (Guide.qml, fieldRow). Revealing a URL is for
-// the eyes only, so this ignores `revealed` (what a revealed field may
-// publish is PLAN-NEXT decision 8, unanswered; the safe side is taken).
-// The label is the user's own name for the source and passes. A URL with a
-// scheme is masked by maskUrl, which keeps scheme, host, port, path and
-// query keys. A local path in a URL field passes. Anything else -- the
-// username, the password, a server typed without a scheme (it can carry
-// `user:pass@`), and any field added later -- is one `*` per character, so
-// a reader still hears that the field is filled and how long it is, as the
-// password's bullets always said.
+// the eyes only, so this ignores `revealed`.
+//
+// D-SINK-97 (2026-11-11, the owner's decision of 2026-11-08). An ADDRESS
+// field -- the playlist, the EPG, the Xtream server -- publishes its scheme
+// and host, or stars, and nothing else, whether or not it is revealed on
+// screen: a screen-reader user no longer proofreads the address by ear, and
+// nothing drawn changes (addressAccessibleValue, model/sources.mjs; since
+// round 4b a `file:` URL takes the host rule like any scheme and a bare
+// local path is stars, the owner's answer read literally). Until
+// then the Value reused the visual mask (maskUrl), which keeps the path, the
+// query keys and every token that is not `key=value`, and finds a userinfo
+// only once an `@` is in the authority -- so a URL typed by hand published
+// its username and password at every prefix before the `@`, and again when
+// the `@` alone was deleted -- and gave a URL whose userinfo holds an
+// unencoded `/`, `?` or `#` back with the credential in the host position.
+//
+// D-SINK-98 (2026-11-11, the lead's call under the owner's standing
+// authority of 2026-11-09): the label is the user's own name for the source
+// and passes through labelSinkText (round 4b; until then sinkText, which
+// acts only on a literal `://`), so a label that has an address's shape is
+// heard as its host or hosts, the way every composed source name carrying
+// it is (sourceAccessibleName, confirmRemoveMessage, sourceTransient,
+// sourceErrorMessage, footerCounts, sourcesSummary, activeSourceSummary, the
+// Sources row) -- until the field is HELD (round 4c, labelHeldAfter, the
+// lead's call under the same authority), and then it is one `*` per
+// character, so no edit of a label that has read as an address is heard.
+//
+// Anything else -- the username, the password, and any field added later --
+// is one `*` per character, so a reader still hears that the field is
+// filled and how long it is, as the password's bullets always said.
+var ADDRESS_FIELDS = ["server", "playlist", "epg"]
+
 function fieldAccessibleValue(form, field) {
   var f = form || {}
   var id = str(field)
   var value = f.values ? str(f.values[id]) : ""
-  if (id === "label") return value
-  if (id === "server" || isUrlField(id)) {
-    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return maskUrl(value)
-    if (isUrlField(id) && /^(\/|~\/)/.test(value) && value.indexOf("?") === -1) return value
-  }
-  return new Array(value.length + 1).join("*")
+  if (id === "label") return labelHeldAfter(f.labelHeld, value) ? accessibleStars(value) : labelSinkText(value)
+  if (ADDRESS_FIELDS.indexOf(id) !== -1) return addressAccessibleValue(value)
+  return accessibleStars(value)
+}
+
+// D-SINK-97: the accessible Description of a form field. The password's is
+// its label, which its node needs because nothing else names it (Guide.qml,
+// fieldA11y). Every other field's is empty: an address field's used to be
+// maskUrl of the value, which carried what the Value carried, and Qt raises
+// a Description change as an event of its own.
+function fieldAccessibleDescription(field, labelText) {
+  return str(field) === "password" ? str(labelText) : ""
 }
 
 // Ctrl+R / eye: toggles only when the value has something to mask.
@@ -1425,11 +1554,13 @@ export {
   adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,
   probeCommitState, pruneArgs, pruneKeeps, cacheJobKey, cacheJobDrop,
   cacheJobArgs, probeWaitsFor, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, DESTINATION_RULES, cacheBeforeDestinationRules,
-  cacheStale, formFields, isFormField, formLimit, FORM_SLACK, formCapacity,
-  emptyValues, copyValues, copyForm, formState, formFocusOrder, formHasText,
-  firstFieldWithText, guideWithForm, openForm, openFirstRun, openAddForm,
-  openEditForm, openXtreamForm, closeForm, withFormPatch, withFormValue,
-  withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
-  fieldAccessibleValue, toggleReveal, withFormReveal
+  sourcesSummary, activeSourceSummary, entryWith, DESTINATION_RULES,
+  cacheBeforeDestinationRules, cacheStale, formFields, isFormField, formLimit,
+  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
+  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
+  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
+  withFormPatch, withFormValue, labelHeldAfter, withFormFocus, moveFormFocus,
+  fieldMaskable, fieldRevealed, fieldMasked, ADDRESS_FIELDS,
+  fieldAccessibleValue, fieldAccessibleDescription, toggleReveal,
+  withFormReveal
 }

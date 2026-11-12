@@ -206,8 +206,8 @@ export {
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, sanitizeInput,
   sanitizeUrlInput, trimEdgeSpace, codePointLength, capCodePoints,
   sanitizeTyping, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
-  persistFailureMessage, refusalMessage, isIpv6Literal, HOST_FORMAT_RANGES,
-  hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
+  persistFailureMessage, refusalMessage, SOURCE_URL_SCHEMES, isIpv6Literal,
+  HOST_FORMAT_RANGES, hostNameRefused, cutQueryAndFragment, ENCODE_SENTENCE,
   WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
   sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, formAdviceLine,
   looksLikeHost, validateSourceUrl, normalizeSourceUrl, ADDRESS_CLASSES,
@@ -219,15 +219,18 @@ export {
   epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
-  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
-  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail, sourceAccessibleName,
-  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
-  confirmLogosMessage, confirmRemoveMessage, fetchingLine, failureFromHost,
-  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
-  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
+  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, labelHost,
+  addressAtAfterAuthority, labelSinkText, labelReadsAsAddress,
+  labelHoldsField, labelMayCarryCredential, labelCore, labelDecode,
+  encodeQueryValue, xtreamUrls, validateXtream, pluralGroups, countsLine,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, failureFromHost, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
+  logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
@@ -236,19 +239,22 @@ export {
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
   activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
   pruneArgs, cacheJobDrop, cacheJobArgs, probeWaitsFor, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, DESTINATION_RULES,
-  cacheBeforeDestinationRules, cacheStale, formFields, isFormField, formLimit,
-  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, fieldAccessibleValue, toggleReveal, withFormReveal
+  sourceForEdit, sourcesSummary, activeSourceSummary, entryWith,
+  DESTINATION_RULES, cacheBeforeDestinationRules, cacheStale, formFields,
+  isFormField, formLimit, formCapacity, copyForm, formState, formFocusOrder,
+  formHasText, openForm, openFirstRun, openAddForm, openEditForm,
+  openXtreamForm, closeForm, withFormValue, labelHeldAfter, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
+  fieldAccessibleValue, fieldAccessibleDescription, toggleReveal,
+  withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,
   editRangeFor, cutApplies, wordBoundary, typedText, editInsert, editDelete,
-  withFormError, withFormProbing, sanitizeFieldInput, sanitizePasteInput,
-  formSubmitValues, validateUrlForm, sourcesRowCount, sourcesRowKind,
-  sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove, openSources,
-  closeSources, withSourceCursor, startRemove, startLogosConsent, afterRemove,
-  afterSwitch
+  withFormError, withFormProbing, formHostWithheld, formLineHost,
+  formFetchingLine, formProbeFailureLine, formLabelPlaceholder,
+  sanitizeFieldInput, sanitizePasteInput, formSubmitValues, validateUrlForm,
+  sourcesRowCount, sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor,
+  cursorAfterRemove, openSources, closeSources, withSourceCursor, startRemove,
+  startLogosConsent, afterRemove, afterSwitch
 } from "./model/form-edit.mjs"

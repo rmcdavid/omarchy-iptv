@@ -2962,4 +2962,233 @@ TestCase {
     compare(mouseInput.selectedText, "ell", "a drag selects on a read-only input")
     compare(mouseInput.text, "hello", "and none of it edited the field")
   }
+
+  // D-SINK-97 and D-SINK-98, in the shell's own engine: the Value an address
+  // field publishes (every prefix of a credentialed URL typed key by key,
+  // revealed, and the rule's table) and a label that is a credentialed URL.
+  // node runs the wide sweeps; this holds V4 to the same answers, since the
+  // rule reads regexes, String.prototype.normalize (hostNameRefused) and the
+  // line terminators, where the two engines have differed before.
+  function test_addressAccessibleValueInV4() {
+    var E = Model.ELLIPSIS
+    var LS = String.fromCharCode(0x2028)
+    var urls = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test:8443/x",
+                "http://qqqqqq:zzz" + LS + "zzz@cdn.test/get.php", "http://cdn.test/get.php?username=qqqqqq&password=zz&zz"]
+    var fields = ["playlist", "epg", "server"]
+    var leaked = []
+    for (var f = 0; f < fields.length; f++) {
+      for (var u = 0; u < urls.length; u++) {
+        var st = fields[f] === "server" ? Model.openXtreamForm(Model.guideState("all"), "sources") : Model.openAddForm(Model.guideState("all"))
+        var value = ""
+        for (var i = 0; i < urls[u].length; i++) {
+          value = Model.editInsert(value, value.length, value.length, Model.typedText(urls[u].charAt(i), false), Model.formCapacity(fields[f])).value
+          st = Model.withFormValue(st, fields[f], value, { typed: true })
+          var heard = Model.fieldAccessibleValue(st.form, fields[f])
+          if (/[qz]/.test(heard)) leaked.push(fields[f] + " " + value + " -> " + heard)
+        }
+      }
+    }
+    compare(leaked, [], "no typed prefix publishes a character of the credential")
+    function v(text) { return Model.fieldAccessibleValue({ values: { playlist: text } }, "playlist") }
+    function stars(text) { return new Array(text.length + 1).join("*") }
+    compare(v("http://qqqqqq:zzzzzz@cdn.test/get.php"), "http://****@cdn.test/" + E)
+    compare(v("https://cdn.test:8443/"), "https://cdn.test:8443/")
+    compare(v("http://cdn.test?x=1"), "http://cdn.test?" + E)
+    compare(v("http://[2001:db8::1]:8080/x"), "http://[2001:db8::1]:8080/" + E)
+    compare(v("http://cdn.test:8080"), stars("http://cdn.test:8080"))
+    compare(v("http://qqqqqq:zz#zz@cdn.test/x"), stars("http://qqqqqq:zz#zz@cdn.test/x"))
+    compare(v("http://cdn" + String.fromCharCode(0xff1b) + "test/y"), stars("http://cdn;test/y"), "the NFKD fold refuses a fullwidth `;`")
+    compare(v("http://cdn.test/x#a" + String.fromCharCode(0x2029) + "b"), stars("http://cdn.test/x#a b"))
+    // Round 4b (D2): a file: URL takes the host rule, its authority may be
+    // empty, and a bare local path is stars.
+    compare(v("file:///home/me/tv.m3u"), "file:///" + E)
+    compare(v("file:///x?zzzzzz"), "file:///" + E)
+    compare(v("file://qqqqqq:zzzzzz@cdn.test/x"), "file://****@cdn.test/" + E)
+    compare(v("file:/x"), stars("file:/x"))
+    compare(v("/home/me/tv.m3u"), stars("/home/me/tv.m3u"))
+    compare(v("/cdn.test/live/qqqqqq/zzzzzz/1.ts"), stars("/cdn.test/live/qqqqqq/zzzzzz/1.ts"))
+    compare(v("//qqqqqq:zzzzzz@cdn.test/x"), stars("//qqqqqq:zzzzzz@cdn.test/x"))
+    compare(v("~/qqqqqq@zzzzzz"), stars("~/qqqqqq@zzzzzz"))
+    compare(Model.fieldAccessibleDescription("playlist", "Playlist URL or path"), "")
+    compare(Model.fieldAccessibleDescription("password", "Password"), "Password")
+    compare(Model.sanitizePasteInput("playlist", "http://qqqqqq:zzz" + LS + "zzz@cdn.test/x" + String.fromCharCode(0x85), 4096), "http://qqqqqq:zzzzzz@cdn.test/x")
+    // Round 4c (E1): the field holding such a label is stars; the stored
+    // label is heard as its host.
+    compare(Model.fieldAccessibleValue({ values: { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" } }, "label"), stars("http://qqqqqq:zzzzzz@cdn.test/get.php"))
+    compare(Model.labelSinkText("http://qqqqqq:zzzzzz@cdn.test/get.php"), "cdn.test")
+    compare(Model.confirmRemoveMessage("http://qqqqqq:zzzzzz@cdn.test/get.php", false).indexOf("qq"), -1)
+    compare(Model.sourceTransient("removed", { label: "http://qqqqqq:zzzzzz@cdn.test/get.php" }), "Removed cdn.test")
+  }
+
+  // Round 4b in the shell's engine: the label's reading (D1), whose token
+  // split is V4's `\s` and whose fold is V4's String.prototype.normalize;
+  // the line terminators (D4); the withheld form lines (D5); the IPC active
+  // source (D3). node runs the sweeps; this holds V4 to the same answers.
+  function test_labelSinkTextInV4() {
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["My TV", "My TV"], ["Sports: Live", "Sports: Live"], ["BBC 1/2", "BBC 1/2"], ["IPTV@Home", "IPTV@Home"],
+      ["cdn.test:8080", "cdn.test:8080"], ["tv.m3u", "tv.m3u"], ["Caf" + String.fromCharCode(0xe9), "Caf" + String.fromCharCode(0xe9)],
+      ["qqqqqq:zzzzzz@cdn.test", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"], ["http:/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
+      ["mailto:qqqqqq@cdn.test?password=zzzzzz", "cdn.test"], ["http:" + BS + BS + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http" + String.fromCharCode(0xff1a) + "//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http:" + String.fromCharCode(0xff0f, 0xff0f) + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["http:/" + String.fromCharCode(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
+      ["http" + String.fromCharCode(0xff1a, 0xff0f, 0xff0f) + "qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz" + String.fromCharCode(0xff20) + "cdn.test", Model.HOST_WITHHELD],
+      ["http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "cdn.test:8080"],
+      ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD + " cdn.test"],
+      ["My" + String.fromCharCode(0xa0) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["My" + String.fromCharCode(0xfeff) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["My" + String.fromCharCode(0x3000) + "TV", "My" + String.fromCharCode(0x3000) + "TV"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    // Round 4c (E1): a label that reads as an address holds its field, so the
+    // field is stars; the stored label reads as its host (above).
+    compare(Model.fieldAccessibleValue({ values: { label: "qqqqqq:zzzzzz@cdn.test" } }, "label"), "**********************")
+    compare(Model.confirmRemoveMessage("//qqqqqq:zzzzzz@cdn.test/x", true).indexOf("qq"), -1)
+    compare(Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").code, "label_taken")
+    var st = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: "qqqqqq:zzzzzz@cdn.test", origin: "guide" }, 100)
+    compare(Model.activeSourceSummary(st.state, st.key, 200).label, "cdn.test")
+    compare(Model.typedText(String.fromCharCode(0x2028), false), "")
+    compare(Model.typedText(String.fromCharCode(0x2029), false), "")
+    compare(Model.sanitizePasteInput("label", "a" + String.fromCharCode(0x2028) + "b" + String.fromCharCode(0x2029) + "c", 64), "abc")
+    var form = { kind: "url", values: { label: "", playlist: "http://qqqqqq#zzzzzz@cdn.test/x", epg: "" }, probing: true, probeHost: "qqqqqq", probeKind: "url" }
+    compare(Model.formFetchingLine(form), "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS)
+    compare(Model.formProbeFailureLine(form, "Could not resolve host", "qqqqqq", ""), "Could not resolve host from " + Model.HOST_WITHHELD)
+    compare(Model.formLabelPlaceholder(form), Model.HOST_WITHHELD)
+    compare(Model.formLabelPlaceholder({ kind: "url", values: { label: "", playlist: "http://cdn.test/x", epg: "" } }), "cdn.test")
+  }
+
+  // Round 4c in the shell's engine: the stored label's reading (E2, its
+  // U+0020 token edge, its clauses and its host's shape), the held field
+  // (E1), the dotted username withheld (E4), the edit that keeps its label
+  // (E5), and an address field's scheme and host rule (E8). node runs the
+  // sweeps and the oracle; this holds V4 to the same answers.
+  function test_round4cInV4() {
+    var W = Model.HOST_WITHHELD
+    var E = Model.ELLIPSIS
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["1.5/2 HD", "1.5/2 HD"], ["ESPN 2.0/3.0", "ESPN 2.0/3.0"], ["time 10:30/11:30", "time 10:30/11:30"],
+      ["U.S./News", "U.S./News"], ["v1.2/beta", "v1.2/beta"], ["News?lang=en", "News?lang=en"], ["Rock&Roll=Live", "Rock&Roll=Live"],
+      ["TV & Movies?=", "TV & Movies?="], ["Q&A=fun", "Q&A=fun"], ["x;y=1", "x;y=1"], ["Kids&Family=TV.m3u", "Kids&Family=TV.m3u"],
+      ["list;v=2.m3u", "list;v=2.m3u"], ["C:/TV", "C:/TV"], ["C:" + BS + "TV", "C:" + BS + "TV"], ["News//Sport", "News//Sport"],
+      ["Sky.UK/Sports", "Sky.UK"], ["//cdn.test/x", "cdn.test"], ["get.php?username=qqqqqq&password=zzzzzz", W],
+      ["Sport:Live@HD", W], ["Fox:News@9", W], ["mailto:qqqqqq@zzzzzz", W], ["qqqqqq:zz@zz", W], ["qqqqqq:zzzzzz@cdn.test,qqqqqq", W],
+      ["qqqqqq:zzzzzz@cdn.test!zzzzzz", W], ["qqqqqq:zzzzzz@cdn.test#zzzzzz", "cdn.test"], ["http://nas/x", W],
+      ["rtmp://qqqqqq:zzzzzz@cdn.test:1935/live", W], ["1.2.3.4/x", "1.2.3.4"], ["[::1]:8080/x", "[::1]:8080"],
+      ["qqqqqq:zzzzzz" + String.fromCharCode(0xfeff) + "@cdn.test", "cdn.test"],
+      ["qqqqqq:" + String.fromCharCode(0x2028) + "zzzzzz@cdn.test", "cdn.test"],
+      ["cdn.test/x" + String.fromCharCode(0xa0) + "tv.test/y", "cdn.test"],
+      ["//qqqqqq" + String.fromCharCode(0xff1f) + "zzzzzz@cdn.test/x", "cdn.test"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    // E1, through the form.
+    var st = Model.openAddForm(Model.guideState("all"))
+    compare(st.form.labelHeld, false)
+    st = Model.withFormValue(st, "label", "qqqqqq:zzzzzz@cdn.test", { typed: false })
+    st = Model.withFormValue(st, "label", "qqqqqqzzzzzz@cdn.test", { typed: true })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*********************")
+    st = Model.withFormValue(st, "label", "", { typed: true })
+    st = Model.withFormValue(st, "label", "My TV", { typed: true })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "My TV")
+    compare(Model.openEditForm(Model.guideState("all"), "k", { label: "cdn.test/get.php?username=qqqqqq", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld, true)
+    compare(Model.labelHeldAfter(true, ""), false)
+    compare(Model.labelReadsAsAddress("My TV"), false)
+    // E4.
+    var form = { kind: "url", values: { label: "", playlist: "http://qqqqqq.test:12#zzzzzz@cdn.test/x", epg: "" }, probing: true, probeHost: "qqqqqq.test", probeKind: "url" }
+    compare(Model.formFetchingLine(form), "Fetching from " + W + E)
+    compare(Model.formLabelPlaceholder(form), W)
+    compare(Model.addressAtAfterAuthority("http://qqqqqq.test/zzzzzz@cdn.test/get.php"), true)
+    compare(Model.addressAtAfterAuthority("http://cdn.test/get.php"), false)
+    // E5.
+    compare(Model.validateLabel("1.5/3 HD", [{ label: "1.5/2 HD", id: "a" }, { label: "1.5/3 HD", id: "b" }], "b").ok, true)
+    compare(Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/c.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }, { label: "x", id: "b" }], "b").code, "label_taken")
+    // E8.
+    function v(text) { return Model.fieldAccessibleValue({ values: { playlist: text } }, "playlist") }
+    function stars(text) { return new Array(text.length + 1).join("*") }
+    compare(v("qqqqqq://zz@cdn.test/x"), stars("qqqqqq://zz@cdn.test/x"))
+    compare(v("rtsp://cdn.test:554/live"), stars("rtsp://cdn.test:554/live"))
+    compare(v("http://cdn.test!zzzzzz/x"), stars("http://cdn.test!zzzzzz/x"))
+    compare(v("http://nas/x"), "http://nas/" + E)
+    compare(v("http://[fe80::1%25qqqqqq]/x"), stars("http://[fe80::1%25qqqqqq]/x"))
+  }
+
+  // Round 4d in the shell's engine: the field's broad hold (F1), the
+  // redactor-only withholding (F2), the leftmost authority (F3), the token's
+  // core and clause d's X@H (F4) and a host's labels (F10). node runs the
+  // sweeps and the oracle; this holds V4 to the same answers.
+  function test_round4dInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["htt?p://qqqqqq:zzzzzz/x", W], ["htt:p://qqqqqq:zz zz@cdn.test", W], ["x(p://qqqqqq:zz zz@cdn.test)", W],
+      ["qqqqqq:zzzzzz@cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"], ["cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"],
+      ["qqqqqq:zzzzzz@cdn.test/live//qqqqqq.qqqqqq/1.ts", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x?u=me:x@mail.test", "cdn.test"],
+      ["Provider (cdn.test:8080/qqqqqq/zzzzzz)", "cdn.test:8080"], ["(v1.2/beta)", "(v1.2/beta)"], ["(News/Sport)", "(News/Sport)"],
+      ["[::1]:8080/x", "[::1]:8080"], ["zzzzzz@cdn.test/x", "cdn.test"], ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["IPTV@Home", "IPTV@Home"],
+      ["qqqqqq:zz zz@cdn.test", "qqqqqq:zz zz@cdn.test"], ["qqqqqq:zzzzzz@my_host.test/x", W], ["my_host.test/x", "my_host.test/x"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    var holds = ["a//b", "x:y/z", "x:y" + BS + "z", "x:y@z", "qqqqqq:zz zz@cdn.test", "a?b=c", "a.b/c", "IPTV@Home",
+                 "a" + String.fromCharCode(0xff0f, 0xff0f) + "b", "a/" + String.fromCharCode(0x200b) + "/b", "username=qqqqqq&password=zzzzzz"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["My TV", "@home", "Me @Home", "a=b?c", "a/b.c", "x:y", "Sports: Live", "BBC 1/2", "cdn.test:8080", "qqqqqq:zzzzzz", "password=zzzzzz"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+    var st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", "http" + String.fromCharCode(0xa0) + "://qqqqqq:zz zz@cdn.test/x", { typed: false })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************")
+    compare(Model.openEditForm(Model.guideState("all"), "k", { label: "username=qqqqqq&password=zzzzzz", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld, true)
+  }
+
+  // Round 4e (D-SINK-98; each the lead's call under the owner's standing
+  // authority of 2026-11-09): the escapes decoded (a replace with a
+  // function, parseInt and String.fromCodePoint in V4), a token's raw text
+  // beside its core, the leftmost authority before a `//`, no host for an
+  // a:b@c token whose head holds no `@`, and shape (v) asked per token.
+  function test_round4eInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", "cdn.test"], ["http%3a%2f%2fqqqqqq%3azzzzzz%40cdn.test%2fx", "cdn.test"],
+      ["http&#58;&#47;&#47;qqqqqq&#58;zzzzzz&#64;cdn.test&#47;x", "cdn.test"], ["http&#x3a;&#x2f;&#x2f;qqqqqq&#x3a;zzzzzz&#x40;cdn.test&#x2f;x", "cdn.test"],
+      ["qqqqqq" + BS + "u003azzzzzz" + BS + "u0040cdn.test", "cdn.test"], ["News%2FSport", "News%2FSport"], ["&#37;2F&#37;2Fcdn.test", "&#37;2F&#37;2Fcdn.test"],
+      ["Server cdn.test/. Login qqqqqq zzzzzz", "cdn.test"], ["cdn.test/, qqqqqq/zzzzzz", "cdn.test"], ["(v1.2/beta)", "(v1.2/beta)"],
+      ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["qqqqqq:zzzzzz@cdn.test//zzzzzz.zz/1.ts", "cdn.test"],
+      ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["qqqqqq:zzzzzz@zz//cdn.test/x", W],
+      ["qqqqqq.test:12/zzzzzz@cdn.test/get.php", W], ["'cdn.test/qqqqqq/zzzzzz'", "cdn.test"], ["x(p://qqqqqq:zzzzzz @cdn.test)", W]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    var holds = ["/live/qqqqqq.qq/zzzzzz/1.ts", "Pluto.tv/US", "a%2F%2Fb", "a&#47;&#47;b", "a" + String.fromCharCode(0xff05) + "2F" + String.fromCharCode(0xff05) + "2Fb"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["Dr. Who/Torchwood", "e.g. Sports/News", "News%2FSport", "%252F%252F", "&#47;home"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+    var st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", { typed: false })
+    compare(Model.fieldAccessibleValue(st.form, "label"), "*******************************************")
+  }
+
+  // Round 4f (D-SINK-98, the lead's call under the owner's standing
+  // authority of 2026-11-09): K1's whole-value shape (v), K2's head before a
+  // `//` on its three readings and the two readings of an escaped token,
+  // K3's fold of the raw token, and K4's `;`-less and named entities, in
+  // the engine the shell runs (the decoder's callback takes a sixth
+  // argument here).
+  function test_round4fInV4() {
+    var W = Model.HOST_WITHHELD
+    var BS = String.fromCharCode(92)
+    var cases = [
+      ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["qqqqqq:zzzzzz" + String.fromCharCode(0xff20) + "cdn.test//zzzzzz.zz/1.ts", W],
+      ["nas:8080//qqqqqq.qq/zzzzzz/1.ts", W], ["cdn.test.//qqqqqq.qq/zzzzzz/1.ts", W], ["cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"],
+      ["qqqqqq.qq//zzzzzz@cdn.test/x", W], ["cdn.test%2Fqqqqqq.qq//zzzzzz.zz/x", W], ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+      ["Server cdn.test%2F. Login qqqqqq zzzzzz", "cdn.test"], ["Server cdn.test" + String.fromCharCode(0xff0f) + ". Login qqqqqq zzzzzz", W],
+      ["http&colon;&sol;&sol;qqqqqq&colon;zzzzzz&commat;cdn.test&sol;get.php", "cdn.test"], ["http&#58&#47&#47qqqqqq&#58zzzzzz&#64cdn.test&#47get.php", "cdn.test"]
+    ]
+    for (var i = 0; i < cases.length; i++) compare(Model.labelSinkText(cases[i][0]), cases[i][1], JSON.stringify(cases[i][0]))
+    compare(Model.labelDecode("&colon;&sol;&commat;&quest;&amp;&equals;&semi;&bsol;&#58&#x2f&COLON;"), ":/@?&=;" + BS + ":/&COLON;")
+    compare(Model.labelDecode("&#1114112"), "&#1114112")
+    var holds = ["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts", "&#47&#47qqqqqq"]
+    for (i = 0; i < holds.length; i++) compare(Model.labelHoldsField(holds[i]), true, JSON.stringify(holds[i]))
+    var free = ["Dr. Who/Torchwood", "Ch. 4 / Ch. 5", "cdn.test /qqqqqq"]
+    for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
+  }
 }

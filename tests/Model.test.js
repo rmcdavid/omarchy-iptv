@@ -8371,7 +8371,9 @@ check("R28e: probeFailureLine -- a commit refusal with its code (too_many, state
 checkCall("R28e (structural): both of the guide's probe-failure lines hand probeFailureLine the result's code, and the cap is ONE decision -- Guide.sourcesFull and Service.canAddSource call Model.sourcesFull and compare against no limit of their own", () => {
   const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
   const sv = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
-  return [(g.match(/Model\.probeFailureLine\([^\n]*, String\(r\.code \|\| ""\)\)/g) || []).length, (g.match(/Model\.probeFailureLine\(/g) || []).length,
+  // D-SINK-99 (round 4b): the form's line is Model.formProbeFailureLine,
+  // which hands probeFailureLine the code it is given.
+  return [(g.match(/Model\.(?:probeFailureLine|formProbeFailureLine)\([^\n]*, String\(r\.code \|\| ""\)\)/g) || []).length, (g.match(/Model\.(?:probeFailureLine|formProbeFailureLine)\(/g) || []).length,
           /function sourcesFull\(\) \{\n    if \(!Model\.sourcesFull\(root\.serviceReady \? root\.service\.userState : null\)\) return false/.test(g),
           /readonly property bool canAddSource: !Model\.sourcesFull\(root\.userState\) && !root\.probing/.test(sv),
           (g + sv).search(/LIMITS\.sources|sourceCount < Model\.|>= Model\.MAX_SOURCES/) === -1]
@@ -9294,14 +9296,14 @@ checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: n
 })()
 
 // ---- R33a (round 7, 2026-10-22): A PASTE INTO A URL FIELD JOINS ITS LINES ----
-checkCall("R33a: sanitizePasteInput -- a URL wrapped onto two lines by a mail client (CRLF and LF) pastes as ONE URL into the playlist, EPG and server fields, and that value validates; a TAB inside the same paste is kept and then refused by the validator with the sentence that names it (the one exception is CR and LF, nothing else); a name field strips every control character as before; the field rule's own edge trim still applies", () => {
+checkCall("R33a: sanitizePasteInput -- a URL wrapped onto two lines by a mail client (CRLF and LF) pastes as ONE URL into the playlist, EPG and server fields, and that value validates; a TAB inside the same paste is kept and then refused by the validator with the sentence that names it (the one exception is the line terminators -- CR and LF, and since D-SINK-97 VT, FF, U+0085, U+2028 and U+2029 -- nothing else); a name field strips every control character as before; the field rule's own edge trim still applies", () => {
   const wrapped = "http://h.test/get.php?username=u&\r\npassword=zpass&type=m3u_plus\n"
   const joined = "http://h.test/get.php?username=u&password=zpass&type=m3u_plus"
   const tabbed = "http://u:pa\tss@h.test/x\n"
   return [Model.sanitizePasteInput("playlist", wrapped, 4096), Model.sanitizePasteInput("epg", wrapped, 4096), Model.sanitizePasteInput("server", "http://h.test\n:8080", 4096),
           Model.validateSourceUrl(Model.sanitizePasteInput("playlist", wrapped, 4096)).ok,
           Model.sanitizePasteInput("playlist", tabbed, 4096), Model.validateSourceUrl(Model.sanitizePasteInput("playlist", tabbed, 4096)).message,
-          Model.sanitizePasteInput("playlist", "http://h.test/a\u0085b", 4096) === "http://h.test/a\u0085b", Model.sanitizePasteInput("playlist", "http://h.test/a\u2028b", 4096) === "http://h.test/a\u2028b",
+          Model.sanitizePasteInput("playlist", "http://h.test/a\u0085b", 4096) === "http://h.test/ab", Model.sanitizePasteInput("playlist", "http://h.test/a\u2028b", 4096) === "http://h.test/ab",
           Model.sanitizePasteInput("label", "Pro\r\nvider\t", 64), Model.sanitizePasteInput("username", "u\nser", 64), Model.sanitizePasteInput("playlist", "  " + joined + "  ", 4096),
           Model.sanitizeFieldInput("playlist", wrapped, 4096) === wrapped.replace(/\n$/, "")]
 }, ["http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test:8080", true, "http://u:pa\tss@h.test/x", Model.sourceErrorMessage("url_control"), true, true, "Provider", "user", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", true])
@@ -9353,10 +9355,1452 @@ check("toggleReveal: reveal, hide, no-op when nothing to mask", [Model.toggleRev
 // value, revealed or not; the label and a plain local path still read.
 const a11yForm = { values: { label: "My TV", playlist: "http://joe:PLAYUSER@h.test:80/g.php?username=joe&password=PLAYTOKEN&type=m3u#FRAGTOKEN", epg: "http://h.test/xmltv.php?password=EPGTOKEN", server: "http://prov.example:8080/get.php?username=joe&password=SRVTOKEN", username: "USERTOKEN", password: "PASSTOKEN" }, revealed: { playlist: true, epg: true } }
 check("D-A11Y-1 fieldAccessibleValue: no credential reaches the bus, revealed or not", Object.keys(a11yForm.values).filter(k => /TOKEN|PLAYUSER/.test(Model.fieldAccessibleValue(a11yForm, k))), [])
-check("D-A11Y-1 fieldAccessibleValue: per field", ["label", "playlist", "epg", "server", "username", "password"].map(k => Model.fieldAccessibleValue(a11yForm, k)), ["My TV", "http://****@h.test:80/g.php?username=****&password=****&type=m3u#****", "http://h.test/xmltv.php?password=****", "http://prov.example:8080/get.php?username=****&password=****", "*********", "*********"])
+check("D-A11Y-1 fieldAccessibleValue: per field (D-SINK-97: an address field says scheme and host and the closing character, never its path, query or fragment)", ["label", "playlist", "epg", "server", "username", "password"].map(k => Model.fieldAccessibleValue(a11yForm, k)), ["My TV", "http://****@h.test:80/" + Model.ELLIPSIS, "http://h.test/" + Model.ELLIPSIS, "http://prov.example:8080/" + Model.ELLIPSIS, "*********", "*********"])
 check("D-A11Y-1 fieldAccessibleValue: a schemeless server is starred whole (it can carry user:pass@)", Model.fieldAccessibleValue({ values: { server: "joe:SECRET@prov.example" } }, "server"), "***********************")
-check("D-A11Y-1 fieldAccessibleValue: a local path passes, a path with a query does not", [Model.fieldAccessibleValue({ values: { playlist: "/home/me/tv.m3u" } }, "playlist"), Model.fieldAccessibleValue({ values: { epg: "~/epg.xml" } }, "epg"), Model.fieldAccessibleValue({ values: { playlist: "/x?k=SECRET" } }, "playlist")], ["/home/me/tv.m3u", "~/epg.xml", "***********"])
+// D-SINK-97 (round 4b, D2): a local path is stars, with or without a query.
+check("D-A11Y-1 fieldAccessibleValue: a local path is stars, one per character, with or without a query (D-SINK-97, round 4b)", [Model.fieldAccessibleValue({ values: { playlist: "/home/me/tv.m3u" } }, "playlist"), Model.fieldAccessibleValue({ values: { epg: "~/epg.xml" } }, "epg"), Model.fieldAccessibleValue({ values: { playlist: "/x?k=SECRET" } }, "playlist")], ["***************", "*********", "***********"])
 check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no form", [Model.fieldAccessibleValue({ values: { other: "abc" } }, "other"), Model.fieldAccessibleValue({ values: {} }, "username"), Model.fieldAccessibleValue(null, "password")], ["***", "", ""])
+// ---- D-SINK-97 and D-SINK-98 (2026-11-11): what the Sources form's
+// address fields and its label publish on the accessibility bus. Every check
+// drives the shipping path -- the form state (openAddForm / openXtreamForm,
+// withFormValue as applyEdit and pasteFromProcess call it), the key edits
+// (editInsert, editDelete) and the paste join (sanitizePasteInput) -- and
+// reads what fieldA11y publishes: Model.fieldAccessibleValue and
+// Model.fieldAccessibleDescription. The fixture credentials are spelled from
+// `q` and `z` alone and no scheme, host, mark or ellipsis below holds either
+// letter, so "no q and no z" is the whole credential, a fragment of it, or
+// one character of it, on the bus.
+;(function () {
+  const E = Model.ELLIPSIS
+  const LT = { LF: "\n", VT: String.fromCharCode(11), FF: String.fromCharCode(12), CR: "\r",
+               NEL: String.fromCharCode(0x85), LS: String.fromCharCode(0x2028), PS: String.fromCharCode(0x2029) }
+  const ADDRESS = ["playlist", "epg", "server"]
+  const LEAK = /[qz]/
+  function formFor(field) {
+    return field === "server" ? Model.openXtreamForm(Model.guideState("all"), "sources") : Model.openAddForm(Model.guideState("all"))
+  }
+  // Both reveal states: the bus publishes the same either way.
+  function heard(st, field) {
+    const shown = Model.withFormReveal(st, field, true).form
+    const hidden = Model.withFormReveal(st, field, false).form
+    return [Model.fieldAccessibleValue(st.form, field), Model.fieldAccessibleValue(shown, field), Model.fieldAccessibleValue(hidden, field),
+            Model.fieldAccessibleDescription(field, field)]
+  }
+  function leaks(values) { return values.filter(function (v) { return LEAK.test(v) }) }
+  // A sweep runs once, inside the first checkCall that reads it, so a name
+  // the model does not export (the base commit has no
+  // fieldAccessibleDescription) is one failure per check, not an abort.
+  function memo(fn) {
+    let done = false
+    let value
+    return function () { if (!done) { value = fn(); done = true } return value }
+  }
+
+  // (i) Every prefix, typed left to right through the key path (typedText,
+  // which keeps U+2028 and drops U+0085 as Qt does, then editInsert).
+  const TYPED = [
+    "http://qqqqqq:zzzzzz@cdn.test/get.php",
+    "https://qqqqqq:zzzzzz@cdn.test:8443/get.php",
+    "http://qqqqqq:zzzzzz@cdn.test:8080/live/get.php?type=m3u_plus",
+    "https://qqqqqq:zzzzzz@cdn.test?username=qqqqqq&password=zzzzzz",
+    "http://qqqqqq:zzzzzz@cdn.test/x#zzzzzz",
+    "https://qqqqqq:zzzzzz@cdn.test/",
+    "http://qqqqqq@cdn.test/get.php",
+    "http://qqqqqq:zzz/zzz@cdn.test/get.php",
+    "http://qqqqqq:zzz?zzz@cdn.test/get.php",
+    "https://qqqqqq:zzz#zzz@cdn.test:8443/get.php",
+    "http://qqqqqq:zzz" + LT.LS + "zzz@cdn.test/get.php",
+    "http://qqqqqq:zzz" + LT.NEL + "zzz@cdn.test/get.php",
+    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz&type=m3u_plus",
+    "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+    "http://cdn.test/get.php;username=qqqqqq;password=zzzzzz",
+    "http://cdn.test/get.php?username=qqqqqq&password=zz&zz",
+    "http://cdn.test/get.php?qqqqqq&zzzzzz",
+    "http://cdn.test/x#qqqqqq" + LT.LS + "zzzzzz"
+  ]
+  const typedRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      TYPED.forEach(function (url) {
+        let st = formFor(field)
+        let value = ""
+        const out = []
+        for (let i = 0; i < url.length; i++) {
+          const edit = Model.editInsert(value, value.length, value.length, Model.typedText(url.charAt(i), false), Model.formCapacity(field))
+          value = edit.value
+          st = Model.withFormValue(st, field, value, { typed: true })
+          heard(st, field).forEach(function (v) { out.push(v) })
+        }
+        runs.push({ field: field, url: url, prefixes: url.length, typedWhole: value === Model.typedText(url, false), leaks: leaks(out).length })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: every prefix of " + TYPED.length + " credentialed URLs, typed key by key into the playlist, EPG and server fields, publishes no character of the credential in the Value (as typed, revealed or hidden) or the Description",
+    () => typedRuns().filter(function (r) { return r.leaks !== 0 || !r.typedWhole }), [])
+  checkCall("D-SINK-97: the typed sweep really typed every prefix (" + TYPED.length + " URLs x 3 fields)",
+    () => [typedRuns().length, typedRuns().reduce(function (n, r) { return n + r.prefixes }, 0) > 3 * 600], [TYPED.length * 3, true])
+
+  // (ii) Edit states of a whole value: each userinfo character deleted in
+  // turn, the `@` deleted, and word deletes both ways from every caret
+  // position, repeated until nothing is left.
+  const EDITED = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test:8443/x?y=1", "http://qqqqqq:zz/zz@cdn.test/"]
+  const editRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      EDITED.forEach(function (url) {
+        const states = []
+        const at = url.lastIndexOf("@")
+        for (let i = url.indexOf("//") + 2; i <= at; i++) states.push(Model.editDelete(url, i, i, 1, false, false).value)
+        for (let pos = 0; pos <= url.length; pos++) {
+          ;[-1, 1].forEach(function (dir) {
+            let v = url
+            let caret = pos
+            for (let n = 0; n < 64 && v !== ""; n++) {
+              const edit = Model.editDelete(v, caret, caret, dir, true, false)
+              if (!edit.changed) break
+              v = edit.value
+              caret = edit.caret
+              states.push(v)
+            }
+          })
+        }
+        // The password is never heard, and the username is never heard while
+        // the value still holds an `@` or any of the password. Once both are
+        // deleted the username is the host the value names -- `http://qqqqqq/x`
+        // -- and is heard as one, which no rule that says the host can avoid.
+        let leaked = 0
+        states.forEach(function (v) {
+          const st = Model.withFormValue(formFor(field), field, v, { typed: true })
+          heard(st, field).forEach(function (h) { if (/z/.test(h) || (/q/.test(h) && /[@z]/.test(v))) leaked++ })
+        })
+        runs.push({ field: field, url: url, states: states.length, leaks: leaked,
+                    atGone: Model.fieldAccessibleValue(Model.withFormValue(formFor(field), field, url.substring(0, at) + url.substring(at + 1), { typed: true }).form, field) })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: deleting each userinfo character, the `@` alone, and word after word both ways from every caret never publishes the password, nor the username while an `@` or the password is left",
+    () => editRuns().filter(function (r) { return r.leaks !== 0 || r.states < 40 }), [])
+  checkCall("D-SINK-97: the `@` deleted from a whole value is stars, not the credential read as a host (maskUrl found no userinfo there)",
+    () => editRuns().map(function (r) { return r.atGone === new Array(r.url.length).join("*") }), EDITED.concat(EDITED, EDITED).map(function () { return true }))
+
+  // Round 4d (F8, the lead's call under the owner's standing authority of
+  // 2026-11-09): the typed prefixes of R32a's typo class -- a userinfo
+  // holding an unencoded `/`, `?` or `#` -- publish the username as the host,
+  // and the password's leading digits as the port, until the `@` is typed:
+  // they cannot be told from `http://nas:12/` before it. Accepted and
+  // counted: seven typed states each, in every address field, all before
+  // the `@`; from the `@` on, stars.
+  const TYPO_TYPED = ["http://qqqqqq:12/zzzzzz@cdn.test/get.php", "http://qqqqqq/zzzzzz@cdn.test/x", "http://qqqqqq:12#zzzzzz@cdn.test/x",
+                      "http://qqqqqq:12?zzzzzz@cdn.test/x", "http://qqqqqq.test:12#zzzzzz@cdn.test/x"]
+  const typoTypedRuns = memo(function () {
+    const out = []
+    ADDRESS.forEach(function (field) {
+      TYPO_TYPED.forEach(function (url) {
+        let st = formFor(field)
+        let value = ""
+        let runs = 0, afterAt = 0
+        for (let i = 0; i < url.length; i++) {
+          value = Model.editInsert(value, value.length, value.length, Model.typedText(url.charAt(i), false), Model.formCapacity(field)).value
+          st = Model.withFormValue(st, field, value, { typed: true })
+          const h = Model.fieldAccessibleValue(st.form, field)
+          if (/[qQ]{2,}|[zZ]{2,}/.test(h)) { runs++; if (value.indexOf("@") !== -1) afterAt++ }
+        }
+        out.push([field, url, runs, afterAt])
+      })
+    })
+    return out
+  })
+  checkCall("D-SINK-97 (round 4d, F8): each typed prefix of R32a's five typo URLs publishes the username as the host until the `@` is typed -- seven states each, in the playlist, EPG and server fields, 105 in all, none from the `@` on (the stated cost)",
+    () => [typoTypedRuns().filter(function (r) { return r[2] !== 7 || r[3] !== 0 }), typoTypedRuns().reduce(function (n, r) { return n + r[2] }, 0)], [[], 105])
+
+  // (iii) A paste with each line terminator: joined by sanitizePasteInput,
+  // as it joins CR and LF, and the joined value is heard as scheme and host.
+  const pasteRuns = memo(function () {
+    const runs = []
+    ADDRESS.forEach(function (field) {
+      Object.keys(LT).forEach(function (name) {
+        ;[["inside the userinfo", "http://qqqqqq:zzz" + LT[name] + "zzz@cdn.test/get.php", "http://qqqqqq:zzzzzz@cdn.test/get.php"],
+          ["after the `#`", "http://cdn.test/x#qqqqqq" + LT[name] + "zzzzzz", "http://cdn.test/x#qqqqqqzzzzzz"],
+          ["wrapped at the end", "http://qqqqqq:zzzzzz@cdn.test/get.php" + LT[name], "http://qqqqqq:zzzzzz@cdn.test/get.php"]].forEach(function (c) {
+          const cap = Model.formCapacity(field)
+          const joined = Model.sanitizePasteInput(field, c[1], cap)
+          const st = Model.withFormValue(formFor(field), field, Model.editInsert("", 0, 0, joined, cap).value, { typed: false })
+          runs.push({ field: field, lt: name, where: c[0], joined: joined === c[2], heard: heard(st, field) })
+        })
+      })
+    })
+    return runs
+  })
+  checkCall("D-SINK-97: a paste holding LF, VT, FF, CR, U+0085, U+2028 or U+2029 into an address field is joined, and what it publishes is scheme and host",
+    () => pasteRuns().filter(function (r) {
+      const want = r.where === "after the `#`" ? "http://cdn.test/" + E : "http://****@cdn.test/" + E
+      return !r.joined || r.heard[0] !== want || r.heard[1] !== want || r.heard[2] !== want || r.heard[3] !== ""
+    }).map(function (r) { return r.field + " " + r.lt + " " + r.where }), [])
+  check("D-SINK-97: a line terminator in a value that reached the field another way (a stored source, a caller) is stars, in every address field",
+    ADDRESS.map(function (field) {
+      return Object.keys(LT).filter(function (name) {
+        const v = "http://cdn.test/get.php?x=1" + LT[name] + "#y"
+        return Model.fieldAccessibleValue({ values: { [field]: v } }, field) !== new Array(v.length + 1).join("*")
+      })
+    }), [[], [], []])
+  // Round 4b (D4): a name field's paste joins its lines too, U+2028 and
+  // U+2029 among them, which sanitizeInput (control characters) kept.
+  check("D-SINK-97: a name field's paste joins its lines as an address field's does (round 4b: U+2028, which is not a control character, is removed too)",
+    [Model.sanitizePasteInput("label", "Pro" + LT.CR + LT.LF + "vider", 64), Model.sanitizePasteInput("username", "u" + LT.LS + "ser", 64)], ["Provider", "user"])
+
+  // (iv) file:, local paths, `//` and `~/`. Round 4b (D2): a file: URL takes
+  // the host rule like any scheme, with an authority that may be empty, and
+  // a bare local path is stars -- the owner's "scheme and host only, stars
+  // otherwise" read literally.
+  const local = [
+    ["file:///home/me/tv.m3u", "file:///" + E],
+    ["File:///home/me/tv.m3u", "File:///" + E],
+    ["file://localhost/x", "file://localhost/" + E],
+    ["file://qqqqqq:zzzzzz@cdn.test/x", "file://****@cdn.test/" + E],
+    ["file:///", "file:///"],
+    ["file:///x?zzzzzz", "file:///" + E],
+    ["file:///x#zzzzzz", "file:///" + E],
+    ["file://cdn.test", "*"],
+    ["file://@/x", "*"],
+    ["file://qqqqqq:zzzzzz@/x", "*"],
+    ["file:/x", "*"],
+    ["file:x", "*"],
+    ["/home/me/tv.m3u", "*"],
+    ["~/epg.xml", "*"],
+    ["/", "*"],
+    ["/cdn.test/live/qqqqqq/zzzzzz/1.ts", "*"],
+    ["/live/qqqqqq/zzzzzz/1.ts", "*"],
+    ["//qqqqqq:zzzzzz@cdn.test/x", "*"],
+    ["//cdn.test/x", "*"],
+    ["~/qqqqqq@zzzzzz", "*"],
+    ["/qqqqqq:zzzzzz@cdn.test/x", "*"],
+    ["/x?k=zzzzzz", "*"],
+    ["/x#zzzzzz", "*"],
+    ["~qqqqqq/zzzzzz", "*"],
+    ["~/x" + LT.LF + "y", "*"],
+    ["/x" + LT.PS + "y", "*"]
+  ]
+  check("D-SINK-97: file: URLs take the host rule with an empty authority allowed, and a local path is stars, in every address field (round 4b)",
+    ADDRESS.map(function (field) {
+      return local.filter(function (c) {
+        const got = Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)
+        return got !== (c[1] === "*" ? new Array(c[0].length + 1).join("*") : c[1])
+      }).map(function (c) { return c[0] })
+    }), [[], [], []])
+
+  // What an ordinary value publishes: the rule's own words.
+  const ordinary = [
+    ["http://cdn.test/get.php?type=m3u_plus", "http://cdn.test/" + E],
+    ["https://cdn.test:8443/x.m3u", "https://cdn.test:8443/" + E],
+    ["http://cdn.test/", "http://cdn.test/"],
+    ["http://cdn.test?x=1", "http://cdn.test?" + E],
+    ["http://cdn.test#top", "http://cdn.test#" + E],
+    ["http://qqqqqq:zzzzzz@cdn.test/", "http://****@cdn.test/"],
+    ["http://qqqqqq:z@z@cdn.test/get.php", "http://****@cdn.test/" + E],
+    ["http://@cdn.test/x", "http://****@cdn.test/" + E],
+    ["HTTP://CDN.test/x", "HTTP://CDN.test/" + E],
+    // Round 4c (E8): a scheme only from the list a source URL may have, so
+    // rtsp, which that list does not hold, is stars, and so is a scheme typed
+    // out of a credential; a host only of [A-Za-z0-9-] labels joined by `.`,
+    // dotless allowed, so `nas` is said and `cdn.test!zzzzzz` is stars.
+    ["rtsp://cdn.test:554/live", "*"],
+    ["qqqqqq://zz@cdn.test/x", "*"],
+    ["Qqqqqq://cdn.test/x", "*"],
+    ["http://cdn.test!zzzzzz/x", "*"],
+    ["http://cdn.test,qqqqqq/x", "*"],
+    ["http://cdn_test/x", "*"],
+    ["http://nas/x", "http://nas/" + E],
+    ["http://nas:8080/x", "http://nas:8080/" + E],
+    ["http://1.2.3.4:80/", "http://1.2.3.4:80/"],
+    ["https://my-host.test/x", "https://my-host.test/" + E],
+    ["http://[fe80::1%25qqqqqq]/x", "*"],
+    ["http://[0123]/x", "*"],
+    ["http://[2001:db8::1]:8080/x", "http://[2001:db8::1]:8080/" + E],
+    ["http://[::1]/", "http://[::1]/"],
+    ["http://cdn.test", "*"],
+    ["http://cdn.test:8080", "*"],
+    ["http:cdn.test/x", "*"],
+    ["http:/cdn.test/x", "*"],
+    ["http:///x", "*"],
+    ["http://cdn.test:/x", "*"],
+    ["http://cdn.test:80a/x", "*"],
+    ["http://qqqqqq:zzzzzz/x", "*"],
+    ["http://cdn.test/x@y", "*"],
+    ["http://qqqqqq:zz#zz@cdn.test/x", "*"],
+    ["http://qqqqqq?zz@cdn.test/x", "*"],
+    ["http://cdn.test%40x/y", "*"],
+    ["http://cdn;test/y", "*"],
+    ["http://cdn" + String.fromCharCode(0xff1b) + "test/y", "*"],
+    ["http://cdn test/y", "*"],
+    ["http://[qqqqqq]/y", "*"],
+    ["http://[::1/y", "*"],
+    ["http://[::1]x/y", "*"],
+    ["http://[::1]:zz/y", "*"],
+    ["http://[::1]x8080/y", "*"],
+    ["http://:8080/x", "*"],
+    ["http://qqqqqq:zzzzzz@:8080/x", "*"],
+    ["qqqqqq:zzzzzz@cdn.test", "*"],
+    ["cdn.test/get.php", "*"],
+    ["", ""]
+  ]
+  check("D-SINK-97: ordinary values publish `scheme://[****@]host[:port]` and the authority's closing character with an ellipsis, `/` alone for a bare `/`, and stars for an authority that is not closed, holds an `@` after it, or has a host that does not parse",
+    ADDRESS.map(function (field) {
+      return ordinary.filter(function (c) {
+        const got = Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)
+        return got !== (c[1] === "*" ? new Array(c[0].length + 1).join("*") : c[1])
+      }).map(function (c) { return [c[0], Model.fieldAccessibleValue({ values: { [field]: c[0] } }, field)] })
+    }), [[], [], []])
+  checkCall("D-SINK-97: an address field's Description is empty, revealed or not; the password's is its label; the other fields' are empty",
+    () => [ADDRESS.map(function (f) { return Model.fieldAccessibleDescription(f, "Playlist URL") }),
+     Model.fieldAccessibleDescription("password", "Password"), Model.fieldAccessibleDescription("username", "Username"),
+     Model.fieldAccessibleDescription("label", "Label"), Model.fieldAccessibleDescription(null, "x")],
+    [["", "", ""], "Password", "", "", ""])
+  check("D-SINK-97: the username and password stay one `*` per character",
+    [Model.fieldAccessibleValue({ values: { username: "qqqqqq" } }, "username"), Model.fieldAccessibleValue({ values: { password: "zz#zz@" } }, "password")],
+    ["******", "******"])
+
+  // (v) The label (D-SINK-98): its Value and every composed name carrying it.
+  const LABELS = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "https://qqqqqq:zz#zz@cdn.test/x",
+                  "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "rtmp://qqqqqq:zzzzzz@cdn.test:1935/live"]
+  const labelRuns = LABELS.map(function (label) {
+    const st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", label, { typed: true })
+    const added = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: label, origin: "guide" }, 100)
+    const second = Model.addSource(added.state, { playlistUrl: "http://other.test/list.m3u", label: "Other", origin: "guide" }, 101)
+    const views = Model.sourceViews(second.state, added.key, 200, {})
+    const view = views.filter(function (v) { return v.id === added.key })[0] || {}
+    const names = [
+      Model.fieldAccessibleValue(st.form, "label"),
+      Model.sourceAccessibleName(view),
+      Model.confirmRemoveMessage(view.label, true), Model.confirmRemoveMessage(view.label, false),
+      Model.sourceTransient("added", { label: view.label, host: "cdn.test", channelCount: 3, groupCount: 1 }),
+      Model.sourceTransient("switched", { label: view.label, channelCount: 3 }),
+      Model.sourceTransient("removed", { label: view.label, wasActive: true }),
+      Model.sourceErrorMessage("label_taken", { label: label }), Model.sourceErrorMessage("duplicate", { label: view.label }),
+      Model.footerStatus({ configured: true, count: 3, activeLabel: view.label, sourceCount: 2 }),
+      JSON.stringify(Model.sourcesSummary(second.state, added.key))
+    ]
+    return { label: label, stored: view.label === label, leaks: leaks(names), value: names[0], read: Model.labelSinkText(view.label) }
+  })
+  check("D-SINK-98: a label that is a credentialed URL is stored as typed, and its Value and every composed name carrying it -- the row's name, the remove dialog, the transients, the error line, the footer, the IPC summary -- hold no character of the credential",
+    labelRuns.filter(function (r) { return !r.stored || r.leaks.length !== 0 }), [])
+  // Round 4c (E1): the field that holds such a label is HELD, so its Value
+  // is one `*` per character; a stored one is drawn and heard as its host
+  // (E2), or as `[host withheld]` where the host is a username in front of a
+  // `#` or the scheme is not one a source URL may have (rtmp, E8; round 4b
+  // read `cdn.test:1935`).
+  check("D-SINK-98: such a label's field is stars, and the stored label is heard as its host, or as `[host withheld]` where the host is a username in front of a `#` or the scheme is not a source URL's",
+    labelRuns.map(function (r) { return [r.value === new Array(r.label.length + 1).join("*"), r.read] }),
+    [[true, "cdn.test"], [true, Model.HOST_WITHHELD], [true, "cdn.test"], [true, Model.HOST_WITHHELD]])
+  check("D-SINK-98: an ordinary label passes unchanged everywhere",
+    [Model.fieldAccessibleValue({ values: { label: "My TV" } }, "label"), Model.confirmRemoveMessage("NAS Tvheadend", false),
+     Model.sourceTransient("removed", { label: "Provider" }), Model.sourceErrorMessage("label_taken", { label: "BBC" }),
+     Model.footerStatus({ configured: true, count: 3, activeLabel: "NAS", sourceCount: 2 }).indexOf("NAS") === 0],
+    ["My TV", "Remove " + Model.QUOTE_OPEN + "NAS Tvheadend" + Model.QUOTE_CLOSE + "? Its cache is deleted too.", "Removed Provider",
+     "A source named " + Model.QUOTE_OPEN + "BBC" + Model.QUOTE_CLOSE + " already exists", true])
+  // The Sources row draws its label, and names its two buttons, through
+  // Model.labelSinkText: the bus half is the a11y probe's L2-SRC-* checks,
+  // which observe the row, its buttons and the remove dialog. Round 4b (D3)
+  // replaced the source grep that stood here by the calls below (rules 12
+  // and 14): the IPC active source is the model's activeSourceSummary.
+  // ---- round 4b (2026-11-11). Each decision the lead's call under the
+  // owner's standing authority of 2026-11-09, each fixing a finding of the
+  // two reviews of round 4.
+
+  // D-SINK-98 (D3): the IPC status's active source, composed by the model
+  // and called by Service.qml, names a credentialed label as its host.
+  const activeRuns = memo(function () {
+    return ["http://qqqqqq:zzzzzz@cdn.test/get.php", "qqqqqq:zzzzzz@cdn.test", "cdn.test/get.php?username=qqqqqq&password=zzzzzz"].map(function (label) {
+      const added = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: label, origin: "guide" }, 100)
+      return { stored: added.ok && added.state.sources[0].label === label, summary: Model.activeSourceSummary(added.state, added.key, 200), key: added.key }
+    })
+  })
+  checkCall("D-SINK-98 (D3): Model.activeSourceSummary, which Service.qml's IPC status calls, names a label with an address's shape by its host and holds no run of the credential",
+    () => activeRuns().map(function (r) { return [r.stored, JSON.stringify(r.summary) === JSON.stringify({ id: r.key, label: "cdn.test", host: "cdn.test" })] }),
+    [[true, true], [true, true], [true, true]])
+  checkCall("D-SINK-98 (D3): and it is null when no record is active, and names an ordinary label as stored",
+    () => {
+      const st = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/list.m3u", label: "My TV", origin: "guide" }, 100)
+      return [Model.activeSourceSummary(st.state, "", 200), Model.activeSourceSummary(null, st.key, 200), Model.activeSourceSummary(st.state, st.key, 200).label]
+    }, [null, null, "My TV"])
+
+  // D-SINK-98 (D1): labelSinkText. The labels both reviews measured passing
+  // raw, and four more pasted into the Label field.
+  const BS = String.fromCharCode(92)
+  const fw = function (c) { return String.fromCharCode(c) }
+  const LEAKED_LABELS = [
+    ["qqqqqq:zzzzzz@cdn.test", "cdn.test"],
+    ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+    ["cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"],
+    // Round 4d (F3): an a:b@c token's host is after the last `@` BEFORE its
+    // first `/`, and a scheme that lost a `/` puts that `/` before its `@`,
+    // so it names none (round 4c read `cdn.test` off the token's last `@`).
+    ["http:/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
+    ["mailto:qqqqqq@cdn.test?password=zzzzzz", "cdn.test"],
+    ["http:" + BS + BS + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+    ["http" + fw(0xff1a) + "//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+    ["http:" + fw(0xff0f) + fw(0xff0f) + "qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+    ["http:/" + fw(0x200b) + "/qqqqqq:zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
+    ["http://qqqqqq:zzzzzz@cdn.test/get.php", "cdn.test"],
+    ["http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "cdn.test"],
+    ["http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "cdn.test:8080"],
+    // Round 4d (F4 g): its second token, `zz@cdn.test/x`, reads by clause
+    // d's `X@H` form and names `cdn.test`; its first is withheld (round 4c
+    // read the second as no shape).
+    ["http://qqqqqq:zz zz@cdn.test/x", Model.HOST_WITHHELD + " cdn.test"]
+  ]
+  checkCall("D-SINK-98 (D1): each label the reviews measured passing raw now reads as the host it names, or `[host withheld]`",
+    () => LEAKED_LABELS.map(function (c) { return Model.labelSinkText(c[0]) }), LEAKED_LABELS.map(function (c) { return c[1] }))
+  // Every composer that names a STORED source by its label, fed the label as
+  // validateLabel stores it (sanitizeInput). The label FIELD's Value is not
+  // here: it depends on the form session that reached the value (round 4c,
+  // E1), and the session sweep below drives it through the form.
+  function storedSinks(stored) {
+    const rec = { key: "k9", url: "http://cdn.test/get.php", epgUrl: "", kind: "http", label: stored, labelCustom: true,
+                  origin: "guide", addedAt: 1, lastUsed: 1, fetchedAt: 1, channelCount: 3, groupCount: 2 }
+    const view = Model.sourceView(rec, "k9", 1789000000, "")
+    const st = { sources: [rec], active: "k9" }
+    return [
+      Model.labelSinkText(view.label),                      // the Sources row, drawn and in its two buttons' names
+      Model.sourceAccessibleName(view),
+      Model.confirmRemoveMessage(view.label, true), Model.confirmRemoveMessage(view.label, false),
+      Model.sourceTransient("added", { label: view.label, host: "cdn.test" }),
+      Model.sourceTransient("switched", { label: view.label, channelCount: 3 }),
+      Model.sourceTransient("removed", { label: view.label, wasActive: true }),
+      Model.sourceErrorMessage("duplicate", { label: view.label }), Model.sourceErrorMessage("label_taken", { label: view.label }),
+      Model.validateLabel(stored, [{ label: stored, id: "x" }], "").message,
+      Model.footerStatus({ configured: true, count: 3, activeLabel: view.label, sourceCount: 2 }),
+      JSON.stringify(Model.sourcesSummary(st, "k9")), JSON.stringify(Model.activeSourceSummary(st, "k9", 1789000000))
+    ]
+  }
+  // Round 4b's shape, kept for its pin below: the Value of a field that was
+  // handed the label whole, and every composer.
+  function labelSinks(v) {
+    const st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", v, { typed: false })
+    return [Model.fieldAccessibleValue(st.form, "label")].concat(storedSinks(Model.sanitizeInput(v, 999)))
+  }
+  const RUN = /[qQ]{2,}|[zZ]{2,}/
+  // Round 4d's measured counts, pinned (see the checks that read them): the
+  // typed states heard before the value first holds the field (twelve
+  // prefixes of `qqqqqq:zzzzzz` and five of `mailto:qqqqqq`); the stored
+  // states of the E3 sweep that, pasted whole, still publish a run, by class
+  // (the same four the paste corpus has); and the labels deriveLabel gives
+  // for the fixtures' URLs that hold the field (none).
+  const ROUND4D_TYPED_RESIDUAL = 17
+  const ROUND4D_STORED_PASTE_CLASSES = { "no delimiter": 140, "user:pass, nothing after": 185, "key=value, no ?;& before": 165, "path, no . before its /": 110 }
+  const ROUND4D_DERIVED_HELD = []
+  // Every edit state round 4b swept: each typed prefix (typedText,
+  // editInsert), the paste, every single and range deletion of it,
+  // Backspace, Delete and their Ctrl forms held from every caret
+  // (editDelete), and each of eight invisible or space characters pasted in
+  // at every index. Each comes with the SESSION that reached it, as the form
+  // writes it: a list of label values written one after another into a new
+  // add form (withFormValue, as Guide.qml's writeFormValue calls it).
+  const INSERTS = [0x2028, 0x2029, 0xa0, 0x3000, 0x200b, 0x2060, 0xfeff, 0xad]
+  function labelSessions(base) {
+    const cap = Model.formCapacity("label")
+    const out = []
+    const typed = []
+    let v = ""
+    for (let i = 0; i < base.length; i++) { v = Model.editInsert(v, v.length, v.length, Model.typedText(base.charAt(i), false), cap).value; typed.push(v) }
+    out.push({ kind: "typed", values: typed })
+    const whole = Model.editInsert("", 0, 0, Model.sanitizePasteInput("label", base, cap), cap).value
+    out.push({ kind: "pasted", values: [whole] })
+    for (let i = 0; i < whole.length; i++) out.push({ kind: "delete1", values: [whole, Model.editDelete(whole, i, i, 1, false, false).value] })
+    for (let i = 0; i < whole.length; i++) for (let j = i + 1; j <= whole.length; j++) out.push({ kind: "range", values: [whole, Model.editDelete(whole, i, j, 1, false, false).value] })
+    for (let p = 0; p <= whole.length; p++) [-1, 1].forEach(function (dir) {
+      [false, true].forEach(function (word) {
+        const seq = [whole]
+        let s = whole, caret = p
+        for (let k = 0; k < 200; k++) {
+          const e = Model.editDelete(s, caret, caret, dir, word, false)
+          if (!e.changed) break
+          s = e.value; caret = e.caret; seq.push(s)
+        }
+        out.push({ kind: (word ? "ctrl-" : "") + (dir < 0 ? "backspace" : "delete"), values: seq })
+      })
+    })
+    INSERTS.forEach(function (code) {
+      for (let i = 0; i <= base.length; i++) out.push({ kind: "insert-" + code.toString(16), values: [Model.editInsert("", 0, 0, Model.sanitizePasteInput("label", base.substring(0, i) + fw(code) + base.substring(i), cap), cap).value] })
+    })
+    return out
+  }
+
+  // ---- round 4c (2026-11-11), each the lead's call under the owner's
+  // standing authority of 2026-11-09, each answering a finding of the two
+  // reviews of round 4b.
+  //
+  // E3: an ORACLE, written here from the decided clauses (E2), and never
+  // read off labelSinkText's own output -- round 4b's sweep classed a state
+  // by what labelSinkText returned, so a mutant that handed a query token
+  // back whole read as "a host the state names" and survived. Its parts are
+  // spelled as regular expressions where the model walks indexes, so the
+  // two are not one text copied.
+  const CF_RE = /\p{Cf}/gu
+  const LINE_RE = new RegExp("[" + [10, 11, 12, 13, 0x85, 0x2028, 0x2029].map(fw).join("") + "]")
+  function oNfkd(t) { return t.normalize("NFKD").replace(CF_RE, "") }
+  // Round 4e (I1, the lead's call under the owner's standing authority of
+  // 2026-11-09): the fold also decodes, once, the percent escapes of `/`,
+  // `:`, `@`, `=`, `&`, `?`, `;` and a backslash, an HTML numeric entity
+  // (decimal or hex) naming any code point, and a backslash-u00HH -- written
+  // here as a table of the eight escapes and two entity patterns, between
+  // two NFKD passes.
+  const O_PCT = { "2f": "/", "3a": ":", "40": "@", "3d": "=", "26": "&", "3f": "?", "3b": ";", "5c": BS }
+  // Round 4f (K4, the same authority): a numeric entity's `;` optional (the
+  // longest digit run), and the eight delimiters' HTML names, as HTML
+  // spells them, `;` required -- written here as a list of names searched
+  // at each `&`.
+  const O_NAMED = [["&colon;", ":"], ["&sol;", "/"], ["&commat;", "@"], ["&quest;", "?"], ["&amp;", "&"], ["&equals;", "="], ["&semi;", ";"], ["&bsol;", BS]]
+  function oDecode(t) {
+    return t.replace(/%([0-9A-Fa-f]{2})|&#(\d+)(;?)|&#[xX]([0-9A-Fa-f]+)(;?)|\\u00([0-9A-Fa-f]{2})|&[a-z]+;/g, function (m, p, d, ds, x, xs, u) {
+      if (p !== undefined) return O_PCT[p.toLowerCase()] !== undefined ? O_PCT[p.toLowerCase()] : m
+      if (m.charAt(0) === "&" && m.charAt(1) !== "#") { const n = O_NAMED.find(function (e) { return e[0] === m }); return n ? n[1] : m }
+      const cp = d !== undefined ? Number(d) : x !== undefined ? Number("0x" + x) : Number("0x" + u)
+      return cp <= 0x10ffff ? String.fromCodePoint(cp) : m
+    })
+  }
+  function oFold(t) { const a = oNfkd(t), b = oDecode(a); return b === a ? a : oNfkd(b) }
+  function oQuad(h) {
+    const p = h.split(".")
+    return p.length === 4 && p.every(function (x) { return /^[0-9]{1,3}$/.test(x) && Number(x) <= 255 })
+  }
+  // E2's host: two or more [A-Za-z0-9-] labels, none empty and none opening
+  // or closing with `-`, the last opening with a letter and two or more
+  // long; or a dotted quad; or a bracketed IPv6 literal (a `:` inside, no
+  // zone); then `:` and digits, or nothing.
+  function oHost(hp) {
+    const m = /^(\[[0-9A-Fa-f:.]*\]|[^:\[]*)(:[0-9]+)?$/.exec(hp)
+    if (!m) return false
+    const h = m[1]
+    if (h.charAt(0) === "[") return h.indexOf(":") !== -1
+    if (oQuad(h)) return true
+    const labels = h.split(".")
+    const last = labels[labels.length - 1]
+    return labels.length >= 2 && labels.every(function (l) { return /^[A-Za-z0-9]$|^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$/.test(l) }) &&
+      /^[A-Za-z]/.test(last) && last.length >= 2
+  }
+  function oSlashAuth(x) {
+    for (let i = x.indexOf("//"); i !== -1; i = x.indexOf("//", i + 1)) {
+      const auth = x.substring(i + 2).split(/[\/?#]/)[0]
+      if (auth.indexOf("@") !== -1 || oHost(auth)) return auth
+    }
+    return null
+  }
+  // Round 4d (F4 f, the lead's call under the owner's standing authority of
+  // 2026-11-09): a token's core, its leading ASCII `( [ { < " '` and its
+  // trailing `) ] } > " ' . , ; : ! ?` set aside -- except a bracket of a
+  // bracketed IPv6 literal (hex, `:` and `.`, a `:` inside), which round
+  // 4c's list reads as a host. Spelled here as regular expressions.
+  function oCore(t) {
+    let c = t
+    for (;;) {
+      if (/^\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]/.test(c)) break
+      const m = /^[(\[{<"']/.exec(c)
+      if (!m) break
+      c = c.substring(1)
+    }
+    for (;;) {
+      if (/\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]$/.test(c) && c.lastIndexOf("[") !== -1) break
+      if (!/[)\]}>"'.,;:!?]$/.test(c)) break
+      c = c.substring(0, c.length - 1)
+    }
+    return c
+  }
+  // Clause d's host (round 4d, F4 g): the text before the first `/` when it
+  // is a host, else H of an `X@H` there (X not empty, H after the last `@`)
+  // when H is a host; only with something after the `/`.
+  function oHostPath(x) {
+    const d = /^([^\/]+)\/[\s\S]/.exec(x)
+    if (!d) return null
+    if (oHost(d[1])) return d[1]
+    const g = /^[\s\S]+@([^@]*)$/.exec(d[1])
+    return g && oHost(g[1]) ? g[1] : null
+  }
+  // The clause that makes `x` (a token's core) an address, or "".
+  function oClause(x) {
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(x)) return "scheme"
+    if (oSlashAuth(x) !== null) return "a"
+    if (/[A-Za-z][A-Za-z0-9+.-]+:[\/\\]/.test(x)) return "b"
+    if (/:[\s\S]*@/.test(x)) return "c"
+    if (oHostPath(x) !== null) return "d"
+    if (/[.\/][\s\S]*[?;&][\s\S]*=/.test(x)) return "e"
+    return ""
+  }
+  // The host a reading token names, from its core's own text, by F3's order
+  // as round 4d decided it and round 4e corrected it (written from the
+  // decisions, not from labelTokenHost's code): the LEFTMOST authority --
+  // `scheme://` (rule c); else the `//` authority only when that `//` holds
+  // the token's first `/` and the head before it is no authority (round 4e,
+  // I3: it holds no `@` and is no host); else, when clause c reads, the text
+  // after the last `@` BEFORE the first `/`, up to the first of `?`, `#` or
+  // `;` -- and withheld when that head holds no `@` (round 4e, I4); else
+  // clause d's host, of the core and then of the raw token (round 4e, I2).
+  // Each kept only when it is a host's shape, else HOST_WITHHELD; and when
+  // none applies, the same asked of the token with its escapes decoded
+  // (round 4e, I1), else HOST_WITHHELD. "" below means none applies.
+  // Round 4f (K2 d): a token with an escape the decoder changes is read both
+  // ways; one reading naming nothing defers to the other, and two that
+  // differ -- a host against another, or against withheld -- withhold.
+  function oTokenHost(token) {
+    const W = Model.HOST_WITHHELD
+    const a = oAuthority(oCore(token), token)
+    const d = oDecode(token)
+    if (d === token) return a !== "" ? a : W
+    const b = oAuthority(oCore(d), d)
+    if (a === "") return b !== "" ? b : W
+    return a === b ? a : W
+  }
+  // Round 4f (K2 a, b): a head that is an authority on its own text, its
+  // escapes decoded or its fold -- an `@`, a host, a dotless-or-dotted name
+  // with `:` and a port, or a name ending in `.` -- written as regular
+  // expressions over each reading.
+  function oHeadAuthority(head) {
+    return head !== "" && [head, oDecode(head), oFold(head)].some(function (r) {
+      return /@/.test(r) || oHost(r) || /^(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?:\d+$/.test(r) || /^(?:[A-Za-z0-9-]+\.)+$/.test(r)
+    })
+  }
+  function oAuthority(t, whole) {
+    const W = Model.HOST_WITHHELD
+    const sc = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]*)([\/?#][\s\S]*)?$/.exec(t)
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(t)) {
+      // rule c: a source URL's scheme, no line terminator, an authority
+      // closed by `/`, `?` or `#` with no `@` after it, not R32a-withheld.
+      if (!sc || LINE_RE.test(t) || sc[3] === undefined || ["http", "https", "file"].indexOf(sc[1].toLowerCase()) === -1 ||
+          sc[3].indexOf("@") !== -1 || Model.urlHostWithheld(t)) return W
+      const h = sc[2].substring(sc[2].lastIndexOf("@") + 1)
+      return oHost(h) ? h : W
+    }
+    // The first `/` opens `//` (nothing before it holds a `/`). When what
+    // is before it is an authority (round 4f, K2), an `@` after the `//`
+    // before the next `/` withholds (K2 c), and an authority this text's
+    // own head does not name (no `@`, no host) names none here -- deferring
+    // to the decoded reading where the decoder changes the head; else the
+    // `//` authority.
+    const a = /^([^\/]*)\/\/([^\/?#]*)/.exec(t)
+    if (a && oHeadAuthority(a[1])) {
+      if (/^[^\/]*@/.test(t.substring(a[1].length + 2))) return W
+      if (!/@/.test(a[1]) && !oHost(a[1])) return oDecode(a[1]) !== a[1] ? "" : W
+    } else if (a && (a[2].indexOf("@") !== -1 || oHost(a[2]))) { const h = a[2].replace(/^[\s\S]*@/, ""); return oHost(h) ? h : W }
+    if (/:[\s\S]*@/.test(t)) {
+      const m = /@([^@\/]*)(\/|$)/.exec(t.split("/")[0] + "/")
+      if (!m) return W
+      const h = m[1].split(/[?#;]/)[0]
+      return oHost(h) ? h : W
+    }
+    const d = oHostPath(t)
+    if (d !== null) return d
+    const e = oHostPath(whole)
+    return e !== null ? e : ""
+  }
+  // What a STORED label reads as by the decision: tokens at U+0020 alone,
+  // each classed on its core's own text or the core of its fold, the reading
+  // tokens' hosts joined by a space; else (round 4d, F2) HOST_WITHHELD when
+  // the free-text redactor would change the label -- asked as its own
+  // clause, sinkText(s) !== s, never by reading labelSinkText's output;
+  // else the label as typed.
+  function oRead(stored) {
+    const reading = stored.split(" ").filter(function (t) {
+      return t !== "" && (oClause(oCore(t)) !== "" || oClause(t) !== "" || oClause(oCore(oFold(oCore(t)))) !== "" || oClause(oFold(t)) !== "")
+    })
+    if (reading.length > 0) return { reads: true, text: reading.map(oTokenHost).join(" ") }
+    if (Model.sinkText(stored) !== stored) return { reads: true, text: Model.HOST_WITHHELD, redactor: true }
+    return { reads: false, text: stored }
+  }
+  // F1's five shapes, written from the decisions' words as regular
+  // expressions (the model walks indexes): (i) to (iv) over the WHOLE value;
+  // (v) within one U+0020 token since round 4e (I5), or (round 4f, K1) two
+  // `/` anywhere after a `.` of the whole value.
+  function oCarries(v) {
+    return /\/\//.test(v) || /:[\s\S]*[\/\\@]/.test(v) || /[^ ]@/.test(v) || /[?;&][\s\S]*=/.test(v) || /\.[^ ]*\//.test(v) ||
+      /\.[\s\S]*\/[\s\S]*\//.test(v)
+  }
+  // Whether a value holds the field (round 4d, F1): it reads as an address
+  // by the oracle, or it carries one of the five shapes on its own text or
+  // its fold.
+  function oHolds(v) { return oRead(v).reads || oCarries(v) || oCarries(oFold(v)) }
+
+  // E2/E3, the STORED sweep: every state's stored label reads exactly as the
+  // oracle says, and what still publishes a run falls in a class the oracle
+  // names -- a label with no address shape, passed (the stated residual of a
+  // stored label), or one whose own host holds the run (a deletion made the
+  // credential the host); nothing else.
+  const storedRuns = memo(function () {
+    const out = { states: 0, mismatches: 0, sample: [], classes: {}, byLabel: [] }
+    LEAKED_LABELS.forEach(function (c) {
+      const seen = new Set()
+      labelSessions(c[0]).forEach(function (sess) { sess.values.forEach(function (v) { seen.add(Model.sanitizeInput(v, 999)) }) })
+      let leaking = 0
+      seen.forEach(function (stored) {
+        out.states++
+        const want = oRead(stored)
+        const got = Model.labelSinkText(stored)
+        if (got !== want.text) { out.mismatches++; if (out.sample.length < 6) out.sample.push([stored, got, want.text]) }
+        if (!storedSinks(stored).some(function (o) { return RUN.test(o) })) return
+        leaking++
+        const cls = !want.reads ? "no address shape, passed" : (RUN.test(want.text) ? "its own host holds the run" : "OTHER")
+        out.classes[cls] = (out.classes[cls] || 0) + 1
+      })
+      out.byLabel.push([c[0], seen.size, leaking])
+    })
+    return out
+  })
+  checkCall("D-SINK-98 (round 4c, E2/E3): every stored edit state of the labels the reviews measured reads exactly as an oracle written from the decided clauses says (tokens at U+0020, each on its own text or its NFKD fold less Cf, hosts by the decided branches and shape)",
+    () => [storedRuns().mismatches, storedRuns().sample], [0, []])
+  checkCall("D-SINK-98 (round 4c, E2/E3): and a stored state that still publishes a run through a composer is one the oracle classes as having no address shape, or as naming its own host -- none is anything else",
+    () => [storedRuns().states > 10000, storedRuns().classes.OTHER || 0], [true, 0])
+  // Round 4e (I11, the lead's call under the owner's standing authority of
+  // 2026-11-09): the two classes counted, so the own-host class -- a
+  // deletion that merges a piece of the credential into the host is drawn
+  // and heard as that host (`qqqqqqzzzzzzcdn.test/live/...` as
+  // `qqqqqqzzzzzzcdn.test`, `http://qqqqqq.cdn.test/x` as
+  // `qqqqqq.cdn.test`) -- is pinned, not only the class nothing may be.
+  checkCall("D-SINK-98 (round 4e, I11): the stored states that publish a run, by class -- no address shape, and its own host holds the run -- counted",
+    () => [storedRuns().states, storedRuns().classes], [10918, { "no address shape, passed": 1107, "its own host holds the run": 159 }])
+
+  // E1, the SESSION sweep: the label field, written through the form as the
+  // sessions above write it, publishes no run once its value has read as an
+  // address in the session -- exactly one `*` per character -- and before
+  // that, as typed; emptying it drops the hold.
+  const sessionRuns = memo(function () {
+    const out = { states: 0, held: 0, wrongHeld: [], wrongFree: [], freeRuns: 0, freeRunKinds: {}, sessions: 0 }
+    function drive(st, sess, readSoFar) {
+      out.sessions++
+      sess.values.forEach(function (v) {
+        st = Model.withFormValue(st, "label", v, { typed: sess.kind === "typed" })
+        readSoFar = v === "" ? false : (readSoFar || oHolds(v))
+        const heard = Model.fieldAccessibleValue(st.form, "label")
+        out.states++
+        if (readSoFar) {
+          out.held++
+          if (heard !== new Array(v.length + 1).join("*") && out.wrongHeld.length < 6) out.wrongHeld.push([sess.kind, v, heard])
+        } else {
+          if (heard !== v && out.wrongFree.length < 6) out.wrongFree.push([sess.kind, v, heard])
+          if (RUN.test(heard)) { out.freeRuns++; out.freeRunKinds[sess.kind] = (out.freeRunKinds[sess.kind] || 0) + 1 }
+        }
+      })
+      return st
+    }
+    LEAKED_LABELS.forEach(function (c) {
+      const sessions = labelSessions(c[0])
+      sessions.forEach(function (sess) { drive(Model.openAddForm(Model.guideState("all")), sess, false) })
+      // The same deletions from an EDIT form over the label as stored: held
+      // from the start when the stored label reads as an address.
+      const stored = Model.sanitizeInput(c[0], 999)
+      sessions.filter(function (sess) { return sess.kind === "delete1" || sess.kind === "range" }).forEach(function (sess) {
+        drive(Model.openEditForm(Model.guideState("all"), "k9", { label: stored, playlist: "http://cdn.test/x", epg: "" }), { kind: "edit-" + sess.kind, values: sess.values.slice(1) }, oHolds(stored))
+      })
+    })
+    return out
+  })
+  checkCall("D-SINK-98 (round 4c, E1): every label state a form session reaches after its value first read as an address is heard as one `*` per character, through openAddForm or openEditForm and withFormValue; every state before it is heard as typed",
+    () => [sessionRuns().wrongHeld, sessionRuns().wrongFree], [[], []])
+  // The run-holding states before the value first holds the field, which
+  // the decision publishes as typed. Round 4c's held only by the stored
+  // reading, so four pastes no clause reads were heard -- U+00A0 or U+3000
+  // at the `://` of `http://qqqqqq:zz zz@cdn.test/x`; round 4d (F1) holds
+  // them by their `//` and their `@`, and what is left is typed prefixes
+  // alone: a username, `qqqqqq:zzzzzz` on its way to its `@`, and
+  // `mailto:qqqqqq` on its way to its `@` -- stated, not closed.
+  checkCall("D-SINK-98 (round 4c E1, round 4d F1): the sweep is the size it claims (over 10,000 field states, over 9,000 of them held), and the run-holding states before the value first holds the field are typed prefixes alone -- the stated residual",
+    () => [sessionRuns().states > 10000, sessionRuns().held > 9000, Object.keys(sessionRuns().freeRunKinds).sort(), sessionRuns().freeRuns],
+    [true, true, ["typed"], ROUND4D_TYPED_RESIDUAL])
+  checkCall("D-SINK-98 (D1): a credentialed label that is pasted whole publishes none, in the field and every composer",
+    () => LEAKED_LABELS.filter(function (c) { return labelSinks(Model.sanitizePasteInput("label", c[0], 999)).some(function (o) { return RUN.test(o) }) }).length, 0)
+  // What reads as an address, token by token, and what it is heard as.
+  const SHAPES = [
+    ["My TV", "My TV"], ["Sports: Live", "Sports: Live"], ["BBC 1/2", "BBC 1/2"], ["News & Weather", "News & Weather"],
+    ["Caf" + fw(0xe9), "Caf" + fw(0xe9)], ["IPTV@Home", "IPTV@Home"], ["cdn.test", "cdn.test"], ["cdn.test:8080", "cdn.test:8080"],
+    ["cdn.test (2)", "cdn.test (2)"], ["tv.m3u", "tv.m3u"], ["list.m3u8", "list.m3u8"], ["24/7 News", "24/7 News"],
+    ["AC/DC", "AC/DC"], ["a=b?c", "a=b?c"], ["me@home.test", "me@home.test"], ["Q&A", "Q&A"], ["", ""], ["   ", "   "],
+    // Round 4c (E2): `Sport:Live@HD` names no host's shape (round 4b read
+    // `HD`); `Q&A=fun`, `x;y=1` (no `.` or `/` before the `&` or `;`),
+    // `v1.2/beta` (`2` is no last label), `a:\b` (a one-letter scheme) and
+    // `//cdn.test` (now read, by clause a) changed with it, and rtmp is no
+    // source URL's scheme (E8).
+    ["Sport:Live@HD", Model.HOST_WITHHELD], ["Q&A=fun", "Q&A=fun"], ["x;y=1", "x;y=1"], ["v1.2/beta", "v1.2/beta"],
+    ["a:" + BS + "b", "a:" + BS + "b"], ["http://cdn.test", Model.HOST_WITHHELD], ["http://cdn.test/", "cdn.test"],
+    ["rtmp://qqqqqq:zzzzzz@cdn.test:1935/live", Model.HOST_WITHHELD], ["https://qqqqqq:zz#zz@cdn.test/x", Model.HOST_WITHHELD],
+    ["http://[2001:db8::1]:8080/x", "[2001:db8::1]:8080"], ["file:///home/u/tv.m3u", Model.HOST_WITHHELD],
+    ["My TV http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["http://a.test/x b.test/y", "a.test b.test"],
+    ["qqqqqq:zzzzzz@cdn.test:zz", Model.HOST_WITHHELD], ["qqqqqq:zzzzzz@cdn.test/x?y=1", "cdn.test"],
+    ["http" + fw(0xff1a) + fw(0xff0f) + fw(0xff0f) + "qqqqqq" + fw(0xff1a) + "zzzzzz" + fw(0xff20) + "cdn.test", Model.HOST_WITHHELD],
+    ["My" + fw(0xa0) + "http://qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["My" + fw(0x3000) + "TV", "My" + fw(0x3000) + "TV"],
+    // One clause each that no other clause catches (the mutants of round 4b
+    // found the three below surviving without them): `//` with nothing
+    // before it, a trailing `:/`, and a fold that reads `//` only once the
+    // format character between the two fullwidth solidi is removed.
+    ["//cdn.test", "cdn.test"], ["http:/", Model.HOST_WITHHELD],
+    [fw(0xff0f) + fw(0x200b) + fw(0xff0f) + "cdn.test", Model.HOST_WITHHELD],
+    // Round 4c (E2), the decision's own lists. Unchanged, drawn and heard:
+    ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["1.5/2 HD", "1.5/2 HD"], ["ESPN 2.0/3.0", "ESPN 2.0/3.0"], ["time 10:30/11:30", "time 10:30/11:30"],
+    ["U.S./News", "U.S./News"], ["News?lang=en", "News?lang=en"], ["Rock&Roll=Live", "Rock&Roll=Live"], ["TV & Movies?=", "TV & Movies?="],
+    ["Kids&Family=TV.m3u", "Kids&Family=TV.m3u"], ["list;v=2.m3u", "list;v=2.m3u"], ["C:/TV", "C:/TV"], ["C:" + BS + "TV", "C:" + BS + "TV"],
+    ["News//Sport", "News//Sport"], ["999.1.1.1/x", "999.1.1.1/x"], ["a-.test/x", "a-.test/x"], ["-a.test/x", "-a.test/x"], ["a.t/x", "a.t/x"],
+    // ...and read as their host, or withheld where it has no host's shape:
+    ["Sky.UK/Sports", "Sky.UK"], ["a.tv/x", "a.tv"], ["1.2.3.4/x", "1.2.3.4"], ["[::1]:8080/x", "[::1]:8080"],
+    ["get.php?username=qqqqqq&password=zzzzzz", Model.HOST_WITHHELD], ["//cdn.test/x", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test", "cdn.test"],
+    ["Fox:News@9", Model.HOST_WITHHELD], ["mailto:qqqqqq@zzzzzz", Model.HOST_WITHHELD], ["qqqqqq:zz@zz", Model.HOST_WITHHELD],
+    ["qqqqqq:zzzzzz@cdn.test,qqqqqq", Model.HOST_WITHHELD], ["qqqqqq:zzzzzz@cdn.test!zzzzzz", Model.HOST_WITHHELD],
+    ["http://nas/x", Model.HOST_WITHHELD], ["qqqqqq://zz@cdn.test/x", Model.HOST_WITHHELD],
+    // E3's pins: the a:b@c host cut at `#` (a mutant without it read
+    // `cdn.test#zzzzzz`), the token edge U+0020 alone (a `\s` split made
+    // the first two two tokens, neither an address, and the third two hosts),
+    // a format character that neither splits nor hides a shape, U+2028 kept
+    // as token text, and the token's own text asked beside its fold (a
+    // fold-only reading cuts `//a<U+FF1F>b@...` at the `?` the fold makes).
+    ["qqqqqq:zzzzzz@cdn.test#zzzzzz", "cdn.test"],
+    ["qqqqqq:zzzzzz" + fw(0xfeff) + "@cdn.test", "cdn.test"], ["qqqqqq:zzzzzz" + fw(0xa0) + "@cdn.test", "cdn.test"],
+    ["cdn.test/x" + fw(0xa0) + "tv.test/y", "cdn.test"], ["qqqqqq:" + fw(0x2028) + "zzzzzz@cdn.test", "cdn.test"],
+    ["//qqqqqq" + fw(0xff1f) + "zzzzzz@cdn.test/x", "cdn.test"]
+  ]
+  checkCall("D-SINK-98 (D1, round 4c E2): labelSinkText, shape by shape -- an ordinary label is unchanged; a token opening with `scheme://`, holding `//` before an `@` or a host, `:/` or `:\\` after a scheme of two or more characters, an `@` after a `:`, a host before a `/` with a path, or a `?`, `;` or `&` after a `.` or `/` and before a `=`, makes the whole label its hosts, each a host's shape or withheld",
+    () => SHAPES.filter(function (c) { return Model.labelSinkText(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelSinkText(c[0])] }), [])
+  checkCall("D-SINK-98 (D1): every label deriveLabel and uniqueLabel give for the shared fixtures' valid URLs reads as itself",
+    () => {
+      const urls = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8")).map(function (c) { return c.input })
+        .concat(JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-labels.json"), "utf8")).cases.map(function (c) { return c.url }))
+      const out = []
+      let n = 0
+      urls.forEach(function (url) {
+        ;["playlist", "epg"].forEach(function (kind) {
+          const v = Model.validateSourceUrl(url, { kind: kind })
+          if (!v.ok || v.url === "") return
+          const d = Model.deriveLabel(v.url, v.kind)
+          ;[d, Model.uniqueLabel(d, [d]), Model.uniqueLabel(d, [d, d + " 2"])].forEach(function (l) { n++; if (Model.labelSinkText(l) !== l) out.push(l) })
+        })
+      })
+      return [n > 600, out]
+    }, [true, []])
+
+  // D-SINK-98 (D6): two rows never read alike.
+  check("D-SINK-98 (D6): validateLabel refuses as label_taken a label that READS as another source's label reads, and names it as it reads",
+    [Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").code,
+     Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").message,
+     Model.validateLabel("CDN.test", [{ label: "qqqqqq:zzzzzz@cdn.test", id: "a" }], "").code,
+     Model.validateLabel("qqqqqq:zzzzzz@cdn.test", ["cdn.test"], "").code,
+     Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "a").ok,
+     Model.validateLabel("http://qqqqqq:zzzzzz@other.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }], "").ok,
+     Model.validateLabel("My TV", [{ label: "My Radio", id: "a" }], "").ok, Model.validateLabel("", [{ label: "x", id: "a" }], "").ok],
+    ["label_taken", "A source named " + Model.QUOTE_OPEN + "cdn.test" + Model.QUOTE_CLOSE + " already exists", "label_taken", "label_taken", true, true, true, true])
+  checkCall("D-SINK-98 (D6): and addSource, which validates through it, refuses the second such label",
+    () => {
+      const a = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/a.m3u", label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", origin: "guide" }, 100)
+      const b = Model.addSource(a.state, { playlistUrl: "http://cdn.test/b.m3u", label: "http://qqqqqq:zzzzzz@cdn.test/b.m3u", origin: "guide" }, 101)
+      return [a.ok, b.ok, b.code]
+    }, [true, false, "label_taken"])
+
+  // Round 4c (E5): the read-alike half asks only a label that differs from
+  // the record's own stored one, so an edit that keeps its label is never
+  // refused, whatever the other labels read as; one that changes it into a
+  // read-alike still is.
+  check("D-SINK-98 (round 4c, E5): an edit that keeps its label is never refused as reading alike -- `1.5/3 HD` beside `1.5/2 HD`, two credentialed URL labels, `Sport:Live@HD` beside `Film:Live@HD` -- and an edit that changes a label into a read-alike, or an add, still is",
+    [Model.validateLabel("1.5/3 HD", [{ label: "1.5/2 HD", id: "a" }, { label: "1.5/3 HD", id: "b" }], "b").ok,
+     Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }, { label: "http://qqqqqq:zzzzzz@cdn.test/b.m3u", key: "b" }], "b").ok,
+     Model.validateLabel("Film:Live@HD", [{ label: "Sport:Live@HD", id: "a" }, { label: "Film:Live@HD", id: "b" }], "b").ok,
+     Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/c.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }, { label: "http://qqqqqq:zzzzzz@cdn.test/b.m3u", id: "b" }], "b").code,
+     Model.validateLabel("http://qqqqqq:zzzzzz@cdn.test/b.m3u", [{ label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", id: "a" }, { label: "http://qqqqqq:zzzzzz@cdn.test/b.m3u", id: "b" }], "").code,
+     Model.validateLabel("CDN.TEST", [{ label: "cdn.test", id: "a" }, { label: "CDN.TEST", id: "b" }], "b").code],
+    [true, true, true, "label_taken", "label_taken", "label_taken"])
+  checkCall("D-SINK-98 (round 4c, E5): and updateSource saves an EPG-only edit of a record whose label already reads as another's",
+    () => {
+      const a = Model.addSource(Model.emptyState(), { playlistUrl: "http://cdn.test/a.m3u", label: "1.5/2 HD", origin: "guide" }, 100)
+      const b = Model.addSource(a.state, { playlistUrl: "http://cdn.test/b.m3u", label: "1.5/3 HD", origin: "guide" }, 101)
+      const st = JSON.parse(JSON.stringify(b.state))
+      st.sources[1].label = "http://qqqqqq:zzzzzz@cdn.test/b.m3u"
+      st.sources[0].label = "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+      const u = Model.updateSource(st, st.sources[1].key, { label: st.sources[1].label, epgUrl: "http://cdn.test/epg.xml" }, 102)
+      const form = Model.validateUrlForm({ label: st.sources[1].label, playlist: "http://cdn.test/b.m3u", epg: "http://cdn.test/epg.xml" },
+        st.sources.map(function (r) { return { id: r.key, label: r.label } }), st.sources[1].key)
+      return [a.ok, b.ok, u.ok, u.ok ? u.state.sources[1].epgUrl : u.code, form.ok]
+    }, [true, true, true, "http://cdn.test/epg.xml", true])
+
+  // Round 4c (E1): the hold itself, transition by transition.
+  checkCall("D-SINK-98 (round 4c, E1): labelHeldAfter is a pure function of the flag and the new value -- empty drops it, a reading value sets it, a held flag stays held over any non-empty value",
+    () => [Model.labelHeldAfter(false, ""), Model.labelHeldAfter(true, ""), Model.labelHeldAfter(false, "My TV"), Model.labelHeldAfter(true, "My TV"),
+           Model.labelHeldAfter(false, "qqqqqq:zzzzzz@cdn.test"), Model.labelHeldAfter(undefined, "cdn.test/x"), Model.labelHeldAfter("yes", "My TV"),
+           Model.labelReadsAsAddress("My TV"), Model.labelReadsAsAddress("qqqqqq:zzzzzz@cdn.test"), Model.labelReadsAsAddress("x http://cdn.test")],
+    [false, false, false, true, true, true, false, false, true, true])
+  // Round 4d (F1): `zzzzzz@cdn.test` holds the field by its `@` (shape iii),
+  // where round 4c's stored reading did not hold it and heard it in full.
+  checkCall("D-SINK-98 (round 4c, E1; round 4d, F1): a new add or Xtream form is not held; an edit form is held when its stored label holds the field and not otherwise; a value with an `@` after its first character holds it; a copy keeps the flag; a cancel back to the parent form keeps the parent's; closing the form drops it; emptying the field (Ctrl+U) drops it",
+    () => {
+      const g = Model.guideState("all")
+      const add = Model.openAddForm(g)
+      const xt = Model.openXtreamForm(g, "sources")
+      const editCred = Model.openEditForm(g, "k", { label: "qqqqqq:zzzzzz@cdn.test", playlist: "http://cdn.test/x", epg: "" })
+      const editPlain = Model.openEditForm(g, "k", { label: "My TV", playlist: "http://cdn.test/x", epg: "" })
+      const held = Model.withFormValue(add, "label", "zzzzzz@cdn.test", { typed: true })
+      const typed = Model.withFormValue(Model.withFormValue(add, "label", "cdn.test/get.php", { typed: true }), "label", "zzzzzz", { typed: true })
+      const xtHeld = Model.withFormValue(Model.withFormValue(xt, "label", "qqqqqq:zzzzzz@cdn.test", { typed: false }), "label", "qqqqqqzzzzzz", { typed: true })
+      // Xtream opened over a held URL form, and cancelled back to it: the
+      // parent's own flag comes back with its values.
+      const parentHeld = Model.withFormValue(add, "label", "qqqqqq:zzzzzz@cdn.test", { typed: false })
+      const back = Model.closeForm(Model.openXtreamForm(Model.withFormValue(parentHeld, "label", "qqqqqqzzzzzz", { typed: true }), "sources"), "cancel").state
+      const cleared = Model.withFormValue(Model.withFormValue(typed, "label", "", { typed: true }), "label", "zzzzzz", { typed: true })
+      const editEsc = Model.withFormValue(editCred, "label", "", { typed: true })
+      return [add.form.labelHeld, xt.form.labelHeld, editCred.form.labelHeld, editPlain.form.labelHeld, held.form.labelHeld,
+              Model.fieldAccessibleValue(held.form, "label"), typed.form.labelHeld, Model.fieldAccessibleValue(typed.form, "label"),
+              Model.fieldAccessibleValue(xtHeld.form, "label"), back.form.kind, back.form.labelHeld, Model.fieldAccessibleValue(back.form, "label"),
+              Model.closeForm(editCred, "saved").state.form, cleared.form.labelHeld, Model.fieldAccessibleValue(cleared.form, "label"),
+              editEsc.form.labelHeld, Model.copyForm(editCred.form).labelHeld]
+    },
+    [false, false, true, false, true, "***************", true, "******", "************", "url", true, "************",
+     null, false, "zzzzzz", false, true])
+  // A form a caller builds without the flag is held exactly when its label
+  // reads as an address (copyForm's rule, asked again by the Value), and a
+  // held flag holds whatever the label reads as.
+  check("D-SINK-98 (round 4c, E1): the Value of a form built without the flag is stars for a label that reads as an address and as typed otherwise; a held flag stars any label",
+    [Model.fieldAccessibleValue({ values: { label: "qqqqqq:zzzzzz@cdn.test" } }, "label"), Model.fieldAccessibleValue({ values: { label: "My TV" } }, "label"),
+     Model.fieldAccessibleValue({ values: { label: "My TV" }, labelHeld: true }, "label"), Model.fieldAccessibleValue({ values: { label: "" }, labelHeld: true }, "label")],
+    ["**********************", "My TV", "*****", ""])
+  // The two shapes a review measured on the bus, through the key path.
+  checkCall("D-SINK-98 (round 4c, E1): one Backspace on the `:` of a label typed as `qqqqqq:zzzzzz@cdn.test`, and the range `cdn.test/get.php?username=qqqqqq&` deleted from a pasted query, are heard as stars (round 4b heard `qqqqqqzzzzzz@cdn.test` and `password=zzzzzz`)",
+    () => {
+      const cap = Model.formCapacity("label")
+      let st = Model.openAddForm(Model.guideState("all"))
+      let v = ""
+      "qqqqqq:zzzzzz@cdn.test".split("").forEach(function (c) { v = Model.editInsert(v, v.length, v.length, Model.typedText(c, false), cap).value; st = Model.withFormValue(st, "label", v, { typed: true }) })
+      const bs = Model.editDelete(v, 7, 7, -1, false, false)
+      const colon = Model.withFormValue(st, "label", bs.value, { typed: true })
+      const q = "cdn.test/get.php?username=qqqqqq&password=zzzzzz"
+      const pasted = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", Model.editInsert("", 0, 0, Model.sanitizePasteInput("label", q, cap), cap).value, { typed: false })
+      const cut = Model.editDelete(q, 0, 33, 1, false, false)
+      const pass = Model.withFormValue(pasted, "label", cut.value, { typed: true })
+      return [bs.value, Model.fieldAccessibleValue(colon.form, "label"), cut.value, Model.fieldAccessibleValue(pass.form, "label")]
+    }, ["qqqqqqzzzzzz@cdn.test", "*********************", "password=zzzzzz", "***************"])
+
+  // ---- round 4d (2026-11-12), each the lead's call under the owner's
+  // standing authority of 2026-11-09, each answering a finding of the two
+  // reviews of round 4c.
+  //
+  // F1: the label FIELD, pasted whole into an empty add form -- openAddForm,
+  // then withFormValue with the paste joined and inserted, as
+  // pasteFromProcess writes it -- over round 4b's paste corpus (each label
+  // the reviews measured, every range deletion of it, and each of seven
+  // characters inserted at every index: 10,603 values) and every stored
+  // state of the E3 sweep. Round 4c held the field by the stored reading
+  // alone, and a value no clause reads was heard in full whatever
+  // delimiter it held. Now a value that publishes a run is one in which the
+  // oracle finds none of F1's five shapes on its own text or its fold and
+  // no reading -- and those are exactly four residual classes, counted.
+  // The literal "no value publishes a run" cannot hold: the corpus holds
+  // bare prefixes (`qq`, `qqqqqq:zzzzzz`, `password=zzzzzz`,
+  // `/live/qqqqqq/zzzzzz/1.ts`) that no shape tells from a name.
+  const PASTE_BASES = LEAKED_LABELS.map(function (c) { return c[0] })
+  // Round 4e (I1, the lead's call under the owner's standing authority of
+  // 2026-11-09): the still-on-bus review's 35 encoded values -- seven
+  // credential URLs, each percent-encoded in upper and in lower case, as
+  // HTML decimal and hex entities, and as backslash-u00HH -- join the
+  // corpus, so its "no delimiter" class cannot hide an encoded URL (none of
+  // them holds a raw `:`, `@`, `=` or `/`).
+  const ENC_BASES = ["http://qqqqqq:zzzzzz@cdn.test/get.php", "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+    "http://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts", "qqqqqq:zzzzzz@cdn.test", "//qqqqqq:zzzzzz@cdn.test/x",
+    "https://qqqqqq:zzzzzz@cdn.test:8443/playlist.m3u8", "cdn.test/get.php?username=qqqqqq&password=zzzzzz"]
+  const ENCODINGS = [
+    function (u) { return encodeURIComponent(u) },
+    function (u) { return encodeURIComponent(u).replace(/%[0-9A-F]{2}/g, function (m) { return m.toLowerCase() }) },
+    function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return "&#" + c.charCodeAt(0) + ";" }) },
+    function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return "&#x" + c.charCodeAt(0).toString(16) + ";" }) },
+    function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return BS + "u00" + c.charCodeAt(0).toString(16) }) }]
+  const ENCODED = []
+  ENCODINGS.forEach(function (e) { ENC_BASES.forEach(function (u) { ENCODED.push(e(u)) }) })
+  // Round 4f (K4, the lead's call under the owner's standing authority of
+  // 2026-11-09): each base as the eight delimiters' HTML names and as
+  // numeric entities with no `;`, 14 values, held and read as their host
+  // since K4 (round 4e published all 14 in the field and when stored).
+  const NAMED_ENT = { ":": "&colon;", "/": "&sol;", "@": "&commat;", "?": "&quest;", "&": "&amp;", "=": "&equals;" }
+  const ENCODED_4F = []
+  ;[function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return NAMED_ENT[c] }) },
+    function (u) { return u.replace(/[:\/@?&=]/g, function (c) { return "&#" + c.charCodeAt(0) }) }].forEach(function (e) { ENC_BASES.forEach(function (u) { ENCODED_4F.push(e(u)) }) })
+  // Round 4f (K1, the same authority): scheme-less stream-path bases, each
+  // whole or with one range deleted, and each of those with one U+0020 at
+  // every index (48,199 values), so the corpus counts the class a per-token
+  // shape (v) let through: `cdn.test /live/qqqqqq/zzzzzz/1.ts`.
+  const PATH_BASES = ["cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test/qqqqqq/zzzzzz/playlist.m3u8", "Provider cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+  function pathCorpus(out) {
+    PATH_BASES.forEach(function (b) {
+      const dels = [b]
+      for (let i = 0; i < b.length; i++) for (let j = i + 1; j <= b.length; j++) dels.push(b.substring(0, i) + b.substring(j))
+      dels.forEach(function (d) { out.add(d); for (let i = 0; i <= d.length; i++) out.add(d.substring(0, i) + " " + d.substring(i)) })
+    })
+    return out
+  }
+  function pasteCorpus() {
+    const out = new Set()
+    PASTE_BASES.forEach(function (b) {
+      out.add(b)
+      for (let i = 0; i < b.length; i++) for (let j = i + 1; j <= b.length; j++) out.add(b.substring(0, i) + b.substring(j))
+      ;[0x20, 0xa0, 0x3000, 0x200b, 0xfeff, 0x28, 0x22].forEach(function (c) { for (let i = 0; i <= b.length; i++) out.add(b.substring(0, i) + fw(c) + b.substring(i)) })
+    })
+    ENCODED.forEach(function (v) { out.add(v) })
+    ENCODED_4F.forEach(function (v) { out.add(v) })
+    return pathCorpus(out)
+  }
+  function pastedHeard(v) {
+    const cap = Model.formCapacity("label")
+    const val = Model.editInsert("", 0, 0, Model.sanitizePasteInput("label", v, cap), cap).value
+    const st = Model.withFormValue(Model.openAddForm(Model.guideState("all")), "label", val, { typed: false })
+    return [val, Model.fieldAccessibleValue(st.form, "label")]
+  }
+  // The residual classes, by what the value holds rather than by F1's
+  // shapes: no `:`, `@`, `=` or `/` at all; a `:` with nothing of `/`, `\`
+  // or `@` after it; a `=` with no `?`, `;` or `&` before it; a `/` with no
+  // `.` before it; and (round 4f, K1) a value with one `/` alone, whose `.`
+  // before it is in another U+0020 token.
+  function pasteResidual(v) {
+    if (/^[^:@=\/]*$/.test(v)) return "no delimiter"
+    if (/^[^@=\/]*:[^\/\\@]*$/.test(v)) return "user:pass, nothing after"
+    if (/=/.test(v) && !/[?;&][\s\S]*=/.test(v)) return "key=value, no ?;& before"
+    if (/^[^.]*\//.test(v)) return "path, no . before its /"
+    if (/^[^\/]*\/[^\/]*$/.test(v)) return "one /, its . across a space"
+    return "OTHER"
+  }
+  const pastedRuns = memo(function () {
+    const out = { values: 0, runs: 0, held: [], classes: {}, stored: { values: 0, runs: 0, held: [], classes: {} } }
+    function one(o, v) {
+      o.values++
+      const h = pastedHeard(v)
+      if (!RUN.test(h[1])) return
+      o.runs++
+      if (oHolds(h[0]) && o.held.length < 6) o.held.push([h[0], h[1]])
+      const c = pasteResidual(h[0])
+      o.classes[c] = (o.classes[c] || 0) + 1
+    }
+    pasteCorpus().forEach(function (v) { one(out, v) })
+    const stored = new Set()
+    LEAKED_LABELS.forEach(function (c) { labelSessions(c[0]).forEach(function (sess) { sess.values.forEach(function (v) { stored.add(Model.sanitizeInput(v, 999)) }) }) })
+    stored.forEach(function (v) { one(out.stored, v) })
+    return out
+  })
+  checkCall("D-SINK-98 (round 4d, F1; round 4e, I1; round 4f, K1/K4): pasted whole into an empty add form, no value of round 4b's paste corpus (10,603, round 4e's 35 encoded values, round 4f's 14 and its 48,199 scheme-less stream paths) or of the E3 stored sweep publishes a run in the label field's Value while it holds one of F1's five shapes or reads as an address (round 4c heard 603 corpus values that hold a shape)",
+    () => [pastedRuns().values, pastedRuns().held, pastedRuns().stored.held], [58817, [], []])
+  checkCall("D-SINK-98 (round 4d, F1; round 4f, K1): and what still publishes a run, pasted whole, is the stated residual -- a value with no delimiter, `user:pass` with nothing after its `:`, `key=value` with no `?`, `;` or `&` before, a path with no `.` before its `/`, or one `/` alone whose `.` is in another token -- counted",
+    () => [pastedRuns().classes, pastedRuns().stored.classes],
+    [{ "no delimiter": 140, "user:pass, nothing after": 185, "key=value, no ?;& before": 165, "path, no . before its /": 10427, "one /, its . across a space": 860 }, ROUND4D_STORED_PASTE_CLASSES])
+  // Round 4f (K1): that last class is a range deletion that leaves one
+  // segment of the credential path (`cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts`).
+  // F1: every BMP code point inserted at either side of the `:` of the
+  // `://` of a URL whose password holds a raw space, pasted whole: none is
+  // heard (round 4c heard 126,210 of 126,976 non-surrogate values). The
+  // stored reading of the same values names no run either (F4 g reads the
+  // second token, `zz@cdn.test/x`, and F2 withholds what the redactor
+  // changes).
+  const joinRuns = memo(function () {
+    const base = "http://qqqqqq:zz zz@cdn.test/x"
+    const j = base.indexOf("://")
+    const cap = Model.formCapacity("label")
+    const empty = Model.openAddForm(Model.guideState("all"))
+    const out = { values: 0, field: 0, stored: 0, sample: [] }
+    for (let cp = 0; cp <= 0xffff; cp++) {
+      ;[j, j + 1].forEach(function (at) {
+        const raw = base.substring(0, at) + String.fromCharCode(cp) + base.substring(at)
+        const v = Model.editInsert("", 0, 0, Model.sanitizePasteInput("label", raw, cap), cap).value
+        out.values++
+        const heard = Model.fieldAccessibleValue(Model.withFormValue(empty, "label", v, { typed: false }).form, "label")
+        if (RUN.test(heard)) { out.field++; if (out.sample.length < 4) out.sample.push(cp.toString(16)) }
+        if (RUN.test(Model.labelSinkText(Model.sanitizeInput(raw, 999)))) out.stored++
+      })
+    }
+    return out
+  })
+  checkCall("D-SINK-98 (round 4d, F1): each of the 65,536 BMP code points inserted before or after the `:` of `://` in `http://qqqqqq:zz zz@cdn.test/x` and pasted whole holds the field (no run in its Value), and its stored reading names no run",
+    () => [joinRuns().values, joinRuns().field, joinRuns().stored, joinRuns().sample], [131072, 0, 0, []])
+  // F1's five shapes, one by one, and the two `@` exceptions and the fold.
+  checkCall("D-SINK-98 (round 4d, F1): labelMayCarryCredential -- `//`; a `:` with `/`, a backslash or `@` after it; an `@` not first and not after U+0020; a `=` after `?`, `;` or `&`; a `/` after a `.`; each on the raw text or its NFKD fold less Cf, U+0020 no boundary",
+    () => [["a//b", "x:y/z", "x:y" + BS + "z", "x:y@z", "qqqqqq:zz zz@cdn.test", "a?b=c", "a;b=c", "a&b=c", "a.b/c", "zz zz@cdn.test",
+      "a" + fw(0xff0f) + fw(0xff0f) + "b", "a/" + fw(0x200b) + "/b", "x" + fw(0xff1a) + "/y", "me" + fw(0xa0) + "@x"].map(Model.labelMayCarryCredential),
+     ["My TV", "@home", "Me @Home", "a=b?c", "a/b.c", "x:y", "Sports: Live", "BBC 1/2", "24/7 News", "AC/DC", "cdn.test:8080", "", "x" + fw(0xff20) + "y", "a /b"].map(Model.labelMayCarryCredential)],
+    [[true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+     [false, false, false, false, false, false, false, false, false, false, false, false, true, false]])
+  // The stated cost: ordinary labels heard as stars while typed. Counted
+  // over round 4c's required-unchanged list and every label deriveLabel
+  // gives for the fixtures' valid URLs; nothing stored changes (the SHAPES
+  // pins above).
+  const ORDINARY = ["My TV", "Sports: Live", "BBC 1/2", "News & Weather", "Caf" + fw(0xe9), "IPTV@Home", "Me@BBC.co.uk", "cdn.test", "cdn.test:8080",
+    "cdn.test (2)", "tv.m3u", "list.m3u8", "1.5/2 HD", "ESPN 2.0/3.0", "time 10:30/11:30", "U.S./News", "v1.2/beta", "News?lang=en", "Rock&Roll=Live",
+    "TV & Movies?=", "Q&A=fun", "x;y=1", "Kids&Family=TV.m3u", "list;v=2.m3u", "C:/TV", "C:" + BS + "TV", "News//Sport", "Sports: Live/HD"]
+  checkCall("D-SINK-98 (round 4d, F1): the stated cost -- of round 4c's required-unchanged labels these hold the field and are heard as stars, and of the labels deriveLabel gives for the fixtures' valid URLs these do",
+    () => {
+      const urls = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8")).map(function (c) { return c.input })
+        .concat(JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-labels.json"), "utf8")).cases.map(function (c) { return c.url }))
+      const derived = new Set()
+      urls.forEach(function (url) { ["playlist", "epg"].forEach(function (kind) { const v = Model.validateSourceUrl(url, { kind: kind }); if (v.ok && v.url !== "") derived.add(Model.deriveLabel(v.url, v.kind)) }) })
+      const heldDerived = []
+      derived.forEach(function (l) { if (Model.labelHoldsField(l)) heldDerived.push(l) })
+      return [ORDINARY.filter(function (l) { return Model.labelHoldsField(l) }), derived.size > 50, heldDerived.sort()]
+    },
+    [["IPTV@Home", "Me@BBC.co.uk", "1.5/2 HD", "ESPN 2.0/3.0", "time 10:30/11:30", "U.S./News", "v1.2/beta", "News?lang=en", "Rock&Roll=Live",
+      "TV & Movies?=", "Q&A=fun", "x;y=1", "Kids&Family=TV.m3u", "list;v=2.m3u", "C:/TV", "C:" + BS + "TV", "News//Sport", "Sports: Live/HD"], true,
+     ROUND4D_DERIVED_HELD])
+  checkCall("D-SINK-98 (round 4d, F1): the hold, through the form -- a whole credential with a space in its password, pasted, is stars; so are the reviews' four; `IPTV@Home` typed is stars from its `@`; an edit form opens held over a stored label that only F1's shapes hold",
+    () => {
+      const g = Model.guideState("all")
+      const heard = function (v) { return Model.fieldAccessibleValue(Model.withFormValue(Model.openAddForm(g), "label", v, { typed: false }).form, "label") }
+      let st = Model.openAddForm(g)
+      const typed = []
+      ;"IPTV@Home".split("").forEach(function (c, i) { st = Model.withFormValue(st, "label", "IPTV@Home".substring(0, i + 1), { typed: true }); typed.push(Model.fieldAccessibleValue(st.form, "label")) })
+      return [heard("qqqqqq:zz zz@cdn.test"), heard("http" + fw(0xa0) + "://qqqqqq:zz zz@cdn.test/x"), heard("//qqqqqq:zz zz@cdn.test/x"),
+              heard("username=qqqqqq&password=zzzzzz"), heard("Provider (cdn.test:8080/qqqqqq/zzzzzz)"), typed[3], typed[4], typed[8],
+              Model.openEditForm(g, "k", { label: "username=qqqqqq&password=zzzzzz", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld,
+              Model.openEditForm(g, "k", { label: "My TV", playlist: "http://cdn.test/x", epg: "" }).form.labelHeld]
+    },
+    ["*".repeat(21), "*".repeat(31), "*".repeat(25), "*".repeat(31), "*".repeat(38), "IPTV", "*".repeat(5), "*".repeat(9), true, false])
+
+  // F2, F3, F4 and F10: the stored reading.
+  const ROUND4D_SHAPES = [
+    // F2: no token reads, and the redactor would change the label: withheld
+    // (round 4c published the redactor's output, the username and a piece
+    // of the password). Pinned on labels F4's f and g do not read.
+    ["htt?p://qqqqqq:zzzzzz/x", Model.HOST_WITHHELD], ["htt:p://qqqqqq:zz zz@cdn.test", Model.HOST_WITHHELD],
+    ["Live:p://qqqqqq:zz zz@cdn.test", Model.HOST_WITHHELD], ["x(p://qqqqqq:zz zz@cdn.test)", Model.HOST_WITHHELD],
+    // ...and the four the decision named, where F4 reads first: f's core
+    // `p://qqqqqq:zz` and g's `zz@cdn.test/x`.
+    ["(p://qqqqqq:zz zz@cdn.test/x)", Model.HOST_WITHHELD + " cdn.test"], ["htt:p://qqqqqq:zz zz@cdn.test/x", "cdn.test"],
+    ["Live:p://qqqqqq:zz zz@cdn.test/x", "cdn.test"],
+    // F3: the leftmost authority, so a later `//` names no path segment.
+    ["qqqqqq:zzzzzz@cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"], ["cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test"],
+    ["qqqqqq:zzzzzz@cdn.test/live//qqqqqq.qqqqqq/1.ts", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x?u=me:x@mail.test", "cdn.test"],
+    // Round 4e (I3): the head before a `//` that is itself an authority is
+    // the leftmost one, so `qqqqqq:zzzzzz@zz//cdn.test/x` names its host,
+    // `zz`, which is no host: withheld (round 4d read `cdn.test`).
+    ["qqqqqq:zzzzzz@cdn.test/live/me@zzzzzz.zz/x", "cdn.test"], ["qqqqqq:zzzzzz@zz//cdn.test/x", Model.HOST_WITHHELD],
+    ["//zzzzzz//cdn.test/x", Model.HOST_WITHHELD], ["News//cdn.test/x", "cdn.test"],
+    // ...and since round 4e (I4) an a:b@c token with no `@` before its first
+    // `/` names none (round 4d named `qqqqqq.test:12`, the username).
+    ["qqqqqq.test:12/zzzzzz@cdn.test/x", Model.HOST_WITHHELD],
+    // F4 f: the core; a bracket of an IPv6 literal stays.
+    ["Provider (cdn.test:8080/qqqqqq/zzzzzz)", "cdn.test:8080"], ["(v1.2/beta)", "(v1.2/beta)"], ["(News/Sport)", "(News/Sport)"],
+    ["\"http://qqqqqq:zzzzzz@cdn.test/x\"", "cdn.test"], ["<cdn.test/qqqqqq>", "cdn.test"], ["[::1]:8080/x", "[::1]:8080"], ["([::1]:80/x)", "[::1]:80"],
+    ["qqqqqq:zzzzzz@[::1]", "[::1]"], ["cdn.test (2)", "cdn.test (2)"], ["News.", "News."], ["'quoted'", "'quoted'"],
+    // ...the trailing run too (a host ending in `.` or `)` is no host), and
+    // the core of the FOLD: fullwidth parentheses fold to ASCII ones, which
+    // are then set aside, so the token reads (and, its own text naming no
+    // host, is withheld rather than passed whole).
+    ["qqqqqq:zzzzzz@cdn.test.", "cdn.test"], ["(qqqqqq:zzzzzz@cdn.test)", "cdn.test"],
+    [fw(0xff08) + "cdn.test/qqqqqq/zzzzzz" + fw(0xff09), Model.HOST_WITHHELD],
+    // F4 g: clause d's `X@H` form, with a path.
+    ["zzzzzz@cdn.test/x", "cdn.test"], ["me@mail.test/x", "mail.test"], ["Me@BBC.co.uk", "Me@BBC.co.uk"], ["IPTV@Home", "IPTV@Home"],
+    ["IPTV@Home/Live", "IPTV@Home/Live"], ["@cdn.test/x", "@cdn.test/x"], ["zzzzzz@cdn.test:8080/x", "cdn.test:8080"],
+    ["qqqqqq@zzzzzz@cdn.test/x", "cdn.test"],
+    // F4, not added: a userinfo holding a U+0020 with no `/` after its host.
+    ["qqqqqq:zz zz@cdn.test", "qqqqqq:zz zz@cdn.test"], ["qqqqqq:zz zz@cdn.test/x", "cdn.test"],
+    // F10: a label host's labels are [A-Za-z0-9-].
+    ["qqqqqq:zzzzzz@my_host.test/x", Model.HOST_WITHHELD], ["my_host.test/x", "my_host.test/x"]
+  ]
+  checkCall("D-SINK-98 (round 4d, F2/F3/F4/F10): the stored reading, shape by shape -- withheld where the redactor alone would change a label, the leftmost authority's host, a token's core inside its brackets and quotes, clause d's `X@H` form, and a host's labels of [A-Za-z0-9-] alone",
+    () => ROUND4D_SHAPES.filter(function (c) { return Model.labelSinkText(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelSinkText(c[0])] }), [])
+  check("D-SINK-98 (round 4d, F2/F3/F4): and the test's oracle reads each of them the same way, and classes each as reading or not as the decision says",
+    ROUND4D_SHAPES.filter(function (c) { return oRead(c[0]).text !== c[1] }).map(function (c) { return [c[0], oRead(c[0]).text] }), [])
+  // F3 through the composers: the row's name, the remove dialog and the
+  // Removed transient name `cdn.test` for the three labels the review
+  // measured naming a path segment.
+  checkCall("D-SINK-98 (round 4d, F3): the Sources row's name, the remove dialog and the Removed transient name the leftmost authority's host for a label whose path holds a later `//`, and hold no run",
+    () => ["qqqqqq:zzzzzz@cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "cdn.test/live/qqqqqq//zzzzzz.zz/1.ts", "qqqqqq:zzzzzz@cdn.test/live//qqqqqq.qqqqqq/1.ts"].map(function (label) {
+      const sinks = storedSinks(label)
+      return [sinks[1].indexOf("cdn.test, ") === 0, sinks[2].indexOf(Model.QUOTE_OPEN + "cdn.test" + Model.QUOTE_CLOSE) !== -1,
+              sinks[6].indexOf("Removed cdn.test") === 0, sinks.some(function (o) { return RUN.test(o) })]
+    }), [[true, true, true, false], [true, true, true, false], [true, true, true, false]])
+
+  // ---- round 4e (2026-11-12), each the lead's call under the owner's
+  // standing authority of 2026-11-09, each answering a finding of the two
+  // reviews of round 4d.
+  //
+  // I1: the 35 encoded credential URLs (ENCODED, above), pasted whole into
+  // an empty add form, hold the field -- one `*` per character -- and,
+  // stored, read as their host in every composer with no run (round 4d
+  // published all 35 whole in the field and in every composer).
+  checkCall("D-SINK-98 (round 4e, I1): each of 35 credential URLs pasted percent-encoded, entity-encoded or backslash-u00HH-encoded into the Label field is held and heard as one `*` per character",
+    () => ENCODED.filter(function (v) { const h = pastedHeard(v); return h[1] !== "*".repeat(h[0].length) }), [])
+  checkCall("D-SINK-98 (round 4e, I1): and, stored, each reads as its host in the Sources row and holds no run in any composer",
+    () => [ENCODED.filter(function (v) { return storedSinks(Model.sanitizeInput(v, 999)).some(function (o) { return RUN.test(o) }) }),
+           Array.from(new Set(ENCODED.map(function (v) { return Model.labelSinkText(v) }))).sort()],
+    [[], ["cdn.test", "cdn.test:8080", "cdn.test:8443"]])
+  // I1: labelDecode, escape by escape -- the eight percent escapes in
+  // either case and no other, decimal and hex entities (`x` or `X`) up to
+  // U+10FFFF, backslash-u00HH, one pass.
+  checkCall("D-SINK-98 (round 4e, I1): labelDecode decodes %2F %3A %40 %3D %26 %3F %3B %5C in either case and no other percent escape, `&#NN;` and `&#xHH;` up to U+10FFFF, and backslash-u00HH, once",
+    () => [["%2f%2F", "//"], ["%3a%3A%40%3d%26%3f%3b%5c%5C", "::@=&?;" + BS + BS], ["%25%20%2E%2G", "%25%20%2E%2G"], ["&#47;&#x2F;&#X2f;&#0047;", "////"],
+     [BS + "u002f" + BS + "u003A" + BS + "u0040", "/:@"], [BS + "u2215" + BS + "U002f", BS + "u2215" + BS + "U002f"], ["&#1114111;", String.fromCodePoint(0x10ffff)],
+     ["&#1114112;&#x110000;", "&#1114112;&#x110000;"], ["&#37;2F%2526", "%2F%2526"], ["&#;&#x;", "&#;&#x;"], ["My TV", "My TV"]]
+      .filter(function (c) { return Model.labelDecode(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelDecode(c[0])] }), [])
+  // The stored reading, shape by shape.
+  const ROUND4E_SHAPES = [
+    // I1: a token whose escapes decode to an address reads as the host the
+    // decoded text names; one whose decoded text has no address's shape
+    // passes as typed.
+    ["http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fx", "cdn.test"], ["cdn.test%2Flive", "cdn.test"], ["qqqqqq%3Azzzzzz%40cdn.test", "cdn.test"],
+    ["http&#58;&#47;&#47;qqqqqq&#58;zzzzzz&#64;cdn.test&#47;x", "cdn.test"], ["News%2FSport", "News%2FSport"], ["50%3A50", "50%3A50"],
+    ["&#37;2F&#37;2Fcdn.test", "&#37;2F&#37;2Fcdn.test"],
+    // I2: a token reads when its core OR its raw text reads, and names
+    // clause d's host of its raw text when its core names none -- the
+    // trailing run set aside left `cdn.test/` with nothing after its `/`.
+    ["Server cdn.test/. Login qqqqqq zzzzzz", "cdn.test"], ["cdn.test/, qqqqqq/zzzzzz", "cdn.test"],
+    ["(see cdn.test/) user qqqqqq pass zzzzzz", "cdn.test"], ["cdn.test:8080/, qqqqqq, zzzzzz", "cdn.test:8080"],
+    ["(v1.2/beta)", "(v1.2/beta)"], ["(News/Sport)", "(News/Sport)"], ["Provider (cdn.test:8080/qqqqqq/zzzzzz)", "cdn.test:8080"],
+    // I3: a `//` straight after a host or an a:b@c authority names that
+    // authority's host, never the segment after it.
+    ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["qqqqqq:zzzzzz@cdn.test//zzzzzz.zz/1.ts", "cdn.test"],
+    ["qqqqqq:zzzzzz@cdn.test//qqqqqq.zz/zzzzzz/1.ts", "cdn.test"], ["cdn.test//qqqqqq.zz/zzzzzz/1.ts", "cdn.test"],
+    ["cdn.test//john.doe/zzzzzz/1.ts", "cdn.test"], ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"],
+    // I4: an a:b@c token with no `@` before its first `/` names no host.
+    ["qqqqqq.test:12/zzzzzz@cdn.test/get.php", Model.HOST_WITHHELD], ["cdn.test:8080/playlist/me@mail.test/pw", Model.HOST_WITHHELD],
+    // I6: the `'` of a token's core, both ends.
+    ["'cdn.test/qqqqqq/zzzzzz'", "cdn.test"], ["Provider 'cdn.test:8080/qqqqqq/zzzzzz'", "cdn.test:8080"],
+    // I10: F2's branch on a label that holds `scheme://user:pass` intact up
+    // to a U+0020 before its `@`. A token holding a `:` and a later `@` reads
+    // by clause c, so an intact `scheme://user:pass@` cannot reach F2's
+    // branch; this is the nearest that does.
+    ["x(p://qqqqqq:zzzzzz @cdn.test)", Model.HOST_WITHHELD]
+  ]
+  checkCall("D-SINK-98 (round 4e, I1-I4, I6, I10): the stored reading, shape by shape -- escapes decoded, a token's raw text beside its core, the leftmost authority before a `//`, no host for an a:b@c token whose head holds no `@`, and the `'` set aside",
+    () => ROUND4E_SHAPES.filter(function (c) { return Model.labelSinkText(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelSinkText(c[0])] }), [])
+  check("D-SINK-98 (round 4e): and the test's oracle reads each of them the same way",
+    ROUND4E_SHAPES.filter(function (c) { return oRead(c[0]).text !== c[1] }).map(function (c) { return [c[0], oRead(c[0]).text] }), [])
+  // I10: F2's branch, its precondition asserted: no token reads (by the
+  // oracle), and the redactor changes the label, for every F2 pin -- so a
+  // redactor that
+  // stops changing one turns this red rather than leaving its pin grading
+  // the as-typed branch.
+  checkCall("D-SINK-98 (round 4e, I10): every F2 pin reaches F2's branch -- no token of it reads, and sinkText changes it -- and reads `[host withheld]`",
+    () => ["htt?p://qqqqqq:zzzzzz/x", "htt:p://qqqqqq:zz zz@cdn.test", "Live:p://qqqqqq:zz zz@cdn.test", "x(p://qqqqqq:zz zz@cdn.test)", "x(p://qqqqqq:zzzzzz @cdn.test)"]
+      .filter(function (l) { return oRead(l).redactor !== true || Model.sinkText(l) === l || Model.labelSinkText(l) !== Model.HOST_WITHHELD }), [])
+  // I2, I3 through the composers: the row, its dialog and the Removed line.
+  checkCall("D-SINK-98 (round 4e, I2/I3): the Sources row's name, the remove dialog and the Removed transient name the host for a stored label whose host/path ends in punctuation, or whose `//` follows its host, and hold no run",
+    () => ["Server cdn.test/. Login qqqqqq zzzzzz", "cdn.test/, qqqqqq/zzzzzz", "cdn.test//qqqqqq.zz/zzzzzz/1.ts", "qqqqqq:zzzzzz@cdn.test//zzzzzz.zz/1.ts"].map(function (label) {
+      const sinks = storedSinks(label)
+      return [sinks[1].indexOf("cdn.test, ") === 0, sinks[2].indexOf(Model.QUOTE_OPEN + "cdn.test" + Model.QUOTE_CLOSE) !== -1,
+              sinks[6].indexOf("Removed cdn.test") === 0, sinks.some(function (o) { return RUN.test(o) })]
+    }), [[true, true, true, false], [true, true, true, false], [true, true, true, false], [true, true, true, false]])
+  // I5 and I6: shape (v) asks each U+0020 token's LAST `/`; and I1: every
+  // shape is asked of the escapes decoded.
+  checkCall("D-SINK-98 (round 4e, I5/I6/I1): labelMayCarryCredential -- (v) holds for a `/` with a `.` before it in the same token, asked of its last `/`; a `.` and a later `/` in two tokens do not hold; an escape decoding to a delimiter holds",
+    () => [["/live/qqqqqq.qq/zzzzzz/1.ts", "live/qqqqqq/zzzzzz.zz/1.ts", "cdn/live/me.user/zzzzzz/1.ts", "Pluto.tv/US", "Dr." + fw(0xa0) + "Who/Torchwood",
+            "a%2F%2Fb", "x%3A%2Fy", "qqqqqq%3Azz zz%40cdn.test", "a&#47;&#47;b", "a&#x2F;&#x2f;b", "qqqqqq" + BS + "u003azzzzzz" + BS + "u0040cdn.test",
+            "a" + fw(0xff05) + "2F" + fw(0xff05) + "2Fb", "a&#65295;&#65295;b"].map(Model.labelMayCarryCredential),
+           ["Dr. Who/Torchwood", "St. Louis/KC", "Ch. 4/5", "1.FC Koln/Bayern", "e.g. Sports/News", "Mr. Robot/x", "News%2FSport", "&#47;home", "%252F%252F"].map(Model.labelMayCarryCredential)],
+    [[true, true, true, true, true, true, true, true, true, true, true, true, true],
+     [false, false, false, false, false, false, false, false, false]])
+  // I5's cost, recounted: of 28 more ordinary labels (the what-changed
+  // review's), these hold the field and an Edit form over them opens held
+  // (round 4d held 16 of them; `Dr. Who/Torchwood`, `St. Louis/KC`,
+  // `1.FC Koln/Bayern`, `e.g. Sports/News` and `Ch. 4/5` no longer do).
+  const ORDINARY_4E = ["Sports: Live/HD", "BBC One/Two", "Sky Sports 1/2", "AT&T TV", "Fox 5 NY", "beIN Sports 1-3", "Movies (HD)", "Kids: 24/7", "news@9",
+    "Me @Home", "Dr. Who/Torchwood", "St. Louis/KC", "1.FC Koln/Bayern", "Mr. Robot", "Live: News/Sport", "TV 2.0", "e.g. Sports/News", "Pluto.tv/US",
+    "Weather.com/Live", "ABC: News", "Ch. 4/5", "Sat.1/ProSieben", "radio=on&tv=off", "x?a=b", "a&b=c", "Q&A", "News:/Sport", "24/7: Live"]
+  checkCall("D-SINK-98 (round 4e, I5): the stated cost over 28 more ordinary labels -- these hold the field, an Edit form over each of them opens held and no other, and `Dr. Who/Torchwood` is heard as typed",
+    () => {
+      const g = Model.guideState("all")
+      const held = ORDINARY_4E.filter(function (l) { return Model.labelHoldsField(l) })
+      const edit = ORDINARY_4E.filter(function (l) { return Model.openEditForm(g, "k", { label: l, playlist: "http://cdn.test/x", epg: "" }).form.labelHeld })
+      const dr = Model.openEditForm(g, "k", { label: "Dr. Who/Torchwood", playlist: "http://cdn.test/x", epg: "" })
+      const sp = Model.openEditForm(g, "k", { label: "Sports: Live/HD", playlist: "http://cdn.test/x", epg: "" })
+      return [held, edit.join("|") === held.join("|"), Model.fieldAccessibleValue(dr.form, "label"), Model.fieldAccessibleValue(sp.form, "label")]
+    },
+    [["Sports: Live/HD", "Kids: 24/7", "news@9", "Live: News/Sport", "Pluto.tv/US", "Weather.com/Live", "Sat.1/ProSieben", "radio=on&tv=off", "x?a=b", "a&b=c",
+      "News:/Sport"], true, "Dr. Who/Torchwood", "*".repeat(15)])
+
+  // ---- round 4f (2026-11-12), each the lead's call under the owner's
+  // standing authority of 2026-11-09, each answering a finding of the review
+  // of round 4e.
+  //
+  // K1: shape (v) holds per U+0020 token, or over the whole value when it
+  // has two or more `/` after its first `.` -- a credential path pasted with
+  // one U+0020 in its host or before its path is held again (round 4e heard
+  // 275 such values of its review's sweep that round 4d held); a `.` and one
+  // later `/` in another token still do not hold.
+  checkCall("D-SINK-98 (round 4f, K1): labelMayCarryCredential holds a credential path with one U+0020 in its host or before its path, and still not a `.` and one `/` in two tokens",
+    () => [["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn.test /qqqqqq/zzzzzz/playlist.m3u8", "Provider cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts",
+            "/cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn" + fw(0xff0e) + "test /live/qqqqqq/zzzzzz/1.ts"].map(Model.labelMayCarryCredential),
+           ["cdn.test /qqqqqq", "cdn. zzzzzz/1.ts", "Dr. Who/Torchwood", "Ch. 4 / Ch. 5", "U.S. / Canada", "Mr. Robot / S01", "v2.0 / beta"].map(Model.labelMayCarryCredential)],
+    [[true, true, true, true, true, true], [false, false, false, false, false, false, false]])
+  checkCall("D-SINK-98 (round 4f, K1): pasted into the Label field, `cdn.test /live/qqqqqq/zzzzzz/1.ts` and `cdn. test/live/qqqqqq/zzzzzz/1.ts` are heard as one `*` per character",
+    () => ["cdn.test /live/qqqqqq/zzzzzz/1.ts", "cdn. test/live/qqqqqq/zzzzzz/1.ts"].map(function (v) { return pastedHeard(v)[1] }),
+    ["*".repeat(33), "*".repeat(33)])
+  // K4: numeric entities with no `;` and the eight delimiters' HTML names
+  // decode; the encodings still not decoded stay as typed.
+  checkCall("D-SINK-98 (round 4f, K4): labelDecode decodes `&#NN` and `&#xHH` with no `;` (the longest digit run, up to U+10FFFF) and `&colon;` `&sol;` `&commat;` `&quest;` `&amp;` `&equals;` `&semi;` `&bsol;` as HTML spells them, once; `\\xHH`, `%u00HH`, `\\U000000HH`, octal and `+` stay",
+    () => [["&#47", "/"], ["&#58&#47&#47", "://"], ["&#x3a&#X2F", ":/"], ["&#0058x", ":x"], ["&#58;", ":"], ["&#5812", fw(5812)], ["&#1114112", "&#1114112"], ["&#x110000", "&#x110000"],
+     ["&colon;&sol;&commat;&quest;&amp;&equals;&semi;&bsol;", ":/@?&=;" + BS], ["&COLON;&AMP;&Sol;&colon&sol", "&COLON;&AMP;&Sol;&colon&sol"], ["&amp;colon;&#38;sol;", "&colon;&sol;"],
+     ["&nbsp;&lt;", "&nbsp;&lt;"], [BS + "x3a%u003a" + BS + "U0000003a" + BS + "072a+b", BS + "x3a%u003a" + BS + "U0000003a" + BS + "072a+b"]]
+      .filter(function (c) { return Model.labelDecode(c[0]) !== c[1] || oDecode(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelDecode(c[0]), oDecode(c[0])] }), [])
+  checkCall("D-SINK-98 (round 4f, K4): each of 14 credential URLs pasted as HTML names or as `;`-less numeric entities is held in the Label field and, stored, holds no run in any composer",
+    () => [ENCODED_4F.filter(function (v) { const h = pastedHeard(v); return h[1] !== "*".repeat(h[0].length) }),
+           ENCODED_4F.filter(function (v) { return storedSinks(Model.sanitizeInput(v, 999)).some(function (o) { return RUN.test(o) }) }),
+           Array.from(new Set(ENCODED_4F.map(function (v) { return Model.labelSinkText(v) }))).sort()],
+    [[], [], ["[host withheld]", "cdn.test", "cdn.test:8080", "cdn.test:8443"]])
+  // K2 and K3, the stored reading.
+  const ROUND4F_SHAPES = [
+    // K2 a: the head is an authority on its decoded text or its fold.
+    ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["qqqqqq:zzzzzz&#64;cdn.test//zzzzzz.zz/1.ts", "cdn.test"],
+    ["qqqqqq:zzzzzz" + fw(0xff20) + "cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD], ["http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test//zzzzzz.zz/x", "cdn.test"],
+    ["qqqqqq%3Azzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test"], ["cdn" + fw(0xff0e) + "test//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    ["cdn.test" + fw(0x200b) + ":8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    // K2 b: a host with a port, dotless included, or a trailing `.`.
+    ["nas:8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD], ["localhost:8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    ["cdn.test.//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD], ["cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"],
+    // K2 c: an `@` after the `//` before the next `/` withholds; its cost.
+    ["qqqqqq.qq//zzzzzz@cdn.test/x", Model.HOST_WITHHELD], ["qqqqqq.qq//@cdn.test/x", Model.HOST_WITHHELD],
+    ["qqqqqq:zzzzzz@cdn.test//@x", Model.HOST_WITHHELD], ["qqqqqq.//qq@cdn.test/x", Model.HOST_WITHHELD],
+    // K2 d: the raw and the decoded readings name different hosts.
+    ["cdn.test%2Fqqqqqq.qq//zzzzzz.zz/x", Model.HOST_WITHHELD], ["qqqqqq.qq%2F@cdn.test/x", Model.HOST_WITHHELD], ["x.test%2Fqqqqqq:zzzzzz@cdn.test/y", Model.HOST_WITHHELD],
+    // ...and a decoded reading that names nothing does not defer to a raw one
+    // that names a host (the round-4f review's double escapes): the decoded
+    // head is an authority this text does not name.
+    ["qqqqqq:zzzzzz&amp;#64;cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD], ["qqqqqq:zzzzzz&amp;commat;cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD],
+    ["nas&amp;#58;8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
+    // ...and a dotless head with no port keeps the `//` branch.
+    ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["News//cdn.test/x", "cdn.test"],
+    ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["192.168.1.10:8080//qqqqqq.qq/zzzzzz/1.ts", "192.168.1.10:8080"],
+    // K3: the fold of the raw token is what reads these.
+    ["Server cdn.test%2F. Login qqqqqq zzzzzz", "cdn.test"], ["Server cdn.test" + fw(0xff0f) + ". Login qqqqqq zzzzzz", Model.HOST_WITHHELD],
+    ["cdn.test&#47;, qqqqqq/zzzzzz", "cdn.test"], ["cdn.test" + fw(0xff0f) + ", qqqqqq zzzzzz", Model.HOST_WITHHELD],
+    // K4: HTML names and `;`-less entities.
+    ["cdn.test&colon;8080&sol;qqqqqq&sol;zzzzzz", "cdn.test:8080"], ["qqqqqq&#58zzzzzz&#64cdn.test", "cdn.test"], ["cdn.test&#47live&#47qqqqqq&#47zzzzzz", "cdn.test"]
+  ]
+  checkCall("D-SINK-98 (round 4f, K2-K4): the stored reading, shape by shape -- a head before a `//` that is an authority on any reading, or a host with a port or a trailing `.`, names no later segment; an `@` after such a `//` withholds; raw and decoded readings that disagree withhold; and HTML names decode",
+    () => ROUND4F_SHAPES.filter(function (c) { return Model.labelSinkText(c[0]) !== c[1] }).map(function (c) { return [c[0], Model.labelSinkText(c[0])] }), [])
+  check("D-SINK-98 (round 4f): and the test's oracle reads each of them the same way, and none of them holds a run",
+    ROUND4F_SHAPES.filter(function (c) { return oRead(c[0]).text !== c[1] || RUN.test(c[1]) }).map(function (c) { return [c[0], oRead(c[0]).text] }), [])
+  // The stated residuals: a dotless head with no port is no authority, so
+  // its `//` names the segment after it; a name HTML does not spell so is
+  // not decoded.
+  checkCall("D-SINK-98 (round 4f, K2/K4): the stated residuals -- `cdn-test//qqqqqq.qq/...` names the segment after its `//`, and `&COLON;` and its kin pass as typed",
+    () => ["cdn-test//qqqqqq.qq/zzzzzz/1.ts", "http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x"].map(function (l) { return [Model.labelSinkText(l), oRead(l).text] }),
+    [["qqqqqq.qq", "qqqqqq.qq"], ["http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x", "http&COLON;&SOL;&SOL;qqqqqq&COLON;zzzzzz&COMMAT;cdn.test&SOL;x"]])
+  // K2 through the composers: the row, its dialog and the Removed line.
+  checkCall("D-SINK-98 (round 4f, K2): the Sources row's name, the remove dialog and the Removed transient name the head's host for an encoded or decoded authority before a `//`, and no composer holds a run for a dotless host with a port",
+    () => ["qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts", "cdn.test%3A8080//qqqqqq.qq/zzzzzz/1.ts", "nas:8080//qqqqqq.qq/zzzzzz/1.ts"].map(function (label) {
+      const sinks = storedSinks(label)
+      return [sinks[1].indexOf("cdn.test") === 0, sinks.some(function (o) { return RUN.test(o) })]
+    }), [[true, false], [true, false], [false, false]])
+
+  // D-SINK-97 / D-SINK-98 (D4): line terminators, in every field.
+  checkCall("D-SINK-97 (D4): a paste into ANY field removes LF, VT, FF, CR, U+0085, U+2028 and U+2029 (the name fields kept U+2028 and U+2029); a tab still reaches a URL field's validator",
+    () => ["label", "username", "password", "playlist", "epg", "server"].map(function (field) {
+      return Object.keys(LT).filter(function (k) { return Model.sanitizePasteInput(field, "a" + LT[k] + "b", 64) !== "ab" })
+    }).concat([[Model.sanitizePasteInput("playlist", "http://h.test/a" + String.fromCharCode(9) + "b", 64)]]),
+    [[], [], [], [], [], [], ["http://h.test/a" + String.fromCharCode(9) + "b"]])
+  check("D-SINK-97 (D4): typedText drops U+2028 and U+2029 in every field, where Qt's acceptance rule types them, and still types every other printable",
+    [Model.typedText(LT.LS, false), Model.typedText(LT.PS, false), Model.typedText("a" + LT.LS + "b", false), Model.typedText(fw(0xa0), false), Model.typedText(fw(0x3000), false), Model.typedText(fw(0x200b), false)],
+    ["", "", "ab", fw(0xa0), fw(0x3000), fw(0x200b)])
+
+  // D-SINK-99 (D5): while the form holds a withheld URL, no line it composes
+  // from the probe host names that host. Round 4c (E4): "withheld" is also
+  // an `@` after the authority's closing `/`, `?` or `#`, the test the
+  // field's Value stars by, so the last three -- a dotted username, which
+  // urlHostWithheld never held for -- are withheld too.
+  const TYPO = ["http://qqqqqq#zzzzzz@cdn.test/x", "http://qqqqqq:#zzzzzz@cdn.test/x", "http://qqqqqq/zzzzzz@cdn.test/get.php", "http://qqqqqq?zzzzzz@cdn.test/x", "http://qqqqqq:12#zzzzzz@cdn.test/x"]
+  const DOTTED = ["http://qqqqqq.test:12#zzzzzz@cdn.test/x", "http://qqqqqq.test/zzzzzz@cdn.test/get.php", "http://qqqqqq.test?zzzzzz@cdn.test/x"]
+  // The lines the form composes from the probe host, as Guide.qml composes
+  // them. `added` is finishForm's: the label of the record it finds listed
+  // once the probe succeeds (the STORED label, R32a's), with the probe host
+  // only as the fallback for a record not listed yet (`addedFallback`).
+  function formLines(where, url) {
+    const form = where === "server"
+      ? { kind: "xtream", values: { label: "", server: url, username: "u", password: "p" } }
+      : { kind: "url", values: { label: "", playlist: where === "playlist" ? url : "http://cdn.test/list.m3u", epg: where === "epg" ? url : "" } }
+    const sub = where === "server" ? Model.xtreamUrls(url, "u", "p") : Model.validateUrlForm(Model.formSubmitValues(form), [], "")
+    const host = sub.ok ? sub.host : ""
+    const probing = Object.assign({}, form, { probing: true, probeHost: host, probeKind: "url" })
+    const lineHost = Model.formLineHost(probing, host)
+    let added = null
+    if (where !== "server" && sub.ok) {
+      const a = Model.addSource(Model.emptyState(), { playlistUrl: sub.playlistUrl, epgUrl: sub.epgUrl, label: sub.label, kind: sub.kind, origin: "guide" }, 100)
+      const view = a.ok ? Model.sourceViews(a.state, a.key, 200, {}).filter(function (v) { return v.id === a.key })[0] : null
+      added = Model.sourceTransient("added", { label: view ? String(view.label) : "", host: lineHost, channelCount: 3, groupCount: 1 })
+    }
+    return { host: host, added: added, lines: [Model.formFetchingLine(probing), Model.formProbeFailureLine(probing, "Could not resolve host", host, ""),
+      Model.sourceTransient("added", { label: "", host: lineHost, channelCount: 3, groupCount: 1 }), Model.formLabelPlaceholder(form),
+      Model.formAdviceLine(form), Model.fieldAccessibleValue(form, where)] }
+  }
+  checkCall("D-SINK-99 (D5, round 4c E4): the fetching line, the probe failure line, the Added fallback, the label placeholder, the advice line and the field's Value name no run of the credential, for five withheld URLs and three with a dotted username in the playlist, EPG and server fields",
+    () => {
+      const out = []
+      TYPO.concat(DOTTED).forEach(function (u) { ["playlist", "epg", "server"].forEach(function (w) { formLines(w, u).lines.forEach(function (l) { if (RUN.test(l)) out.push(w + " " + u + " -> " + l) }) }) })
+      return out
+    }, [])
+  checkCall("D-SINK-99 (D5): the probe field's withheld host is named HOST_WITHHELD; the EPG field's withholds nothing of the playlist's, and an ordinary URL's lines are unchanged",
+    () => {
+      const p = formLines("playlist", TYPO[0]), e = formLines("epg", TYPO[0]), c = formLines("playlist", "http://cdn.test/list.m3u")
+      return [p.host, p.lines.slice(0, 4), e.lines.slice(0, 4), c.lines.slice(0, 4)]
+    }, ["qqqqqq", ["Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS, "Could not resolve host from " + Model.HOST_WITHHELD, "Added " + Model.HOST_WITHHELD + Model.SEP + "3 channels in 1 group", Model.HOST_WITHHELD],
+        ["Fetching from cdn.test" + Model.ELLIPSIS, "Could not resolve host from cdn.test", "Added cdn.test" + Model.SEP + "3 channels in 1 group", "cdn.test"],
+        ["Fetching from cdn.test" + Model.ELLIPSIS, "Could not resolve host from cdn.test", "Added cdn.test" + Model.SEP + "3 channels in 1 group", "cdn.test"]])
+  checkCall("D-SINK-99 (round 4c, E4): a dotted username before a later `@` is withheld in the fetching line, the failure line and the placeholder, in the playlist and server fields, while the field's Value is stars; R32a's warning does not hold for it",
+    () => DOTTED.map(function (u) {
+      const p = formLines("playlist", u), s = formLines("server", u)
+      return [Model.formHostWithheld({ kind: "url", values: { playlist: u } }), Model.urlHostWithheld(u), Model.sourceUrlWarning(u),
+              p.lines[0], p.lines[1], p.lines[3], p.lines[5] === new Array(u.length + 1).join("*"), s.lines[0]]
+    }), DOTTED.map(function () {
+      return [true, false, "", "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS, "Could not resolve host from " + Model.HOST_WITHHELD, Model.HOST_WITHHELD, true,
+              "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS]
+    }))
+  // Round 4d (F9, the lead's call under the owner's standing authority of
+  // 2026-11-09): E4's `@` test cannot tell a typo from a VALID URL with an
+  // `@` in its path or query, so R32a's own working email-username link
+  // makes the form's fetching and failure lines and the placeholder say
+  // `[host withheld]`, with no warning, while the label the save stores and
+  // the listed record's Added line name the RFC host -- the stated cost.
+  checkCall("D-SINK-99 (round 4d, F9): R32a's own email-username link and an email in the query -- the fetching and failure lines and the placeholder say `[host withheld]` and no warning explains it, while the stored label and the listed record's Added line name the RFC host",
+    () => ["http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "http://cdn.test/get.php?username=me@mail.test&password=zzzzzz"].map(function (u) {
+      const l = formLines("playlist", u)
+      const sub = Model.validateUrlForm(Model.formSubmitValues({ kind: "url", values: { label: "", playlist: u, epg: "" } }), [], "")
+      const a = Model.addSource(Model.emptyState(), { playlistUrl: sub.playlistUrl, label: sub.label, origin: "guide" }, 100)
+      return [sub.ok, a.ok ? a.state.sources[0].label : a.code, Model.sourceUrlWarning(u), l.lines[0], l.lines[1], l.lines[3], l.added]
+    }), [[true, "host.test:25461", "", "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS, "Could not resolve host from " + Model.HOST_WITHHELD, Model.HOST_WITHHELD,
+          "Added host.test:25461" + Model.SEP + "3 channels in 1 group"],
+         [true, "cdn.test", "", "Fetching from " + Model.HOST_WITHHELD + Model.ELLIPSIS, "Could not resolve host from " + Model.HOST_WITHHELD, Model.HOST_WITHHELD,
+          "Added cdn.test" + Model.SEP + "3 channels in 1 group"]])
+  checkCall("D-SINK-99 (D5): R32a stands -- the withheld URL still validates with its warning, and the record it saves keeps the RFC host as its label",
+    () => {
+      const sub = Model.validateUrlForm(Model.formSubmitValues({ kind: "url", values: { label: "", playlist: TYPO[0], epg: "" } }), [], "")
+      const a = Model.addSource(Model.emptyState(), { playlistUrl: sub.playlistUrl, label: sub.label, origin: "guide" }, 100)
+      return [sub.ok, Model.sourceUrlWarning(TYPO[0]) === Model.WARN_AT_AFTER_AUTHORITY, a.state.sources[0].label]
+    }, [true, true, "qqqqqq"])
+  // Round 4c (E4): what R32a's stored label costs, stated rather than fixed
+  // (the owner's ruling): the `Added ...` transient finishForm shows once the
+  // record is listed, and the duplicate line, name the STORED label, which is
+  // the RFC host -- the username, or a dotted username and the password's
+  // digits.
+  checkCall("D-SINK-99 (round 4c, E4): R32a's stated residual -- the Added transient of a listed record and `Already in Sources as ...` name the stored label, for a withheld URL and a dotted username alike",
+    () => [formLines("playlist", TYPO[0]).added, formLines("playlist", DOTTED[0]).added,
+           (function () {
+             const sub = Model.validateUrlForm(Model.formSubmitValues({ kind: "url", values: { label: "", playlist: TYPO[0], epg: "" } }), [], "")
+             const a = Model.addSource(Model.emptyState(), { playlistUrl: sub.playlistUrl, label: sub.label, origin: "guide" }, 100)
+             const b = Model.addSource(a.state, { playlistUrl: sub.playlistUrl, label: "", origin: "guide" }, 101)
+             return [b.code, b.message]
+           })()],
+    ["Added qqqqqq" + Model.SEP + "3 channels in 1 group", "Added qqqqqq.test:12" + Model.SEP + "3 channels in 1 group",
+     ["duplicate", "Already in Sources as " + Model.QUOTE_OPEN + "qqqqqq" + Model.QUOTE_CLOSE]])
+})()
+// D-SINK-98, round 4c (E7, the lead's call under the owner's standing
+// authority of 2026-11-09): Service.qml's own IPC `status`, run by the
+// service harness (tests/service-harness.js compiles the root's functions
+// from the shipping text), names a stored label with an address's shape by
+// its host in `activeSource` and in `sources`. Round 4b lifted the
+// composition into Model.activeSourceSummary and tested the model alone, so
+// Service.qml composing `view.label` inline again passed every check (the
+// review's N3). IPTV_SERVICE_QML and IPTV_MODEL point it at another tree, as
+// that harness's other cases do.
+;(function () {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const URL = "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
+  const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
+  const LABELS = ["qqqqqq:zzzzzz@cdn.test", "http://qqqqqq:zzzzzz@cdn.test/get.php", "cdn.test/get.php?username=qqqqqq&password=zzzzzz"]
+  checkCall("D-SINK-98 (round 4c, E7): Service.qml's own IPC status -- statusSummary, as the service harness runs it -- names a credentialed stored label by its host in activeSource and sources, and holds no run of the credential",
+    () => LABELS.map(function (label) {
+      const rec = { key, url: URL, epgUrl: "", kind: "http", label, labelCustom: true, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }
+      const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: key, entryMigrated: true }) + "\n"
+      const h = H.bootService(svcText, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
+      const st = h.root.statusSummary()
+      const stored = (h.root.userState.sources || []).map(function (r) { return r.label })
+      return [h.compileErrors.length, stored[0] === label, st.activeSource ? st.activeSource.label : null, (st.sources || []).map(function (s) { return s.label }),
+              /[qz]{2,}/.test(JSON.stringify([st.activeSource, st.sources]))]
+    }), LABELS.map(function () { return [0, true, "cdn.test", ["cdn.test"], false] }))
+})()
 check("withFormReveal explicit", Model.withFormReveal(pasted, "playlist", true).form.revealed.playlist, true)
 const revealed = Model.toggleReveal(pasted, "playlist")
 check("withFormFocus re-masks the field being left", (() => { const n = Model.withFormFocus(revealed, "epg"); return [n.form.focus, n.form.revealed.playlist] })(), ["epg", false])
@@ -13879,6 +15323,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   check("F-SINK-10: no guide site reads a channel name into text without the sink", [
     (guideSource.match(/String\((?:row|tile)\.channel\.name[^)]*\)/g) || []),
     (guideSource.match(/String\(row\.name[^)]*\)/g) || []),
+    // The three channel-name sites (the Sources row's label, which round 4
+    // added here, reads Model.labelSinkText since round 4b).
     (guideSource.match(/Model\.sinkText\(/g) || []).length
   ], [[], [], 3])
   // The map describes the grammar; the footer gates. A narrowed map is still
@@ -15144,7 +16590,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below",
     sameState: "a boolean (R25a: whether memory is the base)",
     sourcesFull: "a boolean (R27c: the cap, at the probe commit)",
-    migrationPendingOf: "the parked pair of a held migration, or null (D-SRC-64; its state is driven below, at the cap)"
+    migrationPendingOf: "the parked pair of a held migration, or null (D-SRC-64; its state is driven below, at the cap)",
+    activeSourceSummary: "the IPC status's active source (D-SINK-98, round 4b: lifted out of Service.qml)"
   }
   const doc = fx.document
   const S = Model.parseState(JSON.stringify(doc))

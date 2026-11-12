@@ -25,7 +25,8 @@
 // EDITS are hand-written vectors for Model.editInsert / editDelete, with the
 // rule each one states; the ones marked "measured" repeat a value the
 // control produced, and the two marked DIVERGES say where the model does
-// not follow Qt and why. TYPED is Model.typedText; RANGES is Model.editRange.
+// not follow Qt and why. TYPED is Model.typedText (two of its vectors are
+// marked DIVERGES too, since round 4b); RANGES is Model.editRange.
 
 var BOUNDARIES = [
   {
@@ -1464,6 +1465,18 @@ var TYPED = [
   {
     "why": "a C1 control is stripped",
     "text": "a\u0085b",
+    "ctrlOnly": false,
+    "expect": "ab"
+  },
+  {
+    "why": "DIVERGES: U+2028 is removed, which Qt's acceptance rule types as printable (D-SINK-97, round 4b)",
+    "text": "a\u2028b",
+    "ctrlOnly": false,
+    "expect": "ab"
+  },
+  {
+    "why": "DIVERGES: U+2029 is removed, which Qt's acceptance rule types as printable (D-SINK-97, round 4b)",
+    "text": "a\u2029b",
     "ctrlOnly": false,
     "expect": "ab"
   }

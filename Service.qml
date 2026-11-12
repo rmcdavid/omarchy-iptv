@@ -5869,11 +5869,10 @@ Item {
     root.applyInvalidStatus()
   }
 
+  // D-SINK-98: the IPC status names the label as sourcesSummary does, and the
+  // model composes it (Model.activeSourceSummary).
   function activeSourceSummary() {
-    var rec = Model.findSource(root.userState.sources, root.activeSourceKey)
-    if (!rec) return null
-    var view = Model.sourceView(rec, root.activeSourceKey, root.nowSec, "")
-    return { id: view.id, label: view.label, host: view.host }
+    return Model.activeSourceSummary(root.userState, root.activeSourceKey, root.nowSec)
   }
 
   // ------------------------------------------------------------ helpers

@@ -10,8 +10,9 @@ import {
 } from "./mpv.mjs"
 import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sanitizeUrlInput,
-  sourceErrorMessage, validateSourceUrl, normalizeSourceUrl, validateLabel,
-  CLIPBOARD_MAX_CHARS
+  sourceErrorMessage, HOST_WITHHELD, urlHostWithheld, validateSourceUrl,
+  normalizeSourceUrl, deriveLabel, validateLabel, addressAtAfterAuthority,
+  fetchingLine, probeFailureLine, CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
   isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
@@ -186,14 +187,27 @@ function codePointEnd(text, pos) {
   return pos + 1
 }
 
+// The seven line terminators: LF, VT, FF, CR, U+0085, U+2028 and U+2029,
+// what an address field's accessible Value is starred for (D-SINK-97). A
+// paste removes them from every field (sanitizePasteInput) and a key press
+// cannot insert one (typedText).
+var PASTE_LINE_BREAK_RE = /[\n\v\f\r\x85\u2028\u2029]/g
+
 // What a key press may insert, by Qt's own acceptance rule for a TextInput
 // (QInputControl::isAcceptableInput, QTBUG-35734): nothing when the
 // modifiers are exactly Control or exactly Control+Shift, so chords never
 // type; otherwise the text with control characters removed. AltGr text
 // (Control+Alt) types, as it did natively.
+// D-SINK-97 and D-SINK-98, round 4b (the lead's call under the owner's
+// standing authority of 2026-11-09), and here the model DIVERGES from Qt on
+// purpose: U+2028 and U+2029 are removed too. Qt's rule accepts them as
+// printable, and so did this function (the review of round 4 measured
+// typedText(U+2028, false) returning it), so a field could hold a line
+// terminator typed by hand, which an address field's Value then stars whole
+// and a label draws on two lines.
 function typedText(text, ctrlOnly) {
   if (ctrlOnly === true) return ""
-  return str(text).replace(CONTROL_RE, "")
+  return str(text).replace(CONTROL_RE, "").replace(PASTE_LINE_BREAK_RE, "")
 }
 
 // Insert `text` over [selStart, selEnd) of `value`, capped at `cap` UTF-16
@@ -269,6 +283,88 @@ function withFormProbing(st, probing, opts) {
   return cur
 }
 
+// D-SINK-99, round 4b (the lead's call under the owner's standing authority
+// of 2026-11-09). R32a stands (the owner, 2026-10-21/22): the form WARNS and
+// never refuses a URL whose dotless host or non-numeric port is followed by
+// a later `@`, and a STORED record shows the RFC host, its stated cost. But
+// while that text is still IN THE FORM, every line the form composes from
+// the probe host names HOST_WITHHELD instead: the fetching line, the probe's
+// failure line, the host an `Added` transient falls back to, and the label
+// field's placeholder (the label deriveLabel would give). Each named the
+// username: `Fetching from qqqqqq...` was measured on the bus for
+// `http://qqqqqq#zzzzzz@cdn.test/x`, and `Could not resolve host from
+// qqqqqq` after it. The probe host is read from the playlist field (the
+// server on the Xtream form), so the predicate is urlHostWithheld over that
+// field's text as it holds it, the one the form warns by (sourceUrlWarning).
+// Round 4c (the lead's call under the owner's standing authority of
+// 2026-11-09): or an `@` after the authority's closing `/`, `?` or `#`
+// (addressAtAfterAuthority), the test the field's own Value stars by, so the
+// field and the lines read one text alike. urlHostWithheld holds only for a
+// dotless host or a port that is not digits, and a dotted username with a
+// password that starts with digits is neither: for
+// `http://qqqqqq.test:12#zzzzzz@cdn.test/x` the Value was stars while the
+// lines said `Fetching from qqqqqq.test...` and the placeholder
+// `qqqqqq.test:12`, measured on the bus. R32a's warning and the label a save
+// stores are unchanged (the owner's ruling): the stored label is still the
+// RFC host, `qqqqqq.test:12`, R32a's stated residual, and so are the two
+// lines that name a STORED label, the `Added ...` transient once the record
+// is listed and `Already in Sources as ...`. The cost of the `@` test,
+// stated (round 4d, the lead's call under the owner's standing authority of
+// 2026-11-09): shape alone cannot tell a typo from a VALID URL with an `@`
+// in its path or query, so R32a's own working email-username link,
+// `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus`, and
+// `http://cdn.test/get.php?username=me@mail.test&password=...` make the
+// fetching and failure lines and the placeholder say `[host withheld]`,
+// with no warning to explain it, while the label the save stores and the
+// `Added ...` line once the record is listed name the RFC host,
+// `host.test:25461`.
+function formProbeField(form) {
+  return form && form.kind === "xtream" ? "server" : "playlist"
+}
+
+function formHostWithheld(form) {
+  var f = form || {}
+  if (!f.values || typeof f.values !== "object") return false
+  var text = sanitizeUrlInput(str(f.values[formProbeField(f)]), MAX_SOURCE_URL + 1)
+  return urlHostWithheld(text) || addressAtAfterAuthority(text)
+}
+
+// `host`, or HOST_WITHHELD while the form's probe field holds a withheld URL.
+function formLineHost(form, host) {
+  return formHostWithheld(form) ? HOST_WITHHELD : str(host)
+}
+
+// The result line while the form's probe runs (UX-SOURCES 5.5).
+function formFetchingLine(form) {
+  var f = form || {}
+  return fetchingLine(formLineHost(f, f.probeHost), str(f.probeKind))
+}
+
+// The result line when the form's probe fails (UX-SOURCES 5.5).
+function formProbeFailureLine(form, reason, host, code) {
+  var f = form || {}
+  return probeFailureLine(reason, formLineHost(f, host), str(f.probeKind), code)
+}
+
+// The label field's placeholder (UX-SOURCES 1.5, 5.1): the label
+// deriveLabel would give the playlist (the server on the Xtream form), or ""
+// when the value does not validate; HOST_WITHHELD in place of a label read
+// off a withheld host. Lifted out of Guide.qml's fieldPlaceholder in round
+// 4b so it is called, not mirrored (rule 12).
+function formLabelPlaceholder(form) {
+  var f = form || {}
+  if (!f.values || typeof f.values !== "object") return ""
+  var derived = ""
+  if (f.kind === "xtream") {
+    var s = validateSourceUrl(f.values.server)
+    if (s.ok && s.kind === "http") derived = deriveLabel(s.url)
+  } else {
+    var p = validateSourceUrl(f.values.playlist)
+    if (p.ok) derived = deriveLabel(p.url, p.kind)
+  }
+  return derived !== "" && formHostWithheld(f) ? HOST_WITHHELD : derived
+}
+
 // The boundary rule for one field's text, on a paste and on submit
 // (D-SRC-63, R32a''', 2026-10-22). A URL field -- the playlist, the EPG,
 // the Xtream server -- gets sanitizeUrlInput: nothing inside the text is
@@ -285,24 +381,32 @@ function sanitizeFieldInput(field, text, limit) {
 }
 
 // The boundary rule for a PASTE, and the one stated exception to "nothing
-// inside a URL is deleted" (R33a, round 7, 2026-10-22): a paste into a URL
-// field JOINS ITS LINES first -- CR and LF removed, nothing else -- and then
-// takes the field's rule above. A URL wrapped by a mail client or a chat
-// window is a paste the form must take, and under D-SRC-63 alone it was
-// refused as a URL with a line break inside it, which is true and useless.
-// Only CR and LF: a tab, U+0085, U+2028 or an information separator inside
-// the pasted text still reaches validateSourceUrl and is refused there,
-// with the sentence that names it (R33b). A name field keeps sanitizeInput,
-// which removes every control character anyway (6.1: a multi-line paste
-// into a name collapses to one line). Typing cannot insert CR or LF (Qt's
-// own acceptance rule, typedText), and the submit path reads a value this
-// has already joined, so the paste is the one place the join is made.
-var PASTE_LINE_BREAK_RE = /[\r\n]/g
+// inside a URL is deleted" (R33a, round 7, 2026-10-22): a paste into any
+// field JOINS ITS LINES first -- the line terminators removed, nothing else
+// -- and then takes the field's rule above. A URL wrapped by a mail client
+// or a chat window is a paste the form must take, and under D-SRC-63 alone
+// it was refused as a URL with a line break inside it, which is true and
+// useless. D-SINK-97 (2026-11-11, the owner's decision): the line
+// terminators are the seven an address field's accessible Value is starred
+// for -- LF, VT, FF, CR, U+0085, U+2028 and U+2029 -- where until then they
+// were CR and LF alone, so a URL wrapped with U+2028 reached the field whole
+// and every reader of it disagreed about where its parts ended. A tab or an
+// information separator inside the pasted text still reaches
+// validateSourceUrl and is refused there, with the sentence that names it
+// (R33b). A name field keeps sanitizeInput, which removes every control
+// character anyway (6.1: a multi-line paste into a name collapses to one
+// line) -- but U+2028 and U+2029 are not control characters, and a name
+// field kept them until round 4b, when the join was made for every field
+// (D-SINK-97 and D-SINK-98, the lead's call under the owner's standing
+// authority of 2026-11-09): a label pasted with one drew on two lines and
+// split a credentialed URL in two for every reader of it. This comment said
+// typing cannot insert a line terminator, which was true of the five C0 and
+// C1 ones only: Qt's acceptance rule types U+2028 and U+2029, and since
+// round 4b typedText removes them too. The submit path reads a value this
+// has already joined.
 
 function sanitizePasteInput(field, text, limit) {
-  var t = str(text)
-  if (URL_INPUT_FIELDS.indexOf(str(field)) !== -1) t = t.replace(PASTE_LINE_BREAK_RE, "")
-  return sanitizeFieldInput(field, t, limit)
+  return sanitizeFieldInput(field, str(text).replace(PASTE_LINE_BREAK_RE, ""), limit)
 }
 
 // Values as submitted: every field trimmed (UX 2.3), by its own rule.
@@ -465,11 +569,13 @@ export {
   WORD_SEPARATOR_RE, WORD_SPACE_RE, clipboardArgv, clipboardCut,
   parseClipboardReply, isWordSpace, isWordSeparator, clampIndex, editCapacity,
   editRange, fullRange, editRangeFor, cutApplies, orderedRange, wordBoundary,
-  isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd, typedText,
-  editInsert, editDelete, withFormError, withFormProbing, URL_INPUT_FIELDS,
-  sanitizeFieldInput, PASTE_LINE_BREAK_RE, sanitizePasteInput,
-  formSubmitValues, validateUrlForm, sourcesAddRows, sourcesRowCount,
-  sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove,
-  openSources, closeSources, withSourceCursor, startRemove, startLogosConsent,
-  afterRemove, afterSwitch
+  isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd,
+  PASTE_LINE_BREAK_RE, typedText, editInsert, editDelete, withFormError,
+  withFormProbing, formProbeField, formHostWithheld, formLineHost,
+  formFetchingLine, formProbeFailureLine, formLabelPlaceholder,
+  URL_INPUT_FIELDS, sanitizeFieldInput, sanitizePasteInput, formSubmitValues,
+  validateUrlForm, sourcesAddRows, sourcesRowCount, sourcesRowKind,
+  sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove, openSources,
+  closeSources, withSourceCursor, startRemove, startLogosConsent, afterRemove,
+  afterSwitch
 }
