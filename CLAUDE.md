@@ -327,12 +327,36 @@ requests and raise the batch.
      the role does. So a form field's drawn control is `Accessible.StaticText`,
      `ignored`, with no EditableText ancestor, and a SIBLING `Item` (not a
      TextInput, so Qt reads its Value from a plain `text` property) is the
-     field on the bus, publishing `Model.fieldAccessibleValue`: `maskUrl` for
-     a URL with a scheme, a local path as is, the label as is, one `*` per
-     character for everything else, revealed or not. Observed by
+     field on the bus, publishing `Model.fieldAccessibleValue`: for an
+     address field (the playlist, the EPG, the Xtream server) its scheme and
+     host -- `scheme://[****@]host[:port]` and an ellipsis -- or one `*` per
+     character, a local path included, revealed or not, with no
+     Description (D-SINK-97); for the label, the label as
+     `Model.labelSinkText` reads it -- the hosts its address-shaped tokens
+     name, or `[host withheld]` -- or one `*` per character once the field
+     has held a credential's delimiter, encoded ones included (D-SINK-98);
+     one `*` per character for everything else. Observed by
      `scripts/a11y-probe.sh` in a headless nested cage: L2-XT-05/06 pass,
-     the undamaged pair L2-XT-08/09 stays green. The text-event half is read,
-     not measured: the probe walks the tree and observes no events.]**
+     the undamaged pair L2-XT-08/09 stays green, and since 2026-11-12
+     L2-SRC-01..79 too (333 checks, 0 failures). The text-event half is
+     read, not measured: the probe walks the tree and observes no events.]**
+     **[2026-11-12, round 4 of the security review (D-SINK-97..99,
+     D-A11Y-12), three lessons. A hidden Item stays in Qt's accessibility
+     tree, and `Accessible.ignored` on a container RE-PARENTS its accessible
+     descendants to the nearest accessible ancestor rather than removing
+     them (measured in a nested cage), so an Item a delegate makes inside a
+     hidden view stays on the bus unless it is ignored itself: the hidden
+     channel wall's tiles sat beside the list's rows as D-A11Y-10's
+     duplicates, and every named node the guide may hide now carries
+     `Accessible.ignored: !visible` (D-A11Y-12; the group column defeats
+     even that, D-A11Y-13). A delimiter can arrive encoded -- `%3A%2F%2F`,
+     `&#64;`, `&colon;` -- so a shape test asks the text as a reader would
+     decode it, once: 35 of 35 encoded credential URLs were heard whole
+     until the label's fold decoded them. And a reading that names nothing
+     must not hand another reading its answer: a decoded head that is an
+     authority names no host of its own, and letting the raw reading answer
+     for it named the segment after a `//`, a password, as the host
+     (783e96f).]**
    - **Process argv**, which was missing from this list while the list itself
      said to add sinks to it (D-SINK-3). The helper used to be handed the
      composed playlist URL as an argument, so it sat in `/proc/<pid>/cmdline`

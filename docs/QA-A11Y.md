@@ -59,6 +59,7 @@ cd <probe>
 python3 make_tree.py && python3 make_bartree_lane2.py
 python3 check_lane2.py            # 64 checks, ~17 s, 3 failures expected (the baseline below); a fourth, L2-SC-02, seen 2026-09-21, is D-A11Y-7
                                   # [2026-11-01: the baseline below is now one failure, L2-XT-11, and scripts/a11y-probe.sh counts 84 checks]
+                                  # [2026-11-12: the baseline is EMPTY (L2-XT-11 passes since D-A11Y-12's round 4c, D-A11Y-10's four since its round 4d); the probe counts 333 checks, 0 failures, on 972b498]
 python3 mutate_lane2.py           # 24 mutations, each a full regenerate + run
 python3 selftest_settle_lane2.py  # the waits, proven both ways, ~20 s
 python3 check_a11y.py             # the prototype, 19 checks, ~3.9 s, 1 failure (see open item 11)
@@ -98,6 +99,18 @@ revealed form is stale -- decision 5 deleted `Accessible.passwordEdit` and two
 nodes with it). Settle is a bounded stability poll (12 s deadline, 40 polls, 3
 consecutive identical walks), 0.21-0.61 s per scenario, replacing a fixed 1.5 s
 sleep whose margin had never been measured.
+
+**[2026-11-12, D-A11Y-12 (round 4d, F6): every scenario also has a CEILING
+at its measured size** (`TREE_CEIL` in `check_bus.py`, asserted as
+`L2-CEIL-<scenario>`, the three bar scenarios included), because a floor
+cannot see a node that returns: the review's mutant took the Programme
+panel's seven labels off their lever and grew every scenario by seven with
+the run green. The floors were re-levelled DOWN in rounds 4b, 4c and 4d,
+each time by a node-list diff of the tree before against the tree after
+that showed only nodes D-A11Y-12 took off the bus (the hidden rows'
+buttons, then every hidden named node, then the hidden wall's tiles), none
+added or moved -- never to make a run green. The sizes on 972b498 run from
+13 (rvfrsrc) to 144 (rvhelp); `query` is 15, `scale10k` 34.]
 
 ## 4. Every assertion, by scenario, as what a user would hear
 
@@ -170,7 +183,7 @@ Populated by the scenario with three distinct tokens and **no user action**.
 - `L2-XT-07` green: the password plaintext does not reach the bus; it published `echoMode` bullets, and since D-A11Y-1's fix it publishes one `*` per character from the masked sibling. Asserted so it cannot regress silently.
 - `L2-XT-08` / `L2-XT-09` **the anti-false-green pair.** What the user typed is still in the form, character for character, digest and length equal, before and after the walk. This is not a policy about the bus, so no ruling can dissolve it: *observing must not mutate*.
 - `L2-XT-10` the fields are still announced by name in the same run the credential check passes, so deleting the node is not a way to pass. (Redundant with 02/03 -- section 6.)
-- `L2-XT-11` **RED.** Eye buttons on a form where no field is maskable publish "Hide query" with `checked=true`. UX-SOURCES 7.1 rules that `checked` *means revealed*; `Guide.qml:3242` binds `Accessible.checked: !fieldRow.masked`, and `masked` is false both when a field is revealed and when it was never maskable. (Contested -- open item 15.)
+- `L2-XT-11` **green since 2026-11-12, RED before** (D-A11Y-12, round 4c: the eye button carries `Accessible.ignored: !visible`, so a field that cannot be masked puts none on the bus; 4 checked "Hide query" buttons on this form on 93d034b, 0 after; open item 15, closed). Eye buttons on a form where no field is maskable publish "Hide query" with `checked=true`. UX-SOURCES 7.1 rules that `checked` *means revealed*; `Guide.qml:3242` binds `Accessible.checked: !fieldRow.masked`, and `masked` is false both when a field is revealed and when it was never maskable. (Contested -- open item 15.)
 
 **Nothing anywhere asserts what a deliberately revealed field may publish.**
 PLAN-NEXT decision 8 is unanswered. Verified three ways: no reveal drive in the
@@ -187,6 +200,24 @@ pinned Sources Button; Sources List; action rows; "Edit <label>" / "Remove
 credential sweep per scenario. These are the only observations behind twelve
 OBSERVED-ONCE rows. **This checker should be retired in favour of
 `check_lane2.py`** -- open item 11.
+
+### 4.9 The Sources form and hidden nodes (D-SINK-97..99, D-A11Y-12; 2026-11-11 and 2026-11-12)
+
+Round 4 of the security review added 32 host scenarios, driven through the
+shipping key and paste paths (`handleFormKey`, `pasteFromProcess`, select
+and Delete) where they type, and these checks; QA-RESULTS "Round 4" counts,
+pass by pass, which were red on the tree before and which are pins shown
+red by a named bus mutant. A detail line prints what the bus held, with only the fixture's
+credential runs masked as `<cred>` (F-HARNESS-106).
+
+- `L2-SRC-01..14` (round 4; addtyped, editstored, sourcesrow, removelabel): a typed and a stored address field's Value is its scheme and host or stars; the label field, the source row, its Edit and Remove buttons and the remove dialog carry no run; what the user typed is intact after the walk.
+- `L2-SRC-15..37` (4b; srvtyped, srvpasted, editlabel, labelrow, labelremove, probing, probefail): only the cursor row's Edit and Remove are on the bus; the label field, the row, its buttons and the remove dialog name the label's host; a local path and a held stream path are stars; the fetching and failure lines and the placeholder say `[host withheld]` while the form holds a withheld URL.
+- `L2-SRC-38..58` (4c; rbcolon, rbpass, rbfeffrow, rbnbsp, rbfeffguide, rbdotted, rbdottedfail): no row button behind a form; the held label field is stars after a Backspace on the `:` or a range deletion; a U+FEFF or U+00A0 inside a credential splits nothing; a dotted username is named by no line.
+- `L2-SRC-59..68` (4d; rvpaste, rvpaste2, rvparen, rvfrsrc): a pasted credential holding a space holds the field; a parenthesised path reads as its host; no form field is on the bus behind Sources opened from first run; no hidden tile behind Sources or a form.
+- `L2-SRC-69..79` (4e; rvpct, rvpctrow, rvpctedit, rvcore, rvdslash): a percent-encoded credential URL holds the field and reads as its host in the row and the dialog; a token's trailing run and its raw text are both read; a `//` straight after a host names no segment; rvfrsrc lists a `Model.sourceView` row.
+- `L2-WALL-01` (wall): the wall's tiles are on the bus while the wall shows them.
+- `L2-PANEL-01..04` (rvhelp, rvtracks, rvdetail, wallhelp): the Keys, Tracks or Programme panel is on the bus once, and each channel once -- no hidden tile beside the list.
+- `L2-CEIL-<scenario>` beside `L2-TREE-<scenario>` for every scenario (section 3).
 
 ## 5. The fidelity guard
 
@@ -305,6 +336,20 @@ Each was applied to shipping code and measured, not argued.
 Two of these (3, 4) share a root cause with the ghost nodes in section 7: the
 probe window is never mapped, so Qt never prunes invisible subtrees.
 
+### 6.4 The bus mutants, 2026-11-12
+
+`tests/a11y/mutate_bus.py` exits non-zero when a mutation is SKIPPED (its
+anchor matches nothing) or turns nothing newly red (F-HARNESS-106): three
+mutants -- the group entry's count, skipped since M3-01, and both bar
+mutants -- had been reported only as SKIPPED for weeks while every run
+exited 0. Re-anchored, they run and are killed. In round 4e's run all 54
+mutations ran in four cage runs, each rc 0, and all were killed; three of
+them only by `L2-FIDELITY`, the drift guard, and by no check of what the
+bus says (F-HARNESS-107, open): "banner: the same alert is announced when
+nothing is wrong", "first run: the empty field reads back its placeholder
+as if it were content", and "THE PROPOSED CREDENTIAL FIX, verbatim: rebind
+the field to the mask".
+
 ## 7. What it still cannot verify, and why
 
 1. **Delivery.** Nothing this plugin declares reaches assistive technology on this desktop. A plain Qt 6.11.2 window publishes `ChildCount 1`; a Quickshell `PanelWindow` publishes 0, and so does a Quickshell `FloatingWindow` -- so it is not a layer-shell problem. Filed upstream as quickshell issue 1144 and tracked as D-GS-3. **The harness proves our side would be correct if the host were. It cannot prove a user can hear anything, and today a user cannot.**
@@ -368,7 +413,7 @@ COMPOSED (10) / UNVERIFIED (15) markers.
 **Document errors found by attack**
 
 14. `docs/UX.md:896` marks the channel row's position "**UNVERIFIED.** Never promised here and never delivered." Both clauses are false, and I re-verified all of it this pass: promised at `docs/UX-GUIDE-AT-SCALE.md:768` and `:865` (ruling D5); delivered at `Model.js:4198-4217` (`node -e` gives `Channel 7, row 8 of 10,000`); asserted in `tests/Model.test.js`; observed on the bus on every realised row; and named by `docs/STATUS.md:173` itself. **Correct the row, and add the `, row N of M` suffix to UX 7.1's channel-row name cell** -- a harness built strictly to that table would assert a name the shipping code does not produce. Owner: UX. This is rule 13 drift inside the table written to end rule 13 drift.
-15. `L2-XT-11` is contested. One pass calls it vacuous ("no field on the Xtream form is maskable, and the eye button is `visible: fieldRow.maskable`, so it is never instantiated"); the baseline contradicts that, since the check is **red**, which requires a non-empty eye-button list -- consistent with a `visible: false` Item still being created and still published in an unpruned tree. **One measurement settles it.** Either way its severity depends on whether an AT reaches a not-showing node, which item 5 covers. Owner: harness lane.
+15. ~~`L2-XT-11` is contested.~~ **CLOSED 2026-11-12, by the one measurement** (D-A11Y-12, round 4c, in a nested headless cage): a `visible: false` Item IS created and published, with the states of a drawn one -- 4 checked "Hide query" eye buttons on the Xtream form on 93d034b -- so the check was not vacuous; the eye button now carries `Accessible.ignored: !visible`, 0 are on the bus, `L2-XT-11` passes and the baseline is empty. Item 5's question no longer decides it: the node is not on the bus. Original text: `L2-XT-11` is contested. One pass calls it vacuous ("no field on the Xtream form is maskable, and the eye button is `visible: fieldRow.maskable`, so it is never instantiated"); the baseline contradicts that, since the check is **red**, which requires a non-empty eye-button list -- consistent with a `visible: false` Item still being created and still published in an unpruned tree. **One measurement settles it.** Either way its severity depends on whether an AT reaches a not-showing node, which item 5 covers. Owner: harness lane.
 16. CLAUDE.md rule 5's second half ("any other annotated item publishes its text") is wrong on Qt 6.11.2, measured with a purpose-built probe: role StaticText publishes its accessible **name** as its AT-SPI Text and its own `text` property never reaches the bus; role EditableText publishes its `text` and ignores the name. This **narrows** the sink list and explains why the exposure is confined to editable fields. Owner: CLAUDE.md / architecture.
 17. The lane briefs' own `pgrep -f 'quickshell -n -p ...'` **self-matches**: it returns two pids, the second being the shell running `pgrep`, and it changes between invocations. This is the exact hazard CLAUDE.md records two incidents about. The stable form is `pgrep -x quickshell`. Owner: PM (propagate into the briefs).
 
@@ -503,12 +548,17 @@ it, not by reading it.
 
 ### The baseline, and what it means
 
-    84 checks; baseline 1 failure since D-A11Y-1's fix (75cc827, 2026-10-31; on dev 2026-11-01);
-    observed 5 until D-A11Y-10 is settled
+    333 checks on 972b498 (2026-11-12); baseline EMPTY, observed 0 failures
 
 | Check | What it says |
 |---|---|
-| `L2-XT-11` | contested; see open item 15 |
+| (none) | `BASELINE = []` in `check_bus.py` since 2026-11-12 |
+
+From D-A11Y-1's fix (75cc827, 2026-10-31; on dev 2026-11-01) to 2026-11-12
+the baseline was one failure, `L2-XT-11` (open item 15, closed by
+D-A11Y-12's round 4c), and every run read off it by four more, D-A11Y-10's,
+which were the hidden channel wall's tiles beside the list's rows (closed by
+D-A11Y-12's round 4d).
 
 Until 2026-10-31 the baseline also held `L2-XT-05` (the provider login pasted
 into the unmaskable Server field reaches the bus) and `L2-XT-06` (the Xtream

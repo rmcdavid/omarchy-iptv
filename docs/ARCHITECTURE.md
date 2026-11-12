@@ -962,7 +962,20 @@ the password's tail print, in both mirrors, and the shared fixture pins
 that output for each of the six and the HOST for every other member of
 the union. A display sink and validation read the RFC host unconditionally.
 Both rules, the costs and the shared fixture are in
-`ARCHITECTURE-SOURCES.md` 3.1.
+`ARCHITECTURE-SOURCES.md` 3.1. **[2026-11-12, D-SINK-95 and D-SINK-96
+(round 3 of the security review): a URL's mark is no longer only an
+unbroken `scheme://`. Any odd character before or inside the `//` -- a
+control, a character with no width, a combining mark, a fullwidth colon,
+one of eleven slash look-alikes -- is a mark, at most one wide code point a
+stretch, and any `a:b@c` token of free text is withheld as a credential,
+read across the URLs inside it (the owner's answer of 2026-11-08; the rest
+the lead's calls under the owner's standing authority of 2026-11-09). One
+reading serves both mirrors, the guide's fold and the parsers. D-SINK-34's
+accepted split is the space's alone since then: a tab or a line break
+inside a password leaves the URL's colon a credential's and the token is
+withheld. The 54-position fuzz leaks 542 of 3,428,136 inputs at the plain
+sinks, where 0.18.0 leaked 1,142,679. The reading, its costs and its
+eighteen stated residuals are in `ARCHITECTURE-SOURCES.md` 3.1.]**
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
 an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is

@@ -104,8 +104,11 @@
 # 1 on Model members where the report holds 17 and 8). The counts are now
 # read from qmllint's `--json` report by scripts/qmllint-count.py and are
 # not comparable with the figures above. On this tree, qmllint 6.12.0:
-# BarWidget.qml 17 + 8 on Model members, Guide.qml 374 + 278, Service.qml
-# 45 + 366, tests/Model.spec.qml 67 + 900. CHECK_VERBOSE=1 lists every entry
+# BarWidget.qml 17 + 8 on Model members, Guide.qml 370 + 274, Service.qml
+# 45 + 365, tests/Model.spec.qml 79 + 980 (re-measured 2026-11-12 on the
+# merge of rounds 3 and 4 of the security review, after round 4 lifted the
+# form's lines into the model and made its four form writers one).
+# CHECK_VERBOSE=1 lists every entry
 # as `warning: <file>:<line>:<column>: <message> [<id>]`.
 #
 # EVERY COUNT THIS FILE PRINTS IS ALSO ASSERTED. A runner that exits 0 having
@@ -232,7 +235,14 @@ fail=0
 # test_olderRestartReprobeUnderQtsEngine, a re-probe of the same older
 # player keeping its episode under Qt's own engine, red on c510985 (no such
 # model names) and under three named mutants; the spec runs 84.
-QML_SPEC_MIN=${QML_SPEC_MIN:-89}
+# 2026-11-12, int-r34 (the merge of rounds 3 and 4 of the security review):
+# 89 -> 97. The floor was one under dev's 90; round 3
+# adds test_dSink95MarkAndDSink96TokenInV4 (D-SINK-95, D-SINK-96) and round
+# 4 six V4 tests of the Sources form's bus values and the label's reading
+# (test_addressAccessibleValueInV4, test_labelSinkTextInV4,
+# test_round4cInV4 to test_round4fInV4), each red on its pass's base
+# (QA-RESULTS "Round 3", "Round 4"); the spec runs 97.
+QML_SPEC_MIN=${QML_SPEC_MIN:-97}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -512,7 +522,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-89}
 # c510985: the lane's tip had dropped it), a deferred player re-probed unsafe
 # stopped at once, and path 6 on the automatic restart itself (both red on
 # c510985); the suite runs 3298.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3428}
+# 2026-11-12, int-r34 (the merge of rounds 3 and 4 of the security review):
+# 3428 -> 3695. The floor had trailed the suite; the rounds add the url-mark vectors, credential spans, fuzz and multi-insert checks
+# (D-SINK-95, D-SINK-96) and the label, field-hold, session, paste-corpus
+# and composer checks (D-SINK-97..99), each red on its pass's base or under
+# a named mutant (QA-RESULTS "Round 3", "Round 4"); the suite runs 3695.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3695}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -849,7 +864,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3428}
 # `player start` that adopts a marked player clears it too; red on the
 # mutant that clears it only for `play`). The five launch vectors it added
 # are one test; the suite runs 1952.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2130}
+# 2026-11-12, int-r34 (the merge of rounds 3 and 4 of the security review):
+# 2130 -> 2382. The floor had trailed the suite; round 3 adds tests/test_url_marks.py and the mark, credential, cut, growth, stop
+# bound and budget tests across the redaction-cost, fold, cut, attribute
+# grammar and group-split modules, each red on its pass's base or under a
+# named mutant (QA-RESULTS "Round 3"); the suite runs 2382, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2382}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

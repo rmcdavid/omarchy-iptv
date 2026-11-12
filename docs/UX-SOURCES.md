@@ -2586,6 +2586,30 @@ while keeping `Accessible.EditableText`. What the bridge publishes for a
 read-only editable -- the `readOnly` state flag, and whether the role
 survives -- is **UNVERIFIED**, and moot until D-GS-3 lands.
 
+**[2026-11-12, D-SINK-97, D-SINK-98, D-SINK-99 and D-A11Y-12, round 4 of
+the security review.** The rows above that name a field's value or
+`Accessible.description` are superseded; `docs/ARCHITECTURE-SOURCES.md`
+section 6 item 10 holds the rules and their costs. The Playlist, EPG and
+Server fields publish `scheme://`, `****@` for a userinfo, the host, the
+port and an ellipsis, or one `*` per character -- a local path included --
+the same revealed or not, with no description (the password's is its
+label). The Label field publishes the label as `Model.labelSinkText` reads
+it, or one `*` per character once it has held a credential's delimiter in
+the form session, until it is emptied: **an Edit form over a label that
+holds a delimiter opens with its Label heard as stars** (`Sports: Live/HD`
+as 15 stars). The source row's name, its Edit and Remove buttons' names and
+the confirm dialog name the label as `labelSinkText` reads it. While the
+form holds a URL whose host the redactors withhold, the result line and the
+Label placeholder say `[host withheld]`. Only the cursor source row's Edit
+and Remove are on the bus; every closed dialog, panel, form, button and
+alert is off it while not shown, a hidden form's fields included; an eye
+button is on the bus only beside a maskable field; and a channel-wall tile
+only while the wall shows it, so **the Keys, Tracks and Programme panels
+over the list put no hidden tile on the bus**. OBSERVED: the a11y probe's
+L2-SRC-01..79, L2-XT-11, L2-WALL-01 and L2-PANEL-01..04, with a ceiling on
+every scenario's size (QA-A11Y 4.9). Still on the bus while hidden: the
+group column (D-A11Y-13).]
+
 ### 7.2 No color-only state
 
 Active: check glyph + bold + `active`. Error: alert glyph + words + the

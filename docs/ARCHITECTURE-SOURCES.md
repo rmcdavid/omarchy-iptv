@@ -606,7 +606,10 @@ acceptance rule, no control character ever types) and a paste through
    password ends the run, so `http://myuser:pa ss@cdn.test/x` prints
    `myuser ss@cdn.test/x` in both mirrors -- the username and the
    password's tail -- and so does a tab, LF, CR, FF or VT in the same place
-   (D-SINK-34, accepted and confined to those six by R32a'''); U+FEFF,
+   (D-SINK-34, accepted and confined to those six by R32a'''; [since
+   2026-11-12, D-SINK-96, to the space alone: a tab or line break there
+   leaves the colon the URL's run holds as a credential's, and the token is
+   withheld, below]); U+FEFF,
    U+0085, U+001C..U+001F, U+2028 or NBSP in the same place prints the host
    in both mirrors (under R32a'' they split the run too, and under 0.14.3
    each mirror split at its own `\s` and printed the host for the other's).
@@ -627,6 +630,201 @@ acceptance rule, no control character ever types) and a paste through
    reply's reason, and the node suite drives that reason shape through
    `Service.handleControlResult` to the `play failed:` journal line and
    through `Service.raiseStreamFailure` to the notification argv.
+   **[2026-11-12, D-SINK-95 and D-SINK-96 (round 3 of the security
+   review): what a redactor takes for a URL, and a credential with no URL.
+   The owner's answer of 2026-11-08 is the rule -- any odd character before
+   or inside the `//` is a URL's mark, and any `a:b@c` token of free text is
+   withheld, false positives accepted -- and everything below it is the
+   lead's call under the owner's standing authority of 2026-11-09 (STATUS
+   decisions log, 2026-11-12).]** Until then both mirrors found a credential
+   only behind an unbroken `scheme://` and never in a `user:pass@host` with
+   no scheme, so a zero-width character, a control or a fullwidth colon in
+   the mark showed the whole credential at every plain sink. Now:
+   - **The mark.** A pair of slashes -- `/` or one of eleven look-alikes
+     (`Model.SLASH_ALIKE_CODES`, the helper's `SLASH_ALIKE_CHARS`: U+1735,
+     U+2041, U+2044, U+2215, U+2571, U+27CB, U+29F8, U+2F03, U+3033,
+     U+31D3, U+FF0F) -- with only FILLER between them (any code point
+     outside U+0020..U+007E but a look-alike), behind a run of `:` and
+     FILLER that holds a `:` or a stand-in (FILLER above U+009F that the
+     readers' space union does not hold). The scheme is found by a walk left
+     over scheme characters that crosses a run of odd characters only out of
+     a letterless segment, and never below where the last failed walk
+     started (the dead bound, which keeps the walk linear and changes no
+     answer). Each stretch of the mark -- the FILLER between two of its
+     colons, the FILLER between its slashes, a crossed run -- holds at most
+     one WIDE code point (above U+009F; a surrogate pair one; a deleted
+     control none). The run is unchanged: to the first of the six
+     delimiters (R32a'''). An empty run, or one of trailing punctuation
+     alone, is a URL to both mirrors and prints `[url]`. The printed host is
+     cut at its first look-alike. The helper prints a scheme only when
+     `NAMED_SCHEMES` lists it (D-SINK-94's list) and otherwise prints what
+     the model prints. No Unicode table: the classes are code-point ranges,
+     so V4, node and CPython read alike, and one reading (`Model.urlAt`, the
+     helper's `next_url`) serves both redactors, the guide's fold, the cut,
+     the group split, the attribute grammar, the tvg-id test and
+     `clean_detail`. A URL already printed as `[host withheld]` reads as
+     itself the second time behind any mark (D-EPG-18, moved into this
+     reading at the merge).
+   - **The credential.** A U+0020 token holding an ASCII `:` outside every
+     URL with an ASCII `@` after it, read across the URLs inside the token,
+     with at most one code point of a script written without spaces (Han,
+     kana, Hangul, Thai, Lao, Myanmar, Khmer, the fullwidth forms, astral;
+     `SPACELESS_RANGES`, held equal in both mirrors over every code point)
+     between the two outside URLs. It prints `[host withheld]` from the
+     token's start, or from after the last of two or more counted code
+     points (above U+009F, no look-alike) before its `:`, then its trailing
+     punctuation. A URL's own colon is a credential's when the URL's run
+     holds no `@` after it, so a TAB, LF, VT, FF or CR in a password no
+     longer splits it (D-SINK-34's class, narrowed to U+0020). A URL whose
+     scheme is not named, or is named behind a mark that is not the clean
+     `://` or a run that opens with `:`, glued to text before it in its token
+     and with an `@` in its run after a `:`, is a username read as a scheme:
+     the token is withheld from its start -- but not when only `( [ { < " '`
+     stand before the scheme. A non-numeric port behind a userinfo is
+     withheld where a redactor prints; the Sources form's predicate and a
+     stored record do not move.
+   - **The parsers.** The cut drops back no further than the start of the
+     item it cuts, or to the span start of the credential it splits (a
+     `;`-joined group text keeps up to the last `;` before it), reading at
+     most max(limit, 4,096) characters past the limit; the guide's cleaners
+     cut the raw text at 64 times their cap before folding. A bare M3U
+     attribute value cut inside a credential grows to take it whole: across
+     a `,` only when a host follows the `@` it would take; across whitespace
+     from a URL's own colon unconditionally, unless an attribute key and its
+     `=` follow, and then only when a host follows; from a colon outside
+     every URL, and across `"`, unconditionally. A host, to that growth, is
+     two or more labels, a dotted quad, an IPv6 literal, one letter-led label
+     with a port, a name with a trailing dot, `_` or non-ASCII in a label,
+     or a host whitespace ends -- never a bare single label. `DESTINATION_RULES`
+     4 and `GUIDE_RULES` 2, so a cache or a guide window written under the
+     old reading is refetched once.
+   - **Held by** `tests/fixtures/url-mark.json` (151 vectors with each
+     mirror's plain, deleting and fold outputs, the look-alike list, and the
+     54-position fuzz's exact leak sets: 542 plain, 442 deleting and 542
+     fold of 3,428,136, the same in both mirrors), run by both suites;
+     `tests/url_reading_rule.py`, the reading as a walk with no dead bound;
+     the redaction-cost and node suites' independent statements of the rule;
+     and the budget tests of the guide path and the M3U path (150 ms at 1M
+     characters, 600 at 4M). The measurements are QA-RESULTS "Round 3
+     (D-SINK-95, D-SINK-96)".
+   - **The residuals, each by behaviour** (round 3e's sixteen, and two the
+     merge found):
+     1. Two or more WIDE code points with no colon between them in one
+        stretch of a mark make no mark: a path or query credential behind it
+        prints (`http<U+00E9><U+00E9>://cdn.test/live/qqqqqq/...`); a
+        userinfo behind it is still withheld as a credential.
+     2. Two or more spaceless-script code points between a credential's `:`
+        and `@`, outside URLs, make no credential, and the whole credential,
+        username and password, prints at every sink of both mirrors
+        (`Login user:<Han><Han>@cdn.test`).
+     3. Two or more counted code points in the username, before its `:`,
+        start the span after the last of them, so the username's head prints
+        (`Login <Cyrillic login>[host withheld]`).
+     4. A U+0020 inside a credential splits it and the head prints: the only
+        leak of the X// and username sweeps, 13 positions a form.
+     5. The deleting sinks (the window title, the notification) join a run
+        that a TAB, LF, VT, FF or CR ends to the text after it, and print
+        that text's head as a host (`News a://<TAB>qqqqqq:///x HD` prints
+        `News qqqqqq HD`); when the joined run takes the credential's `:` and
+        `@` as its own userinfo, they print the hosts of the URLs before it
+        in the token, which are the username's text (`News
+        http://q.qqqa<U+2215>://<TAB>qq:zzzzzz@cdn.test/live/1.ts HD` prints
+        `News http://q.qqqa HD` in the helper and `News q.qqqa HD` in the
+        model). The plain and fold sinks withhold it. 4 and 2 of 200,000
+        multi-insert strings, seeds 11 and 12.
+     6. A delimiter right after a mark gives an empty run, and the plain
+        sinks print what follows as text, a path or query credential
+        included (`News http://<TAB>cdn.test/live/qqqqqq/... HD` prints
+        `News [url]<TAB>cdn.test/live/qqqqqq/...`), unless an `@` after it
+        makes the token a credential.
+     7. One odd code point a stretch still marks a URL, the owner-accepted
+        false positives: `ESPN<U+200B>//<U+200B>HD` prints `<U+200B>HD`; a
+        list of single CJK, Korean or Cyrillic characters behind an ASCII
+        word prints its last item (`Audio:<CJK>/<CJK>/<CJK>`, `RU:` and three
+        Cyrillic letters); a fullwidth colon glued to CJK prose
+        (`file<U+FF1A>//...`) prints the rest of the paragraph, to the next
+        ASCII space, as a lowercased host. 141 of 3,661 realistic strings.
+     8. The cut: a run with a `:` and then an `@` more than
+        max(limit, 4,096) characters past the cut, with no credential inside
+        that window, drops whole; the EPG raw prefix can store a field
+        shorter or empty; a split credential drops back to its span start
+        (`qq:zz@a.test;qqqqqq:zzzzzz@cdn.test` cut at 26 stores `''`); with a
+        separator, a group whose credential's span starts in an earlier
+        `;`-group drops whole; a stop whose mark run holds one slash far
+        ahead costs a search to it (83.5 and 271.0 ms at 1M and 4M through
+        `clean_detail`, under budget).
+     9. Accepted token costs: `abc:http://u:p@h` is withheld whole, and so
+        is a `Label:` glued to a URL with an `@` in its path or query
+        (`Twitter:https://twitter.com/@BBCNews`); the IPC scope id
+        `g:<URL with userinfo>` reads `[host withheld]`; an
+        `href="mailto:...@..."` in a name is withheld.
+     10. A URL TAB-joined to a later word holding `@` is withheld with it in
+         free text, and the deleting sinks print its host. In a bare M3U
+         value it grows onto that word only when an attribute key and `=`
+         follow the whitespace and a host follows the `@`:
+         `tvg-logo=http://logo.test:8080/a.png<TAB>group-title=mail@x.test,Name`
+         stores no logo, no group and the name `Channel 1`. A letter-led
+         word with a port is a host: `NYY@BOS_19:10` in a TAB-separated bare
+         tvg-name takes the logo, 1 of 103 names.
+     11. A word glued before a URL's scheme with no U+0020 between them: the
+         token is withheld from its start when the URL has no named scheme,
+         or a named one behind a mark that is not the clean `://` or a run
+         opening with `:`, and its run holds an `@` after a `:`
+         (`NNNN<TAB>s3://u:p@h`, `1s3://u5er:p4ss@prov.test`,
+         `Watch_http:<U+200B>//u:p@h`); the fold keeps the TAB inside such a
+         span.
+     12. Bare M3U value growth: `Contact<NBSP>:<NBSP>info@france.tv` costs 3,
+         1 and 2 lines in the 351-name sweep's bare forms; a credential whose
+         host has no host's shape (`@localhost`, `@iptv`, `@cdn.1test`,
+         `@1.2.3`, `@cdn.test:`, `@cdn.test:80x`) is cut at the `,`, and the
+         username and the password's head print in the group or tvg-id and
+         the rest of the password and the host in the name, at every sink
+         (24 of the 45-line comma set's fields); a password whose text after
+         the whitespace opens with key characters and a `=`, before such a
+         host, is cut at that whitespace, and the URL's host -- the username
+         -- prints in the group (`http://qqqqqq:zz<TAB>z=z@localhost/x`);
+         and the other way, a non-ASCII dotted name or an underscore label
+         after an `@` is a host (`Ed@Caf<U+00E9>.com`, `KC@BUF_20:15`), so a
+         title holding one after a bare value with a `:` is taken with the
+         value: 16 of 45 synthetic lines, none of the 351 names or the
+         realistic corpus.
+     13. A long bare M3U value pays two reading passes: the bare group-title
+         `x:@` + (`a!+`<ZW><DIV><DIV>)* costs 151.6 ms at 1M characters and
+         598.5 at 4M (a8e8174: 21.9 and 76.5), over the 150 / 600 ms budget
+         and not budgeted, the lead's call; quoted, 72.0 and 283.2. The cost
+         is linear.
+     14. A non-empty run with an empty host prints `[redacted]` in the
+         helper and `[url]` in the model.
+     15. A username ending in a named scheme after a non-scheme character,
+         before a password that opens with the clean `://`
+         (`qq_tcp://zzzzzz@cdn.test`, case-blind), reads as that scheme's
+         URL, as `1http://u:p@h` does: the helper prints the whole username
+         (`qq_tcp://cdn.test`), the model its head (`qq_cdn.test`), the
+         password at none. With a control inside the mark (`News
+         qq_tcp:<NUL>//zzzzzz@cdn.test/live/1.ts HD`) the plain sinks
+         withhold it, and the window title, the notification and the fold,
+         for the 29 controls it removes (U+0000..U+0008, U+000E..U+001F,
+         U+007F, U+0085), print the username; the password prints at none.
+     16. Unchanged from 0.18.0: printable ASCII inside a mark (`http!://`);
+         a control, a space or a look-alike in place of the colon; a
+         fullwidth scheme; entity- or percent-spelt marks; a look-alike `@`
+         in a userinfo (`http://qqqqqq:zzzzzz<U+FF20>cdn.test/x` prints the
+         username) and a look-alike `:` or `@` in a token; a quoted
+         attribute value ending at a `"` inside a scheme-less credential; the
+         fetch side's narrow mark readers (`_HINT_LIST_COMMA`,
+         `_ABSORBED_URL`); the authority ending only at an ASCII `/`, `?` or
+         `#`, the look-alike cut covering only the printed host.
+     17. From the merge: a description whose mark a space-like character
+         follows (`News http://<U+00A0>cdn.test/live/qqqqqq/zzzzzz/1.ts HD`)
+         is stored as `News http:// cdn.test HD` -- the host printed with the
+         character, which the fold then makes a space -- and the helper's
+         second pass over it prints `News [url] cdn.test HD`: not idempotent
+         for 48 of the fuzz's 3,428,136 inputs, no credential, and the shell
+         printed `[url] cdn.test` for that text before.
+     18. From the merge: a credential token that holds the start of an
+         already printed token (`qqqqqq:zz@http://[host withheld] x`) prints
+         `[host withheld] withheld] x`. It needs raw text that already holds
+         the token, and nothing in the corpus or the fuzz makes it.
 6. Anything else (`ftp:`, `data:`, `javascript:`, `rtsp:`) -> `unsupported_scheme`.
 
 Vectors (in `tests/fixtures/source-urls.json`, consumed by node, the QML
@@ -1698,6 +1896,173 @@ edit the control's copy and the next bound write would overwrite it.
    never on a change (R8).
    The register of the sink, the measurement and the residuals is
    `docs/ARCHITECTURE.md` section 6; the gate is `docs/QA.md` 3.3.
+10. **The accessibility bus (D-A11Y-1; D-SINK-97, D-SINK-98, D-SINK-99 and
+   D-A11Y-12, round 4 of the security review, 2026-11-12).** A form field's
+   drawn control is off the bus, and a sibling Item publishes
+   `Model.fieldAccessibleValue` as the field's Value (CLAUDE.md rule 5).
+   The owner's answer of 2026-11-08 rules the address fields; every other
+   rule here is the lead's call under the owner's standing authority of
+   2026-11-09 (STATUS decisions log, 2026-11-12). Measured in QA-RESULTS
+   "Round 4 (D-SINK-97..99, D-A11Y-12, F-HARNESS-106)".
+   - **An address field** (the playlist, the EPG, the Xtream server;
+     D-SINK-97: scheme and host only, stars otherwise, no Description, the
+     same revealed or not). `addressAccessibleValue` publishes `scheme://`,
+     `****@` when a userinfo is present, the host, `:port`, and the
+     authority's closing character with an ellipsis (or `/` alone), only
+     when the value holds no line terminator; its scheme is one a source may
+     have (`SOURCE_URL_SCHEMES`: http, https, file, which `validateSourceUrl`
+     reads too); a `//` follows it; the authority is closed by `/`, `?` or
+     `#` with no `@` after it; the free-text redactors would not withhold
+     its host; and the host is `[A-Za-z0-9-]` labels joined by `.` (dotless
+     allowed), a dotted quad or a zoneless IPv6 literal, with an optional
+     port of digits. A `file:` authority may be empty (`file:///` and an
+     ellipsis). Everything else, a bare local path included, is one `*` per
+     character. The fields' `Accessible.description` is empty; the
+     password's is its label. A paste joins the seven line terminators in
+     every field, and typing drops U+2028 and U+2029, which Qt's own
+     acceptance rule would type. Costs: a local path is heard as its
+     length; an unclosed authority (`http://cdn.test:8080`), rtsp, an
+     unlisted scheme and a host holding `_` or punctuation are stars.
+     Residuals, measured: 555 of 12,630 edit states over the three fields
+     -- range deletions that make a credential the host -- are heard as the
+     host the edited text names (`http://qqqqqq/zzzzzz/1.ts` as
+     `http://qqqqqq/` and an ellipsis), the accepted cost of "scheme and
+     host"; the typed prefixes of R32a's typo URLs are heard as the username
+     until the `@` (7 states each, 105 over 5 URLs in three fields).
+   - **A stored label** (D-SINK-98). `Model.labelSinkText` is the label's
+     own sink, called by the label field while it is not held, the Sources
+     row (drawn, and in its Edit and Remove buttons' names),
+     `sourceAccessibleName`, `confirmRemoveMessage`, `sourceTransient`,
+     `sourceErrorMessage` (duplicate and `label_taken`), `footerCounts`,
+     `sourcesSummary` and `activeSourceSummary` (Service's IPC status). The
+     label is cut into tokens at U+0020. A token's CORE sets aside a leading
+     run of `([{<"'` and a trailing run of `)]}>"'.,;:!?` (an IPv6
+     literal's brackets kept). A token reads as an address when a shape
+     clause holds of its core, its raw text, the core of its fold or the
+     fold of its raw text: a `scheme://`; a `//` followed by text holding an
+     `@` or being a host; `:/` or `:\` after a scheme of two or more
+     characters; an `@` with a `:` before its last `@` (the owner's a:b@c);
+     a host, or `X@H` with `H` a host, before a `/` that something follows;
+     a `?`, `;` or `&` with a `=` after it, with a `.` or `/` before it. The
+     FOLD (`labelFold`) is NFKD less the Cf characters, then one
+     left-to-right decode (`labelDecode`) of the percent escapes of `/`,
+     `:`, `@`, `=`, `&`, `?`, `;` and a backslash in either case, HTML
+     numeric entities with or without their `;` (the longest digit run, to
+     U+10FFFF), the eight delimiters' HTML names (`&colon;`, `&sol;`,
+     `&commat;`, `&quest;`, `&amp;`, `&equals;`, `&semi;`, `&bsol;`,
+     case-sensitive, `;` required) and backslash-u00HH, then NFKD less Cf
+     again. When any token reads, the whole label is the hosts its tokens
+     name, joined by a space, each from its LEFTMOST authority, in this
+     order: rule c's host for a `scheme://`; a `//` authority, only when
+     the head before the `//` holds no `@` and is no authority on its raw,
+     decoded or folded reading, nor a host with a port (dotless included)
+     or a trailing `.`, and with an `@` after the `//` before the next `/`
+     withholding; the host after the last `@` before the first `/`, cut at
+     `?`, `#` or `;`, when the a:b@c clause reads, and none when that head
+     holds no `@`; the host before the `/` (or the `H` of `X@H`), falling
+     back to the raw token; then the decoded token. Each host must have a
+     host's shape -- two or more labels of `[A-Za-z0-9-]`, none starting or
+     ending in `-`, the last letter-led and two or more long; a dotted
+     quad; a zoneless `[IPv6]`; an optional `:digits` -- else it is
+     `[host withheld]`. A token that holds an escape is read raw and
+     decoded: two readings that name different hosts, or a host and a
+     withheld, withhold; a raw reading that names none defers to the
+     decoded one; a decoded reading that names none does not defer to a raw
+     one that names a host. When no token reads, the label is
+     `[host withheld]` if `sinkText` would change it, and itself otherwise.
+     Costs: a label naming a dotless host reads `[host withheld]`
+     (`Sport:Live@HD`); `Sky.UK/Sports` reads `Sky.UK`, `cdn.test%2Flive`
+     `cdn.test`, `Provider (cdn.test:8080/...)` `cdn.test:8080` and
+     `me@mail.test/x` `mail.test`; withheld are `http:/qqqqqq:zzzzzz@cdn.test/x`
+     (a scheme that lost a `/`), `qqqqqq:zzzzzz@zz//cdn.test/x`,
+     `cdn.test:8080/playlist/me@mail.test/pw`, `cdn.test/x?u=me:x@mail.test`,
+     a head with a dotless port or a trailing dot before a `//`
+     (`nas:8080//...`), a token whose readings disagree, and an `@` after a
+     `//` authority (15 of 168,140 swept labels went from a host to
+     withheld). Residuals, measured: 1,107 of 10,918 swept stored states
+     have no address shape and are drawn and heard as typed (a username or
+     password alone, `user:pass` with no `@`, `key=value` with no `.` or `/`
+     before its `?`, `;` or `&`, a path whose first segment is no host,
+     `//qqqqqq`, a userinfo holding a U+0020 with no `/` after its host),
+     because nothing tells such a label from a name; 159 are drawn and
+     heard as their own host (`http://qqqqqq.cdn.test/x`); a head before a
+     `//` that is dotless with no port, outside `[A-Za-z0-9-]` labels, or
+     with a malformed port is no authority, so the segment after the `//`
+     is named (`cdn-test//qqqqqq.qq/zzzzzz/1.ts` reads `qqqqqq.qq`; the
+     class holds `nas//`, `localhost//`, `my_nas:8080//`,
+     `cdn.test:8080:443//`); and not decoded, so read as typed where
+     nothing else reads: `\xHH`, `%u00HH`, `\U000000HH`, octal, `+` for
+     `/`, names HTML does not define (`&COLON;`, `&SOL;`), `&AMP;` and a
+     `;`-less `&amp` (HTML reads both as `&`, which only shape (iv) reads,
+     and the raw `&` already reaches it), and every double escape (`%252F`,
+     `&amp;#58;`, `%26%2364;`); a `;`-less hex entity takes every hex digit
+     after it, as HTML does, so `&#x40cdn.test` is U+40CD (2 of 7 such URLs
+     stored as typed).
+   - **The label field** (D-SINK-98). The field is HELD while
+     `labelHeldAfter` holds: its value is not empty, and in this form
+     session it has read as an address or carried a credential's delimiter
+     (`labelHoldsField`: `labelReadsAsAddress`, or any of five delimiters
+     on the raw value or its fold -- (i) `//`; (ii) a `:` with `/`, `\` or
+     `@` after it, over the whole value; (iii) an `@` not first and not
+     after a U+0020; (iv) a `=` with `?`, `;` or `&` before it; (v) a `/`
+     with a `.` before it in its U+0020 token, or over the whole value when
+     two or more `/` follow its first `.`). A held field publishes one `*`
+     per character until it is emptied; otherwise `labelSinkText`, which is
+     the value as typed while no token reads. `withFormValue` moves the
+     flag on every write and `copyForm` sets it when a form is made, so an
+     Edit form over such a label opens held. `validateLabel` refuses a label
+     that reads as another source's label reads (`labelKey(labelSinkText())`,
+     case-blind), unless it equals the record's own stored label, and names
+     it as it reads. Costs: 17 of 27 ordinary labels hold while typed
+     (`IPTV@Home`, `Me@BBC.co.uk`, `1.5/2 HD`, `News//Sport`, `Q&A=fun`
+     after its `=`; 80 of their 267 typed states heard as stars), 11 of a
+     further 28 (45 of 304), none of the 71 labels `deriveLabel` gives;
+     `Sports: Live/HD` opens an Edit form as 15 stars; a label with two `/`
+     after its first `.` holds (`U.S. / Canada / Mexico`, `Sat.1 /
+     ProSieben / Kabel 1`); an escape that decodes to a delimiter holds
+     (`a%2F%2Fb`); a label holding a NBSP or U+3000 between a `.` and a `/`
+     holds. Residuals, measured: 17 typed states are heard before the first
+     hold (`qq` to `qqqqqq:zzzzzz`, `mailto:qq` to `mailto:qqqqqq`), and
+     `username=qqqqqq&password` until the `=` after its `&` (14 states);
+     pasted whole, 11,777 of 58,817 corpus values are heard, in five classes
+     with no delimiter: 140 with none, 185 `user:pass` with nothing of `/`,
+     `\` or `@` after its `:`, 165 `key=value` with no `?;&` before its `=`,
+     10,427 paths with no `.` before their `/`, and 860 holding one `/`
+     whose `.` is in another U+0020 token, none holding both a username's
+     run and a password's (`cdn.test qqqqqq/zzzzzz` among them, heard whole,
+     accepted beside `Username: qqqqqq Password: zzzzzz`); look-alikes with
+     no NFKD form (U+2236, U+2215), `user:pass#host`, and the encodings not
+     decoded above. The hold is the field's alone: a label saved while held
+     is stored and published by `labelSinkText`.
+   - **The form's lines** (D-SINK-99). While the form's probe field (the
+     playlist, or the server on the Xtream form) holds a URL the free-text
+     redactors withhold, or one with an `@` after its authority
+     (`Model.formHostWithheld`, on the same authority split the field's
+     Value uses), the fetching line, the probe failure line, the Added
+     fallback and the label's placeholder name `[host withheld]`
+     (`formLineHost`, `formFetchingLine`, `formProbeFailureLine`,
+     `formLabelPlaceholder`). R32a stands: the warning shows, and the
+     stored label is the RFC host. Costs: the placeholder says
+     `[host withheld]` while the label that will be saved is the RFC host,
+     which the Added line once the record is listed and the duplicate line
+     name; a valid URL with an `@` in its path or query (R32a's own
+     email-username link) withholds the host in the four lines.
+   - **Hidden nodes** (D-A11Y-12). A hidden Item stays in Qt's
+     accessibility tree with a drawn one's states, and `Accessible.ignored`
+     on a container RE-PARENTS its accessible descendants to its nearest
+     accessible ancestor rather than removing them (measured in a nested
+     headless cage), so every named node the guide may hide carries
+     `Accessible.ignored: !visible` itself: the remove dialog, the closed
+     form, its fields and buttons, the Sources list and rows, each row's
+     Edit and Remove but the cursor row's, the eye buttons of fields that
+     cannot be masked, the Tracks, Programme and Keys panels, the
+     channel-number alert, the empty banner, title, search line and empty
+     state, and each channel-wall tile. Left: the group column (D-A11Y-13),
+     and the form's empty result line, visible at opacity 0, while a form is
+     open.
+   - Not measured: the text-change event half (the probe walks the tree
+     and observes no events), a real screen reader, and a V4 sweep of the
+     label's edit states (the spec runs its cases, the sweeps run in node).
 
 ## 7. Performance
 
