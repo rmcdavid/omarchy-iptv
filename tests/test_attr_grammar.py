@@ -140,7 +140,7 @@ class FixtureTest(unittest.TestCase):
                  "stored": [c for c in CASES if "stored" in c],
                  "header": [c for c in CASES if c["line"].startswith("#EXTM3U")]}
         self.assertEqual((len(CASES), {k: len(v) for k, v in kinds.items()}),
-                         (109, {"leak": 66, "cost": 10, "accepted": 4, "stored": 43, "header": 9}))
+                         (110, {"leak": 67, "cost": 10, "accepted": 4, "stored": 44, "header": 9}))
         self.assertTrue(all(not leaked(c["line"]) for c in kinds["cost"]))
         self.assertEqual(SECRET, "qz")
 
@@ -374,6 +374,17 @@ def mark_end(text, i):
     return j
 
 
+def key_ahead(text, i):
+    """Whether whitespace and then an attribute's key and its `=` start at
+    `i`, one character at a time."""
+    while i < len(text) and text[i].isspace():
+        i += 1
+    k = i
+    while i < len(text) and text[i] in KEY_CHARS:
+        i += 1
+    return i > k and i < len(text) and text[i] == "="
+
+
 def host_follows(text, i, end):
     """Whether text[i:end] opens with a HOST, as the review of 4d13d71's lead
     call states one and the review of 2942e41's widens it: two or more
@@ -491,11 +502,13 @@ def reference(text, trace):
                 # Across a `,`, only when a host follows an `@` it would take
                 # (the review of 4d13d71; any such `@`, the review of
                 # 2942e41); and across whitespace the same, when the
-                # credential's colon is a URL's own (the review of 2942e41).
+                # credential's colon is a URL's own (the review of 2942e41)
+                # and a key and its `=` follow the whitespace (the review of
+                # e038d58).
                 if found is not None and found[1] >= end and found[2] < end:
                     we = found[2] + rule.trailing_keep(text[found[2]:te])
                     own = any(u[0] <= found[0] < u[3] for u in urls)
-                    gated = text[end] == "," or (own and text[end].isspace())
+                    gated = text[end] == "," or (own and text[end].isspace() and key_ahead(text, end))
                     if gated:
                         trace.append("bare-gated")
                     if we > end and (not gated or any(text[a] == "@" and host_follows(text, a + 1, te)
@@ -708,7 +721,18 @@ class TabGrowthTest(unittest.TestCase):
     colon is gated now as growth across a `,` is: only when a host follows
     an `@` it would take. Each line below reads as a8e8174 read it; red on
     2942e41. The stated cost is pinned in attr-grammar.json: a later word
-    whose `@` a host follows still takes the URL attribute with it."""
+    whose `@` a host follows still takes the URL attribute with it.
+
+    The review of e038d58 (its still-shows finding 0): gated on the host
+    alone, a password a TAB, VT or CR cuts was cut there whenever its host
+    was one host_shaped refuses, and the URL's host (the username) printed
+    in the group, tvg-id or tvg-name, the rest of the password and the host
+    in the name, at every sink (54 fields of the review's 35 lines, 8 of its
+    7 more). What separates the two is not the host but what follows the
+    whitespace: an attribute's key and its `=` in every benign line, none in
+    a password. So the gate applies only when a key follows the whitespace
+    (the lead's call under the owner's standing authority of 2026-11-09).
+    Red on e038d58."""
 
     LINES = [("#EXTINF:-1 tvg-logo=http://logo.test/a.png\ttvg-name=Sky@News,Sky News",
               ("Sky News", helper.UNGROUPED, "http://logo.test/a.png", "Sky@News", None)),
@@ -731,6 +755,50 @@ class TabGrowthTest(unittest.TestCase):
             self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz%szz@cdn.test/x,Name" % sep, "Channel 1"))
         _, channel = parse_line("#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@cdn.test/x,")
         self.assertEqual((channel["name"], channel.get("tvgName")), ("http://qqqqqq:zz\tzz@cdn.test/x", None))
+
+    def test_a_password_whitespace_cuts_before_any_host_is_taken_whole(self):
+        # The review of e038d58's lines: every host host_shaped refuses and
+        # one it accepts, a TAB, VT, FF or CR inside the password, in a
+        # group, a tvg-id, a tvg-name and a logo before another attribute,
+        # and the shapes of its second set. Red on e038d58, where 30 of the
+        # first 35 printed the username and the password's tail.
+        hosts = ["localhost", "iptv", "cdn.1test", "1.2.3", "cdn.test:", "cdn.test:80x", "cdn.test", "iptv:8080",
+                 "cdn.test."]
+        lines = []
+        for host in hosts:
+            for sep in "\t\x0b\x0c\r":
+                lines.append("#EXTINF:-1 group-title=http://qqqqqq:zz%szz@%s/x,Name" % (sep, host))
+            lines += ["#EXTINF:-1 tvg-logo=http://qqqqqq:zz\tzz@%s/a.png group-title=News,Name" % host,
+                      "#EXTINF:-1 tvg-id=http://qqqqqq:zz\tzz@%s/x,Name" % host,
+                      "#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@%s/x," % host]
+        lines += ["#EXTINF:-1 group-title=qq_qqqq:" + chr(0x200B) + "//zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http:" + chr(0x200B) + "//qqqqqq:zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=qqqqqq:zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http://qqqqqq:zz\t\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost,Name"]
+        rows = [parse_line(line) for line in lines]
+        bad = []
+        for line, (doc, channel) in zip(lines, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(ascii(line), field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((ascii(line), "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(ascii(line), sink, out) for line, row in zip(lines, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz\tzz@localhost/x,Name", "Channel 1"))
+
+    def test_what_a_key_after_the_whitespace_leaves_stated(self):
+        # The residual: text after the whitespace that reads as a key and
+        # its `=` gates the growth on the host, so a password holding a `=`
+        # before its `@` and a host no host shape names is cut at the
+        # whitespace, and the URL's host (the username) prints in the group;
+        # a host behind it is still taken whole.
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tz=z@localhost/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz", "Name"))
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tz=z@cdn.test/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz\tz=z@cdn.test/x,Name", "Channel 1"))
 
 
 class TabInPasswordValueTest(unittest.TestCase):

@@ -31,6 +31,7 @@ has to be loose to be useful, and the margin here is four orders of magnitude.
 """
 import json
 import os
+import random
 import re
 import time
 import unittest
@@ -795,17 +796,21 @@ class LetterlessBudgetTests(unittest.TestCase):
         self.assertEqual(slow, {})
 
 
-def window_of_urls(limit, size):
+def window_of_urls(limit, size, barrier="!", tail="y", after=False):
     """The review of 2942e41 (its cost finding 0): `x:@<U+00E9><TAB>`, then
     `ab://c<TAB>` to the end of the credential window of a cut at `limit`
     (limit + max(limit, CUT_CREDENTIAL_WINDOW)), one walk barrier `!`, then
     `y` to `size` characters: every URL in the window, and a tail with no
-    SLASH after the barrier."""
+    SLASH after the barrier. The review of e038d58 (its cost finding 2): or
+    another barrier and tail, a `:` before a tail of `:` or of a control,
+    which the run of `:`, FILLER and SLASH from the stop spans; `after`
+    makes the tail `size` characters after the barrier, as the review's
+    stopcost3 built it."""
     reach = limit + max(limit, helper.CUT_CREDENTIAL_WINDOW)
     head = "x:@" + chr(0xE9) + "\t"
     text = head + "ab://c\t" * ((reach - len(head)) // 7)
     text += "z" * (reach - len(text))
-    return text + "!" + "y" * (size - len(text) - 1)
+    return text + barrier + tail * (size if after else size - len(text) - len(barrier))
 
 
 def best_under(f, text, ceiling):
@@ -864,6 +869,89 @@ class EpgPathBudgetTests(unittest.TestCase):
                 if cost >= ceiling:
                     slow[(fname, size)] = round(cost * 1000, 1)
         self.assertEqual(slow, {})
+
+    def test_a_window_of_urls_before_a_tail_the_mark_run_spans(self):
+        # The review of e038d58 (its cost finding 2): with the stop's mark run
+        # holding no second SLASH, the stop bound was the run's end, and the
+        # reading's last next_url call searched the whole run for candidates
+        # it could only refuse: a window of URLs before a `:` and a tail of
+        # `:` cost 172.6 ms at 1M characters through clean_detail and 558.0
+        # ms at 4M, a tail of U+0001 88.2 and 265.9 ms (4d13d71: 0.1 ms). The
+        # bound is the run's only SLASH, or the stop, when it holds fewer
+        # than two (_stop_end). Red on e038d58 at 1M characters through
+        # clean_detail, by little (152.3 and 155.8 ms in two runs of three
+        # on this machine, under 150 in the third), so StopEndTests pins
+        # the bound itself; the tail is `size` characters after the window,
+        # as the review's stopcost3 built it.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for tail in (":", "\x01"):
+                for fname, f, limit in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC),
+                                         helper.EPG_MAX_DESC * helper.EPG_RAW_FACTOR),
+                                        ("clean_title", helper.clean_title, helper.EPG_MAX_TITLE * helper.EPG_RAW_FACTOR)):
+                    cost = best_under(f, window_of_urls(limit, size, ":", tail, True), ceiling)
+                    if cost >= ceiling:
+                        slow[(ascii(tail), fname, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+
+class StopEndTests(unittest.TestCase):
+    """_stop_end bounds next_url's candidate search and changes no answer:
+    next_url with `stop` answers as it does with the search bounded only by
+    the text's end (stop_end = len(text)), at every stop. The review of
+    e038d58 named `stop` + 1 as the bound whenever the stop's mark run holds
+    no second SLASH; a stop between a candidate's slashes (`ab:/<U+200B>/x`
+    at 4) has the candidate's second SLASH as the run's first, and that
+    bound lost it, which the reviewer's random identity sweep did not reach.
+    Every stop of every text in a family of marks built around the stop,
+    and of a seeded random family."""
+
+    @staticmethod
+    def texts():
+        z, e, d = chr(0x200B), chr(0xE9), chr(0x2215)
+        out = []
+        for lead in ("ab", "x a", "1", ""):
+            for p in (":", ":" + z, z + ":", ":" + e, "::"):
+                for one in ("/", d):
+                    for between in ("", z, e, "\x01", z + "\x01", e + e):
+                        for two in ("/", d):
+                            for tail in ("x", "", ":", "\x01x", "/x", ":" + z + "//y"):
+                                out.append(lead + p + one + between + two + tail)
+        rng = random.Random(95)
+        pieces = [":", "/", "//", "a", "1", " ", "!", "@", z, e, d, "\x01", "\t", "ab:", ":/", z + "/", "/" + z]
+        out += ["".join(rng.choice(pieces) for _ in range(rng.randint(1, 16))) for _ in range(3000)]
+        return out
+
+    def test_the_bound_ends_at_the_runs_slashes(self):
+        # The review of e038d58 (its cost finding 2): with fewer than two
+        # SLASHes in the stop's run the bound was the run's end, so a run of
+        # `:` or of controls after the window cost a candidate search over
+        # all of it. It is the run's only SLASH, or the stop, now. Red on
+        # e038d58, deterministically: the budget test beside this one is red
+        # there by about a tenth of the budget, and so on a quiet machine
+        # only most of the time.
+        z = chr(0x200B)
+        head = "x:@" + chr(0xE9) + "\tab://c\t!"
+        stop = len(head)
+        cases = {":" + ":" * 5000: stop + 1,
+                 ":" + "\x01" * 5000: stop + 1,
+                 ":" + "\x01" * 50 + "/" + "\x01" * 5000: stop + 52,
+                 ":" + "/" + z + "/" + "\x01" * 50: stop + 4,
+                 ":" + z + "/" + "\x01" * 50 + "/" + ":" * 50: stop + 54}
+        got = {ascii(tail[:4]) + str(len(tail)): helper._stop_end(head + tail, stop) - stop for tail in cases}
+        want = {ascii(tail[:4]) + str(len(tail)): end - stop for tail, end in cases.items()}
+        self.assertEqual(got, want)
+
+    def test_the_bound_changes_no_answer_at_any_stop(self):
+        bad = []
+        for text in self.texts():
+            for stop in range(len(text) + 1):
+                for search in (0, stop // 2):
+                    got = helper.next_url(text, search, search, False, stop)
+                    want = helper.next_url(text, search, search, False, stop, len(text))
+                    if got != want:
+                        bad.append((ascii(text), search, stop, got, want))
+        self.assertEqual(bad[:4], [])
 
 
 

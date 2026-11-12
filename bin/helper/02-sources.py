@@ -510,6 +510,10 @@ def unique_label(label: str, existing: list[str]) -> str:
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
+# Whitespace and then an attribute's key and its `=`: what a bare value's
+# growth across whitespace from a URL's own colon is gated on (parse_attrs,
+# the review of e038d58).
+_ATTR_KEY_AHEAD = re.compile(r'\s*[A-Za-z0-9_.\-]+=')
 
 # Channel-number attributes, in precedence order (M2-03 1.1, ruling CN11).
 # `tvg-chno` is what every asset in this repo uses; the two aliases are read
@@ -622,7 +626,19 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     test reads only the value the match already scanned (the quoted one from
     the last `:` before the run's first `/`; the bare one in one bounded
     search, and once more at its last `:` when a control ends it), the
-    run's end is found once, and the walk resumes past it or stops."""
+    run's end is found once, and the walk resumes past it or stops.
+
+    Its cost, stated (the review of e038d58, the lead's call under the
+    owner's standing authority of 2026-11-09, with no budget test): a long
+    bare value holding a `:` before marks the reading refuses pays two
+    native reading passes, next_url over the value for D-SINK-95's growth
+    and the line's URL reading for its token's credential. The bare
+    group-title `x:@` and then `a!+<U+200B><U+2215><U+2215>` repeated costs
+    150.7 ms at 1M characters and 607.8 ms at 4M in parse_m3u, over the
+    150/600 ms budget the title and the quoted form are held to
+    (M3uPathBudgetTests), against a8e8174's 21.9 and 76.5; the quoted form
+    73.4 and 293.4, against 6.4 and 16.9. Linear, four times the cost for
+    four times the input."""
     attrs: dict[str, str] = {}
     pos = 0
     size = len(text)
@@ -738,19 +754,34 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
                 # so a password holding an `@` is not judged on its own tail.
                 # And across whitespace (a TAB, or any other) the same holds
                 # when the credential's colon is a URL's own (_eligible_colon:
-                # its run ends before the `@`), the review of 2942e41: the
-                # value had grown there unconditionally, so a TAB-separated
-                # URL attribute took every attribute after it and the title's
-                # head whenever a word later in the token held an `@`
-                # (`tvg-logo=http://logo.test/a.png<TAB>tvg-name=Sky@News,Sky
-                # News` lost its logo, its tvg-name and the name's head).
-                # Growth across whitespace whose colon stands outside every
-                # URL is unconditional, as it was. The cost, stated: a
-                # TAB-separated URL attribute before a later word whose `@` a
-                # host follows is still taken whole with it
-                # (`tvg-logo=http://logo.test:8080/a.png<TAB>group-title=
-                # mail@x.test,Name` stores no logo, no group and the name
-                # `Channel 1`).
+                # its run ends before the `@`) and an attribute's key and its
+                # `=` follow the whitespace (_ATTR_KEY_AHEAD), the review of
+                # 2942e41: the value had grown there unconditionally, so a
+                # TAB-separated URL attribute took every attribute after it
+                # and the title's head whenever a word later in the token held
+                # an `@` (`tvg-logo=http://logo.test/a.png<TAB>tvg-name=
+                # Sky@News,Sky News` lost its logo, its tvg-name and the
+                # name's head). With no key after the whitespace the value
+                # grows, as it did: the whitespace is inside a password (the
+                # review of e038d58, the lead's call under the owner's
+                # standing authority of 2026-11-09). Gated on the host alone,
+                # as e038d58 gated it, a password a TAB, VT or CR splits was
+                # cut at that whitespace whenever host_shaped refused its
+                # host, and the URL's host (the username) printed in the
+                # group, tvg-id or tvg-name, the rest of the password and the
+                # host in the name, at every sink
+                # (`group-title=http://qqqqqq:zz<TAB>zz@localhost/x,Name`; 30
+                # of the review's 35 lines). Growth across whitespace whose
+                # colon stands outside every URL is unconditional, as it was.
+                # The costs, stated: a TAB-separated URL attribute before a
+                # later word whose `@` a host follows is still taken whole
+                # with it (`tvg-logo=http://logo.test:8080/a.png<TAB>
+                # group-title=mail@x.test,Name` stores no logo, no group and
+                # the name `Channel 1`); and a password whose text after the
+                # whitespace opens with key characters and a `=` reads as a
+                # key, so before a host no host shape names it is still cut
+                # there, as e038d58 cut it (`http://qqqqqq:zz<TAB>z=z@
+                # localhost/x` prints the username in the group).
                 # The token's bounds, found once a token (the review of
                 # 2942e41): values only move forward, and one that starts
                 # before the token's end is in the same token. Found for each
@@ -774,7 +805,8 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
                                           reading.holding(found[0]) >= 0, -2])
                 span = held[token_start]
                 if span is not None and span[0] >= grown and span[1] < grown < span[2]:
-                    if text[grown] == "," or (span[3] and text[grown].isspace()):
+                    if text[grown] == "," or (span[3] and text[grown].isspace()
+                                              and _ATTR_KEY_AHEAD.match(text, grown) is not None):
                         if span[4] == -2:
                             span[4] = last_hosted_at(text, span[1], span[2], token_end)
                         if span[4] >= grown:
@@ -837,8 +869,14 @@ def host_shaped(text: str, i: int, end: int) -> bool:
     before the `,` in the group or the tvg-id, and the rest of the password
     and the host in the name. And its cost: a letter-led word with a port
     after an `@` is a host, so a bare value holding a `:` before a title
-    word like `NYY@BOS_19:10` takes the title. Reads one run of host
-    characters from `i`."""
+    word like `NYY@BOS_19:10` takes the title; and so, stated by the review
+    of e038d58 (the lead's call under the owner's standing authority of
+    2026-11-09), are a non-ASCII dotted name and an underscore label after
+    an `@` (`Ed@Caf<U+00E9>.com`, `KC@BUF_20:15`, `News@UK:1`): a title
+    holding one after a bare value with a `:` is taken with the value -- 16
+    of the review's 45 synthetic lines (eight names in two forms), none of
+    the 351-name sweep's lines and none of the 3,705 realistic strings.
+    Reads one run of host characters from `i`."""
     v6 = _HOST_IPV6_RUN.match(text, i, end)
     single = False
     if v6 is not None:

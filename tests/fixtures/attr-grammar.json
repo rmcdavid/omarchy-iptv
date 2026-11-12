@@ -1143,6 +1143,18 @@
     "name": "Channel 1",
     "group": "qqqqqq:zz,z@z@cdn.test,Name"
    }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost/x,Name",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\tzz@localhost/x,Name"
+   },
+   "title": "",
+   "why": "a bare URL value whose password a TAB cuts, before a host no host shape names and no attribute key: the value takes the credential whole, since growth across whitespace from a URL's own colon is gated only when a key and its `=` follow the whitespace (the review of e038d58) [e038d58 gated it on the host and stored the group `http://qqqqqq:zz`, which every sink printed as `qqqqqq`, and the name `zz@localhost/x,Name`]",
+   "stored": {
+    "name": "Channel 1",
+    "group": "http://qqqqqq:zz\tzz@localhost/x,Name"
+   }
   }
  ]
 }

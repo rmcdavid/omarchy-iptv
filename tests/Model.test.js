@@ -4374,7 +4374,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       if (deleting(v.text) !== wantDeleting) bad.push([v.why, "notifyReasonText", deleting(v.text)])
       if (!leaks(wantDeleting) && leaks(body(v.text))) bad.push([v.why, "notifyArgv", body(v.text)])
     })
-    return [marks.vectors.length >= 150, bad]
+    return [marks.vectors.length >= 151, bad]
   }, [true, []])
   checkCall("D-SINK-95: SLASH_ALIKE_CODES is the fixture's list, and over every code unit isSlashAlikeCode, isUrlFillerCode and isMarkStandInCode hold exactly where the rule recomputed from url-mark.json and url-whitespace.json says, and a CROSSABLE code unit between a scheme and a letterless segment before its `:` is crossed (Model.urlAt)", function () {
     const wrong = []
@@ -4520,9 +4520,16 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   // URLs before it in the token print their hosts, which are the username's
   // text (the review of 2942e41: `News http://q.qqqa<U+2215>://<TAB>qq:zzzzzz@
   // cdn.test/live/1.ts HD` prints `News q.qqqa HD` in the notification,
-  // pinned in url-mark.json). tests/test_url_marks.py holds the helper's
-  // sinks and this mirror's to the same inputs.
-  checkCall("D-SINK-95, D-SINK-96: over several insertions the notification leaks only where sinkText does, but for the named residual", function () {
+  // pinned in url-mark.json). And but for a second, which the review of
+  // e038d58 found and the lead's call (under the owner's standing authority
+  // of 2026-11-09) states rather than closes: a control inside a NAMED
+  // scheme's mark after text in its token, before an `@` in its run
+  // (`News qq_tcp:<NUL>//zzzzzz@cdn.test/live/1.ts HD`), which sinkText
+  // withholds as a mark that is not clean and the notification deletes,
+  // reading the clean `://` and printing the username's head (pinned in
+  // url-mark.json). tests/test_url_marks.py holds the helper's sinks and
+  // this mirror's to the same inputs.
+  checkCall("D-SINK-95, D-SINK-96: over several insertions the notification leaks only where sinkText does, but for the named residuals", function () {
     const bases = ["http://qqqqqq:zzzzzz@cdn.test/live/1.ts", "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
                    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "qqqqqq:zzzzzz@cdn.test/live/1.ts"]
     const pieces = [0x200b, 0x34f, 0x338, 0xa0, 0x3000, 0x2028, 1, 0x7f, 0x85, 9, 10, 13, 11, 12, 0xfffd, 0xff1a,
@@ -4548,9 +4555,27 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
         return e < s.length && s.charAt(e) !== " "
       })
     }
+    const OPENING = "([{<\"'`"
+    const namedControl = function (s) {
+      return Model.urlList(s).some(function (u) {
+        let scheme = "", cleaned = "", k
+        for (k = u.start; k < u.markStart; k++) if (s.charCodeAt(k) >= 0x20 && s.charCodeAt(k) <= 0x7e) scheme += s.charAt(k)
+        for (k = u.markStart; k < u.markEnd; k++) if (!CONTROLS.test(s.charAt(k))) cleaned += s.charAt(k)
+        let ts = s.lastIndexOf(" ", u.start - 1) + 1
+        while (ts < u.start && OPENING.indexOf(s.charAt(ts)) !== -1) ts++
+        return Model.NAMED_SCHEMES.indexOf(scheme.toLowerCase()) !== -1 && ts < u.start
+          && s.substring(u.markStart, u.markEnd) !== "://" && cleaned === "://" && s.substring(u.markEnd, u.runEnd).indexOf("@") !== -1
+      })
+    }
+    // The second residual's shapes: a control beside the colon, before it,
+    // and between the slashes.
+    const namedShapes = ["qq_tcp:" + String.fromCharCode(0) + "//zzzzzz@cdn.test/live/1.ts",
+                         "qq_https" + String.fromCharCode(0x9b) + "://zzzzzz@cdn.test/live/1.ts",
+                         "qq_udp:/" + String.fromCharCode(0x85) + "/zzzzzz@cdn.test/live/1.ts"]
     let x = 2026
     let plainLeaks = 0
     let pinned = 0
+    let pinnedNamed = 0
     const bad = []
     // The residual's own shapes, so the name is reached on every run.
     const D2 = String.fromCharCode(0x2215, 0x2215), Z = String.fromCharCode(0x200b)
@@ -4562,8 +4587,9 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
                       // credential's `:` and `@`, and the URL before it
                       // prints its host, the username's text.
                       "http://q.qqqa" + String.fromCharCode(0x2215) + "://\tqq:zzzzzz@cdn.test/live/1.ts"]
-    for (let i = 0; i < 40000 + residual.length; i++) {
-      let s = residual[i - 40000]
+    const extra = residual.concat(namedShapes)
+    for (let i = 0; i < 40000 + extra.length; i++) {
+      let s = extra[i - 40000]
       if (i < 40000) {
         x = (x * 1103515245 + 12345) & 0x7fffffff
         s = bases[(x >> 8) % 4]
@@ -4579,11 +4605,12 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
       if (plain) plainLeaks++
       if (leaks(body(s)) && !plain) {
         if (named(s)) pinned++
+        else if (namedControl(s)) pinnedNamed++
         else if (bad.length < 4) bad.push(JSON.stringify(s))
       }
     }
-    return [bad, plainLeaks > 1000, pinned >= residual.length]
-  }, [[], true, true])
+    return [bad, plainLeaks > 1000, pinned >= residual.length, pinnedNamed]
+  }, [[], true, true, 3])
   // D-SINK-95 and D-SINK-96 kept linear: each shape at 40,000 characters
   // under 100 ms, best of three, and four times the input under eight times
   // the cost (plus a 5 ms floor), best of five. The look-alike shape is

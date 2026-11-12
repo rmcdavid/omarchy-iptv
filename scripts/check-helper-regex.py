@@ -307,6 +307,12 @@ REVIEWED = [
      "#EXTINF line; the review of 4d13d71)"),
     (r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)', "provider",
      "linear: as _ATTR_QUOTED; the value run has nothing after it (_ATTR_BARE)"),
+    (r'\s*[A-Za-z0-9_.\-]+=', "provider",
+     "linear: matched at one given position, a whitespace run and a key run over disjoint classes and the "
+     "literal `=` neither holds, so each backs off at most once; asked only where a bare value's growth "
+     "across whitespace from a URL's own colon would take an `@`, at that value's end, which is where the "
+     "walk's next _ATTR_BARE match reads the same runs (_ATTR_KEY_AHEAD, parse_attrs, the review of "
+     "e038d58)"),
     (r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", "user",
      "linear: anchored; the scheme run cannot hold ':' and the authority run has nothing after it "
      "(host_port_of)"),

@@ -73,7 +73,7 @@ class FixtureTest(unittest.TestCase):
     def test_the_fixture_is_ascii_and_whole(self):
         self.assertTrue(all(b < 0x80 for b in FIXTURE_BYTES))
         vectors = FIXTURE["vectors"]
-        self.assertGreaterEqual(len(vectors), 150)
+        self.assertGreaterEqual(len(vectors), 151)
         # Each half of the rule is there: broken marks that now redact,
         # tokens, the residuals, the accepted false positives, and the lines
         # the review of cbd6679 found changed that the caps keep.
@@ -572,6 +572,31 @@ def credential_holds_a_delimited_run(text):
     return False
 
 
+def named_scheme_behind_a_control_mark(text):
+    """Whether the text holds the second residual the multi-insert sweep
+    pins by name (the review of e038d58, stated as the lead's call under the
+    owner's standing authority of 2026-11-09): a URL, as
+    tests/url_reading_rule.py reads one, whose scheme is a NAMED one after
+    text in its token that is not opening brackets and quotes alone, whose
+    mark holds a control (C0, DEL or C1) and reads the clean `://` once the
+    controls are deleted, and whose run holds an `@`
+    (`News qq_tcp:<NUL>//zzzzzz@cdn.test/live/1.ts HD`). The plain sinks
+    read that mark as not clean and withhold the token (D-SINK-96); the
+    sinks that delete controls, and the fold for the controls it removes,
+    read the clean `://` and print the username as the scheme's URL's
+    (the whole username in the helper, its head in the model), as the clean
+    form itself prints at every sink (pinned in url-mark.json)."""
+    for start, mark, mark_end, end in rule.urls(text):
+        scheme = "".join(c for c in text[start:mark] if " " <= c <= "~").lower()
+        opening = text[text.rfind(" ", 0, start) + 1:start].strip("([{<\"'`")
+        written = text[mark:mark_end]
+        cleaned = "".join(c for c in written if not (c < " " or "\x7f" <= c <= "\x9f"))
+        if (scheme in helper.NAMED_SCHEMES and opening and written != "://" and cleaned == "://"
+                and "@" in text[mark_end:end]):
+            return True
+    return False
+
+
 MULTI_BASES = ["http://qqqqqq:zzzzzz@cdn.test/live/1.ts", "http://cdn.test/live/qqqqqq/zzzzzz/1.ts",
                "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "qqqqqq:zzzzzz@cdn.test/live/1.ts"]
 MULTI_PIECES = [chr(c) for c in (0x200B, 0x34F, 0x338, 0xA0, 0x3000, 0x2028, 1, 0x7F, 0x85, 9, 10, 13, 11, 12, 0xFFFD,
@@ -611,7 +636,10 @@ class MultiInsertTest(unittest.TestCase):
     same inputs, the sinks that delete controls (player_title_text, the
     notification) only where the plain ones do but for the residual
     credential_holds_a_delimited_run names, and fold-then-redact only where
-    the plain sinks do."""
+    the plain sinks do. Both but for the residual the review of e038d58
+    found and the lead's call states rather than closes, which
+    named_scheme_behind_a_control_mark names exactly: a control inside a
+    named scheme's mark, which those sinks delete before they read."""
 
     def test_the_invariants_hold_over_several_insertions(self):
         # The residual's own shapes, so its name is reached on every run.
@@ -625,18 +653,30 @@ class MultiInsertTest(unittest.TestCase):
                     # credential's `:` and `@`, and the URL before it prints
                     # its host, the username's text.
                     "News http://q.qqqa" + chr(0x2215) + "://\tqq:zzzzzz@cdn.test/live/1.ts HD"]
-        texts = multi_inputs(50000, 2026) + residual
+        # The second residual's shapes (the review of e038d58): a control
+        # beside the colon, before it, and between the slashes; the fold
+        # removes the first and the last.
+        named = ["News qq_tcp:\x00//zzzzzz@cdn.test/live/1.ts HD",
+                 "News qq_https\x9b://zzzzzz@cdn.test/live/1.ts HD",
+                 "News qq_udp:/\x85/zzzzzz@cdn.test/live/1.ts HD"]
+        texts = multi_inputs(50000, 2026) + residual + named
         model = node(MODEL_SINKS, texts)
         bad = {}
         pinned = 0
+        pinned_named = {"deleting": 0, "fold": 0}
         for text, (model_plain, model_body) in zip(texts, model):
             plain = leaks(helper.redact_urls(text))
+            exempt = named_scheme_behind_a_control_mark(text)
+            folded = leaks(fold_redact(text)) and not plain
             checks = {"helper plain != model plain": plain != leaks(model_plain),
-                      "fold beyond plain": leaks(fold_redact(text)) and not plain}
+                      "fold beyond plain": folded and not exempt}
+            pinned_named["fold"] += folded and exempt
             deleting = leaks(helper.player_title_text(text)) or leaks(model_body)
             if deleting and not plain:
                 if credential_holds_a_delimited_run(text):
                     pinned += 1
+                elif exempt:
+                    pinned_named["deleting"] += 1
                 else:
                     checks["deleting beyond plain"] = True
             for name, failed in checks.items():
@@ -644,9 +684,10 @@ class MultiInsertTest(unittest.TestCase):
                     bad.setdefault(name, []).append(ascii(text))
         self.assertEqual({k: v[:3] for k, v in bad.items()}, {})
         # Not vacuous: the plain sinks leak on some (the stated residuals),
-        # and the pinned residual is reached.
+        # and each pinned residual is reached.
         self.assertGreater(sum(1 for t in texts if leaks(helper.redact_urls(t))), 1000)
         self.assertGreaterEqual(pinned, len(residual))
+        self.assertEqual(pinned_named, {"deleting": len(named), "fold": 2})
 
 
 if __name__ == "__main__":

@@ -954,6 +954,15 @@
    "py": "News [host withheld] HD",
    "jsDeleting": "News q.qqqa HD",
    "pyDeleting": "News http://q.qqqa HD"
+  },
+  {
+   "why": "residual, stated (the review of e038d58, the lead's call): a username ending in a NAMED scheme after a character that is no scheme character, with a control inside the mark (here a NUL beside the colon), is withheld at the plain sinks, which read the mark as not clean; the sinks that delete controls (the window title, the notification) delete it and read the clean `://`, so the helper prints the whole username and the model its head there, and so does the fold for the controls it removes (U+0000..U+0008, U+000E..U+001F, U+007F, U+0085); the password prints at no sink",
+   "text": "News qq_tcp:\u0000//zzzzzz@cdn.test/live/1.ts HD",
+   "js": "News [host withheld] HD",
+   "py": "News [host withheld] HD",
+   "jsDeleting": "News qq_cdn.test HD",
+   "pyDeleting": "News qq_tcp://cdn.test HD",
+   "pyFold": "News qq_tcp://cdn.test HD"
   }
  ],
  "fuzz": {

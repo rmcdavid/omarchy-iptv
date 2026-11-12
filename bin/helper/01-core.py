@@ -1008,21 +1008,43 @@ def _slash_at_or_after(text: str, at: int, hi: int) -> int:
 
 def _stop_end(text: str, stop: int) -> int:
     """Where next_url's search for candidates ends when it is given `stop`:
-    the first of the second SLASH at or after `stop`, the end of the run of
-    `:`, FILLER and SLASH that starts at `stop` (_MARK_REACH), and the end
-    of the first pair of wide FILLER code points in that run
-    (_FILLER_WIDE_PAIR), and never before `stop` + 1. A function of the
-    text and `stop` alone, so a UrlReading asks it once (the review of
-    2942e41: asked once a next_url call, with the slashes searched for from
-    `stop` to the text's end before the run bounded them, the cut's
-    credential reading cost one pass over the rest of the text for each URL
-    in its window, 53.9 s on one description of a million characters
-    through clean_detail). The run is matched first and the slashes are
-    searched for only inside it, which is the same end, since it is never
-    past the run's: so a text with no slash after `stop` costs the run, and
-    a run of FILLER as long as the text costs one pass, once a reading."""
+    just past the run's second SLASH, or its only one, or `stop`, where the
+    run is that of `:`, FILLER and SLASH that starts at `stop` (_MARK_REACH),
+    or the end of the first pair of wide FILLER code points in that run
+    (_FILLER_WIDE_PAIR) when that is sooner, and never before `stop` + 1.
+    A function of the text and `stop` alone, so a UrlReading asks it once
+    (the review of 2942e41: asked once a next_url call, with the slashes
+    searched for from `stop` to the text's end before the run bounded them,
+    the cut's credential reading cost one pass over the rest of the text for
+    each URL in its window, 53.9 s on one description of a million
+    characters through clean_detail). The run is matched first and the
+    slashes are searched for only inside it, which is the same end, since it
+    is never past the run's: so a text with no slash after `stop` costs the
+    run, and a run of FILLER as long as the text costs one pass, once a
+    reading.
+
+    When the run holds fewer than two SLASHes the end is the one it holds,
+    or `stop` (the review of e038d58, the lead's call under the owner's
+    standing authority of 2026-11-09): a candidate whose P starts at or
+    before `stop` and whose mark runs past it has every character from
+    `stop` to its mark's end in the run, so it ends at the run's second
+    SLASH when `stop` stands in its P, and at the run's first when `stop`
+    stands between its slashes (`ab:/<U+200B>/x` stopped at 4 is one); with
+    no SLASH in the run none runs past `stop`. Ending at the run's end
+    instead, the reading's last next_url call searched the whole run for
+    candidates it could only refuse: a window of URLs before a tail of `:`
+    cost 172.6 ms at 1M characters through clean_detail, and costs the run's
+    one match now (40.6 ms). The lead's call named `stop` + 1 whenever the
+    run holds no second SLASH, which loses the candidate `stop` stands
+    inside; the first SLASH is the end that keeps it (StopEndTests holds
+    both; the review's identity sweep, 120,000 next_url calls against
+    2942e41, finds no difference with either)."""
     reach = _MARK_REACH.match(text, stop).end()
-    end = min(reach, _slash_at_or_after(text, _slash_at_or_after(text, stop, reach) + 1, reach) + 1)
+    first = _slash_at_or_after(text, stop, reach)
+    if first == reach:
+        return stop + 1
+    second = _slash_at_or_after(text, first + 1, reach)
+    end = (first if second == reach else second) + 1
     pair = _FILLER_WIDE_PAIR.search(text, stop, end)
     return max(stop + 1, end if pair is None else pair.end())
 
@@ -1104,13 +1126,14 @@ def next_url(text: str, search: int, resume: int, plain: bool | None = None,
         return None
     dead = resume
     # With `stop`, the candidates are searched for no further than
-    # _stop_end: the first of the second SLASH at or after it, the end of
-    # the run of `:`, FILLER and SLASH that starts at it (_MARK_REACH), and
-    # the end of the first pair of wide FILLER code points in that run
-    # (_FILLER_WIDE_PAIR). A candidate whose P starts at or before `stop`
-    # ends at one of those slashes, inside that run, holding no such pair
-    # (the caps), so the search finds it, and the first one it finds past
-    # `stop` ends the reading as it would have. Without that end the search
+    # _stop_end: just past the second SLASH of the run of `:`, FILLER and
+    # SLASH that starts at it (_MARK_REACH), or past its only one, or past
+    # `stop` when it holds none, or the end of the first pair of wide FILLER
+    # code points in that run (_FILLER_WIDE_PAIR) when that is sooner. A
+    # candidate whose P starts at or before `stop` ends before `stop` or at
+    # one of those slashes, inside that run, holding no such pair (the
+    # caps), so the search finds it, and the first one it finds past `stop`
+    # ends the reading as it would have. Without that end the search
     # read on to the text's end once candidates the reading rejects were no
     # longer candidates (the review of 4d13d71).
     end = len(text)
@@ -1422,7 +1445,16 @@ def _unnamed_scheme_credential(text: str, ts: int, te: int, reading: UrlReading,
     `://` (`qq_tcp://zzzzzz@cdn.test`, case-blind), prints whole in the
     helper (`qq_tcp://cdn.test`) and its head in the model (`qq_cdn.test`),
     as `1http://u:p@h` does. The token is withheld from its start, as
-    `abc:http://u:p@h` is. Model.unnamedSchemeCredential is the mirror."""
+    `abc:http://u:p@h` is. And a control inside the mark
+    (`News qq_tcp:<NUL>//zzzzzz@cdn.test/live/1.ts HD`) is withheld at the
+    plain sinks and printed at the window title and the notification -- the
+    helper prints the whole username, the model its head -- and at the fold
+    for the controls it removes (U+0000..U+0008, U+000E..U+001F, U+007F and
+    U+0085): those sinks delete the control before they read, and read the
+    clean `://` (the review of e038d58, stated as the lead's call under the
+    owner's standing authority of 2026-11-09; pinned in url-mark.json, and
+    MultiInsertTest exempts exactly this class).
+    Model.unnamedSchemeCredential is the mirror."""
     reading.need(te)
     urls = reading.urls
     opening = _OPENING_RUN.match(text, ts, te).end()

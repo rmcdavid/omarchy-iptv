@@ -1262,8 +1262,15 @@ var OPENING_CHARS = "([{<\"'`"
 // clean `://` (`qq_tcp://zzzzzz@cdn.test`, case-blind), prints its head
 // here (`qq_cdn.test`) and whole in the helper (`qq_tcp://cdn.test`), as
 // `1http://u:p@h` does. tokenCredential withholds the token from its start,
-// as `abc:http://u:p@h` is. The helper's _unnamed_scheme_credential is the
-// mirror.
+// as `abc:http://u:p@h` is. And a control inside the mark
+// (`News qq_tcp:<NUL>//zzzzzz@cdn.test/live/1.ts HD`) is withheld at the
+// plain sinks and printed at the window title and the notification -- the
+// helper prints the whole username, the model its head -- and at the fold
+// for the controls it removes (U+0000..U+0008, U+000E..U+001F, U+007F and
+// U+0085): those sinks delete the control before they read, and read the
+// clean `://` (the review of e038d58, stated as the lead's call under the
+// owner's standing authority of 2026-11-09; pinned in url-mark.json). The
+// helper's _unnamed_scheme_credential is the mirror.
 //
 // Linear: the next `@` is searched for once and kept while the URLs pass it,
 // so no search reads past a run more than once, each URL is walked for its
