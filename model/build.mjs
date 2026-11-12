@@ -63,7 +63,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.18.0"
+var PLUGIN_VERSION = "0.19.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -110,7 +110,7 @@ var GLYPHS = {
   alert: "\udb80\udc26",     // U+F0026 nf-md-alert             failed / banner
   loading: "\udb80\uddd8",   // U+F01D8 nf-md-dots_horizontal   loading
   refresh: "\udb81\udc50",   // U+F0450 nf-md-refresh           refresh notification
-  history: "\udb80\udeda",   // U+F02DA nf-md-history           recent
+  history: "\udb80\udeda",   // U+F02DA nf-md-history           behind live (bar lead glyph)
   // Sources screens (UX-SOURCES.md 4.6)
   sources: "\udb81\udc11",   // U+F0411 nf-md-playlist_play     pinned Sources row
   check: "\udb80\udd2c",     // U+F012C nf-md-check             active source marker

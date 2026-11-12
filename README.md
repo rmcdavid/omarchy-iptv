@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.18.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.19.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -33,10 +33,18 @@ player's command line outlives the update. 0.18.0 is updated for Omarchy
 4.5.0 -- its notifications, its six bar sections and the keyboard shortcut
 it now takes from the guide (if you pasted the guide's keybinding, change
 its chord: see Install). This was checked against 4.5.0's own code and in a
-headless test session, not yet on a running 4.5.0 desktop. It also closes a
+headless test session. On a running 4.5.0 desktop it was checked for its
+notifications, for the plugin reading its settings in each bar section, and
+for which chords 4.5.0 takes; saving a setting from one of the new sections
+was not tried there. It also closes a
 set of ways a username or password in a playlist or a guide could be shown
 as a channel's name, group or programme text, or, from a playlist that
-names several guides, sent to another guide's server.
+names several guides, sent to another guide's server. 0.19.0 hides a
+username or password in a playlist or a guide in more of the odd ways a
+provider can write one, reads a Sources form address to a screen reader as
+no more than its scheme and host, and refuses a host name holding a
+character no host name may hold before the helper looks it up or hands it
+to the player.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -286,7 +294,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (139 checks, 2026-11-07).
+  branch (139 checks, 2026-11-12).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -766,10 +774,14 @@ masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
 while editing. Revealing is for the screen only: what a field publishes on
 the desktop accessibility bus, which screen readers and every program
 running as you can read (Quickshell 0.3.2 carries the upstream change
-that lets a shell window publish there), is always masked, since 0.16.0: a
-URL, the Xtream server's included, with its user name, password and query
-values hidden; a local path and the label as typed; and the username, the
-password and a server typed without `http://` as one `*` per character.
+that lets a shell window publish there), is always masked, since 0.16.0,
+and since 0.19.0 an address field, the Xtream server's included, publishes
+no more than its scheme and host (`http://****@cdn.example.com/...`, a
+user name and password as `****`), and one `*` per character for anything
+else, a local path and an address with no `/` yet after its host included;
+the label publishes as typed until it holds anything shaped like an
+address or a login, and then one `*` per character until it is emptied;
+and the username and the password publish one `*` per character.
 Only `http://`, `https://`, and absolute paths are accepted, and no prefix
 is guessed. One thing to know before you choose: `http://`
 sends the address and any password in it unencrypted, to anyone on the path
@@ -933,9 +945,11 @@ carry channel ids — most do — are not affected at all.
   stripped, a web address written into a name or a group (one written
   with its scheme, such as `http://`) is shown as its host wherever the
   shell shows the name (the guide, the bar, notifications, `status`, the
-  window title), control characters are left out of the
-  window title and notifications, and mpv property expansion is disabled
-  for the window title.
+  window title), text that reads like a login (`user:password@host` with
+  no scheme, or a word, a colon and later an `@` in the same word, such as
+  `Sports:Live@HD`) is shown as `[host withheld]`, control characters are
+  left out of the window title and notifications, and mpv property
+  expansion is disabled for the window title.
 - On Omarchy 4.0 the player window is rendered slightly translucent under
   the defaults. Omarchy 4.0 exempts media players from its default opacity by
   class name, and ours is `omarchy-iptv` rather than `mpv`, so the exemption
@@ -1020,7 +1034,9 @@ carry channel ids — most do — are not affected at all.
   -- `127.0.0.1`, `localhost` -- the host is the address AND the port, so a
   local relay such as Threadfin may redirect within its own port but not
   to another program's). When the server's
-  answer is not HTTP at all, the error shows at most 200 characters of it.
+  answer is not HTTP at all, or a redirect names an address the HTTP
+  library cannot read, the error names only the kind of failure
+  (`BadStatusLine`, `InvalidURL`), never the text of it.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.
@@ -1041,9 +1057,11 @@ carry channel ids — most do — are not affected at all.
   rendezvous mode, or a `localport`, `localaddr`, `reuse` or `listen`
   setting in the address -- is skipped. A playlist from the internet may not
   point channels at addresses on this computer or your local network
-  written out as such (a playlist from your own network or a file may; the
-  player looks up a channel's host name itself, so a name that leads there
-  is not caught), and a sign-in header it
+  written out as such, nor at a host name of a single word, such as
+  `tvheadend`, other than its own server's (a playlist from your own
+  network or a file may; the player looks up a channel's host name itself,
+  so a name with a dot in it that leads there is not caught), and a
+  sign-in header it
   sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
   only for channels on the playlist's own server -- on this computer, its
   own port. A playlist served from this computer (a relay such as Threadfin

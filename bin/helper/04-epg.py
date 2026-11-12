@@ -66,6 +66,20 @@ def clean_field(text: str | None, limit: int) -> str:
     return _CONTROL_WS.sub(" ", text).strip()[:limit]
 
 
+# How much RAW text the guide's cleaners fold before their cut: 64 times
+# the field's cap, cut by cut_free_text before fold_space (the review of
+# cbd6679, its cost finding). element_text applies no cap, so fold_space ran
+# over the whole of a 1M-character description first, at about 1.5 us a
+# character on `<U+200B><U+2215>` repeated (1,551 ms at 1M, 6,263 at 4M, where
+# 0.18.0 took 31 and 123). The cut is cut_free_text's, so it never folds half
+# a URL or half a credential. What it can change in a stored field, stated:
+# one whose first 64 caps of raw text fold to less than its cap -- 25,600
+# characters of whitespace and controls before a 400-character description
+# -- is stored from those alone, shorter or empty; and an item the raw cut
+# straddles is dropped there, before the fold.
+EPG_RAW_FACTOR = 64
+
+
 def clean_title(text: str | None) -> str:
     """fold_space, trimmed, cut by cut_free_text (D-SINK-75): a title is
     stored as written and redacted only at its sinks, after this cut.
@@ -78,7 +92,7 @@ def clean_title(text: str | None) -> str:
     cut_free_text drops, where the split left a run with no `://` to keep."""
     if not text:
         return ""
-    return cut_free_text(fold_space(text).strip(), EPG_MAX_TITLE)
+    return cut_free_text(fold_space(cut_free_text(text, EPG_MAX_TITLE * EPG_RAW_FACTOR)).strip(), EPG_MAX_TITLE)
 
 
 def element_text(elem: Any) -> str:
@@ -160,15 +174,18 @@ def clean_detail(text: str | None, limit: int) -> str:
     # host and the password's tail as text. The final clean_field after the
     # redaction keeps the plain fold, since no credential is left for it to
     # split.
-    text = cut_free_text(fold_space(text or "").strip(), limit)
-    if "://" not in text:
+    text = cut_free_text(fold_space(cut_free_text(text or "", limit * EPG_RAW_FACTOR)).strip(), limit)
+    if not redaction_can_change(text):
         # The common case, and the hot one. redact_urls cannot rewrite text
-        # without "://", so this guard changes no answer. It was worth 2.7 s of
-        # a 6.3 s 48,000-programme fetch with a 600-character description on
-        # every programme, back when the old pattern retried at every word
-        # boundary and prose is all word boundaries; redact_urls takes the same
-        # exit itself now (F-SINK-11), so this one is a call it does not make
-        # rather than a stall it avoids. Kept: one `in` beats one call.
+        # redaction_can_change refuses, so this guard changes no answer. It was
+        # worth 2.7 s of a 6.3 s 48,000-programme fetch with a 600-character
+        # description on every programme, back when the old pattern retried at
+        # every word boundary and prose is all word boundaries; redact_urls
+        # takes the same exit itself now (F-SINK-11), so this one is a call it
+        # does not make rather than a stall it avoids. It was `"://" not in
+        # text` until D-SINK-95 and D-SINK-96 (2026-11-11), which stored a URL
+        # whose mark an odd character breaks, and a scheme-less
+        # `user:pass@host`, unredacted in epg-now.json.
         return text
     return clean_field(redact_urls(text), limit)
 
@@ -1208,7 +1225,7 @@ def load_window(path: str) -> dict[str, Any] | None:
         return None
     head, _, body = text.partition("\n")
     try:
-        meta = json.loads(head)
+        meta = json_decode(head)
     except ValueError:
         return None
     if not isinstance(meta, dict) or meta.get("version") != 1:
@@ -1239,7 +1256,7 @@ def window_channels(window: dict[str, Any]) -> dict[str, str]:
     for line in window.get("lines", []):
         cid, tab, blob = line.partition("\t")
         if tab:
-            out[json.loads(cid)] = blob
+            out[json_decode(cid)] = blob
     return out
 
 
@@ -1349,7 +1366,7 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
 def record_to_dict(record: str) -> dict[str, Any]:
     """-> {"title", "start", "stop"} plus whichever EPG_DETAIL_KEYS the record
     carries. Diagnostics and tests; programme_json is the hot path."""
-    out = dict(json.loads('{"title":' + record[22:] + "}"))
+    out = dict(json_decode('{"title":' + record[22:] + "}"))
     out["start"] = int(record[:10])
     out["stop"] = int(record[11:21])
     return out
@@ -1387,7 +1404,7 @@ def _window_id_ok(cid: str) -> bool:
     if inner.isprintable() and '"' not in inner and "\\" not in inner:
         return True
     try:
-        return isinstance(json.loads(cid), str)
+        return isinstance(json_decode(cid), str)
     except ValueError:
         return False
 
@@ -1400,6 +1417,35 @@ def _record_ok(record: str) -> bool:
     raised on it, which ended every recompute as `internal`."""
     return (len(record) >= 24 and record[10] == " " == record[21] and record[:10].isdigit()
             and record[11:21].isdigit() and record[:21].isascii())
+
+
+def _record_tail_ok(record: str) -> bool:
+    """Is the record's tail, from index 22, what record_body writes: the
+    title's JSON string, then `,"key":"value"` members and nothing else?
+    D-EPG-17: programme_json pastes the tail as it is, so a tail that is not
+    JSON (a hand edit, a damaged disk) wrote a fragment line no reader can
+    parse; the shell indexes that line by its key alone, so the channel
+    counted as covered and showed no programme. Asked only of the one or two
+    records a channel's entry is made from, and with the decoder's own
+    string scanner rather than a whole decode: a decode of each cost the
+    10,000-channel recompute about two thirds again (measured), and a string
+    cannot nest, so the scanner has no depth to run out of (D-STATE-7)."""
+    scan = json.decoder.scanstring
+    size = len(record)
+    try:
+        if record[22:23] != '"':
+            return False
+        end = scan(record, 23)[1]
+        while end < size:
+            if record[end:end + 2] != ',"':
+                return False
+            end = scan(record, end + 2)[1]
+            if record[end:end + 2] != ':"':
+                return False
+            end = scan(record, end + 2)[1]
+    except ValueError:
+        return False
+    return True
 
 
 def _untitled(record: str) -> bool:
@@ -1425,8 +1471,12 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
     wrote holds no such line; one an earlier helper wrote can (a playlist
     tvg-id carrying a TAB, a CR or another C0 control), and it used to end
     the 5-minute recompute in `internal` or write an epg-now.json no reader
-    could parse, for every channel of the source, until the next fetch. The
-    record's tail is not re-checked: record_body has always encoded it.
+    could parse, for every channel of the source, until the next fetch.
+
+    D-EPG-17: and when the tail of a record it would write is not what
+    record_body writes (_record_tail_ok). record_body has always encoded the
+    tail, so only a hand edit or a damaged disk makes one; pasted unchecked,
+    it wrote a fragment line that does not parse.
     """
     sep = EPG_RECORD_SEP
     bisect_right = bisect.bisect_right
@@ -1455,8 +1505,8 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
                 break
             probe -= 1
         following = records[index] if index < len(records) else None
-        if (current is not None and not _record_ok(current)) or (
-                following is not None and not _record_ok(following)):
+        if (current is not None and not (_record_ok(current) and _record_tail_ok(current))) or (
+                following is not None and not (_record_ok(following) and _record_tail_ok(following))):
             skipped += 1
             continue
         # R31c (D-EPG-11): an entry is written only with a TITLED now or

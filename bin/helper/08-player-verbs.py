@@ -16,6 +16,43 @@ def fallback_channel_name(url: str, default: str) -> str:
     return url_host(url) or default
 
 
+# D-PLY-63: Model.looksLikeUrl's two patterns as one, matched at the start.
+# ASCII, because the model's `/i` never folds a letter outside ASCII onto one
+# inside it and Python's does (U+212A KELVIN SIGN reads as `k`, U+017F as `s`).
+_NAME_URL_SHAPE = re.compile(r"[a-z][a-z0-9+.-]*://|(?:rtp|udp|rtsp|mms):", re.I | re.A)
+
+
+def shown_name(channel: dict[str, Any], position: int) -> str:
+    """The name the guide row shows for a cached channel: Model.displayName's
+    mirror (D-PLY-63), run with it over one shared fixture (display-names,
+    dev branch tests). The stored `name` is clean_name's answer, which keeps
+    a U+FEFF because the `n:` id is hashed from it (D-STATE-2); what is SHOWN
+    takes the reader's class off both ends, leading dashes with it, and a
+    name that is then empty or URL-shaped gives way to the tvg-name, and
+    that to the word and the row's position. The player's title, the stash
+    a reattaching shell labels the bar from, and the reply's `name` all take
+    this, so a name of U+FEFF alone no longer titles the player with
+    nothing beside a row that reads its tvg-name."""
+    for key in ("name", "tvgName"):
+        text = str(channel.get(key) or "").lstrip(URL_SPACE_CHARS + "-").rstrip(URL_SPACE_CHARS)
+        if text and not _NAME_URL_SHAPE.match(text):
+            return text
+    return GENERATED_NAME_FORMAT % position if position > 0 else GENERATED_NAME_WORD + " ?"
+
+
+def channel_position(channels: list[Any], channel: dict[str, Any]) -> int:
+    """The 1-based place of a cached channel among the rows the guide makes
+    (Model.prepareChannels: every entry that is an object, a list included),
+    which is the number in a generated name. 0 when it is not in the list."""
+    place = 0
+    for entry in channels:
+        if isinstance(entry, (dict, list)):
+            place += 1
+        if entry is channel:
+            return place
+    return 0
+
+
 def cached_source(document: dict[str, Any]) -> dict[str, Any]:
     """playlist_source as the parse saw it, read back out of channels.json
     (D-SINK-58, 2026-10-29), so player_target can run the parse's host rule
@@ -54,12 +91,51 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     of its playlist (cached_source) -- so a cache nothing checked cannot
     reach a LAN or loopback literal, or hand a sign-in header to another
     host, while the refresh that would replace it keeps failing. A `--url`
-    a human typed meets the listening rule only (it has no playlist)."""
+    a human typed meets the listening rule only (it has no playlist).
+
+    D-SINK-87 (the owner, 2026-11-08): and both, before anything is sent to
+    the player, an address naming a host the player would read in a form
+    host_name_refused refuses (stream_host_name_refused, every reading): a
+    cache written before the rule can hold one (DESTINATION_RULES 3 has the
+    shell refetch it once at the next start or swap), and `--url` is typed.
+    Refused as `unsupported_scheme` with one fixed sentence: unlike
+    `local_address` below, it names no host, which may be a userinfo. The
+    shell reads that code as the channel's own refusal
+    (PLAYER_START_CHANNEL_REFUSALS: a card, and the channel marked failed,
+    unless the user has stopped since) on a `player start` or `player
+    restart` it sends with no player playing on, and on the automatic
+    restart of another build's player, which it then stops. A `player
+    start` refused while the player the shell observes plays on is D-PLY-52's
+    instead: the label goes back and nothing is told or marked. A channel
+    change sends one while another build's player is still owed its restart
+    (Model.playFork). A `play`, a zap into a running player, is untold the
+    same way, D-PLY-42's untold refusal (open, the owner's call): no card
+    and no mark, so a next or previous zap lands on the channel again.
+
+    D-SINK-91 (2026-11-09): and both, an IPv6 literal whose zone is not a
+    number (stream_zone_refused), which FFmpeg would cut into another host:
+    `unsupported_scheme` again, routed as above, with its own fixed
+    sentence.
+
+    D-SINK-89 (the owner, 2026-11-08): and a cached channel only, never a
+    typed `--url`, whose address names a host of one label from a playlist
+    the cache records as not local (stream_label_refused, against
+    cached_source as D-SINK-58's host rule is). Refused as `local_address`,
+    the code of a channel refused for where its playlist sent it, with one
+    fixed sentence that names no host, which may be a username. The shell
+    routes it as it routes `local_address` (PLAYER_START_CHANNEL_REFUSALS):
+    on a `player start` or `player restart` with no player playing on, and
+    on the automatic restart of another build's player, a card ("Refused a
+    local address") and the channel marked failed, unless the user has
+    stopped since; a start refused while the observed player plays on is
+    D-PLY-52's, the label put back and nothing told or marked; and a `play`,
+    a zap into a running player, is D-PLY-42's untold refusal (open, the
+    owner's call): no card and no mark."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)
         url = str(channel.get("url") or "")
-        name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
+        name = shown_name(channel, channel_position(document["channels"], channel))
         headers = dict(channel.get("headers")) if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
         source = cached_source(document)
@@ -70,11 +146,17 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         group = ""
         source = None
     if not is_stream_url(url):
-        raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+        raise HelperError("unsupported_scheme", "unsupported stream URL scheme%s" % scheme_phrase(stream_scheme(url)))
+    if stream_host_name_refused(url):
+        raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
+    if stream_zone_refused(urllib.parse.urlsplit(url).netloc):
+        raise HelperError("unsupported_scheme", STREAM_ZONE_REFUSAL)
     if source is not None:
         if stream_host_refused(url, source):
             raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
                                                "chose; not played" % (url_host(url) or "the host"))
+        if stream_label_refused(url, url_host(url), stream_scheme(url), source):
+            raise HelperError("local_address", STREAM_LABEL_REFUSAL)
         held = {"url": url, "headers": headers}
         if drop_sign_in_headers(held, source):
             log("play: dropped a sign-in header for another host")
@@ -581,7 +663,8 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
         client.try_command("set_property", prop, "auto")
     # F-SINK-14 (2026-10-29): the name the window title and media-title show
     # is the one the guide row shows -- redact_urls, Model.sinkText's mirror
-    # (the shared shown-names fixture, dev branch, runs both). A name holding a
+    # (the shared shown-names fixture, dev branch, runs both), over
+    # shown_name's choice of name (D-PLY-63, player_target). A name holding a
     # credentialed URL put the whole URL in the compositor's toplevel title,
     # where every client that lists windows reads it. `$>` stays (S-01).
     # F-SINK-16: and with no control character in it. The parse keeps a
@@ -891,6 +974,9 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
     state = "unknown"
     reason = ""
     last_error = launch_reason(launch_errors or [])
+    # D-PLY-29: a warning replaces only a reason that is itself a warning
+    # (or none), so a driver line after the failure does not become it.
+    named = last_error != "" and not player_log_warning(last_error)
     while time.monotonic() < deadline:
         events = client.drain_events(deadline)
         if events is None:                       # mpv closed the connection
@@ -900,7 +986,11 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
             event = str(message.get("event") or "")
             mine = entry_id is None or message.get("playlist_entry_id") == entry_id
             if event == "log-message" and str(message.get("level") or "") in ("error", "fatal"):
-                last_error = redact_urls(str(message.get("text") or "")).strip() or last_error
+                text = redact_urls(str(message.get("text") or "")).strip()
+                if text and not player_log_warning(text):
+                    last_error, named = text, True
+                elif text and not named:
+                    last_error = text
             elif event == "file-loaded":
                 return {"state": "playing", "reason": ""}
             elif event == "end-file" and mine:

@@ -2236,7 +2236,7 @@ Item {
     var result = root.service.buildXtreamSource({ server: values.server, username: values.username, password: values.password, label: lv.label })
     // UX-SOURCES 6.5: the password leaves the form state as soon as the
     // URLs are built; the form is never shown pre-filled again.
-    root.guide = Model.withFormValue(root.guide, "password", "")
+    root.writeFormValue("password", "", false)
     result = root.retryIfUnfetched(result)
     if (!result || result.ok !== true) { root.failForm(root.resultError(result, "server")); return }
     root.startProbe(result.id, x.host, "url")
@@ -2256,13 +2256,15 @@ Item {
       root.refocus()
       return
     }
+    // D-SINK-99: the host these lines name is HOST_WITHHELD while the form
+    // holds a withheld URL (Model.formLineHost), read before the form closes.
     if (r.ok === true) {
       var event = root.form.sourceId !== "" ? "saved" : (root.firstRunForm ? "loaded" : "added")
-      root.finishForm(event, { id: id, host: String(r.host || root.form.probeHost), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
+      root.finishForm(event, { id: id, host: Model.formLineHost(root.form, String(r.host || root.form.probeHost)), channelCount: Number(r.channelCount), groupCount: Number(r.groupCount) })
       return
     }
     var field = root.form.kind === "xtream" ? "server" : "playlist"
-    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind, String(r.code || "")) })
+    root.failForm({ code: "probe", field: field, message: Model.formProbeFailureLine(root.form, r.reason, String(r.host || root.form.probeHost), String(r.code || "")) })
   }
 
   // A probe outside a form: Enter / Space on a never-fetched source, or an
@@ -2633,18 +2635,12 @@ Item {
   }
 
   // The Label placeholder live-updates to the label Model.deriveLabel would
-  // give the current Playlist / Server value (UX-SOURCES 1.5, 5.1).
+  // give the current Playlist / Server value (UX-SOURCES 1.5, 5.1), or
+  // HOST_WITHHELD while that value's host is withheld (D-SINK-99); the model
+  // decides (Model.formLabelPlaceholder).
   function fieldPlaceholder(id) {
     if (id === "label") {
-      var f = root.form
-      var derived = ""
-      if (f && f.kind === "xtream") {
-        var s = Model.validateSourceUrl(f.values.server)
-        if (s.ok && s.kind === "http") derived = Model.deriveLabel(s.url)
-      } else if (f) {
-        var p = Model.validateSourceUrl(f.values.playlist)
-        if (p.ok) derived = Model.deriveLabel(p.url, p.kind)
-      }
+      var derived = Model.formLabelPlaceholder(root.form)
       return derived !== "" ? derived : root.copy.placeholderOptional
     }
     if (id === "playlist") return root.copy.placeholderPlaylist
@@ -2696,7 +2692,20 @@ Item {
   // and pasteFromProcess (the wl-paste answer), both below.
 
   function setFieldValue(id, value, typed) {
-    root.guide = Model.withFormValue(root.guide, id, Model.sanitizeTyping(value, Model.formCapacity(id)), { typed: typed })
+    root.writeFormValue(id, Model.sanitizeTyping(value, Model.formCapacity(id)), typed)
+  }
+
+  // The one place this file writes a form value: setFieldValue (Ctrl+U),
+  // pasteFromProcess, applyEdit (every key) and submitXtream's password
+  // clear all call it, and it hands the value to Model.withFormValue, the
+  // one place the model changes a form's value. That is where the label's
+  // held flag moves (Model.labelHeldAfter, D-SINK-98 round 4c), so no write
+  // of the label can skip it. The other label writes are the model's own:
+  // a form made (openAddForm, openEditForm's stored label, openXtreamForm,
+  // openFirstRun), the parent form a cancel returns to (closeForm), and
+  // Esc's clear of the focused field (onEscape, which calls withFormValue).
+  function writeFormValue(id, value, typed) {
+    root.guide = Model.withFormValue(root.guide, id, value, { typed: typed === true })
   }
 
   function toggleRevealField(id) {
@@ -2755,11 +2764,12 @@ Item {
     // is inside the pasted text (a tab in a password is refused by the
     // validator, never deleted into `pass`); a name field strips controls.
     // R33a: with the one stated exception -- a paste into a URL field joins
-    // its lines first (CR and LF removed, nothing else), so a URL a mail
-    // client wrapped is taken (Model.sanitizePasteInput).
+    // its lines first (its line terminators removed, nothing else; the
+    // seven of D-SINK-97), so a URL a mail client wrapped is taken
+    // (Model.sanitizePasteInput).
     var edit = Model.editInsert(value, range.start, range.end, Model.sanitizePasteInput(id, text, cap), cap)
     if (!edit.changed) return
-    root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
+    root.writeFormValue(id, edit.value, false)
     if (item) item.cursorPosition = edit.caret
   }
 
@@ -2846,7 +2856,7 @@ Item {
   // is being edited; a paste is the one edit that re-masks (pasteFromProcess).
   function applyEdit(id, item, edit) {
     if (!edit.changed) return
-    root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: true })
+    root.writeFormValue(id, edit.value, true)
     item.cursorPosition = edit.caret
   }
 
@@ -3204,6 +3214,17 @@ Item {
           selectedText: root.cursorInk
           fontFamily: root.fontFamily
           cornerRadius: root.cornerRadius
+          // D-A11Y-12, round 4c (the lead's call under the owner's standing
+          // authority of 2026-11-09): a named node of this file is on the bus
+          // only while it is shown -- `Accessible.ignored: !visible`, its own
+          // effective visibility, on the node itself and on each named node
+          // inside it. Not on a container alone: measured in a nested headless
+          // cage (round 4c), an ignored container's accessible descendants are
+          // RE-PARENTED to its nearest accessible ancestor, not removed, which
+          // is why the closed Tracks, Programme and Keys panels, each ignored
+          // while closed, still put their dialogs and labels on the bus. This
+          // dialog's name composes the cursor row's label even while closed.
+          Accessible.ignored: !visible
           Accessible.role: Accessible.Dialog
           Accessible.name: root.confirmMessage
           onCanceled: root.cancelRemove()
@@ -3240,6 +3261,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+            Accessible.ignored: !visible
             Accessible.role: Accessible.EditableText
             Accessible.name: root.copy.accessibleSearch
             Accessible.description: root.query
@@ -3259,6 +3281,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
+            Accessible.ignored: !visible
             Accessible.role: Accessible.Heading
             Accessible.name: root.headerTitle
           }
@@ -3300,6 +3323,7 @@ Item {
             : Style.normalFillFor(root.foreground, root.accent)
           opacity: visible ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: root.bannerFadeMs; easing.type: Easing.OutCubic } }
+          Accessible.ignored: !visible
           Accessible.role: Accessible.AlertMessage
           Accessible.name: root.bannerText
 
@@ -3387,6 +3411,14 @@ Item {
 
                   width: ListView.view.width
                   height: isHeader ? root.groupEntryHeight + Style.space(10) : root.groupEntryHeight
+                  // D-A11Y-12, round 4c: NOT taken off the bus while the column
+                  // is hidden (behind Sources and the forms), because the lever
+                  // does not hold here: measured in a nested cage, this
+                  // delegate's `Accessible.ignored`, even a constant `true`,
+                  // reads false again within 700 ms of the delegate being made,
+                  // and the entry stays on the bus; the same delegate shape in
+                  // a standalone probe stays off. The cause is not found, so
+                  // the column's list and entries are left as they were.
                   Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
                   Accessible.name: Model.scopeEntryAccessibleName({ label: label, count: count, kind: kind })
                   Accessible.selected: selected
@@ -3518,6 +3550,7 @@ Item {
                 radius: root.cornerRadius
                 color: pinnedMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
                 Behavior on color { ColorAnimation { duration: 60 } }
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: Model.sourcesRowAccessibleName(root.sourceCount)
 
@@ -3645,6 +3678,12 @@ Item {
                 // Both views exist at all times and carry the SAME role and
                 // the SAME name, so without this a reader is offered two
                 // identical channel lists and the hidden one is indexed.
+                // This takes the hidden LIST off the bus and not its tiles:
+                // an ignored container's descendants are re-parented (measured
+                // in round 4c, D-A11Y-12's lever note at removeDialog), so
+                // each tile carries the lever itself (round 4d, below). Until
+                // then a hidden wall's tiles stayed, beside the list's rows,
+                // which is what D-A11Y-10's duplicate rows were.
                 Accessible.ignored: !visible
 
                 delegate: Item {
@@ -3836,6 +3875,13 @@ Item {
                     Accessible.ignored: true
                   }
 
+                  // D-A11Y-12, round 4d (the lead's call under the owner's
+                  // standing authority of 2026-11-09): a tile is on the bus
+                  // only while the wall shows it, the lever the list rows
+                  // carry. The wall's own ignored re-parents its tiles rather
+                  // than removing them (round 4c), so behind Sources and every
+                  // form, and in list mode, the hidden wall's tiles stayed.
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.ListItem
                   // The row's own composer, with the row's own arguments. The
                   // first build passed only the name, so a reader on the wall
@@ -3984,6 +4030,7 @@ Item {
                     visible: row.hasCursor
                   }
 
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.ListItem
                   // M2-09 D5 / GS5: the position is appended LAST, after the
                   // failure state, so someone stepping rows hears the name
@@ -4309,6 +4356,7 @@ Item {
                 height: Math.max(Style.space(34), Style.font.heading + Style.spacing.controlPaddingY * 2)
                 radius: root.cornerRadius
                 color: Style.normalFillFor(root.foreground, root.accent)
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: "Entering channel number " + root.numberBuffer
                   + (root.numberResolution.kind === "none" ? ", no match" : "")
@@ -4401,6 +4449,7 @@ Item {
             // D-A11Y-6: this whole surface was silent. When it is showing it is
             // the only thing on screen, so it announces as one statement rather
             // than as three unlabelled fragments a reader has to assemble.
+            Accessible.ignored: !visible
             Accessible.role: Accessible.StaticText
             Accessible.name: Model.emptyStateAccessibleName(emptyState.title, emptyState.prose)
             // The Sources screens own the body in their modes; the
@@ -4524,6 +4573,7 @@ Item {
               spacing: root.rowSpacing
               boundsBehavior: Flickable.StopAtBounds
               cacheBuffer: root.detailRowHeight * 4
+              Accessible.ignored: !visible
               Accessible.role: Accessible.List
               Accessible.name: root.copy.accessibleSources
               onHeightChanged: root.scrollToSourceCursor()
@@ -4537,7 +4587,10 @@ Item {
                 readonly property var source: srow.isSource ? (root.sourceList[srow.index] || null) : null
                 readonly property bool hasCursor: srow.index === root.sourceCursor
                 readonly property bool active: !!(srow.source && srow.source.active)
-                readonly property string label: srow.source ? String(srow.source.label) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
+                // D-SINK-98: the label drawn and in the button names through
+                // Model.labelSinkText, so a label with an address's shape
+                // reads as its host or hosts.
+                readonly property string label: srow.source ? Model.labelSinkText(String(srow.source.label)) : (srow.rowKind === "add" ? root.copy.rowAdd : root.copy.rowXtream)
                 readonly property string detail: srow.source ? Model.sourceDetail(srow.source, root.narrow) : ""
                 readonly property string meta: srow.source && !root.narrow ? String(srow.source.lastUsedText) : ""
                 readonly property string leadGlyph: srow.isSource ? (srow.active ? Model.GLYPHS.check : "") : (srow.rowKind === "add" ? Model.GLYPHS.plus : Model.GLYPHS.key)
@@ -4550,6 +4603,7 @@ Item {
 
                 width: ListView.view.width
                 height: (srow.isSource ? root.detailRowHeight : root.singleRowHeight) + srow.separatorHeight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.ListItem
                 Accessible.name: srow.source ? Model.sourceAccessibleName(srow.source) : srow.label
                 Accessible.focused: srow.hasCursor
@@ -4636,6 +4690,12 @@ Item {
                     }
 
                     // Edit / remove buttons on the cursor row only (UX-SOURCES 4.1).
+                    // D-A11Y-12: and on the bus only there. A hidden Item stays
+                    // in Qt's accessibility tree, so every other row's pair --
+                    // `Edit Add source`, `Remove Add Xtream login` -- was on
+                    // the bus beside the one the cursor row draws, with the
+                    // same states (the a11y probe, round 4b); `ignored` takes
+                    // a button off the bus while its row does not show it.
                     Row {
                       id: sactions
                       visible: srow.hasCursor && srow.isSource
@@ -4650,6 +4710,7 @@ Item {
                         fontFamily: root.fontFamily
                         Accessible.role: Accessible.Button
                         Accessible.name: root.copy.tooltipEdit + " " + srow.label
+                        Accessible.ignored: !sactions.visible
                         onClicked: root.openEditForm()
                       }
 
@@ -4661,6 +4722,7 @@ Item {
                         fontFamily: root.fontFamily
                         Accessible.role: Accessible.Button
                         Accessible.name: root.copy.tooltipRemove + " " + srow.label
+                        Accessible.ignored: !sactions.visible
                         onClicked: root.startRemove()
                       }
                     }
@@ -4760,6 +4822,7 @@ Item {
             width: Math.min(body.width, Style.space(640))
             spacing: Style.spacing.rowGap
             visible: root.formActive
+            Accessible.ignored: !visible
             Accessible.role: Accessible.Dialog
             Accessible.name: root.formAccessibleName
 
@@ -4938,6 +5001,19 @@ Item {
                 // which is Model.fieldAccessibleValue: masked whether or not
                 // the field is revealed, and nothing raises a text event for
                 // it. Read-only, so an assistive tool cannot write through it.
+                // D-SINK-97: an address field's Value is its scheme and host,
+                // or stars (a local path is stars since round 4b), and its
+                // Description is empty; D-SINK-98: the label's is
+                // Model.labelSinkText of it, or stars once the field is held
+                // (round 4c, Model.labelHeldAfter; round 4d holds it by
+                // Model.labelHoldsField, a broader test than the stored
+                // reading). D-A11Y-12, round 4d (the lead's call under the
+                // owner's standing authority of 2026-11-09): on the bus only
+                // while it is shown. Its visibility is formColumn's, and
+                // formColumn's own ignored RE-PARENTS this node rather than
+                // removing it (round 4c's measurement), so Sources opened
+                // from the first-run form's saved-sources link left both
+                // address fields on the bus beside the Sources list.
                 Item {
                   id: fieldA11y
                   readonly property string text: Model.fieldAccessibleValue(root.form, fieldRow.fieldId)
@@ -4946,16 +5022,18 @@ Item {
                   width: field.width
                   height: field.height
                   enabled: field.enabled
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.EditableText
                   Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
                   // The password row had `Accessible.passwordEdit: true`. It
                   // was inert in both directions on Qt 6.11.2, measured twice
                   // independently, and left the password with NO label at all:
                   // it is not maskable, so this description resolved to the
-                  // empty string. It gets its label explicitly.
-                  Accessible.description: fieldRow.fieldId === "password"
-                    ? root.fieldLabelText(fieldRow.fieldId)
-                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  // empty string. It gets its label explicitly, and every
+                  // other field gets none (D-SINK-97: an address field's was
+                  // its visual mask, which carried what the Value carried, and
+                  // Qt raises a Description change as an event of its own).
+                  Accessible.description: Model.fieldAccessibleDescription(fieldRow.fieldId, root.fieldLabelText(fieldRow.fieldId))
                   Accessible.focusable: true
                   Accessible.focused: field.activeFocus
                 }
@@ -4970,6 +5048,7 @@ Item {
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   enabled: !root.formProbing
+                  Accessible.ignored: !visible
                   Accessible.role: Accessible.Button
                   Accessible.name: fieldRow.masked ? root.copy.accessibleShow : root.copy.accessibleHide
                   Accessible.checked: !fieldRow.masked
@@ -5000,13 +5079,14 @@ Item {
               readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
-                if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
+                if (root.formProbing && root.form) return Model.formFetchingLine(root.form)
                 return warningText
               }
 
               opacity: lineText !== "" ? 1 : 0
               Behavior on opacity { NumberAnimation { duration: root.bannerFadeMs; easing.type: Easing.OutCubic } }
               color: isError ? Util.alpha(root.urgent, 0.10) : Style.normalFillFor(root.foreground, root.accent)
+              Accessible.ignored: !visible
               Accessible.role: Accessible.AlertMessage
               Accessible.name: lineText
 
@@ -5065,6 +5145,7 @@ Item {
                 accent: root.accent
                 enabled: !root.formProbing
                 Keys.forwardTo: [formKeys]
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: root.copy.accessibleSaved + Model.formatCount(root.sourceCount)
                 onActiveFocusChanged: if (activeFocus) root.fieldFocused("savedSources")
@@ -5084,6 +5165,7 @@ Item {
                 accent: root.accent
                 enabled: !root.formProbing
                 Keys.forwardTo: [formKeys]
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: root.copy.linkXtream
                 onActiveFocusChanged: if (activeFocus) root.fieldFocused("xtream")
@@ -5125,6 +5207,7 @@ Item {
                 accent: root.accent
                 enabled: !root.formProbing
                 Keys.forwardTo: [formKeys]
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: root.copy.buttonCancel
                 onActiveFocusChanged: if (activeFocus) root.fieldFocused("cancel")
@@ -5142,6 +5225,7 @@ Item {
                 accent: root.accent
                 enabled: !root.formProbing
                 Keys.forwardTo: [formKeys]
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: text
                 onActiveFocusChanged: if (activeFocus) root.fieldFocused(root.firstRunHead ? "load" : "save")
@@ -5272,6 +5356,7 @@ Item {
           borderSpec: root.borderSpec
           padding: root.contentMargin
           clip: true
+          Accessible.ignored: !visible
           Accessible.role: Accessible.Dialog
           Accessible.name: root.copy.tracksTitle
           MouseArea { anchors.fill: parent; onClicked: {} }
@@ -5330,6 +5415,7 @@ Item {
             spacing: Style.space(4)
             boundsBehavior: Flickable.StopAtBounds
             model: root.trackRows
+            Accessible.ignored: !visible
             Accessible.role: Accessible.List
             Accessible.name: root.copy.tracksTitle
 
@@ -5342,6 +5428,7 @@ Item {
               readonly property bool current: choosable && index === root.trackCursor
               width: ListView.view.width
               height: isHeader ? root.groupEntryHeight + Style.space(6) : root.groupEntryHeight
+              Accessible.ignored: !visible
               Accessible.role: isHeader ? Accessible.Heading : Accessible.ListItem
               Accessible.name: Model.trackAccessibleName(root.trackRows, index)
               Accessible.selected: current
@@ -5517,6 +5604,7 @@ Item {
           borderSpec: root.borderSpec
           padding: root.contentMargin
           clip: true
+          Accessible.ignored: !visible
           Accessible.role: Accessible.Dialog
           Accessible.name: root.copy.detailTitle
           MouseArea { anchors.fill: parent; onClicked: {} }
@@ -5538,6 +5626,7 @@ Item {
               font.pixelSize: Style.font.body
               font.bold: true
               elide: Text.ElideRight
+              Accessible.ignored: !visible
               Accessible.role: Accessible.StaticText
               Accessible.name: text
             }
@@ -5582,6 +5671,7 @@ Item {
                 font.pixelSize: Style.font.body
                 font.bold: true
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5604,6 +5694,7 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5623,6 +5714,7 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5637,6 +5729,7 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5651,6 +5744,7 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5666,6 +5760,7 @@ Item {
                 wrapMode: Text.WordWrap
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5682,6 +5777,7 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideRight
+                Accessible.ignored: !visible
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
               }
@@ -5739,6 +5835,7 @@ Item {
           borderSpec: root.borderSpec
           padding: root.contentMargin
           clip: true
+          Accessible.ignored: !visible
           Accessible.role: Accessible.Dialog
           Accessible.name: root.copy.helpTitle
           MouseArea { anchors.fill: parent; onClicked: {} }
@@ -5760,6 +5857,7 @@ Item {
               font.pixelSize: Style.font.body
               font.bold: true
               elide: Text.ElideRight
+              Accessible.ignored: !visible
               Accessible.role: Accessible.StaticText
               Accessible.name: text
             }
@@ -5809,6 +5907,7 @@ Item {
                     foreground: root.foreground
                     color: Util.alpha(root.foreground, Model.sectionHeaderAlpha(root.foreground, root.background))
                     fontFamily: root.fontFamily
+                    Accessible.ignored: !visible
                     Accessible.role: Accessible.Heading
                     Accessible.name: text
                   }
@@ -5837,6 +5936,7 @@ Item {
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body
                         elide: Text.ElideRight
+                        Accessible.ignored: !visible
                         Accessible.role: Accessible.StaticText
                         Accessible.name: text
                       }
@@ -5854,6 +5954,7 @@ Item {
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body
                         elide: Text.ElideRight
+                        Accessible.ignored: !visible
                         Accessible.role: Accessible.StaticText
                         Accessible.name: text
                       }

@@ -3,6 +3,177 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.19.0 (2026-11-12)
+
+**Keeps a username or password out of more of the places the plugin shows,
+speaks or looks up provider text.** A username or password in a playlist or
+a guide is now hidden in more of the odd ways a provider can write one; the
+Sources form reads an address to a screen reader as no more than its scheme
+and host; and a host name holding a character no host name may hold is
+refused before the helper looks it up or hands it to the player. What to
+do: **restart the shell** (`omarchy-restart-shell`). If a channel was
+playing when you updated, expect it to reopen once in a new player window,
+as after 0.17.0 and 0.18.0. Some sources may need a look after the update:
+see Worth knowing.
+
+### Changed
+
+- **Each source's playlist and guide are fetched again once after the
+  update**, even when they are not due, so that what is stored is read by
+  this version's rules: the active source's when the shell starts, each
+  other source's when you next switch to it. Until that fetch lands, or
+  while it keeps failing, the source shows what it had, and a channel in it
+  that this version refuses does not play: starting the player on it shows
+  a failure card, and changing to it while another channel plays leaves the
+  player where it was, with no card. (D-SINK-87, D-SINK-89, D-SINK-95,
+  D-SINK-96)
+- **The logo consent dialog says how many logos "cannot be used and will be
+  skipped"** rather than calling them all "not https", which an https logo
+  skipped for a login or a one-word host in its address was not.
+  (D-LOGO-27)
+- **A source label that reads as a web address or holds a login is shown
+  as the host it names**, in the Sources list, the remove dialog, the guide
+  footer, the Sources notices and the IPC replies: a pasted
+  `http://user:pass@cdn.example.com/get.php` reads `cdn.example.com`,
+  `Sky.UK/Sports` reads `Sky.UK`, and one with no host to name, such as
+  `Sports:Live@HD`, reads `[host withheld]`. Two saved labels can now read
+  the same, and a label you type that would read the same as another
+  source's is refused. (D-SINK-98)
+
+### Fixed
+
+- **A username or password in a channel name, group or programme text is
+  hidden even when the provider wrote it oddly**: an invisible or
+  look-alike character in or before a web address's `://`, a
+  `user:pass@host` with no `http://` in front, or a password holding a tab
+  or a line break. Such text is shown as the address's host or as
+  `[host withheld]`, in the guide and the bar, and in the window title and
+  notifications too. (D-SINK-95, D-SINK-96)
+- **With a screen reader, the Sources form reads an address field as no
+  more than its scheme and host, or as stars**, revealed or not, and the
+  label field, once it holds anything shaped like an address or a login, as
+  stars until it is emptied. A hidden button, field, panel or channel tile
+  is no longer read out, so the guide's channels are no longer each read
+  twice. (D-SINK-97, D-SINK-98, D-A11Y-12, D-A11Y-10)
+- **While the Sources form holds an address whose password has an
+  unencoded `/`, `?` or `#`**, its "Fetching from" and failure lines and the
+  label's placeholder say `[host withheld]` rather than naming the
+  username, on screen and to a screen reader. They also do so, with no
+  warning, for an address with an `@` after its host, such as an email
+  address as the username in its query. The form still warns about such a
+  password, and a source saved from it without a label is still named after
+  what the address gives as its host. (D-SINK-99)
+- **A source address whose host name holds a character no host name may
+  hold** (`@`, `%`, `;`, `=`, `&`, a second `:`, a space, a bracket, a
+  backslash or an invisible formatting character, including through
+  look-alike characters) is refused when typed, and the helper never looks
+  such a name up, on any hop or redirect. (D-SINK-86, D-SINK-88, D-SINK-92)
+- **A channel whose stream address names its host in a form no host name
+  may take is skipped**, judged the way the player would read it, and
+  counted in the guide footer's playlist warning. This includes an `http`
+  or `https` channel whose host name is written in accented or non-Latin
+  letters, which the player could not open without yt-dlp or a proxy
+  anyway. (D-SINK-87, D-SINK-88)
+- **A channel from a playlist that is not on this computer or your local
+  network is skipped when its stream host has no dot in its name** -- a
+  single word such as `tvheadend`, or an address written as one number --
+  unless that is the playlist's own host; the guide footer's playlist
+  warning counts it. (D-SINK-89)
+- **A channel can no longer make the player listen for network connections
+  through a setting in its address whose name is written in an encoded
+  form**, which 0.16.0 to 0.18.0 let through. (D-SINK-90)
+- **An IPv6 stream address whose zone the player would cut into another
+  host is refused.** (D-SINK-91; see Worth knowing)
+- **A playlist or guide download that fails says only what kind of failure
+  it was** (such as `Connection refused` or `InvalidURL`), never the
+  network library's own text, which could quote part of a password from a
+  provider's redirect into the source's status and the journal; and
+  `playlist --url` or `play --url`, run by hand on an address without its
+  `http://`, no longer names its username as the unsupported scheme.
+  (D-SINK-93, D-SINK-94)
+- **A programme description or a notice whose web address has its host
+  withheld reads `[host withheld]`**, not `[url] withheld]`. (D-EPG-18)
+- **The player window's title is the channel name the guide shows**; a name
+  made only of an invisible character, or one that is a web address, no
+  longer titles the window with nothing or with the address's host.
+  (D-PLY-63)
+- **A "Stream failed" notice no longer gives a graphics driver's warning as
+  the reason a channel did not play** when the player also wrote a line
+  that is not a warning. (D-PLY-29)
+- **When the helper runs out of file descriptors**, starting, stopping or
+  checking the player says so instead of failing with an internal error or
+  no message, and a running player is left alone. (D-PLY-38)
+- **A damaged programme record in the cached guide no longer leaves its
+  channel counted as covered with no programme shown**; the channel is
+  skipped and the guide status says so. (D-EPG-17)
+- **A saved search of emoji or other characters outside the basic plane is
+  cut at the same place by the guide and the helper**, and can no longer
+  leave half a character that made later state changes from the command
+  line fail. (D-STATE-3)
+- **A hand-edited state file** holding half of an emoji's character pair no
+  longer makes changes from the command line fail with an internal error:
+  the change is made and the half is written back as it was. One nested
+  absurdly deep is reported as unreadable and left alone. A source key
+  ending in a line break is refused by the helper, as the shell already
+  refused it. (D-STATE-8, D-STATE-7, D-SRC-77)
+- **A source's cache folder the helper cannot delete in is reported as
+  such**, without its path, instead of as an internal error. (D-SRC-75)
+- **`playlist` and `epg`, run by hand, refuse an address with a stray
+  Unicode space or control character at either end**, whether it is given
+  as `--url` or in `OMARCHY_IPTV_URL`, as adding the source in the guide
+  does. (D-SRC-76)
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration). The new
+  player window is black until its stream opens, and is not put back where
+  the old one was. The channel comes back at live, paused if you had paused
+  it, and picture in picture is not carried over: press `p` again.
+- **A saved source whose host name holds one of the characters above is
+  removed from the Sources list when this version first reads it**, and a
+  kept source's guide address whose host holds one is cleared, so its guide
+  then reads as not set up; neither shows a notice. Some of these did reach
+  their server before, such as a host written with a percent escape or an
+  invisible soft hyphen; add the source again with its host written
+  plainly. (D-SINK-86, D-SINK-88, D-SINK-92)
+- **An IPv6 stream address with a named interface zone, such as
+  `[fe80::1%eth0]`, is now refused even where it used to play.** A zone
+  written as a number is still accepted. (D-SINK-91)
+- **Some names and programme text now read `[host withheld]` where 0.18.0
+  showed them.** Text that reads like a login is hidden whole: a word, a
+  colon and later an `@` in the same word (`Sports:Live@HD`), a label glued
+  to a web address whose path holds an `@`
+  (`Twitter:https://twitter.com/@BBCNews`), or a web address followed,
+  across a tab, by a word holding an `@`. A word with an invisible
+  character or a full-width colon just before a `//` is read as a web
+  address and shows only its part after the `//`. A channel title that
+  opens with a word such as `info@example.tv`, written straight after an
+  unquoted attribute that holds a `:`, can be taken into that attribute, so
+  the channel shows the rest of its title, or `Channel <n>` when nothing is
+  left. (D-SINK-95, D-SINK-96)
+- **With a screen reader, a label shaped like an address or a login**, such
+  as `Sports: Live/HD`, `U.S. / Canada / Mexico` or `IPTV@Home`, is read as
+  stars while you type it and when its Edit form opens; the Sources list
+  still shows and reads those three as typed. (D-SINK-98)
+
+### Known limitations
+
+- **The limitations listed under 0.18.0 still apply.**
+- **A few unusual writings of a login can still show part of it**, among
+  them: a space inside the username or password; a login with no `http://`
+  in front whose password holds two or more characters of a script written
+  without spaces, such as Chinese, Japanese, Korean or Thai, or emoji; a
+  `:` or `@` written with a look-alike character; a web address with two
+  invisible or unusual characters together in or before its `://`, when its
+  username and password come after its host; and a login pasted into a
+  source's label with its characters percent-encoded twice. The full list
+  is in ARCHITECTURE-SOURCES on the `dev` branch
+  (https://github.com/rmcdavid/omarchy-iptv/blob/dev/docs/ARCHITECTURE-SOURCES.md).
+  (D-SINK-95, D-SINK-96, D-SINK-98)
+- **With a screen reader, the guide's group column is still read while it
+  is hidden behind the Sources screen and its forms.** (D-A11Y-13)
+
 ## 0.18.0 (2026-11-07)
 
 **Works on Omarchy 4.5.0, and keeps a web address whole in more of the

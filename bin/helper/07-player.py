@@ -1123,7 +1123,11 @@ def find_player(sock_path: str) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     try:
         entries = os.listdir("/proc")
-    except OSError:
+    except OSError as error:
+        # D-PLY-38: with no descriptor left the scan cannot run, and "no
+        # player" would be a false answer a stop reports as done.
+        if out_of_descriptors(error):
+            raise no_descriptors(error) from None
         return found
     mine = os.getpid()
     for entry in entries:
@@ -1309,7 +1313,7 @@ def acquire_lock(path: str, timeout: float) -> int:
             except OSError as error:
                 if error.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
                     os.close(fd)
-                    raise HelperError("busy", "could not lock the player: %s" % (error.strerror or error))
+                    raise HelperError("busy", "could not lock the player: %s" % (error.strerror or type(error).__name__))
                 if _monotonic() >= deadline:
                     break
                 _sleep(LOCK_POLL_S)
@@ -1342,7 +1346,7 @@ def read_lock_record(fd: int) -> dict[str, Any]:
     except OSError:
         return {}
     try:
-        document = json.loads(raw.decode("utf-8"))
+        document = json_decode(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return {}
     return document if isinstance(document, dict) else {}
@@ -1352,7 +1356,7 @@ def read_lock_file(sock_path: str) -> dict[str, Any]:
     """The record without taking the lock (probe is lock-free)."""
     try:
         with os.fdopen(open_regular(player_lock_path(sock_path)), "rb") as handle:
-            document = json.loads(handle.read().decode("utf-8"))
+            document = json_decode(handle.read().decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return {}
     return document if isinstance(document, dict) else {}
@@ -1592,8 +1596,24 @@ def drain_launch_stderr(fd: int, buffer: list[str]) -> None:
         _LAUNCH_TAIL[fd] = pending
 
 
+# D-PLY-29: a line that only warns is not the reason. Model.playerLogWarning
+# is the same pattern (exact cases on purpose: the two languages fold case
+# differently outside ASCII); the shared fixture player-endings.json (dev
+# branch tests), its `tailWarnings` section, holds both to it.
+PLAYER_WARNING_RE = re.compile(r"(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):")
+
+
+def player_log_warning(line: str) -> bool:
+    return PLAYER_WARNING_RE.match(str(line)) is not None
+
+
 def launch_reason(buffer: list[str]) -> str:
+    """mpv's last stderr line that is not a warning (a driver's warning is
+    what software GL writes there), or its last line when all of them warn."""
     lines = [line.strip() for line in "".join(buffer).splitlines() if line.strip()]
+    for line in reversed(lines):
+        if not player_log_warning(line):
+            return line
     return lines[-1] if lines else ""
 
 
@@ -1607,8 +1627,12 @@ def probe_client(sock_path: str, ipc_timeout: float) -> MpvIpc | None:
         ok, _ = client.try_command("get_property", "mpv-version")
         if ok:
             return client
-    except HelperError:
-        pass
+    except HelperError as error:
+        if error.code == "no_descriptors":
+            # D-PLY-38: the helper could not look, which is not "the player
+            # does not answer" -- adopt_or_spawn stops such a player.
+            client.close()
+            raise
     client.close()
     return None
 
@@ -1619,7 +1643,13 @@ def wait_for_socket(sock_path: str, timeout: float, ipc_timeout: float,
     while True:
         if stderr_fd >= 0 and stderr_buffer is not None:
             drain_launch_stderr(stderr_fd, stderr_buffer)
-        client = probe_client(sock_path, ipc_timeout)
+        try:
+            client = probe_client(sock_path, ipc_timeout)
+        except HelperError:
+            # no_descriptors (D-PLY-38), after a spawn: read as "not yet",
+            # so the wait stays bounded and the caller reaps what it
+            # launched instead of leaving it behind an error.
+            client = None
         if client is not None:
             return client
         if time.monotonic() >= deadline:

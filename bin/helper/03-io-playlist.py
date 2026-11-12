@@ -14,8 +14,16 @@ def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
     anything else through validate_source_url (D11: the guide and the
     helper accept exactly the same set; the 2,048-character cap and control
     characters are enforced here too). A leading `~` is expanded first, as
-    in 0.1, for values set from the command line."""
-    value = (url or "").strip()
+    in 0.1, for values set from the command line.
+
+    D-SRC-76: only the validator's own edges come off before that test
+    (_URL_EDGE_SPACE: the six ASCII whitespace characters and a no-break
+    space). A bare strip() took Python's whole whitespace set, so a URL
+    with an information separator, U+0085 or a Unicode space at an end was
+    fetched here while the validator, handed the same text by `state source
+    add` or the guide's form, refuses it (D-SRC-63: refused, never
+    deleted)."""
+    value = (url or "").strip(_URL_EDGE_SPACE)
     if value.startswith("~"):
         value = os.path.expanduser(value)
     result = validate_source_url(value)
@@ -255,10 +263,32 @@ RESOLVE_WAIT_SLICE_S = 0.05
 # limit_memory's RLIMIT_DATA.
 RESOLVE_STACK_BYTES = 1024 * 1024
 
+# D-SINK-86 (the owner, 2026-11-08): the refusal of a host name that holds
+# what no name may hold (host_name_refused, 02-sources.py), asked before any
+# lookup on every hop. One fixed sentence that names no host, because the
+# host may be a userinfo: a redirect to `http://user:pass@h/` is a request
+# for `user:pass@h`, and the lookup of exactly that was the disclosure.
+# `bad_url`, the code of a URL the validator refuses, so the shell's
+# sentence is "Invalid URL" and the logo run counts it with the policy's
+# refusals (06-failed.py).
+HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a backslash, a second colon, "
+                     "whitespace or an invisible format character; not looked up")
+
+
+def refuse_host_name(text: Any, with_port: bool = False) -> None:
+    """Raise HOST_NAME_REFUSAL when host_name_refused(text, with_port)."""
+    if host_name_refused(text, with_port):
+        raise HelperError("bad_url", HOST_NAME_REFUSAL)
+
 
 def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
+
+    D-SINK-86: a host name that holds what no name may hold is refused here,
+    before the thread and before the resolver, whoever asks; this is the one
+    call into the resolver the helper has, and its callers ask the same rule
+    earlier, where they can say more about the hop.
 
     The wait is a loop of short joins, so it returns to the interpreter
     every RESOLVE_WAIT_SLICE_S and a FetchDeadline alarm ends it there, as
@@ -269,6 +299,7 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
     then finishes on the resolver's own clock and is discarded (daemon:
     the process does not wait for it at exit). Nothing is cached here and
     nothing is re-looked-up: the result goes straight to the connect."""
+    refuse_host_name(host)
     import socket
     import threading
     result: list[Any] = []
@@ -313,7 +344,8 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
             break
         worker.join(min(RESOLVE_WAIT_SLICE_S, left))
     if not result:
-        raise TimeoutError("the host-name lookup took longer than %.1f s" % bound)
+        # A strerror of its own, the sentence network_detail repeats (D-SINK-93).
+        raise TimeoutError(errno.ETIMEDOUT, "the host-name lookup took longer than %.1f s" % bound)
     found = result[0]
     if isinstance(found, BaseException):
         raise found
@@ -465,7 +497,10 @@ class DestinationPolicy:
                            % (where, who))
 
     def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
-        """The TARGET of a proxied request, looked up here (see the class)."""
+        """The TARGET of a proxied request, looked up here (see the class).
+        D-SINK-86 first: the proxy would make the lookup this one stands
+        for, so a name that holds what no name may hold reaches neither."""
+        refuse_host_name(host)
         if self.refuses_name(host):
             raise self.name_refusal(first)
         try:
@@ -505,6 +540,18 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
     error: OSError | None = None
     refused = False
+    # D-SINK-86: before the D-SINK-83 test below and before the lookup, with
+    # a policy or none, to a destination or to the user's proxy. The host is
+    # the one http.client split off the request's: its port gone, and a
+    # literal's brackets gone only when the host both opens with `[` and ends
+    # with `]`. So a colon left in it is a second colon unless the whole host
+    # is a bare IPv6 literal, and a bracket left in it -- `[::1]x.test`, from
+    # a request for `http://%5B::1%5Dx.test/`, which urllib percent-decodes
+    # and http.client keeps whole -- is the provider's text, refused as any
+    # bracket in a name is (D-SINK-92, 2026-11-09; this comment said a
+    # literal's brackets were always gone, and the review of 6371c67 found
+    # the name reaching the resolver).
+    refuse_host_name(host)
     if policy is not None and not proxied and policy.refuses_name(host):
         # D-SINK-83: before the lookup, not after it -- the
         # lookup is what discloses the name (DestinationPolicy.refuses_name).
@@ -535,7 +582,8 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         raise error
     if refused and policy is not None:
         raise policy.refusal(host, first)
-    raise OSError("getaddrinfo returned an empty list")
+    # A strerror of its own, the sentence network_detail repeats (D-SINK-93).
+    raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
 
 
 def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> list[Any]:
@@ -550,11 +598,19 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     hop (urllib opens one connection per request and closes it), so the
     handler counts it and builds that request's connection class around it;
     a proxied request's target is checked here, by name, because its socket
-    goes to the proxy (DestinationPolicy.check_proxied)."""
+    goes to the proxy (DestinationPolicy.check_proxied).
+
+    D-SINK-86: each request's host is judged as the request object holds it
+    -- percent-decoded by urllib, the port still on it -- before its
+    connection object exists, so neither the resolver nor http.client's own
+    host check, whose InvalidURL quotes the host (and, for `user:pass@host`,
+    the password as a port), ever sees a host the rule refuses. Behind a
+    proxy that host is the proxy's, and check_proxied judges the target."""
     import http.client
     import urllib.request
 
     def connection_class(base: Any, req: Any) -> Any:
+        refuse_host_name(req.host, with_port=True)
         if policy is None:
             create = bounded_create_connection
         else:
@@ -590,26 +646,49 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     return [BoundedHTTPHandler(), BoundedHTTPSHandler(context=context)]
 
 
-# D-SRC-59: the most of a library error's text a network refusal carries.
-# For http.client.BadStatusLine (a server whose first line is not a status
-# line) and UnknownProtocol (one whose first word is not a known HTTP
-# version), str(error) is the provider's own first line, read with
-# readline(_MAXLINE + 1): up to 65,536 characters, which reached the
-# playlist, probe and guide replies, both status files and the stderr line.
-# Redacted FIRST and cut after, so a cut can never leave the userinfo of a
-# URL that the redaction would have removed; control characters are folded
-# to spaces (a raw line carries its CR LF, and a C0 character escapes to six
-# bytes of JSON). The status line is decoded ISO-8859-1, so every character
-# left is at most two bytes of UTF-8 and the detail at most
-# (200 + 3) x 2 = 406 bytes of a reply.
-NETWORK_DETAIL_MAX = 200
+# D-SINK-93 (2026-11-11): what a network refusal of `playlist`, the probe and
+# `epg` says after `could not reach <host>:` -- a fixed sentence chosen by
+# the error's kind, never the error's own text (the owner's rule of
+# 2026-11-08 for what reaches the journal: codes and fixed sentences only
+# for anything built from an error message). The text was the leak: for a
+# redirect to `http://user:pass/x@host/` http.client reads `user` as the
+# host and `pass` as a port, and its InvalidURL ("nonnumeric port:
+# 'pass'") quoted the password into the reply, both status files and the
+# stderr line the shell writes to the journal -- no `://` was left in it
+# for redact_urls to find. D-SRC-59 had capped and redacted the same text
+# for a server whose first line is not a status line (BadStatusLine quotes
+# that line); it is now named by kind like the rest, as read_logo_response
+# has named http.client's errors since D-LOGO-24.
+#
+# What is kept is text no provider and no URL writes: an OS error's
+# strerror (the C library's sentence for its errno: "Connection refused",
+# "Name or service not known"; the helper's own two raises carry their own
+# fixed strerror), a timeout's "timed out", OpenSSL's reason token for a TLS
+# failure, and the status code of a proxy that refused a tunnel. Model.
+# statusReason reads the first three for its short reasons ("Connection
+# refused", "Could not resolve host", "Timed out", "TLS error").
+_SSL_REASON = re.compile(r"[A-Z0-9_]{1,64}")
+_TUNNEL_REFUSED = re.compile(r"Tunnel connection failed: ([0-9]{3})(?![0-9])")
 
 
 def network_detail(error: Any) -> str:
-    text = redact_urls(error)
-    if len(text) > NETWORK_DETAIL_MAX:
-        text = text[:NETWORK_DETAIL_MAX].rstrip() + "..."
-    return _CONTROL_CHARS.sub(" ", text).strip()
+    ssl = sys.modules.get("ssl")
+    if ssl is not None and isinstance(error, ssl.SSLCertVerificationError):
+        return "certificate verify failed"
+    if ssl is not None and isinstance(error, ssl.SSLError):
+        reason = getattr(error, "reason", None)
+        if isinstance(reason, str) and _SSL_REASON.fullmatch(reason):
+            return "TLS error (%s)" % reason
+        return "TLS error"
+    if isinstance(error, OSError):
+        if isinstance(error.strerror, str) and error.strerror.strip():
+            return _CONTROL_CHARS.sub(" ", error.strerror).strip()
+        if isinstance(error, TimeoutError):
+            return "timed out"
+        tunnel = _TUNNEL_REFUSED.match(str(error.args[0])) if len(error.args) == 1 else None
+        if tunnel:
+            return "the proxy refused the tunnel (HTTP %s)" % tunnel.group(1)
+    return type(error).__name__
 
 
 def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) -> Any:
@@ -632,8 +711,13 @@ def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) 
                     fp.close()
                 except OSError:
                     pass
-                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
+                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme%s" % (label, host, scheme_phrase(scheme)))
             new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None:
+                # D-SINK-86: the next hop's host as its request holds it
+                # (percent-decoded, port and userinfo on), before that hop
+                # is opened; fp is already closed (unread_redirect_handler).
+                refuse_host_name(new.host, with_port=True)
             if new is not None and request_origin(newurl) != request_origin(req.full_url):
                 for name in ("Authorization", "Cookie"):
                     new.remove_header(name)
@@ -888,13 +972,20 @@ def read_http_response(opener: Any, request: Any, timeout: float, label: str, ho
     except HelperError:
         raise
     except urllib.error.HTTPError as error:
+        # Closed here: an HTTPError holds its response, and one left to the
+        # collector is reported with its message, which for a refused
+        # redirect is the target URL (D-SINK-93).
+        close_quietly(error)
         if 300 <= error.code < 400:
             # urllib refused the redirect itself (file:, data:, a loop); its
             # message carries the target URL, so it is not repeated here.
             raise HelperError("unsafe_redirect", "%s redirect from %s not followed" % (label, host))
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
-        reason = getattr(error, "reason", error)
+        # The reason when it is an error (urllib wraps every OSError of the
+        # connection in one); a reason that is text is urllib's own words,
+        # named by the URLError's kind (D-SINK-93).
+        reason = error.reason if isinstance(getattr(error, "reason", None), BaseException) else error
         raise HelperError("network", "could not reach %s: %s" % (host, network_detail(reason)))
     except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("network", "could not reach %s: %s" % (host, network_detail(error)))
@@ -1190,9 +1281,31 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
         raise
 
 
+def escape_half_pairs(text: str) -> str:
+    """JSON text with every lone surrogate written as its JSON escape
+    (D-STATE-8). A str holds a surrogate code point only as HALF a pair --
+    the decoder joins a whole escaped pair into one character -- and half a
+    pair has no UTF-8 form, so the escape it was read from is the only way to
+    write it. Outside a string JSON holds none, so every one replaced here
+    stands inside a string, where the escape reads back as the same half."""
+    return "".join(ch if not 0xD800 <= ord(ch) <= 0xDFFF else "%su%04x" % (chr(92), ord(ch)) for ch in text)
+
+
 def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None:
     # json.dumps (one-shot C encoder) is several times faster than json.dump.
-    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", private_dir)
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    try:
+        write_text_atomic(path, text, private_dir)
+    except UnicodeEncodeError:
+        # D-STATE-8: a text read from a JSON file as half a surrogate pair (a
+        # hand edit, another writer) cannot be encoded, and the write ended
+        # `internal`: every state verb that writes, over a state.json holding
+        # one anywhere. The failed attempt left nothing behind
+        # (write_text_atomic removes its temporary file), and the second
+        # writes each half as the escape it was read from, so the file is
+        # valid UTF-8 JSON and every reader reads what it read before. Only
+        # on this path, so a write that never met one costs what it did.
+        write_text_atomic(path, escape_half_pairs(text), private_dir)
 
 
 def json_string(text: str) -> str:
@@ -1283,13 +1396,25 @@ def read_regular_text(path: str) -> str:
 
 def read_json(path: str) -> Any:
     try:
-        return json.loads(read_regular_text(path))
+        return json_decode(read_regular_text(path))
     except (OSError, ValueError):
         return None
 
 
 def emit(payload: Any) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    text = json.dumps(payload, ensure_ascii=False) + "\n"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        # D-STATE-8, the reply's half: a verb that prints what a JSON file
+        # held (`state show`, and every state verb's reply) met the same half
+        # pair on stdout, after its write had landed, and answered `internal`.
+        # Asked of the text and not of the stream, whose error handler is the
+        # locale's: under C it is surrogateescape, which writes some halves
+        # as raw bytes that are not UTF-8. A reply is small; the write of a
+        # whole cache file (write_json_atomic) pays for no such check.
+        text = escape_half_pairs(text)
+    sys.stdout.write(text)
     sys.stdout.flush()
 
 
@@ -1343,10 +1468,13 @@ def url_from(args: argparse.Namespace) -> str:
     printed on purpose (D12, read_local_source) and carries no credential;
     log() redacts whatever is left.
     """
-    explicit = (getattr(args, "url", None) or "").strip()
+    # D-SRC-76: the validator's edges and no more (resolve_source), so a
+    # --url of nothing but those is absent, and anything else whitespace
+    # leaves at an end reaches the validator, which refuses it.
+    explicit = (getattr(args, "url", None) or "").strip(_URL_EDGE_SPACE)
     if explicit:
         return explicit
-    return (os.environ.get(URL_ENV) or "").strip()
+    return (os.environ.get(URL_ENV) or "").strip(_URL_EDGE_SPACE)
 
 
 def cmd_playlist(args: argparse.Namespace) -> int:

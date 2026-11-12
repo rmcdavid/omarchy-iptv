@@ -9,7 +9,7 @@ import {
   channelId, indexById
 } from "./text.mjs"
 import {
-  primaryGroup, groupSearchText, parseChno, chnoOf, chnoEntryKey,
+  primaryGroup, rowGroup, groupSearchText, parseChno, chnoOf, chnoEntryKey,
   isNumericQuery
 } from "./channels.mjs"
 import {
@@ -237,7 +237,7 @@ function groupChannels(channels) {
   var ungrouped = null
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    var name = primaryGroup(list[i])
+    var name = rowGroup(list[i])
     if (seen[name] === undefined) {
       seen[name] = { name: name, kind: "group", count: 0 }
       if (name === UNGROUPED) ungrouped = seen[name]
@@ -415,7 +415,7 @@ function channelsForScope(channels, scopeId, state) {
   // strips to nothing is Ungrouped, which is what primaryGroup reads for the
   // row it came from.
   var name = stripSpace(rawScopeName(id)) || UNGROUPED
-  for (i = 0; i < list.length; i++) if (list[i] && primaryGroup(list[i]) === name) out.push(list[i])
+  for (i = 0; i < list.length; i++) if (list[i] && rowGroup(list[i]) === name) out.push(list[i])
   return out
 }
 

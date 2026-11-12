@@ -7,7 +7,7 @@ import {
   channelId
 } from "./text.mjs"
 import {
-  primaryGroup, groupSearchText
+  primaryGroup, rowGroup, groupSearchText
 } from "./channels.mjs"
 import {
   matchRank, channelsForScope, effectiveScope
@@ -66,8 +66,24 @@ var MAX_SAVED_QUERY = 64
 //
 // It shares matchRank, so a saved search contains exactly the rows the search
 // showed. What it does not share is the cap and the ordering.
+// D-STATE-3. A saved query's cut: at most MAX_SAVED_QUERY UTF-16 units and
+// never half of a surrogate pair. A plain slice left the high half of a pair
+// that straddled the cap at the end of the stored query (`a`, forty emoji and
+// a word stored 64 units ending in a lone U+D83D), and the helper, which cut
+// by code points and so kept other text, cannot encode a lone half: every
+// state write of its own then failed. Both sides now cut by units and take a
+// high surrogate off the end of what is left, whether the cut made it or a
+// file written before this held it (saved_query_cut in the helper; the
+// shared saved-searches fixture, dev branch, runs both).
+function savedQueryCut(query) {
+  var q = str(query).slice(0, MAX_SAVED_QUERY)
+  var last = q.length - 1
+  if (last >= 0 && q.charCodeAt(last) >= 0xd800 && q.charCodeAt(last) <= 0xdbff) q = q.slice(0, last)
+  return q
+}
+
 function savedSearchTerms(query) {
-  var toks = tokenize(str(query).slice(0, MAX_SAVED_QUERY))
+  var toks = tokenize(savedQueryCut(query))
   return toks.slice(0, MAX_SAVED_TERMS)
 }
 
@@ -373,7 +389,7 @@ function storedInt(value) {
 // One stored record. A query that tokenizes to nothing is not a saved search.
 function savedSearchRecord(entry) {
   if (!entry || typeof entry !== "object") return null
-  var query = str(entry.query).slice(0, MAX_SAVED_QUERY)
+  var query = savedQueryCut(entry.query)
   if (savedSearchTerms(query).length === 0) return null
   return { query: query, at: storedInt(entry.at) }
 }
@@ -759,6 +775,10 @@ function stateSession(state) {
 // that the channel the record names died with no shell attached to notice:
 // mark it failed in the guide, silently, and clear the record. A toast for
 // something that stopped minutes ago, possibly on another login, is noise.
+// [D-PLY-33, 2026-10-28: no longer the whole decision. The service applies
+// the mark prepared here only if Model.deathReport says an unattended death
+// marks, and it does not, so `mark` now means "a record was found and is
+// retired" and `failed` is not applied; nothing is told, as before.]
 //
 // The answer depends on whether the state file has landed yet, because the
 // two arrive in either order: the probe fires from Component.onCompleted and
@@ -944,8 +964,8 @@ function toggleHiddenGroup(state, name) {
 // nothing hidden this is the SAME array, not a copy, because
 // channelsForScope(all) used to return the list itself and callers may
 // compare by identity; a filter that always copied would change that
-// silently. Costs one primaryGroup per channel only when something is
-// hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
+// silently. Costs one stored-group read per channel (rowGroup, D-PERF-12)
+// only when something is hidden -- measured at 10,000 channels in QA-RESULTS M3-01.
 function browsableChannels(channels, state) {
   var list = asList(channels)
   var hidden = hiddenGroupSet(state)
@@ -955,7 +975,7 @@ function browsableChannels(channels, state) {
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    if (hidden[primaryGroup(list[i])] !== true) out.push(list[i])
+    if (hidden[rowGroup(list[i])] !== true) out.push(list[i])
   }
   return out
 }
@@ -2059,16 +2079,17 @@ function stateBlockedHeader(reason, path, midSession) {
   return stateUnreadableNotice(reason, path, midSession === true).title
 }
 export {
-  MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
-  savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
-  favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
-  savedSearchRows, savedSearchArrivals, savedSearchDepartures,
-  savedSearchFooter, withSavedSearch, withoutSavedSearch, STORED_DECIMAL,
-  STORED_TEXT_MAX, storedInt, savedSearchRecord, emptyState, entryMigratedOf,
-  withEntryMigrated, migrationPendingOf, withMigrationPending, playedRecord,
-  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
-  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
-  stateSession, deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedQueryCut,
+  savedSearchTerms, savedSearchHit, savedSearchCount, savedSearchChannels,
+  savedSearchNotice, favoriteOrigin, favoriteRemovalNotice, hideNotice,
+  scopeEntryAccessibleName, savedSearchRows, savedSearchArrivals,
+  savedSearchDepartures, savedSearchFooter, withSavedSearch,
+  withoutSavedSearch, STORED_DECIMAL, STORED_TEXT_MAX, storedInt,
+  savedSearchRecord, emptyState, entryMigratedOf, withEntryMigrated,
+  migrationPendingOf, withMigrationPending, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
   sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
   isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
   removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,

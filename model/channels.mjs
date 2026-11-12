@@ -42,6 +42,19 @@ function primaryGroup(channel) {
   return first === "" ? UNGROUPED : first
 }
 
+// D-PERF-12: the group of a row the browse passes walk. prepareChannels
+// stores primaryGroup on every row it returns, beside the `group` it read it
+// from, and the passes that run on every rebuild (the group list, a group's
+// channels, the hidden-group filter) asked primaryGroup again for each row:
+// a strip of the reader's class per row per pass, which for a group led by
+// U+001C-U+001F and a long whitespace run is a walk a code unit at a time.
+// A row that carries no stored string (one prepareChannels did not make) is
+// read as before.
+function rowGroup(row) {
+  var stored = row ? row.primaryGroup : undefined
+  return typeof stored === "string" ? stored : primaryGroup(row)
+}
+
 // The group text a searchKey ends with: every group in `groups`, joined by a
 // space, as the helper's make_channel writes the key, else `group`, so the
 // whole group-title stays searchable (R4, R5). D-SG-5: a row the shell
@@ -849,8 +862,8 @@ function chnoStatus(kind, label, name, matches, ordinal, committed) {
   return out
 }
 export {
-  primaryGroup, groupSearchText, helperGroupFold, looksLikeUrl, cleanName,
-  displayName, prepareChannels, CHNO_NONE, CHNO_NO_MATCH,
+  primaryGroup, rowGroup, groupSearchText, helperGroupFold, looksLikeUrl,
+  cleanName, displayName, prepareChannels, CHNO_NONE, CHNO_NO_MATCH,
   CHNO_NO_NUMBERS_TEXT, chnoFail, chnoRawOf, isAsciiDigit, parseChno,
   isChnoSpace, chnoOf, buildChnoIndex, chnoIdAt, chnoEntryKey, resolveChno,
   chnoUnambiguous, channelByNumber, channelOrderOf, orderChannels,

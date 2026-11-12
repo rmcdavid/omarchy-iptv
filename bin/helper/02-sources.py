@@ -85,6 +85,154 @@ def looks_like_host(text: str) -> bool:
     return re.search(r"[.:]", text.split("/", 1)[0]) is not None
 
 
+# D-SINK-86 (the owner, 2026-11-08): what no host NAME may hold. A name that
+# holds one of these eight (five, and since D-SINK-92 the two brackets and the
+# backslash), a second `:` (one port is fine), the reader's
+# whitespace (URL_SPACE_CHARS) or an invisible format character
+# (HOST_FORMAT_RANGES) is refused: by validate_source_url as `invalid`, and
+# by the connection layer before any lookup, on every hop (03-io-playlist.py:
+# resolve_within, bounded_create_connection, check_proxied, the request each
+# hop opens, whose host urllib holds percent-decoded, and both redirect
+# handlers). No DNS name holds any of them. `@` ends a userinfo and `%` opens
+# an escape (`u%40h` is a request for `u@h`); `;`, `=` and `&` are
+# D-SINK-30's parameter delimiters; a colon past the port's belongs to a
+# userinfo or a second port (http.client splits at the LAST colon, so
+# `user:pass@host` is a lookup of `user:pass@host`); and a format character
+# draws as nothing while IDNA's nameprep maps some away (`h<U+00AD>.test` is
+# looked up as `h.test`), so the name a user reads is not the name asked
+# for. Mirrored by Model.hostNameRefused over the shared source-urls fixture.
+#
+# D-SINK-92 (2026-11-09): and `[` and `]`, which no DNS name holds either.
+# A bracket is URL syntax only around an IPv6 literal in a URL's authority;
+# a host handed to a connection has had a literal's brackets taken off
+# (http.client and urlsplit both remove them), so a bracket left in a name
+# is the provider's text -- `http://%5B::1%5Dx.test/` is a request for
+# `[::1]x.test`, which http.client keeps whole and the resolver would be
+# handed, colons and all -- and so is a fullwidth bracket the idna codec
+# folds to one (`a<U+FF3B>b.test` is handed on as `a[b.test`).
+#
+# D-SINK-92, the review of bf47cdc: and the backslash, which no DNS name
+# holds and which the resolver reads as an escape. On this machine's hosts
+# line `resolve` comes before `dns`, and glibc's dns module, which refuses
+# such a name (res_hnok), is asked only after systemd-resolved. resolved
+# reads a name's text with dns_label_unescape, `\.` and `\\` as themselves
+# and `\DDD` as the byte DDD up to 255, and nss-resolve hands it the name
+# unchecked, so `a\091b\093.test` is the label `a[b]`, `a\058b.test` the
+# label `a:b`, `a\064evil.test` the label `a@evil` and `user\.x` ONE label,
+# `user.x` (read in the sources, not measured). So the bracket and the colon
+# this rule refuses would reach the resolver spelled another way, as would
+# the `@` and, past D-SINK-83 and D-SINK-89, a name of one label. Both validators already refused a written backslash in an
+# authority; a redirect, a logo and an rtsp, rtmp or srt host did not (mpv
+# escapes an http-like URL's to `%5C`, which the `%` refuses), and nor did
+# U+FF3C and U+FE68, which the idna codec and NFKD fold to one: 79 code
+# points fold in all.
+HOST_NAME_REFUSED_CHARS = "@%;=&[]\\"
+# Unicode category Cf, every code point of it, as (first, last): what Python
+# 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
+# Explicit rather than unicodedata.category, so both mirrors refuse one set
+# whatever either engine's Unicode version; each suite holds its table to its
+# engine's category over the whole range (test_host_names.py, Model.test.js)
+# and the fixture pins both ends of every range in both mirrors.
+HOST_FORMAT_RANGES = ((0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD),
+                      (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E),
+                      (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064), (0x2066, 0x206F),
+                      (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD), (0x110CD, 0x110CD),
+                      (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0001, 0xE0001),
+                      (0xE0020, 0xE007F))
+_HOST_NAME_REFUSED = frozenset(HOST_NAME_REFUSED_CHARS + URL_SPACE_CHARS).union(
+    chr(code) for first, last in HOST_FORMAT_RANGES for code in range(first, last + 1))
+# What an IPv6 literal's zone may hold: _IPV6_LITERAL's `%25[A-Za-z0-9._~-]+`.
+_ZONE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
+
+
+def _ipv6_literal_text(text: str) -> bool:
+    """Is `text` an IPv6 address without its brackets, with at most a zone
+    of _ZONE_CHARS after a `%` -- decoded (`eth0`, as a request holds it) or
+    not (`25eth0`, as a URL spells it)? Imports ipaddress only for text
+    whose address part holds a colon."""
+    address, sep, zone = text.partition("%")
+    if ":" not in address or (sep and (zone == "" or not _ZONE_CHARS.issuperset(zone))):
+        return False
+    import ipaddress
+    try:
+        ipaddress.IPv6Address(address)
+    except ValueError:
+        return False
+    return True
+
+
+def host_name_refused(text: Any, with_port: bool = False) -> bool:
+    """D-SINK-86: does this host NAME hold what no name may hold?
+
+    `text` is a host as a connection is handed it (no port, and an IPv6
+    literal without its brackets, which http.client and urlsplit have taken
+    off), or, `with_port`, a host[:port] as a request object holds it, where
+    one colon is the port's. An IPv6 literal is no name: its colons and its
+    zone's `%` are its own, so a bare one passes where no port can follow
+    it, and, `with_port`, a leading bracketed one is set aside when nothing
+    or a port's colon follows its `]`. Any other bracket is refused
+    (D-SINK-92, 2026-11-09): text after a literal's `]` (`[::1]x.test`,
+    which http.client keeps whole, brackets and colons included, and would
+    hand the resolver), a bracket anywhere else, and with no port any
+    bracket at all, since a connection is never handed a literal's. And a
+    backslash, which the resolver reads as an escape (`\\058` is a colon,
+    `\\091` a bracket, `\\.` a dot inside a label). Every
+    character is asked once against one frozenset, so the cost is linear;
+    nothing here looks anything up. Model.hostNameRefused is the validator's
+    half.
+
+    D-SINK-88 (2026-11-08): and a name that is not ASCII is judged again in
+    its NFKD form, which holds every refused character the resolver path can
+    read in it. CPython's socket hands a str host to the C resolver through
+    the idna codec, whose nameprep removes stringprep's B.1 characters, case
+    folds by B.2 and then applies NFKC (Unicode 3.2), label by label, so
+    `user<U+FF1B>sid.test` passed the code points above and was looked up as
+    `user;sid.test`. Judging the NFKC form, as this did first, missed some:
+    composition only ever REMOVES a refused character (`=` and U+0338
+    compose to U+2260), and B.2 can block a composition that NFKC alone
+    makes -- it maps the combining mark U+0345 to the letter U+03B9 -- so
+    `sid<U+FF1D><U+0345><U+0338>x.test` folds under NFKC to a name holding
+    U+2260 and no `=`, while the codec hands the resolver `xn--sid=x-pod61g.test`
+    (the review of 95f1bb9, 2026-11-08). The decomposed form never
+    composes, and the D-SINK-86 suite on the dev branch holds, over every
+    code point, that B.1, B.2 and Unicode 3.2's decompositions add no
+    refused character the current NFKD of the same code point lacks, so the
+    rule needs neither nameprep's tables nor its version. The fold is the
+    running Unicode's, which refuses 73 code points beyond the code-point
+    rule: the 70 nameprep folds, U+FE13 and U+FE14 (unassigned in 3.2, which
+    the codec hands on unfolded), and U+2260 itself, which only NFKD reads
+    as `=`; since D-SINK-92 refuses the brackets, four more, 77: U+FF3B and
+    U+FF3D, which the codec folds to `[` and `]`, and U+FE47 and U+FE48,
+    which only the running Unicode does; and since it refuses the
+    backslash, two more, 79: U+FF3C and U+FE68, which both fold to `\\`. A
+    colon the fold adds is a colon in the name, never the port's.
+    An ASCII name pays nothing, and the fold is asked only of a name the
+    first judgment let through. Model.hostNameRefused folds the same way."""
+    name = str(text or "")
+    if _host_name_refused_as_written(name, with_port):
+        return True
+    if name.isascii():
+        return False
+    import unicodedata
+    folded = unicodedata.normalize("NFKD", name)
+    return folded != name and (folded.count(":") > name.count(":") or _host_name_refused_as_written(folded, with_port))
+
+
+def _host_name_refused_as_written(name: str, with_port: bool) -> bool:
+    """host_name_refused's judgment of the code points as they stand."""
+    if with_port and name.startswith("["):
+        close = name.find("]")
+        if close != -1 and _ipv6_literal_text(name[1:close]):
+            name = name[close + 1:]
+            if name and not name.startswith(":"):
+                return True
+    elif not with_port and _ipv6_literal_text(name):
+        return False
+    if name.count(":") > (1 if with_port else 0):
+        return True
+    return not _HOST_NAME_REFUSED.isdisjoint(name)
+
+
 def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     """Mirror of Model.validateSourceUrl(text, {origin}) -> {ok, code,
     message, kind, url, host}; `url` is the normalized form (the source
@@ -95,7 +243,8 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     `origin` "cli" accepts `~` paths verbatim (SR11; expanded by the reader),
     the forms refuse them. The authority refuses backslashes, zero-width
     characters, ports above 65535 and bracket literals that are not IPv6
-    (SR15). Messages never contain a URL."""
+    (SR15), and a host name that host_name_refused refuses (D-SINK-86).
+    Messages never contain a URL."""
     cli = origin == "cli"
     # D-SRC-63 (R32a'''): the URL boundary rule deletes nothing inside the
     # text, so what sanitize_input used to rewrite is refused below instead.
@@ -149,7 +298,7 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
             return _validation(False, "invalid", "file URL path is not absolute")
         return _validate_path(path)
     if scheme not in ("http", "https"):
-        return _validation(False, "scheme", "unsupported source scheme '%s' (use http, https or an absolute path)" % scheme)
+        return _validation(False, "scheme", "unsupported source scheme%s (use http, https or an absolute path)" % scheme_phrase(scheme))
     if not rest.startswith("//"):
         return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
     if _URL_SPACE.search(rest):
@@ -185,7 +334,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     else:
         colon = hostport.rfind(":")
         host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
-        if _BARE_HOST_CHARS.search(host):
+        # D-SINK-86: and a name holding what no name may hold (`@`, `%`, `;`,
+        # `=`, `&`, a colon, whitespace, a format character); the bracketed
+        # literal above is judged by _IPV6_LITERAL instead.
+        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
             return _validation(False, "invalid", "URL host contains an invalid character")
     if host == "":
         return _validation(False, "invalid", "URL has no host name")
@@ -358,6 +510,10 @@ def unique_label(label: str, existing: list[str]) -> str:
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
+# Whitespace and then an attribute's key and its `=`: what a bare value's
+# growth across whitespace from a URL's own colon is gated on (parse_attrs,
+# the review of e038d58).
+_ATTR_KEY_AHEAD = re.compile(r'\s*[A-Za-z0-9_.\-]+=')
 
 # Channel-number attributes, in precedence order (M2-03 1.1, ruling CN11).
 # `tvg-chno` is what every asset in this repo uses; the two aliases are read
@@ -418,6 +574,28 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
       the rest of the run, to the first delimiter at or after the later of
       `ve` and the end of the mark that runs past it, when one does.
 
+      D-SINK-95 (2026-11-11): or when next_url, the redactors' reading,
+      finds a URL whose mark an odd character breaks. A line with no
+      SLASH (`/` or a look-alike) holds none, and a printable ASCII line
+      reads as above, since a wide mark there is a narrow one behind a
+      scheme. A quoted value's quote is inside a URL's run when the reading
+      over the run before it, from the last ASCII space, finds a URL there.
+      A bare value is asked over itself and, when the character that ended
+      it is FILLER (every Python whitespace character but U+0020 is), the
+      run of `:`, FILLER and SLASH after it, where its mark may go on; its
+      run then grows to the first delimiter at or after the later of `ve`
+      and that mark's end. Each test reads only the value and the mark
+      characters after it.
+
+      D-SINK-96 (the review of cbd6679, 2026-11-12): and a bare value
+      holding a `:`, as grown so far, takes the rest of its U+0020 token's
+      credential (token_credential) when that credential's span starts
+      before the value's end and the `@` that makes it one stands at or
+      after it: the value then ends where the credential's span does, and
+      a value that ran past its old end so is recorded in `past` as a URL's
+      is. The token's credential is asked once a token, over one reading of
+      the line's URLs.
+
     Why: a URL takes the rest of its run (split_groups' shape, D-SINK-78),
     and that is what both redactors read as one URL: they end it only at the
     six delimiters, so a URL stored whole redacts to its host whatever `"`,
@@ -448,14 +626,41 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     test reads only the value the match already scanned (the quoted one from
     the last `:` before the run's first `/`; the bare one in one bounded
     search, and once more at its last `:` when a control ends it), the
-    run's end is found once, and the walk resumes past it or stops."""
+    run's end is found once, and the walk resumes past it or stops.
+
+    Its cost, stated (the review of e038d58, the lead's call under the
+    owner's standing authority of 2026-11-09, with no budget test): a long
+    bare value holding a `:` before marks the reading refuses pays two
+    native reading passes, next_url over the value for D-SINK-95's growth
+    and the line's URL reading for its token's credential. The bare
+    group-title `x:@` and then `a!+<U+200B><U+2215><U+2215>` repeated costs
+    150.7 ms at 1M characters and 607.8 ms at 4M in parse_m3u, over the
+    150/600 ms budget the title and the quoted form are held to
+    (M3uPathBudgetTests), against a8e8174's 21.9 and 76.5; the quoted form
+    73.4 and 293.4, against 6.4 and 16.9. Linear, four times the cost for
+    four times the input."""
     attrs: dict[str, str] = {}
     pos = 0
     size = len(text)
     old = -1
     opens = False
-    # A line with no `/` holds no `://`, and parses as it always has.
-    urls = "/" in text
+    # A line with no SLASH holds no mark, and parses as it always has; one
+    # that is printable ASCII holds only the narrow marks (D-SINK-95).
+    urls = "/" in text or (not text.isascii() and _SLASH_ALIKE.search(text) is not None)
+    plain = text.isascii() and text.isprintable()
+    # A token's credential span, by the token's start, asked once a token
+    # (D-SINK-96, the bare branch below): a line holds no credential unless
+    # it holds a `:` and an `@`.
+    tokens = ":" in text and "@" in text
+    held: dict[int, tuple[int, int, int] | None] = {}
+    # The line's URLs, read once and only as far as a token asks (the
+    # review of 4d13d71): a reading made a token, from the token's start,
+    # read on to the next URL or the line's end for each, quadratic in a
+    # line of `a=x:y` attributes before an `@` (42.8 s on a 96,000-character
+    # #EXTINF line). A reading from the line's start finds the same URLs
+    # inside each token, since no walk, mark or run crosses a U+0020.
+    reading: UrlReading | None = None
+    token_start = token_end = -1
     while pos < size:
         match = _ATTR_QUOTED.match(text, pos)
         if match is not None:
@@ -469,7 +674,12 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
             # attempt, not one each (D-PERF-13's shape).
             low = max(start, text.rfind(" ", start, quote) + 1)
             slash = text.find("/", low, quote) if urls else -1
-            if slash != -1 and _URL_MARK.search(text, max(low, text.rfind(":", low, slash)), quote) is not None:
+            inside = slash != -1 and _URL_MARK.search(text, max(low, text.rfind(":", low, slash)), quote) is not None
+            if urls and not plain and not inside:
+                window = text[low:quote]
+                inside = (not (window.isascii() and window.isprintable())
+                          and next_url(window, 0, 0, False) is not None)
+            if inside:
                 run = _URL_DELIMITER.search(text, quote)
                 run_end = run.start() if run is not None else size
                 # The run's last character that is not Python whitespace (a
@@ -501,17 +711,116 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
             if urls and end < size and (text[end] < " " or "\x7f" <= text[end] <= "\x9f"):
                 colon = text.rfind(":", start, end)
                 last = _URL_MARK.match(text, colon) if colon != -1 else None
-            if urls and (last is not None or _URL_MARK.search(text, start, end) is not None):
-                run = _URL_DELIMITER.search(text, max(end, last.end()) if last is not None else end)
+            inside = urls and (last is not None or _URL_MARK.search(text, start, end) is not None)
+            grow = end if last is None else max(end, last.end())
+            if urls and not plain and not inside:
+                # D-SINK-95: the value, and the run of `:`, FILLER and SLASH
+                # after it when FILLER ended it, read as the redactors read.
+                reach = end
+                if end < size and not (" " <= text[end] <= "~"):
+                    reach = _MARK_REACH.match(text, end).end()
+                url = next_url(text[start:reach], 0, 0)
+                if url is not None:
+                    inside = True
+                    grow = max(end, start + url[2])
+            grown = end
+            if inside:
+                run = _URL_DELIMITER.search(text, grow)
                 grown = run.start() if run is not None else size
-                if grown != end:
-                    # A bare value starts with no whitespace, so this is its
-                    # offset in the stored value. A list opening is judged in
-                    # the LINE at the old end, delimiters after the comma
-                    # allowed, as hint_first_entry reads one (`A, B`).
-                    old = end - start
-                    opens = _HINT_LIST_COMMA.match(text, end) is not None
-                end = grown
+            if tokens and text.find(":", start, grown) >= 0:
+                # D-SINK-96 (the review of cbd6679): a value holding a `:`
+                # whose token's credential (token_credential, read on the
+                # U+0020 token around it) starts before the value's end and
+                # has its `@` past it takes the credential to its span's end.
+                # Cut at its `,`, whitespace or `"`, the value kept the
+                # username and the password's head (`group-title=qqqqqq:zz,
+                # zz@cdn.test,Name` listed group `qqqqqq:zz`, and the name
+                # `zz@cdn.test,Name` read as no credential), as a URL's run did
+                # before D-SINK-80, whose growth and cost this takes: the title
+                # is swallowed and the name falls back. A URL value whose run
+                # a TAB, VT, FF or CR ends inside such a credential takes it
+                # too (`http://qq<TAB>qqqq:zzzzzz@cdn.test/x`, D-SINK-34's
+                # class, which every redactor withholds whole since the
+                # credential is read across the URL): stored to the TAB, the
+                # value printed `qq` as its host. Across a `,` the value grows
+                # only when a host follows an `@` it would take (host_shaped,
+                # the review of 4d13d71): growing on any `@` swallowed an
+                # ordinary title whose first word held one, and dropped the
+                # tvg-id before it (`tvg-id=uk:bbc1,KC@BUF 20:15` stored no
+                # tvg-id and the name `20:15`; `group-title=UK:Sports,NYY@BOS`
+                # lost its name), in 25 of 351 realistic names a form; a
+                # provider's credential names a host. Any `@` it would take,
+                # not only the first after the colon (the review of 2942e41),
+                # so a password holding an `@` is not judged on its own tail.
+                # And across whitespace (a TAB, or any other) the same holds
+                # when the credential's colon is a URL's own (_eligible_colon:
+                # its run ends before the `@`) and an attribute's key and its
+                # `=` follow the whitespace (_ATTR_KEY_AHEAD), the review of
+                # 2942e41: the value had grown there unconditionally, so a
+                # TAB-separated URL attribute took every attribute after it
+                # and the title's head whenever a word later in the token held
+                # an `@` (`tvg-logo=http://logo.test/a.png<TAB>tvg-name=
+                # Sky@News,Sky News` lost its logo, its tvg-name and the
+                # name's head). With no key after the whitespace the value
+                # grows, as it did: the whitespace is inside a password (the
+                # review of e038d58, the lead's call under the owner's
+                # standing authority of 2026-11-09). Gated on the host alone,
+                # as e038d58 gated it, a password a TAB, VT or CR splits was
+                # cut at that whitespace whenever host_shaped refused its
+                # host, and the URL's host (the username) printed in the
+                # group, tvg-id or tvg-name, the rest of the password and the
+                # host in the name, at every sink
+                # (`group-title=http://qqqqqq:zz<TAB>zz@localhost/x,Name`; 30
+                # of the review's 35 lines). Growth across whitespace whose
+                # colon stands outside every URL is unconditional, as it was.
+                # The costs, stated: a TAB-separated URL attribute before a
+                # later word whose `@` a host follows is still taken whole
+                # with it (`tvg-logo=http://logo.test:8080/a.png<TAB>
+                # group-title=mail@x.test,Name` stores no logo, no group and
+                # the name `Channel 1`); and a password whose text after the
+                # whitespace opens with key characters and a `=` reads as a
+                # key, so before a host no host shape names it is still cut
+                # there, as e038d58 cut it (`http://qqqqqq:zz<TAB>z=z@
+                # localhost/x` prints the username in the group).
+                # The token's bounds, found once a token (the review of
+                # 2942e41): values only move forward, and one that starts
+                # before the token's end is in the same token. Found for each
+                # value, the two searches read the whole line when TABs
+                # separate its values, quadratic (12.6 s for parse_attrs on
+                # `a=x:@<TAB>` repeated to 1.6M characters).
+                if start >= token_end:
+                    token_start = text.rfind(" ", 0, start) + 1
+                    token_end = text.find(" ", end)
+                    if token_end < 0:
+                        token_end = size
+                if token_start not in held:
+                    if reading is None:
+                        reading = UrlReading(text, 0, plain)
+                    found = token_credential(text, token_start, token_end, reading)
+                    # (its `@`, the span's start, the span's end, whether its
+                    # colon is a URL's own, the last `@` in the span a host
+                    # follows: -2 until a gated growth asks).
+                    held[token_start] = (None if found is None else
+                                         [found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end]),
+                                          reading.holding(found[0]) >= 0, -2])
+                span = held[token_start]
+                if span is not None and span[0] >= grown and span[1] < grown < span[2]:
+                    if text[grown] == "," or (span[3] and text[grown].isspace()
+                                              and _ATTR_KEY_AHEAD.match(text, grown) is not None):
+                        if span[4] == -2:
+                            span[4] = last_hosted_at(text, span[1], span[2], token_end)
+                        if span[4] >= grown:
+                            grown = span[2]
+                    else:
+                        grown = span[2]
+            if grown != end:
+                # A bare value starts with no whitespace, so this is its
+                # offset in the stored value. A list opening is judged in
+                # the LINE at the old end, delimiters after the comma
+                # allowed, as hint_first_entry reads one (`A, B`).
+                old = end - start
+                opens = _HINT_LIST_COMMA.match(text, end) is not None
+            end = grown
             value = text[start:end]
         key = match.group(1).lower()
         stripped = value.strip()
@@ -526,6 +835,81 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
         opens = False
         pos = end
     return attrs, text[pos:]
+
+
+# A host name's characters, as host_shaped reads them: ASCII letters, digits,
+# `-`, `.` and `_`, and every non-ASCII code point but whitespace (an IDN
+# label as the provider wrote it).
+_HOST_NAME_RUN = re.compile(r"[^\x00-\x2c/:-@\[-\^`{-\x7f\s]*")
+_HOST_IPV6_RUN = re.compile(r"\[[0-9A-Fa-f:.]+\]")
+_HOST_PORT_RUN = re.compile(r":[0-9]+")
+
+
+def host_shaped(text: str, i: int, end: int) -> bool:
+    """Whether text[i:end] starts with a HOST and ends there, at a `/`,
+    `?`, `#` or `,`, or at whitespace: two or more labels whose last is
+    letter-led and at least two characters long, a dotted quad, or a
+    bracketed IPv6 literal, each with an optional `:` and digits; or ONE
+    letter-led label of two or more characters with a `:` and digits
+    (`localhost:8080`, `iptv:80`). A label holds ASCII letters, digits,
+    `-` and `_`, or any non-ASCII code point but whitespace (an IDN label),
+    and one trailing dot ends the name (`cdn.test.`). parse_attrs asks it
+    of the text after each `@` a bare value's growth across a `,`, or across
+    whitespace from a URL's own colon, would take (the review of 4d13d71):
+    `qqqqqq:zz,zz@cdn.test,Name` grows, `UK:News,Sky@News HD` does not. The
+    review of 2942e41 widened it: a single label with a port, a trailing
+    dot, an underscore, a non-ASCII label and a host whitespace ends were
+    not hosts, so `qqqqqq:zz,zz@localhost:8080,Name` stored the group
+    `qqqqqq:zz` and every sink printed it. What it leaves, stated: a bare
+    single label is no host (`Sky@News` must not grow), nor is a digit-led
+    one with a port (`Live@8:30`, `Breakfast@9:00`), a digit-led last label
+    (`cdn.1test`), three numbers (`1.2.3`), or a `:` with no digits or with
+    text after them (`cdn.test:`, `cdn.test:80x`), so
+    `qqqqqq:zz,zz@localhost,Name` prints the username and the password
+    before the `,` in the group or the tvg-id, and the rest of the password
+    and the host in the name. And its cost: a letter-led word with a port
+    after an `@` is a host, so a bare value holding a `:` before a title
+    word like `NYY@BOS_19:10` takes the title; and so, stated by the review
+    of e038d58 (the lead's call under the owner's standing authority of
+    2026-11-09), are a non-ASCII dotted name and an underscore label after
+    an `@` (`Ed@Caf<U+00E9>.com`, `KC@BUF_20:15`, `News@UK:1`): a title
+    holding one after a bare value with a `:` is taken with the value -- 16
+    of the review's 45 synthetic lines (eight names in two forms), none of
+    the 351-name sweep's lines and none of the 3,705 realistic strings.
+    Reads one run of host characters from `i`."""
+    v6 = _HOST_IPV6_RUN.match(text, i, end)
+    single = False
+    if v6 is not None:
+        j = v6.end()
+    else:
+        j = _HOST_NAME_RUN.match(text, i, end).end()
+        name = text[i:j]
+        labels = (name[:-1] if name.endswith(".") else name).split(".")
+        quad = len(labels) == 4 and all(label.isascii() and label.isdigit() and len(label) <= 3 for label in labels)
+        last = labels[-1]
+        if not quad and (not all(labels) or len(last) < 2 or not last[0].isalpha()):
+            return False
+        single = not quad and len(labels) == 1
+    port = _HOST_PORT_RUN.match(text, j, end)
+    if port is not None:
+        j = port.end()
+    elif single:
+        return False
+    return j == end or text[j] in "/?#," or text[j].isspace()
+
+
+def last_hosted_at(text: str, lo: int, hi: int, end: int) -> int:
+    """The last ASCII `@` in [lo, hi) after which host_shaped(text, its
+    position + 1, end) holds, or -1. parse_attrs asks it once a token: a
+    growth would take every `@` from where it starts to the span's end, so
+    it grows when this is at or after that start. Each host read stops at
+    the next `@`, so the reads are disjoint."""
+    at = text.rfind("@", lo, hi)
+    while at >= 0:
+        if host_shaped(text, at + 1, end):
+            return at
+        at = text.rfind("@", lo, at)
+    return -1
 
 
 def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:
@@ -560,6 +944,11 @@ def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:
     return ""
 
 
+# parse_extinf's duration, compiled once rather than looked up in re's cache
+# on every #EXTINF line (D-PERF-13).
+_EXTINF_DURATION = re.compile(r"\s*(-?\d+(?:\.\d+)?)?")
+
+
 def parse_extinf(line: str, past: dict[str, tuple[int, bool]] | None = None) -> tuple[dict[str, str], str]:
     """#EXTINF:<duration> [attrs],<title> -> (attrs, title).
 
@@ -567,7 +956,7 @@ def parse_extinf(line: str, past: dict[str, tuple[int, bool]] | None = None) -> 
     `past` is parse_attrs'.
     """
     body = line[len("#EXTINF:"):]
-    match = re.match(r"\s*(-?\d+(?:\.\d+)?)?", body)
+    match = _EXTINF_DURATION.match(body)
     body = body[match.end():] if match else body
     attrs, rest = parse_attrs(body, past)
     rest = rest.lstrip()
@@ -637,15 +1026,25 @@ def stream_params(url: str) -> list[tuple[str, str]]:
     """The (name, value) pairs FFmpeg reads off a stream URL: everything after
     the FIRST `?` -- a `#` does not end it, unlike urlsplit's query, which is
     how `srt://h:1#?mode=listener` would have slipped past -- split at `&`,
-    each name cut at its `=`. Names are compared case-folded and with their
-    %-escapes decoded, which FFmpeg does neither of: stricter, never looser."""
+    each name cut at its `=`. Each name is read as FFmpeg n9.0.2 reads it
+    (libavformat/utils.c find_opt: percent-decoded into a C string that its
+    option lookup reads up to the first NUL, so `mode%00=listener` sets
+    srt's `mode` and `sources%00x` is `sources`; the review of 3ba4044 read
+    it upstream and measured it with ffprobe), and is then compared
+    case-folded and trimmed, which FFmpeg does not do: stricter, never
+    looser. FFmpeg also decodes a `+` to a space, which no option's name
+    holds, so a `+` before the NUL makes a name no option's either way, and
+    is left as written. The value is returned as written."""
     mark = url.find("?")
     if mark == -1:
         return []
     pairs = []
     for item in url[mark + 1:].split("&"):
         name, _, value = item.partition("=")
-        pairs.append((urllib.parse.unquote(name).strip().lower(), value))
+        name = urllib.parse.unquote(name)
+        if "\x00" in name:
+            name = name.partition("\x00")[0]
+        pairs.append((name.strip().lower(), value))
     return pairs
 
 
@@ -656,8 +1055,9 @@ def stream_listen_refusal(url: str) -> str:
     return _listen_refusal(url, stream_scheme(url), url_host(url))
 
 
-def _listen_refusal(url: str, scheme: str, host: str) -> str:
-    params = stream_params(url)
+def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, str]] | None = None) -> str:
+    if params is None:
+        params = stream_params(url)
     if any(name in LISTEN_PARAMS for name, _ in params):
         return "listener"
     if scheme == "srt":
@@ -669,13 +1069,427 @@ def _listen_refusal(url: str, scheme: str, host: str) -> str:
     return ""
 
 
+# D-SINK-87 (the owner, 2026-11-08): no channel stream address that names a
+# host the player would read in a form host_name_refused refuses is handed to
+# the player, which reads the host itself and looks it up. The helper cannot
+# ask the player which reading it takes, so where the two could differ the
+# address is refused by ANY reading rather than one picked, each asked of
+# host_name_refused itself (no second rule):
+#   1. the authority's host[:port] as written, after the netloc's LAST `@`
+#      (where urlsplit and FFmpeg both end a userinfo, and both end the
+#      authority at the first `/`, `?` or `#`), judged with its port: FFmpeg
+#      reads a port as the digits up to the next colon and urlsplit reads no
+#      port at all (rc-p1b's `127.0.0.1:631:80`), so what follows a port is
+#      judged too (`h.test:80;sid=x`, `h.test:80:81`). Its form is held to
+#      SR15's, as validate_source_url holds a source's: a port is ASCII
+#      digits or nothing (`user:123secret` is host `user`, port 123, to
+#      FFmpeg's av_url_split: the username alone, looked up), and a bracket
+#      holds an IPv6 literal (av_url_split reads a bracket's content as the
+#      host, so `[v1.a:b]`, which urlsplit accepts as an IPvFuture literal,
+#      is the name `v1.a:b`), so a `[` or `]` anywhere else, or text between
+#      a literal's `]` and its port's colon, is refused. urlsplit (Python
+#      3.14) refuses a netloc holding only one kind of bracket; holding both,
+#      it refuses text before a `[` in the host[:port] after the last `@`, or
+#      between its `]` and a port's colon, and otherwise requires the host
+#      (the bracket's content, or with no `[` there the text up to the first
+#      colon) to be an IPv6 address or IPvFuture-shaped. So with the `[` in
+#      the userinfo it reads `http://a[@v1.evil]x/` as the host `v1.evil]x`,
+#      an IPvFuture match, which av_url_split reads the same way, and this
+#      holds the whole form itself rather than leaning on urlsplit (the
+#      reviews of 95f1bb9 and 3ba4044).
+#      That form is what makes urlsplit's own reading, the hostname every
+#      other stream rule here takes, a part of this one: that hostname is
+#      this text up to its port, or an IPv6 literal's content, lower-cased,
+#      and lower-casing changes no code point's verdict (SubsumptionTest, in
+#      the dev branch's D-SINK-87 suite, holds that over every code point,
+#      and the whole claim over its vectors, IPvFuture ones among them);
+#   2. for the schemes mpv percent-escapes before FFmpeg reads them, that
+#      host[:port] as mpv escapes it. mpv 0.41.0's stream/stream_lavf.c
+#      (read upstream 2026-11-08): open_f rewrites mms:// to mmsh://, then
+#      normalize_url escapes an http, https or mmsh URL with mp_url_escape
+#      (stream/stream.c), byte by byte, keeping only ASCII letters, digits,
+#      `-._~` and PLAYER_URL_KEPT. The stream layer opens every such stream
+#      through that copy, and the demuxer probes what it reads; an HLS one is
+#      then opened again by FFmpeg from the URL as given (demux_lavf passes
+#      the stream's own url, which open_f never rewrites), so an HLS stream
+#      goes through both readings. So `b<U+00FC>cher.test`, one name to the
+#      helper, is `b%C3%BCcher.test` on the player's first path: a name
+#      holding `%`, refused. urllib.parse.quote's always-safe set is exactly
+#      mp_url_escape's. rtsp, rtmp, udp, rtp and srt are not escaped, so the
+#      first reading is theirs;
+#   3. for udp and rtp, the hosts the address's query names
+#      (STREAM_QUERY_HOST_SCHEMES). FFmpeg n9.0.2's udp.c and rtpproto.c read
+#      what follows the URL's FIRST `?` as their options
+#      (ff_parse_opts_from_query_string: split at `&`, every name and value
+#      percent-decoded with `+` read as a space, each into a C string, so a
+#      decoded NUL ends it), and ip.c resolves each entry of `sources` and
+#      `block` by name (av_get_token at `,`, then getaddrinfo, no
+#      AI_NUMERICHOST, and no bracket handling: an entry is handed on as it
+#      is); rtp resolves them itself and pastes them, decoded, into the udp
+#      URL it opens, where udp decodes them again. So every value whose name
+#      stream_params reads as `sources` or `block` (`sources%00x` among them:
+#      the review of 3ba4044) is read, and every entry of every reading --
+#      decoded once, and for rtp twice -- is judged with no port, trimmed of
+#      only the ASCII whitespace av_get_token skips. A reading holding `'` or
+#      a backslash is refused whole, because av_get_token's quoting would
+#      join or split its entries otherwise: the reading's, not the raw
+#      value's, since `%27user,+pass%27` is the one name `user, pass` to
+#      FFmpeg. So is one holding `[` or `]`: host_name_refused sets a leading
+#      bracketed IPv6 literal aside as URL syntax, and here it is none, so
+#      `[2001:db8::1]x` would be looked up as a name holding brackets and
+#      colons (the review of 3ba4044); and one holding a NUL, where FFmpeg's
+#      C string ends the list and this reading would not. rtp's once-decoded
+#      reading is resolved too, so both of its readings are judged.
+#      `sources=10.0.0.1,10.0.0.2` and a bare `fe80::1` play. Such a name is
+#      a lookup, not a listener, so it is a `name`, never D-SINK-42's
+#      `listener`. No other option the player reads from a stream URL of any
+#      scheme here names a host it looks up (read in mpv 0.41.0 and FFmpeg
+#      n9.0.2 on 2026-11-08; `localaddr` is a LISTEN_PARAMS name, under any
+#      name stream_params reads as that one; the search is recorded in the
+#      dev branch's QA-RESULTS).
+# A percent-decoded reading of the authority adds nothing: a raw `%` outside
+# an IPv6 zone is refused already, and urlsplit deletes tab, CR and LF before
+# it reads, which is why every caller asks this AFTER the control-character
+# check (stream_form_ok, stream_entry_refusal), the D-SINK-54 lesson. The
+# fold of D-SINK-88 is host_name_refused's own, so every reading has it.
+#
+# The cost (constraint 7, D-PERF-13): _stream_name_refused accepts at once an
+# authority whose host is only ASCII letters, digits and `_.-~` and whose
+# port is ASCII digits or nothing. No reading can refuse it: none of those
+# characters is one host_name_refused refuses or folds, it holds no bracket
+# and at most one colon, its port is digits, and quote returns it unchanged.
+# It is a shortcut held equal to the readings over every code point
+# (FastPathTest, the dev branch's D-SINK-87 suite), not a second rule, and a
+# udp or rtp address never takes it, so its query hosts are always read.
+# Reading 3 has three of its own, so a provider's source list costs no more
+# than its length (the review of 95f1bb9 measured a 4,096-character list of
+# `::1` entries at 68 s per 10,000 lines): a reading of only
+# _PLAIN_HOST_CHARS and commas (_PLAIN_READING_BYTES) is accepted at once
+# (_plain_reading), for the same reason as the authority and held to the
+# per-entry judgment the same way (ReadingShortcutTest, the dev branch's
+# D-SINK-87 suite); each distinct entry is judged once per line, across
+# every reading of every pair, however often the line repeats it (the
+# review of 3ba4044 counted 340 calls for a line of `sources=::1&` pairs,
+# deduplicated then only within a value); and a reading already judged on
+# the line, rtp's unchanged second decode among them, is not read again.
+# The query's pairs are read once per line, by the listening rule and this
+# one together. A line of DISTINCT entries that are not plain (IPv6
+# literals, one-code-point Unicode names) still costs a call per entry.
+# For entries holding no colon that is this code's choice, not a limit: such
+# an entry's verdict is the OR of its code points' own, so a per-code-point
+# verdict would accept the list in linear time with the same answers (not
+# taken; the review of 6371c67). Entries holding colons need the call.
+# Whether to bound a list at all is the owner's open question (the D-SINK-87
+# row on the dev branch): FFmpeg n9.0.2 fails the udp or rtp open before
+# any lookup when a value of an option it knows is 512 raw bytes or more,
+# and keeps only a string option's last value, but skips undecoded a value
+# under a name it does not know, which this reading still judges
+# (`SOURCES=`), so a line that plays can carry such a list.
+PLAYER_ESCAPED_SCHEMES = frozenset({"http", "https", "mms", "mmsh"})
+PLAYER_URL_KEPT = ":/?#[]@!$&'()*+,;=%"
+# Reading 3: each scheme whose query names hosts, and how many times FFmpeg
+# decodes them before it looks them up.
+STREAM_QUERY_HOST_SCHEMES = {"udp": 1, "rtp": 2}
+STREAM_QUERY_HOST_PARAMS = frozenset({"sources", "block"})
+# av_get_token's WHITESPACES: what it skips before an entry and trims after.
+_TOKEN_SPACE = " \n\t\r"
+_PLAIN_HOST_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~"
+# A reading of only these is accepted at once. Asked as bytes.translate's
+# deletion, which costs a 4,096-character reading about 4 us where str.strip
+# over the same set cost about 39.
+_PLAIN_READING_BYTES = (_PLAIN_HOST_CHARS + ",").encode("ascii")
+_PORT_DIGITS = "0123456789"
+# player_target's refusal: one fixed sentence, naming no host and no URL
+# (the host may be a userinfo the provider spelled wrong).
+STREAM_HOST_NAME_REFUSAL = ("refused a stream whose address names a host the player would read in a form no host "
+                            "name or port may take; not played")
+
+
+def _stream_name_refused(url: str, netloc: str, scheme: str, params: list[tuple[str, str]] | None = None) -> bool:
+    """D-SINK-87's question of one location line and its urlsplit: `url` the
+    line, `netloc` its netloc, `scheme` lower-cased, `params` its
+    stream_params when the caller has them. The fast accept above
+    (_plain_authority), never for udp or rtp, then every reading
+    (_stream_name_readings)."""
+    if scheme not in STREAM_QUERY_HOST_SCHEMES and _plain_authority(netloc):
+        return False
+    return _stream_name_readings(url, netloc, scheme, params)
+
+
+def _plain_authority(netloc: str) -> bool:
+    """The fast accept: is the host[:port] after the netloc's last `@` only
+    _PLAIN_HOST_CHARS, then at most one colon and ASCII digits? str.strip
+    over a set is quote's own idiom for "only these"."""
+    host, _, port = netloc.rpartition("@")[2].partition(":")
+    return not host.strip(_PLAIN_HOST_CHARS) and not port.strip(_PORT_DIGITS)
+
+
+def _stream_name_readings(url: str, netloc: str, scheme: str, params: list[tuple[str, str]] | None = None) -> bool:
+    """Every reading, with no shortcut: the authority (readings 1 and 2) and,
+    for udp and rtp, the hosts the query names (reading 3)."""
+    if _stream_authority_refused(netloc.rpartition("@")[2], scheme):
+        return True
+    decodes = STREAM_QUERY_HOST_SCHEMES.get(scheme, 0)
+    return decodes > 0 and _stream_query_hosts_refused(url, decodes, params)
+
+
+def _stream_authority_refused(hostport: str, scheme: str) -> bool:
+    """Readings 1 and 2 of an authority's host[:port], and its form: a
+    bracket only as a leading IPv6 literal's pair, followed by nothing or by
+    a port's colon, and a port of ASCII digits or none. The whole form is
+    asked here, because urlsplit (Python 3.14) checks a host's brackets only
+    where its own split puts them: with a `[` in the userinfo and a `]` in
+    the host it accepts an IPvFuture-shaped host such as `v1.evil]x`."""
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close == -1 or not _ipv6_literal_text(hostport[1:close]):
+            return True
+        rest = hostport[close + 1:]
+        if rest and not rest.startswith(":"):
+            return True
+        port = rest[1:]
+    else:
+        if "[" in hostport or "]" in hostport:
+            return True
+        port = hostport.partition(":")[2]
+    if port.strip(_PORT_DIGITS):
+        return True
+    if host_name_refused(hostport, True):
+        return True
+    return scheme in PLAYER_ESCAPED_SCHEMES and host_name_refused(
+        urllib.parse.quote(hostport, safe=PLAYER_URL_KEPT, errors="surrogatepass"), True)
+
+
+def _stream_query_hosts_refused(url: str, decodes: int, params: list[tuple[str, str]] | None = None) -> bool:
+    """Reading 3: does a `sources` or `block` value name a host, in any of
+    its `decodes` readings (_query_readings), that host_name_refused
+    refuses? `judged` carries the entries already asked across every pair,
+    so a line costs a call per DISTINCT entry however many pairs repeat
+    it."""
+    judged: set[str] = set()
+    for reading in _query_readings(url, decodes, params):
+        if _query_reading_refused(reading, judged):
+            return True
+    return False
+
+
+def _query_readings(url: str, decodes: int, params: list[tuple[str, str]] | None = None) -> Any:
+    """Each distinct reading of each `sources` or `block` value on this
+    line, in order, lazily: decoded once, and for rtp (`decodes` 2) twice.
+    stream_params reads the names as FFmpeg does (up to a decoded NUL) or
+    more widely (case-folded, trimmed); `params` is its answer when the
+    caller has it. A value already read on this line is not decoded again,
+    and a reading already given (rtp's unchanged second decode among them)
+    is not given again -- but decoding goes on past it, because a later
+    pair's first reading can equal an earlier pair's second, and its own
+    second decode is then one the earlier pair never made, and the one rtp
+    hands udp when that pair is the last (FFmpeg keeps a string option's
+    last value). Asked by reading 3 (D-SINK-87) and by the one-label rule
+    (D-SINK-89)."""
+    values: set[str] = set()
+    readings: set[str] = set()
+    for name, value in (stream_params(url) if params is None else params):
+        if name not in STREAM_QUERY_HOST_PARAMS or value in values:
+            continue
+        values.add(value)
+        reading = value
+        for _ in range(decodes):
+            reading = urllib.parse.unquote_plus(reading)
+            if reading in readings:
+                continue
+            readings.add(reading)
+            yield reading
+
+
+# A decoded reading holding any of these is refused whole: av_get_token's
+# quote and escape, a bracket (an entry is looked up as it is, so a
+# bracketed IPv6 literal would be a name holding brackets and colons), and
+# a NUL, where FFmpeg's C string ends the list.
+_READING_REFUSED = ("'", "\\", "[", "]", "\x00")
+
+
+def _query_reading_refused(reading: str, judged: set[str] | None = None) -> bool:
+    """One decoded `sources` or `block` reading: refused whole when it holds
+    one of _READING_REFUSED, accepted at once when it is only
+    _PLAIN_READING_BYTES (_plain_reading), and otherwise judged entry by
+    entry (_query_entries_refused), `judged` the entries already asked on
+    the line."""
+    if any(mark in reading for mark in _READING_REFUSED):
+        return True
+    if _plain_reading(reading):
+        return False
+    return _query_entries_refused(reading, set() if judged is None else judged)
+
+
+def _plain_reading(reading: str) -> bool:
+    """Reading 3's fast accept: is the reading only _PLAIN_READING_BYTES,
+    plain host characters and commas? No entry of it can be refused: none of
+    those characters is one host_name_refused refuses or folds, and a
+    trimmed entry of them holds no colon. A shortcut held equal to
+    _query_entries_refused over every code point (ReadingShortcutTest, the
+    dev branch's D-SINK-87 suite), not a second rule."""
+    return reading.isascii() and not reading.encode("ascii").translate(None, _PLAIN_READING_BYTES)
+
+
+def _query_entries_refused(reading: str, judged: set[str]) -> bool:
+    """Reading 3's judgment with no shortcut: is an entry of `reading`, split
+    at `,` and trimmed of _TOKEN_SPACE as av_get_token reads it, a name
+    host_name_refused refuses? An entry already in `judged` is not asked
+    again, and the walk goes on past it; every entry asked is added to it.
+    The entries are walked in their own order (dict.fromkeys, not a set),
+    so which of them a skip passes over is the line's, never the hash
+    seed's, and a vector can hold the skip (the review of cce5548: a
+    `break` there passed every suite, and what it let through moved with
+    PYTHONHASHSEED)."""
+    for raw in dict.fromkeys(reading.split(",")):
+        entry = raw.strip(_TOKEN_SPACE)
+        if entry in judged:
+            continue
+        judged.add(entry)
+        if host_name_refused(entry):
+            return True
+    return False
+
+
+def stream_host_name_refused(url: str) -> bool:
+    """D-SINK-87: would the player be handed a host, by any reading of this
+    stream URL (_stream_name_refused), in a form host_name_refused refuses?
+    A URL urlsplit cannot read is refused. Asked by player_target after
+    is_stream_url, which refuses a control character first."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return True
+    return _stream_name_refused(url, parts.netloc, parts.scheme.lower())
+
+
+# D-SINK-91 (2026-11-09): an IPv6 literal whose zone is not a number. FFmpeg
+# n9.0.2 never percent-decodes a URL's host, so it holds the zone as the
+# address writes it (`ff02::1%25eth0`: the zone `25eth0`), and every stream
+# protocol but udp and srt hands that host to the protocol beneath it
+# through ff_url_join (libavformat/url.c: rtp to udp in build_udp_url, http
+# and rtsp and rtmp to tcp, https and rtmps to tls and then tcp, mmsh to
+# http), which brackets it only when getaddrinfo with AI_NUMERICHOST reads
+# it as an IPv6 address. glibc reads a zone numerically only when it is,
+# on a link-local address, an interface's name, or digits whose value fits
+# in 32 bits (inet/inet6_scopeid_pton.c: a digit first, then strtoull to
+# the end and `number <= UINT32_MAX`), so `rtp://[ff02::1%25eth0]:5004`
+# reaches udp as `udp://ff02::1%25eth0:5004`,
+# and av_url_split cuts an unbracketed host at its first colon: udp looks
+# up the NAME `ff02`, port 0 (read upstream, the review of 6371c67). The
+# same cut makes http's tcp look up `2a00` for `[2a00:1450::1%25eth0]` and
+# connect to 0.0.10.46 for `[2606:4700::1%25eth0]`, and rtp's
+# `[::ffff:239.1.1.1%25eth0]` bind every interface (observed by that review
+# inside an unshared network namespace, numeric hosts only). So such a
+# literal is refused, on every stream scheme: udp and srt hand the zone to
+# the resolver as written, and an interface's name may be present on one
+# machine and gone on the next, so one rule over the literal is kept
+# rather than a list of the protocols that rewrite it today. A zone of
+# ASCII digits whose value is at most 4294967295 (`%252`, read as 252;
+# leading zeros allowed, as strtoull reads them) and a literal with no zone
+# play. Digits past that value are no number to glibc either, so
+# `[ff02::1%254294967296]` (the zone `254294967296`) is cut as `%25eth0`
+# is (the review of bf47cdc). The value is read only once its text, its
+# leading zeros off, is at most ten digits: a typed `--url` has no length
+# bound, and int() refuses a string of more than 4,300 digits.
+STREAM_ZONE_REFUSAL = "refused a stream whose IPv6 address carries a zone that is not a number; not played"
+
+
+def stream_zone_refused(netloc: str) -> bool:
+    """D-SINK-91: is the host after this netloc's last `@` a bracketed IPv6
+    literal whose zone, as the address writes it, is not a number glibc
+    reads (_numeric_zone)? No zone, or a host that is no bracketed literal,
+    is no question here."""
+    hostport = netloc.rpartition("@")[2]
+    if not hostport.startswith("["):
+        return False
+    zone = hostport[1:].partition("]")[0].partition("%")
+    return zone[1] != "" and not _numeric_zone(zone[2])
+
+
+def _numeric_zone(zone: str) -> bool:
+    """glibc's numeric reading of a scope (__inet6_scopeid_pton): ASCII
+    digits, and a value of at most UINT32_MAX. The value is read only when
+    the digits past their leading zeros are at most ten, so a zone of any
+    length costs one int() of at most ten digits."""
+    if not (zone.isascii() and zone.isdigit()):
+        return False
+    digits = zone.lstrip("0")
+    return len(digits) <= 10 and int(digits or "0") <= 0xFFFFFFFF
+
+
+# D-SINK-89 (the owner, 2026-11-08: "yes, refuse one-word stream hosts from
+# remote playlists too"): D-SINK-83's rule, which refuses before any lookup
+# a host of ONE DNS label that the provider chose for a guide hint or a
+# logo, reaches the channels too. A host a URL's space cut leaves (D-SINK-
+# 34's class) is the username of `http://USER:...`, one label, and the
+# player would ask the resolver, and through it the search domains'
+# servers, about it. So from a playlist that is not local
+# (playlist_source's `local`: a file, or an http(s) source whose last hop
+# connected to a non-global address) a channel is refused when the host
+# its address names is one label by dotless_host -- the authority's, as
+# urlsplit reads it, which D-SINK-87's form makes the player's too -- and,
+# for udp and rtp, when any entry of any reading of a `sources` or `block`
+# value is (_query_readings: the names FFmpeg looks up). The playlist's own
+# host is excepted, compared as DestinationPolicy.refuses_name compares it:
+# host_key equal, the port not compared. A local playlist keeps one-label
+# names (a LAN's own names: `tvheadend`, `hdhomerun`). A dotted IPv4 or an
+# IPv6 literal is never one label; an IPv4 address written as one number
+# or in hex (`16843009`) is, as it is for a hint or a logo. Asked after
+# D-SINK-87's readings, which let an entry hold a colon only as an IPv6
+# literal, so an entry holding a colon is no question here and costs no
+# literal parse. Every other distinct entry is asked, and that is the cost
+# the D-SINK-89 row states: from a list that is not local, a source list
+# of plain names or IPv4 literals, which reading 3 accepts with one
+# translate, is walked here an entry at a time, about three times a local
+# list's cost per line (the review of cce5548).
+STREAM_LABEL_REFUSAL = ("refused a stream whose address names a host of one label, from a playlist that is not on this "
+                        "machine or a local network; not played")
+
+
+def stream_label_refused(url: str, host: str, scheme: str, source: dict[str, Any],
+                         params: list[tuple[str, str]] | None = None) -> bool:
+    """D-SINK-89: `url` a channel's address, `host` its urlsplit hostname,
+    `scheme` lower-cased, `source` playlist_source's (or cached_source's)
+    record of its playlist, `params` stream_params(url) when the caller has
+    it. -> whether it names a host of one label the playlist may not."""
+    if source.get("local"):
+        return False
+    home = str(source.get("host") or "")
+    if dotless_host(host) and host_key(host) != home:
+        return True
+    decodes = STREAM_QUERY_HOST_SCHEMES.get(scheme, 0)
+    if decodes == 0:
+        return False
+    # The entries in their own order, as _query_entries_refused walks them:
+    # an entry already asked is passed over and the walk goes on.
+    asked: set[str] = set()
+    for reading in _query_readings(url, decodes, params):
+        for raw in dict.fromkeys(reading.split(",")):
+            entry = raw.strip(_TOKEN_SPACE)
+            if entry in asked:
+                continue
+            asked.add(entry)
+            if ":" not in entry and dotless_host(entry) and host_key(entry) != home:
+                return True
+    return False
+
+
 def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
     first half, a control character included: stream_form_ok), `listener`
     (stream_listen_refusal, D-SINK-42), `local` (stream_host_refused,
-    D-SINK-41) or `port` (the same rule's loopback-relay half, D-SINK-57)."""
+    D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57),
+    `name` (the address names a host the player would read in a form
+    host_name_refused refuses, D-SINK-87), `zone` (an IPv6 literal whose
+    zone is not a number, D-SINK-91) or `label` (a host of one label from a
+    playlist that is not local, D-SINK-89). `name`, `zone` and `label` are
+    asked last, in that order: the rules before them classify a literal and
+    look nothing up, so a line two rules refuse keeps the older reason, and
+    the parse's host rule still answers row for row as play time's does
+    (the destinations fixture, dev branch)."""
     if url.startswith("-") or _CONTROL_CHARS.search(url):
         return "scheme", ""
     try:
@@ -686,7 +1500,8 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     scheme = parts.scheme.lower()
     if scheme not in STREAM_SCHEMES or host == "":
         return "scheme", host
-    if _listen_refusal(url, scheme, host) != "":
+    params = stream_params(url)
+    if _listen_refusal(url, scheme, host, params) != "":
         return "listener", host
     # url_port's reading, from the one urlsplit: the scheme's default stands
     # only for a port the URL does not name. A port that does not parse is no
@@ -702,6 +1517,15 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     refusal = _host_refusal(host, scheme, source, port)
     if refusal:
         return refusal, host
+    if _stream_name_refused(url, parts.netloc, scheme, params):
+        return "name", host
+    # Each asked only where it can answer, so a plain line of a local list,
+    # the 10,000-channel case, pays two tests and no call: a netloc with no
+    # `[` holds no literal, and a local playlist keeps every label.
+    if "[" in parts.netloc and stream_zone_refused(parts.netloc):
+        return "zone", host
+    if not source.get("local") and stream_label_refused(url, host, scheme, source, params):
+        return "label", host
     return "", host
 
 
@@ -811,11 +1635,6 @@ def clean_header_value(value: str) -> str:
 # ends a run for its cut (cut_free_text, D-SINK-75), where it does: each
 # group reaches the sinks on its own.
 GROUP_SEPARATOR = ";"
-# One group of a text that holds a `;` and a `://` (split_groups): text up to
-# a `;` that separates, where a `://` (_URL_MARK) takes the rest of its run,
-# to the next space, whole, `;`s and all, and a `:` that starts no `://` is
-# taken alone.
-GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
 # split_groups' last answer, by its text: a persistent #EXTGRP is split again
 # for every channel after it, the same text each time, and consecutive
 # entries often repeat one group-title. A dict changed in place (as
@@ -823,41 +1642,111 @@ GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
 SPLIT_GROUPS_LAST: dict[str, list[str]] = {}
 
 
+def group_split_protects(value: str) -> bool:
+    """Whether any `;` of `value` can stand where split_groups keeps it in
+    its group: the value holds a `;` and either a mark (a SLASH and
+    url_mark_any) or both an ASCII `:` and `@` (a D-SINK-96 token). Where
+    it is False every `;` separates, and the native split is the rule's
+    answer at native cost (D-PERF-13). A `;` written straight after a
+    space, or first, opens its run, so no mark or token can stand before it
+    there: when every `;` is one of those (`A ;B`, `a:// ;` repeated) none
+    can be kept and nothing is searched. A text with no SLASH is not
+    searched for a mark, so a run of `:` with no `//` costs no attempt."""
+    count = value.count(GROUP_SEPARATOR)
+    if count == 0 or count == value.count(" " + GROUP_SEPARATOR) + value.startswith(GROUP_SEPARATOR):
+        return False
+    if ":" in value and "@" in value:
+        return True
+    if "/" not in value and (value.isascii() or _SLASH_ALIKE.search(value) is None):
+        return False
+    return url_mark_any(value) >= 0
+
+
+def group_parts(value: str) -> list[str]:
+    """`value` split at every `;` that separates groups (split_groups): one
+    pass over its space-runs. A `;` that opens its run (written straight
+    after a space, or first, or after another such `;`) always separates,
+    since no mark or token can stand before it there, so a run whose every
+    `;` is one of those is not asked. Any other run is asked once, by
+    url_mark_any over the run's own slice and one find for its first `:`
+    and one for its last `@`; each `;` is then read once."""
+    parts: list[str] = []
+    piece = 0
+    size = len(value)
+    i = 0
+    while True:
+        space = value.find(" ", i)
+        run_end = size if space < 0 else space
+        semi = value.find(GROUP_SEPARATOR, i, run_end)
+        if semi >= 0:
+            lead = i
+            while lead < run_end and value[lead] == GROUP_SEPARATOR:
+                lead += 1
+            mark = colon = at = -1
+            if value.find(GROUP_SEPARATOR, lead, run_end) >= 0:
+                run = value[i:run_end]
+                mark = url_mark_any(run, 0)
+                colon = run.find(":")
+                at = run.rfind("@")
+            while semi >= 0:
+                inside = semi - i
+                if not ((mark >= 0 and inside > mark) or (0 <= colon < inside < at)):
+                    parts.append(value[piece:semi])
+                    piece = semi + 1
+                semi = value.find(GROUP_SEPARATOR, semi + 1, run_end)
+        if space < 0:
+            break
+        i = space + 1
+    parts.append(value[piece:])
+    return parts
+
+
 def split_groups(value: str) -> list[str]:
     """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
     first of each kept in order).
 
-    D-SINK-78: a `;` separates groups only when no `://` (_URL_MARK, read as
-    the sinks that delete control characters read one) stands between it
-    and the last ASCII space before it. Every redactor reads a `;` as URL
+    D-SINK-78: a `;` separates groups only when no mark stands between it
+    and the last ASCII space before it -- a narrow `://` (_URL_MARK, read as
+    the sinks that delete control characters read one) or, since D-SINK-95
+    (2026-11-11), a URL's mark as next_url reads one, which any odd
+    character may break (url_mark_any). Every redactor reads a `;` as URL
     text, in a userinfo, a path or a query, so splitting there handed each
     sink half a URL: `http://myuser:pa;ss@cdn.test/x` was listed under
     `http://myuser:pa`, shown as the host `myuser`, and `ss@cdn.test/x`
-    went beside it as a group no redactor could touch. So from a `://` to
+    went beside it as a group no redactor could touch. So from a mark to
     the space that ends its run every `;` stays in its group, and the URL
-    reaches the sinks whole. A space, because it ends a run at every sink,
-    as it does for cut_free_text. The cost: a group written straight after
-    a URL, with no space before its `;`, is part of the URL's group.
+    reaches the sinks whole. D-SINK-96: nor does a `;` that stands after the
+    run's first `:` and before its last `@`, which is inside the token a
+    redactor withholds (`qqqqqq:pa;ss@cdn.test/x` split there left
+    `qqqqqq:pa`, no token, beside `ss@cdn.test/x`). A space, because it ends
+    a run at every sink, as it does for cut_free_text. The cost: a group
+    written straight after a URL or a token, with no space before its `;`,
+    is part of that group (`Movies;Sci:Fi;Kids@Home` lists `Movies` and
+    `Sci:Fi;Kids@Home`).
 
     Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
     per part scanned the list, k*k/2 comparisons for k parts, and a
     persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
     one-character parts -- is split again for every channel after it, so a
     50,000-channel list paid about 32,000 comparisons a channel. Same list,
-    one pass. The `://` test is one pass too, and native: GROUP_PART takes
-    each URL's run whole as it reaches it and never searches back from a
-    `;`, and a text that holds no `://` is split natively. A text split last
-    time is answered from SPLIT_GROUPS_LAST, as a new list."""
+    one pass. group_parts reads each space-run once, and only where
+    group_split_protects says a `;` could be kept (D-PERF-13: where none
+    can, every `;` separates and the native split is the answer). A text
+    split last time is answered from SPLIT_GROUPS_LAST, as a new list."""
     last = SPLIT_GROUPS_LAST.get(value)
     if last is not None:
         return list(last)
-    if GROUP_SEPARATOR in value and "/" in value and _URL_MARK.search(value) is not None:
-        parts = GROUP_PART.findall(value)
+    if group_split_protects(value):
+        parts = group_parts(value)
     else:
-        # No `;`, or no `://`: every `;` separates, and the native split is
-        # the rule's answer at native cost.
+        # No `;` a mark or a token keeps: every `;` separates, and the native
+        # split is the rule's answer at native cost.
         parts = value.split(GROUP_SEPARATOR)
-    groups = list(dict.fromkeys(name for name in (part.strip() for part in parts) if name))
+    # Trimmed, first of each kept in order, the empty name dropped: one
+    # native pass, where a generator per part cost about 0.2 us each.
+    names = dict.fromkeys(map(str.strip, parts))
+    names.pop("", None)
+    groups = list(names)
     SPLIT_GROUPS_LAST.clear()
     SPLIT_GROUPS_LAST[value] = groups
     return list(groups)
@@ -963,13 +1852,28 @@ def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None,
 def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
     """split_groups' list with each name cut to M3U_MAX_GROUP and at most
     M3U_MAX_GROUPS_PER_CHANNEL of them; a cut that makes two names equal
-    keeps the first, as split_groups does for a repeat."""
+    keeps the first, as split_groups does for a repeat.
+
+    D-PERF-13: when the first M3U_MAX_GROUPS_PER_CHANNEL names are distinct,
+    none is empty and none is over M3U_MAX_GROUP, the loop below keeps each
+    of them as it is and stops at the next, counting it; that answer is
+    taken natively. split_groups' list is distinct and has no empty name,
+    so a persistent 512-character #EXTGRP of short groups (38 of them, 16
+    kept) is no longer walked name by name for every channel."""
+    head = groups[:M3U_MAX_GROUPS_PER_CHANNEL]
+    if head and max(map(len, head)) <= M3U_MAX_GROUP and "" not in head and len(set(head)) == len(head):
+        if len(groups) > len(head):
+            bound_count(bounds, "groupCount")
+        return head
     out: list[str] = []
     for name in groups:
         if len(out) >= M3U_MAX_GROUPS_PER_CHANNEL:
             bound_count(bounds, "groupCount")
             break
-        name = cut_text(name, M3U_MAX_GROUP, "group", bounds)
+        # cut_text's own first test, made here: a name within the cap is
+        # returned as it is, and this skips the call (D-PERF-13).
+        if len(name) > M3U_MAX_GROUP:
+            name = cut_text(name, M3U_MAX_GROUP, "group", bounds)
         if name and name not in out:
             out.append(name)
     return out
@@ -1023,7 +1927,11 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # none of which redacts an id, since an id is what `play` takes back. An
     # `@` alone (`CNN.us@HD`) is no URL and is kept. The group scope stays
     # raw (D-SINK-78): hidden groups and saved scopes match on it.
-    if _URL_MARK.search(tvg_id) is not None:
+    # D-SINK-95 and D-SINK-96 (2026-11-11): so is a tvg-id holding a mark the
+    # redactors' reading finds (url_mark_any), or a `:` with an `@` after it,
+    # the token a redactor withholds; kept, the id would carry it raw.
+    colon = tvg_id.find(":")
+    if url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0):
         tvg_id = ""
     tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
@@ -1096,7 +2004,9 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["headers"] = headers
     if options:
         channel["options"] = options
-    channel["searchKey"] = search_key(name, " ".join(groups) if groups else group)
+    # The name is folded once, for searchKey and nameKey alike (search_key_of).
+    name_key = normalize_text(name)
+    channel["searchKey"] = search_key_of(name_key, " ".join(groups) if groups else group)
     # F-PERF-1. `searchKey` has been precomputed since M0 precisely so the
     # guide's filter does not fold 10,000 strings on every keystroke. The
     # ranker needs a SECOND fold -- the name alone, to rank a name match above
@@ -1109,7 +2019,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # An older cache without this key still works -- the reader keeps its
     # fallback -- so there is no migration, only a slower guide until the next
     # refresh writes one.
-    channel["nameKey"] = normalize_text(name)
+    channel["nameKey"] = name_key
     return channel
 
 
@@ -1177,6 +2087,9 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     is_playlist = False
     bounds: dict[str, int] = {}
     playlist = source if isinstance(source, dict) else {"host": "", "local": False}
+    skipped_name = 0
+    skipped_zone = 0
+    skipped_label = 0
     skipped_listen = 0
     skipped_local = 0
     skipped_port = 0
@@ -1253,6 +2166,12 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             bound_count(bounds, "url")
         elif refusal == "scheme":
             skipped_scheme += 1
+        elif refusal == "name":
+            skipped_name += 1                 # D-SINK-87: a host in a form no host takes
+        elif refusal == "zone":
+            skipped_zone += 1                 # D-SINK-91: an IPv6 zone that is not a number
+        elif refusal == "label":
+            skipped_label += 1                # D-SINK-89: one label, from a list that is not local
         elif refusal == "listener":
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
@@ -1282,6 +2201,17 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     if skipped_scheme:
         warnings.append(counted_sentence(skipped_scheme, "%d entry skipped: unsupported URL scheme",
                                          "%d entries skipped: unsupported URL scheme"))
+    if skipped_name:
+        # D-SINK-87: a count, never the host (it may be a userinfo).
+        warnings.append(counted_sentence(skipped_name, "%d entry skipped: its address names a host the player would read in a form no host name or port may take",
+                                         "%d entries skipped: their addresses name hosts the player would read in forms no host name or port may take"))
+    if skipped_zone:
+        warnings.append(counted_sentence(skipped_zone, "%d entry skipped: its address is an IPv6 literal whose zone is not a number",
+                                         "%d entries skipped: their addresses are IPv6 literals whose zones are not numbers"))
+    if skipped_label:
+        # D-SINK-89: a count, never the host (it may be a username).
+        warnings.append(counted_sentence(skipped_label, "%d entry skipped: its address names a host of one label, not the playlist's own, from a playlist that is not on this machine or a local network",
+                                         "%d entries skipped: their addresses name hosts of one label, not the playlist's own, from a playlist that is not on this machine or a local network"))
     if skipped_listen:
         warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
                                          "%d entries skipped: the streams would listen on this machine for anyone to send to"))
@@ -1437,7 +2367,14 @@ def substitute_name_ids(channels: list[dict[str, Any]], legacy: list[str]) -> li
     """The one substitution scheme 2 makes on top of scheme 1. Separate from
     channel_ids so channel_id_remap can hash every URL once instead of twice:
     measured on the user's 3,335-channel list that is 80 ms against 123 ms,
-    and the helper's budget is 10,000 channels parsed in under a second."""
+    and the helper's budget is 10,000 channels parsed in under a second.
+
+    Only a `u:` row is ever substituted, so a list with none comes back as
+    it went in, and its names are neither folded nor hashed (D-PERF-13):
+    the count below decides nothing without one. Measured on PerformanceTest's
+    10,000 rows, each with a tvg-id of its own: 77 ms, then under 1."""
+    if not any(base.startswith("u:") for base in legacy):
+        return list(legacy)
     name_keys = [name_id_key(channel.get("name", "")) for channel in channels]
     name_counts: dict[str, int] = {}
     for key in name_keys:

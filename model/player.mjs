@@ -219,12 +219,17 @@ function zapArgs(socket, cacheDir, key, nowPlaying) {
 // and it routes exactly as that did -- on this branch and on the status
 // branch (helperCannotTell) -- because nothing ran: no switch failed, no
 // player misbehaved. Only the sentence changed (settings.mjs maps the code).
-var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache", "helper_damaged"]
+//
+// `no_descriptors` (D-PLY-38, 2026-11-11) is the helper with no file
+// descriptor left: it could not look at the player at all, so it routes as
+// the two above do, here and on the status branch.
+var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache", "helper_damaged",
+                       "no_descriptors"]
 
 // The status branch's "cannot tell": a helper that could not answer is
 // neither healthy nor a health strike, so a stub or a damaged install never
 // reaps a working player by restarting it through the same broken helper.
-var HELPER_CANNOT_TELL = ["not_implemented", "no_output", "helper_damaged"]
+var HELPER_CANNOT_TELL = ["not_implemented", "no_output", "helper_damaged", "no_descriptors"]
 
 function helperCannotTell(code) {
   return HELPER_CANNOT_TELL.indexOf(str(code)) !== -1
@@ -281,10 +286,15 @@ function playFailureVerdict(code, context) {
 // and where:
 //   player_target   no_cache (channels.json missing or unreadable),
 //                   unknown_channel (the cache does not hold the id),
-//                   unsupported_scheme (the entry's own URL scheme)
+//                   unsupported_scheme (the entry's own URL: a scheme or a
+//                   form is_stream_url refuses, or, since D-SINK-87, an
+//                   address naming a host the player would read in a form
+//                   no host name or port may take)
 //   player_runtime  folder_unusable, runtime_unwritable
 //   check_socket_path  socket_path_blocked
 //   acquire_lock    runtime_unwritable, busy
+//   find_player, MpvIpc.connect  no_descriptors (D-PLY-38: no file
+//                   descriptor left for the /proc scan or the socket)
 //   check_seq       superseded
 //   adopt_or_spawn  mpv_missing, spawn_failed, no_socket
 //   apply_channel   tls_unverified (read off the PLAYER before the channel
@@ -300,7 +310,18 @@ function playFailureVerdict(code, context) {
 //                   code: parseHelperStatus)
 // Only `unsupported_scheme` is about the entry, and only a cache this
 // helper's parser would not write can carry one (it skips such lines), so
-// it is the one code listed.
+// it is the one code listed. This list is the START path's, and not every
+// start reply that carries it is told: Service.qml's start tail tells it (a
+// card and a mark, unless the user has stopped since) for a start or restart
+// sent with no player playing on, and for the automatic restart of another
+// build's player, which it stops; a start refused while the player it
+// observes plays on -- a channel change while another build's player is
+// still owed its restart sends one (playFork) -- is D-PLY-52's
+// refusedWhilePlaying, which puts the label back and tells nothing. On a zap
+// into a running player the same code comes back from `play`, which
+// playFailureVerdict reads as `failed` -- no card and no mark, D-PLY-42's
+// untold refusal (open, the owner's call) -- so a next or previous zap
+// lands on that channel again until the cache is refetched.
 //
 // A list of the CHANNEL code rather than a fourth list of local ones, and
 // on purpose: marking is the costly direction, so a code the helper grows
@@ -320,6 +341,8 @@ function playFailureVerdict(code, context) {
 // playlist, so a cache nothing checked -- one from before the destination
 // rules, whose refresh failed -- refuses a channel on a LAN or loopback
 // literal that its playlist chose. That refusal is about the entry.
+// D-SINK-89 (2026-11-09): and so is the same code for a cached channel whose
+// address names a host of one label from a playlist that is not local.
 var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme", "local_address"]
 
 function playerStartFailure(code) {
@@ -1097,8 +1120,32 @@ function endedReport(context) {
     notify: verdict.notify === true,
     kind: verdict.kind,
     target: channelForEnd(ctx.owners, ctx.lastEndFile, ctx.nowPlaying),
-    reason: format !== "" ? format : tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
+    reason: format !== "" ? format : tail.length > 0 ? playerTailReason(tail) : str(verdict.reason)
   }
+}
+
+// D-PLY-29: a log or stderr line that only WARNS is not the reason a channel
+// did not play. Under software GL, mpv's stderr carries driver lines such as
+// "MESA-EGL: warning: failed to get driver name for fd -1", and the tail's
+// last line used to be the reason whatever it said. A line is a warning when
+// it opens, after an optional "[prefix] " and any run of "tag: " words, with
+// "warning:" in one of three spellings. Exact cases, no case-insensitive
+// flag: the helper's player_log_warning is the same pattern, and the two
+// languages fold case differently outside ASCII. Pinned in the shared
+// fixture player-endings.json (`warningLines`), which the python suite reads.
+var PLAYER_WARNING_RE = /^(?:\[[^\]]*\] )?(?:[A-Za-z0-9_.-]+: )*(?:warning|Warning|WARNING):/
+
+function playerLogWarning(line) {
+  return PLAYER_WARNING_RE.test(str(line))
+}
+
+// The reason a tail gives: its last line that is not a warning, or its last
+// line when every line warns (a warning still says more than nothing). ""
+// for an empty tail.
+function playerTailReason(tail) {
+  var rows = asList(tail)
+  for (var i = rows.length - 1; i >= 0; i--) if (!playerLogWarning(rows[i])) return str(rows[i])
+  return rows.length > 0 ? str(rows[rows.length - 1]) : ""
 }
 
 // D-PLY-44 (owner, 2026-10-29: refuse nested playlists). The helper's own
@@ -1271,7 +1318,8 @@ export {
   PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
   playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
   playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport, PLAYER_FORMAT_ERROR,
+  rememberEntryOwner, channelForEnd, endedReport, PLAYER_WARNING_RE,
+  playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry
 }
