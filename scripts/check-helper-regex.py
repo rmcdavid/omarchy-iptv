@@ -100,7 +100,7 @@ REVIEWED = [
      "is not a letter and fails at once (_LATIN_MARKS, fold_text)"),
     ("'[^' + URL_DELIMITER_CHARS + ']+'", "provider",
      "linear: matched at one given position, one class run and nothing after it; the class is the "
-     "six ASCII delimiters, R32a''' (_URL_TAIL_RE, redact_urls)"),
+     "six ASCII delimiters, R32a''' (_URL_TAIL_RE, next_url: once a URL, from its mark's end)"),
     ("'[' + URL_DELIMITER_CHARS + ']'", "provider",
      "linear: one character class, no quantifier; the six ASCII delimiters, R32a''' (_URL_DELIMITER: "
      "run_host_parts' provider text, the class that ends a free-text URL's authority; and parse_attrs' "
@@ -116,7 +116,8 @@ REVIEWED = [
      "inside the window (found by lane-bounds-h). This one is used with match(s, lo, j) under DOTALL: "
      "`.*` runs to j once and backs off once to the LAST non-scheme character, so an attempt costs at "
      "most 2*(j - lo), and the doubling windows sum to under 8R + 128 steps for a run of R -- "
-     "independent of the text before it (_SCHEME_RUN_RE, redact_urls)"),
+     "independent of the text before it (_SCHEME_RUN_RE, _run_start for next_url's scheme walk, D-SINK-95; "
+     "the stretches two walks read are disjoint: a walk that finds no scheme sets the bound at its P, and one that finds a scheme ends the search at its URL, whose run the next search starts past. cbd6679 broke that and said otherwise: its redact_urls went on past a URL whose run was empty without moving the bound, so every later walk crossed back to the same letter, quadratic on `a` and `<U+200B><U+2215><U+2215><TAB>` repeated (13 s at 40,001 characters, the review of cbd6679); an empty run is a URL now, and a walk with no letter before it is not taken; cut_free_text asks for one URL a cut)"),
     (r"[:;=&]", "provider",
      "linear: one character class, no quantifier (_RUN_HOST_END, run_host_parts: the port and "
      "parameter delimiters that end a free-text host inside an authority, R32a')"),
@@ -133,8 +134,9 @@ REVIEWED = [
     (":[\x00-\x1f\x7f-\x9f]*/[\x00-\x1f\x7f-\x9f]*/", "provider",
      "linear: a literal `:` first, then two runs of one control class, each ended by a `/` the class "
      "cannot hold, so an attempt backs off at most once over each run and a run is scanned only from "
-     "the `:` before it; cut_free_text and split_groups each search once a call (_URL_MARK; GROUP_PART is "
-     "built on it). parse_attrs (D-SINK-80) searches it once a quoted value, bounded to the value's run "
+     "the `:` before it; url_mark_start searches it once a call, and url_mark_any calls that once: once a "
+     "cut (cut_free_text), once a group text and once a space-run of it (split_groups' group_parts, over the "
+     "run's own slice, so the runs read are disjoint), once a tvg-id (make_channel). parse_attrs (D-SINK-80) searches it once a quoted value, bounded to the value's run "
      "after its last space and begun at the last `:` before that run's first `/`, and a bare value once, "
      "bounded to the value, plus one match at its last `:` when a control ends the value, so a run is "
      "scanned from the `:` before it at most twice; fold_space (D-SINK-79) searches it from each run's end, "
@@ -156,23 +158,108 @@ REVIEWED = [
      "each control run), so an attempt backs off at most once over each run, and no run can hold a `,`, "
      "so the runs two attempts scan are disjoint; once a call over a guide hint, which parse drops past "
      "2,048 characters (_HINT_LIST_COMMA, hint_first_entry, D-SINK-82)"),
-    ("'(?:[^;:]+|' + _URL_MARK.pattern + '[^ ]*|:)+'", "provider",
-     "linear: nothing follows the outer repeat, so a match once begun never fails and is never backed "
-     "into; the branches part at their first character -- a run that cannot hold `;` or `:`, else a "
-     "`:`, tried as a `://` before alone -- so a match's iterations are fixed by the text; the `://` "
-     "branch failing at a `:` scans only the control runs after it, as _URL_MARK does, and its `[^ ]*` "
-     "has nothing after it; a start fails at its first character, a `;`, and findall resumes past "
-     "each match (GROUP_PART, split_groups)"),
-    ("' [^ :]*+(?:(?!' + _URL_MARK.pattern + '):[^ :]*+)*+' + _URL_MARK.pattern + '[^ ;]*+;'", "provider",
-     "linear: a literal space first, so search() over ' ' + text starts an attempt only at a space, and "
-     "nothing in it can pass a space, so each attempt reads only its own run; the run before its first "
-     "`://` is taken by POSSESSIVE repeats (a run of neither space nor `:`, then each `:` that the "
-     "lookahead finds starts no _URL_MARK, which reads only the control runs after that `:`, with the "
-     "run after it), then _URL_MARK, then a possessive run to the run's end or a `;`; no repeat is "
-     "backed into, so an attempt costs about its run's length and the runs are disjoint: one pass over "
-     "the text, once a call (GROUP_URL_SEPARATOR, split_groups, D-PERF-13); possessive repeats need "
-     "Python 3.11's re, the helper's first construct past 3.10: docs/ARCHITECTURE.md names 3.14, and "
-     "the pattern compiles at load, so an older python3 would fail every verb, not only the parse"),
+    ("'[' + SLASH_ALIKE_CHARS + ']'", "provider",
+     "linear: one character class, no quantifier (_SLASH_ALIKE: redaction_can_change's, parse_attrs' and "
+     "group_split_protects' one search a text for a slash look-alike, and slash_alike_cut's over a printed "
+     "host, D-SINK-95)"),
+    (r"'[^\x00-\x9f' + _SPACE_ABOVE_C1 + SLASH_ALIKE_CHARS + ']'", "provider",
+     "linear: one character class, no quantifier, searched over one mark's P at a time, and no two Ps "
+     "overlap (_MARK_STAND_IN, next_url, D-SINK-95)"),
+    ("'(?:[A-Za-z][0-9+.\\\\-]*+|[0-9+.\\\\-](?<=[^ -~][0-9+.\\\\-])[0-9+.\\\\-]*+|[' + SLASH_ALIKE_CHARS + '](?<=[A-Za-z0-9+.\\\\-\\x00-\\x1f\\x7f-\\x9f][' + SLASH_ALIKE_CHARS + ']))((?=[^ -9;-~' + SLASH_ALIKE_CHARS + '])' + _WIDE_STRETCH + '(?::' + _WIDE_STRETCH + ')*+)[/' + SLASH_ALIKE_CHARS + ']' + _WIDE_STRETCH + '[/' + SLASH_ALIKE_CHARS + ']'", "provider",
+     "linear: every branch opens with a one-character class, so search() tries a start only at a lead -- a "
+     "letter, a scheme character that is no letter, or a slash look-alike -- and skips the rest natively; the "
+     "letter branch's possessive run of scheme non-letters and the digit branch's possessive run end at the "
+     "first character they cannot hold, and each lookbehind reads one or two characters; then P's "
+     "stretches, each a possessive run of deleted controls and at most one wide FILLER code point, joined by "
+     "a `:` no stretch can hold, the first slash, one stretch and the second slash, none backed into; an "
+     "attempt at a lead reads the runs after it once, and a start inside a run fails at its first "
+     "character, since a `:` or FILLER opens no branch and a look-alike behind a wide code point fails its "
+     "lookbehind; next_url resumes a failed candidate's search at its P, so a stretch is read by at most two "
+     "attempts, and with `stop` it searches no further than the mark run after it (_URL_CANDIDATE and "
+     "_WIDE_STRETCH, next_url, D-SINK-95; the review of 4d13d71 moved the caps into it and took only the "
+     "leads a scheme walk can leave with a letter, so a run of rejected candidates is one native search)"),
+    ("'[^\\x00-\\x9f' + SLASH_ALIKE_CHARS + '][\\x00-\\x1f\\x7f-\\x9f]*+[^\\x00-\\x9f' + SLASH_ALIKE_CHARS + ']'", "provider",
+     "linear: an attempt starts only at a wide FILLER code point, then one possessive run of deleted "
+     "controls, never backed into, then one character; searched once a next_url call that has a `stop`, "
+     "from `stop` to the end of the mark run after it, so that run is read once (_FILLER_WIDE_PAIR, the end "
+     "of next_url's candidate search past its stop, the review of 4d13d71)"),
+    ("'.*[' + ''.join((chr(a) + '-' + chr(b) for a, b in SPACELESS_RANGES)) + ']'", "provider",
+     "linear: matched under DOTALL over a stretch outside every URL between a credential's `:` and its `@`; "
+     "`.*` runs to the end once and backs off to the last code point of a script written without spaces; "
+     "asked at most twice a stretch, the second time short of the first's answer, and each `@` is asked "
+     "once (_LAST_SPACELESS, _counted_ends, D-SINK-96's cap on the password side, the review of 4d13d71)"),
+    (r"(?:.*[ -*,/:-@\[-`{-~])?", "provider",
+     "linear: as _SCHEME_RUN_RE, matched with match(s, lo, j) under DOTALL: `.*` runs to j once and backs "
+     "off once to the last character that is neither a scheme character nor CROSSABLE, and _run_start's "
+     "windows double; asked once a scheme walk that crosses, and "
+     "the stretches two walks read are disjoint: a walk that finds no scheme sets the bound at its P, and one that finds a scheme ends the search at its URL, whose run the next search starts past. cbd6679 broke that and said otherwise: its redact_urls went on past a URL whose run was empty without moving the bound, so every later walk crossed back to the same letter, quadratic on `a` and `<U+200B><U+2215><U+2215><TAB>` repeated (13 s at 40,001 characters, the review of cbd6679); an empty run is a URL now, and a walk with no letter before it is not taken (_CROSS_SPAN_RE, _scheme_start, D-SINK-95)"),
+    (r".*[A-Za-z]", "provider",
+     "linear: matched once a crossing scheme walk over the stretch it may cross, under DOTALL: `.*` runs to "
+     "the end once and backs off to the last letter, and "
+     "the stretches two walks read are disjoint: a walk that finds no scheme sets the bound at its P, and one that finds a scheme ends the search at its URL, whose run the next search starts past. cbd6679 broke that and said otherwise: its redact_urls went on past a URL whose run was empty without moving the bound, so every later walk crossed back to the same letter, quadratic on `a` and `<U+200B><U+2215><U+2215><TAB>` repeated (13 s at 40,001 characters, the review of cbd6679); an empty run is a URL now, and a walk with no letter before it is not taken (_LAST_LETTER, _scheme_start, D-SINK-95)"),
+    (r".*[^ -~]", "provider",
+     "linear: matched once a crossing scheme walk over the stretch before its last letter, under DOTALL: "
+     "`.*` runs to the end once and backs off to the last CROSSABLE character (_LAST_CROSSABLE, "
+     "_scheme_start, D-SINK-95)"),
+    (r"[A-Za-z]", "provider",
+     "linear: one character class, no quantifier, searched over one scheme segment at a time (_ASCII_LETTER, "
+     "next_url and _scheme_start, D-SINK-95); and by next_url from the bound to a candidate's P, which the "
+     "bound then moves to when it finds none, and from there to the next letter, where the search goes on, "
+     "so each stretch is read once (the review of cbd6679's shortcut)"),
+    (r"[^ -~]", "provider",
+     "linear: one character class, no quantifier; sub over one URL's scheme and mark (_CROSSABLE, "
+     "redact_urls' printed scheme, D-SINK-95)"),
+    (r"(?<![^ ])[^ :]*+:[^ @]*+@[^ ]*+", "provider",
+     "linear: a one-character lookbehind lets an attempt start only at a token's start (after a space, or "
+     "at the text's start), where three possessive runs read the token once, to its first `:`, then to "
+     "its next `@` or space, then to its end, none backed into; every start inside a token fails at the "
+     "lookbehind; finditer resumes past each match (_CREDENTIAL_TOKEN, credential_spans: the candidate "
+     "tokens, D-SINK-96)"),
+    ("[^\x00-\x9f][\x00-\x1f\x7f-\x9f]*+[^\x00-\x9f]", "provider",
+     "linear: an attempt starts only at a wide code point, then one possessive run of deleted controls, "
+     "never backed into, then one character; an attempt at a wide code point reads the control run after "
+     "it once, and the starts inside a run fail at their first character. Searched over one mark's P and "
+     "between, and once a crossing scheme walk from its last letter to its P, each disjoint as the walks "
+     "are (_WIDE_PAIR, next_url and _scheme_start: the caps, the review of cbd6679)"),
+    ("[ -*,/:-@\\[-`{-~]|[^\x00-\x9f][\x00-\x1f\x7f-\x9f]*+[^\x00-\x9f]", "provider",
+     "linear: two alternatives that part at their first character: a printable character, matched alone, "
+     "or _WIDE_PAIR's attempt; searched once a cut, from the limit to the first such barrier "
+     "(_WALK_BARRIER, cut_free_text, the review of cbd6679)"),
+    ("'.*[^\\x00-\\x9f' + SLASH_ALIKE_CHARS + ']'", "provider",
+     "linear: matched under DOTALL over a stretch outside every URL, `.*` runs to the end once and backs "
+     "off to the last counted code point; asked at most twice a stretch, the second time short of the "
+     "first's answer, and the stretches are between a colon and its `@`, each `@` asked once, or before a "
+     "credential's colon, once a credential (_LAST_COUNTED, _counted_ends, D-SINK-96's cap, the review of "
+     "cbd6679)"),
+    ("[\t\n\x0b\x0c\r]", "provider",
+     "linear: one character class, no quantifier; sub over one credential's span (_HELD_DELIMITERS, "
+     "_fold_held, the review of cbd6679)"),
+    ("[\x00-\x08\x0e-\x1f\x7f\x85]", "provider",
+     "linear: one character class, no quantifier; sub over one credential's span (_HELD_CONTROLS, "
+     "_fold_held, the review of cbd6679)"),
+    ("[\U00002028\U00002029]", "provider",
+     "linear: one character class, no quantifier; sub over one URL's scheme and mark (_MARK_SEPARATORS, "
+     "fold_space, D-SINK-95)"),
+    (r"[^ -.0-9;-~]*", "provider",
+     "linear: matched at one given position, one class run and nothing after it, once a bare value that "
+     "FILLER ended, over the `:`, FILLER and SLASH run after it (_MARK_REACH, parse_attrs, D-SINK-95); and "
+     "once a _stop_end call, from the `stop` (the end of next_url's candidate search, the review of 4d13d71), "
+     "which a UrlReading asks once and a next_url call with a `stop` and no `stop_end` once (the review of "
+     "2942e41)"),
+    (r"[^\x00-\x2c/:-@\[-\^`{-\x7f\s]*", "provider",
+     "linear: matched at one given position, one class run and nothing after it, once an `@` a bare value's "
+     "gated growth would take, from it, once a token; the class holds no `@`, so the runs read after the "
+     "`@`s of one token are disjoint (_HOST_NAME_RUN, host_shaped, last_hosted_at, parse_attrs, the reviews "
+     "of 4d13d71 and 2942e41)"),
+    ("[(\\[{<\"'`]*", "provider",
+     "linear: matched at one given position, one class run and nothing after it, once a "
+     "_unnamed_scheme_credential call, from its token's start (_OPENING_RUN, the review of 2942e41)"),
+    (r"\[[0-9A-Fa-f:.]+\]", "provider",
+     "linear: matched at one given position: a literal `[`, one class run ended by the `]` it cannot hold, "
+     "so it backs off at most once; once a host_shaped call (_HOST_IPV6_RUN)"),
+    (r":[0-9]+", "provider",
+     "linear: matched at one given position, a literal `:` and one class run; once a host_shaped call "
+     "(_HOST_PORT_RUN)"),
     (r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", "user",
      "linear: anchored; the scheme run cannot hold ':' so it backs off at most once over its length, "
      "and (.*)$ under DOTALL reaches the end at once (_SCHEME_RE, _SOURCE_SCHEME_RE)"),
@@ -213,9 +300,19 @@ REVIEWED = [
      "linear: matched at parse_attrs' position only, which moves past each match and stops at the "
      "first failure; the key run cannot hold '=' and the value run cannot hold '\"' (_ATTR_QUOTED). Since "
      "D-SINK-80 a value inside a URL's run may close past the match, and the walk resumes after that close "
-     "or stops: it never moves back, so the walk stays one pass"),
+     "or stops: it never moves back, so the walk stays one pass. The credential reading behind the bare "
+     "branch's growth (token_credential, D-SINK-96) is one UrlReading a line, read as far as a token asks: "
+     "this said the reads were bounded while 4d13d71 made one reading a token, each reading the URLs to "
+     "the line's end, quadratic in a line of `a=x:y` values before an `@` (42.8 s on a 96,000-character "
+     "#EXTINF line; the review of 4d13d71)"),
     (r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)', "provider",
      "linear: as _ATTR_QUOTED; the value run has nothing after it (_ATTR_BARE)"),
+    (r'\s*[A-Za-z0-9_.\-]+=', "provider",
+     "linear: matched at one given position, a whitespace run and a key run over disjoint classes and the "
+     "literal `=` neither holds, so each backs off at most once; asked only where a bare value's growth "
+     "across whitespace from a URL's own colon would take an `@`, at that value's end, which is where the "
+     "walk's next _ATTR_BARE match reads the same runs (_ATTR_KEY_AHEAD, parse_attrs, the review of "
+     "e038d58)"),
     (r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", "user",
      "linear: anchored; the scheme run cannot hold ':' and the authority run has nothing after it "
      "(host_port_of)"),

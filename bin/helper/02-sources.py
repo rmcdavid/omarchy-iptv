@@ -510,6 +510,10 @@ def unique_label(label: str, existing: list[str]) -> str:
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
 _ATTR_BARE = re.compile(r'\s*([A-Za-z0-9_.\-]+)=([^\s,"]+)')
+# Whitespace and then an attribute's key and its `=`: what a bare value's
+# growth across whitespace from a URL's own colon is gated on (parse_attrs,
+# the review of e038d58).
+_ATTR_KEY_AHEAD = re.compile(r'\s*[A-Za-z0-9_.\-]+=')
 
 # Channel-number attributes, in precedence order (M2-03 1.1, ruling CN11).
 # `tvg-chno` is what every asset in this repo uses; the two aliases are read
@@ -570,6 +574,28 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
       the rest of the run, to the first delimiter at or after the later of
       `ve` and the end of the mark that runs past it, when one does.
 
+      D-SINK-95 (2026-11-11): or when next_url, the redactors' reading,
+      finds a URL whose mark an odd character breaks. A line with no
+      SLASH (`/` or a look-alike) holds none, and a printable ASCII line
+      reads as above, since a wide mark there is a narrow one behind a
+      scheme. A quoted value's quote is inside a URL's run when the reading
+      over the run before it, from the last ASCII space, finds a URL there.
+      A bare value is asked over itself and, when the character that ended
+      it is FILLER (every Python whitespace character but U+0020 is), the
+      run of `:`, FILLER and SLASH after it, where its mark may go on; its
+      run then grows to the first delimiter at or after the later of `ve`
+      and that mark's end. Each test reads only the value and the mark
+      characters after it.
+
+      D-SINK-96 (the review of cbd6679, 2026-11-12): and a bare value
+      holding a `:`, as grown so far, takes the rest of its U+0020 token's
+      credential (token_credential) when that credential's span starts
+      before the value's end and the `@` that makes it one stands at or
+      after it: the value then ends where the credential's span does, and
+      a value that ran past its old end so is recorded in `past` as a URL's
+      is. The token's credential is asked once a token, over one reading of
+      the line's URLs.
+
     Why: a URL takes the rest of its run (split_groups' shape, D-SINK-78),
     and that is what both redactors read as one URL: they end it only at the
     six delimiters, so a URL stored whole redacts to its host whatever `"`,
@@ -600,14 +626,41 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
     test reads only the value the match already scanned (the quoted one from
     the last `:` before the run's first `/`; the bare one in one bounded
     search, and once more at its last `:` when a control ends it), the
-    run's end is found once, and the walk resumes past it or stops."""
+    run's end is found once, and the walk resumes past it or stops.
+
+    Its cost, stated (the review of e038d58, the lead's call under the
+    owner's standing authority of 2026-11-09, with no budget test): a long
+    bare value holding a `:` before marks the reading refuses pays two
+    native reading passes, next_url over the value for D-SINK-95's growth
+    and the line's URL reading for its token's credential. The bare
+    group-title `x:@` and then `a!+<U+200B><U+2215><U+2215>` repeated costs
+    150.7 ms at 1M characters and 607.8 ms at 4M in parse_m3u, over the
+    150/600 ms budget the title and the quoted form are held to
+    (M3uPathBudgetTests), against a8e8174's 21.9 and 76.5; the quoted form
+    73.4 and 293.4, against 6.4 and 16.9. Linear, four times the cost for
+    four times the input."""
     attrs: dict[str, str] = {}
     pos = 0
     size = len(text)
     old = -1
     opens = False
-    # A line with no `/` holds no `://`, and parses as it always has.
-    urls = "/" in text
+    # A line with no SLASH holds no mark, and parses as it always has; one
+    # that is printable ASCII holds only the narrow marks (D-SINK-95).
+    urls = "/" in text or (not text.isascii() and _SLASH_ALIKE.search(text) is not None)
+    plain = text.isascii() and text.isprintable()
+    # A token's credential span, by the token's start, asked once a token
+    # (D-SINK-96, the bare branch below): a line holds no credential unless
+    # it holds a `:` and an `@`.
+    tokens = ":" in text and "@" in text
+    held: dict[int, tuple[int, int, int] | None] = {}
+    # The line's URLs, read once and only as far as a token asks (the
+    # review of 4d13d71): a reading made a token, from the token's start,
+    # read on to the next URL or the line's end for each, quadratic in a
+    # line of `a=x:y` attributes before an `@` (42.8 s on a 96,000-character
+    # #EXTINF line). A reading from the line's start finds the same URLs
+    # inside each token, since no walk, mark or run crosses a U+0020.
+    reading: UrlReading | None = None
+    token_start = token_end = -1
     while pos < size:
         match = _ATTR_QUOTED.match(text, pos)
         if match is not None:
@@ -621,7 +674,12 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
             # attempt, not one each (D-PERF-13's shape).
             low = max(start, text.rfind(" ", start, quote) + 1)
             slash = text.find("/", low, quote) if urls else -1
-            if slash != -1 and _URL_MARK.search(text, max(low, text.rfind(":", low, slash)), quote) is not None:
+            inside = slash != -1 and _URL_MARK.search(text, max(low, text.rfind(":", low, slash)), quote) is not None
+            if urls and not plain and not inside:
+                window = text[low:quote]
+                inside = (not (window.isascii() and window.isprintable())
+                          and next_url(window, 0, 0, False) is not None)
+            if inside:
                 run = _URL_DELIMITER.search(text, quote)
                 run_end = run.start() if run is not None else size
                 # The run's last character that is not Python whitespace (a
@@ -653,17 +711,116 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
             if urls and end < size and (text[end] < " " or "\x7f" <= text[end] <= "\x9f"):
                 colon = text.rfind(":", start, end)
                 last = _URL_MARK.match(text, colon) if colon != -1 else None
-            if urls and (last is not None or _URL_MARK.search(text, start, end) is not None):
-                run = _URL_DELIMITER.search(text, max(end, last.end()) if last is not None else end)
+            inside = urls and (last is not None or _URL_MARK.search(text, start, end) is not None)
+            grow = end if last is None else max(end, last.end())
+            if urls and not plain and not inside:
+                # D-SINK-95: the value, and the run of `:`, FILLER and SLASH
+                # after it when FILLER ended it, read as the redactors read.
+                reach = end
+                if end < size and not (" " <= text[end] <= "~"):
+                    reach = _MARK_REACH.match(text, end).end()
+                url = next_url(text[start:reach], 0, 0)
+                if url is not None:
+                    inside = True
+                    grow = max(end, start + url[2])
+            grown = end
+            if inside:
+                run = _URL_DELIMITER.search(text, grow)
                 grown = run.start() if run is not None else size
-                if grown != end:
-                    # A bare value starts with no whitespace, so this is its
-                    # offset in the stored value. A list opening is judged in
-                    # the LINE at the old end, delimiters after the comma
-                    # allowed, as hint_first_entry reads one (`A, B`).
-                    old = end - start
-                    opens = _HINT_LIST_COMMA.match(text, end) is not None
-                end = grown
+            if tokens and text.find(":", start, grown) >= 0:
+                # D-SINK-96 (the review of cbd6679): a value holding a `:`
+                # whose token's credential (token_credential, read on the
+                # U+0020 token around it) starts before the value's end and
+                # has its `@` past it takes the credential to its span's end.
+                # Cut at its `,`, whitespace or `"`, the value kept the
+                # username and the password's head (`group-title=qqqqqq:zz,
+                # zz@cdn.test,Name` listed group `qqqqqq:zz`, and the name
+                # `zz@cdn.test,Name` read as no credential), as a URL's run did
+                # before D-SINK-80, whose growth and cost this takes: the title
+                # is swallowed and the name falls back. A URL value whose run
+                # a TAB, VT, FF or CR ends inside such a credential takes it
+                # too (`http://qq<TAB>qqqq:zzzzzz@cdn.test/x`, D-SINK-34's
+                # class, which every redactor withholds whole since the
+                # credential is read across the URL): stored to the TAB, the
+                # value printed `qq` as its host. Across a `,` the value grows
+                # only when a host follows an `@` it would take (host_shaped,
+                # the review of 4d13d71): growing on any `@` swallowed an
+                # ordinary title whose first word held one, and dropped the
+                # tvg-id before it (`tvg-id=uk:bbc1,KC@BUF 20:15` stored no
+                # tvg-id and the name `20:15`; `group-title=UK:Sports,NYY@BOS`
+                # lost its name), in 25 of 351 realistic names a form; a
+                # provider's credential names a host. Any `@` it would take,
+                # not only the first after the colon (the review of 2942e41),
+                # so a password holding an `@` is not judged on its own tail.
+                # And across whitespace (a TAB, or any other) the same holds
+                # when the credential's colon is a URL's own (_eligible_colon:
+                # its run ends before the `@`) and an attribute's key and its
+                # `=` follow the whitespace (_ATTR_KEY_AHEAD), the review of
+                # 2942e41: the value had grown there unconditionally, so a
+                # TAB-separated URL attribute took every attribute after it
+                # and the title's head whenever a word later in the token held
+                # an `@` (`tvg-logo=http://logo.test/a.png<TAB>tvg-name=
+                # Sky@News,Sky News` lost its logo, its tvg-name and the
+                # name's head). With no key after the whitespace the value
+                # grows, as it did: the whitespace is inside a password (the
+                # review of e038d58, the lead's call under the owner's
+                # standing authority of 2026-11-09). Gated on the host alone,
+                # as e038d58 gated it, a password a TAB, VT or CR splits was
+                # cut at that whitespace whenever host_shaped refused its
+                # host, and the URL's host (the username) printed in the
+                # group, tvg-id or tvg-name, the rest of the password and the
+                # host in the name, at every sink
+                # (`group-title=http://qqqqqq:zz<TAB>zz@localhost/x,Name`; 30
+                # of the review's 35 lines). Growth across whitespace whose
+                # colon stands outside every URL is unconditional, as it was.
+                # The costs, stated: a TAB-separated URL attribute before a
+                # later word whose `@` a host follows is still taken whole
+                # with it (`tvg-logo=http://logo.test:8080/a.png<TAB>
+                # group-title=mail@x.test,Name` stores no logo, no group and
+                # the name `Channel 1`); and a password whose text after the
+                # whitespace opens with key characters and a `=` reads as a
+                # key, so before a host no host shape names it is still cut
+                # there, as e038d58 cut it (`http://qqqqqq:zz<TAB>z=z@
+                # localhost/x` prints the username in the group).
+                # The token's bounds, found once a token (the review of
+                # 2942e41): values only move forward, and one that starts
+                # before the token's end is in the same token. Found for each
+                # value, the two searches read the whole line when TABs
+                # separate its values, quadratic (12.6 s for parse_attrs on
+                # `a=x:@<TAB>` repeated to 1.6M characters).
+                if start >= token_end:
+                    token_start = text.rfind(" ", 0, start) + 1
+                    token_end = text.find(" ", end)
+                    if token_end < 0:
+                        token_end = size
+                if token_start not in held:
+                    if reading is None:
+                        reading = UrlReading(text, 0, plain)
+                    found = token_credential(text, token_start, token_end, reading)
+                    # (its `@`, the span's start, the span's end, whether its
+                    # colon is a URL's own, the last `@` in the span a host
+                    # follows: -2 until a gated growth asks).
+                    held[token_start] = (None if found is None else
+                                         [found[1], found[2], found[2] + _trailing_cut(text[found[2]:token_end]),
+                                          reading.holding(found[0]) >= 0, -2])
+                span = held[token_start]
+                if span is not None and span[0] >= grown and span[1] < grown < span[2]:
+                    if text[grown] == "," or (span[3] and text[grown].isspace()
+                                              and _ATTR_KEY_AHEAD.match(text, grown) is not None):
+                        if span[4] == -2:
+                            span[4] = last_hosted_at(text, span[1], span[2], token_end)
+                        if span[4] >= grown:
+                            grown = span[2]
+                    else:
+                        grown = span[2]
+            if grown != end:
+                # A bare value starts with no whitespace, so this is its
+                # offset in the stored value. A list opening is judged in
+                # the LINE at the old end, delimiters after the comma
+                # allowed, as hint_first_entry reads one (`A, B`).
+                old = end - start
+                opens = _HINT_LIST_COMMA.match(text, end) is not None
+            end = grown
             value = text[start:end]
         key = match.group(1).lower()
         stripped = value.strip()
@@ -678,6 +835,81 @@ def parse_attrs(text: str, past: dict[str, tuple[int, bool]] | None = None) -> t
         opens = False
         pos = end
     return attrs, text[pos:]
+
+
+# A host name's characters, as host_shaped reads them: ASCII letters, digits,
+# `-`, `.` and `_`, and every non-ASCII code point but whitespace (an IDN
+# label as the provider wrote it).
+_HOST_NAME_RUN = re.compile(r"[^\x00-\x2c/:-@\[-\^`{-\x7f\s]*")
+_HOST_IPV6_RUN = re.compile(r"\[[0-9A-Fa-f:.]+\]")
+_HOST_PORT_RUN = re.compile(r":[0-9]+")
+
+
+def host_shaped(text: str, i: int, end: int) -> bool:
+    """Whether text[i:end] starts with a HOST and ends there, at a `/`,
+    `?`, `#` or `,`, or at whitespace: two or more labels whose last is
+    letter-led and at least two characters long, a dotted quad, or a
+    bracketed IPv6 literal, each with an optional `:` and digits; or ONE
+    letter-led label of two or more characters with a `:` and digits
+    (`localhost:8080`, `iptv:80`). A label holds ASCII letters, digits,
+    `-` and `_`, or any non-ASCII code point but whitespace (an IDN label),
+    and one trailing dot ends the name (`cdn.test.`). parse_attrs asks it
+    of the text after each `@` a bare value's growth across a `,`, or across
+    whitespace from a URL's own colon, would take (the review of 4d13d71):
+    `qqqqqq:zz,zz@cdn.test,Name` grows, `UK:News,Sky@News HD` does not. The
+    review of 2942e41 widened it: a single label with a port, a trailing
+    dot, an underscore, a non-ASCII label and a host whitespace ends were
+    not hosts, so `qqqqqq:zz,zz@localhost:8080,Name` stored the group
+    `qqqqqq:zz` and every sink printed it. What it leaves, stated: a bare
+    single label is no host (`Sky@News` must not grow), nor is a digit-led
+    one with a port (`Live@8:30`, `Breakfast@9:00`), a digit-led last label
+    (`cdn.1test`), three numbers (`1.2.3`), or a `:` with no digits or with
+    text after them (`cdn.test:`, `cdn.test:80x`), so
+    `qqqqqq:zz,zz@localhost,Name` prints the username and the password
+    before the `,` in the group or the tvg-id, and the rest of the password
+    and the host in the name. And its cost: a letter-led word with a port
+    after an `@` is a host, so a bare value holding a `:` before a title
+    word like `NYY@BOS_19:10` takes the title; and so, stated by the review
+    of e038d58 (the lead's call under the owner's standing authority of
+    2026-11-09), are a non-ASCII dotted name and an underscore label after
+    an `@` (`Ed@Caf<U+00E9>.com`, `KC@BUF_20:15`, `News@UK:1`): a title
+    holding one after a bare value with a `:` is taken with the value -- 16
+    of the review's 45 synthetic lines (eight names in two forms), none of
+    the 351-name sweep's lines and none of the 3,705 realistic strings.
+    Reads one run of host characters from `i`."""
+    v6 = _HOST_IPV6_RUN.match(text, i, end)
+    single = False
+    if v6 is not None:
+        j = v6.end()
+    else:
+        j = _HOST_NAME_RUN.match(text, i, end).end()
+        name = text[i:j]
+        labels = (name[:-1] if name.endswith(".") else name).split(".")
+        quad = len(labels) == 4 and all(label.isascii() and label.isdigit() and len(label) <= 3 for label in labels)
+        last = labels[-1]
+        if not quad and (not all(labels) or len(last) < 2 or not last[0].isalpha()):
+            return False
+        single = not quad and len(labels) == 1
+    port = _HOST_PORT_RUN.match(text, j, end)
+    if port is not None:
+        j = port.end()
+    elif single:
+        return False
+    return j == end or text[j] in "/?#," or text[j].isspace()
+
+
+def last_hosted_at(text: str, lo: int, hi: int, end: int) -> int:
+    """The last ASCII `@` in [lo, hi) after which host_shaped(text, its
+    position + 1, end) holds, or -1. parse_attrs asks it once a token: a
+    growth would take every `@` from where it starts to the span's end, so
+    it grows when this is at or after that start. Each host read stops at
+    the next `@`, so the reads are disjoint."""
+    at = text.rfind("@", lo, hi)
+    while at >= 0:
+        if host_shaped(text, at + 1, end):
+            return at
+        at = text.rfind("@", lo, at)
+    return -1
 
 
 def own_value(value: str, entry: tuple[int, bool], listed: bool) -> str:
@@ -1403,22 +1635,6 @@ def clean_header_value(value: str) -> str:
 # ends a run for its cut (cut_free_text, D-SINK-75), where it does: each
 # group reaches the sinks on its own.
 GROUP_SEPARATOR = ";"
-# One group of a text that holds a `;` and a `://` (split_groups): text up to
-# a `;` that separates, where a `://` (_URL_MARK) takes the rest of its run,
-# to the next space, whole, `;`s and all, and a `:` that starts no `://` is
-# taken alone.
-GROUP_PART = re.compile("(?:[^;:]+|" + _URL_MARK.pattern + "[^ ]*|:)+")
-# A `;` that stands in a URL's run: one after the first `://` of a run
-# (from a space to the next), the one place GROUP_PART keeps a `;` inside a
-# group; a text with none splits at every `;` (split_groups, D-PERF-13).
-# Searched in " " + text, so every run, the first included, opens with the
-# literal space and an attempt starts only there. An attempt reads its run
-# once and never backs off (possessive): the characters before the run's
-# first `://`, a run of neither space nor `:` and then each `:` that starts
-# none with the run after it, then the `://`, then up to the run's end or a
-# `;`. So the search is one pass, where a plain `://[^ ;]*;` would rescan a
-# run from each `://` in it.
-GROUP_URL_SEPARATOR = re.compile(" [^ :]*+(?:(?!" + _URL_MARK.pattern + "):[^ :]*+)*+" + _URL_MARK.pattern + "[^ ;]*+;")
 # split_groups' last answer, by its text: a persistent #EXTGRP is split again
 # for every channel after it, the same text each time, and consecutive
 # entries often repeat one group-title. A dict changed in place (as
@@ -1426,57 +1642,105 @@ GROUP_URL_SEPARATOR = re.compile(" [^ :]*+(?:(?!" + _URL_MARK.pattern + "):[^ :]
 SPLIT_GROUPS_LAST: dict[str, list[str]] = {}
 
 
+def group_split_protects(value: str) -> bool:
+    """Whether any `;` of `value` can stand where split_groups keeps it in
+    its group: the value holds a `;` and either a mark (a SLASH and
+    url_mark_any) or both an ASCII `:` and `@` (a D-SINK-96 token). Where
+    it is False every `;` separates, and the native split is the rule's
+    answer at native cost (D-PERF-13). A `;` written straight after a
+    space, or first, opens its run, so no mark or token can stand before it
+    there: when every `;` is one of those (`A ;B`, `a:// ;` repeated) none
+    can be kept and nothing is searched. A text with no SLASH is not
+    searched for a mark, so a run of `:` with no `//` costs no attempt."""
+    count = value.count(GROUP_SEPARATOR)
+    if count == 0 or count == value.count(" " + GROUP_SEPARATOR) + value.startswith(GROUP_SEPARATOR):
+        return False
+    if ":" in value and "@" in value:
+        return True
+    if "/" not in value and (value.isascii() or _SLASH_ALIKE.search(value) is None):
+        return False
+    return url_mark_any(value) >= 0
+
+
+def group_parts(value: str) -> list[str]:
+    """`value` split at every `;` that separates groups (split_groups): one
+    pass over its space-runs. A `;` that opens its run (written straight
+    after a space, or first, or after another such `;`) always separates,
+    since no mark or token can stand before it there, so a run whose every
+    `;` is one of those is not asked. Any other run is asked once, by
+    url_mark_any over the run's own slice and one find for its first `:`
+    and one for its last `@`; each `;` is then read once."""
+    parts: list[str] = []
+    piece = 0
+    size = len(value)
+    i = 0
+    while True:
+        space = value.find(" ", i)
+        run_end = size if space < 0 else space
+        semi = value.find(GROUP_SEPARATOR, i, run_end)
+        if semi >= 0:
+            lead = i
+            while lead < run_end and value[lead] == GROUP_SEPARATOR:
+                lead += 1
+            mark = colon = at = -1
+            if value.find(GROUP_SEPARATOR, lead, run_end) >= 0:
+                run = value[i:run_end]
+                mark = url_mark_any(run, 0)
+                colon = run.find(":")
+                at = run.rfind("@")
+            while semi >= 0:
+                inside = semi - i
+                if not ((mark >= 0 and inside > mark) or (0 <= colon < inside < at)):
+                    parts.append(value[piece:semi])
+                    piece = semi + 1
+                semi = value.find(GROUP_SEPARATOR, semi + 1, run_end)
+        if space < 0:
+            break
+        i = space + 1
+    parts.append(value[piece:])
+    return parts
+
+
 def split_groups(value: str) -> list[str]:
     """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
     first of each kept in order).
 
-    D-SINK-78: a `;` separates groups only when no `://` (_URL_MARK, read as
-    the sinks that delete control characters read one) stands between it
-    and the last ASCII space before it. Every redactor reads a `;` as URL
+    D-SINK-78: a `;` separates groups only when no mark stands between it
+    and the last ASCII space before it -- a narrow `://` (_URL_MARK, read as
+    the sinks that delete control characters read one) or, since D-SINK-95
+    (2026-11-11), a URL's mark as next_url reads one, which any odd
+    character may break (url_mark_any). Every redactor reads a `;` as URL
     text, in a userinfo, a path or a query, so splitting there handed each
     sink half a URL: `http://myuser:pa;ss@cdn.test/x` was listed under
     `http://myuser:pa`, shown as the host `myuser`, and `ss@cdn.test/x`
-    went beside it as a group no redactor could touch. So from a `://` to
+    went beside it as a group no redactor could touch. So from a mark to
     the space that ends its run every `;` stays in its group, and the URL
-    reaches the sinks whole. A space, because it ends a run at every sink,
-    as it does for cut_free_text. The cost: a group written straight after
-    a URL, with no space before its `;`, is part of the URL's group.
+    reaches the sinks whole. D-SINK-96: nor does a `;` that stands after the
+    run's first `:` and before its last `@`, which is inside the token a
+    redactor withholds (`qqqqqq:pa;ss@cdn.test/x` split there left
+    `qqqqqq:pa`, no token, beside `ss@cdn.test/x`). A space, because it ends
+    a run at every sink, as it does for cut_free_text. The cost: a group
+    written straight after a URL or a token, with no space before its `;`,
+    is part of that group (`Movies;Sci:Fi;Kids@Home` lists `Movies` and
+    `Sci:Fi;Kids@Home`).
 
     Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
     per part scanned the list, k*k/2 comparisons for k parts, and a
     persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
     one-character parts -- is split again for every channel after it, so a
     50,000-channel list paid about 32,000 comparisons a channel. Same list,
-    one pass. The `://` test is one pass too, and native: GROUP_PART takes
-    each URL's run whole as it reaches it and never searches back from a
-    `;`, and a text in which no `;` stands in a URL's run is split natively.
-    A text split last time is answered from SPLIT_GROUPS_LAST, as a new
-    list.
-
-    D-PERF-13: GROUP_PART loops once per piece it takes, about 100 ns a
-    character over 512 characters of `a:// ;` repeated, so it runs only
-    where its answer can differ from the native split's: where a `;` stands
-    in a URL's run (GROUP_URL_SEPARATOR). Where none does, every `;`
-    separates, and GROUP_PART's parts are exactly the native split's
-    non-empty pieces; empty ones are dropped below either way. A text with
-    no `://` at all (url_mark_start, native on the usual text) is not
-    searched, so a run of `:` with no `//` costs no attempt."""
+    one pass. group_parts reads each space-run once, and only where
+    group_split_protects says a `;` could be kept (D-PERF-13: where none
+    can, every `;` separates and the native split is the answer). A text
+    split last time is answered from SPLIT_GROUPS_LAST, as a new list."""
     last = SPLIT_GROUPS_LAST.get(value)
     if last is not None:
         return list(last)
-    url_separator = False
-    if GROUP_SEPARATOR in value and "/" in value and url_mark_start(value) >= 0:
-        # A `;` written straight after a space, or first, opens its run, so
-        # no `://` can stand before it there: when every `;` is one of those
-        # (`A ; B`), none is in a URL's run and the search is not needed.
-        opening = value.count(" " + GROUP_SEPARATOR) + value.startswith(GROUP_SEPARATOR)
-        url_separator = (value.count(GROUP_SEPARATOR) > opening
-                         and GROUP_URL_SEPARATOR.search(" " + value) is not None)
-    if url_separator:
-        parts = GROUP_PART.findall(value)
+    if group_split_protects(value):
+        parts = group_parts(value)
     else:
-        # No `;` in a URL's run: every `;` separates, and the native split
-        # is the rule's answer at native cost.
+        # No `;` a mark or a token keeps: every `;` separates, and the native
+        # split is the rule's answer at native cost.
         parts = value.split(GROUP_SEPARATOR)
     # Trimmed, first of each kept in order, the empty name dropped: one
     # native pass, where a generator per part cost about 0.2 us each.
@@ -1663,7 +1927,11 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # none of which redacts an id, since an id is what `play` takes back. An
     # `@` alone (`CNN.us@HD`) is no URL and is kept. The group scope stays
     # raw (D-SINK-78): hidden groups and saved scopes match on it.
-    if _URL_MARK.search(tvg_id) is not None:
+    # D-SINK-95 and D-SINK-96 (2026-11-11): so is a tvg-id holding a mark the
+    # redactors' reading finds (url_mark_any), or a `:` with an `@` after it,
+    # the token a redactor withholds; kept, the id would carry it raw.
+    colon = tvg_id.find(":")
+    if url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0):
         tvg_id = ""
     tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).

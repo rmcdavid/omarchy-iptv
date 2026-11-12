@@ -66,6 +66,20 @@ def clean_field(text: str | None, limit: int) -> str:
     return _CONTROL_WS.sub(" ", text).strip()[:limit]
 
 
+# How much RAW text the guide's cleaners fold before their cut: 64 times
+# the field's cap, cut by cut_free_text before fold_space (the review of
+# cbd6679, its cost finding). element_text applies no cap, so fold_space ran
+# over the whole of a 1M-character description first, at about 1.5 us a
+# character on `<U+200B><U+2215>` repeated (1,551 ms at 1M, 6,263 at 4M, where
+# 0.18.0 took 31 and 123). The cut is cut_free_text's, so it never folds half
+# a URL or half a credential. What it can change in a stored field, stated:
+# one whose first 64 caps of raw text fold to less than its cap -- 25,600
+# characters of whitespace and controls before a 400-character description
+# -- is stored from those alone, shorter or empty; and an item the raw cut
+# straddles is dropped there, before the fold.
+EPG_RAW_FACTOR = 64
+
+
 def clean_title(text: str | None) -> str:
     """fold_space, trimmed, cut by cut_free_text (D-SINK-75): a title is
     stored as written and redacted only at its sinks, after this cut.
@@ -78,7 +92,7 @@ def clean_title(text: str | None) -> str:
     cut_free_text drops, where the split left a run with no `://` to keep."""
     if not text:
         return ""
-    return cut_free_text(fold_space(text).strip(), EPG_MAX_TITLE)
+    return cut_free_text(fold_space(cut_free_text(text, EPG_MAX_TITLE * EPG_RAW_FACTOR)).strip(), EPG_MAX_TITLE)
 
 
 def element_text(elem: Any) -> str:
@@ -160,15 +174,18 @@ def clean_detail(text: str | None, limit: int) -> str:
     # host and the password's tail as text. The final clean_field after the
     # redaction keeps the plain fold, since no credential is left for it to
     # split.
-    text = cut_free_text(fold_space(text or "").strip(), limit)
-    if "://" not in text:
+    text = cut_free_text(fold_space(cut_free_text(text or "", limit * EPG_RAW_FACTOR)).strip(), limit)
+    if not redaction_can_change(text):
         # The common case, and the hot one. redact_urls cannot rewrite text
-        # without "://", so this guard changes no answer. It was worth 2.7 s of
-        # a 6.3 s 48,000-programme fetch with a 600-character description on
-        # every programme, back when the old pattern retried at every word
-        # boundary and prose is all word boundaries; redact_urls takes the same
-        # exit itself now (F-SINK-11), so this one is a call it does not make
-        # rather than a stall it avoids. Kept: one `in` beats one call.
+        # redaction_can_change refuses, so this guard changes no answer. It was
+        # worth 2.7 s of a 6.3 s 48,000-programme fetch with a 600-character
+        # description on every programme, back when the old pattern retried at
+        # every word boundary and prose is all word boundaries; redact_urls
+        # takes the same exit itself now (F-SINK-11), so this one is a call it
+        # does not make rather than a stall it avoids. It was `"://" not in
+        # text` until D-SINK-95 and D-SINK-96 (2026-11-11), which stored a URL
+        # whose mark an odd character breaks, and a scheme-less
+        # `user:pass@host`, unredacted in epg-now.json.
         return text
     return clean_field(redact_urls(text), limit)
 

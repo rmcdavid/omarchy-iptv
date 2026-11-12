@@ -1238,7 +1238,11 @@ TestCase {
     compare(Model.redactUrls("http://myuser:pa\u0085ss@h.test/x"), "h.test")
     compare(Model.redactUrls("x http://myuser:pa\u00a0ss@h.test/x y"), "x h.test y")
     compare(Model.redactUrls("http://myuser:pa\u2028ss@h.test/x"), "h.test")
-    compare(Model.redactUrls("http://myuser:pa\tss@h.test/x"), "myuser\tss@h.test/x")
+    // The review of 4d13d71: a tab ends the run before the `@`, so the URL
+    // holds the colon and not the `@`, and the token is withheld; a space
+    // still splits it (D-SINK-34).
+    compare(Model.redactUrls("http://myuser:pa\tss@h.test/x"), "[host withheld]")
+    compare(Model.redactUrls("http://myuser:pa ss@h.test/x"), "myuser ss@h.test/x")
     compare(Model.redactUrls("see http://h.test\u2028next"), "see h.test\u2028next")
     compare(Model.redactUrls("see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\"."), "see 'h.test', <a.test> and \"b.test\".")
     compare(Model.redactUrls("x http://[2001:db8::5]. y"), "x [2001:db8::5]. y")
@@ -1251,6 +1255,71 @@ TestCase {
     compare(Model.validateSourceUrl("http://h.test:pa/me@x.test/y").message, Model.sourceErrorMessage("invalid") + ". " + Model.ENCODE_SENTENCE)
     compare(Model.validateSourceUrl("http://user.name:2024/ab@host.test/x").ok, true)
     compare(Model.sourceUrlWarning("http://user.name:2024/ab@host.test/x"), "")
+  }
+
+  // D-SINK-95 and D-SINK-96 (2026-11-11), in V4: the reading's classes are
+  // code-unit comparisons and one character class built from
+  // SLASH_ALIKE_CODES, which this engine must read as node does; a sample of
+  // the shared url-mark fixture (node and the helper run all of it).
+  function test_dSink95MarkAndDSink96TokenInV4() {
+    function c(code) { return String.fromCharCode(code) }
+    var cases = [
+      ["News http:" + c(0x1) + "//qqqqqq:zzzzzz@cdn.test/x HD", "News cdn.test HD"],
+      ["News http" + c(0x34f) + "://qqqqqq:zzzzzz@cdn.test/x HD", "News cdn.test HD"],
+      ["News http:" + c(0x200b) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD", "News cdn.test HD"],
+      ["News http" + c(0xff1a) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD", "News cdn.test HD"],
+      ["http:" + c(0x2215) + c(0x2215) + "cdn.test" + c(0x2215) + "live" + c(0x2215) + "qqqqqq", "cdn.test"],
+      ["http" + c(0xdb40) + c(0xdc01) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test"],
+      ["http://cdn.test" + c(0xff0f) + "live" + c(0xff0f) + "qqqqqq", "cdn.test"],
+      ["News qqqqqq:zzzzzz@cdn.test/live/1.ts HD", "News [host withheld] HD"],
+      ["Backup qqqqqq:zz" + c(0x9) + "zz@cdn.test/x", "Backup [host withheld]"],
+      ["(qqqqqq:zzzzzz@cdn.test).", "[host withheld])."],
+      // The review of cbd6679: a credential is read across the URLs in its
+      // token (so `abc:` before a URL with a userinfo withholds the token),
+      // with one counted code point at most between its `:` and `@`, a
+      // surrogate pair one; each stretch of a mark holds one wide code point;
+      // a non-numeric port behind a userinfo is withheld; an empty run is a URL.
+      ["abc:http://qqqqqq:zzzzzz@cdn.test/x", "[host withheld]"],
+      ["News qqqqqq:zz" + c(0xe9) + "//zz@cdn.test/x HD", "News [host withheld] HD"],
+      ["News qqqqqq:zz:" + c(0xe9) + "/" + c(0xe9) + "/zz@cdn.test HD", "News [host withheld] HD"],
+      [c(0x4e2d) + c(0x4e2d) + "qqq:z" + c(0xe9) + "z@h", c(0x4e2d) + c(0x4e2d) + "[host withheld]"],
+      [c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "q:z@h.", c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "[host withheld]."],
+      [c(0x6bcf) + c(0x665a) + "19:30" + c(0x64ad) + c(0x51fa) + "cctv@cctv.test", c(0x6bcf) + c(0x665a) + "19:30" + c(0x64ad) + c(0x51fa) + "cctv@cctv.test"],
+      ["NHK" + c(0x7dcf) + c(0x5408) + "//BS", "NHK" + c(0x7dcf) + c(0x5408) + "//BS"],
+      ["http" + c(0xd83d) + c(0xde00) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts", "cdn.test"],
+      ["News http://:@qqqqqq:zzzzzz HD", "News [host withheld] HD"],
+      ["Featuring://" + " The Band", "[url] The Band"],
+      ["ESPN" + c(0xa0) + "//" + c(0xa0) + "HD", "ESPN" + c(0xa0) + "//" + c(0xa0) + "HD"],
+      ["UK: Sports", "UK: Sports"],
+      // The review of 4d13d71: only the scripts written without spaces count
+      // between a credential's `:` and `@` (a surrogate pair one, two Han
+      // characters the stated residual); a URL whose run ends before its `@`
+      // holds the colon and not the `@`; a URL with no named scheme after
+      // text in its token, an `@` in its run and a `:` before it withholds it.
+      ["Login user:p" + c(0xe4) + "ssw" + c(0xf6) + "rt@cdn.test", "Login [host withheld]"],
+      ["Login user:" + c(0x5bc6) + c(0x7801) + "@cdn.test", "Login user:" + c(0x5bc6) + c(0x7801) + "@cdn.test"],
+      ["q:z" + c(0xd83d) + c(0xde00) + "z@h", "[host withheld]"],
+      ["q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h", "q:z" + c(0xd83d) + c(0xde00) + c(0xd83d) + c(0xde00) + "z@h"],
+      ["News http://qqqqqq:zz" + c(0x9) + "zz@cdn.test/x HD", "News [host withheld] HD"],
+      ["News qq_qqqq:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      // The review of 2942e41: a named scheme counts too when its mark is not
+      // the clean `://` (case-blind); a URL only an opening bracket or quote
+      // stands before in its token prints its host; and a named scheme behind
+      // the clean `://` is still a URL's, the stated residual.
+      ["News qq_tcp:" + c(0x200b) + "//zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      ["News qq_HTTPS" + c(0x200b) + "//:zzzzzz@cdn.test HD", "News [host withheld] HD"],
+      ["Clone (ssh://git@github.com/x) now", "Clone (github.com) now"],
+      ["News qq!acestream://zzzzzz@cdn.test/live/1.ts HD", "News qq!cdn.test HD"]
+    ]
+    for (var i = 0; i < cases.length; i++) {
+      compare(Model.redactUrls(cases[i][0]), cases[i][1], "redactUrls " + i)
+      compare(Model.sinkText(cases[i][0]), cases[i][1], "sinkText " + i)
+    }
+    compare(Model.redactionCanChange("Kino" + c(0x2215) + "Filme"), true)
+    compare(Model.redactionCanChange("Sports:News"), false)
+    compare(Model.isMarkStandInCode(0x200b), true)
+    compare(Model.isMarkStandInCode(0xa0), false)
+    compare(Model.isUrlFillerCode(0x2215), false)
   }
 
 
@@ -2624,7 +2693,9 @@ TestCase {
     var linked = []
     for (var k = 0; k < NotifyHosts.CASES.length; k++)
       if (linksIn(hostCard("Stream failed", escapeOnce(NotifyHosts.CASES[k].display)).bodyRich).length) linked.push(NotifyHosts.CASES[k].id)
-    compare(JSON.stringify(linked), JSON.stringify(["H01", "H02", "H03", "H04", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"]),
+    // H04's mailto anchor is a D-SINK-96 token the plugin withholds before
+    // any escape, so its display holds no anchor to draw (2026-11-11).
+    compare(JSON.stringify(linked), JSON.stringify(["H01", "H02", "H03", "H05", "H06", "H07", "H09", "H10", "H33", "H34", "H35"]),
             "0.17.0's escape: the 4.5.0 card draws a live link for these cases, as node measures")
   }
 

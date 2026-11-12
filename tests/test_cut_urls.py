@@ -18,6 +18,18 @@ player's title, player_title_text, and the shell's notification body,
 Model.notifyArgv), where a tab inside a URL does not end its run. The
 credential is spelt in letters nothing else here holds (`q` and `z`), so ANY
 fragment of it in an output is a leak, the username's first letter included.
+
+D-SINK-95 and D-SINK-96 (2026-11-11): the run is also dropped when the part
+the cut keeps holds a mark the redactors' reading finds behind a scheme, or
+a scheme-less token's `:` without the `@` after it (CutSweepTest).
+
+The review of cbd6679 (2026-11-12): the cut drops back no further than the
+start of the item it would cut -- the run's first URL, when the cut keeps its
+mark, or the run's credential (url_reading_rule), when the cut loses its
+`@` -- with a space just before it, so a space-less Chinese or Japanese
+description keeps the prose before a false positive where the first version
+stored it empty (ProseCutTest), and the sinks that delete controls read the
+start the cut drops to (DeletingStartTest).
 """
 import calendar
 import json
@@ -26,6 +38,7 @@ import subprocess
 import time
 import unittest
 
+import url_reading_rule as rule
 from helper_loader import load_helper
 
 helper = load_helper()
@@ -112,6 +125,50 @@ def deleted(text):
     return "".join(c for c in text if not (ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f))
 
 
+def credential_before(source, cap):
+    """What a cut at `cap` keeps of `source` when it loses the `@` of the
+    credential in the run it cuts (url_reading_rule): the text before the
+    credential's span, a space just before it taken; or None. The
+    credential it cuts is the run's first whose `:` stands after the last
+    `@` the cut keeps -- before `cap`, or before the run's first URL when
+    the cut keeps that URL's whole mark and drops it (the review of
+    4d13d71: the run's FIRST credential, whose `@` a cut may keep, left the
+    next one's username to split_groups)."""
+    if len(source) <= cap or source[cap] == " ":
+        return None
+    start = source.rfind(" ", 0, cap) + 1
+    end = source.find(" ", cap)
+    end = len(source) if end < 0 else end
+    url = rule.first_url(source, start)
+    bound = url[0] if url is not None and url[2] <= cap else cap
+    found = rule.credential(source, start, end, rule.urls(source), max(start, source.rfind("@", start, bound) + 1))
+    if found is None or found[2] >= bound:
+        return None
+    return source[:found[2] - 1 if found[2] > 0 and source[found[2] - 1] == " " else found[2]]
+
+
+def splits_before(source, cap, at):
+    """Whether a cut of `source` at `cap` splits a credential whose span
+    starts before `at` (credential_before)."""
+    kept = credential_before(source, cap)
+    return kept is not None and len(kept) < at
+
+
+def held_fold(text):
+    """fold_space inside a credential's withheld span, stated: the six
+    ASCII delimiters but the space become a TAB, the other controls it folds
+    are deleted, and the line and paragraph separators become U+00A0."""
+    out = []
+    for c in text:
+        if c in "\t\n\x0b\x0c\r":
+            out.append("\t")
+        elif c < " " or c in "\x7f\x85":
+            continue
+        else:
+            out.append("\xa0" if c in "\u2028\u2029" else c)
+    return "".join(out)
+
+
 def forms(cap, shapes, fold=False):
     """(text, kept) for every cut of each shape at `cap`. The URL comes after
     a space, after a space behind words joined by C1 controls (which no fold
@@ -139,18 +196,30 @@ def forms(cap, shapes, fold=False):
         for pad in range(max(1, cap - len(url) - 3), cap + 2):
             for head, sep in (("N" * pad, " "), ((joined * pad)[:pad], " "), ("N" * pad, "\t")):
                 text = head + sep + url + " tail"
-                cut = (head + " " + kept_url + " tail" if fold else text)[:cap]
-                whole = kept_url if len(head) + 1 + len(kept_url) <= cap else ""
+                folded = head + " " + kept_url + " tail"
+                if fold and sep == "\t" and any(a <= len(head) < e for a, e, _ in rule.credentials(text)):
+                    # A TAB inside a credential's span stays (fold_space's
+                    # _fold_held): the URL after it, with no named scheme and
+                    # a userinfo, makes the TAB-joined token a credential
+                    # (the review of 4d13d71).
+                    folded = head + "\t" + held_fold(url) + " tail"
+                cut = (folded if fold else text)[:cap]
+                whole = (folded[len(head) + 1:-5] if fold else url)
+                whole = whole if len(head) + 1 + len(whole) <= cap else ""
                 if whole or "://" not in deleted(cut[len(head) + 1:]):
                     before = cut
                 elif cut[len(head)] == " ":
                     before = head
                 else:
                     before = ""
+                held = None if whole else credential_before(folded if fold else text, cap)
+                if held is not None:
+                    before = held
                 out.append((text, (before.rstrip(), whole)))
             text = "N" * pad + url + "tail"
             seen = "N" * pad + kept_url + "tail"
-            out.append((text, ("" if "://" in deleted(seen[:cap]) else seen[:cap].rstrip(), "")))
+            held = credential_before(seen, cap)
+            out.append((text, ("" if "://" in deleted(seen[:cap]) else (seen[:cap] if held is None else held).rstrip(), "")))
     return out
 
 
@@ -270,13 +339,19 @@ class CutFreeTextTest(unittest.TestCase):
     def test_a_cut_inside_a_url_drops_its_run_and_the_space_before_it(self):
         self.assertEqual(helper.cut_free_text("News " + PLAIN, len(PLAIN)), "News")
         for delim in "\t\n\x0b\x0c\r":
-            # Not a run end, so the run reaches back to the text's start.
-            self.assertEqual(helper.cut_free_text("News" + delim + PLAIN, len(PLAIN)), "", repr(delim))
+            # Not a run end, so the run reaches back to the text's start,
+            # and the cut drops back to the URL's start, the delimiter kept
+            # (the review of cbd6679: no further than the item it cuts; the
+            # callers trim it).
+            self.assertEqual(helper.cut_free_text("News" + delim + PLAIN, len(PLAIN)), "News" + delim, repr(delim))
 
     def test_the_run_reaches_back_past_a_no_break_space(self):
-        # URL text to the redactors (R32a'''), so the run starts at the space.
+        # URL text to the redactors (R32a'''), so the run starts at the space,
+        # and the cut drops back to the URL's start, which the no-break space
+        # is no part of (the review of cbd6679: no further than the item it
+        # cuts).
         text = "Live News" + chr(0xa0) + PLAIN
-        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Live")
+        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Live News" + chr(0xa0))
 
     def test_a_control_inside_the_colon_slash_slash_still_marks_a_url(self):
         # Any of the class both mirrors delete: C0, DEL and C1.
@@ -285,13 +360,17 @@ class CutFreeTextTest(unittest.TestCase):
             text = "News " + head + "qqqqqq:zzzzzz@cdn.test/x"
             self.assertEqual(helper.cut_free_text(text, 20), "News", repr(head))
 
-    def test_a_character_no_mirror_deletes_does_not_join_a_url(self):
-        # A no-break space or a zero-width character is URL text to both
-        # redactors, so `http:/` and `/qqq` around it are no URL to any sink,
-        # cut or not, and the cut keeps the run.
-        for ch in (chr(0xa0), chr(0x200b), chr(0xfeff)):
+    def test_d_sink_95_a_character_no_mirror_deletes_still_marks_a_url(self):
+        # A no-break space or a zero-width character between the slashes is
+        # FILLER to the redactors' reading since D-SINK-95, so `http:/<c>/`
+        # is a URL's mark to every sink and a cut inside the URL drops its
+        # run; until then it was no URL to any sink, and the cut kept the run
+        # (and the reading printed the username where it was cut). A
+        # printable character there is still no mark, and the run is then a
+        # D-SINK-96 token the cut loses the `@` of, so it is dropped too.
+        for ch in (chr(0xa0), chr(0x200b), chr(0xfeff), "!"):
             text = "News http:/" + ch + "/qqqqqq:zzzzzz@cdn.test/x"
-            self.assertEqual(helper.cut_free_text(text, 16), text[:16], repr(ch))
+            self.assertEqual(helper.cut_free_text(text, 16), "News", repr(ch))
 
     def test_controls_before_the_run_do_not_move_it(self):
         # The run starts at the last space of the text as it is, and only the
@@ -324,7 +403,10 @@ class CutFreeTextTest(unittest.TestCase):
         # last one is dropped, and the groups before it stay.
         text = "Sports;News;" + PLAIN
         self.assertEqual(helper.cut_free_text(text, len(text) - 20, helper.GROUP_SEPARATOR), "Sports;News")
-        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "")
+        # With no separator a `;` is text, and the cut drops back to the
+        # URL's start (the review of cbd6679: no further than the item it
+        # cuts), which the run before it does not reach.
+        self.assertEqual(helper.cut_free_text(text, len(text) - 20), "Sports;News;")
 
     def test_a_group_text_cut_at_a_semicolon_inside_a_url_drops_its_run(self):
         # D-SINK-78: the first version ended a run at every `;`, so a cut at
@@ -352,6 +434,73 @@ class CutFreeTextTest(unittest.TestCase):
         text = "News " + PLAIN + " more;Kids"
         for limit in (len("News " + PLAIN + " mo"), len("News " + PLAIN)):
             self.assertEqual(helper.cut_free_text(text, limit, helper.GROUP_SEPARATOR), text[:limit])
+
+
+class CutSweepTest(unittest.TestCase):
+    """D-SINK-95 and D-SINK-96 (2026-11-11): no cut hands a redactor half a
+    URL whose mark an odd character breaks, or half a scheme-less token.
+    Twelve shapes behind four prefixes, cut at every offset, with no
+    separator and with the group text's `;`, then split as the group text
+    is, then through the plain and the deleting redaction: no part shows a
+    letter of the credential: 0 of 4,217 parts. Red on the shipped cut and
+    split (dev a8e8174, with this tree's redactors): 696 of 4,684 parts
+    leak, 1,392 part-and-sink pairs."""
+
+    Z, FC, D = chr(0x200b), chr(0xff1a), chr(0x2215)
+    SHAPES = ["http:" + Z + "//qqqqqq:zzzzzz@cdn.test/x", "qqqqqq:zzzzzz@cdn.test/live/1.ts",
+              "http" + FC + "//cdn.test/live/qqqqqq/zzzzzz/1.ts", "xqqqqqq:zzzzzz@xhttp://cdn.test/x",
+              "http:" + D + D + "cdn.test/live/qqqqqq/zzzzzz/1.ts", "qqqqqq:pa;ss@cdn.test/x",
+              "http:" + Z + "//qqqqqq:pa;ss@cdn.test/x", "http" + chr(0x7f) + "://cdn.test/live/qq;qq/zz/1.ts",
+              "qqqqqq:zz@zz@cdn.test/x", "http://qqqqqq:zzzzzz@cdn.test/x", "1" + Z + "://qqqqqq:zzzzzz@cdn.test/x",
+              "http" + D + "://cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+    PREFIXES = ["", "Title ", "A;", "Sports;B "]
+
+    def test_no_cut_part_shows_a_credential(self):
+        parts, bad = 0, []
+        for shape in self.SHAPES:
+            for prefix in self.PREFIXES:
+                text = prefix + shape + " tail"
+                for limit in range(1, len(text)):
+                    for separator in ("", helper.GROUP_SEPARATOR):
+                        kept = helper.cut_free_text(text, limit, separator)
+                        for group in (helper.split_groups(kept) if separator else [kept]):
+                            parts += 1
+                            for sink in (helper.redact_urls, helper.player_title_text):
+                                out = sink(group)
+                                if "q" in out or "z" in out:
+                                    bad.append((ascii(text), limit, separator, ascii(out)))
+        self.assertEqual((parts > 4000, bad[:4]), (True, []))
+
+
+class SplitCredentialCutTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 3): the cut asked for
+    its run's FIRST credential, so a `;`-joined group text holding two,
+    cut inside the second, kept the first's `@` and did not drop back:
+    `qq:zz@a.test;qqqqqq:zzzzzz@cdn.test` cut at 26 kept
+    `qq:zz@a.test;qqqqqq:zzzzzz`, which split_groups split at its `;`, and
+    the group `qqqqqq:zzzzzz` printed at every sink. The cut drops back to
+    the span of the credential it splits -- the run's first whose `:`
+    stands after the last `@` it keeps -- and, with a separator, to the last
+    `;` before that credential's `:`. Red on 4d13d71."""
+
+    def test_a_cut_inside_the_second_credential_keeps_only_the_first_group(self):
+        text = "qq:zz@a.test;qqqqqq:zzzzzz@cdn.test"
+        self.assertEqual([helper.cut_free_text(text, limit, ";") for limit in (12, 13, 16, 20, 26)],
+                         ["", "qq:zz@a.test", "qq:zz@a.test", "qq:zz@a.test", "qq:zz@a.test"])
+        self.assertEqual(helper.split_groups(helper.cut_free_text(text, 26, ";")), ["qq:zz@a.test"])
+        # With no separator the whole run is the credential it splits.
+        self.assertEqual(helper.cut_free_text(text, 26), "")
+
+    def test_a_group_title_cut_at_its_cap_inside_the_second_credential(self):
+        title = "Sports " * 69 + "Live;qq:zz@a.test;qqqqqq:zzzzzz@cdn.test/live/1.ts"
+        self.assertEqual(len(title), 533)
+        doc = helper.parse_m3u('#EXTM3U\n#EXTINF:-1 group-title="%s",N\nhttp://stream.test/live/1.ts\n' % title)
+        groups = doc["channels"][0].get("groups", [doc["channels"][0]["group"]])
+        # The first group is its own cut at M3U_MAX_GROUP; 4d13d71 listed a
+        # third, `qqqqqq:zzzz`.
+        self.assertEqual((len(groups), groups[-1]), (2, "qq:zz@a.test"))
+        shown = [helper.redact_urls(g) for g in groups] + [helper.player_title_text(g) for g in groups]
+        self.assertEqual([g for g in shown if leaked(g)], [])
 
 
 class PlaylistCutTest(unittest.TestCase):
@@ -435,8 +584,14 @@ class PlaylistCutTest(unittest.TestCase):
             listed = [c.get("groups", [c["group"]]) for c in rows]
             self.assertTrue(all(gs[:4] == [ch * 100 for ch in "abcd"] for gs in listed))
             held_to_every_sink(self, [g for gs in listed for g in gs[4:]], helper.M3U_MAX_GROUP)
+            # The fifth group keeps what a cut of its own text keeps, unless
+            # the cut splits a credential whose span starts before it: a URL
+            # glued to the words before it, with no named scheme, behind
+            # the four groups in one token (the review of 4d13d71), whose
+            # cut drops back to the last `;` before its colon.
             held_to_every_sink(self, [gs[4] if len(gs) > 4 else "" for gs in listed], helper.M3U_MAX_GROUP,
-                               [k for _, k in cases])
+                               [("", "") if splits_before(head + t, helper.M3U_MAX_GROUP_TEXT, len(head)) else k
+                                for t, k in cases])
 
     def test_a_one_group_text_cut_after_a_url_keeps_its_group(self):
         text = "News http://cdn.test/live " + "W" * 600
@@ -531,18 +686,22 @@ class TitleCutTest(unittest.TestCase):
             self.assertGreater(len([v for v in stored if v]), len(cases) * 2 // 3, field)
             for value in stored:
                 self.assertEqual(leaked(value), [], (field, value[-60:]))
-            # What the cut keeps is stored as the helper redacts it.
-            held_to_every_sink(self, stored, cap, [(helper.redact_urls(before), helper.redact_urls(whole))
-                                                   for _, (before, whole) in cases])
+            # What the cut keeps is stored as the helper redacts it: the kept
+            # text, which holds the whole URL whenever one is kept, redacted
+            # in its place (a URL a credential's token holds is withheld with
+            # it, so it is not asked for alone; the review of 4d13d71).
+            held_to_every_sink(self, stored, cap, [(helper.redact_urls(before), "") for _, (before, _) in cases])
 
     def test_a_detail_the_redaction_lengthens_is_cut_again(self):
-        # Each `a://b/c@d` is withheld whole (R32a'), which is ten characters
-        # longer than it was, so the cut after the redaction is what holds it.
+        # Each `a://b/c@d` is withheld whole (R32a'), which is six characters
+        # longer than it was (`a` is no named scheme, so no `a://` is
+        # printed since the review of cbd6679), so the cut after the
+        # redaction is what holds it.
         text = " ".join(["a://b/c@d"] * 40)
         for field, cap in (("desc", helper.EPG_MAX_DESC), ("category", helper.EPG_MAX_CATEGORY),
                            ("episode", helper.EPG_MAX_EPISODE)):
             stored = self.titles([text], field)[0]
-            self.assertEqual((len(stored), stored[:19]), (cap, "a://" + helper.HOST_WITHHELD), field)
+            self.assertEqual((len(stored), stored[:19]), (cap, helper.HOST_WITHHELD + " [ho"), field)
 
     def test_a_title_is_folded_and_trimmed_before_it_is_cut(self):
         url_at_cap = "N" * (helper.EPG_MAX_TITLE - len(PLAIN) - 1) + " " + PLAIN
@@ -562,6 +721,93 @@ class TitleCutTest(unittest.TestCase):
         titles = self.titles(["News " + PLAIN + " " + "N" * 300])
         self.assertEqual(helper.redact_urls(titles[0]), "News http://cdn.test " + "N" * (helper.EPG_MAX_TITLE - 45))
         self.assertEqual(shell_sinks(titles)[0][0], "News cdn.test " + "N" * (helper.EPG_MAX_TITLE - 45))
+
+
+# The review of cbd6679's cut cases: a space-less description or title
+# whose cut held a false positive was stored empty. Built from the review's
+# own text: its prefixes, and the filler its probe wrote.
+CJK_432 = 'HBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\xb7\u514b\u62c9\u514b/\u57fa\u7279\xb7\u54c8\u7075\u987f/\u5f7c\u7279\xb7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c'
+CJK_417 = '\u6bcf\u665a20:00\u64ad\u51fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u6b22\u8fce\u5173\u6ce8\u5fae\u535a@\u592e\u89c6\u65b0\u95fb'
+CJK_248 = '20:00\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69\u7cbe\u5f69@\u592e\u89c6'
+CJK_GOT = '\u300a\u6743\u529b\u7684\u6e38\u620f\u300b\uff08Game of Thrones\uff09\u662fHBO\u51fa\u54c1\u7684\u5947\u5e7b\u5267\u3002\u4e3b\u6f14\uff1a\u827e\u7c73\u8389\u4e9a\xb7\u514b\u62c9\u514b/\u57fa\u7279\xb7\u54c8\u7075\u987f/\u5f7c\u7279\xb7\u4e01\u62c9\u57fa\u3002\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c'
+CJK_PROSE = '\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2\u8ff0\u4e86\u4e03\u5927\u738b\u56fd\u4e4b\u95f4\u7684\u4e89\u9738\uff0c\u5404\u5927\u5bb6\u65cf\u4e3a\u4e86\u94c1\u738b\u5ea7\u5c55\u5f00\u4e86\u6fc0\u70c8\u7684\u6597\u4e89\uff0c\u672c\u5b63\u8bb2'
+
+
+class ProseCutTest(unittest.TestCase):
+    """The review of cbd6679 (its changes-too-much finding 3): the cut
+    dropped a run it cut back to the run's last space, so a space-less
+    Chinese or Japanese description or title whose cut held a false
+    positive -- a wide mark, or a `:` and an `@` far apart -- was stored
+    EMPTY until the next fetch, and one with a single space before it kept
+    its first words. The caps make the review's four texts no false positive
+    at all, so each is stored to its cap; and a cut drops back no further
+    than the start of the item it cuts, so the prose before a real one is
+    kept. Red on cbd6679: each review text stored "" (the last, 15
+    characters), and each item below dropped its prose."""
+
+    def test_the_reviews_texts_are_stored_to_their_cap(self):
+        cases = [(CJK_432, CJK_432[:400], CJK_432[:200]), (CJK_417, CJK_417[:400], CJK_417[:200]),
+                 (CJK_248, CJK_248, CJK_248[:200]), (CJK_GOT, CJK_GOT[:400], CJK_GOT[:200])]
+        got = [(helper.clean_detail(t, helper.EPG_MAX_DESC), helper.clean_title(t)) for t, _, _ in cases]
+        self.assertEqual(got, [(d, t) for _, d, t in cases])
+
+    def test_the_cut_keeps_the_prose_before_the_item_it_cuts(self):
+        mark = "ESPN" + chr(0x200b) + "//" + chr(0x200b) + "HD"
+        credential = "qqqqqq:zzzzzz" + "x" * 200 + "@cdn.test"
+        kept = CJK_PROSE + "Sport:Live@HD" + CJK_PROSE
+        self.assertEqual([helper.cut_free_text(CJK_PROSE + mark + CJK_PROSE, 400),
+                          helper.cut_free_text(CJK_PROSE + credential, 400),
+                          helper.cut_free_text(CJK_PROSE + "x" + chr(0x4e2d) * 2 + credential, 400),
+                          helper.cut_free_text(kept, 400),
+                          helper.clean_detail(CJK_PROSE + mark + CJK_PROSE, helper.EPG_MAX_DESC),
+                          helper.clean_title(CJK_PROSE[:150] + mark + CJK_PROSE)],
+                         [CJK_PROSE, CJK_PROSE, CJK_PROSE + "x" + chr(0x4e2d) * 2, kept[:400], CJK_PROSE, CJK_PROSE[:150]])
+        # The credential the cut keeps whole is withheld at every sink, and
+        # the prose before it shows.
+        self.assertEqual(helper.redact_urls(kept[:400]), CJK_PROSE + helper.HOST_WITHHELD)
+
+
+class DeletingStartTest(unittest.TestCase):
+    """The review of cbd6679: the cut drops back to the start of the item it
+    cuts as the plain reading finds it, and the sinks that delete controls
+    first (the player's title, the notification) must read no item in what
+    it keeps of that run either -- a deleted control is no WIDE code point
+    and no STAND_IN, so it moves no mark, and the scheme a deleting sink
+    reads starts no later -- or they would print half of one. Over prose
+    holding controls before items holding them, cut at every offset inside
+    the item: what the cut keeps of its run reads as plain text at the sinks
+    that delete controls whenever it does at the plain ones, and no sink
+    shows a letter of the credential the whole text does not."""
+
+    def test_what_the_cut_keeps_of_its_run_reads_alike_at_every_sink(self):
+        prefixes = ["", "News ", CJK_PROSE[:40], "ab" + chr(1) + "cd", "x" + chr(0x7f) + "y" + chr(0xa0),
+                    "1" + chr(0x85), "Q\t", chr(0x4e2d) + "\t" + chr(0x4e2d), "N" + chr(0x9b) + "N"]
+        items = [PLAIN, "ht" + chr(1) + "tp://qqqqqq:zzzzzz@cdn.test/x", "http" + chr(1) + "://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+                 "http:\t//qqqqqq:zzzzzz@cdn.test/x", "qqqqqq:zz\tzz@cdn.test/x", "qqqqqq:zz" + chr(1) + chr(0xe9) + "zz@cdn.test",
+                 "1://qqqqqq:zzzzzz@cdn.test", "ab" + chr(1) + "cd://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+                 "x" + chr(0x200b) + "//qqqqqq:zzzzzz@cdn.test", "http://x/\tqqqqqq:zz@cdn.test",
+                 "a" + chr(0x200b) + chr(0x2215) * 2 + "\t:zzzzzz@cdn.test",
+                 # Two C1 controls beside the colon: no WIDE code point, so a
+                 # mark to every sink.
+                 "http:" + chr(0x85) + chr(0x9b) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts"]
+        tails = ["", " tail", CJK_PROSE[:20]]
+        bad, checked = [], 0
+        for prefix in prefixes:
+            for item in items:
+                for tail in tails:
+                    text = prefix + item + tail
+                    whole = {"plain": leaked(helper.redact_urls(text)), "deleting": leaked(helper.player_title_text(text))}
+                    for limit in range(len(prefix), len(prefix) + len(item)):
+                        stored = helper.cut_free_text(text, limit)
+                        run = stored[stored.rfind(" ") + 1:]
+                        if helper.redact_urls(run) == run and helper.player_title_text(run) != deleted(run):
+                            bad.append(("deleting reads an item", ascii(text), limit))
+                        for sink, out in (("plain", helper.redact_urls(stored)), ("deleting", helper.player_title_text(stored))):
+                            if leaked(out) and not whole[sink]:
+                                bad.append((sink, ascii(text), limit, ascii(out)))
+                        checked += 1
+        self.assertEqual(bad[:4], [])
+        self.assertGreater(checked, 5000)
 
 
 if __name__ == "__main__":

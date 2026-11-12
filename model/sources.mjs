@@ -16,7 +16,7 @@ import {
 } from "./mpv.mjs"
 import {
   hostOf, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, urlDelimiterIndex,
-  redactUrls
+  slashAlikeCut, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -553,8 +553,10 @@ var HOST_WITHHELD = "[host withheld]"
 // source-urls fixture pins that shape in both mirrors (measured: each
 // mutation goes red, 2026-10-22).
 // Every scan is one index walk or one single-class search; nothing here is
-// retried. The helper's `run_host_parts` is the mirror.
-function runHostParts(body) {
+// retried. The helper's `run_host_parts` is the mirror. D-SINK-95: the host
+// it RETURNS stops at its first slash look-alike (slashAlikeCut); `withheld`
+// is asked of the host before that cut, so urlHostWithheld does not move.
+function runHostParts(body, printing) {
   var s = str(body)
   var sp = urlDelimiterIndex(s)
   if (sp !== -1) s = s.substring(0, sp)
@@ -564,7 +566,7 @@ function runHostParts(body) {
   var hostport = authority.substring(authority.lastIndexOf("@") + 1)
   if (hostport.charAt(0) === "[") {
     var close = hostport.indexOf("]")
-    return { host: close === -1 ? "" : hostport.substring(0, close + 1), withheld: false }
+    return { host: slashAlikeCut(close === -1 ? "" : hostport.substring(0, close + 1)), withheld: false }
   }
   var end = hostport.search(/[:;=&]/)
   var host = end === -1 ? hostport : hostport.substring(0, end)
@@ -577,7 +579,17 @@ function runHostParts(body) {
   var laterAt = rest.indexOf("@") !== -1
   var dotless = host !== "" && host.indexOf(".") === -1
   var badPort = port !== "" && !/^[0-9]+$/.test(port)
-  return { host: host, withheld: laterAt && (dotless || badPort) }
+  // `printing` (the redactors' print path, the review of cbd6679): a
+  // non-numeric port behind a userinfo is withheld too, with no later `@`
+  // needed. `http://<TAB>:@qqqqqq:zzzzzz` is withheld whole by the plain
+  // sinks (a credential token), and with the tab deleted the sinks that
+  // delete controls read the run `:@qqqqqq:zzzzzz`: host `qqqqqq`, port
+  // `zzzzzz`, which they printed. The predicate the Sources form warns with
+  // (urlHostWithheld, below) passes no `printing`, so it does not move, nor
+  // does the host a stored record shows. The helper's run_host_parts is the
+  // mirror.
+  if (printing === true && badPort && authority.indexOf("@") !== -1) return { host: slashAlikeCut(host), withheld: true }
+  return { host: slashAlikeCut(host), withheld: laterAt && (dotless || badPort) }
 }
 
 // R32a': the predicate alone, over a whole URL (or any text holding one).

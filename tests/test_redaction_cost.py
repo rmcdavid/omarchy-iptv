@@ -31,6 +31,7 @@ has to be loose to be useful, and the margin here is four orders of magnitude.
 """
 import json
 import os
+import random
 import re
 import time
 import unittest
@@ -65,20 +66,57 @@ helper = load_helper()
 # had one, and this oracle copied it, so `1http://u:p@h/x`, `_http://...` and a
 # scheme right after an accented or CJK letter were no URL to either and the
 # suite pinned the leak; Model.redactUrls never had it and printed the host.
+# D-SINK-95 and D-SINK-96 (2026-11-11): the reading as ONE leftmost pattern,
+# its classes spelt here and nowhere else -- X (CROSSABLE) everything outside
+# U+0020..U+007E; F (FILLER) X but the slash look-alikes; K (STAND_IN) F above
+# U+009F but the reader's space union; S (SLASH) `/` or a look-alike; and,
+# since the review of cbd6679 (2026-11-12), D the deleted controls and W a
+# WIDE code point (above U+009F), at most one of which any stretch the
+# reading crosses may hold:
+#   scheme  a letter and scheme characters, then crossable runs of at most
+#           one W, each followed by letterless scheme characters, the last
+#           possibly by the mark (the walk crosses only out of a letterless
+#           segment);
+#   mark    the whole run of `:` and F before the first S (nothing of it
+#           before it), whose stretches between colons hold at most one W,
+#           holding a `:` or being one K; then S, F holding at most one W, S;
+#   run     to the first of the six delimiters, possibly empty.
+# Matched left to right without overlap. A credential is a run of characters
+# other than U+0020 that holds a `:` outside every match with an `@` after it,
+# with at most one counted character (W but no look-alike) outside the
+# matches between them (credentials_as_ruled); it is withheld from the run's
+# start, or after the last counted character before that `:` when there are
+# two or more, and a match inside it prints nothing. A match prints its scheme
+# and `://` only when the scheme is a NAMED one, then its host.
 _WS = "\t\n\x0b\x0c\r "
-# D-EPG-18 (2026-11-12): one more clause, an alternative the pattern tries
-# first: a `://` followed by exactly the withheld token is a URL a redactor
-# already printed, and it is printed as it stands, nothing past its `]`
-# consumed.
-_AS_RULED = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://(?:\[host withheld\]|[^" + _WS + "]+)")
+# D-EPG-18 (2026-11-12), carried into this statement on the merge: one more
+# clause, an alternative the run tries first: a mark followed by exactly the
+# withheld token is a URL a redactor already printed, and it is printed as
+# it stands (its scheme by the same list), nothing past its `]` consumed; a
+# credential whose run starts inside that token is withheld right after it.
+_SA_AS_RULED = "".join(map(chr, (0x1735, 0x2041, 0x2044, 0x2215, 0x2571, 0x27CB, 0x29F8, 0x2F03, 0x3033, 0x31D3,
+                                 0xFF0F)))
+_D = "[\x00-\x1f\x7f-\x9f]"
+_W = "[^\x00-\x9f]"
+_WF = "[^\x00-\x9f" + _SA_AS_RULED + "]"
+_K = ("[^\x00-\x9f" + "".join(map(chr, (0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F, 0x205F,
+                                          0x3000, 0xFEFF))) + _SA_AS_RULED + "]")
+_S = "[/" + _SA_AS_RULED + "]"
+_CROSS = "(?:" + _D + "*" + _W + _D + "*|" + _D + "+)"
+_STRETCH = "(?:" + _D + "*(?:" + _WF + _D + "*)?)"
+_AS_RULED = re.compile("([A-Za-z][A-Za-z0-9+.\\-]*(?:" + _CROSS + "[0-9+.\\-]+)*" + _CROSS + "?)"
+                       "(?<![^ -9;-~" + _SA_AS_RULED + "])"
+                       "(" + _STRETCH + "(?::" + _STRETCH + ")+|" + _D + "*" + _K + _D + "*)"
+                       + _S + _STRETCH + _S + "(\\[host withheld\\]|[^" + _WS + "]*)")
+_NAMED_AS_RULED = {"http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "mmsh", "srt", "file", "ftp", "ftps",
+                   "sftp", "data", "smb", "rtmpe", "rtmpt", "mmst", "tcp", "tls", "magnet", "acestream"}
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
 _PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
 HOST_WITHHELD = "[host withheld]"
 
 
-def host_as_ruled(raw):
-    body = raw[raw.find("://") + 3:]
+def host_as_ruled(body):
     cut = _AUTHORITY_END_AS_RULED.search(body)
     authority = body if cut is None else body[:cut.start()]
     rest = "" if cut is None else body[cut.start():]
@@ -88,30 +126,131 @@ def host_as_ruled(raw):
     hostport = authority[authority.rfind("@") + 1:]
     if hostport.startswith("["):
         close = hostport.find("]")
-        return hostport[:close + 1].lower() if close != -1 else ""
+        return look_alike_cut(hostport[:close + 1].lower() if close != -1 else "")
     end = _HOST_END_AS_RULED.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
     port = _PORT_AS_RULED.match(hostport)
     port = port.group(1) if port else ""
-    if "@" in rest and ((host and "." not in host) or (port and not port.isdigit())):
+    bad_port = port and not port.isdigit()
+    if "@" in rest and ((host and "." not in host) or bad_port):
         return HOST_WITHHELD
-    return host.lower()
+    # The review of cbd6679: a non-numeric port behind a userinfo is withheld
+    # too, at a redactor's print.
+    if bad_port and "@" in authority:
+        return HOST_WITHHELD
+    return look_alike_cut(host.lower())
+
+
+def look_alike_cut(host):
+    """D-SINK-95: the printed host stops at its first slash look-alike."""
+    for i, c in enumerate(host):
+        if c in _SA_AS_RULED:
+            return host[:i]
+    return host
+
+
+def trailing_as_ruled(raw):
+    bracket = "[" in raw
+    trailing = ""
+    while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
+        trailing = raw[-1] + trailing
+        raw = raw[:-1]
+    return raw, trailing
+
+
+# The review of 4d13d71 (2026-11-12): the count between a credential's `:`
+# and its `@` is of the scripts written without spaces alone (these code
+# point ranges, less the look-alikes); a `:` a match holds is a
+# credential's when the match's run holds no `@` after it; and a match after
+# the token's start whose scheme (its printable ASCII, lower-cased) is no
+# NAMED one, with an `@` in its run and a `:` in its mark or its run before
+# that `@`, withholds the token from its start. And an empty run, or one of trailing punctuation
+# alone, prints `[url]` with no scheme. The review of 2942e41: so does a
+# match whose scheme is a NAMED one when its mark is not the clean `://` or
+# its run opens with a `:`; and a match before which only opening brackets
+# and quotes stand in the token withholds nothing.
+_SPACELESS_AS_RULED = ((0x2E80, 0x2FDF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF), (0x3000, 0x30FF),
+                       (0x31F0, 0x31FF), (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF),
+                       (0xD7B0, 0xD7FF), (0x0E00, 0x0EFF), (0x1000, 0x109F), (0x1780, 0x17FF), (0xFF00, 0xFFEF),
+                       (0x10000, 0x10FFFF))
+
+
+def credentials_as_ruled(s, matches):
+    """(start, end) of every withheld span: the rule above, a character at a
+    time."""
+    spans = [m.span() for m in matches]
+
+    def holder(i):
+        for m in matches:
+            if m.start() <= i < m.end():
+                return m
+        return None
+
+    def counted(i):
+        return ord(s[i]) > 0x9F and s[i] not in _SA_AS_RULED and holder(i) is None
+
+    def spaceless(i):
+        return counted(i) and any(a <= ord(s[i]) <= b for a, b in _SPACELESS_AS_RULED)
+
+    out = []
+    for token in re.finditer("[^ ]+", s):
+        i, j = token.span()
+        start = -1
+        for c in range(i, j):
+            if s[c] != ":":
+                continue
+            m = holder(c)
+            if m is not None and "@" in s[c + 1:m.end()]:
+                continue
+            at = s.find("@", c + 1, j)
+            if at < 0:
+                break
+            if sum(1 for x in range(c + 1, at) if spaceless(x)) > 1:
+                continue
+            before = [x for x in range(i, c) if counted(x)]
+            start = i if len(before) <= 1 else before[-1] + 1
+            break
+        # The review of 2942e41: a named scheme counts when its mark is not
+        # the clean `://` or its run opens with a `:`, and no match counts
+        # that only opening brackets and quotes stand before in the token.
+        if any(i < m.start() < j and "@" in m.group(3) and ":" in m.group(2) + m.group(3).split("@")[0]
+               and (re.sub("[^ -~]", "", m.group(1)).lower() not in _NAMED_AS_RULED
+                    or s[m.start(2):m.start(3)] != "://" or m.group(3).startswith(":"))
+               and re.fullmatch("[(\\[{<\"'`]*", s[i:m.start()]) is None for m in matches):
+            start = i
+        if start >= 0:
+            out.append((start, start + len(trailing_as_ruled(s[start:j])[0]), j))
+    return out
 
 
 def redact_urls_as_ruled(text):
-    def replace(match):
-        raw = match.group(0)
-        if raw[match.end(1) - match.start() + 3:] == HOST_WITHHELD:
-            return "%s://%s" % (match.group(1).lower(), HOST_WITHHELD)
-        bracket = "[" in raw
-        trailing = ""
-        while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
-            trailing = raw[-1] + trailing
-            raw = raw[:-1]
-        host = host_as_ruled(raw)
-        return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
-
-    return _AS_RULED.sub(replace, "" if text is None else str(text))
+    s = "" if text is None else str(text)
+    matches = list(_AS_RULED.finditer(s))
+    held = credentials_as_ruled(s, matches)
+    out, pos = [], 0
+    for match in matches:
+        if any(a <= match.start() < t for a, _, t in held):
+            continue
+        for a, b, _ in held:
+            if pos < b and a < match.start():
+                out.append(s[pos:max(pos, a)] + HOST_WITHHELD)
+                pos = b
+        run, trailing = trailing_as_ruled(match.group(3))
+        scheme = re.sub("[^ -~]", "", match.group(1)).lower()
+        if match.group(3) == HOST_WITHHELD:
+            out.append(s[pos:match.start()] + (scheme + "://" if scheme in _NAMED_AS_RULED else "") + HOST_WITHHELD)
+        elif run:
+            shown = host_as_ruled(run) or "[redacted]"
+            out.append(s[pos:match.start()] + (scheme + "://" if scheme in _NAMED_AS_RULED else "") + shown + trailing)
+        else:
+            out.append(s[pos:match.start()] + "[url]" + trailing)
+        pos = match.end()
+    for a, b, _ in held:
+        if pos < b:
+            out.append(s[pos:max(pos, a)] + HOST_WITHHELD)
+            pos = b
+    out.append(s[pos:])
+    return "".join(out)
 
 
 # D-PERF-6 (R32e): the scheme-run search as it shipped before, kept as the
@@ -127,7 +266,20 @@ _SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 # trailing punctuation (R32a''), several kinds of whitespace, and non-ASCII.
 # Every class the scan asks the engine is ASCII-only -- no `\w` or `\s` is
 # left in it -- so non-ASCII is plain text to it.
-ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>"
+ALPHABET = list("ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>") + [
+    # D-SINK-95 and D-SINK-96 (2026-11-11): a STAND_IN, a look-alike colon and
+    # slashes, a crossed control and an astral character before a mark, a
+    # control inside one, a token, a letterless mark and a token whose line
+    # separator stands before a `//`.
+    "http:" + chr(0x200B) + "//", "http" + chr(0xFF1A) + "//", "http:" + chr(0x2215) * 2, "http" + chr(0x2215) + "://",
+    "http" + chr(0xE0001) + "://", ":" + chr(1) + "//", "a:b@", "1://", "qqqqqq:zz" + chr(0x2028) + "//zz@",
+    chr(0x200B), chr(0xFF1A), chr(0x2215), chr(0x7F),
+    # The review of cbd6679 (2026-11-12): a mark with an empty run before a
+    # delimiter, two odd characters in one stretch (P, between the slashes,
+    # a crossed run), a mark inside a password, and a colon and an at-sign
+    # around a delimiter.
+    "a" + chr(0x200B) + chr(0x2215) * 2 + "\t", ":" + chr(0xE9) + "/" + chr(0xE9) + "/", chr(0x4E2D) * 2,
+    "qqqqqq:zz" + chr(0xE9) + "//zz@", "\t:@", chr(0xE9) * 2 + "//", "http" + chr(0xE9) * 2 + "://"]
 
 
 def generated(length, seed):
@@ -181,6 +333,23 @@ EDGES = [
     "http://[Host withheld]", "http://[host  withheld]", "://[host withheld]", "1://[host withheld] http://u:p@h.test/a",
     "HTTP://[host withheld]http://u:p@h.test/a", "http://u:p@[host withheld]/x",
     "http://[host withheld]a://u:p@h.test/x",
+    # D-SINK-95 and D-SINK-96 (2026-11-11): the composites, alone and before a
+    # credential.
+    "http:" + chr(0x200B) + "//qqqqqq:zzzzzz@cdn.test/x", "http" + chr(0xFF1A) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts",
+    "http:" + chr(0x2215) * 2 + "cdn.test/live/qqqqqq/zzzzzz/1.ts", "http" + chr(0x2215) + "://cdn.test/live/q/z/1.ts",
+    "http" + chr(0xE0001) + "://cdn.test/live/q/z/1.ts", ":" + chr(1) + "//cdn.test/x", "a:b@", "1://", "x a:b@c y",
+    "qqqqqq:zz" + chr(0x2028) + "//zz@cdn.test/x", "http://cdn.test" + chr(0xFF0F) + "live" + chr(0xFF0F) + "q",
+    "http:/" + chr(0x2215) + "/cdn.test/x", "abc:http://u:p@h.test/x", "http@://u:p@h.test/x", "(u:p@h.test).",
+    # The review of cbd6679 (2026-11-12): every input its findings quote.
+    "News qqqqqq:zz" + chr(0xE9) + "//zz@cdn.test/x HD", "News qqqqqq:zz" + chr(0x200B) + "//zz@cdn.test/x HD",
+    "News qqqqqq:zz://zz@cdn.test/x HD", "News qqqqqq:zz" + chr(0xE9) + chr(0x2215) * 2 + "zz@cdn.test/x HD",
+    "News qqqqqq:zz" + chr(0xE9) + ":/" + chr(0xE9) + "/zz@cdn.test/x HD",
+    "News qqqqqq:" + chr(0x200B) + "//zzzzzz@cdn.test HD", "qqqqqq:" + chr(0x2215) * 2 + "zzzzzz@cdn.test",
+    "News qqqqqq:http://\tzzzzzz@cdn.test HD", "News http://\t:@qqqqqq:zzzzzz HD",
+    "News http://\t@cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+    "News a" + chr(0x200B) + chr(0x2215) * 2 + "\t:" + chr(0x200B) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts HD",
+    "News qqqqqq:zzzzzz" + chr(0x2215) + "://\t@cdn.test/live/1.ts HD", "Featuring:\n// The Band",
+    "NHK" + chr(0x7DCF) + chr(0x5408) + "//BS", "a" + chr(0x4E2D) * 300 + ":b@c", "http://me@h.test:pa x",
 ]
 
 
@@ -303,6 +472,25 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         self.assertEqual(helper.run_host_parts("u:p@h.test:8080/x"), ("h.test", False))
         self.assertEqual(helper.run_host_parts("[2001:db8::7]:8080/me@x"), ("[2001:db8::7]", False))
 
+    def test_a_non_numeric_port_behind_a_userinfo_is_withheld_where_a_redactor_prints_only(self):
+        """The review of cbd6679 (its still-shows finding 3): the sinks that
+        delete controls read `http://<TAB>:@qqqqqq:zzzzzz` as the run
+        `:@qqqqqq:zzzzzz`, host `qqqqqq` and port `zzzzzz`, and printed the
+        username. A redactor's print withholds a non-numeric port behind a
+        userinfo now; the predicate the Sources form warns with, and the host
+        a stored record shows, do not move. Red on cbd6679: the print gave
+        `qqqqqq`."""
+        self.assertEqual(helper.run_host_parts(":@qqqqqq:zzzzzz", True), ("qqqqqq", True))
+        self.assertEqual(helper.run_host_parts(":@qqqqqq:zzzzzz"), ("qqqqqq", False))
+        self.assertEqual(helper.host_withheld("http://:@qqqqqq:zzzzzz"), False)
+        self.assertEqual(helper.host_withheld("http://me@h.test:pa"), False)
+        self.assertEqual(helper.run_host("http://me@h.test:pa"), HOST_WITHHELD)
+        self.assertEqual(helper.redact_urls("News http://:@qqqqqq:zzzzzz HD"), "News http://[host withheld] HD")
+        self.assertEqual(helper.player_title_text("News http://\t:@qqqqqq:zzzzzz HD"), "News http://[host withheld] HD")
+        # A numeric port, or none, behind a userinfo prints as it did.
+        self.assertEqual(helper.redact_urls("http://u:p@h.test:8080/x"), "http://h.test")
+        self.assertEqual(helper.redact_urls("http://u:p@nas"), "http://nas")
+
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):
             self.assertEqual(helper.redact_urls(value),
@@ -325,7 +513,19 @@ class GluedSchemeTests(unittest.TestCase):
     Red on dev 9cce189: every shape below printed the username and the
     password except four. The `a1` control and the two whose first letter
     starts their 300-character run were redacted then too (those two pin the
-    run search's window), and `1A.HTTP` printed `1A.http://prov.test`."""
+    run search's window), and `1A.HTTP` printed `1A.http://prov.test`.
+
+    Since the review of cbd6679 (D-SINK-94's sibling, rule 15) the scheme
+    prints only when NAMED_SCHEMES lists it, so a scheme that took in the
+    letters glued before it (`a1http`, `s3`, `a2http`, `a.http`, `a000...`)
+    prints the host alone, as the model does, where it printed itself; and a
+    `:` right before the scheme makes the whole token a credential
+    (D-SINK-96 across the URL, `abc:http://u:p@h` withheld whole), which the
+    sweep below expects. Since the review of 4d13d71 a scheme that is no
+    named one, after text in its token, with an `@` in its run and a `:` in
+    its mark or its run before that `@`, withholds the token: it is a
+    credential's username read as a scheme (`1s3://u:p@h` is withheld
+    whole)."""
 
     CRED = "http://u5er:p4ss@prov.test/live/1.ts"
     # Scheme-legal non-letters, more of them than a scan that gives up after
@@ -345,12 +545,15 @@ class GluedSchemeTests(unittest.TestCase):
             ("9" * 200 + self.CRED, "9" * 200 + "http://prov.test"),
             # The first letter far before `://`: the run search has to look
             # back past its 64-, 128- and 256-character windows to find it.
-            ("A" + "0" * 300 + self.CRED[4:], "a" + "0" * 300 + "://prov.test"),
-            ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x a" + "9" * 300 + "http://prov.test"),
-            # Digits or `+.-` inside the scheme, after its first letter.
-            ("1s3" + self.CRED[4:], "1s3://prov.test"),
-            ("_1A2HTTP" + self.CRED[4:], "_1a2http://prov.test"),
-            ("1A.HTTP" + self.CRED[4:], "1a.http://prov.test"),
+            ("A" + "0" * 300 + self.CRED[4:], "prov.test"),
+            ("x A" + "9" * 300 + "HTTP" + self.CRED[4:], "x prov.test"),
+            # Digits or `+.-` inside the scheme, after its first letter: no
+            # named scheme, after text in its token, with a userinfo -- a
+            # credential's username read as a scheme, withheld whole since
+            # the review of 4d13d71.
+            ("1s3" + self.CRED[4:], HOST_WITHHELD),
+            ("_1A2HTTP" + self.CRED[4:], HOST_WITHHELD),
+            ("1A.HTTP" + self.CRED[4:], HOST_WITHHELD),
             # An ASCII name before the glue character: the run starts after it.
             ("ESPN" + chr(0x9891) + chr(0x9053) + "HTTP" + self.CRED[4:], "ESPN" + chr(0x9891) + chr(0x9053) + "http://prov.test"),
             ("CANAL" + chr(0xc9) + self.CRED, "CANAL" + chr(0xc9) + "http://prov.test"),
@@ -364,7 +567,7 @@ class GluedSchemeTests(unittest.TestCase):
             (self.EARLIER + "1" + self.CRED, "see http://a.test 1http://prov.test"),
             (self.EARLIER + "Sports_" + self.CRED, "see http://a.test Sports_http://prov.test"),
             # A letter at the run's start was always a URL, and still is.
-            ("a1" + self.CRED, "a1http://prov.test"),
+            ("a1" + self.CRED, "prov.test"),
             # The scheme is lowercased from where it starts, so a scan that
             # started at a LATER letter would print `_Http`.
             ("Sports_HTTP" + self.CRED[4:], "Sports_http://prov.test"),
@@ -392,8 +595,13 @@ class GluedSchemeTests(unittest.TestCase):
             forms = ((chr(c), chr(c) in letters), (chr(c) + "1", chr(c) in letters),
                      (chr(c) + self.LONG, chr(c) in letters), ("ESPN" + chr(c), chr(c) in legal))
             for prefix, whole in forms:
-                if whole:
-                    shown = (prefix + "HTTP").lower() + "://prov.test"
+                if c == 0x3A:
+                    # `:` and then the scheme: one credential token, the
+                    # URL's userinfo its `@` (the review of cbd6679).
+                    shown = HOST_WITHHELD
+                elif whole:
+                    # The scheme took in the prefix and is no named one.
+                    shown = "prov.test"
                 else:
                     shown = prefix + "http://prov.test"
                 for before, kept in (("", ""), (self.EARLIER, "see http://a.test ")):
@@ -421,7 +629,9 @@ class PathologicalOutputTests(unittest.TestCase):
         # collapses to `prov.example.test` there -- the two renderings differ
         # on purpose and the shared fixture pins the property, not the text.)
         out = helper.redact_urls(run_of(20000) + CRED)
-        self.assertEqual(out, run_of(20000) + "http://prov.example.test")
+        # Since the review of cbd6679 a scheme prints only from NAMED_SCHEMES,
+        # so the two renderings now agree on this one.
+        self.assertEqual(out, "prov.example.test")
         for fragment in ("u5er", "p4ss", "1.ts"):
             self.assertNotIn(fragment, out)
 
@@ -454,7 +664,7 @@ class PathologicalOutputTests(unittest.TestCase):
         # survives. A cap leaves a run with no letter, which is no URL, and the
         # credential goes out whole.
         out = helper.redact_urls("A" + "0" * 20000 + CRED[4:])
-        self.assertEqual(out, "a" + "0" * 20000 + "://prov.example.test")
+        self.assertEqual(out, "prov.example.test")
 
 
 class RedactionBudgetTests(unittest.TestCase):
@@ -498,6 +708,303 @@ class RedactionBudgetTests(unittest.TestCase):
         self.assertLess(large, max(8.0 * small, 0.050),
                         "%.4f ms at 10,000 -> %.4f ms at 40,000" % (small * 1000, large * 1000))
 
+
+
+class MarkBudgetTests(unittest.TestCase):
+    """D-SINK-95 and D-SINK-96 (2026-11-11): the wide reading and the token
+    arm are linear too, through redact_urls and fold_space. Each shape at
+    40,000 characters under 100 ms, best of three, and four times the input
+    costs under eight times the time (plus a 5 ms floor), best of five.
+    `1://` repeated was quadratic in the shipped redactor, which read each
+    URL's run before its scheme: 2.2 s at 40,000 characters. The look-alike
+    shape is quadratic without the dead bound on the scheme walk: 842 ms at
+    10,000 characters in the prototype.
+
+    The review of cbd6679 added five. `a` and then `<U+200B><U+2215><U+2215>`
+    and a delimiter repeated (and its LF, digit-led and delimiter-led units)
+    was quadratic in redact_urls, whose reading needed a run: a walk that
+    found a scheme for an empty run moved no bound, so every later walk
+    crossed back to the `a` (13 s at 40,001 characters; 785 ms at 10,000
+    under the heavy lock); red on cbd6679 here. `<U+200B><U+2215>` repeated
+    was linear but the slowest unit, a regex call per candidate (60 ms at
+    40,000, and 1.5 s at 1M on the guide's path, EpgPathBudgetTests). The
+    candidate with no letter before it is not walked now, and no candidate
+    before the next letter is asked."""
+
+    Z, D, DEL = chr(0x200B), chr(0x2215), chr(0x7F)
+    SHAPES = {
+        "1:// repeated": lambda n: ("1://" * (n // 4 + 1))[:n],
+        "1111111:/DEL/ repeated": lambda n: ("1111111:/" + chr(0x7F) + "/") * (n // 11),
+        "a:b@ repeated": lambda n: "a:b@ " * (n // 5),
+        "ZW 1 repeated, then ://x": lambda n: (chr(0x200B) + "1") * (n // 2) + "://x",
+        "http:/ and a run of ZW": lambda n: "http:/" + chr(0x200B) * n,
+        "1 ZW division slash twice, repeated": lambda n: ("1" + chr(0x200B) + chr(0x2215) * 2) * (n // 4),
+        "token TAB url TAB repeated": lambda n: "a:b@c\thttp://x\t" * (n // 15),
+        "ZW //a TAB repeated, then :": lambda n: (chr(0x200B) + "//a\t") * (n // 5) + ":",
+        "a, then ZW division slash twice TAB repeated": lambda n: "a" + (chr(0x200B) + chr(0x2215) * 2 + "\t") * (n // 4),
+        "a, then ZW fullwidth solidus twice LF repeated": lambda n: "a" + (chr(0x200B) + chr(0xFF0F) * 2 + "\n") * (n // 4),
+        "a, then 1 ZW division slash twice TAB repeated": lambda n: "a" + ("1" + chr(0x200B) + chr(0x2215) * 2 + "\t") * (n // 5),
+        "a, then TAB ZW division slash twice repeated": lambda n: "a" + ("\t" + chr(0x200B) + chr(0x2215) * 2) * (n // 4),
+        "ZW division slash repeated": lambda n: (chr(0x200B) + chr(0x2215)) * (n // 2),
+        # One credential whose `@` ends the text, across one URL every six
+        # characters: the cut reads it only in a window past its limit.
+        "one credential across many URLs": lambda n: "q:" + ("a" + chr(0x200B) + "//b\t") * (n // 6) + "@h",
+        "credential across URLs repeated": lambda n: ("q:z" + chr(0xE9) + "//z@h ") * (n // 9),
+        # The review of 4d13d71 (its cost finding 1): a `:` and an `@` with no
+        # URL after them sent the cut's credential reading on to the text's
+        # end (2.2 s at 4M through clean_detail); and the candidates the
+        # reading rejects cost one Python step each until _URL_CANDIDATE
+        # stopped taking them.
+        "x:@, then a!. ZW division slash twice repeated": lambda n: "x:@" + ("a!." + chr(0x200B) + chr(0x2215) * 2) * (n // 6),
+        "x:@, then ZW e-acute division slash repeated": lambda n: "x:@" + (chr(0x200B) + chr(0xE9) + chr(0x2215)) * (n // 3),
+    }
+
+    def best(self, f, text, k):
+        best = float("inf")
+        for _ in range(k):
+            started = time.perf_counter()
+            f(text)
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    def test_every_shape_at_40000_characters_under_100ms(self):
+        slow = {}
+        for name, shape in self.SHAPES.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                cost = self.best(f, shape(40000), 3)
+                if cost >= 0.100:
+                    slow[(name, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_the_cost_does_not_square_when_the_input_doubles(self):
+        bad = {}
+        for name, shape in self.SHAPES.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                small, large = self.best(f, shape(10000), 5), self.best(f, shape(40000), 5)
+                if large >= max(8.0 * small, 0.005):
+                    bad[(name, fname)] = "%.2f ms -> %.2f ms" % (small * 1000, large * 1000)
+        self.assertEqual(bad, {})
+
+
+class LetterlessBudgetTests(unittest.TestCase):
+    """The review of cbd6679 (its cost finding 3): every look-alike pair is a
+    candidate mark, and each was walked for a scheme, so `<U+200B><U+2215>`
+    repeated cost about 1.5 us a character in redact_urls (1.5 s at 1M). A
+    walk with no ASCII letter between its bound and its P finds no scheme,
+    so it is not taken now, and the search goes on from the next letter: a
+    million characters of the look-alike shapes with no letter in them cost
+    at most 150 ms, best of three. Red on cbd6679, and on this tree without
+    the shortcut."""
+
+    def test_a_text_with_no_letter_costs_no_walk(self):
+        z, d = chr(0x200B), chr(0x2215)
+        shapes = {"ZW division slash repeated": (z + d) * 500000,
+                  "1 ZW division slash twice repeated": ("1" + z + d + d) * 250000,
+                  "TAB ZW division slash twice repeated, after one letter": "a" + ("\t" + z + d + d) * 250000}
+        slow = {}
+        for name, text in shapes.items():
+            for fname, f in (("redact_urls", helper.redact_urls), ("fold_space", helper.fold_space)):
+                cost = MarkBudgetTests.best(None, f, text, 3)
+                if cost >= 0.150:
+                    slow[(name, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+
+def window_of_urls(limit, size, barrier="!", tail="y", after=False):
+    """The review of 2942e41 (its cost finding 0): `x:@<U+00E9><TAB>`, then
+    `ab://c<TAB>` to the end of the credential window of a cut at `limit`
+    (limit + max(limit, CUT_CREDENTIAL_WINDOW)), one walk barrier `!`, then
+    `y` to `size` characters: every URL in the window, and a tail with no
+    SLASH after the barrier. The review of e038d58 (its cost finding 2): or
+    another barrier and tail, a `:` before a tail of `:` or of a control,
+    which the run of `:`, FILLER and SLASH from the stop spans; `after`
+    makes the tail `size` characters after the barrier, as the review's
+    stopcost3 built it."""
+    reach = limit + max(limit, helper.CUT_CREDENTIAL_WINDOW)
+    head = "x:@" + chr(0xE9) + "\t"
+    text = head + "ab://c\t" * ((reach - len(head)) // 7)
+    text += "z" * (reach - len(text))
+    return text + barrier + tail * (size if after else size - len(text) - len(barrier))
+
+
+def best_under(f, text, ceiling):
+    """MarkBudgetTests.best of three, ended after one run that costs ten
+    times `ceiling`: red already, and a shape the code squares would
+    otherwise take minutes to say so."""
+    best = float("inf")
+    for _ in range(3):
+        started = time.perf_counter()
+        f(text)
+        best = min(best, time.perf_counter() - started)
+        if best >= 10 * ceiling:
+            break
+    return best
+
+
+class EpgPathBudgetTests(unittest.TestCase):
+    """The review of cbd6679 (its cost finding 3): the guide's cleaners ran
+    fold_space over a whole <title> or <desc> before their cut, and
+    element_text caps nothing, so `<U+200B><U+2215>` repeated cost 1,551 ms
+    at 1M characters through clean_detail and 6,263 ms at 4M, where 0.18.0
+    took 31 and 123. They cut the raw text first now (EPG_RAW_FACTOR, by
+    cut_free_text, which drops no more than the item it would cut), so every
+    budget shape stays at most 150 ms at 1M characters and 600 ms at 4M,
+    best of three, through clean_detail at the description's cap and
+    clean_title. Red on cbd6679 on the look-alike shapes."""
+
+    def test_every_budget_shape_through_the_guides_cleaners(self):
+        slow = {}
+        for name, shape in MarkBudgetTests.SHAPES.items():
+            for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+                text = shape(size)
+                for fname, f in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC)),
+                                 ("clean_title", helper.clean_title)):
+                    cost = MarkBudgetTests.best(None, f, text, 3)
+                    if cost >= ceiling:
+                        slow[(name, size, fname)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_a_window_of_urls_before_a_tail_with_no_slash(self):
+        # The review of 2942e41 (its cost finding 0): the cut's credential
+        # reading, stopped at the first walk barrier past its window, asked
+        # next_url's stop bound once a URL, and the bound searched for two
+        # SLASHes from the stop to the text's end before the mark run bounded
+        # it, so a window full of URLs before a long tail with no SLASH
+        # (window_of_urls) cost one pass over the tail a URL: 53.9 s at 1M
+        # characters through clean_detail (4d13d71: 0.1 ms) and 24.2 s
+        # through clean_title. The bound is asked once a reading now, and
+        # searched for only inside the mark run. Red on 2942e41.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for fname, f, limit in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC),
+                                     helper.EPG_MAX_DESC * helper.EPG_RAW_FACTOR),
+                                    ("clean_title", helper.clean_title, helper.EPG_MAX_TITLE * helper.EPG_RAW_FACTOR)):
+                cost = best_under(f, window_of_urls(limit, size), ceiling)
+                if cost >= ceiling:
+                    slow[(fname, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_a_window_of_urls_before_a_tail_the_mark_run_spans(self):
+        # The review of e038d58 (its cost finding 2): with the stop's mark run
+        # holding no second SLASH, the stop bound was the run's end, and the
+        # reading's last next_url call searched the whole run for candidates
+        # it could only refuse: a window of URLs before a `:` and a tail of
+        # `:` cost 172.6 ms at 1M characters through clean_detail and 558.0
+        # ms at 4M, a tail of U+0001 88.2 and 265.9 ms (4d13d71: 0.1 ms). The
+        # bound is the run's only SLASH, or the stop, when it holds fewer
+        # than two (_stop_end). Red on e038d58 at 1M characters through
+        # clean_detail, by little (152.3 and 155.8 ms in two runs of three
+        # on this machine, under 150 in the third), so StopEndTests pins
+        # the bound itself; the tail is `size` characters after the window,
+        # as the review's stopcost3 built it.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for tail in (":", "\x01"):
+                for fname, f, limit in (("clean_detail", lambda t: helper.clean_detail(t, helper.EPG_MAX_DESC),
+                                         helper.EPG_MAX_DESC * helper.EPG_RAW_FACTOR),
+                                        ("clean_title", helper.clean_title, helper.EPG_MAX_TITLE * helper.EPG_RAW_FACTOR)):
+                    cost = best_under(f, window_of_urls(limit, size, ":", tail, True), ceiling)
+                    if cost >= ceiling:
+                        slow[(ascii(tail), fname, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+
+class StopEndTests(unittest.TestCase):
+    """_stop_end bounds next_url's candidate search and changes no answer:
+    next_url with `stop` answers as it does with the search bounded only by
+    the text's end (stop_end = len(text)), at every stop. The review of
+    e038d58 named `stop` + 1 as the bound whenever the stop's mark run holds
+    no second SLASH; a stop between a candidate's slashes (`ab:/<U+200B>/x`
+    at 4) has the candidate's second SLASH as the run's first, and that
+    bound lost it, which the reviewer's random identity sweep did not reach.
+    Every stop of every text in a family of marks built around the stop,
+    and of a seeded random family."""
+
+    @staticmethod
+    def texts():
+        z, e, d = chr(0x200B), chr(0xE9), chr(0x2215)
+        out = []
+        for lead in ("ab", "x a", "1", ""):
+            for p in (":", ":" + z, z + ":", ":" + e, "::"):
+                for one in ("/", d):
+                    for between in ("", z, e, "\x01", z + "\x01", e + e):
+                        for two in ("/", d):
+                            for tail in ("x", "", ":", "\x01x", "/x", ":" + z + "//y"):
+                                out.append(lead + p + one + between + two + tail)
+        rng = random.Random(95)
+        pieces = [":", "/", "//", "a", "1", " ", "!", "@", z, e, d, "\x01", "\t", "ab:", ":/", z + "/", "/" + z]
+        out += ["".join(rng.choice(pieces) for _ in range(rng.randint(1, 16))) for _ in range(3000)]
+        return out
+
+    def test_the_bound_ends_at_the_runs_slashes(self):
+        # The review of e038d58 (its cost finding 2): with fewer than two
+        # SLASHes in the stop's run the bound was the run's end, so a run of
+        # `:` or of controls after the window cost a candidate search over
+        # all of it. It is the run's only SLASH, or the stop, now. Red on
+        # e038d58, deterministically: the budget test beside this one is red
+        # there by about a tenth of the budget, and so on a quiet machine
+        # only most of the time.
+        z = chr(0x200B)
+        head = "x:@" + chr(0xE9) + "\tab://c\t!"
+        stop = len(head)
+        cases = {":" + ":" * 5000: stop + 1,
+                 ":" + "\x01" * 5000: stop + 1,
+                 ":" + "\x01" * 50 + "/" + "\x01" * 5000: stop + 52,
+                 ":" + "/" + z + "/" + "\x01" * 50: stop + 4,
+                 ":" + z + "/" + "\x01" * 50 + "/" + ":" * 50: stop + 54}
+        got = {ascii(tail[:4]) + str(len(tail)): helper._stop_end(head + tail, stop) - stop for tail in cases}
+        want = {ascii(tail[:4]) + str(len(tail)): end - stop for tail, end in cases.items()}
+        self.assertEqual(got, want)
+
+    def test_the_bound_changes_no_answer_at_any_stop(self):
+        bad = []
+        for text in self.texts():
+            for stop in range(len(text) + 1):
+                for search in (0, stop // 2):
+                    got = helper.next_url(text, search, search, False, stop)
+                    want = helper.next_url(text, search, search, False, stop, len(text))
+                    if got != want:
+                        bad.append((ascii(text), search, stop, got, want))
+        self.assertEqual(bad[:4], [])
+
+
+
+class M3uPathBudgetTests(unittest.TestCase):
+    """The review of 4d13d71 (its cost finding 1, the M3U side): parse_m3u
+    with one channel whose title, or whose quoted group-title, is `x:@` and
+    then `a!+<U+200B><U+2215><U+2215>` repeated took 2.4 s and 4.7 s at 4M
+    characters (0.18.0: 13 and 20 ms): the title's cut read its
+    credential's URLs to the text's end, and parse_attrs' quoted value read
+    its run with one Python step a candidate. Each stays at most 150 ms at
+    1M characters and 600 ms at 4M, best of three, as the guide's path
+    does."""
+
+    def test_one_channel_whose_title_or_quoted_group_is_the_shape(self):
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            shape = "x:@" + ("a!+" + chr(0x200B) + chr(0x2215) * 2) * (size // 6)
+            for form, line in (("title", "#EXTINF:-1," + shape), ("quoted group-title", '#EXTINF:-1 group-title="%s",N' % shape)):
+                doc = "#EXTM3U\n" + line + "\nhttp://stream.test/live/1.ts\n"
+                cost = MarkBudgetTests.best(None, helper.parse_m3u, doc, 3)
+                if cost >= ceiling:
+                    slow[(form, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
+
+    def test_a_window_of_urls_in_the_title_or_quoted_group_title(self):
+        # The review of 2942e41 (its cost finding 0), the M3U side: the same
+        # window (window_of_urls) cost 4.4 s at 1M characters through the
+        # title's cut and the quoted group-title's (4d13d71: 0.7 and 0.3 ms).
+        # Red on 2942e41.
+        slow = {}
+        for size, ceiling in ((1000000, 0.150), (4000000, 0.600)):
+            for form, line in (("title", "#EXTINF:-1," + window_of_urls(helper.M3U_MAX_NAME, size)),
+                               ("quoted group-title", '#EXTINF:-1 group-title="%s",N'
+                                % window_of_urls(helper.M3U_MAX_GROUP_TEXT, size))):
+                doc = "#EXTM3U\n" + line + "\nhttp://stream.test/live/1.ts\n"
+                cost = best_under(helper.parse_m3u, doc, ceiling)
+                if cost >= ceiling:
+                    slow[(form, size)] = round(cost * 1000, 1)
+        self.assertEqual(slow, {})
 
 if __name__ == "__main__":
     unittest.main()

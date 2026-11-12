@@ -19,6 +19,12 @@ case's row held to the helper's sinks; a sweep of URL shapes, cut characters,
 attributes, forms and positions through parse_m3u, held to the helper's sinks
 and, in node, to the shell's; the rule against a reference written from its
 statement over random lines; and linear time.
+
+D-SINK-95 and D-SINK-96 (2026-11-11): a URL's run is also one the redactors'
+reading finds behind a mark any odd character may break
+(tests/url_reading_rule.py), and the sweep's scheme form with a delimiter
+after its `//` is no longer D-SINK-34's cost: the token after the delimiter
+is withheld at every sink.
 """
 import json
 import os
@@ -28,6 +34,7 @@ import subprocess
 import time
 import unittest
 
+import url_reading_rule as rule
 from helper_loader import load_helper
 
 helper = load_helper()
@@ -133,7 +140,7 @@ class FixtureTest(unittest.TestCase):
                  "stored": [c for c in CASES if "stored" in c],
                  "header": [c for c in CASES if c["line"].startswith("#EXTM3U")]}
         self.assertEqual((len(CASES), {k: len(v) for k, v in kinds.items()}),
-                         (104, {"leak": 59, "cost": 9, "accepted": 9, "stored": 38, "header": 9}))
+                         (110, {"leak": 67, "cost": 10, "accepted": 4, "stored": 44, "header": 9}))
         self.assertTrue(all(not leaked(c["line"]) for c in kinds["cost"]))
         self.assertEqual(SECRET, "qz")
 
@@ -225,7 +232,9 @@ def sweep():
                                 head = "#EXTINF:-1 " + (pair + " " + others if first else others + " " + pair)
                                 head, title = head + sep + "Plain Title", None
                             meta = {"attr": attr, "form": form, "cut": cut, "quoted": quoted, "first": first,
-                                    "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS}
+                                    "comma": comma, "url": value, "accepted": cut in ACCEPTED_CUTS,
+                                    "token": cut in ACCEPTED_CUTS and (form == "scheme"
+                                                                       or (form in ("user", "pass") and cut != " "))}
                             out.append((meta, head, title))
     return out
 
@@ -297,10 +306,39 @@ class SweepTest(unittest.TestCase):
     def test_the_accepted_class_is_the_redactors_own(self):
         # Excluded above, counted, and each one's URL as written already
         # prints a fragment through the redactor: D-SINK-34's cost, which no
-        # grammar can close.
+        # grammar can close -- except the scheme form, whose credential after
+        # the delimiter is a D-SINK-96 token every redactor withholds, so its
+        # URL as written prints nothing of it (it printed all of it until
+        # 2026-11-11; the next test holds its row at every sink); and, since
+        # the review of cbd6679 read a credential across the URL in its token,
+        # the user form with a delimiter but the space (`http://qq<TAB>qqqq:
+        # zzzzzz@cdn.test/x`: the URL ends at the TAB, and the `:` after it
+        # makes the token a credential, withheld whole); and, since the review
+        # of 4d13d71, the pass form with a delimiter but the space
+        # (`http://qqqqqq:zz<TAB>zzzz@cdn.test/x`: the URL ends at the TAB
+        # before its `@`, so it holds the colon and not the `@`, and the
+        # token is a credential withheld whole).
+        tokens = 0
         for meta, _, _ in self.rows:
             if meta["accepted"]:
-                self.assertTrue(leaked(helper.redact_urls(meta["url"])), meta)
+                tokens += meta["token"]
+                self.assertEqual(bool(leaked(helper.redact_urls(meta["url"]))), not meta["token"], meta)
+        self.assertEqual(tokens, 728)
+
+    def test_d_sink_96_the_scheme_form_shows_no_credential_at_any_sink(self):
+        # D-SINK-34's class, closed for the shape where the delimiter stands
+        # right after `//`: whatever the grammar stores, no helper sink and
+        # no shell sink shows a letter of the credential.
+        kept = [(m, d, c) for m, d, c in self.rows if m["token"]]
+        bad = []
+        for meta, doc, channel in kept:
+            for field, value in shown_fields(doc, channel):
+                bad += [(meta, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((meta, "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for _, d, c in kept])
+        bad += [(m, sink, out) for (m, _, _), row in zip(kept, outs) for sink, out in row if leaked(out)]
+        self.assertEqual((len(kept), bad[:4]), (728, []))
 
     def test_no_field_shows_a_credential_at_a_shell_sink(self):
         kept = [(m, d, c) for m, d, c in self.rows if not m["accepted"]]
@@ -336,6 +374,58 @@ def mark_end(text, i):
     return j
 
 
+def key_ahead(text, i):
+    """Whether whitespace and then an attribute's key and its `=` start at
+    `i`, one character at a time."""
+    while i < len(text) and text[i].isspace():
+        i += 1
+    k = i
+    while i < len(text) and text[i] in KEY_CHARS:
+        i += 1
+    return i > k and i < len(text) and text[i] == "="
+
+
+def host_follows(text, i, end):
+    """Whether text[i:end] opens with a HOST, as the review of 4d13d71's lead
+    call states one and the review of 2942e41's widens it: two or more
+    labels whose last is letter-led and at least two characters, a dotted
+    quad, or a bracketed IPv6 literal, each with an optional `:` and digits;
+    or one letter-led label of two or more characters with a `:` and digits;
+    a label of ASCII letters, digits, `-` and `_` or any non-ASCII
+    character but whitespace, and one trailing dot allowed; then `end` (the
+    token's end), a `/`, `?`, `#` or `,`, or whitespace."""
+    name = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._"
+    j = i
+    single = False
+    if j < end and text[j] == "[":
+        k = j + 1
+        while k < end and text[k] in "0123456789abcdefABCDEF:.":
+            k += 1
+        if k == j + 1 or k >= end or text[k] != "]":
+            return False
+        j = k + 1
+    else:
+        k = j
+        while k < end and (text[k] in name or (ord(text[k]) > 0x7f and not text[k].isspace())):
+            k += 1
+        run = text[j:k]
+        labels = (run[:-1] if run.endswith(".") else run).split(".")
+        quad = len(labels) == 4 and all(0 < len(x) <= 3 and all(c in "0123456789" for c in x) for x in labels)
+        named = len(labels) >= 2 and all(labels) and len(labels[-1]) >= 2 and labels[-1][0].isalpha()
+        single = len(labels) == 1 and len(labels[0]) >= 2 and labels[0][0].isalpha()
+        if not (quad or named or single):
+            return False
+        j = k
+    if j < end and text[j] == ":" and j + 1 < end and text[j + 1] in "0123456789":
+        k = j + 1
+        while k < end and text[k] in "0123456789":
+            k += 1
+        j = k
+    elif single:
+        return False
+    return j == end or text[j] in "/?#," or text[j].isspace()
+
+
 def reference(text, trace):
     """parse_attrs as the rule states it, one character at a time, with no
     pattern: today's grammar, and inside a URL's run the run's own end."""
@@ -356,7 +446,8 @@ def reference(text, trace):
             if q == -1:
                 break
             s = max(vs, text.rfind(" ", vs, q) + 1)
-            if "://" not in deleted(text[s:q]):
+            # D-SINK-95: or the redactors' reading finds a URL there.
+            if "://" not in deleted(text[s:q]) and not rule.urls(text[s:q]):
                 value, end = text[vs:q], q + 1
             else:
                 e = n
@@ -382,6 +473,15 @@ def reference(text, trace):
             if ve == vs:
                 break
             ends = [x for x in (mark_end(text, j) for j in range(vs, ve)) if x != -1]
+            # D-SINK-95: or the reading finds a URL over the value and, when
+            # FILLER ended it, the run of `:`, FILLER and SLASH after it.
+            reach = ve
+            if ve < n and rule.filler(text[ve]):
+                while reach < n and (text[reach] == ":" or rule.filler(text[reach]) or rule.slash(text[reach])):
+                    reach += 1
+            url = rule.first_url(text[vs:reach])
+            if url is not None:
+                ends.append(vs + url[2])
             end = ve
             if ends:
                 trace.append("bare-inside")
@@ -390,6 +490,31 @@ def reference(text, trace):
                     if text[j] in DELIMITERS:
                         end = j
                         break
+            # D-SINK-96 (the review of cbd6679): a value holding a `:` takes
+            # the rest of its token's credential when the credential starts
+            # before the value's end and its `@` stands at or after it.
+            if ":" in text[vs:end]:
+                ts = text.rfind(" ", 0, vs) + 1
+                te = text.find(" ", end)
+                te = n if te < 0 else te
+                urls = rule.urls(text)
+                found = rule.credential(text, ts, te, urls)
+                # Across a `,`, only when a host follows an `@` it would take
+                # (the review of 4d13d71; any such `@`, the review of
+                # 2942e41); and across whitespace the same, when the
+                # credential's colon is a URL's own (the review of 2942e41)
+                # and a key and its `=` follow the whitespace (the review of
+                # e038d58).
+                if found is not None and found[1] >= end and found[2] < end:
+                    we = found[2] + rule.trailing_keep(text[found[2]:te])
+                    own = any(u[0] <= found[0] < u[3] for u in urls)
+                    gated = text[end] == "," or (own and text[end].isspace() and key_ahead(text, end))
+                    if gated:
+                        trace.append("bare-gated")
+                    if we > end and (not gated or any(text[a] == "@" and host_follows(text, a + 1, te)
+                                                      for a in range(end, we))):
+                        trace.append("bare-credential")
+                        end = we
             value = text[vs:end]
         value = value.strip()
         if value or key not in attrs:
@@ -407,13 +532,18 @@ class RuleTest(unittest.TestCase):
     # Python ends a bare value at and no redactor ends a URL at.
     ALPHABET = ["x", "Z", "=", '"', ",", " ", "\t", ":", "/", "://", "http://", ":\x01/\x00/", "@", "-",
                 chr(0xa0), chr(0x3000), chr(0x85), chr(0x1c), "\x0b", "\r", "\x00", '",', '" ', "a=",
-                "::", ":\x01", "\x9f/", "//", ":" + chr(0x85) + "//"]
+                "::", ":\x01", "\x9f/", "//", ":" + chr(0x85) + "//",
+                # D-SINK-95: a STAND_IN, a look-alike slash and the marks they make.
+                chr(0x200b), chr(0x2215), "http:" + chr(0x200b) + "//", "a" + chr(0xa0) + "://", ":" + chr(0x2215) * 2]
     # How an attribute starts: nothing, a space or other whitespace, then a
     # key (or something no key is) and `=`, quoted or bare.
     OPENERS = ["", " ", "\t", chr(0xa0), "  "]
     KEYS = ["a", "tvg-id", "K.b_c", "t" + chr(0xe9), "", "a "]
     # And how its value starts, a URL most of the time.
-    STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//"]
+    STARTS = ["", "x", "http://", "http://", "a://", "x a://", ":\x01/\x00/", "http:" + chr(0x1c) + "//",
+              "http:" + chr(0x200b) + "//", "http" + chr(0x7f) + "://", "http:" + chr(0x2215) * 2,
+              # The review of cbd6679: a credential the value's end cuts.
+              "qq:zz", "q:z\tz@", "http://q\tq:z"]
 
     def lines(self, seed, count):
         rng = random.Random(seed)
@@ -434,9 +564,9 @@ class RuleTest(unittest.TestCase):
         for text in self.lines(80, 40000):
             self.assertEqual(helper.parse_attrs(text), reference(text, trace), ascii(text))
         # Not vacuous: every branch of the rule was taken, often.
-        counts = {b: trace.count(b) for b in ("quoted-inside", "quoted-unterminated", "bare-inside")}
+        counts = {b: trace.count(b) for b in ("quoted-inside", "quoted-unterminated", "bare-inside", "bare-credential")}
         self.assertTrue(counts["quoted-inside"] > 4000 and counts["bare-inside"] > 3000
-                        and counts["quoted-unterminated"] > 1000, counts)
+                        and counts["quoted-unterminated"] > 1000 and counts["bare-credential"] > 300, counts)
 
     def test_the_reference_answers_the_fixture(self):
         # So the reference is the rule the fixture states, and not only the
@@ -455,6 +585,248 @@ class RuleTest(unittest.TestCase):
             self.assertEqual(got, [c["attrs"], c["title"]], c["why"])
 
 
+class CredentialValueTest(unittest.TestCase):
+    """The review of cbd6679 (its still-shows finding 4): a bare value ends at
+    its first `,`, whitespace or `"`, so one cut inside a scheme-less
+    credential stored the username and the password's head as the value
+    and the rest as the title -- `group-title=qqqqqq:zz,zz@cdn.test,Name`
+    listed the group `qqqqqq:zz` and named the row `zz@cdn.test,Name`,
+    neither of which a redactor reads as a credential, so the group axis,
+    the row, the bar and the notifications showed it. The value takes the
+    credential's whole span now, as a URL takes its run (D-SINK-80): the
+    title is swallowed and the name falls back. Red on cbd6679: every line
+    below showed a letter of the credential at some sink."""
+
+    LINES = ["#EXTINF:-1 group-title=qqqqqq:zz,zz@cdn.test,Name",
+             "#EXTINF:-1 group-title=qqqqqq:zz\tzz@cdn.test,Name",
+             '#EXTINF:-1 group-title=qqqqqq:zz"zz@cdn.test,Name',
+             "#EXTINF:-1 tvg-name=qqqqqq:zz,zz@cdn.test,Name",
+             "#EXTINF:-1 tvg-chno=7 group-title=http://qq\tqqqq:zzzzzz@cdn.test/x,Name"]
+
+    def test_no_sink_shows_a_letter_of_the_credential(self):
+        bad = []
+        rows = [parse_line(line) for line in self.LINES]
+        for line, (doc, channel) in zip(self.LINES, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(line, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(line, sink, out) for line, row in zip(self.LINES, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+
+    def test_the_value_takes_the_credential_whole(self):
+        _, channel = parse_line(self.LINES[0])
+        self.assertEqual((channel["group"], channel["name"]), ("qqqqqq:zz,zz@cdn.test,Name", "Channel 1"))
+        _, channel = parse_line(self.LINES[3])
+        self.assertEqual(channel["name"], "qqqqqq:zz,zz@cdn.test,Name")
+        # An ordinary bare value with a `:` and a title after it is read as
+        # it always was, and so is one whose credential the comma does not
+        # cut.
+        _, channel = parse_line("#EXTINF:-1 group-title=UK:Sports,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("UK:Sports", "Name"))
+        _, channel = parse_line("#EXTINF:-1 group-title=News,Sport:Live@HD")
+        self.assertEqual((channel["group"], channel["name"]), ("News", "Sport:Live@HD"))
+        # And a value whose `@` it holds already keeps its title: the
+        # credential the value holds is withheld at its sinks.
+        _, channel = parse_line("#EXTINF:-1 tvg-chno=7 group-title=a:b@c Name")
+        self.assertEqual((channel["group"], channel["name"]), ("a:b@c", "Name"))
+
+
+class HostShapedGrowthTest(unittest.TestCase):
+    """The review of 4d13d71 (its changes-too-much finding 0): a bare value
+    holding a `:` grew across the `,` that ended it to the end of its
+    token's credential whenever an `@` followed, so an ordinary title whose
+    first word held one was swallowed and the tvg-id before it dropped
+    (`tvg-id=uk:bbc1,KC@BUF 20:15` stored no tvg-id and the name `20:15`),
+    in 25 of 351 realistic names a form. Across a `,` the value grows only
+    when a host follows the `@` it would take (host_shaped). Each benign
+    line parses as a8e8174 parsed it, name and tvg-id; each credential is
+    still taken whole. Red on 4d13d71 for the benign lines."""
+
+    BENIGN = [("#EXTINF:-1 group-title=UK:News,Sky@News HD", "Sky@News HD", "UK:News", None),
+              ("#EXTINF:-1 group-title=UK:Sports,NYY@BOS", "NYY@BOS", "UK:Sports", None),
+              ("#EXTINF:-1 group-title=PPV:Events,UFC300@Vegas", "UFC300@Vegas", "PPV:Events", None),
+              ("#EXTINF:-1 tvg-id=uk:bbc1,KC@BUF 20:15", "KC@BUF 20:15", helper.UNGROUPED, "uk:bbc1"),
+              ("#EXTINF:-1 tvg-id=uk:bbc1,KC@BUF(20:15)", "KC@BUF(20:15)", helper.UNGROUPED, "uk:bbc1"),
+              ("#EXTINF:-1 tvg-name=Live@8:30,Live@8:30", "Live@8:30", helper.UNGROUPED, None),
+              ("#EXTINF:-1 catchup=default catchup-days=7 tvg-rec=3 timeshift=1:00,Q&A@10", "Q&A@10", helper.UNGROUPED, None)]
+
+    def test_an_ordinary_title_after_a_value_holding_a_colon_keeps_its_name_and_tvg_id(self):
+        got = [(parse_line(line)[1]["name"], parse_line(line)[1]["group"], parse_line(line)[1].get("tvgId"))
+               for line, _, _, _ in self.BENIGN]
+        self.assertEqual(got, [(name, group, tvg) for _, name, group, tvg in self.BENIGN])
+
+    def test_a_credential_whose_at_a_host_follows_is_still_taken_whole(self):
+        cases = [("#EXTINF:-1 group-title=qqqqqq:zz,zz@cdn.test,Name", "Channel 1", "qqqqqq:zz,zz@cdn.test,Name"),
+                 ("#EXTINF:-1 group-title=qqqqqq:zz,zz@10.0.0.1:8080/x,Name", "Channel 1", "qqqqqq:zz,zz@10.0.0.1:8080/x,Name"),
+                 ("#EXTINF:-1 group-title=qqqqqq:zz,zz@[::1]:8080,Name", "Channel 1", "qqqqqq:zz,zz@[::1]:8080,Name"),
+                 ("#EXTINF:-1 group-title=qqqqqq:zz\tzz@News,Name", "Channel 1", "qqqqqq:zz\tzz@News,Name")]
+        got = [(parse_line(line)[1]["name"], parse_line(line)[1]["group"]) for line, _, _ in cases]
+        self.assertEqual(got, [(name, group) for _, name, group in cases])
+        self.assertEqual([helper.host_shaped(t, 0, len(t)) for t in ("cdn.test", "News", "a.b", "1.2.3.4:80/x", "[::1]", "x.123",
+                                                                    "KC@BUF", "8:30", "cdn.test(x")],
+                         [True, False, False, True, True, False, False, False, False])
+
+    def test_the_host_shapes_the_review_of_2942e41_named(self):
+        # A single letter-led label with a port, a trailing dot, an underscore,
+        # a non-ASCII label and a host whitespace ends are hosts; a bare
+        # single label, a one-letter one with a port and a digit-led one with
+        # a port are not (`Sky@News`, `Live@8:30` and `Breakfast@9:00` must
+        # not grow).
+        shapes = {"localhost:8080": True, "iptv:80": True, "cdn.test.": True, "cdn_test.com": True,
+                  chr(0x43F) + chr(0x440) + chr(0x438) + chr(0x43C) + chr(0x435) + chr(0x440) + "." + chr(0x440) + chr(0x444): True,
+                  "cdn.test\tx": True, "cdn.test" + chr(0xA0) + "x": True, "localhost.:80": True,
+                  "localhost": False, "iptv": False, "localhost.": False, "x:80": False, "8:30": False, "9:00": False,
+                  "localhost:": False, "localhost:80x": False, "cdn.1test": False, "1.2.3": False}
+        self.assertEqual({t: helper.host_shaped(t, 0, len(t)) for t in shapes}, shapes)
+
+    def test_a_credential_whose_host_the_review_of_2942e41_named_is_taken_whole(self):
+        # Red on 2942e41: each stored the username and the password's head as
+        # the group or the tvg-id, and every sink printed them.
+        hosts = ["localhost:8080", "iptv:80", "cdn.test.", "cdn_test.com", "cdn.test\tx",
+                 chr(0x43F) + chr(0x440) + chr(0x438) + chr(0x43C) + chr(0x435) + chr(0x440) + "." + chr(0x440) + chr(0x444)]
+        lines = ["#EXTINF:-1 %s=qqqqqq:zz,zz@%s,Name" % (key, host) for key in ("group-title", "tvg-id") for host in hosts]
+        # And a password holding an `@` is judged on every `@` the growth
+        # would take, not on its own tail.
+        lines.append("#EXTINF:-1 group-title=qqqqqq:zz,z@z@cdn.test,Name")
+        rows = [parse_line(line) for line in lines]
+        bad = []
+        for line, (doc, channel) in zip(lines, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(ascii(line), field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]) or "tvgId" in channel:
+                bad.append((ascii(line), "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(ascii(line), sink, out) for line, row in zip(lines, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+
+    def test_what_a_host_that_is_no_host_shape_leaves_stated(self):
+        # The residual: a bare single label (or a digit-led last label, a
+        # three-part number, a port with no digits or with text after them)
+        # is no host, so the value is cut at the `,`: the username and the
+        # password before it print in the group or the tvg-id, and the rest
+        # of the password and the host in the name.
+        _, channel = parse_line("#EXTINF:-1 group-title=qqqqqq:zz,zz@localhost,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("qqqqqq:zz", "zz@localhost,Name"))
+        _, channel = parse_line("#EXTINF:-1 tvg-id=qqqqqq:zz,zz@iptv,Name")
+        self.assertEqual((channel.get("tvgId"), channel["name"]), ("qqqqqq:zz", "zz@iptv,Name"))
+
+
+class TabGrowthTest(unittest.TestCase):
+    """The review of 2942e41 (its changes-too-much finding 2): a URL's own
+    colon is a credential's when the URL's run ends before the `@` (the
+    review of 4d13d71's eligibility), the run ends at a TAB, and a bare value
+    grew across a TAB unconditionally, so a TAB-separated URL attribute took
+    every attribute after it and the title's head whenever a word later in
+    its U+0020 token held an `@`. Growth across whitespace from a URL's own
+    colon is gated now as growth across a `,` is: only when a host follows
+    an `@` it would take. Each line below reads as a8e8174 read it; red on
+    2942e41. The stated cost is pinned in attr-grammar.json: a later word
+    whose `@` a host follows still takes the URL attribute with it.
+
+    The review of e038d58 (its still-shows finding 0): gated on the host
+    alone, a password a TAB, VT or CR cuts was cut there whenever its host
+    was one host_shaped refuses, and the URL's host (the username) printed
+    in the group, tvg-id or tvg-name, the rest of the password and the host
+    in the name, at every sink (54 fields of the review's 35 lines, 8 of its
+    7 more). What separates the two is not the host but what follows the
+    whitespace: an attribute's key and its `=` in every benign line, none in
+    a password. So the gate applies only when a key follows the whitespace
+    (the lead's call under the owner's standing authority of 2026-11-09).
+    Red on e038d58."""
+
+    LINES = [("#EXTINF:-1 tvg-logo=http://logo.test/a.png\ttvg-name=Sky@News,Sky News",
+              ("Sky News", helper.UNGROUPED, "http://logo.test/a.png", "Sky@News", None)),
+             ("#EXTINF:-1 tvg-id=bbc1.uk\ttvg-logo=http://logo.test:8080/a.png\tgroup-title=News@UK,BBC One",
+              ("BBC One", "News@UK", "http://logo.test:8080/a.png", None, "bbc1.uk")),
+             ("#EXTINF:-1 tvg-logo=http://logo.test/a.png\tgroup-title=Sports,Live@8",
+              ("Live@8", "Sports", "http://logo.test/a.png", None, None)),
+             ("#EXTINF:-1 tvg-logo=http://logo.test:8080/a.png\tgroup-title=Sports,Breakfast@9:00",
+              ("Breakfast@9:00", "Sports", "http://logo.test:8080/a.png", None, None))]
+
+    def test_a_tab_separated_url_attribute_keeps_what_follows_it(self):
+        got = [tuple(parse_line(line)[1].get(k) for k in ("name", "group", "logo", "tvgName", "tvgId")) for line, _ in self.LINES]
+        self.assertEqual(got, [want for _, want in self.LINES])
+
+    def test_a_password_a_tab_cuts_inside_a_url_is_still_taken_whole(self):
+        # The review of 4d13d71's pins: the URL's colon, the TAB (or VT, FF,
+        # CR) and the `@` a host follows.
+        for sep in "\t\x0b\x0c\r":
+            _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz%szz@cdn.test/x,Name" % sep)
+            self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz%szz@cdn.test/x,Name" % sep, "Channel 1"))
+        _, channel = parse_line("#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@cdn.test/x,")
+        self.assertEqual((channel["name"], channel.get("tvgName")), ("http://qqqqqq:zz\tzz@cdn.test/x", None))
+
+    def test_a_password_whitespace_cuts_before_any_host_is_taken_whole(self):
+        # The review of e038d58's lines: every host host_shaped refuses and
+        # one it accepts, a TAB, VT, FF or CR inside the password, in a
+        # group, a tvg-id, a tvg-name and a logo before another attribute,
+        # and the shapes of its second set. Red on e038d58, where 30 of the
+        # first 35 printed the username and the password's tail.
+        hosts = ["localhost", "iptv", "cdn.1test", "1.2.3", "cdn.test:", "cdn.test:80x", "cdn.test", "iptv:8080",
+                 "cdn.test."]
+        lines = []
+        for host in hosts:
+            for sep in "\t\x0b\x0c\r":
+                lines.append("#EXTINF:-1 group-title=http://qqqqqq:zz%szz@%s/x,Name" % (sep, host))
+            lines += ["#EXTINF:-1 tvg-logo=http://qqqqqq:zz\tzz@%s/a.png group-title=News,Name" % host,
+                      "#EXTINF:-1 tvg-id=http://qqqqqq:zz\tzz@%s/x,Name" % host,
+                      "#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@%s/x," % host]
+        lines += ["#EXTINF:-1 group-title=qq_qqqq:" + chr(0x200B) + "//zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http:" + chr(0x200B) + "//qqqqqq:zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=qqqqqq:zz\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http://qqqqqq:zz\t\tzz@localhost/x,Name",
+                  "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost,Name"]
+        rows = [parse_line(line) for line in lines]
+        bad = []
+        for line, (doc, channel) in zip(lines, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(ascii(line), field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+            if leaked(channel["id"]):
+                bad.append((ascii(line), "id", channel["id"]))
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(ascii(line), sink, out) for line, row in zip(lines, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz\tzz@localhost/x,Name", "Channel 1"))
+
+    def test_what_a_key_after_the_whitespace_leaves_stated(self):
+        # The residual: text after the whitespace that reads as a key and
+        # its `=` gates the growth on the host, so a password holding a `=`
+        # before its `@` and a host no host shape names is cut at the
+        # whitespace, and the URL's host (the username) prints in the group;
+        # a host behind it is still taken whole.
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tz=z@localhost/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz", "Name"))
+        _, channel = parse_line("#EXTINF:-1 group-title=http://qqqqqq:zz\tz=z@cdn.test/x,Name")
+        self.assertEqual((channel["group"], channel["name"]), ("http://qqqqqq:zz\tz=z@cdn.test/x,Name", "Channel 1"))
+
+
+class TabInPasswordValueTest(unittest.TestCase):
+    """The review of 4d13d71 (its still-shows finding 1): a TAB in the
+    password of a bare URL value ended the URL's run before its `@`, so
+    `group-title=http://qqqqqq:zz<TAB>zz@cdn.test/x,Name` stored the group
+    `http://qqqqqq:zz`, which every sink printed as `qqqqqq`, and named the
+    row `zz@cdn.test/x,Name`; `tvg-name=` stored `http://qqqqqq:zz` the
+    same way. The URL holds the colon and not the `@` now, so the token is
+    a credential and the value takes it whole. Red on 4d13d71."""
+
+    LINES = ["#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@cdn.test/x,Name",
+             "#EXTINF:-1 tvg-name=http://qqqqqq:zz\tzz@cdn.test/x,"]
+
+    def test_no_sink_shows_a_letter_of_the_credential(self):
+        rows = [parse_line(line) for line in self.LINES]
+        self.assertEqual([(c["name"], c["group"], c.get("tvgName")) for _, c in rows],
+                         [("Channel 1", "http://qqqqqq:zz\tzz@cdn.test/x,Name", None),
+                          ("http://qqqqqq:zz\tzz@cdn.test/x", helper.UNGROUPED, None)])
+        bad = []
+        for line, (doc, channel) in zip(self.LINES, rows):
+            for field, value in shown_fields(doc, channel):
+                bad += [(line, field, sink, out) for sink, out in helper_sinks(field, value) if leaked(out)]
+        outs = shell_sinks([shell_row(d, c) for d, c in rows])
+        bad += [(line, sink, out) for line, row in zip(self.LINES, outs) for sink, out in row if leaked(out)]
+        self.assertEqual(bad, [])
+
+
 class TvgIdTest(unittest.TestCase):
     def row(self, line):
         return parse_line(line)[1]
@@ -470,6 +842,16 @@ class TvgIdTest(unittest.TestCase):
             self.assertNotIn("tvgId", channel, ascii(line))
             self.assertFalse(channel["id"].startswith("t:"), ascii(line))
             self.assertEqual(leaked(channel["id"]), [], ascii(line))
+
+    def test_d_sink_95_and_96_a_tvg_id_holding_a_broken_mark_or_a_token_is_dropped(self):
+        # A mark the redactors' reading finds behind a scheme (url_mark_any),
+        # or a `:` with an `@` after it: kept, the raw `t:` id would carry the
+        # credential to every sink that shows an id, none of which redacts one.
+        for tvg in ("qqqqqq:zzzzzz@cdn.test", "http:" + chr(0x200B) + "//qqqqqq:zzzzzz@cdn.test/x",
+                    "http" + chr(0xFF1A) + "//cdn.test/live/qqqqqq/zzzzzz/1.ts", "x:" + chr(0x2215) * 2 + "qqqqqq/zzzzzz"):
+            channel = self.row('#EXTINF:-1 tvg-id="%s",Plain Title' % tvg)
+            self.assertNotIn("tvgId", channel, ascii(tvg))
+            self.assertEqual(leaked(channel["id"]), [], ascii(tvg))
 
     def test_a_tvg_id_with_an_at_sign_or_a_colon_but_no_url_is_kept(self):
         for tvg in ("CNN.us@HD", "news:sports", "a:/b", "a//b", "bbc.uk@SD:1"):
@@ -507,7 +889,14 @@ class LinearTest(unittest.TestCase):
               lambda n: "a=x:\t//y " * (n // 10),
               lambda n: 'a="x:"' * (n // 6),
               lambda n: 'a="http://x' + '",' * (n // 2) + "y",
-              lambda n: "a=:" + "\x00" * n + " b=c"]
+              lambda n: "a=:" + "\x00" * n + " b=c",
+              # The review of 4d13d71: a bare value holding a `:` asked its
+              # token's credential over a URL reading of its own, which read
+              # on to the line's end, so a line of them before an `@` was
+              # quadratic (ratio 8.4 and 16.7 on 4d13d71; 42.8 s on a
+              # 96,000-character #EXTINF line). One reading a line now.
+              lambda n: "a=x:y " * (n // 6) + "@",
+              lambda n: "a=x:y " * (n // 6) + "@" + chr(0xE9)]
 
     def best(self, text):
         times = []
@@ -517,9 +906,25 @@ class LinearTest(unittest.TestCase):
             times.append(time.thread_time() - t0)
         return min(times)
 
+    # The review of 2942e41 (its cost finding 1): a bare value's U+0020
+    # token bounds were searched for once a value, so values a TAB separates,
+    # one token, read the whole line each: quadratic (12.6 s for
+    # `a=x:@<TAB>` repeated to 1.6M characters, 33.9 s with two Han before
+    # each TAB). They are found once a token now. At 8,000 and 32,000
+    # characters the line's own linear work hides the square (a ratio of 5.2
+    # and 6.2 on 2942e41), so these are held at 100,000 and 400,000, where
+    # 2942e41 gives 11.9 and 13.2.
+    LONG_SHAPES = [lambda n: "a=x:@\t" * (n // 6),
+                   lambda n: ("a=x:" + chr(0x65E5) + chr(0x672C) + "\t") * (n // 7) + "@"]
+
     def test_parse_attrs_is_linear_on_every_shape(self):
         for shape in self.SHAPES:
             small, large = self.best(shape(8000)), self.best(shape(32000))
+            self.assertLess(large, 8 * small + 0.002, ascii(shape(16)[:16]))
+
+    def test_parse_attrs_is_linear_when_tabs_separate_the_values(self):
+        for shape in self.LONG_SHAPES:
+            small, large = self.best(shape(100000)), self.best(shape(400000))
             self.assertLess(large, 8 * small + 0.002, ascii(shape(16)[:16]))
 
 

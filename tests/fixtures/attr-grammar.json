@@ -1008,38 +1008,34 @@
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\tzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a TAB in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a TAB in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\u000bzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\u000bzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a VT in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a VT in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\fzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\fzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "an FF in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "an FF in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\rzz@cdn.test/x,Plain Title",
    "attrs": {
-    "group-title": "http://qqqqqq:zz"
+    "group-title": "http://qqqqqq:zz\rzz@cdn.test/x,Plain"
    },
-   "title": "zz@cdn.test/x,Plain Title",
-   "why": "a CR in a bare URL ends its run, as every redactor ends it there",
-   "accepted": "D-SINK-34"
+   "title": "Title",
+   "why": "a CR in a bare URL's password ended its run at every redactor, D-SINK-34's class until the review of 4d13d71: the URL holds the colon and not the `@`, so the token is a credential every redactor withholds, and the value takes it whole (D-SINK-96's growth), the title's first word with it"
   },
   {
    "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz\"zz@cdn.test/x\",Plain Title",
@@ -1056,8 +1052,7 @@
     "group-title": "http://qqqqqq:zz\tzz\"zz@cdn.test/x"
    },
    "title": "Plain Title",
-   "why": "a TAB before the quote: membership looks back to a space, so the URL is stored whole, and the plain redactors split it at the TAB",
-   "accepted": "D-SINK-34"
+   "why": "a TAB before the quote: membership looks back to a space, so the URL is stored whole; the plain redactors split it at the TAB until the review of 4d13d71, and withhold it whole since, the URL holding the colon and not the `@`"
   },
   {
    "line": "#EXTINF:-1 group-title=\"http://qqqqqq:zz zz@cdn.test/x\",Plain Title",
@@ -1079,6 +1074,87 @@
     "epgUrlHint": "http://qqqqqq:12"
    },
    "accepted": "D-SINK-34"
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://logo.test/a.png\ttvg-name=Sky@News,Sky News",
+   "attrs": {
+    "tvg-logo": "http://logo.test/a.png",
+    "tvg-name": "Sky@News"
+   },
+   "title": "Sky News",
+   "why": "a TAB-separated bare URL value before a word holding an `@` no host follows: the value's colon is the URL's own, so growth across the TAB is gated as across a `,` (the review of 2942e41), and the line reads as a8e8174 read it [2942e41 took the tvg-name and the title's first word into the logo, and stored no logo]",
+   "stored": {
+    "name": "Sky News",
+    "group": "Ungrouped",
+    "logo": "http://logo.test/a.png",
+    "tvgName": "Sky@News"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-id=bbc1.uk\ttvg-logo=http://logo.test:8080/a.png\tgroup-title=News@UK,BBC One",
+   "attrs": {
+    "tvg-id": "bbc1.uk",
+    "tvg-logo": "http://logo.test:8080/a.png",
+    "group-title": "News@UK"
+   },
+   "title": "BBC One",
+   "why": "two TAB-separated values, a URL with a port among them, before a group holding an `@` no host follows: read as a8e8174 read it (the review of 2942e41) [2942e41 stored no logo and no group, and the name `One`]",
+   "stored": {
+    "name": "BBC One",
+    "group": "News@UK",
+    "logo": "http://logo.test:8080/a.png",
+    "tvgId": "bbc1.uk"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 tvg-logo=http://logo.test:8080/a.png\tgroup-title=mail@x.test,Name",
+   "attrs": {
+    "tvg-logo": "http://logo.test:8080/a.png\tgroup-title=mail@x.test,Name"
+   },
+   "title": "",
+   "why": "a TAB-separated bare URL value before a word whose `@` a host follows: the URL's colon and that `@` are read as one credential, and the value takes the rest of the token, the title with it (the review of 2942e41)",
+   "stored": {
+    "name": "Channel 1",
+    "group": "Ungrouped",
+    "logo": null
+   },
+   "cost": "a TAB-separated URL attribute before a later word whose `@` a host follows is taken whole with it: no logo, no group, and the name falls back"
+  },
+  {
+   "line": "#EXTINF:-1 group-title=qqqqqq:zz,zz@localhost:8080,Name",
+   "attrs": {
+    "group-title": "qqqqqq:zz,zz@localhost:8080,Name"
+   },
+   "title": "",
+   "why": "a scheme-less credential cut at its `,` whose host is one label with a port: host_shaped reads it as a host, so the value takes the credential whole (the review of 2942e41) [2942e41 stored the group `qqqqqq:zz` and the name `zz@localhost:8080,Name`]",
+   "stored": {
+    "name": "Channel 1",
+    "group": "qqqqqq:zz,zz@localhost:8080,Name"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=qqqqqq:zz,z@z@cdn.test,Name",
+   "attrs": {
+    "group-title": "qqqqqq:zz,z@z@cdn.test,Name"
+   },
+   "title": "",
+   "why": "a scheme-less credential cut at its `,` whose password holds an `@`: growth is judged on every `@` it would take, not only the first after the colon (the review of 2942e41) [2942e41 judged `z@cdn.test` and stored the group `qqqqqq:zz`]",
+   "stored": {
+    "name": "Channel 1",
+    "group": "qqqqqq:zz,z@z@cdn.test,Name"
+   }
+  },
+  {
+   "line": "#EXTINF:-1 group-title=http://qqqqqq:zz\tzz@localhost/x,Name",
+   "attrs": {
+    "group-title": "http://qqqqqq:zz\tzz@localhost/x,Name"
+   },
+   "title": "",
+   "why": "a bare URL value whose password a TAB cuts, before a host no host shape names and no attribute key: the value takes the credential whole, since growth across whitespace from a URL's own colon is gated only when a key and its `=` follow the whitespace (the review of e038d58) [e038d58 gated it on the host and stored the group `http://qqqqqq:zz`, which every sink printed as `qqqqqq`, and the name `zz@localhost/x,Name`]",
+   "stored": {
+    "name": "Channel 1",
+    "group": "http://qqqqqq:zz\tzz@localhost/x,Name"
+   }
   }
  ]
 }
