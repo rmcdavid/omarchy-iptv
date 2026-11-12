@@ -9359,7 +9359,6 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     if (d === token) return a !== "" ? a : W
     const b = oAuthority(oCore(d), d)
     if (a === "") return b !== "" ? b : W
-    if (b === "") return a
     return a === b ? a : W
   }
   // Round 4f (K2 a, b): a head that is an authority on its own text, its
@@ -10055,6 +10054,11 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     ["qqqqqq:zzzzzz@cdn.test//@x", Model.HOST_WITHHELD], ["qqqqqq.//qq@cdn.test/x", Model.HOST_WITHHELD],
     // K2 d: the raw and the decoded readings name different hosts.
     ["cdn.test%2Fqqqqqq.qq//zzzzzz.zz/x", Model.HOST_WITHHELD], ["qqqqqq.qq%2F@cdn.test/x", Model.HOST_WITHHELD], ["x.test%2Fqqqqqq:zzzzzz@cdn.test/y", Model.HOST_WITHHELD],
+    // ...and a decoded reading that names nothing does not defer to a raw one
+    // that names a host (the round-4f review's double escapes): the decoded
+    // head is an authority this text does not name.
+    ["qqqqqq:zzzzzz&amp;#64;cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD], ["qqqqqq:zzzzzz&amp;commat;cdn.test//zzzzzz.zz/1.ts", Model.HOST_WITHHELD],
+    ["nas&amp;#58;8080//qqqqqq.qq/zzzzzz/1.ts", Model.HOST_WITHHELD],
     // ...and a dotless head with no port keeps the `//` branch.
     ["http//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["//qqqqqq:zzzzzz@cdn.test/x", "cdn.test"], ["News//cdn.test/x", "cdn.test"],
     ["cdn.test:8080//qqqqqq.qq/zzzzzz/1.ts", "cdn.test:8080"], ["192.168.1.10:8080//qqqqqq.qq/zzzzzz/1.ts", "192.168.1.10:8080"],

@@ -1877,7 +1877,10 @@ function addressAccessibleValue(value) {
 // (`qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts`) or is a host with a port or
 // a trailing `.` (`nas:8080//`, `cdn.test.//`); a dotless head with no
 // port still is no authority, so `cdn-test//qqqqqq.qq/zzzzzz/1.ts` reads
-// `qqqqqq.qq`, the stated residual. An encoded URL is read through its
+// `qqqqqq.qq`, the stated residual, with its class: a dotless head with no
+// port (`cdn-test`, `nas`, `localhost`), and a head outside [A-Za-z0-9-]
+// labels or with a malformed port (`my_nas:8080`, `cdn.test:8080:443`,
+// `fe80::1:8080`, `cdn.test%2E`, `cdn.test:http`). An encoded URL is read through its
 // escapes (round 4e, I1; round 4f, K4). And a STORED label holding
 // a credential without an address's shape is drawn and heard as typed,
 // because nothing tells it from a name; measured after round 4f as after
@@ -1963,7 +1966,14 @@ function labelHoldsField(text) {
 // after its first `.` and none in that `.`'s token: a range deletion that
 // leaves one segment, `cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts` -- 860 of the
 // paste corpus's 48,199 scheme-less stream-path values, none holding both
-// a username's run and a password's.
+// a username's run and a password's -- but a user/pass pair written after
+// a host and a space, `cdn.test qqqqqq/zzzzzz`, is this class and is heard
+// whole (round 4d held it; accepted at the round 4f merge, the lead's call
+// under the same authority, beside `Username: qqqqqq Password: zzzzzz`).
+// The cost of the whole-value arm: a label with two `/` after its first `.`
+// holds again, as on round 4d -- `U.S. / Canada / Mexico`, `Sat.1 /
+// ProSieben / Kabel 1`, `Mr. Robot / S01 / HD` (14 of 17 such labels the
+// round-4f review wrote; none in the three counted sets below).
 // (ii) was narrowed the same way and measured, and stays whole: a token
 // (ii) let one pasted value through, `qqqqqq:zzzzzz @cdn.test`, heard in
 // full (601 of round 4b's paste corpus with its 35 encoded values, against
@@ -2197,7 +2207,9 @@ function labelFold(token) {
 // `http&#58&#47&#47...` held no shape and were heard whole, 7 of 7 values
 // each. Not decoded, and so heard as typed when nothing else holds the
 // value: `\xHH`, `%u00HH`, `\U000000HH`, octal `\072`, `+` for `/`, a name
-// HTML does not spell so (`&COLON;`, `&AMP;`), and every double escape. And
+// HTML does not define (`&COLON;`, `&SOL;`), `&AMP;` and a `;`-less `&amp`
+// (HTML reads both as `&`; nothing here reads `&` but shape (iv), which the
+// raw `&` already reaches), and every double escape. And
 // a `;`-less hex entity takes every hex digit after it, as HTML does, so
 // `qqqqqq&#x3azzzzzz&#x40cdn.test` decodes its `@` with the `cd` after it
 // into U+40CD and holds no shape: 1 of the 7 URLs heard in the field, 2 of
@@ -2243,10 +2255,19 @@ function labelFoldNfkd(text) {
 // Round 4f (K2 d, the lead's call under the owner's standing authority of
 // 2026-11-09): a token that holds an escape is read both ways, and when the
 // raw and the decoded readings name different hosts -- or one names a host
-// and the other withholds -- it names HOST_WITHHELD; a reading that names
-// none defers to the other. Until then the raw reading won whenever it named
-// anything, so `qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts` was never asked as
-// `qqqqqq:zzzzzz@cdn.test//...`.
+// and the other withholds -- it names HOST_WITHHELD; a raw reading that names
+// none defers to the decoded one. Until then the raw reading won whenever it
+// named anything, so `qqqqqq:zzzzzz%40cdn.test//zzzzzz.zz/1.ts` was never
+// asked as `qqqqqq:zzzzzz@cdn.test//...`. A DECODED reading that names none
+// does not defer to a raw one that names a host (the lead's call at the
+// round 4f merge, under the same authority): there the decoded head is an
+// authority its own text does not name, so the raw reading's host is the
+// segment after a `//` -- `qqqqqq:zzzzzz&amp;#64;cdn.test//zzzzzz.zz/1.ts`,
+// `qqqqqq:zzzzzz&amp;commat;cdn.test//...` and `nas&amp;#58;8080//
+// qqqqqq.qq/...` read `zzzzzz.zz` and `qqqqqq.qq` and now HOST_WITHHELD.
+// 0 of the round 4f review's 168,140 swept labels move. A percent-encoded
+// entity (`%26%2364;`) is a double escape the decoder does not take, and
+// still names the segment after its `//`.
 function labelTokenHost(token) {
   var raw = str(token)
   var h = labelTokenAuthority(labelCore(raw), raw)
@@ -2254,7 +2275,7 @@ function labelTokenHost(token) {
   if (d === raw) return h !== "" ? h : HOST_WITHHELD
   var e = labelTokenAuthority(labelCore(d), d)
   if (h === "") return e !== "" ? e : HOST_WITHHELD
-  return e === "" || e === h ? h : HOST_WITHHELD
+  return e === h ? h : HOST_WITHHELD
 }
 
 // Round 4d (the lead's call under the owner's standing authority of

@@ -1394,7 +1394,11 @@ function withFormValue(st, field, value, opts) {
 // buttons and the remove dialog give it as typed (17 of round 4c's 27
 // required-unchanged labels, 11 of 28 more ordinary ones, none of the 71
 // deriveLabel gives for the fixtures; round 4e's narrower shape (v) let
-// `Dr. Who/Torchwood` and `St. Louis/KC` go). What remains heard, measured
+// `Dr. Who/Torchwood` and `St. Louis/KC` go, and round 4f's whole-value
+// arm holds again a label with two `/` after its first `.`, as round 4d
+// did: `U.S. / Canada / Mexico`, `Sat.1 / ProSieben / Kabel 1`, `Mr. Robot
+// / S01 / HD`, 14 of 17 such labels the round-4f review wrote, each held
+// on round 4d with more typed states heard as stars). What remains heard, measured
 // after round 4e, is what holds none of them. Typed: a prefix before the
 // value first holds -- a username, `qqqqqq:zzzzzz` before its `@` or `/`,
 // `mailto:qqqqqq` before its `@` (17 states over the reviews' 13 labels),
@@ -1407,7 +1411,12 @@ function withFormValue(st, field, value, opts) {
 // remnant `password=zzzzzz`), a path with no `.` before its `/` (10,427, the
 // remnant `/live/qqqqqq/zzzzzz/1.ts`), and one `/` alone whose `.` is in
 // another U+0020 token (860, `cdn.test /qqqqqq`, `cdn. zzzzzz/1.ts`, none
-// holding both a username's run and a password's) -- deletion remnants as
+// of those holding both a username's run and a password's; but a user/pass
+// pair written after a host and a space, `cdn.test qqqqqq/zzzzzz` or
+// `Provider cdn.test qqqqqq/zzzzzz`, is this class and is heard whole, as
+// on round 4e -- round 4d held it -- the lead's call at the round 4f merge
+// under the owner's standing authority of 2026-11-09 to accept it beside
+// `Username: qqqqqq Password: zzzzzz`) -- deletion remnants as
 // well as prefixes, which no shape tells from a name. Round 4e asked shape
 // (v) per token alone and so heard `cdn.test /live/qqqqqq/zzzzzz/1.ts`, a
 // credential path pasted with one U+0020 before its path, whole; since
