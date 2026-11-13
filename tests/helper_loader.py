@@ -111,11 +111,42 @@ def _sandbox_home():
 _sandbox_home()
 
 
-def load_helper():
+# D-SINK-101 (2026-11-13): the address the suite's stand-in resolver gives
+# every name the play-time lookup asks about. Global (address_class), and
+# never connected to: no test's player is real.
+SUITE_STREAM_ADDRESS = "93.184.216.34"
+
+
+def suite_stream_resolve(name, port):
+    """The suite's stand-in for the helper's play-time lookup
+    (stream_resolve): every name answers SUITE_STREAM_ADDRESS.
+
+    Why it exists. Since D-SINK-101 player_target looks a cached channel's
+    host NAME up before the player is handed it, and the suite's channels
+    name hosts under `.test` and `.example`, which no resolver answers --
+    with a real one every play test of every other property would refuse
+    with `unchecked_address`, and the suite would ask the network. The
+    project never lets a test ask a real resolver, and never one about a
+    name that leads to this machine or the LAN.
+
+    Why it is no more forgiving than it has to be (rule 10): it stands in
+    for that ONE lookup -- resolve_within, which the fetches use, is not
+    touched -- and in the test process only. tests/test_stream_lookup.py
+    loads the helper WITHOUT it (load_helper(stream_lookup=None)), states
+    every answer it tests, including the refusals, and holds the shipping
+    stream_resolve to resolve_within and its bound."""
+    import socket
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (SUITE_STREAM_ADDRESS, int(port or 0)))]
+
+
+def load_helper(stream_lookup=suite_stream_resolve):
     loader = importlib.machinery.SourceFileLoader("omarchy_iptv", str(HELPER))
     spec = importlib.util.spec_from_loader("omarchy_iptv", loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
+    # D-SINK-101: a tree before the lookup (a --baseline run) has no seam.
+    if stream_lookup is not None and hasattr(module, "stream_resolve"):
+        module.stream_resolve = stream_lookup
     return module
 
 

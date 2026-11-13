@@ -1105,6 +1105,27 @@ requests and raise the batch.
      applies on the way to the resolver is a reader too, a fold that
      composes can hide what one that decomposes keeps, and a library that
      decodes a name into a C string reads it only up to its first NUL.]**
+     **[2026-11-13, D-SINK-101, raised by the marketplace maintainer on
+     #14817 against 0.19.0: "where a well-formed name resolves stays open"
+     was the defect. A remote playlist named a dotted host of its own whose
+     DNS answered 127.0.0.1 or the LAN, and the player sent its requests
+     there, no rebinding needed. Now the helper looks a cached channel's
+     host name up itself before the player is handed it (`player_target`,
+     last, `stream_lookup_refusal` through `resolve_within` under 3 s) and
+     judges every address the answer holds as it judges a literal; one
+     refused address refuses the channel, and a name it cannot look up in
+     time is refused too (`unchecked_address`), or a slow answer to the
+     helper and a fast one to the player would be a free pass. It asks
+     the name as the player asks it, a name that is not ASCII as its UTF-8
+     bytes with no idna codec. What stays open: the player resolves the name
+     again, and a name that answers it differently a moment later (DNS
+     rebinding) is not caught, because the helper cannot pin the address
+     without breaking an https stream's certificate check; an HTTP redirect
+     the stream server sends, and HLS and DASH segment hosts, which FFmpeg
+     follows itself; and a proxy, which resolves the name on its own side.
+     The lesson: a check on what a string SAYS is not a check on where it
+     GOES, and a residual stated about the second question is the next
+     finding about it.]**
      The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.

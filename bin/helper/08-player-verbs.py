@@ -81,6 +81,111 @@ def cached_source(document: dict[str, Any]) -> dict[str, Any]:
             "loopback": klass == "loopback" or host_class(host) == "loopback", "local": local}
 
 
+# D-SINK-101 (the marketplace maintainer on #14817, against 0.19.0; fixed on
+# dev 2026-11-13). Every rule above judges what a channel's address SAYS:
+# a literal is classed as it is written, and a NAME passed every one of
+# them, because the player looked it up and the helper never did. So a
+# playlist that is not local could name `svc.attacker.test` with an A
+# record of 127.0.0.1 or 192.168.1.1 and the player sent its request to a
+# service on this machine or the LAN, no rebinding needed. Now player_target
+# looks the name up itself, with resolve_within (the helper's one call into
+# the resolver), before the player is handed the URL, and judges EVERY
+# address the answer holds by the rule a literal meets (_class_refusal:
+# the source's locality, a loopback relay's own port, multicast for udp and
+# rtp, the playlist's own host by name). One refused address refuses the
+# channel, `local_address` as a literal is. A name it cannot look up within
+# STREAM_LOOKUP_TIMEOUT_S is refused too, `unchecked_address`: otherwise a
+# slow answer to the helper and a fast one to the player is a free pass.
+#
+# The bound is not DEFAULT_TIMEOUT, the fetches' 20 s: the shell's watchdog
+# over one `play` is 8 s (Service.qml, controlTimeoutMs), so a lookup the
+# fetches' bound let run would be killed with the zap's reply. 3 s, and the
+# start's and restart's watchdogs carry it (Model.PLAYER_BOUNDS.lookupMs,
+# the player-bounds fixture).
+#
+# What stays open, by design: the player resolves the name AGAIN, a moment
+# later, and a name that answers the helper with a global address and the
+# player with a local one (DNS rebinding) is not caught. The helper cannot
+# hand the player the address it checked: an https stream's certificate is
+# checked against the name, and a URL rewritten to the address fails it. An
+# HTTP redirect the stream server sends, and HLS and DASH segment hosts,
+# are followed by FFmpeg itself and judged by nobody here; and through a
+# proxy the proxy resolves the name, so the helper's answer is about this
+# machine's resolver only (ARCHITECTURE-PLAYER 19.2, dev branch).
+STREAM_LOOKUP_TIMEOUT_S = 3.0
+STREAM_LOOKUP_REFUSAL = ("could not look up the stream's host name to check where it leads; not played")
+STREAM_RESOLVED_REFUSAL = ("the stream's host name leads to an address on this machine or a local network that "
+                           "the playlist chose; not played")
+
+
+def stream_lookup_name(netloc: str) -> str | bytes:
+    """The host of a URL's authority as the player hands it to the
+    resolver: the text after the last `@` and before the port's colon, as
+    written (FFmpeg n9.0.2 neither lowercases nor percent-decodes it, and
+    asks getaddrinfo with no AI_IDN). An ASCII name is that text; one that
+    is not is its UTF-8 BYTES, which resolve_within hands to the resolver
+    with no idna codec, so the helper asks what the player will ask -- the
+    str would go through CPython's IDNA 2003 nameprep (a sharp s becomes `ss`)
+    and could be another name in the same zone. Only a NAME reaches this
+    (stream_lookup_refusal): a literal is classed as written, and a name
+    holds no bracket and no second colon (stream_host_name_refused)."""
+    name = netloc.rpartition("@")[2].partition(":")[0]
+    return name if name.isascii() else name.encode("utf-8")
+
+
+def stream_resolve(name: str | bytes, port: int) -> list[Any]:
+    """The play-time lookup: resolve_within under STREAM_LOOKUP_TIMEOUT_S.
+    Its own function so the suite stands a resolver in for this lookup
+    alone (the suite's helper loader, dev branch) and never asks a real one."""
+    return resolve_within(name, port, STREAM_LOOKUP_TIMEOUT_S)
+
+
+def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
+    """D-SINK-101: `url` a cached channel's address, `source` cached_source's
+    record of its playlist. -> "" when the channel may be handed on,
+    `local` or `port` (_class_refusal's answer for an address its host name
+    resolved to), or `lookup` (the name could not be looked up within
+    STREAM_LOOKUP_TIMEOUT_S, or answered nothing).
+
+    Asked only where an answer could refuse: a literal or a localhost name
+    is judged as written (_host_refusal), a local playlist that is not on
+    loopback may name any address, and a playlist that is not local may
+    always name its own host (own_host_match, by name, as the literal rule
+    reads it) -- none of those is looked up. A loopback relay's channel is,
+    because its port is the rule there."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return "lookup"
+    if host == "" or host_class(host) != "":
+        return ""
+    if source.get("local") and not source.get("loopback"):
+        return ""
+    scheme = parts.scheme.lower()
+    # stream_entry_refusal's reading of the port: the scheme's default only
+    # for a port the URL does not name, and a port that does not parse none.
+    try:
+        port = parts.port
+        if port is None:
+            port = URL_DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        port = None
+    if not source.get("local") and own_host_match(host, port, source):
+        return ""
+    try:
+        answers = stream_resolve(stream_lookup_name(parts.netloc), port or 0)
+    except (OSError, ValueError, HelperError):
+        return "lookup"
+    if not answers:
+        return "lookup"
+    for answer in answers:
+        refusal = _class_refusal(address_class(answer[4][0]), host, scheme, source, port)
+        if refusal:
+            return refusal
+    return ""
+
+
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
     """Resolve the channel the helper will play. The URL is read from the
     0600 cache by the helper itself and never crosses a process boundary.
@@ -130,7 +235,16 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     stopped since; a start refused while the observed player plays on is
     D-PLY-52's, the label put back and nothing told or marked; and a `play`,
     a zap into a running player, is D-PLY-42's untold refusal (open, the
-    owner's call): no card and no mark."""
+    owner's call): no card and no mark.
+
+    D-SINK-101 (2026-11-13): and a cached channel only, last, whose host is
+    a NAME: looked up here and every address judged as a literal would be
+    (stream_lookup_refusal). An address that would be refused refuses it as
+    `local_address` with one fixed sentence that names no host, routed as
+    above; a name that cannot be looked up within STREAM_LOOKUP_TIMEOUT_S is
+    `unchecked_address`, which the shell reads as this machine's failure
+    (Model.playerStartFailure "local": told, nothing marked). A typed
+    `--url` is never looked up here."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)
@@ -157,6 +271,13 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
                                                "chose; not played" % (url_host(url) or "the host"))
         if stream_label_refused(url, url_host(url), stream_scheme(url), source):
             raise HelperError("local_address", STREAM_LABEL_REFUSAL)
+        # D-SINK-101: last, so a name every rule above refuses is never
+        # looked up (D-SINK-83's lesson: the lookup is a disclosure).
+        resolved = stream_lookup_refusal(url, source)
+        if resolved == "lookup":
+            raise HelperError("unchecked_address", STREAM_LOOKUP_REFUSAL)
+        if resolved:
+            raise HelperError("local_address", STREAM_RESOLVED_REFUSAL)
         held = {"url": url, "headers": headers}
         if drop_sign_in_headers(held, source):
             log("play: dropped a sign-in header for another host")

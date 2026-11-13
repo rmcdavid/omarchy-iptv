@@ -527,7 +527,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-97}
 # (D-SINK-95, D-SINK-96) and the label, field-hold, session, paste-corpus
 # and composer checks (D-SINK-97..99), each red on its pass's base or under
 # a named mutant (QA-RESULTS "Round 3", "Round 4"); the suite runs 3695.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3695}
+# 2026-11-13, dsink101: 3695 -> 3696 -- D-SINK-101's sentence for
+# `unchecked_address` and its local routing (red on e17fc04's model); the
+# suite runs 3696.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -869,7 +872,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3695}
 # bound and budget tests across the redaction-cost, fold, cut, attribute
 # grammar and group-split modules, each red on its pass's base or under a
 # named mutant (QA-RESULTS "Round 3"); the suite runs 2382, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2382}
+# 2026-11-13, dsink101: 2382 -> 2397 -- tests/test_stream_lookup.py
+# (D-SINK-101: a cached channel's host name looked up at play time and every
+# address judged as a literal, with a stated resolver only; red 12 of 15 on
+# e17fc04 and under 12 single-decision mutants, QA-RESULTS "D-SINK-101");
+# the suite runs 2397, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2397}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

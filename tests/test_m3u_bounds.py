@@ -294,10 +294,33 @@ class MemoryLimitTest(unittest.TestCase):
         self.assertEqual(status["channelCount"], 10000)
 
     def test_very_low_limit_refuses_an_ordinary_epg(self):
-        code, status, stdout, stderr = run_helper("epg", "--url", str(FIXTURES / "epg-basic.xml"),
-                                                  "--cache-dir", self.cache, "--force", limit=8)
+        # F-HARNESS-108 (2026-11-13): an ordinary guide whose programmes sit
+        # in the window. This read epg-basic.xml, whose "now" is 2026-09-12:
+        # once that day left the window the parse kept no programme, needed
+        # almost nothing, and the refusal turned on whether the interpreter's
+        # start-up left enough free heap for it -- D-SINK-101's 5 KB more of
+        # helper source left enough, and the test went green-to-red with no
+        # change to the limit. 50 channels of 28 half-hour programmes around
+        # the run's own clock, about 220 KB, are refused under 8 MiB and
+        # parse whole without the limit.
+        import time
+        now = int(time.time()) // 1800 * 1800
+        stamp = lambda t: time.strftime("%Y%m%d%H%M%S +0000", time.gmtime(t))
+        lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="omarchy-iptv test">']
+        lines += ['  <channel id="c%d.test"><display-name>Channel %d</display-name></channel>' % (c, c) for c in range(50)]
+        lines += ['  <programme start="%s" stop="%s" channel="c%d.test"><title>Show %d</title>'
+                  '<desc>An ordinary programme.</desc></programme>' % (stamp(now + k * 1800), stamp(now + k * 1800 + 1800), c, k)
+                  for c in range(50) for k in range(-4, 24)]
+        guide = pathlib.Path(self.cache, "ordinary.xml")
+        guide.write_text("\n".join(lines + ["</tv>"]) + "\n", encoding="utf-8")
+        cache = os.path.join(self.cache, "c")
+        code, status, stdout, stderr = run_helper("epg", "--url", str(guide), "--cache-dir", cache, "--force", limit=8)
         self.assert_refused(code, status, stdout, stderr, "epg")
-        self.assertFalse(os.path.exists(os.path.join(self.cache, helper.EPG_WINDOW_FILE)))
+        self.assertFalse(os.path.exists(os.path.join(cache, helper.EPG_WINDOW_FILE)))
+        # And the default admits it, every programme in the window kept.
+        code, status, stdout, stderr = run_helper("epg", "--url", str(guide), "--cache-dir", cache, "--force")
+        self.assertEqual(code, 0, stdout + stderr)
+        self.assertEqual(status["programmeCount"], 50 * 28)
 
     def test_the_verb_holds_the_limit_while_it_parses_and_lifts_it_after(self):
         # Run as the program (runpy, run_name __main__). The limit is read

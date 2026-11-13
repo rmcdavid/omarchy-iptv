@@ -6456,6 +6456,23 @@ checkCall("D-PLY-32: one notion of local -- no code on PLAY_UNREADABLE, HELPER_C
   // player_target refuses a cached channel on a LAN or loopback literal its
   // playlist chose, which is about the entry.
   { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme", "local_address"] })
+// D-SINK-101 (2026-11-13): the helper looks a cached channel's host name up
+// before the player is handed it. A name that answers an address on this
+// machine or the LAN is `local_address`, the sentence a literal's refusal
+// has; a name it cannot look up is `unchecked_address`, a sentence of its
+// own that names no host, and local -- told, nothing marked -- because a
+// resolver that is down or slow is no verdict on the channel. Red on
+// e17fc04: the code fell to the scrubbed message.
+checkCall("D-SINK-101: unchecked_address reads its own sentence under every player kind and is local; local_address keeps its sentence",
+  () => {
+    const reply = (kind, code, message) => Model.statusReason(Model.parseHelperStatus(JSON.stringify({ ok: false, kind: kind,
+      error: { code: code, message: message } }), kind))
+    const helperSentence = "could not look up the stream's host name to check where it leads; not played"
+    return [["player.start", "player.restart", "play"].map(k => reply(k, "unchecked_address", helperSentence)),
+            reply("player.start", "local_address", "the stream's host name leads to an address on this machine or a local network that the playlist chose; not played"),
+            Model.playerStartFailure("unchecked_address"), Model.playFailureVerdict("unchecked_address", { playerUp: true, nowPlaying: true })]
+  },
+  [Array(3).fill("Could not look up the stream's address"), "Refused a local address", "local", "failed"])
 // D-PLY-38 (2026-11-11): the helper with no file descriptor left could not
 // look at the player, so its code is no verdict on the player anywhere.
 checkCall("D-PLY-38: no_descriptors is 'cannot tell' on the status branch, 'unknown' on a zap whether or not retries are left, local on a start, and reads its own sentence under every player kind",

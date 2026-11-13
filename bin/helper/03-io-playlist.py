@@ -281,7 +281,7 @@ def refuse_host_name(text: Any, with_port: bool = False) -> None:
         raise HelperError("bad_url", HOST_NAME_REFUSAL)
 
 
-def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
+def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
 
@@ -298,8 +298,13 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
     that took too long raises, and the caller answers it as one; the worker
     then finishes on the resolver's own clock and is discarded (daemon:
     the process does not wait for it at exit). Nothing is cached here and
-    nothing is re-looked-up: the result goes straight to the connect."""
-    refuse_host_name(host)
+    nothing is re-looked-up: the result goes straight to the connect.
+
+    D-SINK-101: a `bytes` host is the play-time lookup's
+    (stream_lookup_name): a name that is not ASCII, handed to the resolver
+    as the player will hand it, with no idna codec. The refusal reads it as
+    the text it encodes."""
+    refuse_host_name(host.decode("utf-8", "surrogateescape") if isinstance(host, bytes) else host)
     import socket
     import threading
     result: list[Any] = []

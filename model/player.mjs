@@ -80,6 +80,10 @@ function healthTick(skips, busy) {
 //   tail: the larger of the `no_socket` refusal (the spawn laddered from
 //     term, then a settle) and the load (the one request after the loadfile
 //     whose timeout does not end the verb, then the first-load window)
+//   lookup: the play-time lookup of a cached channel's host name
+//     (D-SINK-101, 2026-11-13: player_target, before the lock), answered just
+//     inside its bound; one that reaches it refuses the channel and ends the
+//     verb, so it is summed once, by a start and by a restart
 // What is NOT summed is every other request at its bound: a request that
 // reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
 // answering each of a start's twenty-odd requests just inside 2 s could run a
@@ -100,7 +104,8 @@ var PLAYER_BOUNDS = {
   ipcMs: 2000,            // DEFAULT_IPC_TIMEOUT: one connect, or one request
   settleMs: 500,          // STOP_SETTLE_MS (not Service.qml's stopSettleMs)
   settleConnectMs: 200,   // SETTLE_CONNECT_TIMEOUT: socket_is_dead's one connect
-  settleLockMs: 500       // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
+  settleLockMs: 500,      // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
+  lookupMs: 3000          // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
 }
 var PLAYER_WATCHDOG_MARGIN_MS = 5000
 var PLAYER_BIRTH_EDGE_MS = 12000
@@ -128,8 +133,8 @@ function playerWatchdogMs(kind) {
   // so the replace path is the wedged one plus these two (walked: 42.07 s, past
   // the 38.25 s the bound left without them; lane RA's M9).
   var carry = 2 * b.ipcMs
-  if (k === "start") return lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "") return PLAYER_BIRTH_EDGE_MS
   return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))

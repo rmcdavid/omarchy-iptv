@@ -23,7 +23,10 @@ from unittest import mock
 
 from helper_loader import load_helper
 
-helper = load_helper()
+# D-SINK-101: without the suite's stand-in for the play-time lookup, so the
+# walk below spends that lookup at the bound the shipping code hands
+# resolve_within, which the walk replaces (no resolver is ever asked).
+helper = load_helper(stream_lookup=None)
 
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "player-bounds.json"
 BOUNDS = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -190,6 +193,23 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         clock.t += timeout
         return b"4242" if state["pipes"] == 1 else b""
 
+    # D-SINK-101: the channel's host is a name from a playlist that is not
+    # local, so the shipping lookup runs (stream_lookup_refusal, through
+    # stream_resolve) and its answer -- a global address -- comes just inside
+    # the bound the code hands resolve_within. A tree before the lookup (a
+    # --baseline run) has none to spend.
+    url = "http://s.example.test/x.ts"
+
+    def target(cid, raw, d):
+        if hasattr(helper, "stream_lookup_refusal"):
+            assert helper.stream_lookup_refusal(url, {"host": "p.example.test", "port": 80, "loopback": False,
+                                                      "local": False}) == ""
+        return {"id": cid, "url": url, "name": "X", "headers": {"User-Agent": "u"}, "group": "G"}
+
+    def resolve(host, port, timeout):
+        clock.t += timeout - _JUST_INSIDE
+        return [(2, 1, 6, "", ("93.184.216.34", port))]
+
     real_spawn = helper.spawn_detached
 
     def spawn(argv, cwd="/"):
@@ -298,8 +318,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         mock.patch.object(helper, "MpvIpc", Ipc),
         mock.patch.object(helper, "emit", replies.append),
         mock.patch.object(helper, "log", lambda message: None),
-        mock.patch.object(helper, "player_target", lambda cid, raw, d: {
-            "id": cid, "url": "http://s.example.test/x.ts", "name": "X", "headers": {"User-Agent": "u"}, "group": "G"}),
+        mock.patch.object(helper, "player_target", target),
+        mock.patch.object(helper, "resolve_within", resolve),
         mock.patch.object(helper, "player_dirs", lambda s, o=None: {
             "cwd": folder, "screenshots": folder, "watchLater": folder, "shaderCache": folder}),
         mock.patch.object(helper, "ensure_player_dirs", lambda dirs, warnings: None),

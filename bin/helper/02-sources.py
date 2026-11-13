@@ -1559,8 +1559,8 @@ def stream_host_refused(url: str, source: dict[str, Any]) -> bool:
     link-local, CGNAT, unspecified, reserved, a localhost name) from a
     playlist that is neither local nor on that same host. A multicast udp or
     rtp group is the ISP-multicast case and passes. A NAME that resolves to
-    such an address is mpv's lookup and not seen here (ARCHITECTURE-PLAYER,
-    the residuals)."""
+    such an address is not seen here: player_target looks it up at play time
+    (stream_lookup_refusal, D-SINK-101), and the parse does not."""
     return _host_refused(url_host(url), stream_scheme(url), source, url_port(url))
 
 
@@ -1590,7 +1590,15 @@ def _host_refusal(host: str, scheme: str, source: dict[str, Any], port: int | No
     reached a 127.0.0.1 listener and `::` a ::1 one, and the player played a
     loopback relay's channel at `http://0.0.0.0:<another port>/` from the
     server there). So it is held to the relay's port the same way."""
-    kind = host_class(host)
+    return _class_refusal(host_class(host), host, scheme, source, port)
+
+
+def _class_refusal(kind: str, host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> str:
+    """_host_refusal's judgment of one address CLASS (host_class's, or
+    address_class's of an address `host` resolved to), so a literal and an
+    address a name answers (stream_lookup_refusal, D-SINK-101) meet one rule:
+    "" for a name or a global address, else as _host_refusal says. The own
+    host is matched by `host`, the name as written, never by an address."""
     if kind in ("", "global"):
         return ""
     if kind == "multicast" and scheme in MULTICAST_ONLY_SCHEMES:
