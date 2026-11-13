@@ -3,6 +3,69 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.19.1 (2026-11-13)
+
+**Checks where a channel's server name leads before the player connects
+to it.** A playlist from the internet could name a channel's server by a
+name that leads to this computer or your local network, and the player
+connected there when you played the channel, which could reach a service
+running on your computer or your network. The plugin now looks the name up
+itself when you play the channel and refuses the channel if the name leads
+there. What to do: **restart the shell** (`omarchy-restart-shell`). If a
+channel was playing when you updated, expect it to reopen once in a new
+player window, as after 0.19.0. If that channel is one this version
+refuses, the old player is stopped instead and a "Stream failed" card says
+"Refused a local address"; if its server name cannot be looked up at that
+moment, the old player plays on until you change channel.
+
+### Fixed
+
+- **A channel from a playlist that is not on this computer or your local
+  network is not played when its server's name leads to this computer or
+  your local network**, the playlist's own server included. When you play
+  such a channel, the plugin looks its server's name up and refuses it if
+  any address the name gives is one a playlist from the internet may not
+  name directly; the player is never handed it. Reported by the Omarchy
+  plugin marketplace's maintainer against 0.19.0. (D-SINK-101)
+- **With your own web proxy set, a playlist whose server name gives a
+  public address and also a local one is treated as a playlist from the
+  internet** from its next download, not as one from your own network: its
+  channels may then not lead to this computer or your local network, even
+  on its own server. (D-SINK-101)
+
+### Worth knowing
+
+- **Playing a channel from a playlist on the internet now first waits for
+  the plugin's own lookup of the channel's server name**, and so does
+  playing a channel that a relay on this computer, such as Threadfin or
+  xTeVe, names by a server name; such a relay channel is refused if the
+  name leads to this computer on a port other than the relay's own. A
+  lookup that fails, or takes longer than 3 seconds, refuses the channel:
+  starting the player on it shows "Could not look up the stream's address",
+  and changing to it while another channel plays leaves the player where it
+  was, with no card. A channel refused for where its name leads shows
+  "Refused a local address" when you start the player on it, and the guide
+  marks it failed; changing to it while another channel plays leaves the
+  player where it was, with no card.
+- **Behind a web proxy on a network where this computer cannot look names
+  up itself**, a channel from a playlist on the internet is refused unless
+  it is on the playlist's own server or its server is written as a numeric
+  address, because the plugin cannot check where the name leads.
+
+### Known limitations
+
+- **A name that gives one address when the plugin checks it and another a
+  moment later, when the player connects, is not caught**: the player looks
+  the name up again, and the plugin cannot hand it the checked address
+  without breaking the check of an https server's certificate. Nor are a
+  stream server's redirects, or the hosts an HLS or DASH stream's segments
+  come from, which the player follows itself.
+- **With a web proxy set, the proxy looks a channel's server name up again
+  on its own side**, so the plugin checks only the answer this computer
+  gets; and where this computer cannot look up the playlist's own server,
+  channels on that server play without the check.
+- **The limitations listed under 0.19.0 still apply.**
+
 ## 0.19.0 (2026-11-12)
 
 **Keeps a username or password out of more of the places the plugin shows,
