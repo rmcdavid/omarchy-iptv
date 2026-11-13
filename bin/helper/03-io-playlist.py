@@ -521,7 +521,18 @@ class DestinationPolicy:
         for kind in kinds:
             if not self.permits(host, kind, first, port):
                 raise self.refusal(host, first)
-        self.connected(host, "global" if kinds == {"global"} else sorted(kinds - {"global"})[0], first, port)
+        # D-SINK-101 (round 2's check, the lead's call under the owner's
+        # standing authority of 2026-11-09): the proxy fetches from an
+        # address that works, and a name holding a global answer reaches the
+        # provider's public one, so such a target is GLOBAL. It read as its
+        # non-global class whenever any answer was not global (since
+        # D-SINK-40), so a provider's own name answering a loopback or LAN
+        # address beside its public one made the source local, and its list
+        # could name this machine and the LAN with no rebinding. Every answer
+        # is still judged above, so a non-global answer a hop may not reach
+        # is refused before this. Cost: a typed LAN name that also answers a
+        # public address reads, behind a proxy, as a remote source.
+        self.connected(host, "global" if "global" in kinds else sorted(kinds)[0], first, port)
 
 
 def bounded_create_connection(address: tuple[str, int], timeout: Any = None,

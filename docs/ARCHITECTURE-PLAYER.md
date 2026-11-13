@@ -3523,13 +3523,19 @@ one, made FFmpeg open listeners the protocol list had to admit.
   -- 127.0.0.1 or ::1 beside a public address -- have the fetch fall
   through to the public address and record the source as public, while
   the player tried loopback first, at any port, with the sign-in headers
-  the own host keeps. Each answer for the own host must now be of the
-  class the fetch connected to (`sourceClass`: global for a remote
+  the own host keeps. Each answer for the own host must now be global or
+  of the class the fetch connected to (`sourceClass`: global for a remote
   playlist), which is what `DestinationPolicy.permits` requires of a
   redirect to it; any other refuses the channel as `local_address`. One
   pass, a residual: a source fetched through a proxy (`unresolved`) whose
   own-host lookup fails plays as before, so a proxy-only network keeps its
-  own-host channels.] What the user sees: on a start, `local_address` is
+  own-host channels. And behind a proxy the first hop's class is GLOBAL
+  whenever the name answers a global address (`check_proxied`): it was the
+  answer's non-global class whenever any answer was not global (since
+  D-SINK-40), so a provider's own name answering a loopback or LAN address
+  beside its public one made the source local, and its list could name this
+  machine and the LAN, with no rebinding; cost: a typed LAN name that also
+  answers a public address reads, behind a proxy, as a remote source.] What the user sees: on a start, `local_address` is
   a card and the channel marked failed, as D-SINK-89's are, and
   `unchecked_address` a card with nothing marked; on a zap into a running
   player both are D-PLY-42's untold refusal (the label put back, nothing

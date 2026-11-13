@@ -883,7 +883,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # lookup passes, the class its fetch connected to; red on 5f46d7c, 11
 # failures with subtests, and under 8 single-decision mutants); the suite
 # runs 2400, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2400}
+# 2026-11-13, the check of 8804d96: 2400 -> 2401 -- check_proxied records a
+# typed first hop answering a global address as global
+# (test_a_typed_first_hop_answering_a_public_address_is_no_local_source, red
+# on 8804d96); the suite runs 2401, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2401}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
