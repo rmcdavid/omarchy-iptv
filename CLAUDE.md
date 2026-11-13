@@ -4,12 +4,13 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.19.0 (2026-11-12: the security review's rounds 3
-and 4 -- a credential read across its URLs and a URL's mark read as a provider writes it,
-the Sources form publishing no credential on the accessibility bus -- with the host-name
-rounds D-SINK-86 to -94 and the nightly runs' fixes since 0.18.0; `main` 34fac24, the
-GitHub Release marked Latest, `[Verify]` #14817 filed the same day, validated with its
-baseline passed). The marketplace's verified snapshot is still 0.17.0 (`main` 787a33b,
+Quickshell process. Released through v0.19.1 (2026-11-13: D-SINK-101, the marketplace
+maintainer's finding on #14817 against 0.19.0 -- a channel's stream host name is looked up
+at play time and every answer judged by the literal rule, the playlist's own host
+included; `main` 9e006be, the GitHub Release marked Latest, `[Verify]` #14874 filed the
+same day, and a reply on #14817 on the owner's word). Before it, v0.19.0 (2026-11-12:
+the security review's rounds 3 and 4 with the host-name rounds D-SINK-86 to -94; `main`
+34fac24, `[Verify]` #14817). The marketplace's verified snapshot is still 0.17.0 (`main` 787a33b,
 2026-11-02: restart on adoption), since 2026-11-03T01:31:53Z through #13709. Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
@@ -78,7 +79,11 @@ we close none (F-M3-4). **[2026-11-07: 0.18.0 (`main` dc402e7) was cut on the
 owner's word and its request filed on it as #14290; #13611 and #12636 stay
 open beside it, as filed.]** **[2026-11-12: 0.19.0 (`main` 34fac24) was cut on
 the owner's word and its request filed on it as #14817; #14290 (re-pointed to
-ce68db5 on 2026-11-09), #13611 and #12636 stay open beside it, as filed.]** Neither can be approved as filed: neither Target
+ce68db5 on 2026-11-09), #13611 and #12636 stay open beside it, as filed.]**
+**[2026-11-13: the maintainer raised D-SINK-101 on #14817; 0.19.1 (`main`
+9e006be) was cut on the owner's word, its request filed as #14874, and a
+reply posted on #14817 naming it; #14817, #14290, #13611 and #12636 stay
+open, as filed.]** Neither can be approved as filed: neither Target
 commit is our HEAD, and one edited to 787a33b would be refused as already
 the listing. Once `main` moves, either could be approved only if its Target
 commit were edited to the HEAD of that day, by a maintainer, as he edited
