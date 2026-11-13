@@ -1059,10 +1059,13 @@ carry channel ids — most do — are not affected at all.
   point channels at addresses on this computer or your local network
   written out as such, nor at a host name of a single word, such as
   `tvheadend`, other than its own server's (a playlist from your own
-  network or a file may; a channel's host name is looked up and checked
-  when you play the channel, and refused if it leads there or cannot be
-  looked up within 3 seconds; a name that answers differently a moment
-  later, when the player looks it up again, is not caught), and a
+  network or a file may; a channel's host name, its own server's
+  included, is looked up and checked when you play the channel, and
+  refused if it leads there or cannot be looked up within 3 seconds --
+  behind a proxy with no working DNS on this computer, that is every
+  channel not on the playlist's own server; a name that answers
+  differently a moment later, when the player looks it up again, is not
+  caught), and a
   sign-in header it
   sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
   only for channels on the playlist's own server -- on this computer, its

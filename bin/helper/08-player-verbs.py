@@ -71,14 +71,20 @@ def cached_source(document: dict[str, Any]) -> dict[str, Any]:
     if host == "local file":
         return {"host": "", "port": None, "loopback": False, "local": True}
     klass = document.get("sourceClass")
-    klass = klass if klass in ADDRESS_CLASSES else ""
+    # `unresolved` is no address's class, but a fetch through a proxy that
+    # could not look the playlist's host up records it (check_proxied), and
+    # stream_lookup_refusal reads it.
+    klass = klass if klass in ADDRESS_CLASSES or klass == "unresolved" else ""
     local = document.get("sourceLocal")
     if not isinstance(local, bool):
-        local = klass not in ("", "global") or host_class(host) not in ("", "global")
+        local = klass not in ("", "global", "unresolved") or host_class(host) not in ("", "global")
     port = document.get("sourcePort")
     port = port if isinstance(port, int) and not isinstance(port, bool) else None
+    # `class`: the class the fetch's first hop connected to (sourceClass),
+    # which a remote playlist's own host is held to at play time
+    # (stream_lookup_refusal, D-SINK-101).
     return {"host": host_key(host), "port": port,
-            "loopback": klass == "loopback" or host_class(host) == "loopback", "local": local}
+            "loopback": klass == "loopback" or host_class(host) == "loopback", "local": local, "class": klass}
 
 
 # D-SINK-101 (the marketplace maintainer on #14817, against 0.19.0; fixed on
@@ -148,11 +154,22 @@ def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
     STREAM_LOOKUP_TIMEOUT_S, or answered nothing).
 
     Asked only where an answer could refuse: a literal or a localhost name
-    is judged as written (_host_refusal), a local playlist that is not on
-    loopback may name any address, and a playlist that is not local may
-    always name its own host (own_host_match, by name, as the literal rule
-    reads it) -- none of those is looked up. A loopback relay's channel is,
-    because its port is the rule there."""
+    is judged as written (_host_refusal) and a local playlist that is not
+    on loopback may name any address -- neither is looked up. A loopback
+    relay's channel is, because its port is the rule there.
+
+    A playlist that is not local is asked about its OWN host too (the
+    review of D-SINK-101's first fix, the lead's call under the owner's
+    standing authority of 2026-11-09): the provider controls that name, and
+    one record set answering a loopback address beside a public one let the
+    fetch fall through to the public address while the player tried
+    loopback first. So an own-host answer must be of the class the fetch
+    connected to (`class`, sourceClass) -- for a remote playlist, global --
+    which is what DestinationPolicy.permits requires of a redirect to the
+    own host; any other refuses as `local`. The one exception: a source
+    fetched through a proxy (`class` unresolved) whose own-host lookup
+    fails passes, as before, so a proxy-only network keeps its own-host
+    channels; one that answers is judged like any other."""
     try:
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname or ""
@@ -171,16 +188,19 @@ def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
             port = URL_DEFAULT_PORTS.get(scheme)
     except ValueError:
         port = None
-    if not source.get("local") and own_host_match(host, port, source):
-        return ""
+    own = not source.get("local") and own_host_match(host, port, source)
     try:
         answers = stream_resolve(stream_lookup_name(parts.netloc), port or 0)
     except (OSError, ValueError, HelperError):
-        return "lookup"
+        answers = []
     if not answers:
-        return "lookup"
+        return "" if own and source.get("class") == "unresolved" else "lookup"
     for answer in answers:
-        refusal = _class_refusal(address_class(answer[4][0]), host, scheme, source, port)
+        kind = address_class(answer[4][0])
+        if own:
+            refusal = "" if kind in ("global", source.get("class")) else "local"
+        else:
+            refusal = _class_refusal(kind, host, scheme, source, port)
         if refusal:
             return refusal
     return ""
@@ -243,8 +263,17 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     `local_address` with one fixed sentence that names no host, routed as
     above; a name that cannot be looked up within STREAM_LOOKUP_TIMEOUT_S is
     `unchecked_address`, which the shell reads as this machine's failure
-    (Model.playerStartFailure "local": told, nothing marked). A typed
-    `--url` is never looked up here."""
+    (Model.playerStartFailure "local"): on a start a card with nothing
+    marked, where `local_address` is a card and the channel marked failed;
+    on a `play`, a zap into a running player, both are D-PLY-42's untold
+    refusal (the label put back, nothing told or marked), as above. A
+    remote playlist's OWN host is looked up too, and held to the class its
+    fetch connected to; a source fetched through a proxy (`unresolved`)
+    whose own-host lookup fails passes. Behind a proxy with no working
+    local DNS, every channel off the playlist's own host is therefore
+    refused as `unchecked_address`, as check_proxied refuses a target the
+    playlist chose that it cannot resolve. A typed `--url` is never looked
+    up here."""
     if channel_id:
         document = read_channel_document(cache_dir(directory))
         channel = find_channel(document["channels"], channel_id)

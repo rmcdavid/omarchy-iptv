@@ -1112,7 +1112,12 @@ requests and raise the batch.
      there, no rebinding needed. Now the helper looks a cached channel's
      host name up itself before the player is handed it (`player_target`,
      last, `stream_lookup_refusal` through `resolve_within` under 3 s) and
-     judges every address the answer holds as it judges a literal; one
+     judges every address the answer holds as it judges a literal -- the
+     playlist's own host is asked too, and held to the class its fetch
+     connected to, because one record set on the provider's own name, a
+     loopback address beside a public one, let the fetch fall through to
+     the public address while the player tried loopback first (the review
+     of the first fix); one
      refused address refuses the channel, and a name it cannot look up in
      time is refused too (`unchecked_address`), or a slow answer to the
      helper and a fast one to the player would be a free pass. It asks

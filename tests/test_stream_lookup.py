@@ -235,14 +235,69 @@ class PlayTargetTest(unittest.TestCase):
                 self.assertEqual(got, [("played", u) for u in urls])
                 self.assertEqual(resolver.asked, [])
 
-    def test_the_playlists_own_host_name_plays_and_is_not_asked(self):
-        own = dict(REMOTE, sourceHost=NAME)
-        urls = ["http://%s/live/1.ts" % NAME, "http://%s:8080/live/2.ts" % NAME.upper(), "http://%s./x" % NAME]
-        got, resolver = self.outcomes(own, urls, {NAME: ["192.168.1.10"]})
-        self.assertEqual(got, [("played", u) for u in urls])
-        self.assertEqual(resolver.asked, [])
+    # The review of the first fix (D-SINK-101, 2026-11-13): the playlist's
+    # OWN host was never asked, so one record set on the provider's own name
+    # -- a loopback address beside a public one -- let the fetch fall through
+    # to the public address and record the source as public, while the
+    # player tried loopback first. The reviewer's vectors: ports 631, 80 and
+    # 443, any case, a trailing dot.
+    OWN = "prov.example.test"
+    OWN_URLS = ["http://prov.example.test:631/printers/x", "http://prov.example.test/live/1.ts",
+                "https://prov.example.test/live/2.m3u8", "http://PROV.Example.TEST:631/x", "http://prov.example.test.:80/x"]
+    OWN_ASKED = [(OWN, 631), (OWN, 80), (OWN, 443), ("PROV.Example.TEST", 631), (OWN + ".", 80)]
+
+    def own_answers(self, found):
+        return {OWN_NAME: found for OWN_NAME in (self.OWN, "PROV.Example.TEST", self.OWN + ".")}
+
+    def test_the_playlists_own_host_is_asked_and_a_local_answer_refuses_it(self):
+        for found in (["127.0.0.1", GLOBAL], ["::1", "127.0.0.1", GLOBAL], ["127.0.0.1"], ["192.168.1.10"],
+                      [GLOBAL, "fd00::1"]):
+            with self.subTest(answers=found):
+                got, resolver = self.outcomes(REMOTE, self.OWN_URLS, self.own_answers(found))
+                self.assertEqual(got, self.refused(len(self.OWN_URLS)))
+                self.assertEqual(resolver.asked, self.OWN_ASKED)
+
+    def test_the_playlists_own_host_plays_when_every_answer_is_global(self):
+        got, resolver = self.outcomes(REMOTE, self.OWN_URLS, self.own_answers([GLOBAL, "2606:4700::1111"]))
+        self.assertEqual(got, [("played", u) for u in self.OWN_URLS])
+        self.assertEqual(resolver.asked, self.OWN_ASKED)
         # Another name in the same zone is not the playlist's own.
-        got, _ = self.outcomes(own, ["http://other.qqqqqq.test/x"], {"other.qqqqqq.test": ["192.168.1.10"]})
+        got, _ = self.outcomes(REMOTE, ["http://other.example.test/x"], {"other.example.test": ["192.168.1.10"]})
+        self.assertEqual(got, self.refused())
+
+    def test_a_proxied_playlists_own_host_plays_when_it_cannot_be_looked_up_and_nothing_else_does(self):
+        proxied = dict(REMOTE, sourceClass="unresolved")
+        url = "http://%s/live/1.ts" % self.OWN
+        unchecked = ("unchecked_address", getattr(helper, "STREAM_LOOKUP_REFUSAL", "<none>"), False)
+        for failed in (socket.gaierror(socket.EAI_AGAIN, "Temporary failure"), TimeoutError("timed out"), []):
+            with self.subTest(failed=repr(failed)):
+                got, resolver = self.outcomes(proxied, [url, "http://other.example.test/x"],
+                                              {self.OWN: failed, "other.example.test": failed})
+                self.assertEqual(got, [("played", url), unchecked])
+                self.assertEqual(resolver.asked, [(self.OWN, 80), ("other.example.test", 80)])
+                # A source that connected to a public address has no such pass.
+                got, _ = self.outcomes(REMOTE, [url], {self.OWN: failed})
+                self.assertEqual(got, [unchecked])
+        # One that answers is judged like any other.
+        got, _ = self.outcomes(proxied, [url], {self.OWN: ["127.0.0.1", GLOBAL]})
+        self.assertEqual(got, self.refused())
+        got, _ = self.outcomes(proxied, [url], {self.OWN: [GLOBAL]})
+        self.assertEqual(got, [("played", url)])
+        # A cache that records the class but not the locality still reads
+        # as public, so a LAN literal from it is refused as before.
+        old = {"sourceHost": self.OWN, "sourceClass": "unresolved"}
+        got, _ = self.outcomes(old, ["http://192.168.1.10/x"], {})
+        self.assertEqual([g[0] for g in got], ["local_address"])
+
+    def test_the_own_host_is_held_to_the_class_its_fetch_connected_to(self):
+        """A remote source whose first hop connected to the LAN (a typed LAN
+        address that redirected to a public one) keeps its own host in that
+        class, as DestinationPolicy.permits keeps a redirect to it."""
+        lan_first = dict(REMOTE, sourceClass="private")
+        url = "http://%s/live/1.ts" % self.OWN
+        got, _ = self.outcomes(lan_first, [url], {self.OWN: ["192.168.1.10", GLOBAL]})
+        self.assertEqual(got, [("played", url)])
+        got, _ = self.outcomes(lan_first, [url], {self.OWN: ["192.168.1.10", "127.0.0.1"]})
         self.assertEqual(got, self.refused())
 
     def test_multicast_stays_as_it_was(self):

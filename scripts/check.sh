@@ -877,7 +877,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # address judged as a literal, with a stated resolver only; red 12 of 15 on
 # e17fc04 and under 12 single-decision mutants, QA-RESULTS "D-SINK-101");
 # the suite runs 2397, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2397}
+# 2026-11-13, dsink101's review round: 2397 -> 2400 -- the playlist's own
+# host asked too (one test flipped, four added in tests/test_stream_lookup.py:
+# a local answer refuses, a public one plays, a proxied source's failed
+# lookup passes, the class its fetch connected to; red on 5f46d7c, 11
+# failures with subtests, and under 8 single-decision mutants); the suite
+# runs 2400, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2400}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

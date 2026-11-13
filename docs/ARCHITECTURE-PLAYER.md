@@ -3516,8 +3516,24 @@ one, made FFmpeg open listeners the protocol list had to admit.
   keeps from the resolver stays kept; asked as the player asks it (as
   written, a name that is not ASCII as its UTF-8 bytes, which reach the
   resolver with no idna codec, as FFmpeg's getaddrinfo has no AI_IDN);
-  never for a literal, a typed `--url`, a local file or LAN playlist, or a
-  remote playlist's own host. What stays open: (a) the player resolves the
+  never for a literal, a typed `--url`, or a local file or LAN playlist.
+  [The review of the first fix (5f46d7c), the lead's call under the
+  owner's standing authority of 2026-11-09: a remote playlist's OWN host
+  is asked too. Skipping it let one record set on the provider's own name
+  -- 127.0.0.1 or ::1 beside a public address -- have the fetch fall
+  through to the public address and record the source as public, while
+  the player tried loopback first, at any port, with the sign-in headers
+  the own host keeps. Each answer for the own host must now be of the
+  class the fetch connected to (`sourceClass`: global for a remote
+  playlist), which is what `DestinationPolicy.permits` requires of a
+  redirect to it; any other refuses the channel as `local_address`. One
+  pass, a residual: a source fetched through a proxy (`unresolved`) whose
+  own-host lookup fails plays as before, so a proxy-only network keeps its
+  own-host channels.] What the user sees: on a start, `local_address` is
+  a card and the channel marked failed, as D-SINK-89's are, and
+  `unchecked_address` a card with nothing marked; on a zap into a running
+  player both are D-PLY-42's untold refusal (the label put back, nothing
+  told or marked). What stays open: (a) the player resolves the
   name AGAIN, so a name that answers the helper with a global address and
   the player, a moment later, with a local one (DNS rebinding) is not
   caught; the helper cannot pin the address it checked, because an https
@@ -3527,7 +3543,10 @@ one, made FFmpeg open listeners the protocol list had to admit.
   the environment's), which resolves the name on its own side, so the
   helper's answer is this machine's resolver's only -- through a proxy the
   target is judged by its name, as the fetches' `check_proxied` judges
-  it.]
+  it. Its cost: behind a proxy with no working local DNS, every channel
+  off the playlist's own host is refused as `unchecked_address`, as
+  `check_proxied` refuses a target the playlist chose that it cannot
+  resolve.]
 - **HLS variant and segment URLs.** FFmpeg's hls demuxer fetches them
   itself; measured, it opens only http(s), file and data URLs (an HLS-shaped
   playlist whose "segments" were `udp://0.0.0.0:P` and `rtp://0.0.0.0:P`
