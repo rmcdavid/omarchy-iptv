@@ -19133,3 +19133,15 @@ ARCHITECTURE-PLAYER 19.2: DNS rebinding (the player resolves the name
 again), an HTTP redirect the stream server sends and HLS and DASH segment
 hosts (FFmpeg follows them itself), and a proxy (which resolves the name
 on its own side).
+
+### 0.19.1 pre-cut record (2026-11-13): the gate and the release recipe's live run on the final tree
+
+**Tree.** Branch `dsink101` over `dev` e17fc04 (0.19.0): D-SINK-101's 5f46d7c (a channel's stream host name looked up at play time, every answer judged by the literal rule, a failed lookup refused), 8804d96 (the review's own-host gap: a remote playlist's own host asked too, each answer global or of its fetch's class; the zap, start and proxy routing stated; the decisions row) and bf2c0df (the check of 8804d96: `check_proxied` records a proxied first hop answering a global address as global, red on 8804d96), plus the version bump with the release notes (manifest, `Model.PLUGIN_VERSION`, the CHANGELOG's 0.19.1 section, the README Status sentence and two README Limits sentences), uncommitted while measured. Every test of the lookup uses a stubbed resolver; no real lookup was made.
+
+**The notes.** A claims check (`wf_4a001e16-be8`: a reader and a skeptic) rewrote five sentences and added two: the automatic restart's two outcomes for a playing channel this version refuses or cannot look up (stopped with a card; or played on, fed nothing, until the next change of channel -- read in Service.qml and Model.olderRestartDisposition, `spent` gives `defer`, no loop); the proxy-class fix applies from a source's next download (DESTINATION_RULES unchanged); the lookup's cost restated without an unmeasured cache claim, with the loopback relay's named channels; the local-address refusal's start and zap routing; the proxy-only cost narrowed to what the code refuses; the proxy residuals as a known limitation; and in the README the Status sentence narrowed to internet playlists, and the Limits paragraph saying play-time refusals stay in the guide uncounted and naming the lookup-failure card.
+
+**key-scenario live** (`scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, under the heavy lock), on the same tree: **139 passed, 0 failed** in 561.7 s, 07:57:20 to 08:06:43 CST, load 2.24 at the end. Crash journal 87 before and after. Transcript `/run/user/1000/omarchy-iptv-key/transcripts/key-20261113-075721-2994103.out` (0600; 139 PASS, 0 FAIL). The README's "(139 checks, 2026-11-13)" rests on this run.
+
+**Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line 0.19.1; `premise_exception_problems` returns []; origin `main` 34fac24 equals the local `main`; no v0.19.1 tag.
+
+**The open requests.** #14817 (`[Verify]: IPTV 0.19.0`, the request the finding was raised on) stays open, unapprovable once `main` moves; #14290, #13611 and #12636 stay open as filed (F-M3-4). The owner asked for 0.19.1's own request and a reply on #14817 once fixed (2026-11-13).
