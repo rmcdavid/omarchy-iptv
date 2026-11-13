@@ -2951,8 +2951,9 @@ def host_class(host: Any) -> str:
     """The class of a URL host: a numeric literal's address_class,
     `loopback` for `localhost` and every `*.localhost` name (RFC 6761: they
     resolve to this machine), "" for any other name, whose class only a
-    lookup can tell (the connect-time check makes that lookup; a stream
-    host's lookup is mpv's, and the residual is stated in
+    lookup can tell (the connect-time check makes that lookup; a cached
+    channel's host is looked up at play time, stream_lookup_refusal, and
+    the player looks it up again, which is the rebinding residual stated in
     ARCHITECTURE-PLAYER)."""
     text = str(host or "").strip().lower()
     if text in _LOCALHOST_NAMES or text.endswith(".localhost") or text.endswith(".localhost."):

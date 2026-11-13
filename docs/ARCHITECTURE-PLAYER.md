@@ -553,7 +553,13 @@ one more request). model/player.mjs carries the arithmetic and
 tests/fixtures/player-bounds.json its result; tests/test_player_bounds.py walks
 the shipping verbs' long paths under a virtual clock, each wait at the bound
 the code itself sets, and holds each inside its watchdog less the margin
-(start 38.07 s, restart 41.12 s, probe 6 s). Not summed: every other IPC request at its 2 s bound -- a request
+(start 38.07 s, restart 41.12 s, probe 6 s). [2026-11-13, D-SINK-101: a
+start and a restart each begin with the play-time lookup of a cached
+channel's host name, 3 s at its bound and survived when answered just
+inside it, so start 50.25 s and restart 49.45 s (restart on adoption's
+carry had already made start 47.25 s); walked, the lookup spent at the
+bound the code hands `resolve_within`: start 41.07 s, a start that replaces
+another build's player 45.05 s, restart 44.05 s.] Not summed: every other IPC request at its 2 s bound -- a request
 that reaches its bound raises and ends the verb, so only an mpv answering
 each of a start's twenty-odd requests just inside 2 s could run past it.
 (2) That residual, and anything else that runs past, is recovered rather than
@@ -3492,6 +3498,61 @@ one, made FFmpeg open listeners the protocol list had to admit.
   [2026-11-09, D-SINK-89: a name of ONE label from a playlist that is not
   local is refused before the player is handed it, at the parse and at
   play; a dotted name still resolves where it resolves.]
+  **[2026-11-13, D-SINK-101: the pre-resolve is made, at play time, in
+  `player_target` rather than `apply_channel`, and this item narrows to
+  what it cannot reach.** The marketplace maintainer raised the item
+  against 0.19.0 (#14817): an ordinary dotted name a remote playlist
+  chose, resolving to loopback or the LAN, sent the player's requests to a
+  local service with no rebinding, and the provider-run 302 above is no
+  reason to leave the static case open. The owner: fix it now. A cached
+  channel's host NAME is looked up by the helper (`stream_resolve`, through
+  `resolve_within`, under `STREAM_LOOKUP_TIMEOUT_S` = 3 s) and every
+  address the answer holds is judged by the rule a literal meets
+  (`_class_refusal`): one refused address refuses the channel as
+  `local_address`, and a name that cannot be looked up in time, or that
+  answers nothing, is refused as `unchecked_address` -- a slow answer to
+  the helper and a fast one to the player would otherwise be a free pass.
+  Asked last, after every older rule, so a name D-SINK-83 or D-SINK-89
+  keeps from the resolver stays kept; asked as the player asks it (as
+  written, a name that is not ASCII as its UTF-8 bytes, which reach the
+  resolver with no idna codec, as FFmpeg's getaddrinfo has no AI_IDN);
+  never for a literal, a typed `--url`, or a local file or LAN playlist.
+  [The review of the first fix (5f46d7c), the lead's call under the
+  owner's standing authority of 2026-11-09: a remote playlist's OWN host
+  is asked too. Skipping it let one record set on the provider's own name
+  -- 127.0.0.1 or ::1 beside a public address -- have the fetch fall
+  through to the public address and record the source as public, while
+  the player tried loopback first, at any port, with the sign-in headers
+  the own host keeps. Each answer for the own host must now be global or
+  of the class the fetch connected to (`sourceClass`: global for a remote
+  playlist), which is what `DestinationPolicy.permits` requires of a
+  redirect to it; any other refuses the channel as `local_address`. One
+  pass, a residual: a source fetched through a proxy (`unresolved`) whose
+  own-host lookup fails plays as before, so a proxy-only network keeps its
+  own-host channels. And behind a proxy the first hop's class is GLOBAL
+  whenever the name answers a global address (`check_proxied`): it was the
+  answer's non-global class whenever any answer was not global (since
+  D-SINK-40), so a provider's own name answering a loopback or LAN address
+  beside its public one made the source local, and its list could name this
+  machine and the LAN, with no rebinding; cost: a typed LAN name that also
+  answers a public address reads, behind a proxy, as a remote source.] What the user sees: on a start, `local_address` is
+  a card and the channel marked failed, as D-SINK-89's are, and
+  `unchecked_address` a card with nothing marked; on a zap into a running
+  player both are D-PLY-42's untold refusal (the label put back, nothing
+  told or marked). What stays open: (a) the player resolves the
+  name AGAIN, so a name that answers the helper with a global address and
+  the player, a moment later, with a local one (DNS rebinding) is not
+  caught; the helper cannot pin the address it checked, because an https
+  stream's certificate is checked against the name and a URL rewritten to
+  the address fails it; (b) the FFmpeg redirect above, unchanged; (c) HLS
+  and DASH segment hosts, the next item; (d) a proxy (`--http-proxy` or
+  the environment's), which resolves the name on its own side, so the
+  helper's answer is this machine's resolver's only -- through a proxy the
+  target is judged by its name, as the fetches' `check_proxied` judges
+  it. Its cost: behind a proxy with no working local DNS, every channel
+  off the playlist's own host is refused as `unchecked_address`, as
+  `check_proxied` refuses a target the playlist chose that it cannot
+  resolve.]
 - **HLS variant and segment URLs.** FFmpeg's hls demuxer fetches them
   itself; measured, it opens only http(s), file and data URLs (an HLS-shaped
   playlist whose "segments" were `udp://0.0.0.0:P` and `rtp://0.0.0.0:P`

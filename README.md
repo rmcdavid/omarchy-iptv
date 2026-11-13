@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.19.0. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.19.1. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -44,7 +44,9 @@ username or password in a playlist or a guide in more of the odd ways a
 provider can write one, reads a Sources form address to a screen reader as
 no more than its scheme and host, and refuses a host name holding a
 character no host name may hold before the helper looks it up or hands it
-to the player.
+to the player. 0.19.1 also looks up the server name of a channel from a
+playlist on the internet when you play it, and refuses the channel if the
+name leads to this computer or your local network.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -294,7 +296,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (139 checks, 2026-11-12).
+  branch (139 checks, 2026-11-13).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -1059,23 +1061,34 @@ carry channel ids — most do — are not affected at all.
   point channels at addresses on this computer or your local network
   written out as such, nor at a host name of a single word, such as
   `tvheadend`, other than its own server's (a playlist from your own
-  network or a file may; the player looks up a channel's host name itself,
-  so a name with a dot in it that leads there is not caught), and a
+  network or a file may; a channel's host name, its own server's
+  included, is looked up and checked when you play the channel, and
+  refused if it leads there or cannot be looked up within 3 seconds --
+  behind a proxy with no working DNS on this computer, that is every
+  channel not on the playlist's own server; a name that answers
+  differently a moment later, when the player looks it up again, is not
+  caught), and a
   sign-in header it
   sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
   only for channels on the playlist's own server -- on this computer, its
   own port. A playlist served from this computer (a relay such as Threadfin
   or xTeVe on `127.0.0.1`) may name channels on your network, but its
   channels on this computer must be on the relay's own port; one on another
-  port is another program's, and is skipped. Each is counted in the guide
-  footer's `Playlist warning: ...`.
+  port is another program's, and is skipped. Each skipped channel is
+  counted in the guide footer's `Playlist warning: ...`. A channel whose
+  server name is looked up when you play it -- one from a playlist on the
+  internet, or one a relay names by a server name, which is refused if the
+  name leads to this computer on another port -- stays in the guide and is
+  not counted.
   A channel list saved by an earlier version is checked the same way when
   you play a channel from it, so a list whose first refresh after the
-  update failed cannot reach these addresses either. When such a channel
-  is the one that starts the player, its failure card says
-  `Refused a local address`; as a change of channel while another plays,
-  the player simply stays where it was, with a line in the shell's journal
-  and no card.
+  update failed cannot reach these addresses either. When such a channel,
+  or one refused for where its name leads, is the one that starts the
+  player, its failure card says `Refused a local address`; when its name
+  cannot be looked up within 3 seconds, a `Could not start playback` card
+  says `Could not look up the stream's address` and marks nothing; as a
+  change of channel while another plays, the player simply stays where it
+  was, with a line in the shell's journal and no card.
 - A channel whose server answers with a playlist instead of a stream -- a
   plain `.m3u` or `.pls` "redirector" -- is not played: its entries were
   never checked by any of the above, and could make the player listen on

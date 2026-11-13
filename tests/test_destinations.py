@@ -654,6 +654,36 @@ class ProxyTest(unittest.TestCase):
         parsed = helper.parse_m3u(["#EXTM3U", "#EXTINF:-1,L", "http://10.0.0.5/x", "#EXTINF:-1,P", "http://cdn.example.test/x"], source)
         self.assertEqual([c["name"] for c in parsed["channels"]], ["P"])
 
+    def test_a_typed_first_hop_answering_a_public_address_is_no_local_source(self):
+        """D-SINK-101, the round-2 check's finding (a rule-15 sibling, in the
+        code since D-SINK-40): behind a proxy the typed first hop's class was
+        its answer's NON-global class whenever any answer was not global, so
+        a provider's own name answering a loopback or LAN address beside its
+        public one made the source LOCAL, and its list could then name this
+        machine and the LAN. The proxy fetches from an address that works --
+        the public one -- so an answer holding a global address is a remote
+        source: its LAN literals are skipped and its own host is held to
+        what a remote source's own host may answer (stream_lookup_refusal)."""
+        for answer in (("127.0.0.1", "93.184.216.34"), ("10.0.0.1", "93.184.216.34"), ("93.184.216.34", "::1")):
+            def lookup(host, port, timeout, answer=answer):
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (a, port)) for a in answer]
+            policy = helper.DestinationPolicy("playlist", "user")
+            with mock.patch.object(helper, "resolve_within", lookup):
+                policy.check_proxied("prov.example.test", 443, 5, policy.begin_hop())
+            self.assertEqual((policy.first_class, policy.last_class), ("global", "global"), answer)
+            source = helper.playlist_source("https", "https://prov.example.test/list.m3u", policy.last_class)
+            self.assertFalse(source["local"], answer)
+            parsed = helper.parse_m3u(["#EXTM3U", "#EXTINF:-1,L", "http://192.168.1.1/admin", "#EXTINF:-1,P", "http://cdn.example.test/x"], source)
+            self.assertEqual([c["name"] for c in parsed["channels"]], ["P"], answer)
+        # With no global answer the class is still the non-global one: a typed
+        # LAN name that answers only LAN addresses stays a local source.
+        def lan(host, port, timeout):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", port))]
+        policy = helper.DestinationPolicy("playlist", "user")
+        with mock.patch.object(helper, "resolve_within", lan):
+            policy.check_proxied("tvh.example.test", 80, 5, policy.begin_hop())
+        self.assertEqual(policy.last_class, "private")
+
     def test_a_typed_first_hop_through_the_proxy_is_fetched(self):
         target = "http://192.0.2.10/pl.m3u"
         proxy = LoggingServer({target: (200, (), PLAYLIST)})

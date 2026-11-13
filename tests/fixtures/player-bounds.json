@@ -18,12 +18,16 @@
     "  ladder(\"term\") = killGraceMs + 2 settleMs                               = 3000",
     "  spawn          = settleConnectMs + spawnPidMs + 2 spawnMs + 2i          = 200 + 2000 + 10000 + 4000 = 16200",
     "  tail           = max(ladder(\"term\") + settleConnectMs, i + firstLoadMs) = max(3200, 5000) = 5000",
-    "  start   = lockMs + lockPollMs + 2i + carry + ladder(\"\") + spawn + tail + marginMs = 6050 + 4000 + 4000 + 7000 + 16200 + 5000 + 5000 = 47250",
+    "  start   = lookupMs + lockMs + lockPollMs + 2i + carry + ladder(\"\") + spawn + tail + marginMs",
+    "                                                 = 3000 + 6050 + 4000 + 4000 + 7000 + 16200 + 5000 + 5000 = 50250",
     "  (carry = 2i, restart on adoption, 2026-11-01: a found player ANOTHER build launched answers its probe and is",
     "  replaced, not adopted -- its volume, mute, fullscreen and pause read inside one ipcMs, the three set on the new",
     "  player inside another; walked at 42.07 s against the 38.25 s 43250 left, lane RA's M9.)",
-    "  restart = lockMs + lockPollMs + ladder(\"term\") + settleConnectMs + 2i + ladder(\"\") + spawn + tail + marginMs",
-    "                                                                         = 6050 + 3000 + 200 + 4000 + 7000 + 16200 + 5000 + 5000 = 46450",
+    "  restart = lookupMs + lockMs + lockPollMs + ladder(\"term\") + settleConnectMs + 2i + ladder(\"\") + spawn + tail + marginMs",
+    "                                                  = 3000 + 6050 + 3000 + 200 + 4000 + 7000 + 16200 + 5000 + 5000 = 49450",
+    "  (lookupMs, D-SINK-101, 2026-11-13: player_target looks a cached channel's host name up before the lock; a",
+    "  lookup answered just inside its bound is survived, one that reaches it refuses the channel, so a start and a",
+    "  restart each sum it once; the walk spends it at the bound the code hands resolve_within.)",
     "  (a restart's own ladder can leave a player in uninterruptible sleep, and adopt_or_spawn then meets it as a",
     "  start does: probed and laddered from quit. Corrected by the recheck from 35450, which left that path out.)",
     "  probe   = max(3i, settleLockMs + lockPollMs + settleConnectMs) + marginMs = max(6000, 750) + 5000 = 11000",
@@ -43,7 +47,8 @@
     "killGraceMs": 2000,
     "settleMs": 500,
     "settleConnectMs": 200,
-    "settleLockMs": 500
+    "settleLockMs": 500,
+    "lookupMs": 3000
   },
   "names": {
     "lockMs": ["DEFAULT_LOCK_TIMEOUT", "s"],
@@ -56,12 +61,13 @@
     "killGraceMs": ["STOP_KILL_GRACE_MS", "ms"],
     "settleMs": ["STOP_SETTLE_MS", "ms"],
     "settleConnectMs": ["SETTLE_CONNECT_TIMEOUT", "s"],
-    "settleLockMs": ["SETTLE_LOCK_TIMEOUT", "s"]
+    "settleLockMs": ["SETTLE_LOCK_TIMEOUT", "s"],
+    "lookupMs": ["STREAM_LOOKUP_TIMEOUT_S", "s"]
   },
   "marginMs": 5000,
   "watchdogMs": {
-    "start": 47250,
-    "restart": 46450,
+    "start": 50250,
+    "restart": 49450,
     "probe": 11000,
     "": 12000
   },

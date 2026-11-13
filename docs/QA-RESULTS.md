@@ -19037,3 +19037,111 @@ Seven commits on a8e8174 (branch `worktree-wf_66d4d44f-9c8-1`), merged onto f2d7
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.19.0; `premise_exception_problems` returns []; origin `main` ce68db5 equals the local `main`; no v0.19.0 tag locally or on the remote.
 
 **The open requests.** #14290 (`[Verify]: IPTV 0.18.0`, re-pointed to ce68db5 on 2026-11-09) is OPEN, `validated` and `plugin-update`; #12636 and #13611 stay open as filed. Moving `main` leaves #14290 unapprovable as filed; it is not closed (F-M3-4). The owner asked for 0.19.0's own request with the cut (2026-11-12).
+
+### D-SINK-101: a channel's host name is looked up and judged before the player is handed it (the lane dsink101, 2026-11-13)
+
+The marketplace maintainer on omacom/omarchy-plugin-marketplace#14817,
+against 0.19.0 (34fac24): a remote playlist could name a dotted host whose
+DNS answers loopback or a private address, and `player_target` passed it
+because every rule classed only a literal as written. Fixed on dev
+(branch dsink101 from e17fc04), unreleased; the owner's word of 2026-11-13:
+fix it now and cut 0.19.1.
+
+**No real resolver was asked, by any run below.** Every test of the new
+check states its resolver: `stream_resolve` replaced by a recorded
+stand-in, or `socket.getaddrinfo` by a double for the shipping lookup's own
+path. The rest of the suite runs under the loader's stand-in
+(`suite_stream_resolve`, which answers a global address for the one
+play-time lookup). Before the new module existed, one full python run was
+made with the shipping `stream_resolve` replaced by a probe that records
+the name and raises instead of looking it up, to find any test, in process
+or as a subprocess, that reaches the lookup outside the stand-in: none did
+(2,382 tests, the probe's log empty).
+
+**Red first.** `tests/test_stream_lookup.py` (15 tests) copied onto an
+export of e17fc04, with the new loader: 12 red (25 failures counting
+subtests, 2 errors); the 3 that pass there are controls of what already
+held (a local file or LAN playlist is never asked, literals and typed
+addresses are never asked, a name an older rule refuses is never looked
+up). On the fix: 15 green. The node check of the new sentence
+(`unchecked_address`, "Could not look up the stream's address", local)
+against e17fc04's `model/settings.mjs`: 3696 checks, 1 failure; on the fix
+0. The player-bounds walk with the lookup spent at its bound, against
+e17fc04's fixture: 2 red (a start that replaces another build's player
+walked 45.05 s against 42.25, a restart 44.05 against 41.45); on the
+fix's fixture (start 50.25 s, restart 49.45 s) green: start 41.07 s,
+replace 45.05 s, restart 44.05 s.
+
+**Mutants**, each one decision of the shipping code, the module run on a
+sealed copy of the tree; all 12 red:
+
+| Mutant | Red |
+|---|---|
+| M1 a resolved refusal not raised (player_target) | 17 failures, 7 tests |
+| M2 only the first answer judged | 2 failures |
+| M3 a failed lookup passes | 7 failures, 3 tests |
+| M4 an empty answer passes | 1 |
+| M5 a loopback relay's channel never asked | 1 |
+| M6 the playlist's own host looked up | 1 |
+| M7 the name asked lower-cased, always as str | 1 |
+| M8 the lookup's bound the fetches' 20 s | 1 |
+| M9 an unchecked name refused as `local_address` | 8 failures, 3 tests |
+| M10 the lookup asked before the label rule | 15 failures, 7 tests |
+| M11 `resolve_within` reads a bytes name as `str()` | 1 error |
+| M12 `stream_resolve` hands `resolve_within` 20 s | 2; the module took 20.27 s |
+
+M12 is the stub measurement behind the bound: with the fetches' 20 s, a
+lookup that never answers held `player_target` 20 s, past the shell's 8 s
+watchdog over one `play` (Service.qml, `controlTimeoutMs`). With 3 s and
+the zap's own 2 s connect a `play` stays inside it; the outliving test
+holds a 0.3 s bound to between 0.29 and 2 s.
+
+**Rule 15, every path that hands the player a URL.** The only `loadfile`
+is `apply_channel` (bin/helper/08-player-verbs.py, the `client.command(
+"loadfile", ...)` line), and its two callers take their target from
+`player_target`, which runs the check last for every cached channel:
+`play` (`cmd_play`, 06-failed.py) and `player start|restart`
+(`player_start`, 08-player-verbs.py), which serves the first play, a
+channel change that replaces another build's player, the automatic restart
+on adoption (`--keep-pause`), the shell's re-establish of an adopted or
+migrated player (`reestablishAdopted` and `reapplyIntent` send `player
+start` or `play`), and the health path's `player restart`. The stash
+(`player_stash`) holds no URL; picture in picture sends the player
+properties over the socket and never a load; the shell sends no `loadfile`
+(searched: no `loadfile` command in any shipped QML or model file, only
+comments); the launch argv carries no URL (S-03). The wire test runs
+`play`, `player start`, `player start --keep-pause` and `player restart`
+against a FakeMpv, each over a name answering loopback (`local_address`),
+one that cannot be looked up (`unchecked_address`) and one answering a
+global address (loaded): only the last was ever loaded, once a path, and no
+refused name reached a command. Searched for siblings by shape: every
+other caller of a host's class (`_host_refusal` at the parse,
+`stream_host_refused` at play, `drop_sign_in_headers`) judges a literal
+or a name as written and hands nothing to a resolver; the fetches already
+judge every address they connect to (`DestinationPolicy` in
+`bounded_create_connection`).
+
+**F-HARNESS-108**, found by the first full run: the memory-limit test of
+an ordinary guide passed at every limit from 2 to 10 MiB on the fix and
+refused at all of them on e17fc04, because `epg-basic.xml`'s day had left
+the guide window and the parse kept no programme. The test now writes an
+in-window guide (50 channels, 1,400 programmes, about 220 KB): refused
+under 8 MiB on both trees, parsed whole without the limit.
+
+**What stays open**, stated in the code, the board row and
+ARCHITECTURE-PLAYER 19.2: DNS rebinding (the player resolves the name
+again), an HTTP redirect the stream server sends and HLS and DASH segment
+hosts (FFmpeg follows them itself), and a proxy (which resolves the name
+on its own side).
+
+### 0.19.1 pre-cut record (2026-11-13): the gate and the release recipe's live run on the final tree
+
+**Tree.** Branch `dsink101` over `dev` e17fc04 (0.19.0): D-SINK-101's 5f46d7c (a channel's stream host name looked up at play time, every answer judged by the literal rule, a failed lookup refused), 8804d96 (the review's own-host gap: a remote playlist's own host asked too, each answer global or of its fetch's class; the zap, start and proxy routing stated; the decisions row) and bf2c0df (the check of 8804d96: `check_proxied` records a proxied first hop answering a global address as global, red on 8804d96), plus the version bump with the release notes (manifest, `Model.PLUGIN_VERSION`, the CHANGELOG's 0.19.1 section, the README Status sentence and two README Limits sentences), uncommitted while measured. Every test of the lookup uses a stubbed resolver; no real lookup was made.
+
+**The notes.** A claims check (`wf_4a001e16-be8`: a reader and a skeptic) rewrote five sentences and added two: the automatic restart's two outcomes for a playing channel this version refuses or cannot look up (stopped with a card; or played on, fed nothing, until the next change of channel -- read in Service.qml and Model.olderRestartDisposition, `spent` gives `defer`, no loop); the proxy-class fix applies from a source's next download (DESTINATION_RULES unchanged); the lookup's cost restated without an unmeasured cache claim, with the loopback relay's named channels; the local-address refusal's start and zap routing; the proxy-only cost narrowed to what the code refuses; the proxy residuals as a known limitation; and in the README the Status sentence narrowed to internet playlists, and the Limits paragraph saying play-time refusals stay in the guide uncounted and naming the lookup-failure card.
+
+**key-scenario live** (`scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, under the heavy lock), on the same tree: **139 passed, 0 failed** in 561.7 s, 07:57:20 to 08:06:43 CST, load 2.24 at the end. Crash journal 87 before and after. Transcript `/run/user/1000/omarchy-iptv-key/transcripts/key-20261113-075721-2994103.out` (0600; 139 PASS, 0 FAIL). The README's "(139 checks, 2026-11-13)" rests on this run.
+
+**Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line 0.19.1; `premise_exception_problems` returns []; origin `main` 34fac24 equals the local `main`; no v0.19.1 tag.
+
+**The open requests.** #14817 (`[Verify]: IPTV 0.19.0`, the request the finding was raised on) stays open, unapprovable once `main` moves; #14290, #13611 and #12636 stay open as filed (F-M3-4). The owner asked for 0.19.1's own request and a reply on #14817 once fixed (2026-11-13).

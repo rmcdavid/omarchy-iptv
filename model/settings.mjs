@@ -382,6 +382,12 @@ function statusReason(status) {
     // it keeps `from <host>` (off PROBE_LOCAL_REFUSALS); the helper's own
     // message names the refused host and is the journal's.
     local_address: "Refused a local address",
+    // D-SINK-101 (2026-11-13): player_target could not look a cached
+    // channel's host name up within its bound, so it could not check where
+    // the name leads and did not hand it to the player. Names no host; the
+    // helper's own sentence is the journal's. Local (playerStartFailure):
+    // a resolver that is down or slow is no verdict on the channel.
+    unchecked_address: "Could not look up the stream's address",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
