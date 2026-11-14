@@ -230,8 +230,21 @@ function mpvArgWarnings(tokens) {
 // is option-shaped, else the fixed word `<token>`. An option-shaped name
 // that was refused is reserved (that is the only way splitMpvArgs refuses
 // one), so the sentence says so; a `<token>` is not an option at all.
+// [D-PLY-50: a token refused for the setting's LENGTH is not handed to this
+// sentence; it gets mpvArgsTooLongWarning's one line instead.]
 var MPV_REFUSED_TEXT = " refused: reserved by the plugin"
 var MPV_REFUSED_JUNK_TEXT = " refused: not a --option"
+
+// D-PLY-50 (2026-11-13). Every private helper argument shares ONE environment
+// string (helperSpawn, D-SINK-47), and the kernel refuses an exec whose
+// single string is longer than 128 KiB (MAX_ARG_STRLEN; the helper's
+// ARGS_ENV_MAX): a setting whose tokens total more would make every player
+// start fail at exec, with nothing saying why. So the tokens get half of it,
+// counted as the bytes they will occupy there -- each one as the JSON string
+// helperSpawn writes for its `--mpv-arg=TOKEN` member, in UTF-8, plus its
+// comma -- and the other half stays for the cache directory, the channel id,
+// the scope and the owner token. Read, not measured through Quickshell.
+var MPV_ARGS_ENV_BUDGET = 65536
 
 function mpvRefusedWarning(token) {
   var name = mpvRejectedName(token)
@@ -267,6 +280,9 @@ function mpvRefusedWarnings(rejected) {
 function splitMpvArgs(text) {
   var args = []
   var rejected = []
+  var shaped = []
+  var spent = 0
+  var over = 0
   var parts = str(text).split(/\s+/)
   for (var i = 0; i < parts.length; i++) {
     var token = parts[i]
@@ -283,10 +299,46 @@ function splitMpvArgs(text) {
         // D-SINK-47: a token now becomes one line of the player's options
         // file, and a line break, a NUL or a lone surrogate cannot be carried
         // on one (mpvTokenWritable).
-        || !mpvTokenWritable(token)) rejected.push(token)
-    else args.push(token)
+        || !mpvTokenWritable(token)) {
+      rejected.push(token)
+      shaped.push(token)
+      continue
+    }
+    // D-PLY-50: the kept tokens must fit the one environment string they
+    // travel in. Once one does not, it and every token after it are refused:
+    // mpv reads options in order, so a later one kept past a gap would apply
+    // without the ones written before it.
+    // (`spent` stops growing at the first one, so it stays past the budget.)
+    if (over === 0) spent += mpvArgEnvCost(token)
+    if (spent > MPV_ARGS_ENV_BUDGET) {
+      over++
+      rejected.push(token)
+    } else args.push(token)
   }
-  return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
+  var warnings = mpvRefusedWarnings(shaped)
+  if (over > 0) warnings.push(mpvArgsTooLongWarning(over))
+  return { args: args, rejected: rejected, warnings: warnings.concat(mpvArgWarnings(args)) }
+}
+
+function mpvArgEnvCost(token) {
+  // The literal is HELPER_PRIVATE_ATTACHED, which is declared below this
+  // function (a var may not be named above its declaration in a part); the
+  // node suite holds this count to the string helperSpawn really writes.
+  var text = JSON.stringify("--mpv-arg=" + str(token))
+  var bytes = 1
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i)
+    if (c < 0x80) bytes += 1
+    else if (c < 0x800) bytes += 2
+    else if (c >= 0xd800 && c < 0xdc00) { bytes += 4; i++ }
+    else bytes += 3
+  }
+  return bytes
+}
+
+function mpvArgsTooLongWarning(count) {
+  var n = Math.floor(Number(count) || 0)
+  return "mpvArgs is too long: the last " + n + (n === 1 ? " option is" : " options are") + " not used (limit 64 KiB)"
 }
 
 // D-SINK-47: whether one token can be one line of the player's options file:
@@ -1078,16 +1130,17 @@ export {
   MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
   mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
   mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
-  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvTokenWritable,
-  demuxerNamesTls, scriptOptsRefused, mpvRejectedLine, mpvRejectedName,
-  headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
-  PLAYER_BUILD_KEY, PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN,
-  mpvBuildMarker, buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV,
-  HELPER_ARGS_FLAG, HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST,
-  HELPER_PRIVATE_ATTACHED, helperSpawn, cacheRunArgv, playlistFetchArgv,
-  fetchStateDir, playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV,
-  fetchEnvironment, failedArgv, logoFetchArgv, playerTracksArgv, trackChoice,
-  parseTracks, LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  MPV_ARGS_ENV_BUDGET, mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs,
+  mpvArgEnvCost, mpvArgsTooLongWarning, mpvTokenWritable, demuxerNamesTls,
+  scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, PLAYER_BUILD_KEY,
+  PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN, mpvBuildMarker, buildMpvArgv,
+  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
+  helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
   trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
   trackPanelMessage, trackAccessibleName
 }

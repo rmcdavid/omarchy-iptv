@@ -6104,6 +6104,35 @@ check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--sc
 check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
 check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: ["mpvArg <token> refused: not a --option"] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
+// D-PLY-50: the kept tokens must fit the one environment string every
+// private helper argument shares. Each check calls splitMpvArgs, and the
+// byte count is held to what helperSpawn really writes.
+{
+  const envOf = tokens => Model.helperSpawn(tokens.map(t => "--mpv-arg=" + t), {}).environment[Model.HELPER_ARGS_ENV]
+  const mixed = ["--a=plain", "--b=q\"uote", "--c=back\\slash", "--d=caf" + String.fromCharCode(0xe9), "--e=" + String.fromCharCode(0x20ac), "--f=" + String.fromCodePoint(0x1f600), "--g=tab" + String.fromCharCode(9) + "x", "--h=" + String.fromCharCode(0x7f)]
+  check("D-PLY-50: a token's cost is its bytes in the string helperSpawn writes", mixed.reduce((n, t) => n + Model.mpvArgEnvCost(t), 0) + 1, Buffer.byteLength(envOf(mixed), "utf8"))
+  check("D-PLY-50: each cost alone, too", mixed.map(t => Model.mpvArgEnvCost(t)), mixed.map(t => Buffer.byteLength(envOf([t]), "utf8") - 1))
+  // "--x=" + 1,000 letters costs 2 quotes + 10 + 1,004 + 1 comma = 1,017 bytes
+  const unit = "--x=" + "v".repeat(1000)
+  check("D-PLY-50: the unit token's cost", Model.mpvArgEnvCost(unit), 1017)
+  const whole = Math.floor(Model.MPV_ARGS_ENV_BUDGET / 1017)
+  const rest = Model.MPV_ARGS_ENV_BUDGET - whole * 1017
+  const filler = "--y=" + "w".repeat(rest - 17)
+  check("D-PLY-50: the filler lands on the budget exactly", whole * 1017 + Model.mpvArgEnvCost(filler), Model.MPV_ARGS_ENV_BUDGET)
+  const exact = Model.splitMpvArgs(Array(whole).fill(unit).concat([filler]).join(" "))
+  check("D-PLY-50: a setting that fills the budget exactly is kept whole", [exact.args.length, exact.rejected, exact.warnings], [whole + 1, [], []])
+  const one = Model.splitMpvArgs(Array(whole).fill(unit).concat([filler + "w"]).join(" "))
+  check("D-PLY-50: one byte more and the last option is refused and told", [one.args.length, one.rejected, one.warnings],
+    [whole, [filler + "w"], ["mpvArgs is too long: the last 1 option is not used (limit 64 KiB)"]])
+  const tail = Model.splitMpvArgs(Array(whole + 1).fill(unit).concat(["--hwdec=no", "--title=t", "--ytdl=yes"]).join(" "))
+  check("D-PLY-50: every option after the first that does not fit is refused, small ones too", [tail.args.length, tail.rejected.length, tail.args.indexOf("--hwdec=no"), tail.args.indexOf("--ytdl=yes")], [whole, 4, -1, -1])
+  check("D-PLY-50: the length line counts them, after the reserved lines and with no warning for an option that is not used", tail.warnings,
+    ["mpvArg --title refused: reserved by the plugin", "mpvArgs is too long: the last 3 options are not used (limit 64 KiB)"])
+  check("D-PLY-50: the journal line names them by option name only", Model.mpvRejectedLine(one.rejected), "omarchy-iptv: ignoring mpvArgs tokens: --y")
+  const start = Model.helperSpawn(Model.playerStartArgv("/run/s", "/c/" + "d".repeat(4000), "u:" + "0".repeat(64), 7, "g:" + "s".repeat(4000), 0, tail.args, 4242, false, "t".repeat(64)), {})
+  check("D-PLY-50: a start built from an over-long setting fits the kernel's one-string bound", Buffer.byteLength(Model.HELPER_ARGS_ENV + "=" + start.environment[Model.HELPER_ARGS_ENV], "utf8") < 131072, true)
+  check("D-PLY-50: an ordinary setting is untouched", Model.splitMpvArgs("--profile=low-latency --hwdec=no"), { args: ["--profile=low-latency", "--hwdec=no"], rejected: [], warnings: [] })
+}
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
 // ---- the detached launch argv (M2-02, ARCHITECTURE-PLAYER.md 6 / S-03) ----
