@@ -143,6 +143,11 @@ with the reason. What was measured, in short:
   * `option-info/<opt>/set-from-commandline` is True for an option any token
     on the argv named, in any of those forms, and stays what it was through a
     runtime set_property; an option mpv does not have is `property not found`.
+  * (F-HARNESS-81, measured 2026-11-14) an `--include=<file>` token is read
+    at its place on the argv: the options the file names apply there, a
+    later token for the same option wins, each answers set-from-commandline,
+    and a missing file applies nothing. The two line forms the helper writes
+    are modelled (expand_includes).
   * a flag takes true/false and the strings "yes"/"no", and the EMPTY string
     as "yes"; any other string is `unsupported format for accessing
     property`, a number or null `error accessing property`.
@@ -388,6 +393,52 @@ def string_form(name, value):
     return value
 
 
+def expand_includes(argv):
+    """`argv` with every `--include=<file>` token replaced, where it stands,
+    by the tokens the file holds (F-HARNESS-81). The helper hands a user's
+    mpvArgs to mpv in such a file (D-SINK-47): `name` on a line is `--name`,
+    and `name=%N%value` is `--name=value`, the value being the next N bytes
+    of UTF-8, which must be the whole rest of the line. Measured on mpv
+    0.41.0, headless, 2026-11-14:
+    the file is read at the token's place, so a later token for the same
+    option wins and an earlier one loses; every option it names answers
+    set-from-commandline; a file that is missing applies nothing and does
+    not stop the start. Only the two forms the helper writes are modelled:
+    any other line (a comment, a profile header, a plain or quoted value)
+    is skipped, as is an include inside the file."""
+    out = []
+    for arg in argv:
+        if not arg.startswith("--include="):
+            out.append(arg)
+            continue
+        try:
+            with open(arg.split("=", 1)[1], "rb") as handle:
+                data = handle.read()
+        except OSError:
+            continue
+        for raw in data.split(b"\n"):
+            name, eq, rest = raw.partition(b"=")
+            try:
+                if not name or not eq:
+                    if name and not name.startswith((b"#", b"[")):
+                        out.append("--" + name.decode("utf-8"))
+                    continue
+                if not rest.startswith(b"%"):
+                    continue
+                count, mark, tail = rest[1:].partition(b"%")
+                # The line is the value and nothing more: one that runs past
+                # its N bytes is refused whole, and the lines after it still
+                # apply (measured).
+                if not mark or not count.isdigit() or len(tail) != int(count):
+                    continue
+                token = "--%s=%s" % (name.decode("utf-8"), tail.decode("utf-8"))
+            except UnicodeDecodeError:
+                continue
+            if not token.startswith("--include="):
+                out.append(token)
+    return out
+
+
 def read_argv(argv):
     """The modelled options as a player launched with `argv` holds them, and
     the set of options any token named (option-info's set-from-commandline).
@@ -396,7 +447,7 @@ def read_argv(argv):
     value mpv would refuse is skipped here; mpv itself would refuse to start."""
     values = dict((name, copy_value(default)) for name, (_, default) in OPTIONS.items())
     named = set()
-    for arg in argv:
+    for arg in expand_includes(argv):
         if not arg.startswith("--"):
             continue
         name, sep, value = arg[2:].partition("=")
@@ -1569,6 +1620,56 @@ def self_test():
             for option in ("prefetch-playlist", "load-console", "load-osd-console"):
                 self.assertEqual(older.get("option-info/%s/set-from-commandline" % option), (False, None), option)
             self.assertEqual(older.get("load-console"), (True, None))
+
+        def test_an_include_file_is_applied_at_its_place_on_the_argv(self):
+            # F-HARNESS-81. The helper hands the user's mpvArgs to mpv in an
+            # options file an --include names (D-SINK-47), and this stub
+            # ignored the token, so a stub run applied none of them. Measured
+            # on mpv 0.41.0, headless, 2026-11-14: the file is read where the
+            # token stands, a later token for the same option wins and an
+            # earlier one loses, every option it names answers
+            # set-from-commandline, and a file that is missing applies
+            # nothing and does not stop the start.
+            import tempfile
+            work = tempfile.mkdtemp(prefix="stub-include-")
+            try:
+                opts = os.path.join(work, "opts")
+                with open(opts, "w", encoding="utf-8") as handle:
+                    handle.write("osd-playlist-entry=%8%filename\nno-prefetch-playlist\nload-select=%2%no\n")
+                token = "--include=" + opts
+
+                def read(*argv):
+                    stub = Stub("/nonexistent/include.sock", clock=FakeClock(), argv=list(argv))
+                    return [(stub.get(name)[0], stub.get("option-info/%s/set-from-commandline" % name)[0])
+                            for name in ("osd-playlist-entry", "prefetch-playlist", "load-select")]
+
+                self.assertEqual(read(token), [("filename", True), (False, True), (False, True)])
+                self.assertEqual(read("--osd-playlist-entry=both", token),
+                                 [("filename", True), (False, True), (False, True)])
+                self.assertEqual(read(token, "--osd-playlist-entry=both", "--load-select=yes"),
+                                 [("both", True), (False, True), (True, True)])
+                self.assertEqual(read("--include=" + os.path.join(work, "missing"), "--osd-playlist-entry=both"),
+                                 [("both", True), (False, False), (True, False)])
+                self.assertEqual(read(), [("title", False), (False, False), (True, False)])
+                # The length is in UTF-8 BYTES and the value is taken exactly:
+                # an `=`, a `,` and a `%` inside it, and a letter of two bytes.
+                with open(opts, "w", encoding="utf-8") as handle:
+                    handle.write("log-file=%9%a=b,c%d" + chr(233) + "\nwatch-later-dir=%0%\n")
+                stub = Stub("/nonexistent/include.sock", clock=FakeClock(), argv=["--watch-later-dir=/w", token])
+                self.assertEqual(stub.get("log-file"), ("a=b,c%d" + chr(233), None))
+                self.assertEqual(stub.get("watch-later-dir"), ("", None))
+                # A value that runs past its count is refused whole -- two
+                # letters of two bytes each under a count of 2, measured --
+                # and the line after it still applies.
+                with open(opts, "w", encoding="utf-8") as handle:
+                    handle.write("watch-later-dir=%2%" + chr(233) * 2 + "\nlog-file=%1%abc\nload-select=%2%no\n")
+                stub = Stub("/nonexistent/include.sock", clock=FakeClock(), argv=[token])
+                self.assertEqual([stub.get("watch-later-dir")[0], stub.get("log-file")[0], stub.get("load-select")[0]],
+                                 ["", "", False])
+                self.assertEqual(stub.get("option-info/watch-later-dir/set-from-commandline")[0], False)
+            finally:
+                import shutil
+                shutil.rmtree(work, True)
 
         def test_the_demuxer_lists_are_read_whole_from_the_argv(self):
             want = {"protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",

@@ -174,3 +174,49 @@ class StubAgainstTheShippingWrites(unittest.TestCase):
         # connection, a name mpv does not have.
         self.assertEqual(stub.client.try_command("set_property", "no-such-property", 1), (False, None))
         self.assertEqual(seen[-1][1], "property not found")
+
+
+class StubAgainstTheShippingOptionsFile(unittest.TestCase):
+    """F-HARNESS-81: the join between the helper's writer and the stub's
+    reader. The helper hands a user's mpvArgs to mpv as the file
+    `write_mpv_args` makes, named by an `--include` token on the launch argv;
+    a stub process started with that token must read what one started with
+    the same tokens on its argv reads, where the token stands."""
+
+    # The two modelled options a user's mpvArgs may name (the rest are the
+    # plugin's own, which filter_mpv_args refuses), beside two the stub does
+    # not model, which travel in the file all the same.
+    TOKENS = ["--hwdec=no", "--demuxer-lavf-o-append=k=v,w", "--script-opts-append=a-b=c d#e%f",
+              "--demuxer-lavf-o-append=x=y", "--no-border"]
+    NAMES = ("demuxer-lavf-o", "script-opts")
+
+    def read(self, argv):
+        stub = StubPlayer(["mpv", "--idle=yes", "--input-ipc-server=@SOCK@"] + argv)
+        self.addCleanup(stub.close)
+        out = []
+        for name in self.NAMES:
+            out.append((stub.client.try_command("get_property", name),
+                        stub.client.try_command("get_property", "option-info/%s/set-from-commandline" % name)))
+        return out
+
+    def test_the_file_the_helper_writes_reads_as_the_same_tokens_on_the_argv(self):
+        work = tempfile.mkdtemp(prefix="stub-opts-")
+        self.addCleanup(shutil.rmtree, work, True)
+        os.chmod(work, 0o700)
+        path = os.path.join(work, "mpv-args.conf")
+        kept, rejected = helper.filter_mpv_args(list(self.TOKENS))
+        self.assertEqual((kept, rejected), (self.TOKENS, []))
+        helper.write_mpv_args(path, kept)
+        on_argv = self.read(list(self.TOKENS))
+        self.assertEqual(self.read(["--include=" + path]), on_argv)
+        self.assertEqual(on_argv, [((True, {"k": "v,w", "x": "y"}), (True, True)),
+                                   ((True, {"a-b": "c d#e%f"}), (True, True))])
+        # Where the token stands: what follows it on the argv wins, as the
+        # helper's own pins do, and what precedes it loses.
+        late = self.read(["--include=" + path, "--demuxer-lavf-o-append=k=late"])
+        self.assertEqual(late[0][0], (True, {"k": "late", "x": "y"}))
+        early = self.read(["--demuxer-lavf-o-append=k=early", "--include=" + path])
+        self.assertEqual(early[0][0], (True, {"k": "v,w", "x": "y"}))
+        # And a file that is not there applies nothing.
+        self.assertEqual(self.read(["--include=" + path + ".missing"]),
+                         [((True, {}), (True, False)), ((True, {}), (True, False))])
