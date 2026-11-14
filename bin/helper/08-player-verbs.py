@@ -1409,6 +1409,24 @@ def _connected_pid(client: MpvIpc, found: list[dict[str, Any]]) -> int:
     return int(found[0]["pid"]) if found else 0
 
 
+def stop_fresh_spawn(sock_path: str, launched_pid: int, ipc_timeout: float) -> None:
+    """D-PLY-57 (2026-11-14): after `player_foreign` the player this start
+    launched is stopped, not left behind. It was idle and unfed, a black
+    window under --force-window=immediate, and it held the socket token, so
+    the next start found it. Only what this start launched: the launched pid
+    and the token holders that descend from it (a user's `mpv` wrapper runs
+    the player as its child). From the SIGTERM rung, by pid: the quit rung
+    goes over the socket, and the process that answers the socket is the one
+    this helper must tell nothing. That process is never a target here, even
+    when it carries the token; what answers the socket is left as it was.
+    The time is the ladder's own from that rung, which the shell's watchdog
+    already allows after a spawn (the no-socket path's)."""
+    targets = [record for record in find_player(sock_path)
+               if int(record["pid"]) == launched_pid or descends_from(int(record["pid"]), launched_pid)]
+    if targets:
+        stop_ladder(sock_path, targets, "term", ipc_timeout)
+
+
 def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     kind = "player.%s" % verb
     sock = socket_path(args.socket)
@@ -1430,6 +1448,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     lock_fd = -1
     client = None
     newer: dict[str, Any] | None = None
+    outcome: dict[str, Any] | None = None
     try:
         target = player_target(args.id, "", args.cache_dir)
         player_runtime(sock)
@@ -1480,10 +1499,13 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
             log("player %s: %s" % (verb, stand_down_note(seq, target, newer)))
             warnings.append("a newer channel change reached the player first")
     except HelperError as error:
-        if lock_fd >= 0:
-            release_lock(lock_fd)
         if client is not None:
             client.close()
+        # D-PLY-57: under the lock still, so no other start finds the spawn.
+        if error.code == "player_foreign" and outcome is not None and outcome["spawned"]:
+            stop_fresh_spawn(sock, int(outcome["pid"]), args.ipc_timeout)
+        if lock_fd >= 0:
+            release_lock(lock_fd)
         log("player %s: %s" % (verb, error.message))
         emit(error_payload(kind, error, id=args.id or None, seq=seq))
         return EXIT_ERROR

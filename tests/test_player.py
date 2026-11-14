@@ -29,6 +29,7 @@ import threading
 import time
 import sys
 import unittest
+import unittest.mock
 
 from helper_loader import HELPER, load_helper
 from test_mpv import (FakeMpv, IdentitySeam, PINNED_CMDLINE, PINNED_PROPS, current_props, hold_launch,
@@ -101,7 +102,7 @@ for arg in raw_argv:
 record = os.environ.get("STUB_MPV_RECORD", "")
 if record:
     with open(record, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"argv": raw_argv, "applied": argv, "include": include, "cwd": os.getcwd(), "umask": mask,
+        handle.write(json.dumps({"argv": raw_argv, "applied": argv, "include": include, "cwd": os.getcwd(), "umask": mask, "pid": os.getpid(),
                                  "env": sorted(k for k in os.environ if k.startswith("OMARCHY_IPTV"))}) + "\\n")
 # PO-11: mpv's `s` key writes a screenshot with no explicit mode, into
 # --screenshot-dir or, without one, the directory it was started in. Verified
@@ -819,7 +820,11 @@ class FeedGateTest(GateTestCase):
 
     def test_a_fresh_spawn_that_another_process_answers_for_is_player_foreign_and_fed_nothing(self):
         """T12: `player start` vouches for the pid it launched; when the
-        connection reaches another process, nothing is fed."""
+        connection reaches another process, nothing is fed -- and the spawn
+        is not left behind (D-PLY-57): idle, unfed and holding the socket
+        token, it was a black window the next start found. It is stopped by
+        its pid from the SIGTERM rung, so the process that answers the socket
+        is told nothing and outlives it."""
         os.makedirs(self.runtime, 0o700)
         other = hold_launch(os.path.join(self.dir, "elsewhere", "mpv.sock"), "current")
         self.addCleanup(self.reap_process, other)
@@ -827,10 +832,67 @@ class FeedGateTest(GateTestCase):
         code, payload, _, _ = self.player_start()
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"]["code"], "player_foreign")
-        spawned = helper.find_player(self.sock)
-        self.assertEqual(len(spawned), 1)
-        told = self.told(spawned[0]["pid"])
-        self.assertEqual([c for c in told if isinstance(c, list) and c[0] in ("loadfile", "set_property", "keybind")], [])
+        launches = self.spawned_launches()
+        self.assertEqual(len(launches), 1)
+        told = self.told(launches[0]["pid"])
+        self.assertEqual([c for c in told if isinstance(c, list) and c[0] in ("loadfile", "set_property", "keybind", "quit")], [])
+        self.assertEqual(helper.find_player(self.sock), [])
+        self.assertFalse(os.path.exists("/proc/%d" % launches[0]["pid"]))
+        self.assertIsNone(other.poll(), "the process that answered the socket was signalled")
+
+    def test_an_adopted_player_is_not_stopped_when_the_gate_then_refuses_it(self):
+        """D-PLY-57's edge: only a player THIS start launched is stopped. A
+        first start spawns the player; a second adopts it, and the gate is
+        made to refuse the feed as `player_foreign` (in the tree that needs
+        the socket's peer to change between the adoption and the feed). The
+        adopted player is the user's running one and stays up."""
+        os.makedirs(self.runtime, 0o700)
+        code, first, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+
+        def refuse(*_args, **_kwargs):
+            raise helper.HelperError("player_foreign", helper.FEED_REFUSED_FOREIGN)
+
+        with unittest.mock.patch.object(helper, "apply_channel", refuse):
+            code, payload, _, _ = self.player_start()
+        self.assertEqual((code, payload["error"]["code"]), (1, "player_foreign"))
+        self.assertEqual(len(self.spawned_launches()), 1)
+        self.assertEqual([r["pid"] for r in helper.find_player(self.sock)], [first["pid"]])
+
+    def test_only_what_this_start_launched_is_stopped_after_player_foreign(self):
+        """D-PLY-57: another process that holds the socket token and that
+        this start did not launch (it appears after the spawn, so the
+        adoption never saw it) is not a target. And a start refused for any
+        other reason leaves its spawn up, as before: the idle player is what
+        the next play uses."""
+        os.makedirs(self.runtime, 0o700)
+        bystanders = []
+
+        def refuse(*_args, **_kwargs):
+            bystanders.append(sleeper("--input-ipc-server=%s" % self.sock))
+            self.addCleanup(self.reap_process, bystanders[0])
+            for _ in range(100):
+                if any(r["pid"] == bystanders[0].pid for r in helper.find_player(self.sock)):
+                    break
+                time.sleep(0.02)
+            raise helper.HelperError("player_foreign", helper.FEED_REFUSED_FOREIGN)
+
+        with unittest.mock.patch.object(helper, "apply_channel", refuse):
+            code, payload, _, _ = self.player_start()
+        self.assertEqual((code, payload["error"]["code"]), (1, "player_foreign"))
+        self.assertEqual([r["pid"] for r in helper.find_player(self.sock)], [bystanders[0].pid])
+        self.assertIsNone(bystanders[0].poll())
+        self.reap_process(bystanders[0])
+
+        def fail(*_args, **_kwargs):
+            raise helper.HelperError("not_found", "no such channel")
+
+        with unittest.mock.patch.object(helper, "apply_channel", fail):
+            code, payload, _, _ = self.player_start()
+        self.assertEqual((code, payload["error"]["code"]), (1, "not_found"))
+        launches = self.spawned_launches()
+        self.assertEqual(len(launches), 2)
+        self.assertEqual([r["pid"] for r in helper.find_player(self.sock)], [launches[1]["pid"]])
 
 
 class WrapperSpawnTest(GateTestCase):
@@ -873,6 +935,20 @@ class WrapperSpawnTest(GateTestCase):
         self.assertEqual(code, 0, stderr)
         self.assertNotIn("outdated", zapped)
         return payload
+
+    def test_a_wrapper_and_its_child_are_both_stopped_after_player_foreign(self):
+        """D-PLY-57: the launched pid is the wrapper and the player is its
+        child; both hold the socket token, and neither is left behind."""
+        self.wrap('REAL "$@"')
+        os.makedirs(self.runtime, 0o700)
+        other = hold_launch(os.path.join(self.dir, "elsewhere", "mpv.sock"), "current")
+        self.addCleanup(self.reap_process, other)
+        self.identities[self.sock] = other.pid
+        code, payload, _, _ = self.player_start()
+        self.assertEqual((code, payload["error"]["code"]), (1, "player_foreign"))
+        self.assertEqual(len(self.spawned_launches()), 1)
+        self.assertEqual(helper.find_player(self.sock), [])
+        self.assertIsNone(other.poll())
 
     def test_a_wrapper_that_runs_mpv_as_its_child_still_plays(self):
         self.wrap('REAL "$@"')

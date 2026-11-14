@@ -443,6 +443,8 @@ shell from before ignores the fields.**
   or a process whose own command line reads as this build's.
   `Model.statusReason` reads it as "Another program answers the player's
   socket", and `Model.playerStartFailure` counts it as local.
+  **[2026-11-14, D-PLY-57: the player that start launched is then stopped,
+  by its pid, so no idle window is left behind.]**
 ]
 
 ### 4.4 Exact startup sequence (cold play)
@@ -1159,7 +1161,12 @@ stream opens.
 - D-PLY-54: an mpv package upgrade under a running player is detected by no
   check.
 - D-PLY-57: after `player_foreign` the helper's own spawn is left running.
+  **[2026-11-14: fixed. The start stops what it launched, from the SIGTERM
+  rung and by pid, before it releases the lock; an adopted player and any
+  process it did not launch are left as they were.]**
 - D-PLY-58: the health relaunch of an adopted stash from another source.
+- D-PLY-65: a start sends its log subscription, which carries no channel,
+  on the connection before the build gate judges the peer.
 - D-PLY-59: mpv's listener and its children.
 - D-PLY-60: with no observer attached, a refusal before the ladder of a
   start that replaces another build's player -- the automatic restart (a
