@@ -25,6 +25,14 @@ ROOT=$(cd "$HERE/.." && pwd)
 # shellcheck source=scripts/qa-lib.sh
 . "$HERE/qa-lib.sh"
 
+# F-HARNESS-109 (2026-11-14): qa_target_nested reads a wlroots variable as
+# "this process is a nested compositor's child", so a suite started under a
+# cage's child read every desk case below as nested (5 checks red under
+# WLR_RENDERER=pixman with nothing wrong in the tree). The suite decides its
+# own targets: both are dropped here, and the one case that is about them
+# sets its own (tn's TNWLR).
+unset WLR_BACKENDS WLR_RENDERER
+
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/qa-lib-test-XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -2237,7 +2245,11 @@ is "and while ANOTHER SURFACE holds the keyboard" "$(fg_shot shot guide | tr '\n
 fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}" "" 0
 is "and while the guide's WINDOW is inactive (F-M3-24)" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
 fg_stub "$FG_OPEN" "" 0
-is "a focused guide is captured, once, and the path is printed" "$(fg_shot shot guide | tr '\n' ' ') $(grep -c "^$FG/h/shots/guide.png$" "$FG/out")" "0 1 file  1"
+# [F-HARNESS-58: the output is named only on the desk, so this capture runs
+# toward the socket the stand-in signature's lock names (qa_target_nested's
+# section above built it); the gate itself runs with no signature, where the
+# same shot is a nested one and names no output.]
+is "a focused guide is captured, once, and the path is printed" "$( ( unset WLR_BACKENDS WLR_RENDERER; export XDG_RUNTIME_DIR="$TN" HYPRLAND_INSTANCE_SIGNATURE=tnsig WAYLAND_DISPLAY=wayland-tn; fg_shot shot guide | tr '\n' ' ' ) ) $(grep -c "^$FG/h/shots/guide.png$" "$FG/out")" "0 1 file  1"
 is "on the FOCUSED output" "$(tail -1 "$GRIM_LOG")" "-o STUB-OUT $FG/h/shots/guide.png"
 fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
 is "--any-surface is the deliberate shot of whatever is up, guide closed" "$(fg_shot shot --any-surface player | tr '\n' ' ')" "0 1 file "
@@ -3184,6 +3196,73 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
    "$(env -u OMARCHY_IPTV_HARNESS_REAL_HOME HOME="$HH/scratch/home" bash -c '. "$1"; qa_harness_real_home "$2"' hh "$HERE/qa-lib.sh" "$HH/scratch")" \
    "$(getent passwd "$(id -u)" | cut -d: -f6)"
 
+# ================== off the desk: shot's monitor, P10's player (F-HARNESS-58, -55)
+
+section "run.sh shot / F-HARNESS-58: a nested target is never asked through the session's Hyprland"
+
+# `shot` asked `hyprctl monitors` in the caller's environment and handed the
+# answer to `grim -o`, whatever compositor the harness was pointed at: under
+# a rig that passes the owner's signature in, the SESSION's Hyprland named a
+# monitor the cage does not have. The real run.sh runs here over a stub
+# hyprctl and a stub grim that record their arguments and the signature they
+# were handed; the runtime directory is the one built for qa_target_nested
+# above, so nothing reads the owner's.
+SH="$TMP/sh"; mkdir -p "$SH/bin" "$SH/h/root"; : >"$SH/h/root/shell.qml"
+cat >"$SH/bin/hyprctl" <<'SH_HYPRCTL'
+#!/bin/bash
+printf '%s sig=%s\n' "$*" "${HYPRLAND_INSTANCE_SIGNATURE-unset}" >>"$SH_LOG.hyprctl"
+echo '[{"name":"DESK-MONITOR-1","focused":true}]'
+SH_HYPRCTL
+cat >"$SH/bin/grim" <<'SH_GRIM'
+#!/bin/bash
+printf '%s\n' "$*" >>"$SH_LOG.grim"
+: >"${@: -1}"
+SH_GRIM
+chmod +x "$SH/bin/hyprctl" "$SH/bin/grim"
+sh_run() {   # sh_run <wayland-display>: `run.sh shot --any-surface s` toward it -> its status
+  : >"$SH/log.hyprctl"; : >"$SH/log.grim"
+  env -u WLR_BACKENDS -u WLR_RENDERER SH_LOG="$SH/log" PATH="$SH/bin:$PATH" \
+    OMARCHY_IPTV_HARNESS_DIR="$SH/h" XDG_RUNTIME_DIR="$TN" HYPRLAND_INSTANCE_SIGNATURE=tnsig \
+    WAYLAND_DISPLAY="$1" timeout 20 "$ROOT/scripts/dev-harness/run.sh" shot --any-surface s >"$SH/out" 2>&1
+  echo $?
+}
+is "a shot toward a nested target succeeds" "$(sh_run wayland-cage)" "0"
+is "and never asks hyprctl, the session's signature inherited or not" "$(wc -l <"$SH/log.hyprctl" | tr -d ' ')" "0"
+is "and grim is handed the file alone, no output name" "$(cat "$SH/log.grim")" "$SH/h/shots/s.png"
+is "and the file's path is still the verb's answer" "$(tail -n 1 "$SH/out")" "$SH/h/shots/s.png"
+is "a shot on the desk succeeds" "$(sh_run wayland-tn)" "0"
+is "and asks the session's Hyprland for its monitors, as before" "$(cat "$SH/log.hyprctl")" "monitors -j sig=tnsig"
+is "and grim is handed the focused monitor" "$(cat "$SH/log.grim")" "-o DESK-MONITOR-1 $SH/h/shots/s.png"
+
+section "player-scenario P10 / F-HARNESS-55: a player a driver starts itself inherits no desk display"
+
+# P10 runs `player start` from the DRIVER's environment, outside run.sh, so
+# harness_env's drop never reaches it: it adopts in every recorded run, and
+# spawns mpv when there is nothing to adopt. The call is taken out of the
+# scenario whole and run over a stub python3 that records what it was
+# handed.
+P10="$TMP/p10"; mkdir -p "$P10/bin"
+cat >"$P10/bin/python3" <<'P10_PY'
+#!/bin/bash
+printf 'display=%s sig=%s argv=%s\n' "${DISPLAY-unset}" "${HYPRLAND_INSTANCE_SIGNATURE-unset}" "$*" >>"$P10_LOG"
+P10_PY
+chmod +x "$P10/bin/python3"
+st "P10's own start is found, whole" 0 qa_extract "$ROOT/scripts/dev-harness/player-scenario.sh" \
+   'omarchy-iptv" player start --socket "\$SOCK" --cache-dir "\$cache" \\$' '--seq 9999' 3
+qa_extract "$ROOT/scripts/dev-harness/player-scenario.sh" \
+   'omarchy-iptv" player start --socket "\$SOCK" --cache-dir "\$cache" \\$' '--seq 9999' 3 >"$P10/call.sh" || : >"$P10/call.sh"
+( export DISPLAY=:77 HYPRLAND_INSTANCE_SIGNATURE=desksig P10_LOG="$P10/log" PATH="$P10/bin:$PATH"
+  PLUGIN_ROOT=/p10/root SOCK=/p10/sock cache=/p10/cache LOG="$P10/driver.log"
+  . "$P10/call.sh" )
+is "the helper P10 starts is handed neither the driver's DISPLAY nor its signature" \
+   "$(cat "$P10/log" 2>/dev/null)" \
+   "display=unset sig=unset argv=/p10/root/bin/omarchy-iptv player start --socket /p10/sock --cache-dir /p10/cache --id t:live1 --seq 9999"
+# The join: every `player start` a scenario driver runs itself. Two today,
+# P10's and l_old_start's; a third written without the drop turns this red.
+p10_all=$(grep -c 'bin/omarchy-iptv" player start' "$ROOT"/scripts/dev-harness/*-scenario.sh | awk -F: '{ n += $2 } END { print n + 0 }')
+p10_off=$(grep -c '^ *env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE .*bin/omarchy-iptv" player start' "$ROOT"/scripts/dev-harness/*-scenario.sh | awk -F: '{ n += $2 } END { print n + 0 }')
+is "every player start a scenario driver runs itself drops both" "$p10_all $p10_off" "2 2"
+
 # ======================================= AF_UNIX socket paths (F-HARNESS-104)
 
 section "qa_sock_fits / qa_cage_runtime_fits / F-HARNESS-104: a socket path that cannot fit"
@@ -3592,7 +3671,9 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # 649 -> 662 on 2026-11-12: qa_ref_commit's thirteen (F-HARNESS-53).
 # 662 -> 683 the same day: qa_extract's eighteen and the three extractions
 # that are sourced here taken whole (F-HARNESS-56).
-EXPECTED=683
+# 683 -> 693 on 2026-11-14: shot's seven over a stub hyprctl and grim
+# (F-HARNESS-58) and P10's three over a stub python3 (F-HARNESS-55).
+EXPECTED=693
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

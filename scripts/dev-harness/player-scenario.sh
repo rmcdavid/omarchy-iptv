@@ -1048,7 +1048,11 @@ echo "== P10 a stop that the lock record would supersede still ends the player"
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P10 no player to stop"
 cache=$(ipc activeCache)
-python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player start --socket "$SOCK" --cache-dir "$cache" \
+# F-HARNESS-55 (2026-11-14): this start runs from the DRIVER's environment,
+# outside run.sh, so harness_env's drop never reaches it. It adopts in every
+# recorded run, but it spawns mpv when there is nothing to adopt, and that
+# player must not find the owner's Xwayland or Hyprland (l_old_start's form).
+env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player start --socket "$SOCK" --cache-dir "$cache" \
   --id "t:live1" --seq 9999 >>"$LOG" 2>&1
 is "P10 another launcher pushed the lock sequence ahead" "$(lock_seq)" "9999"
 is "P10 it adopted rather than spawning" "$(player_count)" "1"

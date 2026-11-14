@@ -8,7 +8,8 @@
 #                                    previous, refresh, play, channel, pip, pause, back,
 #                                    forward, live -- the verbs a user binds (F-RWD-14)
 #   run.sh shot [--any-surface] [name]
-#                                    screenshot the focused output into the scratch dir.
+#                                    screenshot the focused output into the scratch dir
+#                                    (a nested target whole, with no hyprctl: F-HARNESS-58).
 #                                    REFUSES, exit 3, unless the harness guide holds the
 #                                    keyboard (F-HARNESS-12); --any-surface, first, is the
 #                                    deliberate shot of whatever is up (the player window)
@@ -423,7 +424,7 @@ prepare_root() {
   # link that works only by accident of a path's length is a bridge to the
   # owner's compositor for any shorter OMARCHY_IPTV_HARNESS_DIR, and
   # nothing here needs it: the harness's real-compositor calls (`shot`'s
-  # `hyprctl monitors`) run in run.sh's own environment, never under this
+  # `hyprctl monitors`, on the desk only: F-HARNESS-58) run in run.sh's own environment, never under this
   # runtime directory, and every scenario that exercises the service's
   # hyprctl puts stub-hyprctl.py on $SCRATCH/bin. A link left by an older
   # run.sh is removed, so an existing scratch tree loses it too.
@@ -937,9 +938,19 @@ case $cmd in
     else
       require_guide_focus shot || exit 3
     fi
-    out=$(hyprctl monitors -j | python3 -c 'import json,sys; ms=json.load(sys.stdin); print(next((m["name"] for m in ms if m.get("focused")), ms[0]["name"]))')
     mkdir -p "$SCRATCH/shots"
-    grim -o "$out" "$SCRATCH/shots/$name.png" && echo "$SCRATCH/shots/$name.png"
+    # F-HARNESS-58 (2026-11-14): the monitor is asked of the session's
+    # Hyprland only when the target IS the session's (qa_target_nested, the
+    # predicate harness_env acts on). Toward a nested compositor the answer
+    # named a monitor of the owner's desk, asked with whatever signature the
+    # caller inherited; a nested target is captured whole instead, with no
+    # output name and no hyprctl.
+    if qa_target_nested "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME"; then
+      grim "$SCRATCH/shots/$name.png" && echo "$SCRATCH/shots/$name.png"
+    else
+      out=$(hyprctl monitors -j | python3 -c 'import json,sys; ms=json.load(sys.stdin); print(next((m["name"] for m in ms if m.get("focused")), ms[0]["name"]))')
+      grim -o "$out" "$SCRATCH/shots/$name.png" && echo "$SCRATCH/shots/$name.png"
+    fi
     ;;
   key)
     shift
