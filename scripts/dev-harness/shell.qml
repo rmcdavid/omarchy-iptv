@@ -3,6 +3,10 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+// F-HARNESS-89: the theme is named through this qualifier, as the shipped
+// files name it: Qt 6.12's QtQuick exports a C++ `Color` that wins over the
+// host's in any import order (D-HOST-9), and this root carries no load patch.
+import qs.Commons as Commons
 import "Model.mjs" as Model
 // The harness's own pure logic (entryKey), staged beside this file by run.sh
 // so node can call the same function a scenario's live arm observes here.
@@ -1080,10 +1084,10 @@ ShellRoot {
   QtObject {
     id: fakeBar
     property var shell: fakeShell
-    property color foreground: Color.foreground
-    property color barForeground: Color.bar.text
-    property color background: Color.bar.background
-    property color urgent: Color.urgent
+    property color foreground: Commons.Color.foreground
+    property color barForeground: Commons.Color.bar.text
+    property color background: Commons.Color.bar.background
+    property color urgent: Commons.Color.urgent
     property string fontFamily: Style.font.family
     property string position: "top"
     property bool vertical: Quickshell.env("OMARCHY_IPTV_VERTICAL") === "1"
@@ -1141,7 +1145,7 @@ ShellRoot {
     id: fakeBarWindow
     anchors { top: true; left: true; right: true }
     implicitHeight: fakeBar.vertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
-    color: Color.bar.background
+    color: Commons.Color.bar.background
     WlrLayershell.namespace: "omarchy-iptv-harness"
     WlrLayershell.layer: WlrLayer.Top
     exclusionMode: ExclusionMode.Ignore
@@ -1151,7 +1155,7 @@ ShellRoot {
       anchors.leftMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
       text: "omarchy-iptv dev harness"
-      color: Color.bar.text
+      color: Commons.Color.bar.text
       opacity: 0.6
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
@@ -1289,7 +1293,7 @@ ShellRoot {
       // calls too: one function, not two copies joined by a name (rule 12).
       var w = harness.windowHost(guideLoader.item)
       return JSON.stringify({
-        background: String(Color.background), menuBackground: String(Color.menu.background),
+        background: String(Commons.Color.background), menuBackground: String(Commons.Color.menu.background),
         guideWindow: w.kind, guideWindowType: w.type
       })
     }

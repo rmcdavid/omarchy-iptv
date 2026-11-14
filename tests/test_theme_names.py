@@ -300,6 +300,20 @@ class ThemeNameGuard(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn("found no unqualified use", problems[0])
 
+    def test_the_dev_harness_root_is_green(self):
+        """F-HARNESS-89: the harness's own root is not shipped, so the default
+        run never judged it, and on Qt 6.12 its bare `Color` handed the
+        plugin's bar no theme colour. The gate judges it by name beside the
+        shipped files; this holds the same call."""
+        status, out = self.run_main("--root", ROOT, "--host", HOST, "--qml-dir", QML_DIR,
+                                    os.path.join(ROOT, "scripts", "dev-harness", "shell.qml"))
+        self.assertEqual(0, status, out)
+        m = re.match(r"^theme name guard: (\d+) unqualified host-kit use\(s\) in 1 file\(s\)", out)
+        self.assertIsNotNone(m, out)
+        self.assertGreaterEqual(int(m.group(1)), 10, out)
+        text = read("scripts/dev-harness/shell.qml")
+        self.assertEqual(len(re.findall(r"\bCommons\.Color\.", text)), 8)
+
     def test_an_unreadable_host_kit_is_red(self):
         work = tempfile.mkdtemp(prefix="omarchy-iptv-themenames-")
         self.addCleanup(shutil.rmtree, work, True)

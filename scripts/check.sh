@@ -78,7 +78,8 @@
 #                                that a Qt or Quickshell module it imports also
 #                                exports, read from the installed type files --
 #                                Qt 6.12's QtQuick `Color` beat the theme's in
-#                                any import order; D-HOST-9)
+#                                any import order; D-HOST-9), and the dev
+#                                harness's own root by name (F-HARNESS-89)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -1840,6 +1841,18 @@ if python3 "$ROOT/scripts/check-theme-names.py" --root "$ROOT" --host "$SHELL_DI
   fi
 else
   cat "$themenames_log"; bad "theme name guard"
+fi
+
+# F-HARNESS-89 (2026-11-14): the dev harness's own root is not shipped, so the
+# run above never read it, and its bare `Color` handed the plugin's bar no
+# theme colour on Qt 6.12. Judged by name, by the same guard.
+harnessnames_log=$CHECK_TMP/theme-names-harness.log
+if python3 "$ROOT/scripts/check-theme-names.py" --root "$ROOT" --host "$SHELL_DIR" --qml-dir "$QML_IMPORTS" \
+     "$ROOT/scripts/dev-harness/shell.qml" >"$harnessnames_log" 2>&1 \
+   && grep -qE '^theme name guard: [1-9][0-9]* unqualified host-kit use\(s\) in 1 file\(s\)' "$harnessnames_log"; then
+  ok "theme name guard, the dev harness root (none shadowed)"
+else
+  cat "$harnessnames_log"; bad "theme name guard, the dev harness root"
 fi
 
 step "helper regex guard (every helper regex has a reviewed cost)"
