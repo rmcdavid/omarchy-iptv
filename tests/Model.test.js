@@ -14744,6 +14744,22 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           Model.shouldRefreshTracks({ wanted: true, playingId: "a", rowsFor: "", askedFor: "", recoveries: "x" })]
 }, [2, true, true, false, false, true, true, true])
 
+// ---- D-A11Y-11: the plugin's animations run for the host's own duration ----
+// Omarchy 4.5.0 runs every animation for Style.duration(ms), 0 while reduce
+// motion is on; 4.0.6 has no such function. Model.motionMs asks the theme
+// kit it is handed and keeps the plugin's own number when it cannot.
+{
+  const host = on => ({ reduceMotion: on, duration(ms) { return this.reduceMotion ? 0 : ms } })
+  check("D-A11Y-11: with motion on, the host's answer is the plugin's own number", [180, 160, 140, 60].map(ms => Model.motionMs(host(false), ms)), [180, 160, 140, 60])
+  check("D-A11Y-11: with reduce motion on, every animation runs for 0", [180, 160, 140, 60].map(ms => Model.motionMs(host(true), ms)), [0, 0, 0, 0])
+  check("D-A11Y-11: a host with no duration function (4.0.6) keeps the plugin's number", [Model.motionMs({}, 180), Model.motionMs({ duration: 0 }, 180), Model.motionMs(null, 180), Model.motionMs(undefined, 180)], [180, 180, 180, 180])
+  check("D-A11Y-11: a host function that throws keeps the plugin's number", Model.motionMs({ duration() { throw new Error("gone") } }, 180), 180)
+  check("D-A11Y-11: an answer that is no duration keeps the plugin's number", [NaN, -1, undefined, null, "fast", Infinity, {}].map(v => Model.motionMs({ duration() { return v } }, 180)), [180, 180, 180, 180, 180, 180, 180])
+  check("D-A11Y-11: the host may shorten an animation and never lengthens one", [Model.motionMs({ duration(ms) { return ms / 2 } }, 180), Model.motionMs({ duration(ms) { return ms * 10 } }, 180)], [90, 180])
+  check("D-A11Y-11: the host is asked for the number the plugin wants", (() => { const seen = []; Model.motionMs({ duration(ms) { seen.push(ms); return ms } }, 140); return seen })(), [140])
+  check("D-A11Y-11: a wanted time that is no duration is 0, asked of nobody", [NaN, -5, "x", Infinity].map(v => Model.motionMs({ duration() { return 99 } }, v)), [0, 0, 0, 0])
+  check("D-A11Y-11: a fractional answer is a whole number of milliseconds", Model.motionMs({ duration() { return 12.6 } }, 180), 13)
+}
 // ---- F-TEXT-2: the footer hint line is the one Text that renders markup ----
 //
 // Guide.qml's footerHints Text declares Text.StyledText under a

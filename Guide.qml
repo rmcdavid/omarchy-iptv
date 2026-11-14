@@ -347,7 +347,10 @@ Item {
   })
 
   // ---- timing constants, in one place (UX.md 5.9)
-  readonly property int bannerFadeMs: 140
+  // D-A11Y-11: the two animation times are the host's answer for them, 0
+  // while Omarchy's reduce motion is on (Model.motionMs).
+  readonly property int bannerFadeMs: Model.motionMs(Style, 140)
+  readonly property int rowTintMs: Model.motionMs(Style, 60)
   readonly property int transientMs: 3000
   readonly property int filterDebounceMs: 40
   readonly property int filterDebounceThreshold: 2000
@@ -3549,7 +3552,7 @@ Item {
                 height: root.groupEntryHeight
                 radius: root.cornerRadius
                 color: pinnedMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-                Behavior on color { ColorAnimation { duration: 60 } }
+                Behavior on color { ColorAnimation { duration: root.rowTintMs } }
                 Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: Model.sourcesRowAccessibleName(root.sourceCount)

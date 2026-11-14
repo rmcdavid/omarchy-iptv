@@ -850,7 +850,8 @@
         "setKeyRow",
         "mergeKeyRows",
         "keyboardMap",
-        "keyboardMapKeys"
+        "keyboardMapKeys",
+        "motionMs"
       ]
     },
     {

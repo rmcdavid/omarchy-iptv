@@ -765,10 +765,34 @@ function keyboardMapKeys(opts) {
   }
   return out
 }
+
+// D-A11Y-11 (2026-11-14): how long one of the plugin's animations runs.
+// Omarchy 4.5.0 runs every shell animation for Style.duration(ms), which is
+// 0 while reduce motion is on (`omarchy toggle animations`; a machine that
+// renders on the CPU), so the host snapped while the plugin's label still
+// slid. `style` is the theme kit's Style, handed in so the node suite can
+// call this; a binding that calls it re-reads when the host's setting
+// changes, because the host function reads its own property inside the
+// binding (the QML spec holds that). The plugin's own number stays wherever
+// the host cannot be asked or answers no duration: 4.0.6 has no such
+// function, and a host may shorten an animation here but never lengthen one.
+function motionMs(style, ms) {
+  var want = Number(ms)
+  if (!(want >= 0) || want === Infinity) return 0
+  want = Math.round(want)
+  var got = want
+  try {
+    if (style && typeof style.duration === "function") got = style.duration(want)
+  } catch (e) {
+    return want
+  }
+  if (typeof got !== "number" || !(got >= 0) || got > want) return want
+  return Math.round(got)
+}
 export {
   barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
   guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
   arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
   hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
-  keyboardMap, keyboardMapKeys
+  keyboardMap, keyboardMapKeys, motionMs
 }

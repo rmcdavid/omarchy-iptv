@@ -3191,4 +3191,42 @@ TestCase {
     var free = ["Dr. Who/Torchwood", "Ch. 4 / Ch. 5", "cdn.test /qqqqqq"]
     for (i = 0; i < free.length; i++) compare(Model.labelHoldsField(free[i]), false, JSON.stringify(free[i]))
   }
+
+  // D-A11Y-11: the plugin's animations run for the host's own duration.
+  // motionHost has the shape of Omarchy 4.5.0's Style (Commons/Style.qml: a
+  // bool and a function that reads it); motionOldHost is 4.0.6's, which has
+  // neither. What is observed is the engine the shell runs: that a binding
+  // which calls Model.motionMs re-reads when the host's property changes,
+  // though the read happens inside the host's function inside the model's,
+  // and that a Behavior handed 0 lands at once where 180 does not.
+  QtObject {
+    id: motionHost
+    property bool reduceMotion: false
+    function duration(ms) { return reduceMotion ? 0 : ms }
+  }
+  QtObject { id: motionOldHost }
+  Item {
+    id: motionUser
+    readonly property int labelMs: Model.motionMs(motionHost, 180)
+    readonly property int oldMs: Model.motionMs(motionOldHost, 180)
+    property real slid: 0
+    Behavior on slid { NumberAnimation { duration: motionUser.labelMs } }
+  }
+  function test_motionFollowsTheHostInV4() {
+    compare(typeof motionHost.duration, "function")
+    compare(typeof motionOldHost.duration, "undefined")
+    compare(motionUser.labelMs, 180)
+    compare(motionUser.oldMs, 180)
+    motionUser.slid = 100
+    verify(motionUser.slid < 100, "with motion on the value is still on its way: " + motionUser.slid)
+    motionHost.reduceMotion = true
+    compare(motionUser.labelMs, 0)
+    compare(motionUser.oldMs, 180)
+    motionUser.slid = 300
+    compare(motionUser.slid, 300)
+    motionHost.reduceMotion = false
+    compare(motionUser.labelMs, 180)
+    motionUser.slid = 0
+    verify(motionUser.slid > 0, "and it slides again once motion is back: " + motionUser.slid)
+  }
 }

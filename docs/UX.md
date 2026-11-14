@@ -1172,6 +1172,19 @@ follows the overlays:
 | Bar glyph color (dim <-> normal) | `ColorAnimation { duration: 160 }`, `enabled: bar.foregroundAnimationEnabled` (media widget) |
 | Footer "Stopped" / "Refreshed" transient | text swap, 3 s `Timer`, no animation |
 
+**[2026-11-14, D-A11Y-11: every duration in this table is what the plugin
+asks for, and what runs is the host's answer for it. Omarchy 4.5.0 runs each
+shell animation for `Style.duration(ms)`, which is 0 while reduce motion is
+on (`omarchy toggle animations`, and by default on a machine that renders on
+the CPU), so with it on the banner, the bar label, the glyph colour and the
+Sources row's hover tint (60 ms, which this table never listed) change at
+once, as the host's own surfaces do. The four times are root properties
+declared as `Model.motionMs(Style, N)`; on a host with no `Style.duration`
+(4.0.6) they are the numbers above. The form field's caret blink is not an
+animation in this sense: it follows the platform's cursor flash time, as
+Qt's own caret does. The lead's call under the owner's standing authority of
+2026-11-09.]**
+
 ### 5.9 What must NOT be hardcoded
 
 - Any hex color, `"white"`, `"black"`, or `Qt.rgba(...)` literal. Every

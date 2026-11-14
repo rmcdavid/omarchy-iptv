@@ -1548,6 +1548,12 @@ in memory that day, so none of these was observed on a running 4.5.0 shell.
   set from `hyprctl -j getoption animations:enabled` (`:477-490`) and
   refreshed on Hyprland's `configreloaded` event (`:494-499`). Neither
   exists on 4.0.6, where `Style.duration` is undefined.
+  **[2026-11-14, D-A11Y-11: the plugin now calls it, through
+  `Model.motionMs(Style, ms)`, for its four animation times, and keeps its
+  own number where the function is missing, throws or answers no duration.
+  `tests/test_host_motion.py` pins the property and the function's body on
+  this machine and goes red when a host update changes either; a silent
+  rename would otherwise only stop reduce motion from reaching the plugin.]**
 - **The stock chords and the system mpv.conf**: see "Keybindings" under
   Paths and "mpv facts" above.
 
