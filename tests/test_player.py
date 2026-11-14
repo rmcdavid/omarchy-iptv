@@ -835,10 +835,33 @@ class FeedGateTest(GateTestCase):
         launches = self.spawned_launches()
         self.assertEqual(len(launches), 1)
         told = self.told(launches[0]["pid"])
-        self.assertEqual([c for c in told if isinstance(c, list) and c[0] in ("loadfile", "set_property", "keybind", "quit")], [])
+        # D-PLY-65: the log subscription too. The start used to send it on
+        # the connection before the gate judged the peer.
+        self.assertEqual([c for c in told if isinstance(c, list)
+                          and c[0] in ("loadfile", "set_property", "keybind", "quit", "request_log_messages")], [])
         self.assertEqual(helper.find_player(self.sock), [])
         self.assertFalse(os.path.exists("/proc/%d" % launches[0]["pid"]))
         self.assertIsNone(other.poll(), "the process that answered the socket was signalled")
+
+    def test_a_start_that_stands_down_is_gated_before_its_owner_claim(self):
+        """D-PLY-65: a start that finds a newer channel on its fresh spawn
+        never reaches apply_channel, whose gate was the only one, and still
+        wrote the owner claim on the connection. The gate is asked first:
+        with another process answering, the start is `player_foreign` and
+        the claim is not sent."""
+        os.makedirs(self.runtime, 0o700)
+        other = hold_launch(os.path.join(self.dir, "elsewhere", "mpv.sock"), "current")
+        self.addCleanup(self.reap_process, other)
+        self.identities[self.sock] = other.pid
+        newer = {"entryId": 1, "id": "t:espn.us", "name": "ESPN", "seq": 9, "verb": "play"}
+        with unittest.mock.patch.object(helper, "applied_by_another_client", lambda client: newer):
+            code, payload, _, _ = self.player_start("--owner-pid", str(os.getpid()),
+                                                    "--owner-token", "0123456789abcdef0123456789abcdef")
+        self.assertEqual((code, payload["error"]["code"]), (1, "player_foreign"))
+        launches = self.spawned_launches()
+        self.assertEqual(len(launches), 1)
+        self.assertEqual(self.feeds(self.told(launches[0]["pid"])), [])
+        self.assertEqual(helper.find_player(self.sock), [])
 
     def test_an_adopted_player_is_not_stopped_when_the_gate_then_refuses_it(self):
         """D-PLY-57's edge: only a player THIS start launched is stopped. A

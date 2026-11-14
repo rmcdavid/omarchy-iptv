@@ -1167,6 +1167,9 @@ stream opens.
 - D-PLY-58: the health relaunch of an adopted stash from another source.
 - D-PLY-65: a start sends its log subscription, which carries no channel,
   on the connection before the build gate judges the peer.
+  **[2026-11-14: fixed. The start asks the gate as soon as it holds the
+  connection, which also covers the owner claim of a start that stands
+  down.]**
 - D-PLY-59: mpv's listener and its children.
 - D-PLY-60: with no observer attached, a refusal before the ladder of a
   start that replaces another build's player -- the automatic restart (a

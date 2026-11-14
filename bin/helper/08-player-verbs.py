@@ -718,6 +718,10 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
     connection actually reaches (player_peer), before ANY command is sent on
     it -- ahead of the TLS assertion, because every command after it tells
     the player something about a channel. -> the peer's pid.
+    [D-PLY-65: `player start` asks it twice, first as soon as it holds the
+    connection, ahead of its log subscription and of a stand-down's owner
+    claim. The adoption's own probes and pins come before that: they are how
+    the peer is chosen, and they carry no channel.]
 
     With `vouched_pid` (`player start`: the pid it launched, or the current
     player it adopted) the peer must be that process, a DESCENDANT of it, or
@@ -1462,6 +1466,13 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         outcome = adopt_or_spawn(sock, mpv_args, args.spawn_timeout, args.ipc_timeout, warnings,
                                  label="player %s" % verb)
         client = outcome["client"]
+        # D-PLY-65 (2026-11-14): the gate, before anything this verb itself
+        # sends on the connection. apply_channel asks it again before its
+        # first command, but the log subscription below went ahead of that,
+        # and a start that stands down never reaches apply_channel at all and
+        # still writes the owner claim. What precedes this is the adoption's
+        # own reading (adopt_or_spawn), which is how the peer is chosen.
+        feed_gate(client, outcome["vouched"])
         # The automatic restart's carry (owner, 2026-11-01): a player that was
         # paused comes back paused -- only when the shell asked for it, the
         # restart of the SAME channel; a zap that replaces a player plays.
