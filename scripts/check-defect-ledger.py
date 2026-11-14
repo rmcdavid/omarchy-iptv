@@ -203,6 +203,28 @@ TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
 # citations are unused (R22d). The table stays, empty, as the shape for the
 # next withdrawal: add an entry in the commit that deletes the name, remove
 # it in the commit that removes its last prefixed citation.
+# F-GATE-19 (2026-11-14): what a citation IS. Every `Model.<name>` in a
+# tracked Markdown file, wherever it stands. The scan used to take one only
+# when its backticks held exactly that, so a call (`Model.name(x)`), a name
+# after other text in the same span, a span that wraps a line, and a
+# citation written with no backticks at all were never checked: measured on
+# 2026-11-03, 108 names were cited in a form the scan did not read and 37 of
+# them in no other form, among them a function Model.mjs does not export and
+# two that no longer exist. Reading code spans as a renderer pairs them was
+# tried and dropped: one stray backtick in a paragraph flips every pair
+# after it, and the scan then lost twelve names the old one found. The text
+# before the name may not be a letter, a digit, `_` or `.`, so `IptvModel.x`
+# and `qs.Model.x` are members of something else.
+MODEL_CITATION_RE = re.compile(r'(?<![A-Za-z0-9_.])Model\.([A-Za-z_][A-Za-z0-9_]*)')
+# `Model.js` is the FILE, named in 22 documents, `Model.mjs` is the same file
+# once it is an ES module (D-REL-5), and `Model.X` is the placeholder this
+# very check is described with. None is a citation. Kept as a named, short
+# list rather than a clever pattern: an exception you can read is an
+# exception somebody will notice. F-GATE-19: the wider scan also meets the
+# test files `Model.test.js` and `Model.spec.qml`, and `Model.f(x)`, the
+# placeholder two documents explain a comparison with.
+MODEL_NOT_SYMBOLS = frozenset({'js', 'mjs', 'X', 'test', 'spec', 'f'})
+
 UNEXPORTED_CITATION_WAIVERS = {}
 WITHDRAWN_SYMBOL_WAIVERS = {}
 
@@ -598,8 +620,9 @@ def main(argv=None):
         # are exactly that. Only a repo that CITES symbols it cannot resolve
         # has a problem, so the complaint moves inside the citation scan.
         cited_anywhere = any(
-            re.search(r'`Model\.[A-Za-z_]', read(root, rel))
-            for rel in tracked_markdown(root))
+            m.group(1) not in MODEL_NOT_SYMBOLS
+            for rel in tracked_markdown(root)
+            for m in MODEL_CITATION_RE.finditer(read(root, rel)))
         if cited_anywhere:
             problems.append(
                 'documents cite Model.* symbols but the model (Model.mjs and '
@@ -610,14 +633,9 @@ def main(argv=None):
         cited = {}
         for rel in tracked_markdown(root):
             text = read(root, rel)
-            for m in re.finditer(r'`Model\.([A-Za-z_][A-Za-z0-9_]*)`', text):
+            for m in MODEL_CITATION_RE.finditer(text):
                 cited.setdefault(m.group(1), set()).add(rel)
-        # `Model.js` is the FILE, named in 22 documents, `Model.mjs` is the
-        # same file once it is an ES module (D-REL-5), and `Model.X` is the
-        # placeholder this very check is described with. None is a citation.
-        # Kept as a named, short list rather than a clever pattern: an
-        # exception you can read is an exception somebody will notice.
-        not_symbols = {'js', 'mjs', 'X'}
+        not_symbols = MODEL_NOT_SYMBOLS
         # R20e: what QML's `Model.<name>` reaches. A model whose aggregator
         # re-exports nothing readable cannot answer, and every `Model.`
         # citation of it is then red rather than silently unchecked.

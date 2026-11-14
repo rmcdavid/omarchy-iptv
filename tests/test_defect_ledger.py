@@ -390,6 +390,45 @@ class LedgerCase(unittest.TestCase):
         self.assertEqual(listed & gone, set())
         self.assertEqual(listed, set())
 
+    def test_a_citation_is_read_wherever_it_stands_not_only_bare_in_backticks(self):
+        """F-GATE-19. The scan took a `Model.<name>` only when the backticks
+        held exactly that, so a call, a name after other text in the same
+        span, a span that wraps a line and a citation with no backticks at
+        all were never checked: a function renamed, deleted or never
+        exported under one stayed green (108 names were cited that way, 37
+        of them in no other form). Every `Model.<name>` in tracked Markdown
+        is a citation now."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\nfunction helperOnly() { return 2 } // internal\n'))
+        head = 'The pass filed D-AAA-1 and D-AAA-2. '
+        for green in ('See `Model.realThing(form)`.', 'See `x === Model.realThing(1) ? a : b`.',
+                      'See `Model.realThing.length`.', 'It calls Model.realThing first.',
+                      'See `a long span that wraps and names\nModel.realThing(1) on its second line`.'):
+            self.write('docs/QA-RESULTS.md', head + green + '\n')
+            self.assertGreen()
+        for red in ('See `Model.ghostThing(form)`.', 'See `x === Model.ghostThing(1) ? a : b`.',
+                    'See `Model.ghostThing.length`.', 'It calls Model.ghostThing first.',
+                    'See `a long span that wraps and names\nModel.ghostThing(1) on its second line`.',
+                    'See `[Model.ghostThing]`.'):
+            self.write('docs/QA-RESULTS.md', head + red + '\n')
+            self.assertRed(r'Model\.ghostThing is cited in docs/QA-RESULTS\.md and resolves in no source file')
+        self.write('docs/QA-RESULTS.md', head + 'See `Model.helperOnly(1)`.\n')
+        self.assertRed(r'Model\.helperOnly is cited in docs/QA-RESULTS\.md, but Model\.mjs does not export it')
+
+    def test_file_names_placeholders_and_other_objects_are_not_citations(self):
+        """F-GATE-19's other half: what the wider scan must not take for a
+        symbol. The test files `Model.test.js` and `Model.spec.qml`, a line
+        reference into the old file, the two placeholders the documents
+        explain the check with, and a member of some other object whose name
+        ends in Model."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\n'))
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. `tests/Model.test.js` and `tests/Model.spec.qml` '
+                   'run it; see `Model.js:120`, `Model.X`, `Model.f(x) == Model.f(x)`, '
+                   '`IptvModel.ghostThing`, `listModel.ghostThing` and `qs.Model.ghostThing`.\n')
+        self.assertGreen()
+
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.
 
@@ -413,6 +452,13 @@ class LedgerCase(unittest.TestCase):
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1, D-AAA-2 and cites `Model.anything`.\n')
         self.assertRed(r'the model \(Model\.mjs and its parts\) is unreadable')
+        # F-GATE-19: a call is a citation too, and a file name alone is not.
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1, D-AAA-2 and cites `Model.anything(1)`.\n')
+        self.assertRed(r'the model \(Model\.mjs and its parts\) is unreadable')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1, D-AAA-2; see `Model.js` and tests/Model.test.js.\n')
+        self.assertGreen()
 
     def test_a_family_name_containing_digits_is_still_seen(self):
         """`D-A11Y-1` must be an id, not invisible text.

@@ -1499,7 +1499,7 @@ where the URL is typed, and not a refusal (PO-5: a large share of real
 providers are http-only). One line: the `@`-typo warning above wins when
 both hold, the error and fetching lines win over either; the form reads
 `Model.formAdviceLine(form)`, which is `Model.formWarningLine(form)` else
-`Model.plainHttpLine(form)`. The README's Sources section carries the same
+`plainHttpLine(form)` in model/sources.mjs. The README's Sources section carries the same
 fact. Not shown on the Sources row of a stored `http://` source (an owner
 question, open).
 

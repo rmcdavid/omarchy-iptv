@@ -2388,6 +2388,8 @@ The gap already hides wrong citations: one of `plainHttpLine`, which
 `Model.mjs` does not export, and, after other text inside the backticks, two
 of `entryWriteNeeded`, deleted on 2026-10-13 (one in docs/QA-SOURCES.md, one
 wrapped in this file under R18b), and one of `barGlyphAlpha`, never built.
+[2026-11-14: F-GATE-19 is fixed. The scan reads every `Model.` citation
+wherever it stands, and the four citations named here were re-cited.]
 The SR register was filed as
 F-M3-20 and is closed: since 2026-10-24 `scripts/check-sr-register.py` (the
 checker in 02418c2, wired into the gate in 740811c) joins every SR citation
@@ -3336,8 +3338,10 @@ restart), and as a valid EPG beside the active source and pending with none;
 a refused EPG, active and pending; `R18b (... host): writes that change only
 the RETIRED keys ... reassign no own-write record after the first`; and
 `R18d (... host) OQ-W3`, typed and the Xtream add. Two structural pins,
-`R18b (structural): the funnel asks Model.entryWriteNeeded against its own
-last-write record BEFORE handing the entry to the host ...` and `R18d
+`R18b (structural): the funnel asks entryWriteNeeded against its own
+last-write record BEFORE handing the entry to the host ...`
+**[2026-11-14, F-GATE-19: the title is quoted without its `Model.` prefix, because R22e deleted the function and R19a (structural) replaced this check.]**
+and `R18d
 (structural): the probe commit hands adoptPendingEpgOnto the form's guide
 URL only for an ADD whose own record is kept ...`, and the suite-wide
 no-LOOP check. Live, key-scenario segments K, Z and A (floor 70 -> 78;

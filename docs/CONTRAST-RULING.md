@@ -474,7 +474,9 @@ private copies. No behaviour change, no count change, one commit. It goes first
 because both remaining fixes make a shipping decision with this arithmetic and
 rule 12 forbids two implementations of it in one repo.
 
-**Step 1 -- D-RUNG-5, the bar.** `Util.alpha(barFg, Model.barGlyphAlpha(...))`
+**Step 1 -- D-RUNG-5, the bar.** `Util.alpha(barFg, barGlyphAlpha(...))`
+**[2026-11-14, F-GATE-19: named without a `Model.` prefix, because no
+function of that name was built.]**
 at 0.86. Includes the sweep rewritten over the 44 theme inks, the honest
 dark-theme cost (15.6 -> 9.2), the `docs/STATUS.md` figure correction, and
 `docs/UX.md:682`, which still names the retired 1.55. Gate: `scripts/check.sh`
