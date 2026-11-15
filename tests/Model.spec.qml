@@ -3229,4 +3229,25 @@ TestCase {
     motionUser.slid = 0
     verify(motionUser.slid > 0, "and it slides again once motion is back: " + motionUser.slid)
   }
+
+  // D-SINK-103: the three decisions Service.qml's save path takes before
+  // every write of state.json, in the engine that runs them (V4): the plan's
+  // "private" step between the read and the write, the reply that alone lets
+  // the write go (failing closed), and the load of the empty file the helper
+  // created, which is not read as a state.
+  function test_statePrivateInV4() {
+    compare(Model.stateSavePlan({ gate: "write", verifyDone: true }), "private")
+    compare(Model.stateSavePlan({ gate: "write", privateDone: true }), "write")
+    compare(Model.stateSavePlan({ gate: "write", privatePending: true }), "join")
+    compare(Model.stateSavePlan({ gate: "refuse", blocked: "absent", privateDone: true }), "refuse")
+    var ok = Model.statePrivateReply('{"ok": true, "kind": "state", "action": "private", "file": "changed"}\n', 0)
+    compare(ok.ok, true)
+    compare(ok.file, "changed")
+    compare(Model.statePrivateReply('{"ok": false, "kind": "state", "action": "private", "why": "not-owned"}\n', 1).why, "not-owned")
+    compare(Model.statePrivateReply("", 0).ok, false)
+    compare(Model.statePrivateReply('{"ok": true, "kind": "state", "action": "private", "file": "changed"}\n', 1).ok, false)
+    compare(Model.statePrivateEcho({ pending: true, result: { loaded: true, text: "" } }), true)
+    compare(Model.statePrivateEcho({ pending: true, result: { loaded: true, text: "{}" } }), false)
+    compare(Model.statePrivateArgv("/p/bin/omarchy-iptv", "/s").join(" "), "python3 -I /p/bin/omarchy-iptv state --state-dir /s private")
+  }
 }

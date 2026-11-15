@@ -95,3 +95,15 @@ node after the re-make (2634 checks, each own-echo mode alike):
 `r25a-keep-landed` 24 failures, `r26a-no-read` 68, `r26b-no-defer` 35;
 `r26d-periodic-reload` has no node pin (the harness runs no Timer). None was
 re-run live through --tree after the re-make.
+
+D-SINK-103 (2026-11-14, dsink103) re-made `r25a-keep-landed.patch`,
+`r26a-no-read.patch` and `r27a-no-wait.patch` against the tree that carries
+the `state private` step before every write (its flag cleared beside the
+landed save's, the "private" branch after the read's, the plan's two new
+lines above the wait). `r25a-keep-landed` is the same lines in a moved
+context; the two that remove the READ now hand the write to `state private`
+(`requestStatePrivate`, the plan's `"private"`) where they used to write at
+once, as the read's own finish now does, so each still takes the read away
+and nothing else. Re-run through node after the re-make (3727 checks):
+`r25a-keep-landed` 24 failures, `r26a-no-read` 82, `r27a-no-wait` 31. None
+was re-run live through --tree.

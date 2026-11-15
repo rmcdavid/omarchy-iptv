@@ -243,7 +243,11 @@ fail=0
 # (test_addressAccessibleValueInV4, test_labelSinkTextInV4,
 # test_round4cInV4 to test_round4fInV4), each red on its pass's base
 # (QA-RESULTS "Round 3", "Round 4"); the spec runs 97.
-QML_SPEC_MIN=${QML_SPEC_MIN:-97}
+# 2026-11-14, dsink103: 97 -> 99. The floor trailed dev's 98; D-SINK-103 adds
+# test_statePrivateInV4, the save plan's "private" step, the reply that alone
+# lets the write go and the empty-file echo in the engine that runs them;
+# the spec runs 99.
+QML_SPEC_MIN=${QML_SPEC_MIN:-99}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -531,7 +535,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-97}
 # 2026-11-13, dsink101: 3695 -> 3696 -- D-SINK-101's sentence for
 # `unchecked_address` and its local routing (red on e17fc04's model); the
 # suite runs 3696.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
+# 2026-11-14, dsink103: 3696 -> 3727. The floor trailed dev's 3716; D-SINK-103
+# adds eleven checks -- the D-SINK-103 plan table, the reply and echo readers,
+# the maintainer's case, the steady state and join, three non-confirming
+# replies, the created-file echo, the watchdog and a block during the run --
+# each red on 7c1784c's Service.qml and model (15 of 3727 there, the two argv
+# sweeps that name the new builder among them) and under six single-decision
+# mutants (QA-RESULTS "D-SINK-103"); the suite runs 3727.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3727}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -888,7 +899,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # typed first hop answering a global address as global
 # (test_a_typed_first_hop_answering_a_public_address_is_no_local_source, red
 # on 8804d96); the suite runs 2401, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2401}
+# 2026-11-14, dsink103: 2401 -> 2427. The floor trailed dev's 2414; D-SINK-103
+# adds tests/test_state.py's StatePrivateTest, thirteen tests of the helper's
+# `state private` over the kernel's own answers (a 0644 target behind a link
+# into a 0755 folder, a 0644 file, a 0600 one left alone, nothing there, a
+# link to nothing and one into a missing folder, a directory, a FIFO, a real
+# root-owned target, a failed chmod, a chmod that changes nothing, a broken
+# folder link, the verb as the service runs it under a 0277 umask), red on
+# 7c1784c 13 of 13 and under four single-decision mutants (QA-RESULTS
+# "D-SINK-103"); the suite runs 2427, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2427}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

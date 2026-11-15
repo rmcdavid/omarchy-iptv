@@ -157,11 +157,9 @@ waits for a free place in Sources, that playlist and its guide-data URL,
 under the next heading), and the channel cache under
 `~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
 stream addresses — each created mode 0600 inside a directory only you can
-enter (one exception, two narrow windows -- one of a few milliseconds, one
-where a save's read of the file does not answer within its 2 s bound -- in
-which a save can create `state.json` at your umask's mode, usually 0644,
-until the plugin makes it 0600 moments after that save lands, is under
-Troubleshooting). They are never shown or logged beyond their host name. The shell's
+enter, and `state.json` made 0600 again before every save, whatever mode it
+was put back at (one exception, the instant between that and the save's
+write, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
 `shell.json` is **no longer one of them**. Up to and including 0.13.6 the
 active source was identified by its URL on that entry, so the count was three
 and the third was a file the plugin does not own; now the entry carries a short
@@ -1368,7 +1366,17 @@ Nothing inside the plugin directory is written at runtime.
 - `state.json` as a symbolic link (into a dotfiles folder, say): it works
   while the link leads to a regular file -- the plugin and its `state`
   commands read and write the file it points to and leave the link in
-  place. Up to and including 0.13.6 the helper's `state` commands replaced
+  place. Before every save the plugin makes the file the link leads to
+  private (0600), so a target put back at 0644 -- a backup copied in, a
+  dotfiles checkout -- is private again before any of your URLs is written
+  into it, and the journal says `state.json was made private before a save
+  (file changed)`. Up to and including 0.19.1 the save kept the target's
+  0644 and the plugin made it 0600 about a quarter of a second after the
+  save, which let other accounts read your URLs in that time if they could
+  enter the folder the link points into (reported by the Omarchy plugin
+  marketplace's maintainer against 0.19.1). The plugin never changes that
+  folder's permissions, and a target owned by another account, or that is
+  not a regular file, is never written: the save fails and says so. Up to and including 0.13.6 the helper's `state` commands replaced
   such a link with a plain file, and in the test that measured it the
   running shell then noticed none of the later changes to the file. While
   the shell is running, it notices AT ONCE a change made THROUGH the link:
@@ -1396,18 +1404,24 @@ Nothing inside the plugin directory is written at runtime.
   nothing is lost; run `omarchy restart shell` to see the change straight
   away. Two narrow exceptions: a re-point that lands between the plugin's
   read of the file and the write that read allows is not seen by that
-  write (a window of milliseconds); and if the read has not answered
+  write (a window of about a quarter of a second, while the plugin makes
+  the file private before the write); and if the read has not answered
   within 2 seconds -- a disk or network mount that has stalled, say -- the
   save goes ahead without it and the journal says `state.json was not read
   back within ... ms of a save; saving without the read`. In each of them
   a replacement is written over as before, and a link re-pointed at a file
   that does not exist, or a folder link at a folder with no `state.json`,
-  gets a new one created there, holding your sources and provider URLs, at
-  0644 under the usual umask 022 -- for the moments until that save lands,
-  when the plugin makes it 0600 and its folder 0700 and says so in the
-  shell's journal (`state.json's mode was repaired after a save`; up to and
-  including 0.15.0 it stayed 0644 until the next shell start). After
-  re-pointing a link, check the new place with `ls -l` all the same.
+  gets a new one created there, holding your sources and provider URLs --
+  created private (0600) by the plugin before the save writes into it, and
+  said in the shell's journal (`state.json was made private before a save
+  (file created)`). Up to and including 0.19.1 the save created it at 0644
+  under the usual umask 022, and the plugin made it 0600 and its folder 0700
+  about a quarter of a second after that save landed (`state.json's mode
+  was repaired after a save`; up to and including 0.15.0 it stayed 0644
+  until the next shell start). Only a re-point landing in the instant
+  between the plugin making the file private and the save writing it still
+  gets that 0644 file for that quarter of a second. After re-pointing a
+  link, check the new place with `ls -l` all the same.
   Up to and including 0.14.3 there was a third such window: a save asked
   for while the plugin's previous save was still being written did not
   read the file first. Now it waits for that write to land and then reads

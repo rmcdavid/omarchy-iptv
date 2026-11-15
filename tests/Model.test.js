@@ -11888,7 +11888,11 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // repair joined onSaved and the outcome call lengthened onSaveFailed's
     // guard, 2026-10-24)
     savedSettles: /onSaved: \{[\s\S]{0,2100}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1600}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // D-SINK-103 (2026-11-14): the failure's flag and settle moved into
+    // Service.noteStateWriteFailed, which onSaveFailed calls and a `state
+    // private` that does not confirm calls too; the order inside is the same.
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1600}root\.noteStateWriteFailed\(\)/.test(serviceSource)
+      && /function noteStateWriteFailed\(\) \{[\s\S]{0,200}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
     // (Model.stateSaveLanded; since D-SRC-39 through Model.stateSaveOutcome's
@@ -11981,13 +11985,17 @@ checkCall("R13 (structural, SR25 as amended): the state write's failure is repor
   const failed = (serviceSource.match(/onSaveFailed: \(error\) => \{[\s\S]*?\n    \}/) || [""])[0]
   const remove = (serviceSource.match(/function removeSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
   const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const flag = failed.indexOf("root.stateSaveFailed = true")
-  const report = failed.indexOf('root.sourcesPersistFailed("state_write_failed")')
-  const settle = failed.indexOf("root.settleEntryFlush()")
+  // D-SINK-103 (2026-11-14): the report, the flag and the settle are
+  // Service.noteStateWriteFailed's, which onSaveFailed calls (and so does a
+  // `state private` that does not confirm); read in that function.
+  const note = failed.indexOf("root.noteStateWriteFailed()") === -1 ? "" : (serviceSource.match(/function noteStateWriteFailed\(\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const flag = note.indexOf("root.stateSaveFailed = true")
+  const report = note.indexOf('root.sourcesPersistFailed("state_write_failed")')
+  const settle = note.indexOf("root.settleEntryFlush()")
   return {
     // Once per episode: the report is guarded by the flag NOT yet set, then
     // the flag is set, then the flush settles (and drops, reading the flag).
-    reportsOncePerEpisode: /if \(!root\.stateSaveFailed\) \{[\s\S]{0,200}?root\.sourcesPersistFailed\("state_write_failed"\)/.test(failed),
+    reportsOncePerEpisode: /if \(!root\.stateSaveFailed\) \{[\s\S]{0,200}?root\.sourcesPersistFailed\("state_write_failed"\)/.test(note),
     reportThenFlagThenSettle: flag !== -1 && report !== -1 && settle !== -1 && report < flag && flag < settle,
     noUrlInTheWarn: !/console\.warn\([^\n]*(Url|url|path)[^\n]*\)/.test(failed),
     removeNeverReturnsAFailureAfterIssuing: remove.indexOf("persistFailureResult") === -1 && remove.indexOf("persist_failed") === -1
@@ -12021,7 +12029,8 @@ checkCall("R14 / R22a (structural): the ignore branch of applyUserState RETURNS 
     // is pinned by its fixture; the plan's table by the R26a pins below.
     // R29a: R28a's re-read on a join is withdrawn, so the park and the join
     // return as they did on 6f1d176 (only R27a's waitExpired input stays).
-    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
+    // D-SINK-103: and the `state private` run's two inputs join it.
+    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired,\n\s*privatePending: root\.statePrivatePending, privateDone: root\.statePrivateDone \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
     // and the park is cleared on the write itself, not left set
     clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
   }
@@ -19910,11 +19919,31 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         P({ gate: "write", inFlight: 1, waitExpired: true }), P({ gate: "write", inFlight: 1, waitExpired: true, inHandler: true }),
         P({ gate: "write", inFlight: 1, verifyDone: true })
       ]
-    }, ["join", "join", "park", "refuse", "refuse", "refuse", "verify", "verify", "verify", "write", "write",
+    }, ["join", "join", "park", "refuse", "refuse", "refuse", "verify", "verify", "verify",
+        // D-SINK-103 re-levelled 2026-11-14: the verify's finish read "write"
+        // here (twice, and last); it asks `state private` first now, and the
+        // write is that run's finish (the D-SINK-103 table below)
+        "private", "private",
         // R27a re-levelled 2026-10-20: these three read "defer", "defer",
         // "write" -- the in-flight save skipped its read (D-SINK-22 window a)
         "defer", "wait", "wait", "wait", "verify", "refuse", "refuse",
-        "verify", "defer", "write"])
+        "verify", "defer", "private"])
+    // D-SINK-103 (2026-11-14): no write before the file is private. The read's
+    // finish asks `state private`; while that run is out every save joins it;
+    // its confirmed finish writes, from any turn and over a write in flight
+    // alike (the read was had); a refusal met at that finish is the run's own
+    // answer, so it refuses rather than reading again.
+    checkCall("D-SINK-103: Model.stateSavePlan -- the read's finish answers private, a run out is joined (refused or not), the run's finish writes, and a refusal at that finish is refused, never re-read", () => {
+      const P = c => M.stateSavePlan(c)
+      return [
+        P({ gate: "write", verifyDone: true }), P({ gate: "write", verifyDone: true, inFlight: 1 }),
+        P({ gate: "write", privatePending: true }), P({ gate: "refuse", blocked: "absent", privatePending: true }), P({ gate: "park", privatePending: true }),
+        P({ gate: "write", privateDone: true }), P({ gate: "write", privateDone: true, inHandler: true }), P({ gate: "write", privateDone: true, inFlight: 1 }),
+        P({ gate: "write", privateDone: true, verifyDone: true }),
+        P({ gate: "refuse", blocked: "absent", privateDone: true }), P({ gate: "refuse", blocked: "unparsed", privateDone: true, writeTurn: true }),
+        P({ gate: "park", privateDone: true }), P({ gate: "write", privatePending: false, privateDone: false })
+      ]
+    }, ["private", "private", "join", "join", "join", "write", "write", "write", "write", "refuse", "refuse", "park", "verify"])
     // R26b's rule-15 search made a check. stateFile.setText is the ONE
     // FileView write in the shipped files, and it is reached from FIVE
     // handlers of three views (channelsFile's two through adoptIdScheme,
@@ -19939,10 +19968,21 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         waitEnd: [calls(/root\.endStateWriteWait\(/g), /function endStateWriteWait\(timedOut\) \{[\s\S]*?if \(root\.stateSavePending\) Qt\.callLater\(root\.saveDeferredState\)\n  \}/.test(serviceSource),
                   /id: stateWriteWaitWatchdog[\s\S]{0,120}onTriggered: if \(root\.stateWriteWaiting\) root\.endStateWriteWait\(true\)/.test(serviceSource)],
         verifyDoneRaised: [calls(/root\.stateVerifyDone = true/g), fnOf("finishStateVerify").indexOf("root.stateVerifyDone = true") !== -1],
-        writeTurnRaised: [calls(/root\.stateWriteTurn = true/g), fnOf("saveDeferredState").indexOf("root.stateWriteTurn = true") !== -1]
+        writeTurnRaised: [calls(/root\.stateWriteTurn = true/g), fnOf("saveDeferredState").indexOf("root.stateWriteTurn = true") !== -1],
+        // D-SINK-103: the third flag that lets a call write, raised only in
+        // finishStatePrivate, after its reply is confirmed; that finish is
+        // reached from the run's exit (a Process signal, never a handler of
+        // stateFile's), its watchdog and requestStatePrivate's refusal of a
+        // second run -- the last two with a reply that is not ok.
+        privateDoneRaised: [calls(/root\.statePrivateDone = true/g),
+                            /if \(!reply \|\| reply\.ok !== true\) \{[\s\S]*?return\n    \}[\s\S]*root\.statePrivateDone = true/.test(fnOf("finishStatePrivate"))],
+        privateFinishFrom: [calls(/root\.finishStatePrivate\(/g),
+                            /root\.finishStatePrivate\(Model\.statePrivateReply\(text, exitCode\)\)/.test(fnOf("handleStatePrivateExit")),
+                            /id: statePrivateWatchdog[\s\S]{0,700}root\.finishStatePrivate\(\{ ok: false, why: "timeout" \}\)/.test(serviceSource),
+                            /root\.finishStatePrivate\(\{ ok: false, why: "still-running" \}\)/.test(fnOf("requestStatePrivate"))]
       }
     }, { setText: 1, finishCalls: 2, finishFromLater: true, finishFromWatchdog: true, laterOnly: [1, 1, 2, 2], waitEnd: [3, true, true],
-         verifyDoneRaised: [1, true], writeTurnRaised: [1, true] })
+         verifyDoneRaised: [1, true], writeTurnRaised: [1, true], privateDoneRaised: [1, true], privateFinishFrom: [3, true, true, true] })
     checkCall("R26a (D-SRC-35): Model.stateBlockRecheck -- a source verb re-reads a liftable no-write mode, never init-timeout, never from inside a load, never while a read is already out, and not when nothing is blocked", () => {
       const R = c => M.stateBlockRecheck(c)
       return [R({ blocked: "absent" }), R({ blocked: "permission" }), R({ blocked: "unparsed" }), R({ blocked: "init-timeout" }),
@@ -22114,18 +22154,152 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.root.toggleFavorite("t:three.uk"); h.drain()
     return [beforeLanding, insideHandler, started, folded, rerun, quiet, [p.running, h.root.stateModeRuns - runsAtBoot], h.compileErrors]
   }, [[false, 0], [false, true], [true, ["python3", "-I", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
-  checkCall("D-SINK-22 (b): the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- the write CREATES state.json at the umask's 0644 (the window stays), and the repair the landing asks for makes it 0600 within the helper's start, told once; before: 0644 until the next shell start", () => {
+  checkCall("D-SINK-22 (b), D-SINK-103: the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- `state private` finds nothing there and CREATES state.json 0600, and the write lands on that file at 0600, the landing's repair finding nothing to do; one journal line says it was created private; before D-SINK-103 the write CREATED it at the umask's 0644 and the repair after the landing made it 0600", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.root.toggleFavorite("t:one.uk"); h.drain()
     while (h.stateModeExit()) {}
     h.root.toggleFavorite("t:two.uk")   // the save reads first (R26a): the load is deferred
     const load = h.later.shift(); load.fn.apply(null, load.args)   // the read answers; the write is decided, deferred (R26b)
     h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })   // the re-point lands in that window
-    h.drain()                            // the write creates the file
+    h.drain()                            // `state private` creates the file 0600; the write lands on it
     const created = [h.stateFile.exists, (h.stateFile.mode || 0).toString(8), h.ids.stateModeProc.running]
     h.stateModeExit()
-    return [created, (h.stateFile.mode || 0).toString(8), h.warnings.filter(w => /state.json's mode was repaired after a save \(file changed, folder kept\)/.test(w)).length, h.file().favorites]
-  }, [[true, "644", true], "600", 1, ["t:one.uk", "t:two.uk"]])
+    return [created, (h.stateFile.mode || 0).toString(8), h.warnings.filter(w => /state.json's mode was repaired after a save/.test(w)).length,
+            h.warnings.filter(w => /state.json was made private before a save \(file created\)/.test(w)).length, h.file().favorites]
+  }, [[true, "600", true], "600", 0, 1, ["t:one.uk", "t:two.uk"]])
+
+  // ---- D-SINK-103 (2026-11-14): no write before the file is private.
+  // Every check runs against IPTV_SERVICE_QML / IPTV_MODEL (this section's
+  // rule), so the red on 7c1784c is one command. `writesMeet` records the
+  // mode the file has at the moment each write is issued, and whether that
+  // text carries the credential -- what QSaveFile copies onto the text's
+  // temporary and then the file (measured, docs/QA-RESULTS.md "D-SINK-103").
+  const writesMeet = h => {
+    const seen = []
+    const setText = h.stateFile.setText.bind(h.stateFile)
+    h.stateFile.setText = (text) => { seen.push([h.stateFile.exists ? (h.stateFile.mode || 0).toString(8) : "none", /p4ss/.test(text)]); setText(text) }
+    return seen
+  }
+  const EPG_SECRET = "http://u:p4ss@epg.example.test/x.xml"
+  checkCall("D-SINK-103: Model.statePrivateArgv is argv only (the state dir and the verb, no URL); Model.statePrivateReply confirms ONLY an ok `state private` line with a known file word and exit 0, and reads every refusal, other verb, unknown word, empty reply and non-zero exit as not ok, with one fixed word", () => {
+    const L = o => JSON.stringify(Object.assign({ kind: "state", action: "private" }, o)) + "\n"
+    const R = (t, c) => M.statePrivateReply(t, c === undefined ? 0 : c)
+    return [M.statePrivateArgv("/p/bin/omarchy-iptv", "/s"),
+            R(L({ ok: true, file: "kept" })), R(L({ ok: true, file: "changed" })), R(L({ ok: true, folder: "changed", file: "created" })),
+            R(L({ ok: true, file: "kept" }), 1), R(L({ ok: true, file: "probably" })), R(L({ ok: false, why: "not-owned" }), 1), R(L({ ok: false, why: "not-a-file" }), 1),
+            R(L({ ok: false, why: "unreachable" }), 1), R(L({ ok: false, why: "unconfirmed" }), 1), R(L({ ok: false, why: "/home/x/state.json" }), 1), R(L({ ok: false }), 1),
+            R('{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}\n'), R(""), R("", 15), R("garbage\n"),
+            R(L({ ok: true, file: "kept" }) + L({ ok: false, why: "not-owned" }), 0)]
+  }, [["python3", "-I", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "private"],
+      { ok: true, file: "kept" }, { ok: true, file: "changed" }, { ok: true, file: "created" },
+      { ok: false, why: "no-reply" }, { ok: false, why: "no-reply" }, { ok: false, why: "not-owned" }, { ok: false, why: "not-a-file" },
+      { ok: false, why: "unreachable" }, { ok: false, why: "unconfirmed" }, { ok: false, why: "refused" }, { ok: false, why: "refused" },
+      { ok: false, why: "no-reply" }, { ok: false, why: "no-reply" }, { ok: false, why: "no-reply" }, { ok: false, why: "no-reply" },
+      { ok: false, why: "not-owned" }])
+  checkCall("D-SINK-103: Model.statePrivateEcho -- only a load that READ an empty text, while `state private` is out or after it answered created, is the run's own file; a text, a failed load, or no run, is not", () => {
+    const E = (pending, created, result) => M.statePrivateEcho({ pending, created, result })
+    return [E(true, false, { loaded: true, text: "" }), E(false, true, { loaded: true, text: "" }), E(true, true, { loaded: true, text: "" }),
+            E(false, false, { loaded: true, text: "" }), E(true, false, { loaded: true, text: "{}" }), E(true, false, { loaded: true, text: " " }),
+            E(true, true, { loaded: false, error: 2 }), E(true, false, null), M.statePrivateEcho(undefined)]
+  }, [true, true, true, false, false, false, false, false, false])
+  checkCall("D-SINK-103 (the maintainer's case, through Service): a valid state.json with no credential restored at 0644, then an in-app save that carries one -- `state private` runs BEFORE the write and the write meets a 0600 file, so no text of ours reaches a file wider than 0600; the landing's repair finds nothing; one journal line says the mode was repaired before the save; before: the write met the 0644 file and the repair came after it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    h.foreign(sf => { sf.disk = stateText([rec(A)], KA, { favorites: ["t:restored.uk"] }); sf.mode = 0o644 })   // the restore, at 0644
+    h.drain(); while (h.stateModeExit()) {}
+    const before = [h.privateRuns.length, (h.stateFile.mode || 0).toString(8), h.root.userState.favorites]
+    const seen = writesMeet(h)
+    const res = h.root.updateSource(KA, { epgUrl: EPG_SECRET }); h.drain()
+    const atLanding = (h.stateFile.mode || 0).toString(8)
+    while (h.stateModeExit()) {}
+    return [before, res.ok, seen, atLanding, h.privateRuns.length, /p4ss/.test(h.stateFile.disk),
+            h.warnings.filter(w => /state.json was made private before a save \(file changed\)/.test(w)).length,
+            h.warnings.filter(w => /state.json's mode was repaired after a save/.test(w)).length,
+            h.privateRuns.every(c => JSON.stringify(c.slice(-4)) === JSON.stringify(["state", "--state-dir", "/.local/state/omarchy-iptv", "private"])),
+            /p4ss/.test(JSON.stringify(h.privateRuns)) || /p4ss/.test(h.warnings.join("\n")), h.compileErrors]
+  }, [[0, "644", ["t:restored.uk"]], true, [["600", true]], "600", 1, true, 1, 0, true, false, []])
+  checkCall("D-SINK-103 (through Service): the steady state -- a 0600 file -- costs one `state private` per write and no journal line; saves asked while that run is out JOIN it, so one run and one write carry all of them", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    const runs0 = h.privateRuns.length
+    const seen = writesMeet(h)
+    h.root.toggleFavorite("t:one.uk"); h.drain(); while (h.stateModeExit()) {}
+    const one = [h.privateRuns.length - runs0, seen.length]
+    h.privateHang = true
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    const out = [h.root.statePrivatePending, h.ids.statePrivateProc.running]
+    h.root.toggleFavorite("t:three.uk"); h.root.updateSource(KA, { epgUrl: EPG_SECRET }); h.drain()
+    const joined = [h.privateRuns.length - runs0, seen.length, h.root.stateSavePending]
+    h.privateHang = false
+    h.privateExit(); h.drain(); while (h.stateModeExit()) {}
+    return [one, out, joined, [h.privateRuns.length - runs0, seen.length, seen.map(s => s[0])], h.file().favorites, /p4ss/.test(h.stateFile.disk),
+            h.warnings.filter(w => /made private before a save|could not be made private/.test(w)).length, h.compileErrors]
+  }, [[1, 1], [true, true], [2, 1, true], [2, 2, ["600", "600"]], ["t:one.uk", "t:two.uk", "t:three.uk"], true, 0, []])
+  for (const [why, answer] of [
+    ["not-owned", { code: 1, raises: false, reply: JSON.stringify({ ok: false, kind: "state", error: { code: "state_not_private", message: "state.json belongs to another account; nothing may be written to it" }, why: "not-owned", action: "private" }) + "\n" }],
+    ["no-reply", { code: 0, raises: false, reply: "" }],
+    ["no-reply", { code: 0, raises: false, reply: '{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}\n' }]
+  ]) {
+    checkCall("D-SINK-103 (through Service): a `state private` that does not confirm (" + why + ", " + (answer.reply === "" ? "an empty reply" : answer.code ? "a refusal" : "another verb's reply") + ") writes NOTHING -- no setText; the save fails as a failed write fails: state_write_failed once per episode, the in-memory state stands, one journal line with the fixed word and no path or URL; the next change, confirmed, writes both", () => {
+      const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+      h.drain(); while (h.stateModeExit()) {}
+      const seen = writesMeet(h)
+      h.privateAnswer = () => answer
+      const res = h.root.updateSource(KA, { epgUrl: EPG_SECRET }); h.drain()
+      h.root.toggleFavorite("t:one.uk"); h.drain()
+      const refused = [res.ok, seen.length, h.root.stateSaveFailed, h.signals.filter(s => s[0] === "sourcesPersistFailed").map(s => s[1]),
+                       h.warnings.filter(w => w === "omarchy-iptv: state.json was not written: it could not be made private first (" + why + "); the in-memory state stands").length,
+                       /p4ss/.test(h.stateFile.disk), (M.findSource(h.root.userState.sources, KA) || {}).epgUrl === EPG_SECRET, h.root.statePrivateRefusals]
+      h.privateAnswer = null
+      h.root.toggleFavorite("t:two.uk"); h.drain(); while (h.stateModeExit()) {}
+      return [refused, seen.map(s => s[0]), h.root.stateSaveFailed, /p4ss/.test(h.stateFile.disk), h.file().favorites,
+              /p4ss|\/\.local\/state/.test(h.warnings.filter(w => /made private/.test(w)).join("\n")), h.compileErrors]
+    }, [[true, 0, true, ["state_write_failed"], 2, false, true, 2], ["600"], false, true, ["t:one.uk", "t:two.uk"], false, []])
+  }
+  checkCall("D-SINK-103 (through Service): nothing at the path -- `state private` CREATES it 0600 and empty, and a watching view that loads that empty file before the exit is handled (the order that leaves the most to get wrong) does not read it as a state: no no-write mode, the write lands at 0600; before the echo rule: `unparsed`, saving stopped, nothing written", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    const seen = writesMeet(h)
+    h.root.toggleFavorite("t:one.uk")   // the read is out
+    const load = h.later.shift(); load.fn.apply(null, load.args)   // it answers
+    h.stateFile.exists = false; h.stateFile.disk = ""; h.stateFile.mode = null   // the file removed in the window; the view still watches the folder
+    h.drain(); while (h.stateModeExit()) {}
+    return [seen, h.root.stateWriteBlocked, h.root.statePrivateEchoes, (h.stateFile.mode || 0).toString(8), h.file().favorites,
+            h.warnings.filter(w => /made private before a save \(file created\)/.test(w)).length, h.root.statePrivateCreated, h.compileErrors]
+  }, [[["600", false]], "", 1, "600", ["t:one.uk"], 1, false, []])
+  checkCall("D-SINK-103 (through Service): a `state private` that never answers is TERMed at the start-up bound (stateInitTimeoutMs) and its save FAILED then, told, not held; a save asked while that run is still alive fails at once (`still-running`), never waits on it; the late exit decides nothing; the next run, confirmed, writes", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    const seen = writesMeet(h)
+    h.privateHang = true
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const p = h.ids.statePrivateProc, wd = h.ids.statePrivateWatchdog
+    const armed = [p.running, wd.running, wd.interval === h.root.stateInitTimeoutMs]
+    h.elapse(h.root.stateInitTimeoutMs - 1)
+    const early = [p.signals.slice(), h.root.statePrivatePending]
+    h.elapse(1)
+    const fired = [p.signals.slice(), h.root.statePrivatePending, h.root.stateSaveFailed, h.warnings.filter(w => /state private exceeded 15 s, terminating it/.test(w)).length,
+                   h.warnings.filter(w => /could not be made private first \(timeout\)/.test(w)).length]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    const busy = [h.privateRuns.length, h.warnings.filter(w => /could not be made private first \(still-running\)/.test(w)).length, seen.length]
+    h.privateHang = false
+    h.privateExit({ code: 15, reply: "" }); h.drain()
+    const late = [seen.length, h.root.statePrivateAbandoned, h.root.statePrivateRefusals]
+    h.root.toggleFavorite("t:three.uk"); h.drain(); while (h.stateModeExit()) {}
+    return [armed, early, fired, busy, late, seen.map(s => s[0]), h.file().favorites, h.signals.filter(s => s[0] === "sourcesPersistFailed").length, h.compileErrors]
+  }, [[true, true, true], [[], true], [[15], false, true, 1, 1], [1, 1, 0], [0, false, 2], ["600"], ["t:one.uk", "t:two.uk", "t:three.uk"], 1, []])
+  checkCall("D-SINK-103 (through Service): a load that sets the no-write mode while `state private` is out -- the file replaced by a directory -- refuses the save at the run's finish; nothing is written into what is there now", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    const seen = writesMeet(h)
+    h.privateHang = true
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    h.stateFile.fault = "is-dir"; h.loadState(); h.runLater()   // the view's reload of what is there now
+    const blocked = h.root.stateWriteBlocked
+    h.privateHang = false
+    h.privateExit({ code: 0, reply: JSON.stringify({ ok: true, kind: "state", action: "private", file: "kept" }) + "\n" }); h.drain()
+    return [blocked, seen.length, h.root.stateWritesRefused > 0, h.root.statePrivatePending, h.compileErrors]
+  }, ["not-a-file", 0, true, false, []])
   checkCall("D-SRC-49 / D-SRC-37 (c): a `state mode` that never answers is TERMed at helperTimeoutMs; its exit stops the watchdog, a non-zero exit with no reply gets one line, and the folded re-run still goes", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.root.toggleFavorite("t:one.uk"); h.drain()
@@ -22549,9 +22723,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const built = [M.helperArgv(P, ["x"]), M.playlistFetchArgv(P, "/c/sources/k", "/s"), M.playlistProbeArgv(P, "/c/sources/k"),
                    M.epgFetchArgv(P, "/c/sources/k", true), M.epgFetchArgv(P, "/c/sources/k", false), M.failedArgv(P, "mark", "t:x", "/c/sources/k"),
                    M.logoFetchArgv(P, "/c/sources/k"), M.configShieldArgv(P), M.clipboardArgv(P), M.stateModeArgv(P, "/s"),
-                   M.stateInitArgv(P, "/s"), M.cacheRunArgv(P, "/c", ["prune"])]
+                   M.stateInitArgv(P, "/s"), M.cacheRunArgv(P, "/c", ["prune"]), M.statePrivateArgv(P, "/s")]
     return built.map(argv => argv.slice(0, 3).join(" "))
-  }, Array(12).fill("python3 -I /p/bin/omarchy-iptv"))
+  }, Array(13).fill("python3 -I /p/bin/omarchy-iptv"))
   checkCall("D-SINK-50 (service): the control, player, cache, failed, playlist, EPG and state-mode slots run the interpreter isolated, and Service.qml composes no interpreter argv of its own", () => {
     const h = boot()
     h.ids.controlProc.running = false
@@ -22729,12 +22903,15 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // token on its argv, which helperSpawn would move on the other verbs and
   // which is no secret there -- execDetached starts only a command list
   // (the D-PLY-64 block below, and ARCHITECTURE-PLAYER 4.14).
-  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, state init and mode, config shield, clipboard -- carry nothing helperSpawn would move", () => {
+  // D-SINK-103 (2026-11-14): `state private`, run before every state write,
+  // is one more such spawn (statePrivateProc), carrying the state folder and
+  // the verb and nothing else.
+  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, state init, mode and private, config shield, clipboard -- carry nothing helperSpawn would move", () => {
     const P = "/p/bin/omarchy-iptv", S = "/run/user/1000/omarchy-iptv/mpv.sock"
     const built = [M.helperArgv(P, M.playerStopArgv(S, 3)),
-                   M.stateInitArgv(P, "/s"), M.stateModeArgv(P, "/s"), M.configShieldArgv(P), M.clipboardArgv(P)]
+                   M.stateInitArgv(P, "/s"), M.stateModeArgv(P, "/s"), M.statePrivateArgv(P, "/s"), M.configShieldArgv(P), M.clipboardArgv(P)]
     return built.map(argv => { const sp = M.helperSpawn(argv, {}); return [JSON.stringify(sp.command) === JSON.stringify(argv), Object.keys(sp.environment)] })
-  }, Array(5).fill([true, []]))
+  }, Array(6).fill([true, []]))
   // The sixth bypass, the orphan check, built WITH a token: what helperSpawn
   // would move from it is exactly the token and nothing else, so a key, an
   // id, a scope or a cache folder added to the argv it carries for its 6 s

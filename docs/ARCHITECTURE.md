@@ -785,7 +785,13 @@ D-SINK-22 (b)(c), D-REL-8, F-M3-18 (a)). What moved, and what it costs:
   session record included**, accepted by the lead for the P23 round; the
   residual is the milliseconds between a creating save and the repair,
   stated in the README's two-window paragraph, no longer "until the next
-  shell start".
+  shell start". **[2026-11-14, D-SINK-103: neither figure was true. One
+  `state mode` run is about 250 ms of CPU and wall at load 1.5-2 (12 runs,
+  median 256.8 ms wall, 253.6 ms CPU; the stub compiles every part on every
+  run, and nothing may cache them in the plugin folder), and the window it
+  left was the 234-272 ms from the write's rename to its chmod, during
+  which a 0644 file held the new text. The file is now made 0600 BEFORE
+  every write; see section 8, standard 5's bracket of that date.]**
 - Every helper slot is bounded (D-SRC-37 (c)). `cacheProc`, `failedProc`,
   `configShieldProc`, `whichProc` and the two PiP start-up probes had no
   watchdog while every other slot had one; each has a TERM-only Timer at
@@ -3683,6 +3689,38 @@ Performance budget (10k channels):
    mode, so a re-pointed folder holding a 0644 `state.json` keeps 0644
    until the next start makes it 0600 (measured by the sink lane through a
    restart).]
+   [2026-11-14, D-SINK-103 (found by the marketplace maintainer on #14290
+   against 0.19.1): **the file is made private BEFORE a write, not repaired
+   after it.** How the service's write gets its mode, measured on Quickshell
+   0.3.2 / Qt 6.12.0 under gdb (`scripts/dev-harness/spikes/state-private/`):
+   FileView's `atomicWrites` is QSaveFile, which opens an unnamed
+   `O_TMPFILE` at 0600 in the folder of the file it resolves the path to (a
+   link's target's folder, not the state folder), writes the text into it,
+   fchmods it to the mode the existing file had when the write opened -- or,
+   with no file, to the mode a dry-run `O_TMPFILE` got from the umask (0644
+   at 022) -- links it under a temporary name and renames that over the
+   target. So the temporary is unnamed, and unreadable by path, while it is
+   written, and holds the new text at the OLD file's mode from the link to
+   the rename; the file then keeps that mode. D-SRC-49's `state mode` after
+   the landing closed that 234-272 ms later (measured), which is the window
+   the finding names. Now every write waits for the helper's `state
+   private` (`state_private` in `bin/helper/10-state.py`), run between the
+   read (R26a) and the write: through a link it makes the file 0600, with
+   nothing there it creates it 0600 and empty (`O_EXCL | O_NOFOLLOW` at what
+   a link names, no folder made), and it refuses -- exit 1, nothing changed
+   -- a target that is not a regular file, one another account owns, and one
+   whose mode it cannot set and read back. It leaves every folder as it is.
+   The service writes only on its confirmed reply (`Model.statePrivateReply`
+   fails closed; `Model.stateSavePlan`'s "private"), so QSaveFile opens a
+   0600 file and nothing it makes is wider: the temporary is 0600 from its
+   open to its rename, the file 0600 after it. A reply that is not a
+   confirmation writes nothing (the save fails as a failed write does), and
+   `state mode` after the landing stays as the second layer. What remains:
+   the one turn between the reply and the writer's open; a target folder
+   another account can write (it could replace the file whatever its mode);
+   and the cost, one more helper run (about 250 ms) before every write, which
+   widens the read-to-write gap to that run (D-SRC-48's shape) and is lost
+   with the change if the shell stops inside it.]
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and

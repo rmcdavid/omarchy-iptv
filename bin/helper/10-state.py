@@ -839,12 +839,117 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
             "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
 
 
+def state_private_refusal(why: str, reason: str = "") -> HelperError:
+    """The one sentence `state private` refuses with (D-SINK-103): what it
+    found, never the path, and that nothing may be written. `why` is a fixed
+    word the service's journal line carries (Model.statePrivateReply)."""
+    sentences = {
+        "not-a-file": "state.json is not a regular file",
+        "not-owned": "state.json belongs to another account",
+        "unreachable": "state.json could not be reached (%s)" % (reason or "error"),
+        "unconfirmed": "state.json could not be made private (%s)" % (reason or "error"),
+    }
+    return HelperError("state_not_private", sentences[why] + "; nothing may be written to it", why=why)
+
+
+def state_private_open(path: str) -> tuple[int, str]:
+    """The descriptor `state private` judges, and what it did to get it:
+    "found" for a file already at the path (through a link, as the FileView
+    writes through one), "created" for one it created 0600 and empty
+    because nothing was there. An O_PATH descriptor opens no FIFO and needs
+    no permission on its target, so a 0000 file of ours is still repaired
+    (chmod_if_kind's reasoning). Nothing at the path, or a link to nothing:
+    the file is created with O_EXCL and O_NOFOLLOW at what the link names --
+    a name another writer takes in between is opened instead, never written
+    through -- with no folder created on the way (a missing folder is
+    `unreachable`, which the FileView's own write would have made 0755)."""
+    try:
+        return os.open(path, os.O_PATH | os.O_CLOEXEC), "found"
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    target = os.path.realpath(path) if os.path.islink(path) else path
+    try:
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except FileExistsError:
+        try:
+            return os.open(path, os.O_PATH | os.O_CLOEXEC), "found"
+        except OSError as error:
+            raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    except OSError as error:
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    # The umask can only narrow 0600 (a 0277 umask gives 0400, which
+    # QSaveFile refuses to replace): the mode is set and read back below,
+    # on the descriptor this returns, like any file found there.
+    os.close(fd)
+    try:
+        return os.open(path, os.O_PATH | os.O_CLOEXEC), "created"
+    except OSError as error:
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+
+
+def state_private(path: str) -> dict[str, Any]:
+    """`state private` (D-SINK-103, 2026-11-14): make state.json private
+    BEFORE the service writes it, and say so only once it is.
+
+    Why before. The service writes state.json through Quickshell's FileView
+    with atomicWrites, which is Qt's QSaveFile, and QSaveFile gives the new
+    file the mode the OLD one had: measured on Quickshell 0.3.2 / Qt 6.12.0
+    under gdb (QA-RESULTS "D-SINK-103", dev branch), the text is written into
+    an unnamed O_TMPFILE created 0600 in the TARGET's folder (through a
+    link, the folder the link points into), fchmod-ed to the old file's
+    mode -- read when the write opens -- linked under a temporary name and
+    renamed over the target. Over a 0644 file, the temporary is 0644 from
+    the link to the rename and the file 0644 after it, holding the new text
+    either way; with nothing there, the mode is the umask's (0644 at 022).
+    Over a 0600 file nothing is ever wider than 0600. So this makes the file
+    0600 (creating it 0600 and empty when nothing is there), and the service
+    writes only on this reply; `state mode` after the save stays, as the
+    second layer.
+
+    Refused, exit 1, nothing changed: a target that is not a regular file
+    (`not-a-file`: a directory, a FIFO), one another account owns
+    (`not-owned`: a chmod would fail anyway, and the rename would put our
+    text in its folder), one that cannot be reached or created
+    (`unreachable`) and a mode that could not be set or read back
+    (`unconfirmed`). The FILE only: the state folder is left as it is --
+    `state init` at every start and `state mode` after every landed save
+    repair it, as before -- because a folder this run made writable would
+    change what a 0500 folder does to the write that follows, and nothing in
+    the folder is readable once the file and the writer's temporary are
+    0600. Through a link, the folder the link points into is never touched.
+    -> {"file": "kept"|"changed"|"created"}"""
+    fd, how = state_private_open(path)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise state_private_refusal("not-a-file")
+        if st.st_uid != os.geteuid():
+            raise state_private_refusal("not-owned")
+        changed = False
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            try:
+                os.chmod("/proc/self/fd/%d" % fd, 0o600)
+            except OSError as error:
+                raise state_private_refusal("unconfirmed", error.strerror or type(error).__name__)
+            changed = True
+        # Read back on the same inode: the reply is the mode the file HAS.
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or stat.S_IMODE(st.st_mode) != 0o600:
+            raise state_private_refusal("unconfirmed", "mode %o" % stat.S_IMODE(st.st_mode))
+    finally:
+        os.close(fd)
+    return {"file": "created" if how == "created" else ("changed" if changed else "kept")}
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     action = args.action
-    if action in ("init", "mode"):
+    if action in ("init", "mode", "private"):
         # FIRST, before the path is even named: everything after this can
         # touch a filesystem that hangs. `mode` runs after every landed save
-        # against the same path, so it has the same bound.
+        # against the same path, and `private` before every save
+        # (D-SINK-103), so they have the same bound.
         signal.alarm(STATE_INIT_DEADLINE)
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
@@ -871,6 +976,13 @@ def cmd_state(args: argparse.Namespace) -> int:
             return EXIT_OK
         if broken:
             raise HelperError("state_unreadable", "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written")
+        if action == "private":
+            # D-SINK-103: the file made 0600 before the service writes it;
+            # the service writes only on this reply. Reads nothing.
+            payload_private: dict[str, Any] = {"ok": True, "kind": "state", "action": action}
+            payload_private.update(state_private(path))
+            emit(payload_private)
+            return EXIT_OK
         if action == "init":
             # R22a: `found` first -- the lstat witness, before anything is
             # repaired. The init NEVER rewrites a file that exists, whatever

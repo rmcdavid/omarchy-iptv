@@ -1888,6 +1888,58 @@ function stateModeReply(text) {
   return null
 }
 
+// D-SINK-103 (2026-11-14). The argv of the helper's `state private`, which
+// the service runs before EVERY write of state.json (Service.saveState's
+// "private" step): the FileView's atomic writer gives the new file the mode
+// the old one had, read when the write opens, and the umask's for a file it
+// creates -- measured, a 0644 file restored at the path, or one a link
+// points to in another folder, took every credential written after it at
+// 0644 until the after-save repair -- so the file is made 0600 FIRST.
+// Argv only, no URL.
+function statePrivateArgv(helperPath, stateDir) {
+  return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "private"])
+}
+
+// `state private`'s reply -> { ok: true, file } when the helper says
+// state.json IS 0600 now ("kept", "changed" or "created"), or
+// { ok: false, why } for anything else. FAIL CLOSED: the
+// service writes only on ok, so a refusal, a reply from another verb, a
+// file word it does not know, no reply at all (the watchdog stopped it, an
+// empty stub mid-update) and a non-zero exit are all `ok: false`. `why` is
+// the helper's own word when it refused ("not-a-file", "not-owned",
+// "unreachable", "unconfirmed"), "no-reply" otherwise; one fixed word, never
+// a path or a URL, for the journal line the service writes.
+var STATE_PRIVATE_FILE = ["kept", "changed", "created"]
+var STATE_PRIVATE_WHY = ["not-a-file", "not-owned", "unreachable", "unconfirmed"]
+function statePrivateReply(text, exitCode) {
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.kind !== "state" || o.action !== "private") continue
+    if (o.ok === true && Number(exitCode) === 0 && STATE_PRIVATE_FILE.indexOf(str(o.file)) !== -1) {
+      return { ok: true, file: str(o.file) }
+    }
+    if (o.ok === false) return { ok: false, why: STATE_PRIVATE_WHY.indexOf(str(o.why)) !== -1 ? str(o.why) : "refused" }
+    return { ok: false, why: "no-reply" }
+  }
+  return { ok: false, why: "no-reply" }
+}
+
+// D-SINK-103: a load the service must not read as a state. When nothing is
+// at the path, `state private` creates state.json 0600 and EMPTY for the
+// write that follows, and a view that watches the folder may load that
+// file before the write lands (a missing file that appears reloads,
+// measured, the contract's FileView facts). Read as a state it is
+// "unparsed", the no-write mode mid-session, for a file the shell itself
+// made. So: true for a load that READ an empty text while the run is out
+// (`pending`) or after it answered `created` and before our write reports
+// (`created`); false for every other load, a failed one included.
+function statePrivateEcho(ctx) {
+  var c = ctx || {}
+  var r = c.result || {}
+  return (c.pending === true || c.created === true) && r.loaded === true && str(r.text) === ""
+}
+
 // The one gate every state write goes through (Service.saveState).
 //   blocked  the no-write mode's reason, "" when writes are allowed
 //   loaded   a state has been applied this session
@@ -1913,13 +1965,17 @@ function stateWriteGate(ctx) {
 //   verifyDone    the call IS the verify's finish (or its watchdog's)
 //   writeTurn     the call is a deferred turn of saveState's own
 //   inFlight      one of our writes is still being reported on
-// -> "join"   the read in flight decides this save too
+//   privatePending D-SINK-103: `state private` is out for this save
+//   privateDone   the call IS that run's confirmed finish
+// -> "join"   the read (or the `state private` run) in flight decides this
+//             save too
 //    "park"   no state loaded or dirs not ready: held for the load
 //    "refuse" the no-write mode, and nothing a re-read can lift now
 //    "verify" reload state.json first and decide on what it finds
 //    "defer"  ask again from a turn of its own (Qt.callLater)
 //    "wait"   one of our writes is in flight: held until it lands (or
 //             fails), then asked again from a turn of its own, which reads
+//    "private" the read is done: make state.json 0600 first (D-SINK-103)
 //    "write"  issue the write now
 // Every write is asked for again from a turn of its own before it is
 // issued, because a setText inside stateFile's own onLoaded writes the file
@@ -1943,17 +1999,27 @@ function stateWriteGate(ctx) {
 // no load in that time and the save is written without its read, counted
 // and logged, as on 0.14.2 (D-SINK-22's window c, which R27a and R28a tried
 // to close and the lead's ruling leaves open, documented).
+// D-SINK-103 (2026-11-14): NO WRITE BEFORE THE FILE IS PRIVATE. The read's
+// finish no longer writes: it answers
+//    "private" ask the helper's `state private` to make state.json 0600
+//             (Model.statePrivateArgv), and write only on its reply
+// and the write is the reply's own finish (`privateDone`). While that run is
+// out (`privatePending`) every save joins it, as a save joins the read, so
+// the write that follows carries whatever memory holds by then. A refusal
+// at that finish (the no-write mode a load set meanwhile) is the run's own
+// answer, so it refuses rather than reading again.
 function stateSavePlan(ctx) {
   var c = ctx || {}
-  if (c.verifyPending === true) return "join"
+  if (c.verifyPending === true || c.privatePending === true) return "join"
   var gate = str(c.gate)
   if (gate === "park") return "park"
   if (gate === "refuse") {
-    if (str(c.blocked) === "init-timeout" || c.verifyDone === true || c.inHandler === true) return "refuse"
+    if (str(c.blocked) === "init-timeout" || c.verifyDone === true || c.privateDone === true || c.inHandler === true) return "refuse"
     return "verify"
   }
   if (gate !== "write") return "refuse"
-  if (c.verifyDone === true) return "write"
+  if (c.privateDone === true) return "write"
+  if (c.verifyDone === true) return "private"
   if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
   return "verify"
@@ -2102,8 +2168,10 @@ export {
   MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
   mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
   STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateModeArgv, stateInitArgv, stateModeReply, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  stateModeArgv, stateInitArgv, stateModeReply, statePrivateArgv,
+  STATE_PRIVATE_FILE, STATE_PRIVATE_WHY, statePrivateReply, statePrivateEcho,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 }

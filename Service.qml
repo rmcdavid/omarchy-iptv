@@ -837,6 +837,31 @@ Item {
   // is what the harness and the IPC status read.
   property bool stateModeRerun: false
   property int stateModeRuns: 0
+  // D-SINK-103 (2026-11-14): NO WRITE BEFORE THE FILE IS PRIVATE. The
+  // FileView's atomic writer gives the new state.json the mode the old one
+  // had (and the umask's to one it creates), so a 0644 file restored at the
+  // path -- or one a link points to, in a folder other accounts can enter --
+  // took every credential written after it at 0644 until the after-save
+  // repair (measured, QA-RESULTS "D-SINK-103" on the dev branch). So every write waits
+  // for the helper's `state private` to say the file is 0600
+  // (Model.stateSavePlan's "private"). `statePrivatePending`: that run is out
+  // and every save joins it. `statePrivateDone`: the call is its confirmed
+  // finish, which issues the write. `statePrivateAbandoned`: its watchdog
+  // failed the save at the bound, so the exit that may still come decides
+  // nothing. The counts are the harness's: runs started, and runs that did
+  // not confirm (no write followed). None of them ever holds a URL.
+  property bool statePrivatePending: false
+  property bool statePrivateDone: false
+  property bool statePrivateAbandoned: false
+  // `statePrivateCreated`: the run answered `created` (nothing was at the
+  // path; the helper made it 0600 and empty) and our write has not landed or
+  // failed yet; with `statePrivatePending` it is what makes a load of that
+  // empty file ours (stateLoadArrived, Model.statePrivateEcho), counted in
+  // `statePrivateEchoes`.
+  property bool statePrivateCreated: false
+  property int statePrivateRuns: 0
+  property int statePrivateRefusals: 0
+  property int statePrivateEchoes: 0
   // A string property holding the LAST persist failure's code USED TO BE
   // HERE (D-SRC-67, P23 lane A's second finding, 2026-10-24, removed by
   // lane A2 the same day): set by the three failure sites and
@@ -2474,6 +2499,16 @@ Item {
   // been decided by the time the handler returns, so the save goes then,
   // from a turn of its own (R26b): never from inside the handler.
   function stateLoadArrived(result) {
+    // D-SINK-103: the EMPTY file `state private` creates when nothing is at
+    // the path is ours, made for the write that follows it, and a view that
+    // watches the folder may load it first (a file that appears reloads).
+    // Read as a state it is "unparsed", which mid-session is the no-write
+    // mode -- for a file this shell made a moment ago -- so such a load
+    // decides nothing (Model.statePrivateEcho).
+    if (Model.statePrivateEcho({ pending: root.statePrivatePending, created: root.statePrivateCreated, result: result })) {
+      root.statePrivateEchoes = root.statePrivateEchoes + 1
+      return
+    }
     root.stateInHandler = root.stateInHandler + 1
     try {
       var kind = Model.stateLoadKind(result)
@@ -2785,7 +2820,8 @@ Item {
     var plan = Model.stateSavePlan({ verifyPending: root.stateVerifyPending, gate: gate, blocked: root.stateWriteBlocked,
                                      inHandler: root.stateInHandler > 0, verifyDone: root.stateVerifyDone,
                                      writeTurn: root.stateWriteTurn, inFlight: root.stateSavesInFlight,
-                                     waitExpired: root.stateWriteWaitExpired })
+                                     waitExpired: root.stateWriteWaitExpired,
+                                     privatePending: root.statePrivatePending, privateDone: root.statePrivateDone })
     if (plan === "join" || plan === "park") {
       root.stateSavePending = true
       return
@@ -2826,9 +2862,21 @@ Item {
       stateVerifyWatchdog.restart()
       return
     }
+    if (plan === "private") {
+      // D-SINK-103: the read is done and the write decided -- and the file
+      // is made 0600 BEFORE it, by the helper (requestStatePrivate). The
+      // write is issued by that run's confirmed reply (finishStatePrivate),
+      // so no text of ours lands in, or passes through, a file other
+      // accounts can read; a run that does not confirm writes nothing.
+      root.stateSavePending = true
+      root.requestStatePrivate()
+      return
+    }
     // R27a: no write is issued without its read any more, so this counter
     // stays 0; it is kept, under its R26 name, so the harness can say so.
-    if (root.stateSavesInFlight > 0 && !root.stateVerifyDone) root.stateVerifySkipped = root.stateVerifySkipped + 1
+    // D-SINK-103: the write now comes from the `state private` reply that
+    // followed the read, so that finish counts as the read's too.
+    if (root.stateSavesInFlight > 0 && !root.stateVerifyDone && !root.statePrivateDone) root.stateVerifySkipped = root.stateVerifySkipped + 1
     root.stateSavePending = false
     root.stateWritesIssued = root.stateWritesIssued + 1
     var text = JSON.stringify(root.userState, null, 2) + "\n"
@@ -4862,6 +4910,96 @@ Item {
     }
   }
 
+  // D-SINK-103. Start `state private` for the save the read has decided
+  // (saveState's "private"), on its own Process, bounded by its own
+  // watchdog. Every save asked while it runs joins it (the plan's "join"),
+  // so one run covers them all and the write that follows carries whatever
+  // memory holds by then. A Process still running here is a run the
+  // watchdog already gave up on that no signal has ended: no second run can
+  // start on it, and no write goes without one, so this save fails now,
+  // told, rather than waiting on a run nothing bounds.
+  function requestStatePrivate() {
+    if (statePrivateProc.running) {
+      root.finishStatePrivate({ ok: false, why: "still-running" })
+      return
+    }
+    root.statePrivatePending = true
+    root.statePrivateRuns = root.statePrivateRuns + 1
+    statePrivateProc.command = Model.statePrivateArgv(root.helperPath, root.stateDir)
+    statePrivateProc.running = true
+    statePrivateWatchdog.restart()
+  }
+
+  // The run's exit, with its one line (Model.statePrivateReply reads it, and
+  // fails closed). A run its watchdog abandoned has had its save failed
+  // already; its exit decides nothing.
+  function handleStatePrivateExit(exitCode, text) {
+    statePrivateWatchdog.stop()
+    if (root.statePrivateAbandoned) {
+      root.statePrivateAbandoned = false
+      return
+    }
+    if (!root.statePrivatePending) return
+    root.finishStatePrivate(Model.statePrivateReply(text, exitCode))
+  }
+
+  // The write the read decided, issued only on a confirmed reply, from this
+  // turn (the Process's exit, never one of stateFile's own handlers, R26b),
+  // so the gap between the file being 0600 and the writer opening it is one
+  // turn. Anything else writes nothing: the save fails the way a failed
+  // write fails (noteStateWriteFailed: the in-memory state stands, the user
+  // is told once per episode, the next change writes it).
+  function finishStatePrivate(reply) {
+    root.statePrivatePending = false
+    statePrivateWatchdog.stop()
+    if (!reply || reply.ok !== true) {
+      root.statePrivateRefusals = root.statePrivateRefusals + 1
+      root.statePrivateCreated = false
+      root.stateSavePending = false
+      // A fixed word, never a path or a URL (Model.statePrivateReply).
+      console.warn("omarchy-iptv: state.json was not written: it could not be made private first (" + String(reply ? reply.why : "no-reply") + "); the in-memory state stands")
+      root.noteStateWriteFailed()
+      return
+    }
+    // A mode this plugin changed, or a file it created, is worth a line the
+    // user can find afterwards; `kept` is the steady state and silent.
+    if (reply.file !== "kept") {
+      console.warn("omarchy-iptv: state.json was made private before a save (file " + reply.file + ")")
+    }
+    // A load that came in meanwhile set the no-write mode: this run's answer
+    // is the save's, so it is refused, as the read's finish refuses it.
+    if (root.stateWriteBlocked !== "") {
+      root.statePrivateCreated = false
+      root.stateSavePending = false
+      root.stateWritesRefused = root.stateWritesRefused + 1
+      return
+    }
+    if (!root.stateSavePending) {
+      root.statePrivateCreated = false
+      return
+    }
+    // The empty file the run created is ours until this write lands or fails
+    // (onSaved / onSaveFailed clear it with the burst's last report).
+    root.statePrivateCreated = reply.file === "created"
+    root.statePrivateDone = true
+    try { root.saveState() } finally { root.statePrivateDone = false }
+  }
+
+  // A state write that did not happen, from either place that learns it:
+  // stateFile's saveFailed and a `state private` that did not confirm
+  // (D-SINK-103). R13: the state write IS the switch / remove / adoption, so
+  // its failure is the one a source call can have, signalled once per
+  // failure EPISODE -- the flag is sticky until a later write lands --
+  // because one switch issues two writes (the touch, then the key move) and
+  // the guide would show the line twice.
+  function noteStateWriteFailed() {
+    if (!root.stateSaveFailed) {
+      root.sourcesPersistFailed("state_write_failed")
+    }
+    root.stateSaveFailed = true
+    root.settleEntryFlush()
+  }
+
   // The verb's answer. `hostConfigShield` moves from unknown to private or
   // exposed and never back to unknown: Model.configShieldState fails closed,
   // so a helper that did not run, crashed or printed nothing reads as exposed
@@ -6246,6 +6384,7 @@ Item {
         var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
         if (outcome.last) {
           root.stateSavesInFlight = 0
+          root.statePrivateCreated = false   // D-SINK-103: the created file holds our text now
           root.stateSaveFailed = false
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
           root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
@@ -6289,6 +6428,7 @@ Item {
         // earlier write of a burst lands nothing, so only `last` is read.
         if (Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves }).last) {
           root.stateSavesInFlight = 0
+          root.statePrivateCreated = false   // D-SINK-103: no write of ours is coming to fill it
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
         }
@@ -6297,15 +6437,10 @@ Item {
         // R13: the state write IS the switch / remove / adoption, so its
         // failure is the one a source call can have, reported here with a
         // reason of its own rather than from the call that issued it (which
-        // returned when the write was issued, SR25 as amended 2026-10-12).
-        // Signalled once per failure EPISODE -- the flag below is sticky until
-        // a later write lands -- because one switch issues two writes (the
-        // touch, then the key move) and the guide would show the line twice.
-        if (!root.stateSaveFailed) {
-          root.sourcesPersistFailed("state_write_failed")
-        }
-        root.stateSaveFailed = true
-        root.settleEntryFlush()
+        // returned when the write was issued, SR25 as amended 2026-10-12),
+        // once per failure EPISODE (noteStateWriteFailed, shared with the
+        // `state private` that does not confirm, D-SINK-103).
+        root.noteStateWriteFailed()
       } finally {
         root.stateInHandler = root.stateInHandler - 1
       }
@@ -6856,6 +6991,24 @@ Item {
   Connections {
     target: stateModeProc
     function onExited(exitCode, exitStatus) { root.handleStateModeExit(exitCode, stateModeStdout.text) }
+  }
+
+  Process {
+    // D-SINK-103: the helper's `state private` BEFORE every write of
+    // state.json (requestStatePrivate). The write is issued only on its
+    // confirmed reply, read at the exit (Model.statePrivateReply). Argv only;
+    // its stderr -- the refusal's sentence, which names no path -- is
+    // redacted like every other helper channel.
+    id: statePrivateProc
+    stdout: StdioCollector { id: statePrivateStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state private:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: statePrivateProc
+    function onExited(exitCode, exitStatus) { root.handleStatePrivateExit(exitCode, statePrivateStdout.text) }
   }
 
   Process {
@@ -7428,6 +7581,23 @@ Item {
       if (!stateModeProc.running) return
       console.warn("omarchy-iptv: state mode exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
       stateModeProc.signal(15)
+    }
+  }
+  Timer {
+    // D-SINK-103: the bound on `state private`, the start-up check's (the
+    // same verb family on the same path; the helper's own alarm ends it at
+    // 30 s). At the bound the run is TERMed and its save FAILED now, told,
+    // rather than held on a run that no signal may end (a filesystem in
+    // uninterruptible sleep): no write goes without the run's reply.
+    id: statePrivateWatchdog
+    interval: root.stateInitTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!statePrivateProc.running || !root.statePrivatePending) return
+      console.warn("omarchy-iptv: state private exceeded " + Math.floor(root.stateInitTimeoutMs / 1000) + " s, terminating it")
+      root.statePrivateAbandoned = true
+      statePrivateProc.signal(15)
+      root.finishStatePrivate({ ok: false, why: "timeout" })
     }
   }
   Timer {
