@@ -423,5 +423,64 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.assertEqual(sorted(set(self.resolver.asked)), [("down.qqqqqq.test", 80), ("ok.qqqqqq.test", 80), (NAME, 80)])
 
 
+class AnswerRefusalTest(unittest.TestCase):
+    """D-SINK-102: stream_answer_refusal, the judgment of ONE answer lifted
+    out of stream_lookup_refusal's loop so the relay, which judges every
+    connection the player makes, asks the same function. Called directly
+    here, and held to the lookup's own verdict for the same single answer."""
+
+    OWN = "prov.example.test"
+
+    def test_one_answer_meets_the_rule_a_literal_meets(self):
+        remote = helper.cached_source(REMOTE)
+        relay = helper.cached_source(RELAY)
+        lan = helper.cached_source(LAN)
+        local_file = helper.cached_source(FILE)
+        proxied = helper.cached_source(dict(REMOTE, sourceClass="unresolved"))
+        cases = [
+            # The playlist's own host: global, or the class its fetch reached.
+            ("global", self.OWN, 80, "http", remote, ""),
+            ("global", self.OWN, 8080, "https", remote, ""),
+            ("loopback", self.OWN, 80, "http", remote, "local"),
+            ("private", self.OWN, 8080, "http", remote, "local"),
+            ("unspecified", self.OWN, 80, "http", remote, "local"),
+            ("global", self.OWN, 80, "http", proxied, ""),
+            ("private", self.OWN, 80, "http", proxied, "local"),
+            # Another host from a remote playlist: global only (multicast on udp and rtp).
+            ("global", NAME, 80, "http", remote, ""),
+            ("loopback", NAME, 80, "http", remote, "local"),
+            ("private", NAME, 443, "https", remote, "local"),
+            ("link-local", NAME, 80, "http", remote, "local"),
+            ("multicast", NAME, 5000, "udp", remote, ""),
+            ("multicast", NAME, 80, "http", remote, "local"),
+            # A loopback relay: the LAN, and this machine on its own port only.
+            ("loopback", NAME, 34400, "http", relay, ""),
+            ("loopback", NAME, 631, "http", relay, "port"),
+            ("unspecified", NAME, 631, "http", relay, "port"),
+            ("loopback", NAME, None, "srt", relay, "port"),
+            ("private", NAME, 80, "http", relay, ""),
+            # A LAN playlist and a local file name any address.
+            ("private", NAME, 80, "http", lan, ""),
+            ("loopback", NAME, 631, "http", lan, ""),
+            ("loopback", NAME, 631, "http", local_file, ""),
+        ]
+        for kind, host, port, scheme, source, want in cases:
+            with self.subTest(kind=kind, host=host, port=port, scheme=scheme, source=source):
+                self.assertEqual(helper.stream_answer_refusal(kind, host, port, scheme, source), want)
+
+    def test_the_lookup_and_the_lifted_judgment_agree_on_every_single_answer(self):
+        addresses = [GLOBAL, "2606:4700::1111"] + [address for address, _ in REFUSED_ANSWERS]
+        for name in (NAME, self.OWN):
+            for raw in (REMOTE, RELAY, dict(REMOTE, sourceClass="unresolved")):
+                source = helper.cached_source(raw)
+                for address in addresses:
+                    with self.subTest(name=name, source=raw, address=address):
+                        _, patch = resolving({name: [address]})
+                        with patch:
+                            looked = helper.stream_lookup_refusal("http://%s:34400/x" % name, source)
+                        kind = helper.address_class(address)
+                        self.assertEqual(helper.stream_answer_refusal(kind, name, 34400, "http", source), looked)
+
+
 if __name__ == "__main__":
     unittest.main()

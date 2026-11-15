@@ -196,14 +196,30 @@ def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
     if not answers:
         return "" if own and source.get("class") == "unresolved" else "lookup"
     for answer in answers:
-        kind = address_class(answer[4][0])
-        if own:
-            refusal = "" if kind in ("global", source.get("class")) else "local"
-        else:
-            refusal = _class_refusal(kind, host, scheme, source, port)
+        refusal = stream_answer_refusal(address_class(answer[4][0]), host, port, scheme, source)
         if refusal:
             return refusal
     return ""
+
+
+def stream_answer_refusal(kind: str, host: str, port: int | None, scheme: str, source: dict[str, Any]) -> str:
+    """The judgment of ONE address a stream host name answered, of class
+    `kind` (address_class's), for a channel of `source` (cached_source's
+    record, or the relay's copy of it) whose URL names `host` at `port`
+    under `scheme`: "" when the address may be connected to, else `local` or
+    `port` (_class_refusal's words). Lifted out of stream_lookup_refusal's
+    loop unchanged (D-SINK-102), so the play-time lookup and the relay,
+    which judges every connection the player makes against the address it
+    connects to, ask ONE function (rule 12).
+
+    The playlist's OWN host, when the playlist is not local, must answer
+    `global` or the class its fetch connected to (`class`, sourceClass) --
+    for a remote playlist, global; every other host meets the rule a
+    literal meets (_class_refusal: the source's locality, a loopback
+    relay's own port, multicast for udp and rtp)."""
+    if not source.get("local") and own_host_match(host, port, source):
+        return "" if kind in ("global", source.get("class")) else "local"
+    return _class_refusal(kind, host, scheme, source, port)
 
 
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
