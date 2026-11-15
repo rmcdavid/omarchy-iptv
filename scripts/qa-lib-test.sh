@@ -379,7 +379,8 @@ st "a root with no helper at all is refused" 1 qa_helper_parts "$HROOT"
 # reads as a ONE-FILE helper, exit 0 and no parts, so a slow tree would stage
 # the stub alone. The stub itself reads its parts with CRLF as LF (D-REL-11),
 # so the reader now does the same. The real tree's stub and parts, copied
-# with CRLF line endings: the same eleven parts in the same order.
+# with CRLF line endings: the same twelve parts in the same order (eleven
+# until D-SINK-102 added the relay's).
 HCRLF="$TMP/helper-crlf"
 mkdir -p "$HCRLF/bin/helper"
 sed 's/$/\r/' "$ROOT/bin/omarchy-iptv" >"$HCRLF/bin/omarchy-iptv"
@@ -387,9 +388,9 @@ for hp in "$ROOT"/bin/helper/*.py; do sed 's/$/\r/' "$hp" >"$HCRLF/bin/helper/${
 is "a CRLF copy of the stub yields the same parts as the LF tree, in order" \
    "$(qa_helper_parts "$HCRLF" | sed "s#^$HCRLF/##" | tr '\n' ' ')" \
    "$(qa_helper_parts "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')"
-is "and that is eleven of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "11"
+is "and that is twelve of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "12"
 # The old reader, verbatim from a9d20f9's qa-lib.sh, against the same copy:
-# whichever grep is on PATH, it does not answer the eleven parts.
+# whichever grep is on PATH, it does not answer the twelve parts.
 old_helper_parts() {
   local root=$1 rel
   local -a parts=()
@@ -432,10 +433,10 @@ slow_tr_parts() {   # slow_tr_parts <pipefail 0|1> <reader> <root> -> "<status> 
 }
 is "81853f7's reader under pipefail and the slow writer: a one-file helper, status 0, no parts (the defect)" \
    "$(slow_tr_parts 1 old_helper_parts_pipe "$ROOT")" "0 0"
-is "the same reader and writer without pipefail finds all eleven, so it is the status and not the bytes" \
-   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 11"
-is "qa_helper_parts under pipefail and the slow writer names all eleven parts, status 0" \
-   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 11"
+is "the same reader and writer without pipefail finds all twelve, so it is the status and not the bytes" \
+   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 12"
+is "qa_helper_parts under pipefail and the slow writer names all twelve parts, status 0" \
+   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 12"
 # The same reader's other masked writer failure: a stub that exists and
 # cannot be READ. 81853f7 answered it as a one-file helper too (tr failed,
 # grep saw nothing, `|| return 0`). Root reads a mode-000 file, so there

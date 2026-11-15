@@ -901,7 +901,8 @@ class ThisTreeTest(unittest.TestCase):
 
     def test_the_parts_are_the_owners_layout(self):
         """docs/HELPER-SPLIT.md, decided 2026-10-15: these eleven, in this
-        order. A part added later changes this list and the doc together."""
+        order, and since D-SINK-102 the relay's twelfth after them. A part
+        added later changes this list and the doc together."""
         self.assertEqual(helper_files.part_names((ROOT / helper_files.STUB).read_text(encoding="utf-8")),
                          tuple(name for name, _ in split.CUTS))
 

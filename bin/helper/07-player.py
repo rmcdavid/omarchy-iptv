@@ -444,7 +444,7 @@ PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=",
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
                            "script-opt": "script-opts", "load-osd-console": "load-console"}
 PER_FILE_PROFILE_PREFIXES = ("protocol.", "extension.")
-PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek", "relay")
 # Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address

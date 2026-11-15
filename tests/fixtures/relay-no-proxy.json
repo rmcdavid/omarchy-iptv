@@ -1,0 +1,43 @@
+{
+ "about": [
+  "D-SINK-102: when the player's relay chains to the user's own proxy (the relay's http_proxy), a target the relay's no_proxy matches goes DIRECT, as FFmpeg's own connection would have (http.c and tls.c ask ff_http_match_no_proxy of every hop's host). These vectors are FFmpeg n9.0.2's libavformat/network.c ff_http_match_no_proxy and match_host_pattern, read on 2026-11-14 and run by tests/test_relay.py against relay_no_proxy_match:",
+  "the list splits at runs of spaces and commas (strspn and strcspn of \" ,\"), and nothing else separates; '*' alone matches every host; otherwise ONE leading '*' and then ONE leading '.' are dropped, and what is left must be the whole host or a suffix of it that a '.' precedes; strcmp, so case-sensitive and byte for byte; no ports, no address ranges; an empty entry (an empty list, or one a trailing separator leaves) matches only a host that ends in a dot.",
+  "noProxy null stands for an unset variable."
+ ],
+ "vectors": [
+  {"noProxy": null, "host": "a.test", "match": false},
+  {"noProxy": "", "host": "a.test", "match": false},
+  {"noProxy": "", "host": "a.test.", "match": true},
+  {"noProxy": "*", "host": "anything.test", "match": true},
+  {"noProxy": "x.test *", "host": "anything.test", "match": true},
+  {"noProxy": "example.test", "host": "example.test", "match": true},
+  {"noProxy": "example.test", "host": "a.b.example.test", "match": true},
+  {"noProxy": "example.test", "host": "badexample.test", "match": false},
+  {"noProxy": "a.example.test", "host": "example.test", "match": false},
+  {"noProxy": "*.example.test", "host": "a.example.test", "match": true},
+  {"noProxy": "*.example.test", "host": "example.test", "match": true},
+  {"noProxy": ".example.test", "host": "example.test", "match": true},
+  {"noProxy": ".example.test", "host": "a.example.test", "match": true},
+  {"noProxy": "*example.test", "host": "a.example.test", "match": true},
+  {"noProxy": "*example.test", "host": "aexample.test", "match": false},
+  {"noProxy": "**.example.test", "host": "a.example.test", "match": false},
+  {"noProxy": "..example.test", "host": "a.example.test", "match": false},
+  {"noProxy": "Example.test", "host": "example.test", "match": false},
+  {"noProxy": "example.test", "host": "EXAMPLE.test", "match": false},
+  {"noProxy": "a.test, b.test", "host": "b.test", "match": true},
+  {"noProxy": "a.test,,b.test", "host": "b.test", "match": true},
+  {"noProxy": "  b.test  ", "host": "b.test", "match": true},
+  {"noProxy": "a.test\tb.test", "host": "b.test", "match": false},
+  {"noProxy": "a.test;b.test", "host": "b.test", "match": false},
+  {"noProxy": "a.test,", "host": "x.test.", "match": true},
+  {"noProxy": "a.test,", "host": "x.test", "match": false},
+  {"noProxy": ".", "host": "a.test", "match": false},
+  {"noProxy": ".", "host": "a.test.", "match": true},
+  {"noProxy": "127.0.0.1", "host": "127.0.0.1", "match": true},
+  {"noProxy": "0.0.1", "host": "127.0.0.1", "match": true},
+  {"noProxy": "127.0.0.1:80", "host": "127.0.0.1", "match": false},
+  {"noProxy": "10.0.0.0/8", "host": "10.1.2.3", "match": false},
+  {"noProxy": "::1", "host": "::1", "match": true},
+  {"noProxy": "longer.example.test", "host": "test", "match": false}
+ ]
+}

@@ -888,7 +888,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # typed first hop answering a global address as global
 # (test_a_typed_first_hop_answering_a_public_address_is_no_local_source, red
 # on 8804d96); the suite runs 2401, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2401}
+# 2026-11-14, dsink102 (D-SINK-102, the relay the player will be pinned to
+# as its HTTP proxy): 2401 -> 2474. The floor had trailed the suite, which
+# ran 2416 on the lane's base (7c1784c plus the lifted stream_answer_refusal
+# and its 2 tests in tests/test_stream_lookup.py); tests/test_relay.py adds
+# 58 -- head parsing, authentication, the judgment of every answer, check
+# and use, keep-alive, rewriting, the tunnel, the user's own proxy, the
+# peer-uid filter, the control socket, a typed URL's first hop, a dead first
+# address, and the verb's lifecycle -- red 58 of 58 on 7c1784c and under 22
+# single-decision mutants of the relay; the suite runs 2474, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2474}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

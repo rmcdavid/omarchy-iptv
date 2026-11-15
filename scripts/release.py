@@ -110,6 +110,7 @@ ALLOWLIST = (
     'bin/helper/09-cache.py',
     'bin/helper/10-state.py',
     'bin/helper/11-cli.py',
+    'bin/helper/12-relay.py',
     'contrib/bindings.lua',
     'contrib/omarchy-menu.jsonc',
     'contrib/windows.lua',

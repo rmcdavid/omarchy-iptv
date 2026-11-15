@@ -2513,6 +2513,8 @@ def cmd_player(args: argparse.Namespace) -> int:
         return player_tracks(args)
     if action == "seek":
         return player_seek(args)
+    if action == "relay":
+        return player_relay(args)
     return player_orphan_check(args)
 
 

@@ -257,6 +257,52 @@ DESTINATION_RULES = 4
 # refetch that fails leaves the old window in use, stale and reported as a
 # failure, until one succeeds; `--now-only` never refetches.
 GUIDE_RULES = 2
+# D-SINK-102 (the marketplace maintainer on #14290, against 0.19.1): the
+# relay the player is pinned to as its HTTP proxy (12-relay.py), which looks
+# every target up itself and connects only to an address it judged. Its
+# bounds. RELAY_IPC_S is one control request each way and RELAY_START_S the
+# spawn's wait for a new relay's status (the spawn, the next step of the
+# design, waits them; Model.PLAYER_BOUNDS mirrors both there). The lookup is
+# the play-time lookup's own, STREAM_LOOKUP_TIMEOUT_S; RELAY_CONNECT_S
+# bounds the connect attempts to one target, all of them together, which
+# start RELAY_ATTEMPT_STAGGER_S apart, at most RELAY_ATTEMPTS_IN_FLIGHT at
+# once (FFmpeg's own shape, so a dead first answer does not hold up a live
+# second one). RELAY_HEAD_S and RELAY_HEAD_BYTES bound one request head,
+# from its first byte; an established connection has no idle timeout, so a
+# paused channel keeps it, and RELAY_CONNECTIONS_MAX bounds how many there
+# are. RELAY_TOKENS_MAX loads keep their token, the newest. A control line
+# is at most RELAY_CONTROL_BYTES, RELAY_CONTROL_MAX at once.
+RELAY_IPC_S = 1.0
+RELAY_START_S = 5.0
+RELAY_CONNECT_S = 10.0
+RELAY_ATTEMPT_STAGGER_S = 0.2
+RELAY_ATTEMPTS_IN_FLIGHT = 3
+RELAY_HEAD_S = 10.0
+RELAY_HEAD_BYTES = 64 * 1024
+RELAY_CONNECTIONS_MAX = 64
+RELAY_TOKENS_MAX = 8
+RELAY_CONTROL_BYTES = 8 * 1024
+RELAY_CONTROL_MAX = 4
+# A refused request's reply is followed by a graceful close: what the client
+# still sends is read and dropped for at most this long.
+RELAY_DRAIN_S = 0.25
+# On SIGTERM the relay passes the signal to its process group and waits at
+# most this long for the group to go before it exits.
+RELAY_TERM_GRACE_S = 2.0
+# Each connection is served by at most two threads; this bounds their
+# address space, not what they use.
+RELAY_THREAD_STACK_BYTES = 512 * 1024
+# The Basic proxy user every token travels under, and the realm of the 407.
+RELAY_USER = "iptv"
+RELAY_REALM = "omarchy-iptv"
+# The relay's fixed reasons and sentences: none names a host, a path or a
+# userinfo (rule 5).
+RELAY_REFUSED = "Refused a local address"
+RELAY_LOOKUP_FAILED = "Could not look up the stream's address"
+RELAY_CONNECT_FAILED = "Could not connect"
+RELAY_CONTROL_REFUSAL = "the player's relay refused that request"
+RELAY_INHERITED_REFUSAL = ("the player's relay runs only as the player's spawn starts it, with its two listeners; "
+                           "not started")
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
