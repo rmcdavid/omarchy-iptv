@@ -113,6 +113,7 @@ class OnlyIsNarrowAndAFullRunIsWhole(unittest.TestCase):
         self.assertEqual(table.get("A"), 2)
         self.assertEqual(table.get("B19"), 1)
         self.assertEqual(table.get("PRUNE"), 1)
+        self.assertEqual(table.get("PRIVATE"), 2)
 
     def test_prune_is_a_counted_block_of_every_full_run(self):
         # D-SRC-69 (2026-10-27): the rig became B41. It must be a `seg` block

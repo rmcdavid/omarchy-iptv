@@ -19145,3 +19145,188 @@ on its own side).
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line 0.19.1; `premise_exception_problems` returns []; origin `main` 34fac24 equals the local `main`; no v0.19.1 tag.
 
 **The open requests.** #14817 (`[Verify]: IPTV 0.19.0`, the request the finding was raised on) stays open, unapprovable once `main` moves; #14290, #13611 and #12636 stay open as filed (F-M3-4). The owner asked for 0.19.1's own request and a reply on #14817 once fixed (2026-11-13).
+
+### D-SINK-103: state.json is made private before a write, not repaired after it (the lane dsink103, 2026-11-14)
+
+**The finding.** The marketplace maintainer on
+omacom/omarchy-plugin-marketplace#14290, reviewing 0.19.1 (main 9e006be):
+"Medium, conditional -- provider credentials can be written with public file
+permissions". With the supported `state.json` link pointing into a folder
+other accounts can traverse, a valid state file with no credential put back
+at 0644 kept that mode when the plugin next saved a credential-bearing
+source; "Quickshell's atomic writer preserves the existing mode; tightening
+happens only in a separate helper after the save". Confirmed by behaviour,
+three ways, on this machine's quickshell 0.3.2.r7.g2b4501a-1 and qt6-base
+6.12.0-3, umask 0022.
+
+**1. The mechanism, under gdb** (`scripts/dev-harness/spikes/state-private/
+measure.sh both`, `RESULT-2026-11-14.txt`). One FileView declared as
+`stateFile` is (`atomicWrites: true`), offscreen, on a private bus, gdb's
+child, stopped at every syscall the writer makes in the case's folders and
+at each process spawn; at each stop every file's mode and whether it holds
+the marker credential. 0.19.1's order (write, then `state mode`):
+
+| case | the writer's syscalls | a file holding the credential readable by others |
+|---|---|---|
+| `new` (nothing there) | `openat(state, O_TMPFILE, 0666)` (dry run, discarded), `openat(state, O_TMPFILE, 0600)`, `fchmod 0644`, `linkat -> state.json` | `state.json` 644 until the repair |
+| `e644` | `openat(state, O_TMPFILE, 0600)`, `fchmod 0644`, `linkat -> state.json` (fails, exists), `linkat -> state.json.XXXXXX`, `rename` | the temporary 644 at the rename; `state.json` 644 until the repair |
+| `e600` | the same, `fchmod 0600` | none |
+| `link644` (the maintainer's) | `openat(wide, O_TMPFILE, 0600)` -- the LINK TARGET's folder -- `fchmod 0644`, two `linkat`, `rename` | the temporary 644 in the 0755 folder; the target 644 until the repair |
+| `linkabsent` | as `new`, in the target's folder | the target 644 until the repair |
+
+So the temporary is unnamed while the text is written into it, takes the
+OLD file's mode (read when the write opens; the umask's for none) before it
+gets a name, and the file keeps it. The fix's order (`state private`, the
+write only on its confirmed reply, then `state mode`): `fchmod 0600` in
+every case, and no file holding the credential is ever wider than 0600 (0
+sightings in all five).
+
+**2. How long, without gdb** (`measure.sh timed 12 new e644 link644`,
+`RESULT-2026-11-14-timed.txt`, load 1.6-2.5, `../../mode-observer.py`
+reading every file after every inotify batch). 0.19.1's order: every run
+saw the file holding the credential at 0644, for 233.4-272.4 ms (median
+239.1, 36 runs) -- the time the after-save `state mode` takes to reach its
+chmod, one helper run. The fix's order: 0 sightings in 36 of 36. A helper
+`state` run measured on its own is 248-284 ms wall, 245-274 ms CPU (12
+each, `private` and `mode`; the bare interpreter is 17 ms): the stub
+compiles every part on every run. ARCHITECTURE.md's P23 note had it at
+"about 30 ms of CPU" and the D-SINK-22 row at "milliseconds"; both are
+corrected in dated brackets.
+
+**3. The real Service.qml** (key-scenario's new PRIVATE segment, B42 and
+B43, each in its own nested headless cage on a private bus under `env -u
+DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+QT_QPA_PLATFORMTHEME`, a scratch `XDG_RUNTIME_DIR`). The target put back at
+0644 mid-session by a rename over it, then an in-app `updateSource` with a
+marker credential in the guide URL, watched by `mode-observer.py`:
+- `--only PRIVATE --baseline 7c1784c`: 15 passed, 2 failed
+  (key-20261114-182348-410901): B42 `edit:true restored:644 observed:yes
+  exposed:2 final:600 span:261.0 0/state.json:644 at-path:link folder:755`,
+  B43 `... exposed:2 final:600 span:269.9 ...`.
+- `--only PRIVATE` on the fix: 17 passed, 0 failed
+  (key-20261114-182320-409262, and again after the observer's streams were
+  redirected, key-20261114-191154-505781): B42 and B43 `observed:yes
+  exposed:0 final:600`.
+
+**The design, and why.** The lead's call under the owner's standing
+authority of 2026-11-09 (the owner's word of 2026-11-14: fix the
+maintainer's findings): a write that can carry a credential never lands in,
+or passes through, a file other accounts can read; the target is made
+private before the shell writes. The measurement shows the pre-tightening
+reaches what QSaveFile reads -- it copies the mode at OPEN, after `setText`
+-- so no helper-side writer or temporary-free path was needed. Every write
+of `state.json` now waits for the helper's new `state private`
+(`state_private`, `bin/helper/10-state.py`), run between the read (R26a)
+and the write (`Model.stateSavePlan` answers `private`; its confirmed
+finish answers `write`): an `O_PATH` open through the link, `fstat`, refuse
+`not-a-file` or `not-owned` (another uid), `chmod` through `/proc/self/fd`
+to 0600 when it is not, read back (`unconfirmed` when it is not 0600); with
+nothing there, create 0600 and empty, `O_EXCL | O_NOFOLLOW` at what a link
+names, no folder made (`unreachable` when its folder is missing). It leaves
+every folder alone: the first version repaired the state folder like
+`state mode`, which would have made a 0500 folder writable before the write
+-- the held-save premise of key-scenario's B19 and B30 -- so it was taken
+out; `state init` and `state mode` repair the folder as before. The service
+(`requestStatePrivate`, `statePrivateProc`, `finishStatePrivate`) writes
+only on a reply `Model.statePrivateReply` confirms (fail closed: a refusal,
+an empty reply, another verb's line, an unknown word or a non-zero exit is
+no); a run that does not confirm fails the save as a failed write does
+(`noteStateWriteFailed`, now shared with `onSaveFailed`: `state_write_failed`
+once per episode, one journal line with a fixed word); a run that does not
+answer is TERMed at `stateInitTimeoutMs` (15 s) and its save failed then,
+and a save asked while it still lives fails at once (`still-running`),
+never waiting on it. Saves asked while it runs join it (the write carries
+memory as it is then). When it creates the file, a watching view may load
+that empty file before the exit is handled; `Model.statePrivateEcho` keeps
+that load from being read as an unparsed state (the no-write mode) while
+the run is out or after it answered `created` until our write reports.
+`state mode` after the landing stays, as the second layer.
+
+**Write sites, rule 15** (searched by shape: everything that creates or
+replaces a file in the shipped QML and the helper parts --
+`grep -n 'setText(\|atomicWrites\|FileView {'` over the shipped QML;
+`grep -n 'O_CREAT\|open(.*"w\|write_text\|write_bytes\|mkstemp\|os.replace\|os.rename'`
+over `bin/helper/*.py` -- and every place a mode is repaired after a write):
+- the shell writes ONE file itself, `stateFile.setText` (Service.qml);
+  the other FileViews (channels, EPG, statuses, manifest) are read only;
+  no Process takes stdin. Fixed here.
+- the host's `shell.json`, which the shell writes through
+  `updateEntryInline`: keys only since D-SINK-19 (a URL there is the user's
+  own `omarchy bar set`), and its mode is D-SINK-18's shield, run BEFORE a
+  persist, with its stated residual. Cleared.
+- the helper's `write_text_atomic` and `write_bytes_atomic` (every cache
+  file, the status files, the logos, and the `state` verbs' writes of
+  `state.json`, through a link included): `O_EXCL` at 0600, `fchmod 0600`,
+  `os.replace` -- the temporary is never wider and the new inode is 0600
+  whatever the old one was. Cleared.
+- `init_state_file` (`O_EXCL` 0600 and `fchmod`, an existing file only
+  chmod-ed), `write_mpv_args` (`O_EXCL | O_NOFOLLOW` 0600 in the 0700
+  runtime folder), the player's lock (0600, no credential), `cache
+  migrate`'s `os.replace` of files the helper wrote 0600. Cleared.
+- mode repaired after a write: only D-SRC-49's `state mode` (now the second
+  layer) and D-SRC-15's `state init` (before the first write of a session).
+
+**Tests.** Red first on 7c1784c, then single-decision mutants of the fix.
+- node (`tests/Model.test.js`, through the shipping Service.qml and model
+  on the service harness, whose new `statePrivateProc` double runs the
+  helper's branches on the fake file -- a chmod or a creation raises the
+  reload BEFORE the exit is handled, the order that leaves the shell the most
+  to get wrong): eleven new checks -- the D-SINK-103 plan table, the reply
+  reader (16 replies), the echo rule, the maintainer's case (the mode each
+  write MEETS is recorded at `setText`: 600 on the fix, 644 on 7c1784c), the
+  steady state and the join (one run, one write for three saves), three
+  replies that do not confirm (a refusal, an empty reply, another verb's),
+  the created file loaded before the exit, the watchdog and the
+  still-running refusal, a block set during the run -- and six re-levelled:
+  R26a's plan table (the verify's finish reads `private`), D-SINK-22 (b)
+  (the re-point between the read and the write: created 600 by the run, red
+  on 7c1784c at 644), R11's and R13's structural reads of the failure path
+  (now `noteStateWriteFailed`), R14's of the plan call, R26b's of who may
+  write (`statePrivateDone`, raised only on a confirmed reply), and the two
+  argv sweeps (D-SINK-50, D-SINK-48) that now name `statePrivateArgv`. With
+  `IPTV_SERVICE_QML` / `IPTV_MODEL` at 7c1784c: 15 of 3727 red. Six
+  single-decision mutants of the fix, each red: the plan writing at the
+  read's finish (11), the reply reader confirming a refusal (2), no echo
+  rule (2), the watchdog TERMing without failing the save (1), a second
+  save waiting on a still-running run (1), a refusal still writing (4). On
+  the fix 3727 / 0, both own-echo modes.
+- python: `tests/test_state.py` `StatePrivateTest`, 13 tests through the
+  shipping verb (in process and as the service runs it, under a 0277
+  umask), over the kernel's own answers: the maintainer's link into a 0755
+  folder, a 0644 file, a 0600 file not chmod-ed at all, nothing there
+  (created 0600 and empty), a link to nothing (its target created), a link
+  into a missing folder (refused, no folder made), a directory and a FIFO
+  (refused, unchanged), a real root-owned file behind the link (`/etc/passwd`,
+  refused `not-owned`, unchanged), a chmod that fails (`unconfirmed`), a
+  folder link to nothing, a chmod that succeeds and changes nothing (a
+  filesystem that keeps its own modes: `unconfirmed`); red on 7c1784c 13 of
+  13 (the verb does not exist: 12 errors, 1 failure). Four single-decision
+  mutants of `state_private`, each red: no chmod (3), no owner check (1),
+  no kind check (2), no read-back (1). A fifth, no fchmod after the create,
+  survived -- the read-back path chmods any file found at another mode,
+  the created one included -- so that fchmod was redundant and is gone.
+- QML spec: `test_statePrivateInV4`, the plan, the reply and the echo in the
+  engine that runs them.
+- live: key-scenario B42 and B43 above; the full run on the fix, 141
+  passed, 0 failed (key-20261114-182416-412475, 590.7 s), B19's and B30's
+  held-save premise among them (`held:true folder:500 repaired:+0`): `state
+  private` leaves the folder alone, so a 0500 folder still refuses the
+  write.
+- the three key-mutation patches whose context the step moved
+  (`r25a-keep-landed`, `r26a-no-read`, `r27a-no-wait`) are re-made, the two
+  that remove the read handing the write to `state private` as the read's
+  finish does; through node, 24, 82 and 31 failures of 3727.
+
+**Costs** (stated in the board row and ARCHITECTURE.md section 8 standard
+5): one more helper run before every write, about a quarter of a second of
+CPU and wall here, so a save lands that much later; the read-to-write gap
+grows from one turn to that run, so another program's replacement of the
+file landing inside it, unseen by the view's watch (D-SRC-29's shapes), is
+written over, as one landing during the write is today (D-SRC-48); a shell
+stopped inside it loses the change, which memory held.
+
+**What stays open.** The one turn between the run's answer and the writer's
+open; a target folder another account can WRITE (it can replace the file or
+the link whatever its mode); an empty `state.json` left when the write after
+a `created` answer fails and the shell stops, which the next start reads as
+not a valid state (the no-write mode, told).

@@ -1,0 +1,74 @@
+# scripts/dev-harness/spikes/state-private/measure.sh timed 12 new e644 link644, 2026-11-15T00:17Z, quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3, umask 0022, load before 1.68 2.45 2.28
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:2 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=e644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=link644 order=fix rc=0 observed:3 exposed:0 final:600
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:238.9 0/state.json:644
+   TIMED case=new order=base rc=0 observed:3 exposed:1 final:600 span:241.9 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:237.4 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:237.1 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:239.3 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:235.0 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:235.7 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:237.1 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:241.3 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:235.6 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:235.4 0/state.json:644
+   TIMED case=new order=base rc=0 observed:4 exposed:2 final:600 span:234.5 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:242.1 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:235.2 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:234.6 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:242.2 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:243.7 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:233.4 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:241.0 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:240.2 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:243.8 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:237.1 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:245.9 0/state.json:644
+   TIMED case=e644 order=base rc=0 observed:4 exposed:2 final:600 span:237.5 0/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:239.2 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:240.7 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:239.8 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:237.3 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:248.2 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:236.0 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:234.9 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:254.9 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:241.7 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:234.1 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:272.4 1/state.json:644
+   TIMED case=link644 order=base rc=0 observed:4 exposed:2 final:600 span:240.4 1/state.json:644
+# exit 0 load after 1.62 2.29 2.24

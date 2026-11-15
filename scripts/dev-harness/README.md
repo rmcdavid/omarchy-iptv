@@ -2166,6 +2166,37 @@ runs, the same recipe:
 
 The coredump journal read +0 across these runs too.
 
+#### PRIVATE (B42, B43): the mode a save gives a new credential (D-SINK-103, 2026-11-14)
+
+The marketplace maintainer's finding on #14290: the FileView's atomic
+writer gives the new `state.json` the mode the old one had, so a target put
+back at 0644 -- here behind a `state.json` link into a 0755 folder (B42), and
+as a regular file in the plugin's own folder (B43) -- held a credential
+saved after it at 0644 until the after-save `state mode`. Each case seeds,
+starts, settles, renames a 0644 copy of the same state over the target
+(what a backup restore or a dotfiles checkout does; the start-up init had
+made it 0600, and the running shell's watch does not see a rename over the
+path), starts `mode-observer.py` over the folders involved, makes an in-app
+save that carries a marker credential (`updateSource` with a guide URL),
+waits for the target to hold it and the shell to settle, and reads the
+observer's line: after every batch of inotify events it read every file's
+mode and whether it held the marker, and `exposed` counts sightings of one
+holding it with a group or other bit. The observation is the kernel's, not
+the shell's account of itself. `seg_on PRIVATE`, so every full run counts
+it; it seeds its own state and stands alone.
+
+| run | tree | result | time |
+|---|---|---|---|
+| `--only PRIVATE` | dsink103 (the fix, uncommitted) | 17 / 0, B42 and B43 `observed:yes exposed:0 final:600` | 18.4 s |
+| `--only PRIVATE --baseline 7c1784c` | 0.19.1's save path | 15 / 2, B42 `exposed:2 final:600 span:261.0 0/state.json:644`, B43 `span:269.9` | 15.7 s |
+| `--only PRIVATE` | the fix, the observer's streams redirected | 17 / 0 | 16.8 s |
+| full | the fix | 141 / 0 (B19's and B30's 0500-folder premise held) | 590.7 s |
+
+The span is how long the file held the credential at 0644 on the real
+Service.qml: one helper run, about a quarter of a second. The writer's own
+temporary, linked under a name for microseconds before its rename, is seen
+by gdb in `spikes/state-private/` and not by this observer.
+
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
@@ -2522,6 +2553,27 @@ None is part of the gate.
   carries -- always the latest `saved`'s. The default set is named `r23g`. Needs cage;
   not part of the gate (`tests/test_harness_home.py` runs it with a stand-in
   `cage` only to check where it writes).
+- `spikes/state-private/measure.sh [fix|base|both] [case...]` and
+  `measure.sh timed [N] [case...]`: what mode Quickshell's FileView with
+  `atomicWrites` (Qt's QSaveFile) gives `state.json` and every temporary it
+  writes through (D-SINK-103). `shell.qml` beside it is one FileView
+  declared as the service's `stateFile` making one write of a marker
+  credential, in 0.19.1's order (`base`: write, then `state mode`) or the
+  fix's (`fix`: `state private` first, the write only on its confirmed
+  reply), with the helper argv built through the model. Under gdb (the probe
+  is gdb's child; `ptrace_scope` is 1), offscreen, on `private-bus.sh`, every
+  openat in the case's folders, fchmod, linkat, rename and process spawn
+  stops the probe and `snap.py` lists each file's mode and whether it holds
+  the marker; `timed` runs without gdb under `../mode-observer.py` and
+  prints how long a file holding it was readable. Cases: `new`, `e644`,
+  `e600`, `link644` (the maintainer's: a link into a 0755 folder, a 0644
+  target), `linkabsent`. `RESULT-2026-11-14.txt` (both orders, gdb) and
+  `RESULT-2026-11-14-timed.txt` (12 runs a case and order) hold what it
+  printed: in 0.19.1's order an unnamed `O_TMPFILE` created 0600 in the
+  target's folder, fchmod-ed to the old file's mode (or the umask's, read
+  off a dry-run temporary), linked and renamed -- 0644 sightings in `new`,
+  `e644`, `link644`, `linkabsent`, a 234-272 ms span -- and in the fix's
+  order none. Needs gdb and quickshell; not part of the gate.
 - `spikes/folder-link/measure.py <helper>`: what the helper does over a
   symbolic link at each folder it makes private (D-SINK-19 round 15, R25c):
   the helper as a subprocess, no display, one line per verb with its exit,
