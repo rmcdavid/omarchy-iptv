@@ -19145,3 +19145,280 @@ on its own side).
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line 0.19.1; `premise_exception_problems` returns []; origin `main` 34fac24 equals the local `main`; no v0.19.1 tag.
 
 **The open requests.** #14817 (`[Verify]: IPTV 0.19.0`, the request the finding was raised on) stays open, unapprovable once `main` moves; #14290, #13611 and #12636 stay open as filed (F-M3-4). The owner asked for 0.19.1's own request and a reply on #14817 once fixed (2026-11-13).
+
+### D-SINK-102: the player reaches the network only through a relay that judges every connection it makes (the dsink102 branch, 2026-11-15)
+
+The marketplace maintainer on omacom/omarchy-plugin-marketplace#14290,
+against 0.19.1 (9e006be): the player's destination checks could be bypassed
+by an HTTP redirect, an HLS or DASH open on another host, or a name that
+answered the player differently from the helper's lookup a moment earlier.
+Built on the branch `dsink102`, cut from dev 7c1784c: 05267a1 (the judgment
+of one answer lifted out of the play-time lookup), a0e3f14 (the relay,
+`bin/helper/12-relay.py`), 866bf34 (the player bound to it) and the
+scenario's commit. Unmerged and unreleased. Every call in it is the lead's
+under the owner's standing authority of 2026-11-09 (decisions 1-19 of the
+design of 2026-11-14; decision 10, refusing mms and mmsh, was the owner's
+question and became the lead's call on 2026-11-15).
+
+**No name was resolved by any run below.** The unit tests reach the
+resolver only through `stream_resolve` (the loader's stand-in, or an answer
+each test states). Every red-first run against an older tree ran with
+`resolve_within` held to literals, so code that lacks the seam could not
+reach the resolver either (the core lane's first base run made two real
+lookups of `.test` names through the old fallback before that guard).
+`relay-scenario.sh` runs inside `unshare -rn`, every address a literal.
+
+**Signals.** An earlier draft of `tests/test_relay_player.py` took the
+player's parent for the relay and SIGKILLed it; on a tree with no relay that
+parent is the nearest subreaper, the user's own service manager. Every
+signal in the new tests, the rig and the cells below goes to a process the
+run itself started, through a pidfd opened while that process's command line
+reads as the one expected (`relay_pidfd` and `pidfd_naming` in the test; the
+rig's `Rig.pidfd`, which names this run's scratch socket or this tree's relay
+of one of its players). No pid is ever derived from ancestry.
+
+**Red first.** Counts as each lane reported them; both counts per test.
+
+| Tests | On the code before | On the branch |
+|---|---|---|
+| `tests/test_stream_lookup.py`, 2 new (05267a1) | both error on 7c1784c (87 subtests, no such function) | green, the module 18 -> 20 |
+| `tests/test_relay.py`, 58 (a0e3f14) | 58 of 58 red on 7c1784c (7 failures, 159 errors with subtests) | 58 green |
+| `tests/test_relay_player.py`, 29 (866bf34) | 28 red on 7c1784c (8 failures, 22 errors with subtests); the 29th, a typed URL never pinned, red under the mutant "typed rtsp forced to tcp" | 29 green |
+| the 11 modified python modules (test_mpv, test_player, test_player_bounds, test_player_launch, test_playlist, test_stream_host_names, test_stream_label_zone, test_stream_lookup, test_stub_mpv_pins, test_mpv_options, test_destinations) | 300 of 474 red on 7c1784c (23 failures, 277 errors), their 5 new methods among them | 0 red |
+| node, tests/Model.test.js | 41 of 3721 checks red against 7c1784c's model and Service.qml; the one new check green there (tlsPropertiesSafe over the http-proxy forms) red under "tlsPropertiesSafe ignores unpinned" | 0 red of 3721 |
+| the stub mpv's self-test, 47 cases | the new per-file case red under 3 stub mutants (http-proxy not an option, which also reddens the transcript replay; the per-file value not set; the value not restored) | 47 green; its two transcripts re-measured on mpv 0.41.0 headless, 12 steps, 0 differ |
+| `scripts/dev-harness/relay-scenario.sh`, 104 (this lane) | `--baseline 9e006be`: 55 passed, 47 failed (below) | 104 passed, 0 failed, twice |
+| `scripts/qa-lib-test.sh`, 9 new and 1 recounted (this lane) | on a copy without the scenario: 692 passed, 5 failed (the four new scenario checks and the recount); with the old qa-lib.sh: 698 passed, 4 failed (the four new reader checks; their control green both ways) | 702 passed, 0 failed |
+
+**Mutants**, each one decision of the shipping code on a sealed scratch copy
+of the tree, every one red; on the branch, every named test is green.
+
+- The relay (a0e3f14, 22 against `tests/test_relay.py`, as its commit
+  names them), among them: StreamPolicy.permits always true; a refused
+  answer connected anyway; the per-request target check removed; the
+  per-request token check removed; Proxy-Authorization forwarded to the
+  origin; the uid filter inverted; the one-label test moved after the
+  lookup; every connection taken as a typed URL's first; the no_proxy branch
+  unjudged; the serial connect.
+- The binding (866bf34, 27 python): the environment strip removed (the
+  environment test); the per-file http-proxy dropped (11 failures and 1 error:
+  PlayTest, RestartTest, registration); the read-back fold dropped (10
+  failures, 3 errors); the demuxer http_proxy left in place (4); the token
+  filter's word removed (1); the pin removed from the argv (16 failures, 3
+  errors); PDEATHSIG not set (the relay-killed test); srt not pinned (1);
+  rtsp's transport not forced (2); launch_verdict accepting any http-proxy
+  value (the player-launch vectors); no setpgid (1); registration after the
+  TLS assertion (3); proxy headers kept (1); the first-load count ignored
+  (1); the orphan check ignoring the relay (1); the probe's launch ignoring
+  the relay (1); player_verdict ignoring the relay (4); the play-time mms and
+  mmsh refusal removed (3); the parse-time refusal removed (6);
+  relay_proxy_held accepting any token (1); a relay exec failure unreported
+  (1); the relay wait skipped (4); a stop keeping the relay socket (1); a
+  typed URL's transport forced (1); mpv_relay_pin accepting any port (1); the
+  stagger made serial (2); mmsh kept (3).
+- The binding (866bf34, 5 node): tlsPropertiesSafe ignoring `unpinned` (4);
+  olderPlayerUnsafe ignoring the relay (2); the service ignoring probe.relay
+  (1); mpvRelayPin accepting any port (2); the probe's relay field read raw
+  (1).
+- The scenario (this lane, `relay-scenario.sh check-tree --tree <copy>`): the
+  relay permitting every answer, 77 passed, 27 failed (R1-R8, R10, R11a/b,
+  R13a and R19's old-token refusal: every sink reached THROUGH the relay,
+  which is what shows the tree's greens are the relay's judgment and not an
+  earlier refusal); the environment strip removed, 101 passed, 3 failed
+  (R10: the redirect reached 127.0.0.1 past the relay, the start answered ok,
+  and the player's environment held both names).
+- The predicates (this lane): `relay-scenario.sh` without its two-levers
+  refusal answered `0 1` (a whole run, one transcript) where the check wants
+  `2 0`.
+
+**The design's measurements** (the measurement lane, headless; mpv 0.41.0, FFmpeg n9.0.2; synthetic
+credentials and literal addresses only; the design's deny-all pin and a
+per-file `http-proxy=http://iptv:<32 hex>@127.0.0.1:<port>` beside
+apply_channel's per-file options; a relay that refuses 127.0.0.2, the LAN
+stand-in; a lane-made rig CA). The evidence was under the session
+scratchpad's `d102/lanes/M/` (`logs/rig.log` between `--- CASE` markers,
+`logs/case-*.json`, `logs/mpv-*.log`, the drivers `rig/mA.py` and `rig/mB.py`,
+the rig `rig/rigm.py`) and is gone with that scratch; what follows is the
+lane's report.
+
+- **What the per-file proxy reaches, MEASURED.** Relayed with the token: the stream; a 302 hop (a new
+  absolute-form request on a new proxy connection, already carrying the
+  token, so no 407); HLS master, variant and segments; the AES key; the
+  EXT-X-MAP init section; a WebVTT rendition; DASH's manifest, init sections
+  and chunks on the BaseURL host; https as CONNECT, an https 302 as a second
+  CONNECT, and http to https. Every LAN variant was refused at the relay and
+  127.0.0.2 logged nothing; the subtitle case still played without its
+  subtitle. **rtmps IS relayed** (CONNECT with the token after one 407, TLS
+  verified end to end against the rig CA, RTMP's C0 byte and 1536 bytes
+  through the tunnel, nothing direct; also with the global option and with
+  the environment variable alone). **rtsps is NOT relayed**: 0 relay
+  connections, TLS straight from mpv's own ports, played to eof (only the
+  environment's http_proxy relays it), which matches rtsp.c's tls open taking
+  only the TLS keys. **mms and mmsh are NOT relayed**: GET with UA NSPlayer
+  direct to 127.0.0.2, 0 relay connections. Control: the pin alone, two
+  407s, nothing reached the origin.
+- **Profiles against the pin, MEASURED.** The command-line pin and the per-file value both beat a
+  `[protocol.http]` / `[protocol.https]` profile naming a decoy proxy (the
+  profile still applies, but sets no http-proxy over a command-line option;
+  the per-file value is applied after it); with the pin and no per-file value
+  the pin denies everything over the profile; with neither, the profile's
+  decoy got the GET. A plain mpv.conf `demuxer-lavf-o=http_proxy=<decoy>`
+  line survived the pin block's `-append` pins and sent the HLS demuxer's
+  reopen to the decoy: decision 8's refusal and the read-back's removal of
+  that key are required, not belt and braces.
+- **The 407 flow, MEASURED.** Every new FFmpeg HTTP context sends first without
+  Proxy-Authorization, takes the 407 (Basic realm, Connection: close), and
+  retries with Basic `iptv:<token>` on a new connection; within one context a
+  later request carries the token at once (a redirect hop on a new
+  connection; four kept-alive reuses); an https redirect is a new TLS context
+  and pays a 407 again; with no credential FFmpeg tries twice and gives up.
+  Each new context costs two TCP connections to the relay.
+- **What the read-back reads** (as the integration lane reports it): `get_property http-proxy`
+  reads the current file's per-file value, so the read-back accepts exactly
+  two forms, the pin and the per-file token form.
+- **A refusal at a zap** (as the integration lane reports it): a relay refusal at a ZAP reaches
+  the shell as an ordinary failed open ("Failed to open <the channel's own
+  host>"; for HLS or DASH, Model.unopenedFormatSentence), so decision 19's
+  premise does not hold. Open for the lead; nothing was changed.
+- The remaining five (PDEATHSIG across exec, rtsp's transport over a user's token, an IPv6 literal CONNECT, keep-alive reuse, external-file autoload): their results were not in the material this lane received; R16 and R17 below observe two of them on the branch.
+
+**The scenario** (`scripts/dev-harness/relay-scenario.sh`, rig
+`tests/relay_rig.py`; check.sh's step 6c since this commit). Inside `unshare
+-rn`, a dummy interface carries 11.0.0.1 (global to the helper's classifier:
+the internet) and 10.0.0.1 (the LAN), so a server on 127.0.0.1 is this
+machine. The SHIPPING helper's `playlist` writes three sources'
+channels.json (a public one on 11.0.0.1, a loopback relay on
+127.0.0.1:18083, a LAN one on 10.0.0.1), `player start` spawns the real mpv
+0.41.0 headless (`--vo=null --ao=null --force-window=no`, with the user's
+`--rtsp-transport=udp` and `--tls-ca-file=<the run's CA>`), and `play` zaps;
+no DISPLAY, WAYLAND_DISPLAY, signature or session bus, a scratch HOME, XDG
+tree and runtime, a core limit of 0, the crash journal counted before and
+after. The servers are threads of the rig, logging every request and
+accept. The checks are listed in the rig's docstring; in short: R1 an http
+302 into 127.0.0.1, R2 the same over https, R3 an HLS variant, R4 HLS
+segments on 10.0.0.1, R5 an HLS key, R6a an fMP4 init section, R6b a WebVTT
+rendition (the channel still plays), R7 a DASH BaseURL, R8 a variant that
+302s to 10.0.0.1, R9 five controls on 11.0.0.1 that play, R10 `no_proxy=*`
+and `http_proxy` in the helper's environment, R11 an mpv.conf naming a proxy
+three ways, R12 `--http-proxy` as a token, R13 a loopback relay source, R14
+rtsp (a 302 into 127.0.0.1, and a control set up over TCP interleaved over
+the user's udp), R16 the relay SIGKILLed during play, R17 keep-alive, R18 a
+loadfile from another IPC client, R19 a zap from a public channel to a local
+playlist's channel with the old load's token read off the player and asked
+again after the zap, R20 an mmsh channel skipped at the parse; R15 (rtmps)
+is unit-level, and measured relayed above.
+
+| Tree | Passed | Failed | Time | Crash journal |
+|---|---|---|---|---|
+| the branch, live (transcript `relay-20261115-235020-414138`) | 104 | 0 | 52 s | 87 -> 87 |
+| the branch, check-tree | 104 | 0 | 50 s | 87 -> 87 |
+| `--baseline 9e006be` (0.19.1; transcript `relay-20261115-235126-416245`) | 55 | 47 | 87 s | 87 -> 87 |
+
+On 9e006be every sink was reached: trap logged `GET /r1/admin`, `/r3/v.m3u8`,
+`/r5/key.bin` (six), `/r6a/init.mp4`, the subtitle rendition, `/r7/init-0.m4s`,
+`/r10/admin`, `/r11*` through the mpv.conf proxy, `/r13a/admin`; traps
+accepted R2's connection; lan logged six R4 segments and R8's `/r8/v.m3u8`;
+R14's control was set up over UDP and did not play; R18's loadfile reached
+the provider; the player's environment held `http_proxy` and `no_proxy`
+(R10); the mpv.conf proxy and the `--http-proxy` token received the
+controls' requests (R11, R12, which then did not play), the token only
+warned; R20's mmsh channel was kept; and R16, R17's relay count and R19 have
+no relay to ask. Green on both: the controls R9a-e, R13b, R14's redirect
+(rtsp's 3xx is refused by the protocol list there too), the premises and
+the teardown.
+
+**The predicates.** `qa_cmdline_sans_relay_pin` (scripts/qa-lib.sh) reads a
+player's command line without exactly the deny-all pin
+(`--http-proxy=http://127.0.0.1:<port>`, port 1-65535 with no leading zero),
+so the S-03 "no URL on the command line" sweeps read what a channel could
+have put there: player-scenario's P2 and P5 and tls-scenario's S5 use it. A
+pin with a credential, another host, a leading zero or a port past 65535 is
+kept and swept. player-scenario's L-series `build` comparison now composes
+this tree's argv with the relay port read off the live player's pin (an
+older tree's builder takes none).
+
+**Section F, the cage.** Each cell in its own nested headless cage
+(`WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1`) under
+`scripts/dev-harness/private-bus.sh`, the outer command under `env -u DISPLAY
+-u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u WAYLAND_DISPLAY`,
+the heavy lock held, nice 10; for the two player cells the cage's child
+unsets DISPLAY and the signature again and puts a refusing `hyprctl` and a
+logging `omarchy-notification-send` first on PATH (13 notices caught, none
+reached the session's daemon). Crash journal 87 before and after every cell;
+no cage, shell, player or bus left.
+
+- **key-scenario live** (the release recipe's step), on 866bf34 with the
+  scenario's scripts uncommitted beside it: **139 passed, 0 failed** in
+  555.6 s, 00:07:05 to 00:16:21 CST 2026-11-16, load 2.42 at the end.
+  Transcript `key-20261116-000705-449297` (139 PASS, 0 FAIL).
+- **player-scenario**, the L-series with it, `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`:
+  the first run (transcript `player-20261116-001648-488702`) read 156
+  passed, 36 failed, 2 skipped. Besides the 9 window checks every cage run
+  fails (hyprctl in a cage), P2 and P5 read the relay pin as a URL on the
+  command line, and L1, L2, L4, L9's premise, L7 and L10 compared the live
+  argv with this tree's builder at relay port 0; both are the harness's, and
+  fixed above. The second run, with both fixes (transcript
+  `player-20261116-003347-533163`): **162 passed, 30 failed, 2 skipped**
+  (192 assertions), 00:33:47 to 00:42:15 CST. P2 and P5 green; L1, L1b, L2,
+  L3, L4, L5 and L9 green (older tags' players replaced, this tree's own
+  launch byte for byte with the relay's port, the counter-case kept, the
+  wrapper's player kept); the 9 window checks red as in every cage run; and
+  21 checks of L7, L8 and L10 red, the cases that withhold the channel list
+  past the hold. They assert D-SINK-71's and D-SINK-72's deferral, which
+  decision 15 replaced by a stop at the hold's end: on the branch the older
+  player was gone 16.3 s after the shell loaded (L7: shell loaded at
+  18485.386, the player last seen at 18501.688, the list refreshed at
+  18504.748; L10 16.3 s after its second shell; the first run's L7 16.2 s),
+  nothing replaced it when the list landed, and in L8 no player was on the
+  socket at any sample after the refresh. Two of the reds are not
+  explained by that decision: the shell named no channel during the hold
+  (now-playing absent) and L7's player gave the scenario no reply to its read
+  of load-auto-profiles. Filed as F-HARNESS-110, for reading before the
+  expectations are changed.
+- **One windowed play through the relay** (a driver of this lane's, not
+  committed): the shipping `playlist` and `player start` on a scratch socket
+  under the software-GPU tokens (`--gpu-sw=yes --ao=null --hwdec=no`), the
+  nested display named by path, a loopback playlist and channel, the helper's
+  environment holding `http_proxy` and `no_proxy=*`: **10 passed, 0 failed**.
+  The start's first load is playing; the player's argv holds one deny-all pin
+  and no URL; time-pos moves; `current-vo gpu-next`, `vo-configured true`;
+  the per-file http-proxy carries a token to the relay's port; the relay
+  answers as this player's (its `child` the player's pid), with upstream 1
+  and refused 0; the player's environment holds neither lowercase name; the
+  stream server saw the request; `player stop` ends the player and its
+  relay, and both sockets are gone. The first attempt failed at the start
+  ("mpv closed the connection") because the driver's scratch
+  XDG_RUNTIME_DIR hid the nested display, which a relative WAYLAND_DISPLAY
+  names; with the display named by path it played.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, `env
+-u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+QT_QPA_PLATFORMTHEME`, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its
+real exit status captured, on exactly the tree this section was committed
+with: node 3721 checks (and 3721 without the own-write echo), python 2506
+tests, QML spec 98, harness predicates 702, the relay scenario 104 (step 6c,
+floor 104), the helper split 12 parts, the release allowlist 43 files, the
+marketplace capability scan 0 hits, the mpv option guard 899 options
+(pinned 26, warned 5). Floors moved by this lane: `RELAY_SCENARIO_MIN` 104
+(new) and the predicate suite's EXPECTED 693 -> 702; the node, python and
+spec floors stay where the integration lane put them.
+
+**Filed.** F-HARNESS-110 (player-scenario's L7, L8 and L10, above) and
+F-HARNESS-111: `tests/tls_pins_rig.py`, tls-scenario's windowless arm,
+starts its own players with no relay (its argv composed with no relay port,
+so the pin names port 0) and loads them through the tree's `apply_channel`,
+which on the branch registers each load with the player's relay first; no
+relay answers, so every case would be refused as `not_running` before
+anything is sent, its "the attacker gets nothing" checks passing for that
+reason and its controls red. Read, not run; the live arm, which goes
+through the shell's own `player start`, is not affected.
+
+**For the lead.** A relay refusal at a zap is told as a failed open
+(decision 19's premise, measured not to hold; three ways out in the
+integration lane's report). A current-build player that outlived a
+SIGKILLed relay under a user's wrapper is replaced at the next zap, probe or
+orphan check, and the 10 s health tick's `status` does not ask the relay, so
+while the shell runs with no zap that interval is unbounded. The documents
+the docs plan names (ARCHITECTURE-PLAYER section 20, the README's limits and
+mpvArgs paragraphs, the CHANGELOG lines, CLAUDE.md's rule-5 entry and its
+"42" allowlist count, the decisions log row) are not in this commit.

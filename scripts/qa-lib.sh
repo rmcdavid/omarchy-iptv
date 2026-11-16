@@ -461,6 +461,30 @@ qa_cmdline() {
   printf '%s\n' "$cmd"
 }
 
+# qa_cmdline_sans_relay_pin <pid>: qa_cmdline's line with exactly one kind
+# of item left out -- `--http-proxy=http://127.0.0.1:<port>`, the deny-all
+# relay pin D-SINK-102 puts on every player this tree starts (a port of
+# 1-65535 with no leading zero, no credential, nothing after the port) --
+# so an S-03 sweep for "://" reads what a channel could have put on the
+# argv and not the pin. Any other `--http-proxy=` item stays, and the sweep
+# then reads it as the URL it is: a credential, another host, a path. Read
+# as the NUL-split items the kernel wrote, never from the joined string, and
+# refused the way qa_cmdline refuses (an empty, non-numeric or gone pid).
+qa_cmdline_sans_relay_pin() {
+  local pid=${1-} item out=""
+  local -a items=()
+  [[ $pid =~ ^[0-9]+$ && -r /proc/$pid/cmdline ]] || return 1
+  mapfile -d '' -t items <"/proc/$pid/cmdline" 2>/dev/null || return 1
+  (( ${#items[@]} > 0 )) || return 1
+  for item in "${items[@]}"; do
+    if [[ $item =~ ^--http-proxy=http://127\.0\.0\.1:([1-9][0-9]{0,4})$ ]] && (( BASH_REMATCH[1] <= 65535 )); then
+      continue
+    fi
+    out+="$item "
+  done
+  printf '%s\n' "$out"
+}
+
 # qa_listener_owned <port> <needle>: whose is the TCP listener on
 # 127.0.0.1:<port>? The pid is read from the LISTENER (`ss -ltnp`), never
 # from `$!` -- behind setsid `$!` is the wrapper (CLAUDE.md, parallel rule 3).

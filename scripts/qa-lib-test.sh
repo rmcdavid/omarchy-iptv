@@ -228,6 +228,33 @@ st "qa_cmdline refuses a pid that is gone"  1 qa_cmdline 99999999
 st "qa_cmdline reads a live process"        0 qa_cmdline "$$"
 ck "and what it read is this shell's own argv" '[[ "$(qa_cmdline $$)" == *bash* ]]'
 
+# D-SINK-102 (2026-11-15): every player this tree starts carries the relay's
+# deny-all pin, `--http-proxy=http://127.0.0.1:<port>`, and player-scenario's
+# P2 and P5 and tls-scenario's S5 read it as "a URL on the command line"
+# (measured: P2 and P5 red in the cage on 866bf34). qa_cmdline_sans_relay_pin
+# leaves out that one form and nothing else. Three sleepers of this shell's
+# own, with crafted argvs, each signalled only by the pid bash handed it and
+# only while its command line still reads as ours.
+PIN_CODE='import time; time.sleep(30)'
+python3 -c "$PIN_CODE" --input-ipc-server=/x.sock --http-proxy=http://127.0.0.1:43123 >/dev/null 2>&1 & PIN_OK=$!
+python3 -c "$PIN_CODE" --http-proxy=http://iptv:0123456789abcdef0123456789abcdef@127.0.0.1:43123 >/dev/null 2>&1 & PIN_CRED=$!
+python3 -c "$PIN_CODE" --http-proxy=http://127.0.0.1:043123 --http-proxy=http://10.0.0.1:80 --http-proxy=http://127.0.0.1:65536 >/dev/null 2>&1 & PIN_ODD=$!
+for pin_pid in "$PIN_OK" "$PIN_CRED" "$PIN_ODD"; do
+  for ((i = 0; i < 50; i++)); do [[ $(qa_cmdline "$pin_pid") == *"time.sleep(30)"* ]] && break; sleep 0.1; done
+done
+ck "control: qa_cmdline reads the deny-all pin as a URL" '[[ "$(qa_cmdline "$PIN_OK")" == *"://"* ]]'
+ck "qa_cmdline_sans_relay_pin leaves the deny-all pin out and keeps the rest" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_OK")" != *"://"* && "$(qa_cmdline_sans_relay_pin "$PIN_OK")" == *"--input-ipc-server=/x.sock"* ]]'
+ck "and keeps a pin that carries a credential, which the sweep then reads as a URL" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_CRED")" == *"iptv:0123456789abcdef"*"@127.0.0.1:43123"* ]]'
+ck "and keeps a leading zero, another host and a port past 65535" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_ODD")" == *":043123 "*"10.0.0.1:80 "*":65536 "* ]]'
+st "qa_cmdline_sans_relay_pin refuses an empty pid" 1 qa_cmdline_sans_relay_pin ""
+for pin_pid in "$PIN_OK" "$PIN_CRED" "$PIN_ODD"; do
+  [[ $(qa_cmdline "$pin_pid") == *"time.sleep(30)"* ]] && kill "$pin_pid" 2>/dev/null
+  wait "$pin_pid" 2>/dev/null
+done
+
 # ======================================================== qa_leak_scan (A1)
 
 section "qa_leak_scan / A1: 'redaction ok' on a capture that caught nothing"
@@ -517,7 +544,8 @@ st "qa_ref_commit refuses a directory that is no repository" 1 qa_ref_commit "$T
 REF_BARE=$(grep -l -- 'rev-parse --short "\$BASELINE")' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
 is "no scenario names a baseline by a bare rev-parse" "$REF_BARE" "0"
 REF_USERS=$(grep -l -- 'baseline tree \$BASELINE (\$(qa_ref_commit "\$ROOT" "\$BASELINE"))' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
-is "the seven scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "7"
+# Seven until 2026-11-15, when relay-scenario.sh (D-SINK-102) joined them.
+is "the eight scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "8"
 
 # ================================================== qa_extract (F-HARNESS-56)
 
@@ -1550,7 +1578,7 @@ is "and no scenario resolves its directory with dirname (a code line; comments m
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
 # not learn it until a review read the two lists side by side.
-for g in chno-entry pip id-rotate logo clip key; do
+for g in chno-entry pip id-rotate logo clip key relay; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
@@ -2646,6 +2674,17 @@ is "tls-scenario.sh --pre-tls --rig-only does not eat the next flag as a ref" \
    "$(tr_refuse tls-scenario.sh --pre-tls --rig-only)" "2 0"
 is "tls-scenario.sh --pre-tls <no such ref> refuses and writes no transcript" \
    "$(tr_refuse tls-scenario.sh --pre-tls no-such-ref-for-a-test)" "2 0"
+# D-SINK-102's scenario: its levers are tls-scenario's and logo-scenario's,
+# and every refusal sits above the export and the transcript, so a mistyped
+# lever starts no player and leaves no file.
+is "relay-scenario.sh --baseline <no such ref> refuses and writes no transcript" \
+   "$(tr_refuse relay-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+is "relay-scenario.sh --baseline with no ref at all refuses rather than grading the tree" \
+   "$(tr_refuse relay-scenario.sh --baseline)" "2 0"
+# The tree here is a real plugin tree, so only the two-levers refusal can
+# refuse it (with /tmp, the --tree check would refuse on its own).
+is "relay-scenario.sh --baseline X --tree Y refuses and writes no transcript" \
+   "$(tr_refuse relay-scenario.sh --baseline HEAD --tree "$ROOT")" "2 0"
 
 # A refusal must not reap somebody else's port either, and that one bites
 # hardest on the refusal that exists to protect it. rewind-scenario.sh installs
@@ -3674,7 +3713,12 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # that are sourced here taken whole (F-HARNESS-56).
 # 683 -> 693 on 2026-11-14: shot's seven over a stub hyprctl and grim
 # (F-HARNESS-58) and P10's three over a stub python3 (F-HARNESS-55).
-EXPECTED=693
+# 693 -> 697 on 2026-11-15 (dsink102, D-SINK-102): relay-scenario.sh joins
+# the gate's list of check-tree scenarios with a live arm (1) and its three
+# lever refusals above the transcript (3). Red on a tree without the
+# scenario: all four failed. 697 -> 702 the same day: qa_cmdline_sans_relay_pin's
+# five over three sleepers of the suite's own (red where qa-lib.sh lacks it).
+EXPECTED=702
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

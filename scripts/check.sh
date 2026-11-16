@@ -14,6 +14,10 @@
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
+#   6c. relay scenario           (scripts/dev-harness/relay-scenario.sh check-tree:
+#                                the player's relay observed at the sinks, a
+#                                real headless mpv inside `unshare -rn`;
+#                                D-SINK-102)
 #   7. ASCII check on code files (glyphs are allowed in .qml only) and the
 #                                control-byte check. BOTH scan the working
 #                                TREE, not the index: `git ls-files --cached
@@ -1020,6 +1024,15 @@ KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
 # at 0.3 is (the claim narrowed to "painted at all"); seen red on the
 # harness-lib that read visible alone.
 OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
+# D-SINK-102 (2026-11-15, dsink102): the relay scenario
+# (scripts/dev-harness/relay-scenario.sh check-tree, tests/relay_rig.py):
+# 103 checks over the shipping helper's `playlist`, `player start` and
+# `play`, a real headless mpv and its relay, inside `unshare -rn`, against
+# logging servers on 11.0.0.1 (the internet), 10.0.0.1 (the LAN) and
+# 127.0.0.1 (this machine) -- R1..R20, the teardown -- plus the scenario's
+# own crash-journal line. `--baseline 9e006be` (0.19.1) answers 55 passed,
+# 47 failed (docs/QA-RESULTS.md "D-SINK-102").
+RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-104}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -1694,6 +1707,44 @@ elif (( key_rc == 77 )); then
   fi
 else
   cat "$key_log"; bad "key preflight (exit $key_rc)"
+fi
+
+step "scripts/dev-harness/relay-scenario.sh check-tree (D-SINK-102)"
+# The player's destination checks judged the address the HELPER saw, and the
+# player then followed a redirect, opened an HLS or DASH part on another
+# host, or looked a name up again itself (the maintainer's finding on
+# omacom/omarchy-plugin-marketplace#14290 against 0.19.1). The fix is a
+# relay the helper runs as the player's parent and pins as its HTTP proxy,
+# which judges every connection against the address it reaches. This step
+# observes that at the sinks, on every commit: the shipping helper and a
+# real mpv with --vo=null --ao=null and no display or session bus, inside a
+# private network namespace of its own (`unshare -rn`, a dummy interface
+# carrying 11.0.0.1 and 10.0.0.1, every address a literal, nothing looked
+# up by name), its socket in a scratch runtime directory, never the
+# owner's. A redirect, a variant, a segment, a key, an init section, a
+# subtitle rendition and a DASH BaseURL into this machine or the LAN must
+# reach a logging server that logs nothing, the controls on 11.0.0.1 must
+# play, and the crash journal must not move. About a minute.
+#
+# A machine without python3, mpv, ffmpeg, openssl, unshare, ip or
+# journalctl, or one that cannot make a network namespace with a dummy
+# interface, answers 77 with the reason: RED here unless
+# RELAY_SCENARIO_SKIP_OK=1 is set, printing the reason either way, for the
+# logo step's reason -- a gate that measured nothing has proved nothing.
+relay_log=$CHECK_TMP/relay-scenario.log
+"$ROOT/scripts/dev-harness/relay-scenario.sh" check-tree >"$relay_log" 2>&1; relay_rc=$?
+if (( relay_rc == 0 )); then
+  relay_n=$(grep -c '^PASS' "$relay_log" || true)
+  if (( relay_n < RELAY_SCENARIO_MIN )); then cat "$relay_log"; bad "relay scenario ran $relay_n checks, expected at least $RELAY_SCENARIO_MIN"; else ok "relay scenario ($relay_n checks)"; fi
+elif (( relay_rc == 77 )); then
+  relay_why=$(grep -a '^SKIP' "$relay_log" | head -1 | sed 's/^SKIP relay-scenario: //')
+  if [[ ${RELAY_SCENARIO_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP relay scenario (RELAY_SCENARIO_SKIP_OK=1): %s\n' "$relay_why"
+  else
+    bad "relay scenario SKIPPED, which is not green: $relay_why (set RELAY_SCENARIO_SKIP_OK=1 to accept a gate that observed no relay)"
+  fi
+else
+  cat "$relay_log"; bad "relay scenario (exit $relay_rc)"
 fi
 
 step "ascii check (code files)"

@@ -1270,8 +1270,10 @@ ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_seen == yes &&
 ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_seen == yes && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
 is "S5 layer 2: the LAST token of the composed argv re-asserts verification" "$s5_last" "--tls-verify=yes"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
-ck "S5 and S-03 still holds: no URL and no credential on the argv" \
-   '[[ "$s5_cmd" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
+# D-SINK-102: every item but the deny-all relay pin (qa_cmdline_sans_relay_pin).
+s5_swept=$(qa_cmdline_sans_relay_pin "$s5_pid")
+ck "S5 and S-03 still holds: no URL but the relay pin and no credential on the argv" \
+   '[[ -n "$s5_swept" && "$s5_swept" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
 wait_log 'ignoring mpvArgs tokens' 10 || true
 # By option NAME: since D-SINK-24 the line names a refused token's option and
 # never its value (Model.mpvRejectedLine), so `--tls-verify=no` reads

@@ -497,10 +497,27 @@ def load_helper(root, name):
     loader.exec_module(module)
     return module
 
-def composed(root, name, sock):
+def relay_port(argv):
+    """D-SINK-102 (2026-11-15): the port of the player's deny-all relay pin,
+    `--http-proxy=http://127.0.0.1:<port>`, which the kernel chose at the
+    spawn, or 0 when the argv holds none (every tree before the relay). The
+    one value `build` takes from the live argv; the rest is the builder's."""
+    pins = [a for a in argv if a.startswith(b"--http-proxy=http://127.0.0.1:")]
+    try:
+        return int(pins[0].rsplit(b":", 1)[1]) if len(pins) == 1 else 0
+    except ValueError:
+        return 0
+
+def composed(root, name, sock, port=0):
+    import inspect
     helper = load_helper(root, name)
-    return [("plain", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, [])]),
-            ("include", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, ["--osd-level=1"])])]
+    # A builder that takes the relay's port is handed the one the player was
+    # launched on; an older tree's builder has no such parameter.
+    extra = {}
+    if port and "relay_port" in inspect.signature(helper.mpv_launch_argv).parameters:
+        extra = {"relay_port": port}
+    return [("plain", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, [], **extra)]),
+            ("include", [os.fsencode(e) for e in helper.mpv_launch_argv(sock, ["--osd-level=1"], **extra)])]
 
 def show(value):
     if isinstance(value, bool):
@@ -639,7 +656,7 @@ def main(verb, args):
             print("NOARGV")
             return
         try:
-            forms = composed(args[0], "omarchy_iptv_rb_build", args[1])
+            forms = composed(args[0], "omarchy_iptv_rb_build", args[1], relay_port(argv))
         except BaseException:
             print("NOBUILDER")
             return
@@ -951,7 +968,12 @@ cmd=$(cmdline_of "$PID1")
 # The positive control. Without it every sweep below is a statement about a
 # string nobody has established is the player's argv (A5).
 ck "P2 the player command line was actually read" '[[ -n "$cmd" && "$cmd" == *"input-ipc-server=$SOCK"* ]]'
-ck "P2 no URL on the command line"           '[[ "$cmd" != *"://"* ]]'
+# D-SINK-102: the deny-all relay pin, `--http-proxy=http://127.0.0.1:<port>`,
+# is the one URL a player of this tree carries, with no credential and no
+# channel in it; the sweep reads every OTHER item (qa_cmdline_sans_relay_pin),
+# so a credentialed or redirected pin is still a URL here.
+swept=$(qa_cmdline_sans_relay_pin "$PID1")
+ck "P2 no URL on the command line but the relay pin" '[[ -n "$swept" && "$swept" != *"://"* ]]'
 ck "P2 no credential on the command line"    '[[ "$cmd" != *"$SECRET_PW"* && "$cmd" != *"$SECRET_USER"* ]]'
 ck "P2 no token on the command line"         '[[ "$cmd" != *"$SECRET_TOKEN"* ]]'
 ck "P2 no header value on the command line"  '[[ "$cmd" != *"$SECRET_UA"* && "$cmd" != *"--user-agent="* && "$cmd" != *"--referrer="* && "$cmd" != *"--http-header-fields"* ]]'
@@ -1018,7 +1040,8 @@ cmd=$(cmdline_of "$PID1")
 # A5: this is the unguarded half. P2's sweep has the "--idle=once" positive
 # control four lines down; P5's has nothing between it and an empty $cmd.
 ck "P5 the player command line was actually read" '[[ -n "$cmd" && "$cmd" == *"input-ipc-server=$SOCK"* ]]'
-ck "P5 still nothing channel-specific on the command line" '[[ "$cmd" != *"://"* && "$cmd" != *"Harness Live Two"* ]]'
+swept=$(qa_cmdline_sans_relay_pin "$PID1")
+ck "P5 still nothing channel-specific on the command line" '[[ -n "$swept" && "$swept" != *"://"* && "$cmd" != *"Harness Live Two"* ]]'
 
 echo "== P8 a second service on the same runtime dir adopts the player"
 OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" --detach --keep --timeout 0 --instance 2 --playlist "$FIX/player.m3u" >>"$LOG" 2>&1
@@ -1571,7 +1594,13 @@ loader = importlib.machinery.SourceFileLoader("omarchy_iptv_l9", os.path.join(ro
 spec = importlib.util.spec_from_loader("omarchy_iptv_l9", loader)
 helper = importlib.util.module_from_spec(spec)
 loader.exec_module(helper)
-forms = [("plain", helper.mpv_launch_argv(sock, [])), ("include", helper.mpv_launch_argv(sock, ["--osd-level=1"]))]
+# D-SINK-102: the relay pin's port is the one value taken from the live argv
+# (relay_port in L_PY says why); an older tree's builder takes none.
+import inspect
+pins = [a for a in argv if a.startswith(b"--http-proxy=http://127.0.0.1:")]
+port = int(pins[0].rsplit(b":", 1)[1]) if len(pins) == 1 and pins[0].rsplit(b":", 1)[1].isdigit() else 0
+extra = {"relay_port": port} if port and "relay_port" in inspect.signature(helper.mpv_launch_argv).parameters else {}
+forms = [("plain", helper.mpv_launch_argv(sock, [], **extra)), ("include", helper.mpv_launch_argv(sock, ["--osd-level=1"], **extra))]
 body, last = argv[:-1], argv[-1:]
 # argv[0] is the path the wrapper exec'd, not `mpv`: compare from element 1.
 print(next((form + "+token" for form, want in forms if [os.fsencode(e) for e in want[1:]] == body[1:]
