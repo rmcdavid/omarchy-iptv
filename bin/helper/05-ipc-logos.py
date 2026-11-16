@@ -320,6 +320,17 @@ def logo_host_part(netloc: str) -> str:
     return text.split(":", 1)[0]
 
 
+def unsplit_scheme(raw: str) -> str:
+    """The scheme of a URL urlsplit refused, lower-cased, or "" when the
+    text before its first `:` is not one (RFC 3986: a letter, then letters,
+    digits, `+`, `-` or `.`). For the survey's `schemes` count alone."""
+    head = raw.partition(":")[0].strip(URL_SPACE_CHARS)
+    if (head and head.isascii() and head[0].isalpha()
+            and all(c.isalnum() or c in "+-." for c in head)):
+        return head.lower()
+    return ""
+
+
 def logo_survey(channels: Any) -> dict[str, Any]:
     """Who enabling logos would contact, counted from the cache.
 
@@ -337,7 +348,21 @@ def logo_survey(channels: Any) -> dict[str, Any]:
         if not isinstance(raw, str) or not raw:
             continue
         with_logo += 1
-        parsed = urllib.parse.urlsplit(raw)
+        try:
+            parsed = urllib.parse.urlsplit(raw)
+        except ValueError:
+            # D-LOGO-26: urlsplit REFUSES some URLs outright -- a `[` or `]`
+            # in the authority that is not one well-formed address literal,
+            # a character whose NFKC form is a delimiter -- and this raised
+            # out of the verb as `internal`, on the survey and, because
+            # cmd_logos surveys first, on every `--fetch` run over such a
+            # cache. The parse drops such a logo, so only a cache another
+            # writer made holds one. Counted as a logo, never contacted, and
+            # no host is named for it: the fetch cannot reach it either.
+            scheme = unsplit_scheme(raw)
+            schemes[scheme] = schemes.get(scheme, 0) + 1
+            refused += 1
+            continue
         scheme = (parsed.scheme or "").lower()
         schemes[scheme] = schemes.get(scheme, 0) + 1
         if scheme not in LOGO_SCHEMES:

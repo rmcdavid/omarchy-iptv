@@ -874,3 +874,70 @@ class LogoStreamTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LogoSurveyRefusedUrlTest(unittest.TestCase):
+    """D-LOGO-26: a logo URL urlsplit refuses outright used to raise out of
+    the survey, so `logos` and every `logos --fetch` run over a cache holding
+    one ended `internal`. The parse drops such a logo, so these caches are
+    written by hand here, as another writer would."""
+
+    REFUSED = ("https://[bad/1.png", "https://a]b.test/1.png", "https://[::1]x.test/1.png")
+
+    def test_urlsplit_really_refuses_these(self):
+        # The premise: were a Python release to start reading one of them,
+        # the cases below would be testing nothing.
+        import urllib.parse
+        for url in self.REFUSED:
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    urllib.parse.urlsplit(url)
+
+    def test_such_a_logo_is_counted_refused_and_names_no_host(self):
+        survey = helper.logo_survey([{"logo": u} for u in self.REFUSED] + [{"logo": "https://cdn.test/a.png"}])
+        self.assertEqual(survey["withLogo"], 4)
+        self.assertEqual(survey["refused"], 3)
+        self.assertEqual(survey["wouldContact"], 1)
+        self.assertEqual(survey["hosts"], [{"host": "cdn.test", "channels": 1}])
+        self.assertEqual(survey["schemes"], {"https": 4})
+
+    def test_its_scheme_is_counted_as_written_or_as_none(self):
+        for raw, want in (("HTTPS://[bad/1.png", "https"), ("ftp://[x/1.png", "ftp"),
+                          ("svn+ssh://[x", "svn+ssh"), ("1x://[y", ""), ("[x", ""),
+                          ("ht tp://[y", ""), ("://[y", "")):
+            with self.subTest(raw=raw):
+                self.assertEqual(helper.unsplit_scheme(raw), want)
+                self.assertEqual(helper.logo_survey([{"logo": raw}])["schemes"], {want: 1})
+
+    def run_verb(self, urls, fetch):
+        import argparse, contextlib, io, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = os.path.join(tmp, "cache")
+            os.makedirs(cache)
+            with open(os.path.join(cache, "channels.json"), "w") as fh:
+                json.dump({"channels": [{"id": "c%d" % i, "name": "C%d" % i, "group": "G",
+                                         "url": "http://127.0.0.1/%d" % i, "logo": u}
+                                        for i, u in enumerate(urls)]}, fh)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = helper.cmd_logos(argparse.Namespace(cache_dir=cache, fetch=fetch, survey=False, timeout=1))
+            lines = [line for line in out.getvalue().splitlines() if line.strip()]
+            return code, json.loads(lines[-1]), os.path.isdir(os.path.join(cache, "logos"))
+
+    def test_the_survey_verb_answers_over_a_cache_holding_one(self):
+        code, reply, _ = self.run_verb(self.REFUSED, fetch=False)
+        self.assertEqual(code, 0)
+        self.assertTrue(reply["ok"])
+        self.assertEqual((reply["withLogo"], reply["refused"], reply["wouldContact"]), (3, 3, 0))
+
+    def test_the_fetch_verb_answers_too_and_contacts_nobody(self):
+        # Every URL here is refused before a connection is made (urlsplit
+        # raises inside fetch_logo as well, and the run counts that as the
+        # logo's own failure, D-LOGO-24), so the real fetcher runs.
+        code, reply, made_folder = self.run_verb(self.REFUSED, fetch=True)
+        self.assertEqual(code, 0)
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["action"], "fetch")
+        self.assertEqual(reply["fetched"], 0)
+        self.assertEqual(reply["names"], [])
+        self.assertFalse(made_folder, "a cache whose logos cannot be contacted gets no logo folder")
