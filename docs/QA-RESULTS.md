@@ -19471,3 +19471,64 @@ Also settled by the lead, from the correctness review's observations and the lan
 - A `proxy` in `--ytdl-raw-options` is stated as part of the `--ytdl` residual in ARCHITECTURE-PLAYER 20's open list and the board row, not refused: READ in mpv 0.41.0's ytdl hook, not measured.
 - Filed: **D-PLY-66** (a relay refusal at a zap reads as an ordinary failed open, and an HLS or DASH one as a playlist-file sentence), **D-PLY-67** (a current-build player that outlives its relay is acted on only at the next zap, shell start or shell exit; recommended bound: `status` asks the relay), and **F-HARNESS-113** (the live-state guard goes red when the owner's running shell saves `state.json` during a gate).
 - Renumbered: the branch filed its player-scenario row under the number `dev` gave the lock guard's row the same night (F-HARNESS-85's follow-up); the branch's is **F-HARNESS-112** everywhere.
+
+### F-HARNESS-112: player-scenario's L7, L8 and L10 rewritten for decision 15 (lane-fh112, 2026-11-16)
+
+The scenario lane filed F-HARNESS-112 with 21 reds in L7, L8 and L10 on 866bf34, two of them unexplained: the shell named no channel during the hold (`NOFIELD`), and L7's player gave no reply to the read of load-auto-profiles (`NOREPLY`). Every call below is the lead's, under the owner's standing authority of 2026-11-09, as the brief for this lane set it, or this lane's where marked.
+
+**The reading, confirmed.** Each cell slept until 19 s after the shell loaded (`L7_PAST`, and the same shape in L8 and L10) and only then read its premises. Decision 15 stops an older player at the hold's end when its channel is not deliverable, and the hold is armed when the probe answers. So by the time the premises were read, the player had already been stopped: about 16.3 s after the load in the scenario lane's second transcript (L7: loaded at 18485.386, P0 last seen at 18501.688, premises read at 19.0 s). Both reds follow from that stop:
+- `stopUnadoptedPlayer` sets now-playing to null, and `qa_field` reads that as `NOFIELD`.
+- A socket with no player is `NOREPLY` to the scenario's `get`.
+
+The same transcript holds the control. L10's FIRST shell read the same two premises inside its hold, through `until_eq`, and both passed (`t:live1 false`). In the code, Service.qml's probe handler sets now-playing from the stash before `openOlderRestart` for an older player, whether it is safe or not; only a player that is not older and not safe is stopped there. Read inside the hold, every premise holds. The reds were the harness's. Nothing in the product changes.
+
+**The cells, rewritten** (`scripts/dev-harness/player-scenario.sh`). Each cell reads its premises inside the hold, then asserts decision 15:
+- **Inside the hold:**
+  - the shell has adopted P0 and names its channel, with no list;
+  - L7's probe has migrated load-auto-profiles;
+  - the probe's mark (D-SINK-72) is on P0, where a new premise first finds none before any probe of this build;
+  - P0 holds the socket alone, with no stop line and no restart line. This is read after the other premises, and it is what shows they were read inside the hold.
+- **At the hold's end:** P0 is first missed within the window `L_HOLD_LO`-`L_HOLD_HI`, 13-23 s after the moment the scenario first saw the shell name the channel. The shell arms the 15 s hold in that same turn. The window allows 2 s for that reading's own lag, and 7 s for `player stop`'s longest ladder (player-bounds.json's ladder("")) plus 1 s for the detached helper's start.
+- **Once P0 is gone:**
+  - the bar names nothing (`NOFIELD`);
+  - there is one stop line, the fixed text `the player another build started cannot be restarted and will not verify ...`, and no restart line.
+- **From `ipc refresh` until 8 s after the list landed:** nothing holds the socket at any 50 ms sample, the bar still names nothing, and the lines are unchanged.
+- **Throughout:** no player card, no other notice, and the coredump journal +0.
+- **New helpers:** the `mark`, `since` and `p0rel` verbs of the scenario's python, `l_wait_gone` (a wait with a deadline, reported when it gives up) and `l_in_window`.
+
+**Two settlements in the cells.**
+- **L8 stays a cell of its own (this lane's call).** The brief offered, as an example, that L8 might now prove a pinned v0.16.0 player is stopped and NOT migrated, with no mark written. Measured, the probe DOES mark it. Its read-back counts the relay pin, which no pre-relay player holds, so `migrate_tls` marks it before its writes. So L8 asserts what was measured: the player's load-auto-profiles reads false from its own argv, it has no mark before the probe, it is marked migrated inside the hold, and it is stopped at the hold's end like L7's.
+  - It is not folded into L7, because its player is the other shape an upgrade meets (the pin block on its own argv), and it shows the missing relay alone is enough.
+- **L10's second shell.** That the second shell reads the player as migrated from the first shell's mark cannot be observed apart on this branch. Its own probe finds the player unsafe for want of a relay, and marks it again whether or not the mark is there. So L10 asserts the following:
+  - the mark is on P0 after the first shell and inside the second shell's hold;
+  - P0 outlived the first shell, which wrote no stop or restart line;
+  - P0 is stopped at the SECOND shell's hold's end, and the late list starts nothing.
+- **The notices.** The first green run read `0 1 0` on all three cells' notice checks. Read off the stub's log, the extra notice was `Playlist refreshed` (one per cell, from the scenario's own `ipc refresh`), beside each shell start's `Bar setting ignored`. The stop itself raised no notice. `notify_others` now excludes those two lever notices, and nothing else. That red run is also the evidence that the check sees a notice.
+
+**Runs.** Each run was player-scenario in its own nested headless cage under `scripts/dev-harness/private-bus.sh`:
+- the cage was `WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1`;
+- the outer command ran under `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u WAYLAND_DISPLAY`, with a scratch `XDG_RUNTIME_DIR` (`/tmp/claude-1000/rt.*`, holding the cage's socket and the harness folder), the heavy lock held, and nice 10;
+- the cage's child refused any display but the nested one, put a refusing `hyprctl` and a logging notifier first on PATH, set `ulimit -c 0` and the software-GPU lever (`OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`).
+
+The crash journal read 87 before and after every run, and no cage, player or bus was left after any. Nothing was signalled by this lane. The scenario's own teardown (`run.sh reap`) ran as it always does.
+
+| Run | Tree | Transcript | Result | L7, L8, L10 |
+|---|---|---|---|---|
+| green1 (05:53:44-05:58:53 CST) | c1eabe7 + the cells | `player-20261116-055344-1165803` | 187 passed, 12 failed, 2 skipped | 43 of 46; the 3 notice checks red (`Playlist refreshed`, above); P0 first missed 15.49, 15.44, 15.30 s after the channel was named |
+| mut1 (05:59:44-06:05:34) | the mutant `if (s.unsafe === true) return "defer"` in the expired branch of `Model.olderRestartDisposition` | `player-20261116-055944-1181653` | 181 passed, 18 failed | 9 red: per cell, the window (P0 still held the socket at the 23 s deadline: `23.01 NONE`), "names no channel, one stop line" (`t:live1 0 0`) and "nothing held the socket after the refresh" (`max:1 p0:yes`). The deferred player was stopped only when the list landed, so the late-list line check stayed green |
+| mutB (06:06:04-06:11:43) | the mutant `return "hold"` there instead (D-SINK-71's late delivery for an unsafe player) | `player-20261116-060604-1198071` | 178 passed, 21 failed | 12 red: the same 9 and the late-list check (`t:live1 0 1`: the list restarted P0 into a new player) |
+| green2 (06:12:08-06:17:27) | c1eabe7 + the final cells | `player-20261116-061208-1214210` | **190 passed, 9 failed, 2 skipped** (199 assertions, the floor 200 met) | **46 of 46**; P0 first missed 15.27, 15.14, 15.29 s after the channel was named |
+
+- **What stayed the same in every run.** The 9 failures of green2, and those beside the L reds in the others, are the window checks every cage run fails, because hyprctl cannot answer in a nested compositor: P1 twice, P4, P5, P8, P6, P11, and P12 twice. The 2 SKIPs are L1's and L4's window checks. Every other L check (L1, L1b, L2, L3, L4, L5, L9) was green in all four runs, the mutants included.
+- **What could not go red.** In each cell, the "never two players" check and the "list landed" control are guards, green under both mutants. The no-card check carries over from the old cells.
+- **The floor.** `EXPECTED_CHECKS` goes from 193 to 200: L7 15 -> 15, L8 9 -> 14, L10 15 -> 17. `scripts/qa-lib-test.sh`'s floor-versus-file check holds it.
+
+**Sibling search (rule 15).**
+- **Other premise reads taken after a computed deadline**, searched as a sleep against a load time (`+ 19 - time.monotonic()` and its kin) in every `scripts/dev-harness/*.sh`. Only these three cells had one. What is left is `l_wait_gone`'s deadline, which waits for an outcome and reads no premise.
+- **Other scenarios that assert D-SINK-71's or D-SINK-72's deferral or late replacement:**
+  - tls-scenario's S6 asserts that an adopted older player is replaced. It is asserted with the channel list present from the start, which is decision 15's restart of a deliverable channel. This was read, not run, here; its windowless arm is F-HARNESS-111.
+  - key-scenario has none.
+- **The model and the service.** `tests/Model.test.js`, `tests/Model.spec.qml` (`test_olderRestartUnderQtsEngine`, with its `expired, unsafe -> stop` vectors) and the node service harness's relay-less stop at the hold's end already hold decision 15: their vectors ask `stop` of exactly the input both mutants change (read, not run under the mutants here), and this cell is that rule's observation at the sink.
+- **The documents that describe the cells.** `docs/QA.md`'s plan rows PLY-RST-29, -30, -32 and -33 stated the old expectations; each now carries a dated bracket with the new ones. ARCHITECTURE-PLAYER's 4.5.2 bracket and section 20's open list named F-HARNESS-112 as open; both now say what was fixed. The scenario's own header, its `--baseline` notes for 6b5ba6c and c510985 (which were runs of the old cells), and its floor comment are rewritten in the same file.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with. The gate does not run player-scenario (it needs a compositor); what it holds of this change is the floor-versus-file check in `scripts/qa-lib-test.sh` and the ASCII and control-character scans over `scripts/dev-harness/`. No floor in `scripts/check.sh` moved: the node, python, spec and predicate counts are the ones the recheck of 68593a1 left.

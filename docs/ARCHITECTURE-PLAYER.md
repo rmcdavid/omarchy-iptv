@@ -1215,11 +1215,20 @@ lands later starts nothing. Measured twice in a nested headless cage on
 866bf34 (QA-RESULTS "D-SINK-102", player-scenario): with the list withheld
 past the hold, the older player was gone 16.2-16.3 s after the shell loaded,
 nothing replaced it when the list landed, and in L8 no player was on the
-socket after the refresh; L7, L8 and L10, which assert the deferral and the
-late replacement above, read red there, and two of their premises are not
-explained by this decision (F-HARNESS-112). L1-L5 and L9 stay green: older
-tags' players are replaced, and this tree's own launch reads `current` byte
-for byte with the relay's port.]**
+socket after the refresh; L7, L8 and L10, which asserted the deferral and the
+late replacement above, read red there (F-HARNESS-112). L1-L5 and L9 stay
+green: older tags' players are replaced, and this tree's own launch reads
+`current` byte for byte with the relay's port. [2026-11-16, F-HARNESS-112
+fixed: the two premises that read as unexplained were read 19 s after the
+load, after this stop, which clears now-playing and leaves no player to
+answer; read inside the hold they hold. L7, L8 and L10 now assert this
+decision: in a nested cage on c1eabe7 the older player was first missed
+15.1-15.5 s after the shell named its channel (the hold is armed in that
+turn), the bar named nothing, the stop raised no card or notice beyond its
+one journal line, and nothing held the socket from the refresh until 8 s
+after the list landed. A v0.16.0 player, whose own argv holds every pin but
+the relay's, is marked migrated by the probe all the same and stopped the
+same way (L8).]]**
 
 **Not carried:** picture in picture, window placement, and the rewind
 history ("behind live" returns to live). The new window is black until its
@@ -4326,7 +4335,8 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   only a start tells, from the relay's count of the first load's refusals
   (decision 19's premise, measured not to hold; the wording is open as
   D-PLY-66).
-- **The harness**: player-scenario's L7, L8 and L10 assert the deferral
-  decision 15 replaced (F-HARNESS-112), and the windowless arm of
-  tls-scenario starts its own players with no relay, so its loads are
-  refused before they are sent (F-HARNESS-111).
+- **The harness**: the windowless arm of tls-scenario starts its own
+  players with no relay, so its loads are refused before they are sent
+  (F-HARNESS-111). (player-scenario's L7, L8 and L10 asserted the deferral
+  decision 15 replaced until 2026-11-16; they now read their premises inside
+  the hold and assert the stop at its end, F-HARNESS-112, fixed.)
