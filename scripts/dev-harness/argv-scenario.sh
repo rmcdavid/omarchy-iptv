@@ -104,9 +104,14 @@ cleanup() {
   "$RUN" reap >/dev/null 2>&1
   # The server's pid is read from the LISTENER, never from $!: this is the
   # project's own rule, learned when a live pass "killed" a fixture server
-  # and found it still serving at the next segment.
+  # and found it still serving at the next segment. And it is signalled only
+  # through a pidfd once its command line still runs THIS run's server
+  # ($WORK/slow.py, qa_signal_named): the trap is installed above the
+  # port-in-use refusal, and on that refusal the listener is whoever held
+  # the port first, which a bare `kill` by the listener's pid ended
+  # (F-HARNESS-114, rewind-scenario's SERVER_OWNED case, read, not run).
   local lpid; lpid=$(ss -ltnp 2>/dev/null | awk -v p=":$PORT " '$0 ~ p {print $0}' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
-  [[ -n $lpid ]] && kill "$lpid" 2>/dev/null
+  [[ -n $lpid ]] && qa_signal_named TERM "$WORK/slow.py" "$lpid"
   [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   rm -rf "$WORK"
 }

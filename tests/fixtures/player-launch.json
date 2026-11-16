@@ -27,7 +27,8 @@
     "that many elements off the end) and keep (keep only that many from the front), applied after drop and before",
     "append. They pin the prefix rule at its edges: the composition's LAST element (layer 2's trailing",
     "--tls-verify=yes) replaced or run on into a longer element, an element moved, and a tail cut short -- each",
-    "older, and each the case a mutant of the comparison (off by one, order-blind, compared as joined bytes) passed."
+    "older, and each the case a mutant of the comparison (off by one, order-blind, compared as joined bytes) passed.",
+    "D-SINK-102 (2026-11-14): the composed tail carries the relay pin at port 40123 (the test composes it so); the pin's element is the second tolerance, taken from the candidate when it reads exactly `--http-proxy=http://127.0.0.1:<1-65535, no leading zero>`, and anything else there -- or no pin -- is older."
   ],
   "older": {
     "v0.16.0": [
@@ -458,6 +459,138 @@
           "--input-ipc-server=",
           "--input-ipc-server=/run/user/1000/elsewhere/mpv.sock"
         ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the relay pin at another port of 127.0.0.1 (the kernel's choice at each spawn)",
+      "verdict": "current",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.1:1"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the relay pin at the highest port, in the options-file form",
+      "verdict": "current",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.1:65535"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the relay pin's port with a leading zero",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.1:080"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the relay pin at port 0, which no relay holds",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.1:0"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the relay pin past the highest port",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.1:65536"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the pin naming another host",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://127.0.0.2:40123"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the pin carrying a credential",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=http://iptv:00000000000000000000000000000000@127.0.0.1:40123"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: the pin in another scheme",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": true,
+      "edit": {
+        "replace": [
+          "--http-proxy=",
+          "--http-proxy=https://127.0.0.1:40123"
+        ]
+      }
+    },
+    {
+      "name": "D-SINK-102: no relay pin at all (every player of 0.19.x and before)",
+      "verdict": "older",
+      "prefix": [
+        "mpv"
+      ],
+      "tail": "current",
+      "include": false,
+      "edit": {
+        "drop": "--http-proxy=http://127.0.0.1:40123"
       }
     }
   ]

@@ -262,6 +262,26 @@ RESOLVE_WAIT_SLICE_S = 0.05
 # would be the largest single anonymous mapping a fetch verb makes under
 # limit_memory's RLIMIT_DATA.
 RESOLVE_STACK_BYTES = 1024 * 1024
+# D-SINK-102 (the conformance review of the relay, 2026-11-16): the
+# relay asks lookups from many threads at once, and two things that were
+# safe in a fetch's single thread were not. The process-wide thread stack
+# size is saved, set, used and restored around each lookup's start, so two
+# lookups interleaving could leave it at RESOLVE_STACK_BYTES for good;
+# RESOLVE_LOCK makes the four one step (the relay's own thread starts take
+# it too, so none of them starts inside that window). And a lookup that
+# outlives its bound leaves its thread running on the resolver's own clock:
+# RESOLVE_WORKERS counts the threads whose lookup has not returned, and a
+# caller that passes `limit` (the play-time lookup, stream_resolve, which is
+# the relay's) is refused with ResolveBusy, before any thread, once that
+# many are outstanding. A fetch passes no limit and looks up as before.
+RESOLVE_LOCK = _thread.allocate_lock()
+RESOLVE_WORKERS = {"live": 0}
+RESOLVE_BUSY = "too many host-name lookups are still running; not looked up"
+
+
+class ResolveBusy(OSError):
+    """resolve_within's refusal past its `limit`: no thread was started and
+    nothing was asked of the resolver."""
 
 # D-SINK-86 (the owner, 2026-11-08): the refusal of a host name that holds
 # what no name may hold (host_name_refused, 02-sources.py), asked before any
@@ -281,7 +301,7 @@ def refuse_host_name(text: Any, with_port: bool = False) -> None:
         raise HelperError("bad_url", HOST_NAME_REFUSAL)
 
 
-def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
+def resolve_within(host: str | bytes, port: int, timeout: float, limit: int | None = None) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
 
@@ -303,7 +323,13 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
     D-SINK-101: a `bytes` host is the play-time lookup's
     (stream_lookup_name): a name that is not ASCII, handed to the resolver
     as the player will hand it, with no idna codec. The refusal reads it as
-    the text it encodes."""
+    the text it encodes.
+
+    D-SINK-102: the stack size's save, set, start and restore are one step
+    under RESOLVE_LOCK, and with `limit` the lookup is refused (ResolveBusy)
+    while that many lookups' threads are still running (RESOLVE_WORKERS),
+    counted and checked under the same lock, so concurrent callers cannot
+    pass it together."""
     refuse_host_name(host.decode("utf-8", "surrogateescape") if isinstance(host, bytes) else host)
     import socket
     import threading
@@ -311,36 +337,48 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
 
     def lookup() -> None:
         try:
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
-        except (OSError, ValueError, AttributeError):
-            pass
-        try:
-            result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
-        except BaseException as error:         # handed to the main thread whole
-            result.append(error)
+            try:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+            except (OSError, ValueError, AttributeError):
+                pass
+            try:
+                result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+            except BaseException as error:         # handed to the main thread whole
+                result.append(error)
+        finally:
+            with RESOLVE_LOCK:
+                RESOLVE_WORKERS["live"] -= 1
 
-    previous = threading.stack_size()
-    try:
-        threading.stack_size(RESOLVE_STACK_BYTES)
-    except (ValueError, RuntimeError):
-        pass
-    try:
-        worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+    unthreaded: RuntimeError | None = None
+    with RESOLVE_LOCK:
+        if limit is not None and RESOLVE_WORKERS["live"] >= limit:
+            raise ResolveBusy(errno.EAGAIN, RESOLVE_BUSY)
+        previous = threading.stack_size()
         try:
-            worker.start()
-        except RuntimeError as error:
-            # No thread to be had (a memory limit too low for one more
-            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
-            # ceiling): the lookup runs here, under the alarm alone, as it
-            # did before D-SRC-62, and says so once. A verb that is about to
-            # refuse for memory still refuses for memory, not for this.
-            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
-            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
-    finally:
-        try:
-            threading.stack_size(previous)
+            threading.stack_size(RESOLVE_STACK_BYTES)
         except (ValueError, RuntimeError):
             pass
+        try:
+            worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+            RESOLVE_WORKERS["live"] += 1
+            try:
+                worker.start()
+            except RuntimeError as error:
+                RESOLVE_WORKERS["live"] -= 1
+                unthreaded = error
+        finally:
+            try:
+                threading.stack_size(previous)
+            except (ValueError, RuntimeError):
+                pass
+    if unthreaded is not None:
+        # No thread to be had (a memory limit too low for one more
+        # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+        # ceiling): the lookup runs here, under the alarm alone, as it
+        # did before D-SRC-62, and says so once. A verb that is about to
+        # refuse for memory still refuses for memory, not for this.
+        log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(unthreaded).__name__)
+        return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     bound = max(0.0, float(timeout))
     until = time.monotonic() + bound
     while worker.is_alive():
@@ -501,15 +539,19 @@ class DestinationPolicy:
         return HelperError("local_address", "%s: a host name of one label that %s chose is not looked up; not contacted"
                            % (where, who))
 
-    def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
+    def check_proxied(self, host: str, port: int, timeout: float, first: bool, resolve: Any = None) -> None:
         """The TARGET of a proxied request, looked up here (see the class).
         D-SINK-86 first: the proxy would make the lookup this one stands
-        for, so a name that holds what no name may hold reaches neither."""
+        for, so a name that holds what no name may hold reaches neither.
+        `resolve` (host, port, timeout) is the lookup, resolve_within when
+        None; the player's relay passes its own (relay_lookup, D-SINK-102),
+        which every fetch never does."""
         refuse_host_name(host)
         if self.refuses_name(host):
             raise self.name_refusal(first)
+        lookup = resolve_within if resolve is None else resolve
         try:
-            kinds = {address_class(found[4][0]) for found in resolve_within(host, port, timeout)}
+            kinds = {address_class(found[4][0]) for found in lookup(host, port, timeout)}
         except (OSError, TimeoutError):
             kinds = set()
         if not kinds:
@@ -537,7 +579,8 @@ class DestinationPolicy:
 
 def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
                               source_address: Any = None, policy: DestinationPolicy | None = None,
-                              first: bool = True, proxied: bool = False, **_: Any) -> Any:
+                              first: bool = True, proxied: bool = False, resolve: Any = None,
+                              stagger: float | None = None, in_flight: int = 1, **_: Any) -> Any:
     """socket.create_connection with its lookup under resolve_within, the
     same signature, the same first-address-that-connects loop (D-SRC-62).
     Installed as every connection's `_create_connection` by
@@ -550,7 +593,22 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     BEFORE it is connected to (DestinationPolicy.permits) and one that is not
     allowed is skipped; when none is, the fetch is refused. `proxied` says
     this connection goes to the user's proxy, whose own address is not the
-    destination (the handler checked the target, check_proxied)."""
+    destination (the handler checked the target, check_proxied).
+
+    D-SINK-102: three parameters that only the player's relay passes, so
+    every fetch connects exactly as before. `resolve` (host, port, bound)
+    replaces resolve_within as the lookup (the relay's relay_lookup, which
+    asks the play-time lookup and so the suite's stand-in). `stagger`
+    connects the way FFmpeg's own connect does, which the relay now makes
+    for the player (ff_connect_parallel, libavformat/network.c n9.0.2,
+    READ): every answer is judged first, the permitted
+    ones are tried IPv6 and IPv4 interleaved, up to `in_flight` at once, the
+    next one started `stagger` seconds after the last or as soon as one
+    fails, and the first to connect wins, all within `timeout` of the first
+    attempt (connect_staggered). So a name whose first answer hangs
+    connects through its second within one stagger, where this serial loop
+    waits the whole bound out first (a dead IPv6 answer ahead of a live IPv4
+    one would otherwise outlast the player's watchdog)."""
     import socket
     host, port = address
     bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
@@ -572,7 +630,11 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         # D-SINK-83: before the lookup, not after it -- the
         # lookup is what discloses the name (DestinationPolicy.refuses_name).
         raise policy.name_refusal(first)
-    for family, kind, proto, _, sockaddr in resolve_within(host, port, bound):
+    answers = (resolve_within if resolve is None else resolve)(host, port, bound)
+    if stagger is not None:
+        return connect_staggered(host, port, answers, timeout, bound, source_address, policy, first, proxied,
+                                 float(stagger), max(1, int(in_flight)))
+    for family, kind, proto, _, sockaddr in answers:
         verdict = "global"
         if policy is not None and not proxied:
             verdict = address_class(sockaddr[0])
@@ -600,6 +662,103 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         raise policy.refusal(host, first)
     # A strerror of its own, the sentence network_detail repeats (D-SINK-93).
     raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
+
+
+def connect_staggered(host: str, port: int, answers: list[Any], timeout: Any, bound: float, source_address: Any,
+                      policy: Any, first: bool, proxied: bool, stagger: float, in_flight: int) -> Any:
+    """bounded_create_connection's `stagger` connect (D-SINK-102). Every answer is judged BEFORE any is connected to, as
+    the serial loop judges each before its own connect (a refused one is
+    skipped; none permitted is the policy's refusal); the permitted ones are
+    ordered IPv6 and IPv4 alternately from the first one's family, as
+    FFmpeg's interleave_addrinfo orders them, and tried non-blocking, at
+    most `in_flight` at once, the next started `stagger` seconds after the
+    last start or at once when an attempt fails. The first to connect wins
+    and every other attempt is closed; nothing is started, and every attempt
+    still open is closed, `bound` seconds after the first began. -> the
+    socket, blocking again and with `timeout` as its timeout when that is a
+    number, as the serial loop leaves it."""
+    import select
+    import socket
+    judged: list[tuple[Any, ...]] = []
+    refused = False
+    for family, kind, proto, _, sockaddr in answers:
+        verdict = "global"
+        if policy is not None and not proxied:
+            verdict = address_class(sockaddr[0])
+            if not policy.permits(host, verdict, first, port):
+                refused = True
+                continue
+        judged.append((family, kind, proto, sockaddr, verdict))
+    if not judged:
+        if refused and policy is not None:
+            raise policy.refusal(host, first)
+        raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
+    lead = [entry for entry in judged if entry[0] == judged[0][0]]
+    other = [entry for entry in judged if entry[0] != judged[0][0]]
+    order = [entry for pair in zip(lead, other) for entry in pair]
+    order += lead[len(other):] + other[len(lead):]
+    deadline = time.monotonic() + bound
+    poller = select.poll()
+    flying: dict[int, tuple[Any, str]] = {}
+    error: OSError | None = None
+    winner: tuple[Any, str] | None = None
+    next_start = time.monotonic()
+    try:
+        while winner is None and (order or flying):
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if order and len(flying) < in_flight and (not flying or now >= next_start):
+                family, kind, proto, sockaddr, verdict = order.pop(0)
+                sock = None
+                try:
+                    sock = socket.socket(family, kind, proto)
+                    if source_address:
+                        sock.bind(source_address)
+                    sock.setblocking(False)
+                    code = sock.connect_ex(sockaddr)
+                except OSError as failure:
+                    if sock is not None:
+                        sock.close()
+                    error = failure
+                    continue
+                if code == 0:
+                    winner = (sock, verdict)
+                    break
+                if code not in (errno.EINPROGRESS, errno.EALREADY, errno.EAGAIN):
+                    sock.close()
+                    error = OSError(code, os.strerror(code))
+                    continue
+                flying[sock.fileno()] = (sock, verdict)
+                poller.register(sock.fileno(), select.POLLOUT)
+                next_start = now + stagger
+                continue
+            wait = deadline - now
+            if order and len(flying) < in_flight:
+                wait = min(wait, next_start - now)
+            for fd, _ in poller.poll(max(0, int(wait * 1000)) + 1):
+                sock, verdict = flying.pop(fd)
+                poller.unregister(fd)
+                code = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if code == 0 and winner is None:
+                    winner = (sock, verdict)
+                    continue
+                sock.close()
+                if code:
+                    error = OSError(code, os.strerror(code))
+                    next_start = time.monotonic()
+    finally:
+        for sock, _ in flying.values():
+            sock.close()
+    if winner is None:
+        raise error if error is not None else TimeoutError(errno.ETIMEDOUT, "timed out")
+    sock, verdict = winner
+    sock.setblocking(True)
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+        sock.settimeout(timeout)
+    if policy is not None and not proxied:
+        policy.connected(host, verdict, first, port)
+    return sock
 
 
 def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> list[Any]:

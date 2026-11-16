@@ -228,6 +228,33 @@ st "qa_cmdline refuses a pid that is gone"  1 qa_cmdline 99999999
 st "qa_cmdline reads a live process"        0 qa_cmdline "$$"
 ck "and what it read is this shell's own argv" '[[ "$(qa_cmdline $$)" == *bash* ]]'
 
+# D-SINK-102 (2026-11-15): every player this tree starts carries the relay's
+# deny-all pin, `--http-proxy=http://127.0.0.1:<port>`, and player-scenario's
+# P2 and P5 and tls-scenario's S5 read it as "a URL on the command line"
+# (measured: P2 and P5 red in the cage on 866bf34). qa_cmdline_sans_relay_pin
+# leaves out that one form and nothing else. Three sleepers of this shell's
+# own, with crafted argvs, each signalled only by the pid bash handed it and
+# only while its command line still reads as ours.
+PIN_CODE='import time; time.sleep(30)'
+python3 -c "$PIN_CODE" --input-ipc-server=/x.sock --http-proxy=http://127.0.0.1:43123 >/dev/null 2>&1 & PIN_OK=$!
+python3 -c "$PIN_CODE" --http-proxy=http://iptv:0123456789abcdef0123456789abcdef@127.0.0.1:43123 >/dev/null 2>&1 & PIN_CRED=$!
+python3 -c "$PIN_CODE" --http-proxy=http://127.0.0.1:043123 --http-proxy=http://10.0.0.1:80 --http-proxy=http://127.0.0.1:65536 >/dev/null 2>&1 & PIN_ODD=$!
+for pin_pid in "$PIN_OK" "$PIN_CRED" "$PIN_ODD"; do
+  for ((i = 0; i < 50; i++)); do [[ $(qa_cmdline "$pin_pid") == *"time.sleep(30)"* ]] && break; sleep 0.1; done
+done
+ck "control: qa_cmdline reads the deny-all pin as a URL" '[[ "$(qa_cmdline "$PIN_OK")" == *"://"* ]]'
+ck "qa_cmdline_sans_relay_pin leaves the deny-all pin out and keeps the rest" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_OK")" != *"://"* && "$(qa_cmdline_sans_relay_pin "$PIN_OK")" == *"--input-ipc-server=/x.sock"* ]]'
+ck "and keeps a pin that carries a credential, which the sweep then reads as a URL" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_CRED")" == *"iptv:0123456789abcdef"*"@127.0.0.1:43123"* ]]'
+ck "and keeps a leading zero, another host and a port past 65535" \
+   '[[ "$(qa_cmdline_sans_relay_pin "$PIN_ODD")" == *":043123 "*"10.0.0.1:80 "*":65536 "* ]]'
+st "qa_cmdline_sans_relay_pin refuses an empty pid" 1 qa_cmdline_sans_relay_pin ""
+for pin_pid in "$PIN_OK" "$PIN_CRED" "$PIN_ODD"; do
+  [[ $(qa_cmdline "$pin_pid") == *"time.sleep(30)"* ]] && kill "$pin_pid" 2>/dev/null
+  wait "$pin_pid" 2>/dev/null
+done
+
 # ======================================================== qa_leak_scan (A1)
 
 section "qa_leak_scan / A1: 'redaction ok' on a capture that caught nothing"
@@ -379,7 +406,8 @@ st "a root with no helper at all is refused" 1 qa_helper_parts "$HROOT"
 # reads as a ONE-FILE helper, exit 0 and no parts, so a slow tree would stage
 # the stub alone. The stub itself reads its parts with CRLF as LF (D-REL-11),
 # so the reader now does the same. The real tree's stub and parts, copied
-# with CRLF line endings: the same eleven parts in the same order.
+# with CRLF line endings: the same twelve parts in the same order (eleven
+# until D-SINK-102 added the relay's).
 HCRLF="$TMP/helper-crlf"
 mkdir -p "$HCRLF/bin/helper"
 sed 's/$/\r/' "$ROOT/bin/omarchy-iptv" >"$HCRLF/bin/omarchy-iptv"
@@ -387,9 +415,9 @@ for hp in "$ROOT"/bin/helper/*.py; do sed 's/$/\r/' "$hp" >"$HCRLF/bin/helper/${
 is "a CRLF copy of the stub yields the same parts as the LF tree, in order" \
    "$(qa_helper_parts "$HCRLF" | sed "s#^$HCRLF/##" | tr '\n' ' ')" \
    "$(qa_helper_parts "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')"
-is "and that is eleven of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "11"
+is "and that is twelve of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "12"
 # The old reader, verbatim from a9d20f9's qa-lib.sh, against the same copy:
-# whichever grep is on PATH, it does not answer the eleven parts.
+# whichever grep is on PATH, it does not answer the twelve parts.
 old_helper_parts() {
   local root=$1 rel
   local -a parts=()
@@ -432,10 +460,10 @@ slow_tr_parts() {   # slow_tr_parts <pipefail 0|1> <reader> <root> -> "<status> 
 }
 is "81853f7's reader under pipefail and the slow writer: a one-file helper, status 0, no parts (the defect)" \
    "$(slow_tr_parts 1 old_helper_parts_pipe "$ROOT")" "0 0"
-is "the same reader and writer without pipefail finds all eleven, so it is the status and not the bytes" \
-   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 11"
-is "qa_helper_parts under pipefail and the slow writer names all eleven parts, status 0" \
-   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 11"
+is "the same reader and writer without pipefail finds all twelve, so it is the status and not the bytes" \
+   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 12"
+is "qa_helper_parts under pipefail and the slow writer names all twelve parts, status 0" \
+   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 12"
 # The same reader's other masked writer failure: a stub that exists and
 # cannot be READ. 81853f7 answered it as a one-file helper too (tr failed,
 # grep saw nothing, `|| return 0`). Root reads a mode-000 file, so there
@@ -516,7 +544,8 @@ st "qa_ref_commit refuses a directory that is no repository" 1 qa_ref_commit "$T
 REF_BARE=$(grep -l -- 'rev-parse --short "\$BASELINE")' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
 is "no scenario names a baseline by a bare rev-parse" "$REF_BARE" "0"
 REF_USERS=$(grep -l -- 'baseline tree \$BASELINE (\$(qa_ref_commit "\$ROOT" "\$BASELINE"))' "$ROOT"/scripts/dev-harness/*-scenario.sh 2>/dev/null | wc -l | tr -d ' ')
-is "the seven scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "7"
+# Seven until 2026-11-15, when relay-scenario.sh (D-SINK-102) joined them.
+is "the eight scenarios that name a baseline's object ask qa_ref_commit" "$REF_USERS" "8"
 
 # ================================================== qa_extract (F-HARNESS-56)
 
@@ -863,7 +892,9 @@ is "a test listener came up within 5 s" "$lo_up" "1"
 st "qa_listener_owned: the listener whose argv names the needle is ours" 0 qa_listener_owned "$lo_port" "$lo_dir"
 st "qa_listener_owned: the same listener is someone else's for another needle" 1 qa_listener_owned "$lo_port" "$TMP/some-other-harness/fixtures"
 lo_pid=$(ss -ltnpH "sport = :$lo_port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n 1 | cut -d= -f2)
-[[ -n $lo_pid ]] && kill "$lo_pid" 2>/dev/null
+# Through a pidfd once its command line still names this test's directory
+# (F-HARNESS-114): the pid is the listener's, not necessarily our child.
+[[ -n $lo_pid ]] && qa_signal_named TERM "$lo_dir" "$lo_pid"
 kill "$lo_wrapper" 2>/dev/null; wait "$lo_wrapper" 2>/dev/null
 for ((i = 0; i < 50; i++)); do qa_listener_owned "$lo_port" "$lo_dir"; [[ $? == 2 ]] && break; sleep 0.1; done
 st "qa_listener_owned: nothing listening answers 2, not 'someone else'" 2 qa_listener_owned "$lo_port" "$lo_dir"
@@ -895,8 +926,11 @@ rp_scr="$TMP/rp-scratch"
 "$TMP/rp-honour/mpv" "--input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_kind=$!
 "$rp_bin/mpv" "--input-ipc-server=$TMP/rp-other/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_other=$!
 sleep 0.3
-# The old form, verbatim from run.sh's reap_player: TERM by pattern, and done.
-pkill -f "input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+# The old form, run.sh's reap_player: TERM, and done. It sent that TERM by a
+# `pkill -f` pattern on this socket, which reached exactly these two; they are
+# this shell's own children, so it goes to their recorded pids (no pattern
+# signals anything here: D-SINK-102's conformance review, 2026-11-16).
+kill -TERM "$rp_deaf" "$rp_kind" 2>/dev/null
 sleep 0.5
 is "old form: run.sh's TERM-only reap leaves a TERM-ignoring player running" \
    "$(kill -0 "$rp_deaf" 2>/dev/null && echo alive || echo gone)" "alive"
@@ -1124,7 +1158,7 @@ is "a zombie counts as gone within one poll, and nothing is sent or said" \
 kill -KILL "$sp_zparent" 2>/dev/null; wait "$sp_zparent" 2>/dev/null
 # Not our child: the detached shell `run.sh reap` ends was started by an
 # earlier invocation. A grandchild whose parent has gone is the same shape.
-sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & echo $!) )
+sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' "$TMP/sp-orphan" >/dev/null 2>&1 & echo $!) )
 sleep 0.2
 is "control: the orphan is alive and is not our child" \
    "$(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone) $(ps -o ppid= -p "$sp_orphan" | tr -d ' ' | awk -v me=$$ '{print ($1 == me) ? "child" : "notchild"}')" "alive notchild"
@@ -1134,6 +1168,41 @@ is "a process that is not our child is ended all the same, without a wait" \
 st "an empty pid is nothing to do, status 0" 0 qa_stop_pid ""
 st "a pid that is not a number is refused with 2" 2 qa_stop_pid "12ab"
 st "a pid that is already gone is 0" 0 qa_stop_pid "$sp_kind"
+
+# qa_signal_named / qa_stop_named (D-SINK-102's conformance review):
+# a pid the harness found by ancestry (a process's children) is signalled
+# only through a pidfd, and only while its command line carries an item that
+# begins with the run's needle. Stand-ins of this suite's own, each started
+# with its marker as an argument item; a needle cannot match across items.
+sn_mark="$TMP/sn-mark"
+python3 -c 'import time; time.sleep(30)' "$sn_mark/one" two >/dev/null 2>&1 & sn_one=$!
+python3 -c 'import time; time.sleep(30)' "$TMP/sn-other" >/dev/null 2>&1 & sn_other=$!
+python3 -c 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)' "$sn_mark/deaf" >/dev/null 2>&1 & sn_deaf=$!
+for ((i = 0; i < 50; i++)); do
+  [[ $(tr '\0' ' ' <"/proc/$sn_one/cmdline" 2>/dev/null) == *sn-mark* && $(tr '\0' ' ' <"/proc/$sn_deaf/cmdline" 2>/dev/null) == *sn-mark* \
+     && $(tr '\0' ' ' <"/proc/$sn_other/cmdline" 2>/dev/null) == *sn-other* ]] && break
+  sleep 0.05
+done
+qa_signal_named TERM "$sn_mark/one two" "$sn_one"; sn_rc=$?
+is "qa_signal_named: a needle that only matches across two command-line items is not a match, and nothing is sent" \
+   "$sn_rc $(kill -0 "$sn_one" 2>/dev/null && echo alive || echo gone)" "1 alive"
+qa_signal_named TERM "$sn_mark/" "$sn_other"; sn_rc=$?
+is "qa_signal_named: a process whose command line does not name the run is left alone (1)" \
+   "$sn_rc $(kill -0 "$sn_other" 2>/dev/null && echo alive || echo gone)" "1 alive"
+qa_signal_named TERM "$sn_mark/" "$sn_one"; sn_rc=$?
+wait "$sn_one" 2>/dev/null
+is "qa_signal_named: one whose command line names it is signalled through its pidfd (0)" \
+   "$sn_rc $(kill -0 "$sn_one" 2>/dev/null && echo alive || echo gone)" "0 gone"
+st "qa_signal_named: a pid that is gone is 2" 2 qa_signal_named TERM "$sn_mark/" "$sn_one"
+is "qa_signal_named refuses a signal it does not name, an empty needle and a pid that is not a number (2 2 2)" \
+   "$(qa_signal_named HUP "$sn_mark/" "$sn_other"; echo -n "$? "; qa_signal_named TERM "" "$sn_other"; echo -n "$? "; qa_signal_named TERM "$sn_mark/" 12ab; echo -n "$?")" "2 2 2"
+sn_err=$(qa_stop_named "$sn_deaf" "$sn_mark/" 1 "stand-in" 2>&1 >/dev/null); sn_rc=$?
+is "qa_stop_named ends a TERM-ignoring process that names the run by KILL, through its pidfd, and reports 0" \
+   "$sn_rc $(kill -0 "$sn_deaf" 2>/dev/null && echo alive || echo gone) $([[ $sn_err == *"sending KILL"* ]] && echo said || echo silent)" "0 gone said"
+sn_err=$(qa_stop_named "$sn_other" "$sn_mark/" 1 "stand-in" 2>&1 >/dev/null); sn_rc=$?
+is "qa_stop_named leaves one that does not name the run alone, says so, and reports 3" \
+   "$sn_rc $(kill -0 "$sn_other" 2>/dev/null && echo alive || echo gone) $([[ $sn_err == *"left alone"* ]] && echo said || echo silent)" "3 alive said"
+kill -KILL "$sn_other" 2>/dev/null; wait "$sn_other" 2>/dev/null
 # run.sh, DRIVEN: a deaf stand-in whose command line carries this scratch
 # directory's fixture-server pattern, recorded in server.pid the way
 # start_server records the real one; `run.sh reap` on that directory ends it
@@ -1158,15 +1227,25 @@ is "a server.pid naming a process that is not the server (a recycled pid) signal
 # ended by its recorded pid here, whatever the checks above found. The
 # first red run against a9d20f9's run.sh left the deaf server stand-in
 # behind (reap did not end it, and nothing else did) for twenty minutes.
-kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" "$sp_orphan" 2>/dev/null
+kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
 wait "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
+# The orphan is not our child, and qa_stop_pid above has normally ended it,
+# so its pid may be anyone's by now: signalled through a pidfd once its
+# command line still carries its own marker (F-HARNESS-114).
+qa_signal_named KILL "$TMP/sp-orphan" "$sp_orphan"
 # The shapes, as bookkeeping (rule 14: the driven checks above are the
 # proof): no `pkill -f` is left in run.sh, and every scenario server kill
 # goes through the ladder behind its ownership guard.
 is "run.sh ends nothing by a pkill pattern any more (code lines; its comments may say the word)" \
    "$(qa_count '^ *pkill -f' "$ROOT/scripts/dev-harness/run.sh")" "0"
-is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid" \
-   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
+# [2026-11-16, D-SINK-102's conformance review: the quickshell
+# under the timeout wrapper, which run.sh did not record itself, goes
+# through qa_stop_named, the same ladder with each signal checked on a
+# pidfd against its command line; the recorded wrapper still goes through
+# qa_stop_pid. F-HARNESS-114, the same day: the detached shell, recorded by
+# an EARLIER invocation, goes through qa_stop_named against its root.]
+is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid (or, for a shell this invocation did not start, qa_stop_named)" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_\(pid\|named\) "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_named "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
 sp_scen=""
 for sc in text tls sources; do
   sp_scen="$sp_scen$sc:$(qa_count 'kill "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh"):$(qa_count 'qa_stop_pid "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh") "
@@ -1549,7 +1628,7 @@ is "and no scenario resolves its directory with dirname (a code line; comments m
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
 # not learn it until a review read the two lists side by side.
-for g in chno-entry pip id-rotate logo clip key; do
+for g in chno-entry pip id-rotate logo clip key relay; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
@@ -2760,6 +2839,17 @@ is "tls-scenario.sh --pre-tls --rig-only does not eat the next flag as a ref" \
    "$(tr_refuse tls-scenario.sh --pre-tls --rig-only)" "2 0"
 is "tls-scenario.sh --pre-tls <no such ref> refuses and writes no transcript" \
    "$(tr_refuse tls-scenario.sh --pre-tls no-such-ref-for-a-test)" "2 0"
+# D-SINK-102's scenario: its levers are tls-scenario's and logo-scenario's,
+# and every refusal sits above the export and the transcript, so a mistyped
+# lever starts no player and leaves no file.
+is "relay-scenario.sh --baseline <no such ref> refuses and writes no transcript" \
+   "$(tr_refuse relay-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+is "relay-scenario.sh --baseline with no ref at all refuses rather than grading the tree" \
+   "$(tr_refuse relay-scenario.sh --baseline)" "2 0"
+# The tree here is a real plugin tree, so only the two-levers refusal can
+# refuse it (with /tmp, the --tree check would refuse on its own).
+is "relay-scenario.sh --baseline X --tree Y refuses and writes no transcript" \
+   "$(tr_refuse relay-scenario.sh --baseline HEAD --tree "$ROOT")" "2 0"
 
 # A refusal must not reap somebody else's port either, and that one bites
 # hardest on the refusal that exists to protect it. rewind-scenario.sh installs
@@ -3847,7 +3937,19 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # host's query stubbed, absent, and the real one over a stub hyprctl.
 # 718 -> 737 the same day: sources_reply_clean's eleven (F-HARNESS-57) and
 # argv_tls's eight (F-HARNESS-52), each function taken out of its scenario.
-EXPECTED=737
+# 693 -> 697 on 2026-11-15 (dsink102, D-SINK-102): relay-scenario.sh joins
+# the gate's list of check-tree scenarios with a live arm (1) and its three
+# lever refusals above the transcript (3). Red on a tree without the
+# scenario: all four failed. 697 -> 702 the same day: qa_cmdline_sans_relay_pin's
+# five over three sleepers of the suite's own (red where qa-lib.sh lacks it).
+# 702 -> 709 on 2026-11-16 (dsink102, lane-launch-load, D-SINK-102's
+# conformance review): qa_signal_named's five and qa_stop_named's
+# two, over stand-ins of the suite's own. Red where qa-lib.sh lacks them:
+# all seven failed.
+# 2026-11-16, the merge of dsink102 into dev (lane-merge): 737 + 16 = 753,
+# dev's lock guard and scenario reads beside the branch's relay scenario,
+# qa_cmdline_sans_relay_pin and qa_signal_named / qa_stop_named.
+EXPECTED=753
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

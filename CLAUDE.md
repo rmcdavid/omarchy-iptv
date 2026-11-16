@@ -83,7 +83,11 @@ ce68db5 on 2026-11-09), #13611 and #12636 stay open beside it, as filed.]**
 **[2026-11-13: the maintainer raised D-SINK-101 on #14817; 0.19.1 (`main`
 9e006be) was cut on the owner's word, its request filed as #14874, and a
 reply posted on #14817 naming it; #14817, #14290, #13611 and #12636 stay
-open, as filed.]** Neither can be approved as filed: neither Target
+open, as filed.]** **[2026-11-16: the maintainer re-pointed #13611 and
+#12636 to 9e006be; by gh at about 12:50Z #12636, #13611, #14290 and #14874
+target 9e006be and #14817 34fac24, all five open, labelled `validated` and
+`plugin-update`; the owner holds `main` at 0.19.1 until #13611 is actioned
+(below).]** Neither can be approved as filed: neither Target
 commit is our HEAD, and one edited to 787a33b would be refused as already
 the listing. Once `main` moves, either could be approved only if its Target
 commit were edited to the HEAD of that day, by a maintainer, as he edited
@@ -92,7 +96,8 @@ commit were edited to the HEAD of that day, by a maintainer, as he edited
 ## Branches: `dev` is the tree, `main` is the artifact
 
 You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
-the files in `ALLOWLIST` in `scripts/release.py` (42 since D-REL-5 split the
+the files in `ALLOWLIST` in `scripts/release.py` (43 since D-SINK-102 added
+the relay's part, `bin/helper/12-relay.py`; 42 after D-REL-5 split the
 model into `Model.mjs` and `model/` and D-REL-7 split the helper into
 `bin/omarchy-iptv` and `bin/helper/`), exported from a
 clean, green `dev` by `scripts/release.py build`, committed onto `main` with
@@ -233,6 +238,15 @@ Consequences you must respect:
   `release.py build` no longer refuses on it (`premise_exception_problems`
   returns []) and the decision request above is moot. A release still waits for the owner's word; the #12636 hold
   above stood until the owner lifted it later the same day.
+- **A fifth time, decided by the owner on 2026-11-16: `main` is HELD at
+  0.19.1 (9e006be) until a maintainer actions #13611** (approves it or
+  raises a finding on it), for the same reason: a moved `main` makes the
+  pending request stale. The maintainer re-pointed #13611 (0.16.0's
+  request) to 9e006be that day and #12636 (0.15.0's) the same day; the
+  automated validation and baseline re-ran and passed at 9e006be on both,
+  and his manual review is pending. His review of 9e006be on #14290 on
+  2026-11-14 raised D-SINK-102 and D-SINK-103, so the next release (the
+  relay and the private save) waits on this hold. `dev` moves freely.
 
 ## Standing authority (product owner, 2026-11-09)
 
@@ -971,7 +985,9 @@ requests and raise the batch.
      (QA-RESULTS "D-SINK-39").
      The lever is RLIMIT_CORE, the one setting that inherits across fork AND
      exec: `spawn_detached`'s grandchild sets it to (0, 0) as its last act
-     before `execvp` (`disable_core_dumps`), and `read_clipboard`'s wl-paste
+     before `execvp` (`disable_core_dumps`) [2026-11-14, D-SINK-102:
+     `spawn_player` now, in the player it forks and in the relay it execs,
+     which sets it again at its own start], and `read_clipboard`'s wl-paste
      -- the helper's only other child, holding the clipboard the form's
      paste path carries a provider URL through -- gets the same as a
      `preexec_fn`. Both halves, because anything in the child's own address
@@ -1140,6 +1156,14 @@ requests and raise the batch.
      The lesson: a check on what a string SAYS is not a check on where it
      GOES, and a residual stated about the second question is the next
      finding about it.]**
+     **[2026-11-14, D-SINK-102, raised by the marketplace maintainer on
+     #14290 against 0.19.1: the open items above -- a name that answers
+     the player differently a moment later, an HTTP redirect the stream
+     server sends, HLS and DASH segment hosts -- are closed for a playlist
+     that is not local by the relay the player is pinned to, which judges
+     every connection against the address it connects to; see "The
+     relay" below. What stays open of them is the user's own proxy, which
+     resolves a target on its own side.]**
      The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.
@@ -1165,6 +1189,70 @@ requests and raise the batch.
      formats the library will accept, and enumerate the demuxers that open
      other URLs (docs/ARCHITECTURE-PLAYER.md 4.12.2) rather than the ones a
      reviewer happened to try.
+   - **The relay** (D-SINK-102, 2026-11-14, the marketplace maintainer's
+     finding on #14290 against 0.19.1; built on the `dsink102` branch,
+     merged into `dev` on 2026-11-16, unreleased, as this is written),
+     which is both the closure of the
+     last open items of "Where provider data sends this machine" and a sink
+     of its own. The player's http, https and rtmps connections go out
+     only through a relay the helper runs as mpv's PARENT,
+     `bin/helper/12-relay.py` behind the internal `player relay` verb (the
+     player asks for SIGKILL when the relay dies, and the relay is a child
+     subreaper) -- all but mmsh's and rtsp's HTTP tunnel's, which take no
+     proxy option and are played only from a local playlist or a typed
+     `--url`. A typed `--url` is relayed only for http, https and rtmps;
+     its mms, mmsh and rtsp-tunnel connections, redirects included, stay
+     direct, because it is the user's own URL (the CLI's PO-5 shape).
+     `--http-proxy=http://127.0.0.1:<port>` opens the pin
+     block with no credential, so on its own it denies everything, and
+     each load the helper makes registers a token for that load's playlist
+     rule over the relay's control socket and carries it as the per-file
+     `http-proxy`. The relay judges every request and every CONNECT -- the
+     stream, each redirect hop, each HLS or DASH playlist, segment, key and
+     init section -- through `bounded_create_connection` against the
+     address it connects to: a playlist's load by `stream_answer_refusal`,
+     the play-time lookup's own per-answer rule (rule 12), and a typed
+     `--url`'s by `DestinationPolicy` across all of its connections, the
+     first hop's freedom only for a first connection to the URL's own host
+     (and, on loopback, its port). So a redirect or a changed DNS answer
+     cannot reach this machine or the LAN. FFmpeg resolves no proxied
+     target (read), and TLS stays end to end, checked against the name.
+     The read-back holds mpv's `http-proxy` to the pin or the current
+     file's per-file token form and refuses the load otherwise;
+     `--http-proxy` and a `--demuxer-lavf-o` `http_proxy` key are refused,
+     the second because mpv applies the demuxer's options after the
+     network options (a plain mpv.conf line sent the HLS reopen past the
+     relay, measured). mpv's environment loses lowercase `http_proxy` and
+     `no_proxy` (FFmpeg honoured a per-hop `no_proxy` past the option,
+     measured); the relay chains to the user's own proxy by FFmpeg's rules,
+     where a target is judged by name (the fetches' residual). rtmp, rtsp
+     and srt never ask a proxy, so `player_target` hands them the literal
+     its lookup judged (rtsp forced to interleaved tcp); mms and mmsh from a
+     playlist that is not local are refused at the parse and at play; rtmps
+     was measured relayed, and rtsps measured not to be, and it was never a
+     scheme the plugin plays. The relay holds request lines and headers --
+     credentials -- in memory, writes them nowhere, answers with no host in
+     any refusal, runs non-dumpable with RLIMIT_CORE (0, 0), serves only
+     peers of this uid (the proxy port by /proc/net/tcp, the control socket
+     by SO_PEERCRED), and exits with its player. A player of this build
+     whose relay does not answer reads `older`: replaced, never fed. Open:
+     a user's `mpv` wrapper that exports a lowercase `no_proxy` or
+     `http_proxy` for the real player hands FFmpeg what the spawn strips,
+     and the read-back, which reads mpv's properties, cannot see it (the
+     wrapper is the user's own code, PO-5's shape); a user's `mpv` wrapper
+     whose CHILD is the real player survives a
+     SIGKILLed relay with a dead proxy until it is replaced (a SIGTERMed
+     relay kills what is left of its process group once its grace is over,
+     so there only a real player that left the group, under a wrapper that
+     calls setsid, survives), and an account
+     that binds the freed port meanwhile receives its plain-http requests,
+     credentials and the load's token included; the ten-second health
+     tick does not ask the relay, so with no zap that interval is
+     unbounded. And the rebinding half is READ in FFmpeg's source and
+     measured with literal targets only, never with a name resolved live.
+     docs/ARCHITECTURE-PLAYER.md section 20 is the specification. The
+     lesson: a check-then-use on a name is a residual the moment someone
+     else does the use; the fix is to own the use, not to check harder.
    - **The player's configuration surface** (D-SINK-43, -44, -45, -46, -51,
      -52, -53, -59, -60, -61, -63, D-PLY-46; 2026-10-29). The TLS entry's
      "last word" was one token; the review and the rechecks of its fixes
@@ -1189,7 +1277,8 @@ requests and raise the batch.
      checks against the program itself does not.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
-   state at `~/.local/state/omarchy-iptv/state.json`, socket under
+   state at `~/.local/state/omarchy-iptv/state.json`, socket (and, since
+   D-SINK-102, the player's relay's control socket `mpv.sock.relay`) under
    `$XDG_RUNTIME_DIR/omarchy-iptv/`. Modes 0700 for directories, 0600 for files.
    **[2026-11-14, D-SINK-103: a file is made private BEFORE a write that can
    carry a credential, never repaired after it. The service's FileView

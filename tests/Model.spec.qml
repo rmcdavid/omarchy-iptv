@@ -825,11 +825,12 @@ TestCase {
     // M2-02: the launch argv carries no channel at all - no URL, no "--",
     // no header options, no per-channel title (S-03). The channel arrives
     // over the 0600 socket, so `--idle=once` is what makes this possible.
-    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", stateDir: "/home/u/.local/state/omarchy-iptv", name: "N", url: "http://u", headers: { "User-Agent": "VLC" }, extraArgs: [] })
+    var argv = Model.buildMpvArgv({ socketPath: "/tmp/s", stateDir: "/home/u/.local/state/omarchy-iptv", name: "N", url: "http://u", headers: { "User-Agent": "VLC" }, extraArgs: [], relayPort: 4321 })
     compare(argv[0], "mpv")
     compare(argv.indexOf("--") !== -1, false)
     compare(argv.indexOf("http://u") !== -1, false)
-    compare(argv.filter(function(t) { return t.indexOf("://") !== -1 }).length, 0)
+    // D-SINK-102: the one address on it is the relay pin, this machine's relay.
+    compare(argv.filter(function(t) { return t.indexOf("://") !== -1 }).join(" "), "--http-proxy=http://127.0.0.1:4321")
     compare(argv.filter(function(t) { return t.indexOf("--user-agent") === 0 }).length, 0)
     compare(argv.indexOf("--idle=once") !== -1, true)
     // D-PLY-27: the software renderer is accepted from the base argv, once,
@@ -1207,8 +1208,9 @@ TestCase {
     compare(Model.sourceUrlWarning("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"), "")
     compare(Model.formWarningLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }), Model.WARN_AT_AFTER_AUTHORITY)
     compare(Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }), "")
+    // D-SINK-102: the bare --http-proxy is refused now too (the relay's pin), by its name only.
     compare(Model.mpvRejectedLine(Model.splitMpvArgs("--http-proxy user:pw@proxy.test:3128 --stream-lavf-o=tls_verify=0").rejected),
-            "omarchy-iptv: ignoring mpvArgs tokens: <token> --stream-lavf-o")
+            "omarchy-iptv: ignoring mpvArgs tokens: --http-proxy <token> --stream-lavf-o")
   }
   // R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32..35)
   // under V4: a READER refuses the 30-point union (validateSourceUrl), a

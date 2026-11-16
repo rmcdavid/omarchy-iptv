@@ -229,6 +229,14 @@ OPTIONS = {
     "load-console": ("flag", True),
     # D-SINK-67: mpv 0.41.0 loads the stats overlay by default (measured).
     "load-stats-overlay": ("flag", True),
+    # D-SINK-102: the relay pin's option, "" by default and the pin verbatim
+    # when the argv names one (measured, the transcripts relay-pin and
+    # relay-none); an idle runtime set persists and reads back. A loadfile's
+    # per-file value reads back verbatim while its file is current (measured
+    # on mpv 0.41.0 through a relay: `http://iptv:<token>@127.0.0.1:<port>`,
+    # set-locally true, and the pin again once the file ends -- this stub
+    # never ends a file, so it reads until the next load replaces it).
+    "http-proxy": ("string", ""),
 }
 # The three values of osd-playlist-entry, each measured taking (`both` on
 # the recheck of 2026-10-29); "bogus" was measured refused. drag-and-drop's
@@ -602,6 +610,11 @@ class Stub(object):
         # Absent until something sets or loads them - mpv reports
         # "property unavailable" for these on an idle player, and the
         # stand-down decision reads exactly that difference.
+        # D-SINK-102: the options a loadfile may set per file, and which of
+        # them the current file did (its option-info's set-locally).
+        self.per_file = ("http-proxy",)
+        self.per_file_set = set()
+        self.per_file_saved = {}
         self.unset = set(["path", "media-title", "title", "force-media-title",
                           "user-data/omarchy-iptv", "user-data"])
         for name in os.environ.get("STUB_IDLE_PROPS", "").split(","):
@@ -730,6 +743,8 @@ class Stub(object):
                     return (None, ERR_NOT_FOUND)
                 if field == "set-from-commandline":
                     return (option in self.from_cli, None)
+                if field == "set-locally" and option in self.per_file:
+                    return (option in self.per_file_set, None)
                 if option in CLI_ONLY:
                     return (None, "property unavailable")   # its other fields: not modelled
                 if field == "default-value":
@@ -835,8 +850,21 @@ class Stub(object):
             self.values[name] = current
             return None
 
-    def loadfile(self, url):
+    def loadfile(self, url, options=None):
         with self.lock:
+            # D-SINK-102: the per-file options this stub models (http-proxy):
+            # in force for the file that starts, which this stub never ends.
+            # The file before it ends first, and mpv puts back what each of
+            # them held before it (measured: the pin again at end-file).
+            for name in self.per_file_set:
+                self.values[name] = self.per_file_saved[name]
+            self.per_file_set = set()
+            for name in self.per_file:
+                value = (options or {}).get(name)
+                if isinstance(value, str):
+                    self.per_file_saved[name] = self.values[name]
+                    self.values[name] = value
+                    self.per_file_set.add(name)
             self.loads.append(url)
             n = len(self.loads)
             self.props["playlist-count"] = n
@@ -981,7 +1009,7 @@ class Stub(object):
             if err:
                 out["error"] = err
         elif verb == "loadfile":
-            out["data"] = self.loadfile(cmd[1])
+            out["data"] = self.loadfile(cmd[1], cmd[4] if len(cmd) > 4 and isinstance(cmd[4], dict) else None)
         elif verb == "seek":
             # Success whether or not anything moved: that is what mpv says.
             # What follows the reply is what mpv sends next (F-RWD-15): the
@@ -1510,7 +1538,7 @@ def self_test():
         def test_the_measured_transcripts_replay_identically(self):
             self.assertEqual(sorted(t["name"] for t in self.transcripts),
                              ["argv-a", "argv-b", "argv-c", "argv-d", "pinned", "pinned-p1c", "prepin", "prepin-p1c",
-                              "runtime-b"])
+                              "relay-none", "relay-pin", "runtime-b"])
             compared, wrong = 0, []
             for t in self.transcripts:
                 stub = Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=t["argv"][1:])
@@ -1523,10 +1551,26 @@ def self_test():
                     if got != step["reply"]:
                         wrong.append("%s step %d %r: mpv %r, stub %r" % (t["name"], number, command, step["reply"], got))
             self.assertEqual(wrong, [])
-            # A replay that skipped its way to green proves nothing: 548 steps
-            # were measured (374 until lane-p1c's two transcripts) and all but
-            # the named ones are compared.
-            self.assertGreaterEqual(compared, 530)
+            # A replay that skipped its way to green proves nothing: 560 steps
+            # were measured (374 until lane-p1c's two transcripts, 548 until
+            # D-SINK-102's two) and all but the named ones are compared.
+            self.assertGreaterEqual(compared, 539)
+
+        def test_a_loadfile_s_per_file_http_proxy_reads_back_while_its_file_is_current(self):
+            """D-SINK-102 (measured on mpv 0.41.0): the per-file value reads
+            verbatim and set-locally true during the file; the pin is the
+            launch value; another load without one leaves the launch value."""
+            stub = self.stub("relay-pin")
+            self.assertEqual(stub.get("http-proxy"), ("http://127.0.0.1:48510", None))
+            value = "http://iptv:%s@127.0.0.1:48510" % ("a" * 32)
+            stub.dispatch({"command": ["loadfile", "http://127.0.0.1:9/x.ts", "replace", -1, {"http-proxy": value}],
+                           "request_id": 1})
+            self.assertEqual(stub.get("http-proxy"), (value, None))
+            self.assertEqual(stub.get("option-info/http-proxy/set-locally"), (True, None))
+            self.assertEqual(stub.get("option-info/http-proxy/set-from-commandline"), (True, None))
+            stub.dispatch({"command": ["loadfile", "http://127.0.0.1:9/y.ts", "replace"], "request_id": 2})
+            self.assertEqual(stub.get("option-info/http-proxy/set-locally"), (False, None))
+            self.assertEqual(stub.get("http-proxy"), ("http://127.0.0.1:48510", None))
 
         def test_a_pinned_player_holds_every_pin_and_says_it_was_told_on_the_command_line(self):
             stub = self.stub("pinned")

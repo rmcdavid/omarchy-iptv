@@ -35,14 +35,11 @@ import {
 //
 // Mirrored by `mpv_arg_warnings()` in the helper (bin/helper/) and pinned by the
 // `mpvHandoff` vectors in the player-argv.json. fixture (dev branch)
-// D-SINK-51 (2026-10-29): `--http-proxy` joins them. For a plain-http stream
-// the proxy receives the request line -- the WHOLE credentialed URL -- and the
-// provider headers (measured: the proxy logged both); for https it receives
-// the host name only. A real need for some users, so warned, not refused.
+// D-SINK-51 (2026-10-29) made `--http-proxy` one of them; D-SINK-102 pins it
+// to the relay instead (MPV_RESERVED), so it is refused, not warned.
 var MPV_HANDOFF = {
   "--ytdl-format": true,
-  "--ytdl-raw-options": true,
-  "--http-proxy": true
+  "--ytdl-raw-options": true
 }
 // The same hook, reached through a script option: warned on only when the
 // value actually names it, so `--script-opts=osc-scalewindowed=2` is silent.
@@ -59,13 +56,8 @@ var MPV_HANDOFF_TEXT = " hands the stream address to another program"
 // by `mpv_arg_writes_disk()` in the helper (bin/helper/), same fixture.
 var MPV_DISK_WARN = { "--cache-on-disk": true }
 var MPV_DISK_TEXT = " writes the stream to disk while it plays"
-// D-SINK-59 (lead, 2026-10-29): `--demuxer-lavf-o` carrying FFmpeg's
-// `http_proxy` key hands a plain-http HLS stream's whole credentialed request
-// line and the provider header to the proxy (measured by rc-mpvpin's
-// recheck), what --http-proxy does, so it is warned the same way. A substring
-// of the raw token, the MPV_DEMUXER_TLS_WORDS shape. Mirrored by
-// MPV_DEMUXER_PROXY_WORD in the helper.
-var MPV_DEMUXER_PROXY_WORD = "http_proxy"
+// D-SINK-59 (lead, 2026-10-29) warned of a `--demuxer-lavf-o` token carrying
+// FFmpeg's `http_proxy` key; D-SINK-102 refuses it (MPV_DEMUXER_TLS_WORDS).
 // D-SINK-53 (lead, 2026-10-29): `--rtsp-transport` other than tcp or http
 // makes every rtsp channel bind RTP and RTCP ports on all interfaces for
 // anyone to send to (measured by lane-dest). The user's own choice (PO-5),
@@ -120,7 +112,6 @@ function mpvHandoffName(token) {
   if (base === "--ytdl") return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
   if (MPV_HANDOFF[base] === true) return name
   if (MPV_HANDOFF_SCRIPT_OPTS[base] === true) return value.indexOf("ytdl") === -1 ? "" : name
-  if (base === "--demuxer-lavf-o") return value.indexOf(MPV_DEMUXER_PROXY_WORD) === -1 ? "" : name
   return ""
 }
 
@@ -189,8 +180,9 @@ function mpvArgWarning(token) {
 }
 
 // Every cost one token carries, in a fixed order. D-SINK-65 made one token
-// able to carry two: a `--demuxer-lavf-o` holding both FFmpeg's http_proxy
-// (D-SINK-59) and a binding rtsp_transport is told both.
+// able to carry two. A `--demuxer-lavf-o` holding FFmpeg's http_proxy, which
+// D-SINK-59 warned of, is refused since D-SINK-102 and warns of nothing; one
+// holding a binding rtsp_transport is told that.
 function mpvArgWarningLines(token) {
   var out = []
   var name = mpvHandoffName(token)
@@ -654,18 +646,32 @@ function buildMpvArgv(params) {
   // a token's value (measured): the pin block after it keeps the last word.
   // The file is removed once mpv has bound its socket, which it does only
   // after reading its whole command line. No tokens, no --include.
+  //
+  // D-SINK-102: the pin block opens with the relay pin beside the resume
+  // folder (mpvPinBlock), `relayPort` the port of the listener the helper's
+  // spawn bound, so it too is set from the command line after every user
+  // token and no profile replaces it; MPV_TLS_VERIFY stays the last element.
   var extra = asList(p.extraArgs)
   var file = str(dirs.mpvArgs) !== "" ? str(dirs.mpvArgs) : dirnameOf(p.socketPath) + "/mpv-args.conf"
   var user = extra.length > 0 ? ["--include=" + file] : []
-  return argv.concat(user).concat(mpvPinBlock(dirs))
+  return argv.concat(user).concat(mpvPinBlock(dirs, p.relayPort))
+}
+
+// D-SINK-102: the pin that makes the player's relay its HTTP proxy, with no
+// credential, so on its own it denies everything; each load the helper
+// registers carries its own token per file. A port that is not one is 0,
+// which no relay holds. Mirror of mpv_relay_pin() in the helper.
+function mpvRelayPin(port) {
+  var p = typeof port === "number" && Math.floor(port) === port && port > 0 && port < 65536 ? port : 0
+  return "--http-proxy=http://127.0.0.1:" + p
 }
 
 // The trailing pins: the contained resume folder first (a named profile in
-// the user's own mpv.conf moved it: measured), then MPV_PIN_BLOCK. Mirror of
-// mpv_pin_block() in the helper.
-function mpvPinBlock(dirs) {
+// the user's own mpv.conf moved it: measured), then the relay pin
+// (D-SINK-102), then MPV_PIN_BLOCK. Mirror of mpv_pin_block() in the helper.
+function mpvPinBlock(dirs, relayPort) {
   var d = dirs || {}
-  return ["--watch-later-dir=" + str(d.watchLater)].concat(MPV_PIN_BLOCK)
+  return ["--watch-later-dir=" + str(d.watchLater), mpvRelayPin(relayPort)].concat(MPV_PIN_BLOCK)
 }
 
 // ------------------------------------------------------------ player verbs
@@ -1125,17 +1131,17 @@ function trackAccessibleName(rows, index) {
 }
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
-  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_DEMUXER_PROXY_WORD, MPV_LISTEN_WARN,
-  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY,
-  MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
-  mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_LISTEN_WARN, MPV_LISTEN_QUIET,
+  MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY, MPV_SCRIPT_OPTS_WORDS,
+  mpvOptionBase, mpvHandoffName, mpvDiskName, mpvListenName,
+  demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning, mpvArgWarningLines,
+  mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
   MPV_ARGS_ENV_BUDGET, mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs,
   mpvArgEnvCost, mpvArgsTooLongWarning, mpvTokenWritable, demuxerNamesTls,
   scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
   MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, PLAYER_BUILD_KEY,
   PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN, mpvBuildMarker, buildMpvArgv,
-  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  mpvRelayPin, mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
   HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
   helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,

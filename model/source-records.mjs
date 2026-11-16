@@ -1136,11 +1136,14 @@ function entryWith(entry, patch, opts) {
 // which the helper then refuses at every play. 4 is the D-SINK-95 and
 // D-SINK-96 reading (2026-11-11): a cache before it can hold a name or a group
 // cut, or split at a `;`, inside a URL whose mark an odd character breaks or
-// inside a scheme-less `user:pass@host`, and a tvg-id holding one. The
+// inside a scheme-less `user:pass@host`, and a tvg-id holding one. 5 is
+// D-SINK-102 (2026-11-14): a cache before it can hold an mms or mmsh
+// channel from a playlist that is not local, which the helper then refuses
+// at every play. The
 // service refetches a cache written under an older version, or carrying none, at the next start or swap, once, whatever
 // its age. The helper's DESTINATION_RULES; joined by the destinations
 // fixture.
-var DESTINATION_RULES = 4
+var DESTINATION_RULES = 5
 
 function cacheBeforeDestinationRules(status) {
   return !!(status && status.ok === true && !(Number(status.destinationRules) >= DESTINATION_RULES))

@@ -355,7 +355,13 @@ var MPV_RESERVED = {
   // overlay's first and file pages draw `${filename}`, which is the whole
   // URL, userinfo and path credentials included, for a URL whose last path
   // segment is empty, and the userinfo for one with no path (measured).
-  "--load-stats-overlay": true
+  "--load-stats-overlay": true,
+  // D-SINK-102 (the lead's call under the owner's standing authority of
+  // 2026-11-09, reversing D-SINK-51's warning): PINNED to the player's relay
+  // (mpvRelayPin). Every http and https connection the player makes goes
+  // through it, judged against the address it reaches; a token naming another
+  // proxy would carry the channel past every judgment.
+  "--http-proxy": true
 }
 
 // D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
@@ -377,9 +383,12 @@ var MPV_RESERVED = {
 // FFmpeg parses with its own escapes -- `format\_whitelist` inside it carries
 // no word above and replaced the pinned list in the segment's context
 // (measured). The key is refused whole; the helper's read-back removes it.
+// D-SINK-102: and `http_proxy`, which demuxer-lavf-o applies after the network
+// options, so it would replace the relay pin for every HLS and DASH reopen and
+// segment (measured with a plain mpv.conf line); reversing D-SINK-59's warning.
 var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_sock",
                              "protocol_whitelist", "protocol_blacklist",
-                             "format_whitelist", "format_blacklist", "seg_format_options"]
+                             "format_whitelist", "format_blacklist", "seg_format_options", "http_proxy"]
 
 // D-SINK-55 (2026-10-29). The protocols libavformat may open below a demuxer:
 // an HLS or DASH segment and key, and whatever a sniffed format opens on its

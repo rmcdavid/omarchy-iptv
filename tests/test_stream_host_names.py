@@ -690,7 +690,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.sock = os.path.join(self.dir, "mpv.sock")
         self.cache = os.path.join(self.dir, "cache")
         self.ids = pre_rule_cache(self.cache)
-        self.server = FakeMpv(self.sock)
+        self.server = FakeMpv(self.sock, props={"http-proxy": "http://127.0.0.1:%d" % self.relay_for(self.sock).port})
         self.addCleanup(self.server.close)
         self.install_identity_seam(helper)
         self.holder = self.identity(self.sock)

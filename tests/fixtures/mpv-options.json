@@ -10,7 +10,8 @@
   "is a decision, not a default.",
   "`why` is required for every string-shaped option (String, String list,",
   "Key/value list, Object settings list, [file]) and for aliases; flags and numbers",
-  "in bulk carry none. An alias takes its target's class. ASCII only."
+  "in bulk carry none. An alias takes its target's class. ASCII only.",
+  "D-SINK-102 (2026-11-14): --http-proxy moves from warned to pinned, its pin the relay pin `--http-proxy=http://127.0.0.1:{relayPort}` beside the resume folder at the head of the pin block, {relayPort} the port of the listener the helper's spawn bound; --demuxer-lavf-o no longer warns."
  ],
  "mpv": {
   "version": "mpv v0.41.0",
@@ -28,12 +29,13 @@
  "counts": {
   "allowed": 821,
   "base": 8,
-  "pinned": 25,
+  "pinned": 26,
   "reserved": 39,
-  "warned": 6
+  "warned": 5
  },
  "pinBlock": [
   "--watch-later-dir={watchLater}",
+  "--http-proxy=http://127.0.0.1:{relayPort}",
   "--load-scripts=no",
   "--scripts-clr",
   "--input-commands-clr",
@@ -67,7 +69,8 @@
    "`allowed`: neither weakens the peer check. Every pinned or forbidden key must contain one of",
    "`words`, the substrings the token filter refuses (MPV_DEMUXER_TLS_WORDS in both mirrors).",
    "2026-10-29 (lane-p1b, D-SINK-55): the words also hold the two format-context keys in `ffmpegFormat`;",
-   "(lane-p1c, D-SINK-62 and D-SINK-64) and its format-list keys and the hls segment demuxer's options."
+   "(lane-p1c, D-SINK-62 and D-SINK-64) and its format-list keys and the hls segment demuxer's options.",
+   "D-SINK-102 (2026-11-14): http_proxy moves from allowed to forbidden and joins the words: a demuxer proxy outvotes the relay pin."
   ],
   "words": [
    "verify",
@@ -79,11 +82,12 @@
    "protocol_blacklist",
    "format_whitelist",
    "format_blacklist",
-   "seg_format_options"
+   "seg_format_options",
+   "http_proxy"
   ],
   "options": {
    "listen": "forbidden",
-   "http_proxy": "allowed",
+   "http_proxy": "forbidden",
    "external_sock": "forbidden",
    "use_srtp": "allowed",
    "mtu": "allowed",
@@ -101,7 +105,7 @@
   },
   "why": {
    "listen": "turns the client into a server for the URL's address",
-   "http_proxy": "a CONNECT tunnel: TLS stays end to end (the plain-http case is --http-proxy, warned)",
+   "http_proxy": "D-SINK-102: a proxy for every HLS and DASH reopen and segment, which outvotes the relay pin (demuxer-lavf-o is applied after the network options; measured with a plain mpv.conf line)",
    "external_sock": "hands the TLS layer a socket the plugin did not open",
    "use_srtp": "DTLS only",
    "mtu": "DTLS only",
@@ -823,8 +827,7 @@
    "class": "pinned",
    "pin": "--demuxer-lavf-o-append=tls_verify=1",
    "why": "for HLS and DASH the demuxer's options configure the PROTOCOL of the reopen and every nested open (D-SINK-43); the pin block also gives it the protocol whitelist that keeps a sniffed SDP from making the player listen (D-SINK-55)",
-   "pinKey": "tls_verify=1",
-   "warn": "D-SINK-59 (lead, 2026-10-29): a token carrying http_proxy hands a plain-http HLS stream to the proxy, like --http-proxy"
+   "pinKey": "tls_verify=1"
   },
   "--demuxer-lavf-probe-info": {
    "type": "Choices",
@@ -1368,8 +1371,9 @@
   },
   "--http-proxy": {
    "type": "String",
-   "class": "warned",
-   "why": "a plain-http stream's full URL and its provider headers go to the proxy (measured); a legitimate need, said out loud (D-SINK-51)"
+   "class": "pinned",
+   "why": "D-SINK-102 (the lead's call under the owner's standing authority of 2026-11-09, reversing D-SINK-51's warning): the player's relay, which judges every http and https connection against the address it reaches; another proxy would carry the channel past it, and the session's own http_proxy still applies as the relay's upstream",
+   "pin": "--http-proxy=http://127.0.0.1:{relayPort}"
   },
   "--hue": {
    "type": "Float",

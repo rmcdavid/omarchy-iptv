@@ -1203,6 +1203,19 @@ and refused everywhere else (`network`, `Could not resolve host`); the cost
 is that, behind a proxy with no local DNS, a provider redirect to another
 host fails. Refusing every proxied provider-chosen hop was the alternative
 and would break every CDN redirect behind a proxy.
+**[2026-11-14, D-SINK-102 (the `dsink102` branch, merged into `dev` on 2026-11-16, unreleased):
+the player's traffic meets this rule too.** The relay the player is pinned to
+(ARCHITECTURE-PLAYER section 20) chains to the user's proxy by FFmpeg's own
+reading of `http_proxy` and `no_proxy` -- lowercase only, an `http://`
+proxy only, and `http_proxy` for an https target too, unlike urllib's,
+because that is what the player itself would have used -- and judges a proxied target exactly as
+this paragraph says, through `DestinationPolicy.check_proxied`'s semantics
+(for a typed `--url`, `check_proxied` itself), so the same residual holds
+for streams: a name the proxy resolves differently from this machine is not
+caught. A target `no_proxy` matches is connected to directly and judged by
+address, as an unproxied fetch is. `check_proxied` gains a `resolve`
+parameter, which only the relay passes (its lookup is the play-time one,
+`stream_resolve`); every fetch looks the target up as before.]**
 
 What remains, each with its size:
 
@@ -1216,6 +1229,21 @@ What remains, each with its size:
   row saying so in advance (the row names only LITERAL refusals).
 - Streams are mpv's, not the helper's: ARCHITECTURE-PLAYER.md section 19
   holds what the parse-time gate covers and what FFmpeg still follows.
+  **[2026-11-14, D-SINK-102 (the `dsink102` branch, merged into `dev` on 2026-11-16,
+  unreleased): for a playlist that is not local, the player's http and
+  https connections, and rtmps's, are now the helper's to judge.** The
+  player is pinned to a relay the helper runs as its parent (`player
+  relay`, `bin/helper/12-relay.py`), which looks every target up itself and
+  connects through `bounded_create_connection` -- this section's CHECK, with
+  every answer judged before it is connected to -- so a redirect, an HLS or
+  DASH playlist, segment or key, or a name that answers differently a
+  moment later reaches only an address the channel's rule permits.
+  `bounded_create_connection` gains `resolve`, `stagger` and `in_flight`,
+  which only the relay passes (it connects as FFmpeg does, up to three
+  attempts 200 ms apart); every fetch connects exactly as before. rtmp,
+  rtsp and srt, which never ask a proxy, are handed the address the
+  helper's lookup judged; mms and mmsh are refused. ARCHITECTURE-PLAYER
+  section 20 has the rule, the schemes, the costs and what stays open.]**
 - Costs the owner accepted: a guide hint on a DIFFERENT LAN host than the
   playlist must be typed; a public provider that redirects into the user's
   LAN stops working; a LAN server that redirects to ANOTHER LAN host stops

@@ -157,7 +157,8 @@ class PlayTargetTest(unittest.TestCase):
     def test_a_remote_playlists_name_that_resolves_to_a_global_address_plays(self):
         urls = ["http://%s/live/1.ts" % NAME, "https://%s:8443/live/2.m3u8" % NAME, "rtsp://%s/s" % NAME]
         got, resolver = self.outcomes(REMOTE, urls, {NAME: [GLOBAL, "2606:4700::1111"]})
-        self.assertEqual(got, [("played", u) for u in urls])
+        # D-SINK-102: the rtsp channel is handed the address it was judged by.
+        self.assertEqual(got, [("played", u) for u in urls[:2]] + [("played", "rtsp://%s/s" % GLOBAL)])
         self.assertEqual(resolver.asked, [(NAME, 80), (NAME, 8443), (NAME, 554)])
 
     def test_one_refused_address_among_global_ones_refuses_it_whichever_comes_first(self):
@@ -207,12 +208,20 @@ class PlayTargetTest(unittest.TestCase):
 
     def test_the_shipping_lookup_is_resolve_within_under_its_bound(self):
         calls = []
-        with mock.patch.object(helper, "resolve_within", lambda h, p, t: calls.append((h, p, t)) or [answer(GLOBAL)]):
+        with mock.patch.object(helper, "resolve_within",
+                               lambda h, p, t, limit=None: calls.append((h, p, t, limit)) or [answer(GLOBAL)]):
             self.assertEqual(helper.stream_resolve(NAME, 80), [answer(GLOBAL)])
-        self.assertEqual(calls, [(NAME, 80, helper.STREAM_LOOKUP_TIMEOUT_S)])
-        # Under the shell's 8 s watchdog over one `play` (Service.qml,
-        # controlTimeoutMs), with the zap's own connect beside it.
-        self.assertLessEqual(helper.STREAM_LOOKUP_TIMEOUT_S + helper.DEFAULT_IPC_TIMEOUT, 8.0 - 2.0)
+        # D-SINK-102: and under the cap on the process's outstanding lookups,
+        # which only the relay, asking from every connection, ever nears.
+        self.assertEqual(calls, [(NAME, 80, helper.STREAM_LOOKUP_TIMEOUT_S, helper.RELAY_LOOKUPS_MAX)])
+        # Under the shell's watchdog over one `play` (Service.qml,
+        # controlTimeoutMs, Model.playerWatchdogMs("play")), read from the
+        # bounds fixture both suites run rather than copied: the lookup, the
+        # relay's two questions and the zap's own connect, with 2 s to spare.
+        bounds = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "player-bounds.json")
+                            .read_text(encoding="utf-8"))
+        self.assertLessEqual(helper.STREAM_LOOKUP_TIMEOUT_S + 2 * helper.RELAY_IPC_S + helper.DEFAULT_IPC_TIMEOUT,
+                             bounds["watchdogMs"]["play"] / 1000.0 - 2.0)
 
     def test_a_loopback_relays_channels_name_the_lan_and_its_own_port_only(self):
         urls = ["http://%s/live/1.ts" % NAME, "http://%s:34400/live/2.ts" % NAME, "http://%s:631/" % NAME,
@@ -336,7 +345,9 @@ class PlayTargetTest(unittest.TestCase):
         wide = "Stra" + chr(0xDF) + "e.qqqqqq.test"
         urls = ["rtsp://me:pw@%s:8554/s" % upper, "rtsp://%s/s" % wide]
         got, resolver = self.outcomes(REMOTE, urls, {upper: [GLOBAL], wide.encode("utf-8"): ["127.0.0.1"]})
-        self.assertEqual(got, [("played", urls[0])] + self.refused())
+        # D-SINK-102: and played at the address it was judged by, the
+        # userinfo and the port as written.
+        self.assertEqual(got, [("played", "rtsp://me:pw@%s:8554/s" % GLOBAL)] + self.refused())
         self.assertEqual(resolver.asked, [(upper, 8554), (wide.encode("utf-8"), 554)])
 
     def test_resolve_within_hands_a_bytes_name_to_the_resolver_as_bytes(self):
@@ -373,7 +384,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.cache = os.path.join(self.dir, "cache")
         self.urls = ["http://%s/live/1.ts" % NAME, "http://down.qqqqqq.test/live/2.ts", "http://ok.qqqqqq.test/live/3.ts"]
         self.ids = write_cache(self.cache, self.urls, REMOTE)
-        self.server = FakeMpv(self.sock)
+        self.server = FakeMpv(self.sock, props={"http-proxy": "http://127.0.0.1:%d" % self.relay_for(self.sock).port})
         self.addCleanup(self.server.close)
         self.install_identity_seam(helper)
         self.holder = self.identity(self.sock)
@@ -421,6 +432,65 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.assertNotIn(NAME, json.dumps(self.server.commands))
         self.assertNotIn("down.qqqqqq", json.dumps(self.server.commands))
         self.assertEqual(sorted(set(self.resolver.asked)), [("down.qqqqqq.test", 80), ("ok.qqqqqq.test", 80), (NAME, 80)])
+
+
+class AnswerRefusalTest(unittest.TestCase):
+    """D-SINK-102: stream_answer_refusal, the judgment of ONE answer lifted
+    out of stream_lookup_refusal's loop so the relay, which judges every
+    connection the player makes, asks the same function. Called directly
+    here, and held to the lookup's own verdict for the same single answer."""
+
+    OWN = "prov.example.test"
+
+    def test_one_answer_meets_the_rule_a_literal_meets(self):
+        remote = helper.cached_source(REMOTE)
+        relay = helper.cached_source(RELAY)
+        lan = helper.cached_source(LAN)
+        local_file = helper.cached_source(FILE)
+        proxied = helper.cached_source(dict(REMOTE, sourceClass="unresolved"))
+        cases = [
+            # The playlist's own host: global, or the class its fetch reached.
+            ("global", self.OWN, 80, "http", remote, ""),
+            ("global", self.OWN, 8080, "https", remote, ""),
+            ("loopback", self.OWN, 80, "http", remote, "local"),
+            ("private", self.OWN, 8080, "http", remote, "local"),
+            ("unspecified", self.OWN, 80, "http", remote, "local"),
+            ("global", self.OWN, 80, "http", proxied, ""),
+            ("private", self.OWN, 80, "http", proxied, "local"),
+            # Another host from a remote playlist: global only (multicast on udp and rtp).
+            ("global", NAME, 80, "http", remote, ""),
+            ("loopback", NAME, 80, "http", remote, "local"),
+            ("private", NAME, 443, "https", remote, "local"),
+            ("link-local", NAME, 80, "http", remote, "local"),
+            ("multicast", NAME, 5000, "udp", remote, ""),
+            ("multicast", NAME, 80, "http", remote, "local"),
+            # A loopback relay: the LAN, and this machine on its own port only.
+            ("loopback", NAME, 34400, "http", relay, ""),
+            ("loopback", NAME, 631, "http", relay, "port"),
+            ("unspecified", NAME, 631, "http", relay, "port"),
+            ("loopback", NAME, None, "srt", relay, "port"),
+            ("private", NAME, 80, "http", relay, ""),
+            # A LAN playlist and a local file name any address.
+            ("private", NAME, 80, "http", lan, ""),
+            ("loopback", NAME, 631, "http", lan, ""),
+            ("loopback", NAME, 631, "http", local_file, ""),
+        ]
+        for kind, host, port, scheme, source, want in cases:
+            with self.subTest(kind=kind, host=host, port=port, scheme=scheme, source=source):
+                self.assertEqual(helper.stream_answer_refusal(kind, host, port, scheme, source), want)
+
+    def test_the_lookup_and_the_lifted_judgment_agree_on_every_single_answer(self):
+        addresses = [GLOBAL, "2606:4700::1111"] + [address for address, _ in REFUSED_ANSWERS]
+        for name in (NAME, self.OWN):
+            for raw in (REMOTE, RELAY, dict(REMOTE, sourceClass="unresolved")):
+                source = helper.cached_source(raw)
+                for address in addresses:
+                    with self.subTest(name=name, source=raw, address=address):
+                        _, patch = resolving({name: [address]})
+                        with patch:
+                            looked = helper.stream_lookup_refusal("http://%s:34400/x" % name, source)
+                        kind = helper.address_class(address)
+                        self.assertEqual(helper.stream_answer_refusal(kind, name, 34400, "http", source), looked)
 
 
 if __name__ == "__main__":

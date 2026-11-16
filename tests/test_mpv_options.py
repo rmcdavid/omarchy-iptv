@@ -64,13 +64,16 @@ class ClassificationTest(unittest.TestCase):
     def test_the_pin_block_is_the_pinned_class_in_the_fixtures_order(self):
         block = self.fixture["pinBlock"]
         self.assertEqual(block[0], "--watch-later-dir={watchLater}")
-        self.assertEqual(list(helper.MPV_PIN_BLOCK), block[1:])
+        # D-SINK-102: then the relay pin, which carries the spawn's port.
+        self.assertEqual(block[1], "--http-proxy=http://127.0.0.1:{relayPort}")
+        self.assertEqual(list(helper.MPV_PIN_BLOCK), block[2:])
         pinned = {n for n, e in self.options.items() if e["class"] == "pinned" and e["type"] != "alias"}
         self.assertEqual({base_of(t) for t in block}, pinned)
         for name in pinned:
             self.assertIn(self.options[name]["pin"], block, name)
         dirs = helper.player_dirs(SOCK, "/home/u/.local/state/omarchy-iptv")
-        self.assertEqual(helper.mpv_pin_block(dirs), [t.format(watchLater=dirs["watchLater"]) for t in block])
+        self.assertEqual(helper.mpv_pin_block(dirs, 43210),
+                         [t.format(watchLater=dirs["watchLater"], relayPort=43210) for t in block])
         # The last element is D-SINK-13's layer 2 and stays last.
         self.assertEqual(block[-1], helper.MPV_TLS_VERIFY)
 
@@ -122,14 +125,14 @@ class ClassificationTest(unittest.TestCase):
     def test_the_warned_class_is_the_handoff_and_disk_sets(self):
         # 2026-10-29 (lane-p1b): an option of another class may warn as well
         # (`warn`): --script-opts is key-pinned now (D-SINK-52) and still warns
-        # for ytdl (PO-10), --demuxer-lavf-o warns for http_proxy (D-SINK-59);
-        # --rtsp-transport joins the warned class (D-SINK-53).
+        # for ytdl (PO-10); --rtsp-transport joins the warned class (D-SINK-53).
+        # --demuxer-lavf-o warned for http_proxy (D-SINK-59) until D-SINK-102
+        # refused that key, and --http-proxy is pinned since then.
         warned = self.klass("warned") | {n for n, e in self.options.items() if e.get("warn")}
         self.assertEqual(warned, set(helper.MPV_HANDOFF) | set(helper.MPV_HANDOFF_SCRIPT_OPTS)
-                         | {"--ytdl"} | set(helper.MPV_DISK_WARN) | set(helper.MPV_LISTEN_WARN)
-                         | {helper.MPV_DEMUXER_OPTS})
-        values = {"--ytdl": "yes", "--cache-on-disk": "yes", "--rtsp-transport": "udp",
-                  "--demuxer-lavf-o": "http_proxy=http://p:1"}
+                         | {"--ytdl"} | set(helper.MPV_DISK_WARN) | set(helper.MPV_LISTEN_WARN))
+        self.assertNotIn("--http-proxy", warned)
+        values = {"--ytdl": "yes", "--cache-on-disk": "yes", "--rtsp-transport": "udp"}
         for name in sorted(warned):
             value = values.get(name, "ytdl_hook-x=1")
             self.assertNotEqual(helper.mpv_arg_warnings([name + "=" + value]), [], name)

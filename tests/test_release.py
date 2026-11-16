@@ -654,16 +654,26 @@ class ReleaseCase(unittest.TestCase):
             return True
 
     def stop_recorded_sleep(self, pidfile):
-        """Kill the recorded pid, and only while it is still that sleep."""
+        """Kill the recorded pid, and only while it is still that sleep: the
+        pid is the process's own report, not a child of this one, so it is
+        signalled through a pidfd opened BEFORE its command line is read, and
+        a pid that exited and was reused in between is never reached."""
+        import signal
         try:
             with io.open(pidfile, encoding='utf-8') as fh:
                 pid = int(fh.read())
+            fd = os.pidfd_open(pid)
+        except (OSError, ValueError):
+            return
+        try:
             with io.open('/proc/%d/cmdline' % pid, 'rb') as fh:
                 if fh.read() != b'sleep\x0031\x00':
                     return
-            os.kill(pid, 9)
-        except (OSError, ValueError):
+            signal.pidfd_send_signal(fd, signal.SIGKILL)
+        except OSError:
             pass
+        finally:
+            os.close(fd)
 
     def test_an_origin_without_main_is_refused(self):
         self.ogit('update-ref', 'refs/heads/dev', 'refs/heads/main')

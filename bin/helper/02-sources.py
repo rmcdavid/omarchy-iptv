@@ -1484,8 +1484,11 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57),
     `name` (the address names a host the player would read in a form
     host_name_refused refuses, D-SINK-87), `zone` (an IPv6 literal whose
-    zone is not a number, D-SINK-91) or `label` (a host of one label from a
-    playlist that is not local, D-SINK-89). `name`, `zone` and `label` are
+    zone is not a number, D-SINK-91), `label` (a host of one label from a
+    playlist that is not local, D-SINK-89) or `remote` (a scheme whose
+    connections nothing here can judge, from a playlist that is not local:
+    STREAM_REMOTE_REFUSED_SCHEMES, D-SINK-102, asked first after the scheme
+    itself, as play time asks it before anything is looked up). `name`, `zone` and `label` are
     asked last, in that order: the rules before them classify a literal and
     look nothing up, so a line two rules refuse keeps the older reason, and
     the parse's host rule still answers row for row as play time's does
@@ -1500,6 +1503,8 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     scheme = parts.scheme.lower()
     if scheme not in STREAM_SCHEMES or host == "":
         return "scheme", host
+    if scheme in STREAM_REMOTE_REFUSED_SCHEMES and not source.get("local"):
+        return "remote", host
     params = stream_params(url)
     if _listen_refusal(url, scheme, host, params) != "":
         return "listener", host
@@ -2098,6 +2103,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     skipped_name = 0
     skipped_zone = 0
     skipped_label = 0
+    skipped_remote = 0
     skipped_listen = 0
     skipped_local = 0
     skipped_port = 0
@@ -2180,6 +2186,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             skipped_zone += 1                 # D-SINK-91: an IPv6 zone that is not a number
         elif refusal == "label":
             skipped_label += 1                # D-SINK-89: one label, from a list that is not local
+        elif refusal == "remote":
+            skipped_remote += 1               # D-SINK-102: mms, mmsh from a list that is not local
         elif refusal == "listener":
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
@@ -2220,6 +2228,9 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
         # D-SINK-89: a count, never the host (it may be a username).
         warnings.append(counted_sentence(skipped_label, "%d entry skipped: its address names a host of one label, not the playlist's own, from a playlist that is not on this machine or a local network",
                                          "%d entries skipped: their addresses name hosts of one label, not the playlist's own, from a playlist that is not on this machine or a local network"))
+    if skipped_remote:
+        # D-SINK-102: a count and the fixed words, never a host.
+        warnings.append(counted_sentence(skipped_remote, PARSE_REMOTE_SCHEME_ONE, PARSE_REMOTE_SCHEME_MANY))
     if skipped_listen:
         warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
                                          "%d entries skipped: the streams would listen on this machine for anyone to send to"))

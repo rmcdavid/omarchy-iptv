@@ -87,6 +87,7 @@
       "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40001,
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -107,6 +108,7 @@
         "--tls-verify=yes",
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40001",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -144,6 +146,7 @@
         "--gpu-shader-cache-dir=/home/u/.cache/shaders"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40002,
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -165,6 +168,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40002",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -212,6 +216,7 @@
         "--hwdec=auto-safe"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 65535,
       "rejected": [
         "--log-file=/tmp/mpv.log",
         "--no-log-file",
@@ -243,6 +248,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/tmp/mpv-args.conf",
         "--watch-later-dir=/tmp/watch-later",
+        "--http-proxy=http://127.0.0.1:65535",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -295,6 +301,7 @@
         "--tls-ca-file=/etc/ssl/provider-ca.pem"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 1,
       "rejected": [
         "--tls-verify=no",
         "--no-tls-verify"
@@ -320,6 +327,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:1",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -373,6 +381,7 @@
         "--no-gpu-sw"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40005,
       "rejected": [],
       "argv": [
         "mpv",
@@ -395,6 +404,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40005",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -450,6 +460,7 @@
         "--demuxer-lavf-o=live_start_index=-1,http_persistent=0"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40006,
       "rejected": [
         "--demuxer-lavf-o=tls_verify=0",
         "--demuxer-lavf-o-append=tls_verify=0",
@@ -482,6 +493,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40006",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -554,6 +566,7 @@
         "--hwdec=auto-safe"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40007,
       "rejected": [
         "--input-commands=\"run\"\"/usr/bin/touch\"\"/tmp/m\"",
         "--input-commands-pre=quit",
@@ -605,6 +618,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40007",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -639,7 +653,7 @@
         "harmless set the review named, measured playing a CA-signed stream behind the pin block,",
         "plus the escape --tls-ca-file and a demuxer workaround: every token kept, in order."
       ],
-      "name": "a common harmless set is kept whole, in order, before the pin block",
+      "name": "a common harmless set is kept whole, in order, before the pin block; the relay's pin option is refused (D-SINK-102)",
       "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
       "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [
@@ -653,7 +667,10 @@
         "--http-proxy=http://proxy.example:3128"
       ],
       "build": "0.16.0+0a1b2c3d",
-      "rejected": [],
+      "relayPort": 40008,
+      "rejected": [
+        "--http-proxy=http://proxy.example:3128"
+      ],
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -675,6 +692,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40008",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -706,8 +724,7 @@
         "volume=%2%50",
         "tls-ca-file=%24%/etc/ssl/provider-ca.pem",
         "demuxer-lavf-o=%19%live_start_index=-1",
-        "screenshot-dir=%16%/home/u/Pictures",
-        "http-proxy=%25%http://proxy.example:3128"
+        "screenshot-dir=%16%/home/u/Pictures"
       ]
     },
     {
@@ -727,6 +744,7 @@
         "--demuxer-lavf-o=live_start_index=-1"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40009,
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -748,6 +766,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40009",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -801,6 +820,7 @@
         "--demuxer-lavf-o=live_start_index=-1"
       ],
       "build": "0.16.0+0a1b2c3d",
+      "relayPort": 40010,
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -822,6 +842,7 @@
         "--script-opts-append=omarchy_iptv-build=0.16.0+0a1b2c3d",
         "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:40010",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -864,6 +885,7 @@
       "stateDir": "/home/u/.local/state/omarchy-iptv",
       "mpvArgs": [],
       "build": "0.16.0 beta+0a1b2c3d",
+      "relayPort": 0,
       "argv": [
         "mpv",
         "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
@@ -884,6 +906,7 @@
         "--tls-verify=yes",
         "--script-opts-append=omarchy_iptv-build=unknown",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--http-proxy=http://127.0.0.1:0",
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
@@ -923,7 +946,7 @@
       "while it plays (allowed, PO-5's shape) and is said out loud (PO-10).",
       "`--demuxer-cache-unlink-files` is RESERVED, not warned: see mpvReserved.",
       "2026-10-29 (lane-p1b): `listenText` is D-SINK-53's sentence, for an --rtsp-transport that makes every",
-      "rtsp channel bind RTP/RTCP ports; and --demuxer-lavf-o carrying http_proxy is a handoff (D-SINK-59)."
+      "rtsp channel bind RTP/RTCP ports. A --demuxer-lavf-o carrying http_proxy, a handoff under D-SINK-59, is refused since D-SINK-102."
     ],
     "text": " hands the stream address to another program",
     "cases": [
@@ -1111,13 +1134,11 @@
         ]
       },
       {
-        "name": "D-SINK-51: --http-proxy hands a plain-http stream's whole URL and its headers to the proxy and is told so",
+        "name": "D-SINK-102: --http-proxy is the relay's pin, refused as a token, so it is no handoff to warn of (D-SINK-51's warning withdrawn)",
         "tokens": [
           "--http-proxy=http://u:pw@proxy.example:3128"
         ],
-        "warnings": [
-          "mpvArg --http-proxy hands the stream address to another program"
-        ]
+        "warnings": []
       },
       {
         "name": "D-SINK-53: --rtsp-transport=udp makes every rtsp channel bind RTP and RTCP ports, and is told so",
@@ -1155,23 +1176,19 @@
         "warnings": []
       },
       {
-        "name": "D-SINK-59: --demuxer-lavf-o carrying FFmpeg's http_proxy hands a plain-http HLS stream to the proxy, like --http-proxy",
+        "name": "D-SINK-102: a --demuxer-lavf-o token carrying FFmpeg's http_proxy is refused, so it warns of nothing (D-SINK-59's warning withdrawn)",
         "tokens": [
           "--demuxer-lavf-o=http_proxy=http://u:pw@proxy.test:3128"
         ],
-        "warnings": [
-          "mpvArg --demuxer-lavf-o hands the stream address to another program"
-        ]
+        "warnings": []
       },
       {
-        "name": "D-SINK-59: and through -append; a demuxer workaround without it is silent",
+        "name": "D-SINK-102: nor through -append; a demuxer workaround without it is silent too",
         "tokens": [
           "--demuxer-lavf-o=live_start_index=-1",
           "--demuxer-lavf-o-append=http_proxy=http://p:1"
         ],
-        "warnings": [
-          "mpvArg --demuxer-lavf-o-append hands the stream address to another program"
-        ]
+        "warnings": []
       },
       {
         "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=udp",
@@ -1352,12 +1369,11 @@
         ]
       },
       {
-        "name": "D-SINK-65: one token that carries two costs is told both, the handoff first (D-SINK-59 and D-SINK-65 together)",
+        "name": "D-SINK-65: a token that opens ports is told so (its http_proxy, which D-SINK-59 warned of, is refused since D-SINK-102)",
         "tokens": [
           "--demuxer-lavf-o=http_proxy=http://p.test:3128,rtsp_transport=udp"
         ],
         "warnings": [
-          "mpvArg --demuxer-lavf-o hands the stream address to another program",
           "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
         ]
       },
@@ -1395,6 +1411,7 @@
     "--external-file",
     "--external-files",
     "--force-media-title",
+    "--http-proxy",
     "--idle",
     "--include",
     "--input-commands",
@@ -1641,7 +1658,8 @@
       "Restart on adoption (2026-11-01): `launch` is the helper's one-word answer to 'was the player this",
       "probe reached launched by THIS build' (launch_verdict on SO_PEERCRED): current, older or unknown, null when",
       "nothing answered. Model.parsePlayerProbe keeps the three words and reads anything else as null, which the",
-      "shell treats as a helper too old to say (today's path, unchanged)."
+      "shell treats as a helper too old to say (today's path, unchanged).",
+      "D-SINK-102: `relay` is whether the player's relay answered as its own, additive, true or false, and null from a helper too old to say."
     ],
     "reply": {
       "ok": true,
@@ -1689,7 +1707,8 @@
         "unpinned": 0,
         "migrated": false
       },
-      "launch": "current"
+      "launch": "current",
+      "relay": true
     },
     "keys": [
       "claimed",
@@ -1700,6 +1719,7 @@
       "ok",
       "owner",
       "pid",
+      "relay",
       "responsive",
       "rewind",
       "running",
@@ -1734,7 +1754,8 @@
         "unpinned": 0,
         "migrated": false
       },
-      "launch": "current"
+      "launch": "current",
+      "relay": true
     }
   },
   "stopLadder": [
@@ -1978,5 +1999,63 @@
     "The helper is its only producer (player_build, from HELPER_PARTS) and launch_verdict its only reader; each vector",
     "carries a fixed `build` that both mirrors render (mpv_launch_argv(..., build=) and Model.buildMpvArgv({build})),",
     "and a value outside [0-9A-Za-z.+_-]{1,64} is the word `unknown` in both."
-  ]
+  ],
+  "_mpvArgvRelayComment": [
+    "D-SINK-102 (2026-11-14): the pin block opens with the relay pin beside the resume folder,",
+    "`--http-proxy=http://127.0.0.1:<relayPort>`, the port of the listener the helper's spawn bound, with no",
+    "credential, so on its own it denies everything and each load carries its own token per file. Both",
+    "mirrors render it from each vector's `relayPort` (mpv_launch_argv(..., relay_port=) and",
+    "Model.buildMpvArgv({relayPort})); a port that is not one (0 here) renders as 0, which no relay holds,",
+    "and --tls-verify=yes stays the last element."
+  ],
+  "relayPin": {
+    "_comment": [
+      "D-SINK-102: the relay pin itself, for a port and for what is not one (mpv_relay_pin, Model.mpvRelayPin):",
+      "`port` is the argument, `pin` the element both mirrors compose. Anything but an integer 1-65535 -- a",
+      "boolean, a string of digits, a fraction, 0, past 65535 -- is port 0, which no relay can hold, so a",
+      "player launched from it reaches nothing over http. Run by tests/test_player.py and tests/Model.test.js."
+    ],
+    "cases": [
+      {
+        "port": 4321,
+        "pin": "--http-proxy=http://127.0.0.1:4321"
+      },
+      {
+        "port": 1,
+        "pin": "--http-proxy=http://127.0.0.1:1"
+      },
+      {
+        "port": 65535,
+        "pin": "--http-proxy=http://127.0.0.1:65535"
+      },
+      {
+        "port": 0,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": 65536,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": -1,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": 1.5,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": "80",
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": true,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      },
+      {
+        "port": null,
+        "pin": "--http-proxy=http://127.0.0.1:0"
+      }
+    ]
+  }
 }

@@ -84,6 +84,18 @@ function healthTick(skips, busy) {
 //     (D-SINK-101, 2026-11-13: player_target, before the lock), answered just
 //     inside its bound; one that reaches it refuses the channel and ends the
 //     verb, so it is summed once, by a start and by a restart
+//   relay (D-SINK-102, 2026-11-14): a spawn waits for its new relay's status
+//     up to relayStartMs, and a start or a restart asks a relay three more
+//     questions, each inside relayIpcMs: the adopted player's status
+//     (player_verdict), the load's registration and the first-load count. A
+//     probe asks one (the relay field). `play` asks two, each inside one
+//     relayIpcMs: the gate's status (feed_gate, player_verdict) and the
+//     load's registration (relay_register). Its fixed 8 s
+//     (CONTROL_WATCHDOG_MS, the control slot's watchdog before the relay)
+//     gains both, so with the 3 s lookup 5 s of the 10 s are bounds of the
+//     helper's own and mpv's round trips keep the 5 s the 8 s left them
+//     (the player-bounds walk of `play`, dev branch, holds that; it first
+//     gained one, which left them 4 s, found by the review of 7c281d8)
 // What is NOT summed is every other request at its bound: a request that
 // reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
 // answering each of a start's twenty-odd requests just inside 2 s could run a
@@ -105,8 +117,14 @@ var PLAYER_BOUNDS = {
   settleMs: 500,          // STOP_SETTLE_MS (not Service.qml's stopSettleMs)
   settleConnectMs: 200,   // SETTLE_CONNECT_TIMEOUT: socket_is_dead's one connect
   settleLockMs: 500,      // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
-  lookupMs: 3000          // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
+  lookupMs: 3000,         // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
+  relayStartMs: 5000,     // RELAY_START_S: a spawn's wait for its relay's status (D-SINK-102)
+  relayIpcMs: 1000,       // RELAY_IPC_S: one question to the relay, both ways
+  relayStaggerMs: 200     // RELAY_ATTEMPT_STAGGER_S: a dead answer delays the relay's next by this (not summed)
 }
+// The control slot's watchdog over one `play` or `status` before D-SINK-102,
+// which `play` extends by its two relay questions (playerWatchdogMs("play")).
+var CONTROL_WATCHDOG_MS = 8000
 var PLAYER_WATCHDOG_MARGIN_MS = 5000
 var PLAYER_BIRTH_EDGE_MS = 12000
 
@@ -133,9 +151,11 @@ function playerWatchdogMs(kind) {
   // so the replace path is the wedged one plus these two (walked: 42.07 s, past
   // the 38.25 s the bound left without them; lane RA's M9).
   var carry = 2 * b.ipcMs
-  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
+  var relay = b.relayStartMs + 3 * b.relayIpcMs
+  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "play") return CONTROL_WATCHDOG_MS + 2 * b.relayIpcMs
   if (k === "") return PLAYER_BIRTH_EDGE_MS
   return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
 }
@@ -889,7 +909,7 @@ function playerLaunch(raw) {
 }
 
 function parsePlayerProbe(text) {
-  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null, launch: null }
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null, launch: null, relay: null }
   var doc = parseJsonObject(text)
   if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
   var pid = Math.floor(Number(doc.pid))
@@ -910,8 +930,21 @@ function parsePlayerProbe(text) {
     // player to feed.
     tls: playerTls(doc.tls),
     // Restart on adoption: current, older, unknown or null (playerLaunch).
-    launch: playerLaunch(doc.launch)
+    launch: playerLaunch(doc.launch),
+    // D-SINK-102: whether the player's relay answered as its own; null from
+    // a helper too old to say, which keeps today's path.
+    relay: doc.relay === true ? true : doc.relay === false ? false : null
   }
+}
+
+// D-SINK-102, decision 15 (the lead's call under the owner's standing
+// authority of 2026-11-09): whether a player another build launched is one
+// that cannot be made safe -- its TLS readings say so (a player with no relay
+// pin reads unsafe there), or its relay does not answer. Such a player is
+// restarted when its channel is deliverable and STOPPED at the hold's expiry
+// otherwise (olderRestartDisposition's `unsafe`), never deferred to play on.
+function olderPlayerUnsafe(tls, relay) {
+  return !(tls && tls.safe === true) || relay === false
 }
 
 // One newline-delimited line from mpv's own JSON IPC socket (4.8). Only the
@@ -1308,10 +1341,10 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
   return id === playerEntryId(currentEntryId)
 }
 export {
-  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
-  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
-  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
-  helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
+  stopEscalation, healthTick, PLAYER_BOUNDS, CONTROL_WATCHDOG_MS,
+  PLAYER_WATCHDOG_MARGIN_MS, PLAYER_BIRTH_EDGE_MS, playerLadderMs,
+  playerWatchdogMs, playFork, playForkBlind, zapArgs, PLAY_UNREADABLE,
+  HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
   playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
@@ -1320,11 +1353,11 @@ export {
   probeLaunchOlder, adoptedSourceMatches, adoptedChannelReach,
   olderRestartDisposition, olderRestartKeepsPause, olderRestartWith,
   olderPlayerIdentity, sameOlderPlayer, olderRestartOpen, playerTlsVerdict,
-  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
-  playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
-  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport, PLAYER_WARNING_RE,
-  playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
+  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, olderPlayerUnsafe,
+  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  PLAYER_WARNING_RE, playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

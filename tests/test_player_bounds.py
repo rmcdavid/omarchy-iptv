@@ -44,6 +44,18 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
                 self.assertTrue(hasattr(helper, name), "the helper has no %s" % name)
                 self.assertEqual(as_ms(getattr(helper, name), unit), BOUNDS["helper"][key])
 
+    def test_a_dead_answer_costs_the_relay_a_stagger_not_its_connect_bound(self):
+        """D-SINK-102: the relay tries a name's answers
+        RELAY_ATTEMPT_STAGGER_S apart, RELAY_ATTEMPTS_IN_FLIGHT at once, so
+        answers that hang before a live one delay it by staggers -- all of
+        them together well inside a start's first-load window -- and never by
+        RELAY_CONNECT_S, which is past it. tests/test_relay.py observes the
+        stagger on a real connect."""
+        h = BOUNDS["helper"]
+        dead = (helper.RELAY_ATTEMPTS_IN_FLIGHT - 1) * as_ms(helper.RELAY_ATTEMPT_STAGGER_S, "s")
+        self.assertLess(dead, h["firstLoadMs"] // 2)
+        self.assertGreater(as_ms(helper.RELAY_CONNECT_S, "s"), h["firstLoadMs"])
+
     def test_the_fixture_names_every_bound_it_holds(self):
         # A number with no helper name beside it is a number nothing here can
         # pin (engineering rule 13): the two key sets are the same set.
@@ -67,9 +79,10 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
         self.assertEqual(parser.parse_args(["player", "restart"] + session).from_rung, "term")
 
     def test_the_spawn_waits_its_named_bounds_for_the_pid_and_the_exec(self):
-        # spawn_detached run for real up to the fork, which answers a child
-        # that never reports: the two pipe reads are recorded with the bound
-        # each was given, and the spawn refuses as it always has.
+        # spawn_player (spawn_detached until D-SINK-102) run for real up to
+        # the fork, which answers a child that never reports: the two pipe
+        # reads are recorded with the bound each was given, and the spawn
+        # refuses as it always has.
         seen = []
 
         def read_pipe(fd, timeout):
@@ -80,7 +93,7 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
                 mock.patch.object(helper.os, "fork", return_value=2 ** 22 + 7), \
                 mock.patch.object(helper.os, "waitpid", side_effect=ChildProcessError()):
             with self.assertRaises(helper.HelperError) as caught:
-                helper.spawn_detached(["--idle=once"], "/")
+                helper.spawn_player(["--idle=once"], "/", -1, -1)
         self.assertEqual(caught.exception.code, "spawn_failed")
         self.assertEqual([as_ms(t, "s") for t in seen], [BOUNDS["helper"]["spawnPidMs"], BOUNDS["helper"]["spawnMs"]])
 
@@ -127,6 +140,12 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
 #   probe   -- a found player that answers mpv-version just inside the bound
 #              and nothing after it (the next request ends the verb), and one
 #              that answers nothing at all.
+#   play    -- (D-SINK-102) the play-time lookup and both of the relay's
+#              questions, the gate's status and the load's registration, at
+#              their bounds, and a player that answers everything at once:
+#              `play`'s 8 s was never a sum of its bounds, so what this walk
+#              holds is what those bounds leave of its watchdog for mpv's
+#              round trips (PlayerWorstPathWalkTest says how much).
 # "Its last poll" is LEARNED from the code, never assumed: a first walk is
 # refused the lock throughout and records when the verb last asked for it, a
 # second is granted it then and refused the socket throughout, recording the
@@ -169,9 +188,11 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     adopting it. `spawned_slow`: how many requests after its handshake the
     new player answers just inside the bound (the carry's sets). Returns
     (virtual seconds, the reply, the signals the found player was sent, what
-    was learned)."""
+    was learned). `play` (D-SINK-102) reaches a running player of this
+    build at once, which answers everything at once, so the time it spends
+    is the lookup's and the relay's alone."""
     clock = _Clock()
-    state = {"phase": "found", "bind_at": None, "pipes": 0}
+    state = {"phase": "play" if verb == "play" else "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
     survivor = {"pid": 777, "startTime": "1"}
     signals = []
@@ -206,17 +227,57 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                                                       "local": False}) == ""
         return {"id": cid, "url": url, "name": "X", "headers": {"User-Agent": "u"}, "group": "G"}
 
-    def resolve(host, port, timeout):
+    def resolve(host, port, timeout, limit=None):
         clock.t += timeout - _JUST_INSIDE
         return [(2, 1, 6, "", ("93.184.216.34", port))]
 
-    real_spawn = helper.spawn_detached
+    real_spawn = helper.spawn_player
 
-    def spawn(argv, cwd="/"):
-        launched = real_spawn(argv, cwd)
+    def spawn(argv, cwd, proxy_fd, control_fd, env=None):
+        launched = real_spawn(argv, cwd, proxy_fd, control_fd, env)
         state["phase"] = "bind"
         state["bind_at"] = clock.t
         return launched
+
+    # D-SINK-102: the relay, at its bounds. Its listeners are doubles (nothing
+    # is bound), its port the one the found player's command line names; a
+    # spawned relay refuses its status at once (as one not yet listening
+    # again does) until RELAY_IPC_S before RELAY_START_S runs out, and from
+    # then on answers just inside the bound the code hands each question, so
+    # the wait spends RELAY_START_S whole with its last question at its own
+    # bound (min(RELAY_IPC_S, the time left): the conformance
+    # review; `learned["relay_tries"]` holds the bounds it was handed); and
+    # every other question -- the adopted player's status, the load's
+    # registration, the first-load count -- just inside the bound the code
+    # hands relay_request.
+    walk_port = 40000
+
+    class Listener:
+        def getsockname(self):
+            return ("127.0.0.1", walk_port)
+
+        def fileno(self):
+            return -1
+
+        def close(self):
+            pass
+
+    def relay_request(sock_path, request, peer, timeout=None, relay_pid=0):
+        timeout = helper.RELAY_IPC_S if timeout is None else timeout
+        op = request.get("op")
+        if op == "status" and state["phase"] in ("bind", "spawned"):
+            if state.get("relay_up_at") is None:
+                state["relay_up_at"] = clock.t + helper.RELAY_START_S - helper.RELAY_IPC_S
+            if clock.t < state["relay_up_at"]:
+                return None
+            learned.setdefault("relay_tries", []).append(timeout)
+        clock.t += timeout - _JUST_INSIDE
+        reply = {"ok": True, "port": walk_port, "build": helper.player_build(), "_pid": 4243}
+        if op == "load":
+            reply.update(token="a" * 32)
+        if op == "count":
+            reply.update(refused=0, upstream=1)
+        return reply
 
     class Sock:
         def __init__(self, answers, then_all=False):
@@ -273,7 +334,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                            "prefetch-playlist": False, "load-console": False,
                            helper.MPV_AUTO_PROFILES_PROP: False, helper.MPV_RESET_PROP: [],
                            "drag-and-drop": False,
-                           "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE}}
+                           "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE},
+                           # D-SINK-102: and the relay pin, at the walk's port.
+                           "http-proxy": "http://127.0.0.1:%d" % walk_port}
                 for option in helper.PER_FILE_TLS_OPTIONS:
                     answers["option-info/%s/set-from-commandline" % option] = True
                 data = answers.get(command[1])
@@ -290,6 +353,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
 
     class Ipc(_REAL_IPC):
         def connect(self):
+            if state["phase"] == "play":
+                self.sock = Sock(None)
+                return
             if state["phase"] == "bind":
                 learned["bind_last"] = clock.t - state["bind_at"]
                 if bind_after is None or clock.t < state["bind_at"] + bind_after:
@@ -314,7 +380,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         mock.patch.object(helper, "limit_core_of", lambda pid: True),
 
         mock.patch.object(helper, "_read_pipe", read_pipe),
-        mock.patch.object(helper, "spawn_detached", spawn),
+        mock.patch.object(helper, "spawn_player", spawn),
         mock.patch.object(helper, "MpvIpc", Ipc),
         mock.patch.object(helper, "emit", replies.append),
         mock.patch.object(helper, "log", lambda message: None),
@@ -335,6 +401,12 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         patches += [mock.patch.object(helper, "player_peer", lambda client: 777 if state["phase"] == "found" else 4242),
                     mock.patch.object(helper, "launch_verdict",
                                       lambda pid, sock: "older" if older and pid == 777 else "current")]
+    if hasattr(helper, "relay_request"):        # a tree before the relay (a --baseline run) has none
+        patches += [mock.patch.object(helper, "launch_reading",
+                                      lambda pid, sock: ("older", None) if older and pid == 777 else ("current", walk_port)),
+                    mock.patch.object(helper, "relay_request", relay_request),
+                    mock.patch.object(helper, "bind_relay_listeners", lambda sock: (Listener(), Listener())),
+                    mock.patch.object(helper, "proc_parent", lambda pid: 4243)]
     for patch in patches:
         patch.start()
     try:
@@ -342,6 +414,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         session = ["--socket", sock, "--cache-dir", folder, "--id", "t:x", "--seq", "3"]
         if verb == "probe":
             helper.player_probe(parser.parse_args(["player", "probe", "--socket", sock]))
+        elif verb == "play":
+            helper.cmd_play(parser.parse_args(["play", "--socket", sock, "--cache-dir", folder, "--id", "t:x"]))
         else:
             extra = ["--from", "term"] if verb == "restart" else []
             helper.player_start(parser.parse_args(["player", verb] + session + extra), verb)
@@ -369,11 +443,23 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertLessEqual(spent, budget, "player %s walked %.3f s, past its watchdog's %.3f s less the margin"
                              % (verb, spent, budget))
 
+    def assert_the_relay_wait_spent_its_bound(self, learned):
+        """The spawn's wait for its relay asked its last question with the
+        bound a relay question has, RELAY_IPC_S less what the poll had
+        already spent of it, and never more: each question had 10 ms before
+        the conformance review, and the wait's walk then spent
+        about RELAY_IPC_S less than RELAY_START_S."""
+        tries = learned.get("relay_tries") or []
+        self.assertTrue(tries, "the walk's spawn never asked its relay")
+        self.assertLessEqual(max(tries), helper.RELAY_IPC_S)
+        self.assertGreater(max(tries), helper.RELAY_IPC_S - 2 * helper.SPAWN_POLL_S, tries)
+
     def test_a_start_that_meets_a_wedged_player_fits_its_watchdog(self):
-        spent, reply, signals, _ = walk_long_path("start")
+        spent, reply, signals, learned = walk_long_path("start")
         self.assertTrue(reply and reply.get("ok"), reply)
         self.assertEqual(signals, [15, 9])            # one ladder, from quit
         self.assertGreater(spent, 37.0)               # the long path really was walked
+        self.assert_the_relay_wait_spent_its_bound(learned)
         self.assert_inside_its_watchdog("start", spent)
 
     def test_a_start_that_replaces_another_builds_player_fits_its_watchdog(self):
@@ -392,11 +478,33 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assert_inside_its_watchdog("start", spent)
 
     def test_a_restart_whose_ladder_leaves_the_player_fits_its_watchdog(self):
-        spent, reply, signals, _ = walk_long_path("restart")
+        spent, reply, signals, learned = walk_long_path("restart")
         self.assertTrue(reply and reply.get("ok"), reply)
         self.assertEqual(signals, [15, 9, 15, 9])     # its own ladder, then adopt_or_spawn's
         self.assertGreater(spent, 40.0)
+        self.assert_the_relay_wait_spent_its_bound(learned)
         self.assert_inside_its_watchdog("restart", spent)
+
+    def test_a_play_leaves_mpvs_round_trips_what_its_8_s_left_them(self):
+        """D-SINK-102: `play` asks the relay two questions, the gate's
+        status (feed_gate, player_verdict) and the load's registration
+        (relay_register), each bounded by RELAY_IPC_S, beside the play-time
+        lookup. Walked through the shipping cmd_play with those at their
+        bounds and the player answering at once, what the walk leaves of
+        Model.playerWatchdogMs("play") is what is left for mpv's round
+        trips, and it may not be less than the 8 s left them before the
+        relay (`controlMs` less the lookup, 5 s). Red when the watchdog
+        summed one question (9 s, 4 s left: the review of 7c281d8), and red
+        for a third question asked on the way."""
+        spent, reply, signals, _ = walk_player_verb("play")
+        self.assertTrue(reply and reply.get("ok"), reply)
+        self.assertEqual(signals, [])
+        h = BOUNDS["helper"]
+        self.assertGreater(spent, (h["lookupMs"] + 2 * h["relayIpcMs"]) / 1000.0 - 0.01)   # both questions were asked
+        left = BOUNDS["watchdogMs"]["play"] / 1000.0 - spent
+        self.assertGreaterEqual(left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0,
+                                "play's watchdog leaves mpv's round trips %.3f s, less than the %.3f s its 8 s left them"
+                                % (left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0))
 
     def test_a_probe_that_meets_a_player_gone_quiet_fits_its_watchdog(self):
         for answers, floor in ((1, 5.9), (0, 3.9)):

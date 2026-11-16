@@ -3,6 +3,89 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## Unreleased
+
+**The player reaches the network only through a relay of the plugin's
+own, which checks every connection as it is made.** A channel from a
+playlist on the internet could still send the player to this computer or
+your local network: through a redirect from its server, an HLS or DASH
+playlist, segment or key on another server, or a server name that gave the
+plugin one answer and the player another a moment later. What to do:
+**restart the shell** (`omarchy-restart-shell`). If a channel was playing
+when you updated, expect it to reopen once in a new player window; if it
+cannot be put back (it is gone from the list, it belongs to another source,
+or the list has not arrived), the old player is stopped about 15 seconds
+after the shell starts, and you start the channel again yourself.
+
+### Fixed
+
+- **A channel from a playlist on the internet can no longer send the
+  player to this computer or your local network** by a redirect, by an HLS
+  or DASH playlist, segment, key or subtitle on another server, or by a
+  server name that changes its answer after the plugin checks it. The
+  player now connects through a small relay the plugin runs beside it,
+  which checks every connection against the address it actually connects
+  to and connects only to an address it checked; secure (`https`) streams
+  are still verified end to end. `rtmp`, `rtsp` and `srt` channels from
+  such a playlist, which never go through a proxy, are played at the
+  address the plugin checked. Reported by the Omarchy plugin marketplace's
+  maintainer against 0.19.1. (D-SINK-102)
+
+### Changed
+
+- **`--http-proxy` in `mpvArgs` is refused**, and so is a
+  `--demuxer-lavf-o` token naming `http_proxy`; both were accepted with a
+  warning. An `http-proxy` line in your own mpv config no longer applies to
+  the plugin's player either. Set `http_proxy` (and `no_proxy`) in the
+  environment the shell runs in instead, and the relay sends the player's
+  traffic through that proxy. (D-SINK-102)
+- **`mms` and `mmsh` channels from a playlist on the internet are not
+  played**: they are skipped when the playlist is read and counted in the
+  guide footer's playlist warning, because nothing can check where their
+  connections go. A playlist on this computer or your own network keeps
+  them. Each source's playlist is fetched again once after the update so
+  that this applies to it: the active source's when the shell starts, each
+  other source's when you next switch to it. (D-SINK-102)
+- **An `rtsp` channel from a playlist on the internet is always played
+  over TCP**, whatever `--rtsp-transport` says. (D-SINK-102)
+
+### Worth knowing
+
+- **A channel the relay refuses** shows "Refused a local address" on its
+  failure card, and the guide marks it failed, when it is the channel that
+  starts the player; as a change of channel while another plays, it fails
+  like a stream that would not open.
+- **An `rtmp`, `rtsp` or `srt` channel from a playlist on the internet is
+  played at the first address its server name gave** when you played it,
+  with no fallback to the name's other addresses, and an `rtmp` server
+  that tells its streams apart by the name in the address may refuse it.
+- **A player started by an earlier version is never left playing on its
+  own**: if its channel cannot be put back in a new player window, it is
+  stopped, where earlier versions let it play on until you changed
+  channel.
+- **With `--ytdl=yes`, yt-dlp fetches pages itself**, outside the relay's
+  checks.
+- **The relay is one more small program per player**, about 22 MB of
+  memory while idle, and it stops with the player.
+
+### Known limitations
+
+- **Through your own web proxy, a server name is checked by the answer
+  this computer gets**, and the proxy looks the name up again on its own
+  side. Behind a proxy on a network where this computer cannot look names
+  up itself, a channel from a playlist on the internet that is not on the
+  playlist's own server is refused.
+- **If you start mpv through a wrapper script of your own that runs the
+  real player as its child, and the relay is killed outright**, the player
+  plays on with nothing to connect through until it is replaced, at the
+  next change of channel or the next shell restart; until then another
+  account on this computer that took over the relay's port could receive
+  the player's plain-`http` requests.
+- **The limitations listed under 0.19.1 still apply**, except the three
+  this release closes for playlists on the internet: a name that changes
+  its answer, a stream server's redirects, and the servers an HLS or DASH
+  stream's segments come from.
+
 ## 0.19.1 (2026-11-13)
 
 **Checks where a channel's server name leads before the player connects

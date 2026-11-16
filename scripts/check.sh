@@ -14,6 +14,10 @@
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
+#   6c. relay scenario           (scripts/dev-harness/relay-scenario.sh check-tree:
+#                                the player's relay observed at the sinks, a
+#                                real headless mpv inside `unshare -rn`;
+#                                D-SINK-102)
 #   7. ASCII check on code files (glyphs are allowed in .qml only) and the
 #                                control-byte check. BOTH scan the working
 #                                TREE, not the index: `git ls-files --cached
@@ -252,6 +256,10 @@ fail=0
 # test_statePrivateInV4, the save plan's "private" step, the reply that alone
 # lets the write go and the empty-file echo in the engine that runs them;
 # the spec runs 99.
+# 2026-11-16, the merge of dsink102 into dev (lane-merge): 99 stays. The
+# branch's 98 was the floor catching up with the base's 98, not a new
+# function; the merged spec runs 99 (dev's test_statePrivateInV4 beside the
+# branch's amended functions).
 QML_SPEC_MIN=${QML_SPEC_MIN:-99}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
@@ -547,7 +555,23 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-99}
 # each red on 7c1784c's Service.qml and model (15 of 3727 there, the two argv
 # sweeps that name the new builder among them) and under six single-decision
 # mutants (QA-RESULTS "D-SINK-103"); the suite runs 3727.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3727}
+# 2026-11-15, dsink102 (D-SINK-102, the player pinned to its relay): 3696
+# -> 3721 -- the relay pin in the launch argv and its shared vectors, the
+# refused --http-proxy and demuxer http_proxy, the bounds' relay terms, the
+# probe's `relay` field, olderPlayerUnsafe, the destination rules' 5, and
+# the service stopping a relay-less player at the hold's end; 41 of them
+# red on 7c1784c's model and the rest under named mutants; the suite runs 3721.
+# 2026-11-16, dsink102 (the review of 7c281d8): one check dropped, the
+# httpProxy vectors' node half, which computed its input from each vector's
+# own answer and could not go red (a fixture with a vector's answer flipped
+# and another's value changed read 3721 / 0), and one added, `play`'s 8 s
+# pinned to the bounds fixture's controlMs beside its two relay questions
+# (red on the one-question sum); the suite runs 3721.
+# 2026-11-16, the merge of dsink102 into dev (lane-merge): 3727 -> 3732.
+# Both floors trailed the base, which ran 3716: dev's D-SINK-103 adds 11
+# (3727) and the branch's D-SINK-102 nets 5 over that base (its 3721); the
+# merged suite runs 3732, 0 failures.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3732}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -926,7 +950,66 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3727}
 # StatePrivateTest test, an in-place write into the created file before the
 # refusal left with its bytes, red on d726878's helper (QA-RESULTS
 # "D-SINK-103", "The undo, rechecked"); the suite runs 2434, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2434}
+# 2026-11-14, dsink102 (D-SINK-102, the relay the player will be pinned to
+# as its HTTP proxy): 2401 -> 2474. The floor had trailed the suite, which
+# ran 2416 on the lane's base (7c1784c plus the lifted stream_answer_refusal
+# and its 2 tests in tests/test_stream_lookup.py); tests/test_relay.py adds
+# 58 -- head parsing, authentication, the judgment of every answer, check
+# and use, keep-alive, rewriting, the tunnel, the user's own proxy, the
+# peer-uid filter, the control socket, a typed URL's first hop, a dead first
+# address, and the verb's lifecycle -- red 58 of 58 on 7c1784c and under 22
+# single-decision mutants of the relay; the suite runs 2474, 1 skipped.
+# 2026-11-15, dsink102 (the launch path, the load and the adoption bound to
+# the relay): 2474 -> 2506 -- tests/test_relay_player.py's 29 (the build
+# gate's relay, the spawn, the load's token and read-back, pinned and
+# refused schemes, the first load the relay refused, the probe and the
+# orphan check), the relay pin's shared vectors, the stagger bound and the
+# relay pin's read-back forms; 28 of the 29 red on 7c1784c and every one
+# under a named single-decision mutant; the suite runs 2506.
+# 2026-11-16, dsink102 (the review of 7c281d8): 2506 -> 2509 -- a
+# backgrounded player is its relay's child through the shipping start (red
+# under the spawn's subreaper call removed, 4 of 4), a relay that never
+# answers stops that player too (red on 7c281d8), and the walk of `play`
+# (red on the one-question sum and under a third question); the suite runs
+# 2509.
+# 2026-11-16, dsink102 (the relay's own findings of the branch's conformance
+# review, lane-relay-internals): 2509 -> 2527 -- tests/test_relay.py's 16
+# (the settle wait, a typed URL's first hop bound to its own host and port,
+# directly and through the user's proxy, a later head's bound, a tunnel's
+# close of both sides, the control socket's uid check, the connection and
+# control caps, the lookups' stack size and their cap, the same-inode guard
+# on the socket, a SIGTERM's kill of a group child that ignores it, the
+# refusal of a --child that is not the relay's own, and the off-lead SIGTERM
+# through the child's pidfd in a pid namespace, a reused pid included) and
+# tests/test_relay_player.py's 2 (relay_request's pid comparison, the
+# control socket's mode under umask 022); 8 red on 26400dd's code and every
+# one red under a named single-decision mutant; the suite runs 2527.
+# 2026-11-16, dsink102 (the launch and load findings of the branch's
+# conformance review, lane-launch-load): 2527 -> 2534 --
+# tests/test_relay_player.py's 7: what the relay inherits at its exec and
+# the player holds (0-4, the player neither listener), the relay's core
+# limit at its exec, a start whose load the relay registered out of shape
+# (its spawn stopped), a relay socket path past sun_path refused before the
+# older player is touched, the registration's shape over `play`, and the
+# spawn's relay wait's per-question bound (two). 4 red on a863b59's code
+# (plus the orphan check's relay socket and the two walks, amended), the
+# rest each red under a named single-decision mutant; the suite runs 2534.
+# 2026-11-16, dsink102 (the branch's recheck, lane-settle): 2534 -> 2540 --
+# tests/test_relay_player.py's 4: something other than a socket at the
+# relay's socket path and a folder at the options file's path (D-PLY-68)
+# each refused before the older player is touched, a fresh spawn the TLS
+# read-back refuses stopped, and one a newer channel plays on kept;
+# tests/test_relay.py's 1, the cap on the lookup of the user's proxy's name;
+# tests/test_clipboard.py's 1, its reap's identity check (F-HARNESS-114).
+# 4 red on de058b3's code, the rest each red under a named single-decision
+# mutant; one amended (tests/test_player.py, D-PLY-57's kept case); the
+# suite runs 2540.
+# 2026-11-16, the merge of dsink102 into dev (lane-merge): 2540 -> 2585.
+# On the base's 2414, dev's tree adds 45 test functions (D-SINK-103's 20,
+# and 25 more in the five commits after its merge, which left the floor at
+# 2434) and the branch 126 (its 2540); the merged suite runs 2585, 1
+# skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2585}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -979,7 +1062,11 @@ HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # tree's read-back asks -- set-from-commandline for every option the pin block
 # holds, the demuxer's two lists from its argv -- held by two more measured
 # transcripts in the replay and five cases naming the rules.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-43}
+# 43 -> 47 on 2026-11-15 (dsink102): the stub learned http-proxy, the
+# relay pin, from the argv and per file -- two transcripts measured on mpv
+# 0.41.0 (relay-pin, relay-none; re-measured on 2026-11-15, 12 steps, 0
+# differ) and the per-file read-back case.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-47}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
 # check-tree): 32 checks over the shipping helper as a subprocess and the
 # shell's Image as a probe under an address-space rlimit, plus its own "ran
@@ -1037,6 +1124,19 @@ KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
 # at 0.3 is (the claim narrowed to "painted at all"); seen red on the
 # harness-lib that read visible alone.
 OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
+# D-SINK-102 (2026-11-15, dsink102): the relay scenario
+# (scripts/dev-harness/relay-scenario.sh check-tree, tests/relay_rig.py):
+# 103 checks over the shipping helper's `playlist`, `player start` and
+# `play`, a real headless mpv and its relay, inside `unshare -rn`, against
+# logging servers on 11.0.0.1 (the internet), 10.0.0.1 (the LAN) and
+# 127.0.0.1 (this machine) -- R1..R20, the teardown -- plus the scenario's
+# own crash-journal line. `--baseline 9e006be` (0.19.1) answers 55 passed,
+# 47 failed (docs/QA-RESULTS.md "D-SINK-102").
+# 104 -> 108 on 2026-11-16 (lane-launch-load, the conformance review):
+# R15's four, an rtmps channel to 11.0.0.1 whose every connection must be one the relay made for that load's token; red with the
+# per-file proxy emptied for rtmps (a direct connection, as an FFmpeg that
+# stopped handing rtmps's TLS the option would make): 3 of the 4.
+RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-108}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -1711,6 +1811,44 @@ elif (( key_rc == 77 )); then
   fi
 else
   cat "$key_log"; bad "key preflight (exit $key_rc)"
+fi
+
+step "scripts/dev-harness/relay-scenario.sh check-tree (D-SINK-102)"
+# The player's destination checks judged the address the HELPER saw, and the
+# player then followed a redirect, opened an HLS or DASH part on another
+# host, or looked a name up again itself (the maintainer's finding on
+# omacom/omarchy-plugin-marketplace#14290 against 0.19.1). The fix is a
+# relay the helper runs as the player's parent and pins as its HTTP proxy,
+# which judges every connection against the address it reaches. This step
+# observes that at the sinks, on every commit: the shipping helper and a
+# real mpv with --vo=null --ao=null and no display or session bus, inside a
+# private network namespace of its own (`unshare -rn`, a dummy interface
+# carrying 11.0.0.1 and 10.0.0.1, every address a literal, nothing looked
+# up by name), its socket in a scratch runtime directory, never the
+# owner's. A redirect, a variant, a segment, a key, an init section, a
+# subtitle rendition and a DASH BaseURL into this machine or the LAN must
+# reach a logging server that logs nothing, the controls on 11.0.0.1 must
+# play, and the crash journal must not move. About a minute.
+#
+# A machine without python3, mpv, ffmpeg, openssl, unshare, ip or
+# journalctl, or one that cannot make a network namespace with a dummy
+# interface, answers 77 with the reason: RED here unless
+# RELAY_SCENARIO_SKIP_OK=1 is set, printing the reason either way, for the
+# logo step's reason -- a gate that measured nothing has proved nothing.
+relay_log=$CHECK_TMP/relay-scenario.log
+"$ROOT/scripts/dev-harness/relay-scenario.sh" check-tree >"$relay_log" 2>&1; relay_rc=$?
+if (( relay_rc == 0 )); then
+  relay_n=$(grep -c '^PASS' "$relay_log" || true)
+  if (( relay_n < RELAY_SCENARIO_MIN )); then cat "$relay_log"; bad "relay scenario ran $relay_n checks, expected at least $RELAY_SCENARIO_MIN"; else ok "relay scenario ($relay_n checks)"; fi
+elif (( relay_rc == 77 )); then
+  relay_why=$(grep -a '^SKIP' "$relay_log" | head -1 | sed 's/^SKIP relay-scenario: //')
+  if [[ ${RELAY_SCENARIO_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP relay scenario (RELAY_SCENARIO_SKIP_OK=1): %s\n' "$relay_why"
+  else
+    bad "relay scenario SKIPPED, which is not green: $relay_why (set RELAY_SCENARIO_SKIP_OK=1 to accept a gate that observed no relay)"
+  fi
+else
+  cat "$relay_log"; bad "relay scenario (exit $relay_rc)"
 fi
 
 step "ascii check (code files)"

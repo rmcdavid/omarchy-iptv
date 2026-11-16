@@ -471,6 +471,12 @@ def build_parser() -> argparse.ArgumentParser:
     tracks.add_argument("--sub", default=None, help="mpv subtitle track id, or 'no'")
     tracks.set_defaults(func=cmd_player)
 
+    # D-SINK-102: the player's relay, which the player's spawn starts with
+    # its two listeners at fds 3 and 4 and the player as its child; it
+    # refuses to run otherwise (relay_inherited). Its argv carries the
+    # child's pid and nothing else: no token, no URL, no socket path.
+    relay = player_actions.add_parser("relay", help="internal: the player's relay, started by the player's spawn")
+    relay.add_argument("--child", type=int, required=True, help="the player's pid")
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
     orphan.add_argument("--owner-token", type=owner_token_arg, default="", help="the destroyed service instance's token: a claim carrying any other is reassigned")
@@ -597,9 +603,10 @@ def helper_arguments(argv: list[str], environ: Any) -> list[str]:
     handed over in ARGS_ENV (D-SINK-47, D-SINK-48; ARGS_ENV says why).
 
     ARGS_ENV is taken OUT of `environ` on every run, flag or not: os.environ's
-    pop unsets it in the C environment, so the one child this helper starts
-    with its environment -- the detached player, exec'd by spawn_detached --
-    and wl-paste never inherit it. (The kernel's copy at exec, the one
+    pop unsets it in the C environment, so wl-paste never inherits it; the
+    player and its relay are exec'd by spawn_player with explicit
+    environments that leave it out as well (player_environment, and the
+    relay's copy). (The kernel's copy at exec, the one
     /proc/<pid>/environ reads, is untouched; the shield is what closes that.)
 
     A flag with no list, a list that is not JSON, not a list of strings, or

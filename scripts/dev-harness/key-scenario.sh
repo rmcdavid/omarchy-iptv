@@ -948,6 +948,13 @@ elapsed() { python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) - float(s
 # found by a pattern that could match this shell.
 CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; SHELL_PID=""; NESTED=""; ORPHANS=""; SLOW_PID=""
 kill_pid() { [[ -n ${1:-} ]] && kill -0 "$1" 2>/dev/null && { kill -TERM "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
+# A helper the shell started, found among its children: SIGKILL through a
+# pidfd (qa_signal_named), only while its command line runs this run's
+# helper -- the tree under test's, or a slow tree staged under $WORK.
+kill_orphan() {
+  qa_signal_named KILL "${PLUGIN_ROOT:-/nonexistent}/" "$1" || qa_signal_named KILL "${WORK:-/nonexistent}/" "$1"
+  return 0
+}
 cleanup() {
   # The shell's children, recorded by PARENT pid (never a pattern) while
   # the shell is still alive: `reap` TERMs then KILLs quickshell, which does
@@ -957,13 +964,32 @@ cleanup() {
   # inside that window and found the orphan; before this line only the O
   # segment's own recording (just before its deliberate SIGKILL) fed
   # ORPHANS, so a signal between the slow start and that line stranded it.
+  # A child list is ancestry read downward, and that is accepted here (the
+  # lead's call under the owner's standing authority of 2026-11-09, made on
+  # 2026-11-16, the branch's recheck): the rule exists to keep a signal off a
+  # process's ANCESTORS -- a player's parent read off /proc was the user's
+  # own `systemd --user` on a tree with no relay -- and these are the
+  # DESCENDANTS of a shell this run started and recorded (run.sh's qs.pid).
+  # A helper the shell starts has no answer of its own to read, and a
+  # /proc-wide scan by command line could reach another session's helpers
+  # over the same tree. No pid read here is signalled as read: each goes
+  # through kill_orphan, a pidfd whose command line must still run this
+  # run's helper (the tree under test's, or a slow tree under $WORK), so a
+  # pid that exited and was reused is never reached -- unless the process
+  # that reused it is another session's helper over this same tree, which
+  # the needle cannot tell from this run's: that needs a reuse, inside this
+  # cleanup, by a process carrying that exact command-line prefix.
   if (( SHELL_STARTED )) && [[ -n $SHELL_PID ]] && kill -0 "$SHELL_PID" 2>/dev/null; then
     ORPHANS="$ORPHANS $(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' ')"
   fi
   (( SHELL_STARTED )) && env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" reap >/dev/null 2>&1
   # The slow helper's sleeping child survives its parent's SIGKILL (O4) and
-  # the reap above alike: recorded by pid, and not ours to `wait` for.
-  local p; for p in $ORPHANS; do kill -KILL "$p" 2>/dev/null; done
+  # the reap above alike: recorded by pid, and not ours to `wait` for. Each
+  # is signalled through a pidfd and only while its command line still runs
+  # this run's helper (kill_orphan): ORPHANS was read off the shell's
+  # children, and no signal goes to a pid read off ancestry unchecked
+  # (D-SINK-102's conformance review).
+  local p; for p in $ORPHANS; do kill_orphan "$p"; done
   # Q's slow listener, by the pid its LISTENER names (never a pattern)
   [[ -n ${SLOW_PID:-} ]] && kill -TERM "$SLOW_PID" 2>/dev/null
   [[ -n $CAGE_CHILD ]] && kill -TERM "$CAGE_CHILD" 2>/dev/null
@@ -1066,9 +1092,16 @@ JS
   python3 "$s4fake" state --state-dir "$s4theirs" init & s4b=$!
   python3 -I "$s4fake" state --state-dir "$s4mine" init & s4c=$!
   python3 -I "$s4fake" state --state-dir "$s4theirs" init & s4d=$!
-  ( python3 -I "$s4fake" cache prune --args-from-env & python3 -I "$s4fake" state --state-dir "$s4mine" mode & python3 -I "$s4other" cache prune & wait ) & s4sub=$!
+  # The parent's three children recorded by the parent itself as it starts
+  # them (`$!`), never read off its child list (D-SINK-102's conformance
+  # review), and signalled through a pidfd that still names them.
+  : >"$WORK/s4-kids"
+  ( python3 -I "$s4fake" cache prune --args-from-env & echo $! >>"$WORK/s4-kids"
+    python3 -I "$s4fake" state --state-dir "$s4mine" mode & echo $! >>"$WORK/s4-kids"
+    python3 -I "$s4other" cache prune & echo $! >>"$WORK/s4-kids"
+    wait ) & s4sub=$!
   for ((s4i = 0; s4i < 100; s4i++)); do
-    s4kids=$(cat /proc/"$s4sub"/task/*/children 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')
+    s4kids=$(tr -s ' \n' ' ' <"$WORK/s4-kids" 2>/dev/null | sed 's/^ //; s/ $//')
     local s4n=0
     for s4k in $s4a $s4b $s4c $s4d $s4kids; do [[ $(tr '\0' ' ' <"/proc/$s4k/cmdline" 2>/dev/null) == *"s4-"*" "* ]] && s4n=$((s4n + 1)); done
     (( s4n == 7 )) && break
@@ -1076,7 +1109,8 @@ JS
   done
   s4got=$(init_pids "$s4fake" "$s4mine" | tr ' ' '\n' | sort -n | tr '\n' ' ' | sed 's/ $//')
   s4jobs=$(helper_jobs "$s4sub" "$s4fake")
-  kill -TERM $s4kids "$s4a" "$s4b" "$s4c" "$s4d" 2>/dev/null; wait "$s4a" "$s4b" "$s4c" "$s4d" "$s4sub" 2>/dev/null
+  for s4k in $s4kids; do qa_signal_named TERM "$WORK/s4-" "$s4k"; done
+  kill -TERM "$s4a" "$s4b" "$s4c" "$s4d" 2>/dev/null; wait "$s4a" "$s4b" "$s4c" "$s4d" "$s4sub" 2>/dev/null
   ck "S4 init_pids names this run's start-up init only (its own state folder), never another harness's over the same helper path, in both argv shapes (python3 and python3 -I); helper_jobs names the helper's cache and mode runs and no other script's" \
      "$([[ $s4got == "$(printf '%s\n' "$s4a" "$s4c" | sort -n | tr '\n' ' ' | sed 's/ $//')" ]] && echo mine || echo "got:${s4got:-none} mine:$s4a/-I:$s4c theirs:$s4b/-I:$s4d") jobs:[$s4jobs]" "mine jobs:[cache mode]"
   echo "== instrument arm done ($(elapsed) s)"
@@ -1788,11 +1822,17 @@ shell_arm() {
   seed_args=(--playlist "$seed_playlist"); seed_key="(none)"
   [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
   # The crash: SIGKILL by the recorded pid, the slow helper's sleeping child
-  # recorded first (it is orphaned by the kill and reaped by pid below).
+  # recorded first (it is orphaned by the kill and reaped by pid below). Its
+  # child list is read as cleanup's is, and accepted for the same reasons
+  # (the comment there): descendants of the recorded shell, each signalled
+  # only through kill_orphan's pidfd and command-line check.
   orphan=$(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' '); ORPHANS="$ORPHANS $orphan"
-  kill -KILL "$SHELL_PID" 2>/dev/null
+  # The shell itself by the pid run.sh recorded (not this script's child),
+  # through a pidfd once its command line still names this run's root
+  # (F-HARNESS-114).
+  qa_signal_named KILL "$SCRATCH/root" "$SHELL_PID"
   for ((i = 0; i < 50; i++)); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 0.1; done
-  for p in $orphan; do kill -KILL "$p" 2>/dev/null; done
+  for p in $orphan; do kill_orphan "$p"; done
   rm -f "$SCRATCH/qs.pid"; SHELL_STARTED=0
   ck "O4 after the kill state.json is still the file the shell started from (control)" "$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written) activeKey:$(sj "json.dumps(d.get('activeKey', 'absent'))")" 'untouched activeKey:"absent"'
   # The next start, on the real tree, over the entry as the host held it.

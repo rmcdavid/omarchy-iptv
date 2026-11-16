@@ -461,6 +461,30 @@ qa_cmdline() {
   printf '%s\n' "$cmd"
 }
 
+# qa_cmdline_sans_relay_pin <pid>: qa_cmdline's line with exactly one kind
+# of item left out -- `--http-proxy=http://127.0.0.1:<port>`, the deny-all
+# relay pin D-SINK-102 puts on every player this tree starts (a port of
+# 1-65535 with no leading zero, no credential, nothing after the port) --
+# so an S-03 sweep for "://" reads what a channel could have put on the
+# argv and not the pin. Any other `--http-proxy=` item stays, and the sweep
+# then reads it as the URL it is: a credential, another host, a path. Read
+# as the NUL-split items the kernel wrote, never from the joined string, and
+# refused the way qa_cmdline refuses (an empty, non-numeric or gone pid).
+qa_cmdline_sans_relay_pin() {
+  local pid=${1-} item out=""
+  local -a items=()
+  [[ $pid =~ ^[0-9]+$ && -r /proc/$pid/cmdline ]] || return 1
+  mapfile -d '' -t items <"/proc/$pid/cmdline" 2>/dev/null || return 1
+  (( ${#items[@]} > 0 )) || return 1
+  for item in "${items[@]}"; do
+    if [[ $item =~ ^--http-proxy=http://127\.0\.0\.1:([1-9][0-9]{0,4})$ ]] && (( BASH_REMATCH[1] <= 65535 )); then
+      continue
+    fi
+    out+="$item "
+  done
+  printf '%s\n' "$out"
+}
+
 # qa_listener_owned <port> <needle>: whose is the TCP listener on
 # 127.0.0.1:<port>? The pid is read from the LISTENER (`ss -ltnp`), never
 # from `$!` -- behind setsid `$!` is the wrapper (CLAUDE.md, parallel rule 3).
@@ -589,6 +613,83 @@ qa_pid_live() {
 # called once qa_pid_live says the process is gone or a zombie, so this
 # never blocks.
 qa_collect_child() { wait "$1" 2>/dev/null; return 0; }
+
+# qa_signal_named <TERM|KILL|0> <needle> <pid>: send one signal to <pid>
+# through a pidfd, and only once that pidfd's process has a command-line
+# item that begins with <needle> (the items the kernel wrote, NUL-split, so
+# a needle cannot match across two items): a pid that exits and is reused
+# between the read and the signal is never reached, and a process whose
+# command line does not name this run is never signalled at all.
+#   0  sent
+#   1  the process's command line carries no such item: left alone
+#   2  unusable arguments, or the process is gone (or unreadable)
+# D-SINK-102's conformance review, 2026-11-16: a test SIGKILLed a
+# pid it read off a player's PARENT, which on a tree with no relay was the
+# user's own `systemd --user` manager, and the desktop session ended three
+# times. The harness's own signals of a pid it found by ancestry (a
+# process's children, read off /proc or `pgrep -P`) go through this, with a
+# needle naming this run.
+qa_signal_named() {
+  local sig=${1-} needle=${2-} pid=${3-}
+  [[ $sig == TERM || $sig == KILL || $sig == 0 ]] || return 2
+  [[ -n $needle && $pid =~ ^[1-9][0-9]*$ ]] || return 2
+  python3 -I -c '
+import os, signal, sys
+number = {"TERM": signal.SIGTERM, "KILL": signal.SIGKILL, "0": 0}[sys.argv[1]]
+needle, pid = os.fsencode(sys.argv[2]), int(sys.argv[3])
+try:
+    fd = os.pidfd_open(pid)
+except OSError:
+    sys.exit(2)
+try:
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            items = handle.read().split(b"\0")
+    except OSError:
+        sys.exit(2)
+    if not any(item.startswith(needle) for item in items if item):
+        sys.exit(1)
+    try:
+        signal.pidfd_send_signal(fd, number)
+    except OSError:
+        sys.exit(2)
+finally:
+    os.close(fd)
+' "$sig" "$needle" "$pid" 2>/dev/null
+}
+
+# qa_stop_named <pid> <needle> [grace-seconds] [what]: qa_stop_pid's ladder
+# (TERM, a bounded wait, KILL, a final look) with every signal sent through
+# qa_signal_named, for a pid this run did not record itself.
+#   0  gone (also: no pid given, or it was gone already)
+#   1  survived SIGKILL; named on stderr
+#   2  <pid> is not a number, or no needle
+#   3  its command line does not name <needle>: left alone, named on stderr
+qa_stop_named() {
+  local pid=${1-} needle=${2-} grace=${3:-5} what=${4:-process} i ticks rc
+  [[ -n $pid ]] || return 0
+  [[ $pid =~ ^[0-9]+$ && -n $needle ]] || return 2
+  [[ $grace =~ ^[0-9]+$ ]] || grace=5
+  qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+  qa_signal_named TERM "$needle" "$pid"; rc=$?
+  if (( rc == 1 )); then
+    echo "qa_stop_named: $what $pid does not name this run; left alone" >&2
+    return 3
+  fi
+  ticks=$(( grace * 10 ))
+  for ((i = 0; i < ticks; i++)); do
+    qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+    sleep 0.1
+  done
+  echo "qa_stop_named: TERM ignored for ${grace} s by $what $pid; sending KILL" >&2
+  qa_signal_named KILL "$needle" "$pid"
+  for ((i = 0; i < 30; i++)); do
+    qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+    sleep 0.1
+  done
+  echo "qa_stop_named: $what $pid survived SIGKILL" >&2
+  return 1
+}
 
 # qa_served_fixture <template> <out> <port>: the harness fixture with EVERY
 # stream served by run.sh's fixture server on <port>, one distinct URL per

@@ -188,9 +188,10 @@
 # the harness's own scratch home since F-HARNESS-20 (qa_harness_home, which
 # keeps an MPV_HOME that names no path in the real home, as this one does not).
 # MPV_HOME is read by mpv and by nothing else, and it reaches
-# mpv because the player is exec'd with the environment it inherits
-# (bin/omarchy-iptv `spawn_detached` ends in `os.execvp`, and the service
-# assigns no `environment` to its player Process). Whether mpv honoured it is
+# mpv because the player is exec'd with the helper's environment less only
+# the private names and the two proxy names FFmpeg reads (spawn_player's
+# `player_environment`, D-SINK-102; spawn_detached's `os.execvp` before it),
+# and the service assigns no `environment` to its player Process. Whether mpv honoured it is
 # not assumed: S2 is the observation, it runs BEFORE the case that depends on it,
 # and S3 is called out as VACUOUS in the run's own output if S2 did not play.
 #
@@ -1296,8 +1297,10 @@ ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_seen == yes &&
 ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_seen == yes && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
 is "S5 layer 2: the LAST item of the composed argv re-asserts verification ($s5_tls)" "${s5_tls##* }" "last:1"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
-ck "S5 and S-03 still holds: no URL and no credential on the argv" \
-   '[[ "$s5_cmd" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
+# D-SINK-102: every item but the deny-all relay pin (qa_cmdline_sans_relay_pin).
+s5_swept=$(qa_cmdline_sans_relay_pin "$s5_pid")
+ck "S5 and S-03 still holds: no URL but the relay pin and no credential on the argv" \
+   '[[ -n "$s5_swept" && "$s5_swept" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
 wait_log 'ignoring mpvArgs tokens' 10 || true
 # By option NAME: since D-SINK-24 the line names a refused token's option and
 # never its value (Model.mpvRejectedLine), so `--tls-verify=no` reads

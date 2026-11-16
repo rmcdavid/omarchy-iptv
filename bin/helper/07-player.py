@@ -201,6 +201,14 @@ MPV_RESERVED = frozenset((
     # URL, userinfo and path credentials included, for a URL whose last path
     # segment is empty, and the userinfo for one with no path (measured).
     "--load-stats-overlay",
+    # D-SINK-102 (the lead's call under the owner's standing authority of
+    # 2026-11-09, reversing D-SINK-51's warning): PINNED to the player's
+    # relay (mpv_relay_pin). Every connection the player makes over http and
+    # https goes through it, judged against the address it reaches; a token
+    # naming another proxy would carry the channel past every judgment, and
+    # mpv takes the last one. The session's own http_proxy still applies, as
+    # the relay's upstream.
+    "--http-proxy",
 ))
 # D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
 # token may not contain. For an HLS or DASH stream libavformat reopens the URL
@@ -234,9 +242,18 @@ MPV_RESERVED = frozenset((
 # `extension_picky=0` beside it, a stream server answering an HLS segment
 # with an SDP body made the player listen on 0.0.0.0 (measured inside
 # `unshare -rn`). The key is refused whole, and the read-back removes it.
+#
+# D-SINK-102 (the lead's call under the owner's standing authority of
+# 2026-11-09, reversing D-SINK-59's warning): and `http_proxy`. mpv applies
+# demuxer-lavf-o AFTER the network options (read in demux_lavf.c), so the
+# key would replace the per-file proxy of every HLS and DASH reopen and
+# segment, past the relay: measured with a plain mpv.conf line, the HLS
+# demuxer's reopen of the master went to the decoy the line named while the
+# stream layer's open went to the relay. Refused as a token, removed and
+# counted at the read-back (DEMUXER_TLS_FORBIDDEN).
 MPV_DEMUXER_TLS_WORDS = ("verify", "ca_file", "cafile", "listen", "external_sock",
                          "protocol_whitelist", "protocol_blacklist",
-                         "format_whitelist", "format_blacklist", "seg_format_options")
+                         "format_whitelist", "format_blacklist", "seg_format_options", "http_proxy")
 MPV_DEMUXER_OPTS = "--demuxer-lavf-o"
 # D-SINK-55 (2026-10-29). The protocols libavformat may open BELOW a demuxer
 # -- an HLS or DASH segment and key, and whatever a sniffed format opens on its
@@ -418,7 +435,7 @@ MPV_AUTO_PROFILES_PROP = "load-auto-profiles"
 # D-SINK-60: read back with the TLS pins (read_tls_state says why).
 MPV_RESET_PROP = "reset-on-next-file"
 DEMUXER_TLS_ON = frozenset(("tls_verify", "verify"))
-DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", "external_sock"))
+DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", "external_sock", "http_proxy"))
 # The options a [protocol.*] or [extension.*] profile could set at file load,
 # AFTER the read-back, to undo the TLS layer -- harmless on a player that has
 # them set from the command line (the pin block does), and the residual on a
@@ -438,25 +455,25 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # load-stats-overlay (D-SINK-67) included: measured, a pre-pin player's own
 # [protocol.*] profile turning stats back on drew the credentialed filename
 # after the adoption had turned it off.
+#
+# D-SINK-102: and `http-proxy`, the relay pin, which mpv_pin_block composes
+# beside the resume folder because it carries the relay's port.
 PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=", 1)[0])[2:]
-                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
+                                     for token in ("--watch-later-dir=", "--http-proxy=") + MPV_PIN_BLOCK}))
 # mpv's own aliases of pinned options, as a profile's key may spell them.
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
                            "script-opt": "script-opts", "load-osd-console": "load-console"}
 PER_FILE_PROFILE_PREFIXES = ("protocol.", "extension.")
-PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
+PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek", "relay")
 # Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
 # on a SECOND program's command line, so the user is told at the moment the
 # option is in force. Pinned to the JavaScript by the `mpvHandoff` vectors in
 # the player-argv.json. fixture (dev branch)
-# D-SINK-51 (2026-10-29): `--http-proxy` joins them. For a plain-http stream
-# the proxy receives the request line -- the WHOLE credentialed URL -- and the
-# provider headers (measured: the proxy logged both); for https it receives
-# the host name only, TLS staying end to end. A real need for some users, so
-# warned, not refused.
-MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options", "--http-proxy"))
+# D-SINK-51 (2026-10-29) made `--http-proxy` one of them; D-SINK-102 pins it
+# to the relay instead (MPV_RESERVED), so it is refused, not warned.
+MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options"))
 MPV_HANDOFF_SCRIPT_OPTS = frozenset(("--script-opts", "--script-opt"))
 MPV_YTDL_OFF = frozenset(("no", "0", "false"))
 MPV_HANDOFF_TEXT = " hands the stream address to another program"
@@ -467,12 +484,8 @@ MPV_HANDOFF_TEXT = " hands the stream address to another program"
 # loud, because nothing else would say it. Mirror of Model.MPV_DISK_WARN.
 MPV_DISK_WARN = frozenset(("--cache-on-disk",))
 MPV_DISK_TEXT = " writes the stream to disk while it plays"
-# D-SINK-59 (lead, 2026-10-29): `--demuxer-lavf-o` carrying FFmpeg's
-# `http_proxy` key hands a plain-http HLS stream's whole credentialed request
-# line and the provider header to the proxy (measured by rc-mpvpin's recheck,
-# 2 of 2 requests), exactly what --http-proxy does, so it is warned the same
-# way. A substring of the raw token, the MPV_DEMUXER_TLS_WORDS shape.
-MPV_DEMUXER_PROXY_WORD = "http_proxy"
+# D-SINK-59 (lead, 2026-10-29) warned of a `--demuxer-lavf-o` token carrying
+# FFmpeg's `http_proxy` key; D-SINK-102 refuses it (MPV_DEMUXER_TLS_WORDS).
 # D-SINK-53 (lead, 2026-10-29): `--rtsp-transport` other than tcp or http makes
 # every rtsp channel bind RTP and RTCP ports on all interfaces for anyone to
 # send to (measured by lane-dest: SETUP asked for client_port with udp, TCP
@@ -580,8 +593,6 @@ def mpv_arg_hands_off_url(token: str) -> str:
         return name
     if base in MPV_HANDOFF_SCRIPT_OPTS:
         return name if "ytdl" in value else ""
-    if base == MPV_DEMUXER_OPTS:
-        return name if MPV_DEMUXER_PROXY_WORD in value else ""
     return ""
 
 
@@ -758,18 +769,36 @@ def mpv_build_marker(build: Any) -> str:
 
 
 def mpv_launch_argv(sock_path: str, mpv_args: list[str],
-                    dirs: dict[str, str] | None = None, build: str | None = None) -> list[str]:
+                    dirs: dict[str, str] | None = None, build: str | None = None,
+                    relay_port: int = 0) -> list[str]:
     """The player's launch argv: `mpv_args` decides only whether the private
     options file is named (D-SINK-47; its tokens are never on the argv), and
     `build` is player_build()'s unless a caller names one (the shared
     vectors do). launch_verdict composes the same argv through the same
     builder, both forms, which is what makes a player this build launched
-    read as this build's (restart on adoption)."""
+    read as this build's (restart on adoption). `relay_port` is the port of
+    the relay listener the spawn bound (D-SINK-102, mpv_relay_pin); a caller
+    that names none composes port 0, which no relay can hold, so a player
+    launched from such an argv reaches nothing over http and reads as no
+    build's own."""
     where = dirs or player_dirs(sock_path)
-    return compose_launch_argv(sock_path, bool(mpv_args), where, player_build() if build is None else build)
+    return compose_launch_argv(sock_path, bool(mpv_args), where, player_build() if build is None else build,
+                               relay_port)
 
 
-def compose_launch_argv(sock_path: str, include: bool, where: dict[str, str], build: str) -> list[str]:
+def mpv_relay_pin(relay_port: Any) -> str:
+    """D-SINK-102: the pin that makes the relay the player's HTTP proxy,
+    `--http-proxy=http://127.0.0.1:<port>`, with no credential, so that on
+    its own it denies everything (the relay answers 407 and FFmpeg, having
+    no credential, gives up: measured); each load the helper registers
+    carries its own token as a per-file value (channel_load_options). A
+    port that is not one is 0. Mirror of the model's mpvRelayPin."""
+    port = relay_port if isinstance(relay_port, int) and not isinstance(relay_port, bool) and 0 < relay_port < 65536 else 0
+    return "--http-proxy=http://%s:%d" % (RELAY_HOST, port)
+
+
+def compose_launch_argv(sock_path: str, include: bool, where: dict[str, str], build: str,
+                        relay_port: int = 0) -> list[str]:
     """Mirror of Model.buildMpvArgv, pinned by the player-argv.json. fixture (dev branch)
 
     No URL, no "--", no header options, no per-channel title: the first
@@ -871,7 +900,13 @@ def compose_launch_argv(sock_path: str, include: bool, where: dict[str, str], bu
     # place they stood: mpv parses an --include file AT ITS POSITION and marks
     # what it sets as set from the command line (measured), so the pin block
     # after it keeps the last word exactly as it did over the tokens.
-    ] + (["--include=%s" % mpv_args_path(sock_path, where)] if include else []) + mpv_pin_block(where)
+    #
+    # D-SINK-102: the pin block now opens with the relay pin beside the
+    # resume folder (mpv_pin_block), so it too is set from the command line
+    # after the user's tokens and no profile replaces it at file load
+    # (measured: a [protocol.http] profile naming another proxy set nothing
+    # over it), and MPV_TLS_VERIFY is still the last element.
+    ] + (["--include=%s" % mpv_args_path(sock_path, where)] if include else []) + mpv_pin_block(where, relay_port)
 
 
 # D-SINK-47: the private file's name, in the runtime directory.
@@ -962,10 +997,26 @@ def remove_mpv_args(path: str) -> None:
         pass
 
 
-def mpv_pin_block(where: dict[str, str]) -> list[str]:
+def check_mpv_args_path(path: str) -> None:
+    """D-PLY-68: the refusal write_mpv_args meets at a folder in the options
+    file's place (its rename cannot replace one: EISDIR), asked by `player
+    start` and `player restart` before the lock, in the same words, so
+    before a restart's ladder or an adoption's replacement has stopped
+    anything. Anything else there is replaced by that rename, as before."""
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return
+    if stat.S_ISDIR(mode):
+        raise runtime_unwritable("write the player's options", IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR)))
+
+
+def mpv_pin_block(where: dict[str, str], relay_port: int = 0) -> list[str]:
     """Mirror of Model.mpvPinBlock: the trailing pins, the contained resume
-    folder first (a named profile moved it: measured), then MPV_PIN_BLOCK."""
-    return ["--watch-later-dir=%s" % where["watchLater"]] + list(MPV_PIN_BLOCK)
+    folder first (a named profile moved it: measured), then the relay pin
+    (D-SINK-102, mpv_relay_pin), then MPV_PIN_BLOCK, whose last element is
+    D-SINK-13's layer 2."""
+    return ["--watch-later-dir=%s" % where["watchLater"], mpv_relay_pin(relay_port)] + list(MPV_PIN_BLOCK)
 
 
 def stop_escalation(stage: str) -> dict[str, Any]:
@@ -1179,13 +1230,20 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
     feed_gate). An older build cannot produce this prefix, because the marker
     element in it carries the version and the CRC of the helper's part
     table, so reading an appended tail as "current" admits no other build's
-    player. It does NOT police the user's own wrapper: a wrapper that
-    appends has taken the pin block's last word (D-SINK-13 layer 2) whatever
-    this answers, because the replacement a stricter answer would ask for
-    runs through the same wrapper and appends the same tokens again -- that
-    is the user's own configuration, PO-5's shape, like a token in mpvArgs.
-    The stricter reading this replaced cost such a user a new player window
-    at every channel change and every shell restart, and protected nothing.
+    player. It does NOT police the user's own wrapper's appended options
+    here: a wrapper that appends has taken the pin block's last word
+    (D-SINK-13 layer 2) for whatever no read-back holds, because the
+    replacement a stricter answer would ask for runs through the same
+    wrapper and appends the same tokens again -- that is the user's own
+    configuration, PO-5's shape, like a token in mpvArgs. The stricter
+    reading this replaced cost such a user a new player window at every
+    channel change and every shell restart, and protected nothing. What a
+    read-back holds is enforced there whatever this answers: an appended
+    `--http-proxy` (mpv takes the last) leaves the player's `http-proxy`
+    reading something other than the relay pin, so read_tls_state counts it
+    unpinned and every load into that player is refused before any channel
+    line (D-SINK-102, 20.3); and an appended `--tls-verify=no` is the
+    TLS read-back's (D-SINK-16).
 
     The exception: a socket option among the appended elements
     (`--input-ipc-server` in any of mpv's spellings) reads "older". mpv obeys
@@ -1202,17 +1260,31 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
     player's argv holds the user's mpvArgs tokens (before D-SINK-47), and the
     appended elements are the user's own.
     """
+    return launch_reading(pid, sock_path)[0]
+
+
+def launch_reading(pid: Any, sock_path: str) -> tuple[str, int | None]:
+    """launch_verdict's word, and beside it the port of the relay pin the
+    player was launched with (D-SINK-102) when the word is "current", None
+    otherwise. The pin's element is the second tolerance: taken from the
+    candidate at its index when it reads exactly
+    `--http-proxy=http://127.0.0.1:<port>` (relay_pin_port), because the port
+    is the kernel's choice at each spawn, as the screenshot folder is the
+    caller's. Any other value there -- another host, a credential, a port
+    with a leading zero, no pin at all, which is every player of 0.19.x and
+    before -- reads "older". The port is read, never returned out of the
+    helper: it names a listener of this uid and nothing private."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return "unknown"
+        return "unknown", None
     try:
         with open("/proc/%d/cmdline" % pid, "rb") as handle:
             raw = handle.read()
     except OSError:
-        return "unknown"
+        return "unknown", None
     argv = [part for part in raw.split(b"\0") if part]
     token = os.fsencode("--input-ipc-server=%s" % sock_path)
     if not argv or token not in argv:
-        return "unknown"
+        return "unknown", None
     tail = argv[argv.index(token):]
     where = player_dirs(sock_path)
     build = player_build()
@@ -1221,12 +1293,36 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
         if len(tail) < len(expected):
             continue
         head, appended = tail[:len(expected)], tail[len(expected):]
+        port = None
         for at, element in enumerate(expected):
             if element.startswith(b"--screenshot-dir=") and head[at].startswith(b"--screenshot-dir="):
                 expected[at] = head[at]
-        if head == expected:
-            return "older" if any(_names_ipc_server(element) for element in appended) else "current"
-    return "older"
+            elif element.startswith(RELAY_PIN_PREFIX) and relay_pin_port(head[at]) is not None:
+                port = relay_pin_port(head[at])
+                expected[at] = head[at]
+        if head == expected and port is not None:
+            if any(_names_ipc_server(element) for element in appended):
+                return "older", None
+            return "current", port
+    return "older", None
+
+
+# D-SINK-102: what a relay pin element is, as bytes off /proc.
+RELAY_PIN_PREFIX = b"--http-proxy="
+_RELAY_PIN_HEAD = b"--http-proxy=http://127.0.0.1:"
+
+
+def relay_pin_port(element: Any) -> int | None:
+    """The port of one argv element when it is exactly the relay pin,
+    `--http-proxy=http://127.0.0.1:<1-65535>` in ASCII digits with no leading
+    zero, as mpv_relay_pin composes it; None for anything else."""
+    if not isinstance(element, bytes) or not element.startswith(_RELAY_PIN_HEAD):
+        return None
+    digits = element[len(_RELAY_PIN_HEAD):]
+    if not 0 < len(digits) <= 5 or not digits.isdigit() or digits.startswith(b"0"):
+        return None
+    port = int(digits)
+    return port if port < 65536 else None
 
 
 def _names_ipc_server(element: bytes) -> bool:
@@ -1252,6 +1348,129 @@ def still_the_player(record: dict[str, Any], sock_path: str) -> bool:
     if recorded and proc_start_time(pid) != recorded:
         return False
     return ("--input-ipc-server=%s" % sock_path) in proc_cmdline(pid)
+
+
+# ----------------------------------------------------------------- relay
+
+def relay_socket_path(sock_path: str) -> str:
+    """D-SINK-102: the player's relay's control socket, beside the player's
+    own in the 0700 runtime folder. Refused (`spawn_failed`) when it does not
+    fit sun_path, which would otherwise end the spawn with an OSError."""
+    path = sock_path + RELAY_SOCKET_SUFFIX
+    if len(os.fsencode(path)) > RELAY_SUN_PATH_MAX:
+        raise HelperError("spawn_failed", RELAY_PATH_TOO_LONG)
+    return path
+
+
+def relay_request(sock_path: str, request: dict[str, Any], peer: int, timeout: float = RELAY_IPC_S,
+                  relay_pid: int = 0) -> dict[str, Any] | None:
+    """One request on the relay's control socket, one JSON line each way,
+    the whole exchange inside `timeout`. -> the relay's answer, or None when
+    there is no answer to trust: no socket, a peer of another uid, a peer
+    that is not an ANCESTOR of `peer` (the process the player's own socket
+    reaches: the spawn makes the relay the player's parent, and a wrapper's
+    child and a backgrounded one stay below it), a line that is not one JSON
+    object, or the time ran out. The pid is the kernel's (SO_PEERCRED), which
+    names the process that last called listen(2) on that socket: the relay
+    listens again at its start, so the spawn that bound it is never named
+    (measured: the re-listen moved the answer from the binder to the child).
+    Nothing is logged: a request can carry a channel's playlist host.
+    With `relay_pid` the relay must be that process instead, for a question
+    asked after the player has gone (relay_refused_count). The answer
+    carries the relay's pid as `_pid`, for that later question."""
+    import socket as sockets
+    import struct
+    if (not isinstance(peer, int) or peer <= 1) and not (isinstance(relay_pid, int) and relay_pid > 1):
+        return None
+    try:
+        path = relay_socket_path(sock_path)
+    except HelperError:
+        return None
+    deadline = time.monotonic() + max(0.0, timeout)
+    conn = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM | sockets.SOCK_CLOEXEC)
+    try:
+        conn.settimeout(max(0.001, deadline - time.monotonic()))
+        conn.connect(path)
+        raw = conn.getsockopt(sockets.SOL_SOCKET, sockets.SO_PEERCRED, struct.calcsize("3i"))
+        answering, uid, _ = struct.unpack("3i", raw)
+        if uid != os.getuid():
+            return None
+        if relay_pid > 1 and answering != relay_pid:
+            return None
+        if relay_pid <= 1 and not descends_from(peer, answering):
+            return None
+        conn.sendall(json.dumps(request, separators=(",", ":")).encode("ascii") + b"\n")
+        line = bytearray()
+        while b"\n" not in line:
+            left = deadline - time.monotonic()
+            if left <= 0 or len(line) > RELAY_CONTROL_BYTES:
+                return None
+            conn.settimeout(left)
+            chunk = conn.recv(RELAY_CONTROL_BYTES + 1)
+            if not chunk:
+                return None
+            line += chunk
+        reply = json_decode(bytes(line).split(b"\n", 1)[0].decode("utf-8"))
+    except (OSError, ValueError, UnicodeError, struct.error):
+        return None
+    finally:
+        conn.close()
+    if not isinstance(reply, dict):
+        return None
+    reply["_pid"] = answering
+    return reply
+
+
+def relay_status(sock_path: str, peer: int, port: int | None, timeout: float = RELAY_IPC_S) -> dict[str, Any] | None:
+    """The relay's status when it is THIS player's relay: it answers (an
+    ancestor of `peer`, relay_request), and says it serves `port` -- the
+    port on the player's own command line -- for this build. None otherwise.
+
+    Asked again until `timeout` runs out, because a relay that has just been
+    spawned answers only once its interpreter has started (about 0.3 s idle,
+    measured) and listened again: until then a connection is queued under
+    the spawn's credentials and refused by the ancestor check, at once. So a
+    zap that reaches a player inside its first moments is not read as one
+    whose relay is gone, which would replace it."""
+    if port is None:
+        return None
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        reply = relay_status_once(sock_path, peer, port, deadline - time.monotonic())
+        if reply is not None:
+            return reply
+        if time.monotonic() + SPAWN_POLL_S >= deadline:
+            return None
+        time.sleep(SPAWN_POLL_S)
+
+
+def relay_status_once(sock_path: str, peer: int, port: int | None, timeout: float) -> dict[str, Any] | None:
+    """relay_status's one question, asked once, its whole exchange inside
+    `timeout` (10 ms at the least): the relay's status when it answers as
+    the ancestor of `peer` for `port` and this build, None otherwise. A relay
+    not yet listening again refuses at once (the ancestor check), so None
+    can come long before the bound."""
+    if port is None:
+        return None
+    reply = relay_request(sock_path, {"op": "status"}, peer, max(0.01, timeout))
+    if (isinstance(reply, dict) and reply.get("ok") is True and reply.get("port") == port
+            and reply.get("build") == player_build()):
+        return reply
+    return None
+
+
+def player_verdict(peer: Any, sock_path: str, timeout: float = RELAY_IPC_S) -> str:
+    """launch_verdict, and for "current" a relay that answers as this
+    player's (relay_status): otherwise "older" (D-SINK-102, decision 16, the
+    lead's call under the owner's standing authority of 2026-11-09). So a
+    player this build launched whose relay is gone -- killed, or a wrapper's
+    child that outlived it -- is replaced, never fed: its pin names a port
+    nothing of ours holds, and a plain-http request it sends there carries
+    the channel's whole address and headers to whatever binds it next."""
+    verdict, port = launch_reading(peer, sock_path)
+    if verdict != "current":
+        return verdict
+    return "current" if relay_status(sock_path, peer, port, timeout) is not None else "older"
 
 
 # ------------------------------------------------------------------ lock
@@ -1411,7 +1630,49 @@ def _read_pipe(fd: int, timeout: float) -> bytes:
     return b"".join(chunks)
 
 
-def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
+def player_environment(environ: Any = None) -> dict[str, str]:
+    """D-SINK-102: the player's environment, explicit, where it used to be
+    inherited whole: the helper's own less the private URL and arguments
+    (URL_ENV, ARGS_ENV) and less the two names FFmpeg reads
+    (PLAYER_PROXY_ENV), each copied to its uppercase spelling where that is
+    absent, so a program the user enabled under the player keeps the user's
+    proxy. Nothing is set for FFmpeg: the pin is its only proxy."""
+    env = dict(os.environ if environ is None else environ)
+    for name in (URL_ENV, ARGS_ENV):
+        env.pop(name, None)
+    for lower, upper in PLAYER_PROXY_ENV:
+        value = env.pop(lower, None)
+        if value is not None and upper not in env:
+            env[upper] = value
+    return env
+
+
+def relay_argv() -> list[str]:
+    """The relay's program and arguments, less `--child=`: this
+    interpreter, isolated (`-I`, as Model.helperArgv starts the helper,
+    D-SINK-50), on this helper's own stub, resolved through any link. Never
+    from argv or the environment, so `player start` is no arbitrary-exec
+    verb; no token and no URL, and no `--input-ipc-server=` element, which
+    find_player would read as a player."""
+    stub = globals().get("__file__") or ""
+    return [sys.executable or "python3", "-I", os.path.realpath(stub), "player", "relay"]
+
+
+PR_SET_PDEATHSIG = 1
+
+
+def _prctl() -> Any:
+    """libc's prctl, resolved before a fork so the child calls it without
+    loading anything; None where it cannot be had."""
+    try:
+        import ctypes
+        return ctypes.CDLL(None, use_errno=True).prctl
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+def spawn_player(argv: list[str], cwd: str, proxy_fd: int, control_fd: int,
+                 env: dict[str, str] | None = None) -> dict[str, Any]:
     """setsid + double fork, and the fd hygiene that makes it survivable.
 
     The grandchild reports its own pid over a pipe (so a spawn that never
@@ -1451,8 +1712,37 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     over err_w as `could not start mpv: <words>`), because to the user it is
     the same fact: the player program could not be started. Whatever was
     opened before the failure is closed first.
-    """
+
+    D-SINK-102 (2026-11-14): the grandchild is now the player's RELAY and
+    the player its child (spawn_detached is gone; this generalises it). The
+    grandchild G hands the two listeners the helper bound, `proxy_fd` and
+    `control_fd`, to fds 3 and 4, and forks the player M, which:
+      * asks for SIGKILL when its parent thread ends (PR_SET_PDEATHSIG) and
+        then checks that its parent is still G, so a dead relay takes its
+        player with it and a pinned port is never left for another account
+        to bind (measured: gone in about 5 ms after a SIGKILL of its parent,
+        across mpv's exec; the setting is not inherited by a child M forks,
+        which is the wrapper residual stated in ARCHITECTURE-PLAYER);
+      * closes 3 and 4, puts the launch-window pipe on stderr, reports its
+        pid, sets RLIMIT_CORE (0, 0) and execs mpv with `env`, the explicit
+        environment (player_environment), where execvp inherited everything.
+    G is a child subreaper from before that fork (a wrapper that backgrounds
+    the player and exits leaves it G's), and then sets its own core limit,
+    points stderr at /dev/null and execs the relay (relay_argv) with `--child=<M>`. An exec
+    failure comes back as `m<errno>` for the player and `r<errno>` for the
+    relay; after the second G kills M first. The player and the relay start
+    in parallel, so the relay's interpreter is off the launch path; a
+    connection the player makes before the relay accepts waits in the
+    listener's backlog. -> pid (M's) and stderrFd. The relay's pid is not
+    returned: the helper learns it only from the relay's own answer on its
+    control socket (SO_PEERCRED, relay_register), never off M's ancestry."""
     opened: list[int] = []
+    prctl = _prctl()
+    player_env = player_environment() if env is None else env
+    relay_env = dict(os.environ)
+    for name in (URL_ENV, ARGS_ENV):
+        relay_env.pop(name, None)
+    relay = relay_argv()
     try:
         pid_r, pid_w = os.pipe()
         opened += [pid_r, pid_w]
@@ -1469,21 +1759,34 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
                 pass
         raise HelperError("spawn_failed", "could not start mpv: %s" % (error.strerror or type(error).__name__)) from None
     if child == 0:                                        # pragma: no cover
+        stage = "m"
         try:
             os.setsid()
             if os.fork() > 0:
                 os._exit(0)
-            os.write(pid_w, str(os.getpid()).encode("ascii"))
-            os.close(pid_w)
+            relay_pid = os.getpid()
+            # The leader of its own process group, which the player and
+            # whatever it starts join: the relay passes a SIGTERM to that
+            # group (player_relay), so a wrapper's child hears it too. The
+            # group holds nothing the spawn did not start.
+            os.setpgid(0, 0)
             os.umask(PLAYER_UMASK)
             try:
                 os.chdir(cwd or "/")
             except OSError:
                 os.chdir("/")
-            devnull = os.open(os.devnull, os.O_RDWR)
+            # Every descriptor this needs, moved above the two fixed numbers
+            # first, so handing the listeners to 3 and 4 cannot land on one.
+            held = [fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 10)
+                    for fd in (pid_w, err_w, log_w, proxy_fd, control_fd)]
+            pid_w, err_w, log_w, proxy_high, control_high = held
+            devnull = fcntl.fcntl(os.open(os.devnull, os.O_RDWR | os.O_CLOEXEC), fcntl.F_DUPFD_CLOEXEC, 10)
+            held.append(devnull)
             os.dup2(devnull, 0)
             os.dup2(devnull, 1)
             os.dup2(log_w, 2)
+            os.dup2(proxy_high, 3)
+            os.dup2(control_high, 4)
             # Once this helper exits nobody reads that pipe; an ignored
             # SIGPIPE (inherited through execve) keeps a failed diagnostic
             # write from ever killing the player.
@@ -1492,25 +1795,57 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
                 limit = int(os.sysconf("SC_OPEN_MAX"))
             except (ValueError, OSError):
                 limit = 4096
-            for fd in range(3, min(limit, 4096)):
-                if fd == err_w:
+            for fd in range(5, min(limit, 4096)):
+                if fd in held:
                     continue
                 try:
                     os.close(fd)
                 except OSError:
                     pass
-            # D-SINK-39: the player is the one child that holds the stream
-            # URL and the provider headers, and a crash of it would hand them
-            # to systemd-coredump, durably and readable by every process of
-            # this uid. Set HERE, after the fork and before the exec, so the
-            # helper's own limits are untouched; a failure is reported over
-            # err_w like an exec failure and the player does not start.
+            # A child subreaper BEFORE the player is forked, so a wrapper that
+            # backgrounds the real player and exits at once leaves it this
+            # relay's child, whichever exits first.
+            if prctl is not None:
+                prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+            player = os.fork()
+            if player == 0:
+                # The player. Its death signal first, then the check that
+                # its parent is still the relay: a parent gone before the
+                # prctl would leave it with no death signal at all.
+                if prctl is None or prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0) != 0:
+                    raise OSError(errno.EPERM, "no death signal")
+                if os.getppid() != relay_pid:
+                    os._exit(127)
+                os.close(3)
+                os.close(4)
+                os.write(pid_w, str(os.getpid()).encode("ascii"))
+                os.close(pid_w)
+                # D-SINK-39: the player is the one child that holds the
+                # stream URL and the provider headers, and a crash of it
+                # would hand them to systemd-coredump, durably and readable
+                # by every process of this uid. Set HERE, after the fork
+                # and before the exec, so the helper's own limits are
+                # untouched; a failure is reported over err_w like an exec
+                # failure and the player does not start.
+                disable_core_dumps()
+                os.execvpe("mpv", argv, player_env)
+            # The relay.
+            stage = "r"
+            os.close(pid_w)
             disable_core_dumps()
-            os.execvp("mpv", argv)
+            os.dup2(devnull, 2)
+            try:
+                os.execve(relay[0], relay + ["--child=%d" % player], relay_env)
+            except BaseException:
+                try:
+                    os.kill(player, signal.SIGKILL)
+                except OSError:
+                    pass
+                raise
         except BaseException as error:                    # noqa: BLE001 - reported over the pipe
             number = getattr(error, "errno", 0) or 0
             try:
-                os.write(err_w, str(int(number)).encode("ascii"))
+                os.write(err_w, ("%s%d" % (stage, int(number))).encode("ascii"))
             except OSError:
                 pass
         os._exit(127)
@@ -1528,7 +1863,10 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     pid = int(pid_text) if pid_text.isdigit() else 0
     if failure:
         os.close(log_r)
-        number = int(failure) if failure.isdigit() else 0
+        stage, digits = failure[:1], failure[1:]
+        number = int(digits) if digits.isdigit() else 0
+        if stage == "r":
+            raise HelperError("spawn_failed", "%s: %s" % (RELAY_SPAWN_FAILED, os.strerror(number) if number else "exec failed"))
         if number == errno.ENOENT:
             raise HelperError("mpv_missing", "mpv is not installed")
         raise HelperError("spawn_failed", "could not start mpv: %s" % (os.strerror(number) if number else "exec failed"))
@@ -1722,7 +2060,7 @@ def settle_socket(sock_path: str, deadline: float | None = None) -> bool:
 
 
 def settle_under_lock(sock_path: str, deadline: float | None = None,
-                      lock_timeout: float = SETTLE_LOCK_TIMEOUT) -> bool:
+                      lock_timeout: float = SETTLE_LOCK_TIMEOUT, relay: bool = False) -> bool:
     """The settle for the two call sites that hold no lock of their own
     (X1/X2, ruling CL8).
 
@@ -1735,13 +2073,23 @@ def settle_under_lock(sock_path: str, deadline: float | None = None,
     A call site that cannot take the lock does not unlink. Another verb owns
     the socket at this instant and will settle it itself, and neither of
     these two verbs is worth failing over a leftover file.
+
+    `relay` (D-SINK-102): the relay socket too, under the same lock and only
+    while no player is left on the socket to have a relay (a start that
+    took the lock before this one has spawned its own, and bound its own
+    relay socket), as player_stop removes it. The orphan check passes it
+    after stopping a player whose relay was killed, which never removes its
+    own.
     """
     try:
         lock_fd = acquire_lock(player_lock_path(sock_path), lock_timeout)
     except (HelperError, OSError):
         return False
     try:
-        return settle_socket(sock_path, deadline)
+        settled = settle_socket(sock_path, deadline)
+        if relay and not find_player(sock_path):
+            unlink_relay_socket(sock_path)
+        return settled
     finally:
         release_lock(lock_fd)
 

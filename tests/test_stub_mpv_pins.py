@@ -26,7 +26,7 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from helper_loader import load_helper  # noqa: E402
+from helper_loader import FakeRelay, load_helper  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STUB = ROOT / "scripts" / "qa-stub-mpv.py"
@@ -34,10 +34,15 @@ helper = load_helper()
 
 
 class StubPlayer:
-    def __init__(self, argv, profiles=None):
+    def __init__(self, argv, profiles=None, relay=False):
         self.dir = tempfile.mkdtemp(prefix="stub-pins-")
         os.chmod(self.dir, 0o700)
         self.sock = os.path.join(self.dir, "s")
+        # D-SINK-102: with `relay`, the helper's own relay code in this
+        # process (FakeRelay) and the argv's pin naming its port.
+        self.relay = FakeRelay(helper, self.sock) if relay else None
+        if self.relay is not None:
+            argv = [helper.mpv_relay_pin(self.relay.port) if a.startswith("--http-proxy=") else a for a in argv]
         env = {k: v for k, v in os.environ.items() if not k.startswith("STUB_")}
         env["STUB_LIFE"] = "20"
         if profiles is not None:
@@ -68,13 +73,19 @@ class StubPlayer:
         except subprocess.TimeoutExpired:
             self.proc.kill()
             self.proc.wait(timeout=5)
+        if self.relay is not None:
+            self.relay.close()
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def launch_argv(pins=True):
+# D-SINK-102: the relay port a pinned launch argv names here.
+RELAY_PORT = 48510
+
+
+def launch_argv(pins=True, relay_port=RELAY_PORT):
     dirs = {"cwd": "/nonexistent", "screenshots": "/nonexistent/shots",
             "watchLater": "/nonexistent/wl", "shaderCache": "/nonexistent/sc"}
-    argv = helper.mpv_launch_argv("@SOCK@", [], dirs)
+    argv = helper.mpv_launch_argv("@SOCK@", [], dirs, relay_port=relay_port)
     if not pins:
         # A player started before the pin block: the same launch argv with
         # the tail cut off, which is what 0.15.0's mpv_launch_argv returned
@@ -108,31 +119,36 @@ class StubAgainstTheShippingReadBack(unittest.TestCase):
 
     def test_a_player_this_plugin_starts_is_safe_as_it_comes(self):
         stub = self.player(argv=launch_argv())
-        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 0))
-        self.assertFalse(helper.migrate_tls(stub.client)["migrated"])
-        helper.assert_tls_verification(stub.client, "test")      # raises when it refuses
+        self.assertEqual(helper.read_tls_state(stub.client, RELAY_PORT), (True, 0, 0))
+        self.assertFalse(helper.migrate_tls(stub.client, RELAY_PORT)["migrated"])
+        helper.assert_tls_verification(stub.client, "test", RELAY_PORT)      # raises when it refuses
+        # D-SINK-102: held to its OWN relay's port, which no other port is.
+        self.assertEqual(helper.read_tls_state(stub.client, RELAY_PORT + 1), (True, 0, 1))
 
     def test_a_player_from_before_the_pins_is_migrated_to_safe(self):
         stub = self.player(argv=launch_argv(pins=False))
         # Three pins not held: load-auto-profiles reads "auto", and the
         # demuxer map holds neither the protocol list (D-SINK-55) nor, since
-        # lane-p1c (2026-10-29), the format list (D-SINK-62).
-        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 3))
+        # lane-p1c (2026-10-29), the format list (D-SINK-62); and since
+        # D-SINK-102 the relay pin, which no migration sets: such a player is
+        # replaced, never fed.
+        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 4))
         result = helper.migrate_tls(stub.client)
         self.assertEqual((result["migrated"], result["verify"], result["optionCount"], result["unpinned"]),
-                         (True, True, 0, 0))
+                         (True, True, 0, 1))
 
     def test_a_per_file_profile_on_a_loose_player_is_counted_and_refused(self):
         stub = self.player(argv=launch_argv(pins=False), profiles=HTTPS_PROFILE)
         result = helper.migrate_tls(stub.client)
-        self.assertEqual((result["migrated"], result["unpinned"]), (True, 1))
+        # The profile, and (D-SINK-102) the relay pin it has none of.
+        self.assertEqual((result["migrated"], result["unpinned"]), (True, 2))
         with self.assertRaises(helper.HelperError) as caught:
             helper.assert_tls_verification(stub.client, "test")
         self.assertEqual(caught.exception.code, "tls_unverified")
 
     def test_the_same_profile_is_harmless_to_a_pinned_player(self):
         stub = self.player(argv=launch_argv(), profiles=HTTPS_PROFILE)
-        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 0))
+        self.assertEqual(helper.read_tls_state(stub.client, RELAY_PORT), (True, 0, 0))
 
 
 if __name__ == "__main__":
@@ -154,13 +170,23 @@ class StubAgainstTheShippingWrites(unittest.TestCase):
         return stub
 
     def test_the_stub_takes_every_property_the_shipping_helper_writes(self):
-        stub = self.player(argv=launch_argv(pins=False))
-        seen = record_requests(stub.client)
-        helper.migrate_tls(stub.client)
-        helper.apply_carry(stub.client, {"volume": 37.0, "mute": True, "fullscreen": False}, 2.0)
-        target = {"url": "http://127.0.0.1:9/a.ts", "name": "A", "id": "t:a", "group": "", "headers": {}}
+        # The migration of an older player and the carry, on a player launched
+        # before the pins; the zap, on one this build launched, whose relay
+        # (D-SINK-102) is the helper's own RelayServer in this process -- the
+        # stub's parent, as the spawn makes the real relay (FakeRelay).
+        older = self.player(argv=launch_argv(pins=False))
+        seen = record_requests(older.client)
+        helper.migrate_tls(older.client)
+        helper.apply_carry(older.client, {"volume": 37.0, "mute": True, "fullscreen": False}, 2.0)
+        stub = self.player(argv=launch_argv(), relay=True)
+        relay = stub.relay
+        zap = record_requests(stub.client)
+        target = {"url": "http://127.0.0.1:9/a.ts", "name": "A", "id": "t:a", "group": "", "headers": {},
+                  "relay": {"origin": "user", "host": "127.0.0.1", "port": 9}}
         helper.apply_channel(stub.client, target, stash=None, owner=None, label="test",
                              vouched_pid=stub.proc.pid)
+        self.assertEqual(relay.tokens(), [target["relayToken"]])
+        seen = seen + zap
         writes = [(c[1], err) for c, err in seen if c[0] in ("set_property", "set_property_string")]
         names = sorted(set(name for name, _ in writes))
         # The run reached the writes it is about: the title pair, the track
@@ -173,7 +199,7 @@ class StubAgainstTheShippingWrites(unittest.TestCase):
         # And the stub is not answering success to everything: the same
         # connection, a name mpv does not have.
         self.assertEqual(stub.client.try_command("set_property", "no-such-property", 1), (False, None))
-        self.assertEqual(seen[-1][1], "property not found")
+        self.assertEqual(zap[-1][1], "property not found")
 
 
 class StubAgainstTheShippingOptionsFile(unittest.TestCase):

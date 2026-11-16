@@ -19522,3 +19522,524 @@ and `realpath` resolves every one, so a supported layout (a link inside a
 linked state folder, or a target through a linked folder) gives two
 strings for one file. Still open, P4; nothing in the shipped code changed
 for it.
+
+### D-SINK-102: the player reaches the network only through a relay that judges every connection it makes (the dsink102 branch, 2026-11-15)
+
+The marketplace maintainer on omacom/omarchy-plugin-marketplace#14290,
+against 0.19.1 (9e006be): the player's destination checks could be bypassed
+by an HTTP redirect, an HLS or DASH open on another host, or a name that
+answered the player differently from the helper's lookup a moment earlier.
+Built on the branch `dsink102`, cut from dev 7c1784c: 05267a1 (the judgment
+of one answer lifted out of the play-time lookup), a0e3f14 (the relay,
+`bin/helper/12-relay.py`), 866bf34 (the player bound to it) and the
+scenario's commit, 365db65; the documents followed on 2026-11-16. Unmerged and unreleased. Every call in it is the lead's
+under the owner's standing authority of 2026-11-09 (decisions 1-19 of the
+design of 2026-11-14; decision 10, refusing mms and mmsh, was the owner's
+question and became the lead's call on 2026-11-15).
+
+**No name was resolved by any run below.** The unit tests reach the
+resolver only through `stream_resolve` (the loader's stand-in, or an answer
+each test states). Every red-first run against an older tree ran with
+`resolve_within` held to literals, so code that lacks the seam could not
+reach the resolver either (the core lane's first base run made two real
+lookups of `.test` names through the old fallback before that guard).
+`relay-scenario.sh` runs inside `unshare -rn`, every address a literal.
+
+**Signals.** An earlier draft of `tests/test_relay_player.py` took the
+player's parent for the relay and SIGKILLed it; on a tree with no relay that
+parent is the nearest subreaper, the user's own service manager. Every
+signal in the new tests, the rig and the cells below goes to a process the
+run itself started, through a pidfd opened while that process's command line
+reads as the one expected (`relay_pidfd` and `pidfd_naming` in the test; the
+rig's `Rig.pidfd`, which names this run's scratch socket or this tree's relay
+of one of its players). No pid is ever derived from ancestry.
+
+**Red first.** Counts as each lane reported them; both counts per test.
+
+| Tests | On the code before | On the branch |
+|---|---|---|
+| `tests/test_stream_lookup.py`, 2 new (05267a1) | both error on 7c1784c (87 subtests, no such function) | green, the module 18 -> 20 |
+| `tests/test_relay.py`, 58 (a0e3f14) | 58 of 58 red on 7c1784c (7 failures, 159 errors with subtests) | 58 green |
+| `tests/test_relay_player.py`, 29 (866bf34) | 28 red on 7c1784c (8 failures, 22 errors with subtests); the 29th, a typed URL never pinned, red under the mutant "typed rtsp forced to tcp" | 29 green |
+| the 11 modified python modules (test_mpv, test_player, test_player_bounds, test_player_launch, test_playlist, test_stream_host_names, test_stream_label_zone, test_stream_lookup, test_stub_mpv_pins, test_mpv_options, test_destinations) | 300 of 474 red on 7c1784c (23 failures, 277 errors), their 5 new methods among them | 0 red |
+| node, tests/Model.test.js | 41 of 3721 checks red against 7c1784c's model and Service.qml; the one new check green there (tlsPropertiesSafe over the http-proxy forms) red under "tlsPropertiesSafe ignores unpinned" | 0 red of 3721 |
+| the stub mpv's self-test, 47 cases | the new per-file case red under 3 stub mutants (http-proxy not an option, which also reddens the transcript replay; the per-file value not set; the value not restored) | 47 green; its two transcripts re-measured on mpv 0.41.0 headless, 12 steps, 0 differ |
+| `scripts/dev-harness/relay-scenario.sh`, 104 (this lane) | `--baseline 9e006be`: 55 passed, 47 failed (below) | 104 passed, 0 failed, twice |
+| `scripts/qa-lib-test.sh`, 9 new and 1 recounted (this lane) | on a copy without the scenario: 692 passed, 5 failed (the four new scenario checks and the recount); with the old qa-lib.sh: 698 passed, 4 failed (the four new reader checks; their control green both ways) | 702 passed, 0 failed |
+
+**Mutants**, each one decision of the shipping code on a sealed scratch copy
+of the tree, every one red; on the branch, every named test is green.
+
+- The relay (a0e3f14, 22 against `tests/test_relay.py`, as its commit
+  names them), among them: StreamPolicy.permits always true; a refused
+  answer connected anyway; the per-request target check removed; the
+  per-request token check removed; Proxy-Authorization forwarded to the
+  origin; the uid filter inverted; the one-label test moved after the
+  lookup; every connection taken as a typed URL's first; the no_proxy branch
+  unjudged; the serial connect.
+- The binding (866bf34, 27 python): the environment strip removed (the
+  environment test); the per-file http-proxy dropped (11 failures and 1 error:
+  PlayTest, RestartTest, registration); the read-back fold dropped (10
+  failures, 3 errors); the demuxer http_proxy left in place (4); the token
+  filter's word removed (1); the pin removed from the argv (16 failures, 3
+  errors); PDEATHSIG not set (the relay-killed test); srt not pinned (1);
+  rtsp's transport not forced (2); launch_verdict accepting any http-proxy
+  value (the player-launch vectors); no setpgid (1); registration after the
+  TLS assertion (3); proxy headers kept (1); the first-load count ignored
+  (1); the orphan check ignoring the relay (1); the probe's launch ignoring
+  the relay (1); player_verdict ignoring the relay (4); the play-time mms and
+  mmsh refusal removed (3); the parse-time refusal removed (6);
+  relay_proxy_held accepting any token (1); a relay exec failure unreported
+  (1); the relay wait skipped (4); a stop keeping the relay socket (1); a
+  typed URL's transport forced (1); mpv_relay_pin accepting any port (1); the
+  stagger made serial (2); mmsh kept (3).
+- The binding (866bf34, 5 node): tlsPropertiesSafe ignoring `unpinned` (4);
+  olderPlayerUnsafe ignoring the relay (2); the service ignoring probe.relay
+  (1); mpvRelayPin accepting any port (2); the probe's relay field read raw
+  (1).
+- The scenario (this lane, `relay-scenario.sh check-tree --tree <copy>`): the
+  relay permitting every answer, 77 passed, 27 failed (R1-R8, R10, R11a/b,
+  R13a and R19's old-token refusal: every sink reached THROUGH the relay,
+  which is what shows the tree's greens are the relay's judgment and not an
+  earlier refusal); the environment strip removed, 101 passed, 3 failed
+  (R10: the redirect reached 127.0.0.1 past the relay, the start answered ok,
+  and the player's environment held both names).
+- The predicates (this lane): `relay-scenario.sh` without its two-levers
+  refusal answered `0 1` (a whole run, one transcript) where the check wants
+  `2 0`.
+
+**The design's measurements** (the measurement lane, headless; mpv 0.41.0, FFmpeg n9.0.2; synthetic
+credentials and literal addresses only; the design's deny-all pin and a
+per-file `http-proxy=http://iptv:<32 hex>@127.0.0.1:<port>` beside
+apply_channel's per-file options; a relay that refuses 127.0.0.2, the LAN
+stand-in; a lane-made rig CA). The evidence was under the session
+scratchpad's `d102/lanes/M/` (`logs/rig.log` between `--- CASE` markers,
+`logs/case-*.json`, `logs/mpv-*.log`, the drivers `rig/mA.py` and `rig/mB.py`,
+the rig `rig/rigm.py`) and is gone with that scratch; what follows is the
+lane's report.
+
+- **What the per-file proxy reaches, MEASURED.** Relayed with the token: the stream; a 302 hop (a new
+  absolute-form request on a new proxy connection, already carrying the
+  token, so no 407); HLS master, variant and segments; the AES key; the
+  EXT-X-MAP init section; a WebVTT rendition; DASH's manifest, init sections
+  and chunks on the BaseURL host; https as CONNECT, an https 302 as a second
+  CONNECT, and http to https. Every LAN variant was refused at the relay and
+  127.0.0.2 logged nothing; the subtitle case still played without its
+  subtitle. **rtmps IS relayed** (CONNECT with the token after one 407, TLS
+  verified end to end against the rig CA, RTMP's C0 byte and 1536 bytes
+  through the tunnel, nothing direct; also with the global option and with
+  the environment variable alone). **rtsps is NOT relayed**: 0 relay
+  connections, TLS straight from mpv's own ports, played to eof (only the
+  environment's http_proxy relays it), which matches rtsp.c's tls open taking
+  only the TLS keys. **mms and mmsh are NOT relayed**: GET with UA NSPlayer
+  direct to 127.0.0.2, 0 relay connections. Control: the pin alone, two
+  407s, nothing reached the origin.
+- **Profiles against the pin, MEASURED.** The command-line pin and the per-file value both beat a
+  `[protocol.http]` / `[protocol.https]` profile naming a decoy proxy (the
+  profile still applies, but sets no http-proxy over a command-line option;
+  the per-file value is applied after it); with the pin and no per-file value
+  the pin denies everything over the profile; with neither, the profile's
+  decoy got the GET. A plain mpv.conf `demuxer-lavf-o=http_proxy=<decoy>`
+  line survived the pin block's `-append` pins and sent the HLS demuxer's
+  reopen to the decoy: decision 8's refusal and the read-back's removal of
+  that key are required, not belt and braces.
+- **The 407 flow, MEASURED.** Every new FFmpeg HTTP context sends first without
+  Proxy-Authorization, takes the 407 (Basic realm, Connection: close), and
+  retries with Basic `iptv:<token>` on a new connection; within one context a
+  later request carries the token at once (a redirect hop on a new
+  connection; four kept-alive reuses); an https redirect is a new TLS context
+  and pays a 407 again; with no credential FFmpeg tries twice and gives up.
+  Each new context costs two TCP connections to the relay.
+- **What the read-back reads** (as the integration lane reports it): `get_property http-proxy`
+  reads the current file's per-file value, so the read-back accepts exactly
+  two forms, the pin and the per-file token form.
+- **A refusal at a zap** (as the integration lane reports it): a relay refusal at a ZAP reaches
+  the shell as an ordinary failed open ("Failed to open <the channel's own
+  host>"; for HLS or DASH, Model.unopenedFormatSentence), so decision 19's
+  premise does not hold. Open for the lead; nothing was changed.
+- The remaining five (PDEATHSIG across exec, rtsp's transport over a user's token, an IPv6 literal CONNECT, keep-alive reuse, external-file autoload): their results were not in the material this lane received; R16 and R17 below observe two of them on the branch.
+
+**The scenario** (`scripts/dev-harness/relay-scenario.sh`, rig
+`tests/relay_rig.py`; check.sh's step 6c since this commit). Inside `unshare
+-rn`, a dummy interface carries 11.0.0.1 (global to the helper's classifier:
+the internet) and 10.0.0.1 (the LAN), so a server on 127.0.0.1 is this
+machine. The SHIPPING helper's `playlist` writes three sources'
+channels.json (a public one on 11.0.0.1, a loopback relay on
+127.0.0.1:18083, a LAN one on 10.0.0.1), `player start` spawns the real mpv
+0.41.0 headless (`--vo=null --ao=null --force-window=no`, with the user's
+`--rtsp-transport=udp` and `--tls-ca-file=<the run's CA>`), and `play` zaps;
+no DISPLAY, WAYLAND_DISPLAY, signature or session bus, a scratch HOME, XDG
+tree and runtime, a core limit of 0, the crash journal counted before and
+after. The servers are threads of the rig, logging every request and
+accept. The checks are listed in the rig's docstring; in short: R1 an http
+302 into 127.0.0.1, R2 the same over https, R3 an HLS variant, R4 HLS
+segments on 10.0.0.1, R5 an HLS key, R6a an fMP4 init section, R6b a WebVTT
+rendition (the channel still plays), R7 a DASH BaseURL, R8 a variant that
+302s to 10.0.0.1, R9 five controls on 11.0.0.1 that play, R10 `no_proxy=*`
+and `http_proxy` in the helper's environment, R11 an mpv.conf naming a proxy
+three ways, R12 `--http-proxy` as a token, R13 a loopback relay source, R14
+rtsp (a 302 into 127.0.0.1, and a control set up over TCP interleaved over
+the user's udp), R16 the relay SIGKILLed during play, R17 keep-alive, R18 a
+loadfile from another IPC client, R19 a zap from a public channel to a local
+playlist's channel with the old load's token read off the player and asked
+again after the zap, R20 an mmsh channel skipped at the parse; R15 (rtmps)
+is unit-level, and measured relayed above. [2026-11-16, the conformance
+review: "unit-level" was true of the relay's half only --
+tests/test_relay.py's CONNECT tests, which cannot tell an rtmps CONNECT from
+an https one -- and no test held the player's half, that mpv and FFmpeg hand
+rtmps's TLS the per-file proxy at all, so the gate stayed green if they
+stopped. R15 is now an arm of the scenario ("The launch and load findings",
+below): 108 checks.]
+
+| Tree | Passed | Failed | Time | Crash journal |
+|---|---|---|---|---|
+| the branch, live (transcript `relay-20261115-235020-414138`) | 104 | 0 | 52 s | 87 -> 87 |
+| the branch, check-tree | 104 | 0 | 50 s | 87 -> 87 |
+| `--baseline 9e006be` (0.19.1; transcript `relay-20261115-235126-416245`) | 55 | 47 | 87 s | 87 -> 87 |
+
+On 9e006be every sink was reached: trap logged `GET /r1/admin`, `/r3/v.m3u8`,
+`/r5/key.bin` (six), `/r6a/init.mp4`, the subtitle rendition, `/r7/init-0.m4s`,
+`/r10/admin`, `/r11*` through the mpv.conf proxy, `/r13a/admin`; traps
+accepted R2's connection; lan logged six R4 segments and R8's `/r8/v.m3u8`;
+R14's control was set up over UDP and did not play; R18's loadfile reached
+the provider; the player's environment held `http_proxy` and `no_proxy`
+(R10); the mpv.conf proxy and the `--http-proxy` token received the
+controls' requests (R11, R12, which then did not play), the token only
+warned; R20's mmsh channel was kept; and R16, R17's relay count and R19 have
+no relay to ask. Green on both: the controls R9a-e, R13b, R14's redirect
+(rtsp's 3xx is refused by the protocol list there too), the premises and
+the teardown.
+
+**The predicates.** `qa_cmdline_sans_relay_pin` (scripts/qa-lib.sh) reads a
+player's command line without exactly the deny-all pin
+(`--http-proxy=http://127.0.0.1:<port>`, port 1-65535 with no leading zero),
+so the S-03 "no URL on the command line" sweeps read what a channel could
+have put there: player-scenario's P2 and P5 and tls-scenario's S5 use it. A
+pin with a credential, another host, a leading zero or a port past 65535 is
+kept and swept. player-scenario's L-series `build` comparison now composes
+this tree's argv with the relay port read off the live player's pin (an
+older tree's builder takes none).
+
+**Section F, the cage.** Each cell in its own nested headless cage
+(`WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1`) under
+`scripts/dev-harness/private-bus.sh`, the outer command under `env -u DISPLAY
+-u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u WAYLAND_DISPLAY`,
+the heavy lock held, nice 10; for the two player cells the cage's child
+unsets DISPLAY and the signature again and puts a refusing `hyprctl` and a
+logging `omarchy-notification-send` first on PATH (13 notices caught, none
+reached the session's daemon). Crash journal 87 before and after every cell;
+no cage, shell, player or bus left.
+
+- **key-scenario live** (the release recipe's step), on 866bf34 with the
+  scenario's scripts uncommitted beside it: **139 passed, 0 failed** in
+  555.6 s, 00:07:05 to 00:16:21 CST 2026-11-16, load 2.42 at the end.
+  Transcript `key-20261116-000705-449297` (139 PASS, 0 FAIL).
+- **player-scenario**, the L-series with it, `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`:
+  the first run (transcript `player-20261116-001648-488702`) read 156
+  passed, 36 failed, 2 skipped. Besides the 9 window checks every cage run
+  fails (hyprctl in a cage), P2 and P5 read the relay pin as a URL on the
+  command line, and L1, L2, L4, L9's premise, L7 and L10 compared the live
+  argv with this tree's builder at relay port 0; both are the harness's, and
+  fixed above. The second run, with both fixes (transcript
+  `player-20261116-003347-533163`): **162 passed, 30 failed, 2 skipped**
+  (192 assertions), 00:33:47 to 00:42:15 CST. P2 and P5 green; L1, L1b, L2,
+  L3, L4, L5 and L9 green (older tags' players replaced, this tree's own
+  launch byte for byte with the relay's port, the counter-case kept, the
+  wrapper's player kept); the 9 window checks red as in every cage run; and
+  21 checks of L7, L8 and L10 red, the cases that withhold the channel list
+  past the hold. They assert D-SINK-71's and D-SINK-72's deferral, which
+  decision 15 replaced by a stop at the hold's end: on the branch the older
+  player was gone 16.3 s after the shell loaded (L7: shell loaded at
+  18485.386, the player last seen at 18501.688, the list refreshed at
+  18504.748; L10 16.3 s after its second shell; the first run's L7 16.2 s),
+  nothing replaced it when the list landed, and in L8 no player was on the
+  socket at any sample after the refresh. Two of the reds are not
+  explained by that decision: the shell named no channel during the hold
+  (now-playing absent) and L7's player gave the scenario no reply to its read
+  of load-auto-profiles. Filed as F-HARNESS-112, for reading before the
+  expectations are changed.
+- **One windowed play through the relay** (a driver of this lane's, not
+  committed): the shipping `playlist` and `player start` on a scratch socket
+  under the software-GPU tokens (`--gpu-sw=yes --ao=null --hwdec=no`), the
+  nested display named by path, a loopback playlist and channel, the helper's
+  environment holding `http_proxy` and `no_proxy=*`: **10 passed, 0 failed**.
+  The start's first load is playing; the player's argv holds one deny-all pin
+  and no URL; time-pos moves; `current-vo gpu-next`, `vo-configured true`;
+  the per-file http-proxy carries a token to the relay's port; the relay
+  answers as this player's (its `child` the player's pid), with upstream 1
+  and refused 0; the player's environment holds neither lowercase name; the
+  stream server saw the request; `player stop` ends the player and its
+  relay, and both sockets are gone. The first attempt failed at the start
+  ("mpv closed the connection") because the driver's scratch
+  XDG_RUNTIME_DIR hid the nested display, which a relative WAYLAND_DISPLAY
+  names; with the display named by path it played.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, `env
+-u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+QT_QPA_PLATFORMTHEME`, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its
+real exit status captured, on exactly the tree this section was committed
+with: node 3721 checks (and 3721 without the own-write echo), python 2506
+tests, QML spec 98, harness predicates 702, the relay scenario 104 (step 6c,
+floor 104), the helper split 12 parts, the release allowlist 43 files, the
+marketplace capability scan 0 hits, the mpv option guard 899 options
+(pinned 26, warned 5). Floors moved by this lane: `RELAY_SCENARIO_MIN` 104
+(new) and the predicate suite's EXPECTED 693 -> 702; the node, python and
+spec floors stay where the integration lane put them.
+
+**Filed.** F-HARNESS-112 (player-scenario's L7, L8 and L10, above) and
+F-HARNESS-111: `tests/tls_pins_rig.py`, tls-scenario's windowless arm,
+starts its own players with no relay (its argv composed with no relay port,
+so the pin names port 0) and loads them through the tree's `apply_channel`,
+which on the branch registers each load with the player's relay first; no
+relay answers, so every case would be refused as `not_running` before
+anything is sent, its "the attacker gets nothing" checks passing for that
+reason and its controls red. Read, not run; the live arm, which goes
+through the shell's own `player start`, is not affected.
+
+**For the lead.** A relay refusal at a zap is told as a failed open
+(decision 19's premise, measured not to hold; three ways out in the
+integration lane's report). A current-build player that outlived a
+SIGKILLed relay under a user's wrapper is replaced at the next zap, probe or
+orphan check, and the 10 s health tick's `status` does not ask the relay, so
+while the shell runs with no zap that interval is unbounded. The documents
+the docs plan names (ARCHITECTURE-PLAYER section 20, the README's limits and
+mpvArgs paragraphs, the CHANGELOG lines, CLAUDE.md's rule-5 entry and its
+"42" allowlist count, the decisions log row) are not in this commit.
+[2026-11-16: they are in the documents' commit, which also measured the
+branch's relay idle with one child at 22.3 MB resident and two threads,
+twice, with the tree's own `player relay` started on listeners a scratch
+rig bound and a `sleep` as its child; no signal was sent, and the relay
+exited 0 and removed its socket when the sleep ended. And a Unix socket
+bound under umask 077, as `bind_relay_listeners` binds the control socket,
+reads `srwx------` (0700), not 0600: owner-only either way.]
+
+### The review of 7c281d8 (2026-11-16): four correctness findings settled in one commit
+
+A correctness review of the branch's tip raised four findings, none of them blocking a release; each is settled in one commit on `dsink102`, with no new id. Every run was headless (`env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`), with a decoy HOME, a scratch `XDG_RUNTIME_DIR` and TMPDIR, a core limit of 0 and nice 10, under heavy.lock. Only the stub mpv ran, on scratch sockets under /tmp; no real mpv, no name and no resolver was asked. Nothing was signalled but by the shipping ladder (each record held to its socket token, uid and start time) and by the suite's own cleanup, which now signals a holder of the test's socket token only through a pidfd opened and then checked against that token (`PlayerTestCase.reap`, tests/test_player.py; it used `os.kill` on the scan's pid). The coredump journal read 87 before and after every run.
+
+- **The spawn's subreaper call.** The review's mutant (spawn_player's `prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)` replaced by `pass`, resealed) is red under a test the review did not run: test_player's `WrapperSpawnTest.test_a_wrapper_that_starts_mpv_in_the_background_and_exits_still_plays`, 3 of 3 runs, "could not start the player's relay". So the claim that nothing could go red is not upheld. That test was taken to hold the call only through the spawn's own relay check, which a relay answering as the ancestor of the launched pid's zombie before it reaps it could pass, and the relay tests' LAUNCHER copies the spawn rather than calling it (rule 12). So SpawnPlayerTest gains `test_a_wrapper_that_backgrounds_the_player_leaves_it_its_relays_child`: through the shipping `player start` and a /bin/sh `mpv` that backgrounds the stub and exits, the start answers ok and the socket's player's parent reads `... player relay --child=<the launched pid>` (read off /proc, never signalled). Green on 7c281d8, where the code is right; red under the mutant 4 of 4. LifecycleTest's docstring now says its LAUNCHER covers the `player relay` verb only.
+- **A relay that does not answer, under a backgrounding wrapper.** Upheld. `adopt_or_spawn` laddered only the launched pid when `wait_for_relay` failed, and under that wrapper the launched pid is the wrapper, already gone. `SpawnPlayerTest.test_a_relay_that_never_answers_stops_a_backgrounded_player_too` (a sleeper where the relay would run) is red on 7c281d8: spawn_failed, and the stub still holding the socket afterwards (`[{'pid': 720535, 'startTime': '2585664'}] != []`). It is green on the fix, which ladders, from the SIGTERM rung and by pid, both the launched pid and the process the socket reached (`player_peer`, SO_PEERCRED, never a parent read off /proc). The rung is SIGTERM, not quit, because quit travels over the socket to whatever answers it. The whole SpawnPlayerTest, 8 tests, is green.
+- **`play`'s watchdog.** Upheld, read. Without a vouched pid, `feed_gate` asks `player_verdict`, whose `relay_status` is bounded by RELAY_IPC_S, and `apply_channel` then asks `relay_register`, bounded by another. `Model.playerWatchdogMs("play")` summed one of the two (9,000 ms), so mpv's round trips kept 4 s of it where the 8 s had left them 5 s, and nothing walked `play`. Now:
+  - it is `CONTROL_WATCHDOG_MS + 2 * relayIpcMs`, 10,000 ms;
+  - player-bounds.json gains `controlMs` (8000);
+  - a node check pins `Model.CONTROL_WATCHDOG_MS` and the two questions to the fixture, red on the one-question model (`[8000,1000]` against `[8000,2000]`);
+  - `test_player_bounds` walks the shipping `cmd_play` under its virtual clock, with the lookup and both relay questions at their bounds and the player answering at once. It spent 4.999997 s and left 5.000003 s of 10 s. It is red with the fixture at 9,000 (4.000003 s left against 5.0) and under a mutant asking a third relay question on the way (4.000004 s).
+  Service.qml's comment, the model's and the fixture's arithmetic, and ARCHITECTURE-PLAYER 20.7 say two questions. 20.7 also no longer says that `play`'s 8 s is walked as the other verbs' sums are, because it was never a sum.
+- **The httpProxy vectors' node half.** Upheld. On 7c281d8, with the fixture's "another port of this machine" flipped to held and the per-file form's value replaced by a foreign proxy, node read 3721 checks, 0 failures, that check among them, while test_mpv's `TlsVerificationTest.test_the_relay_pins_forms_are_the_fixtures_read_off_the_player` went red. The check computed `tlsPropertiesSafe(true, 0, held ? 0 : 1)` and compared the answer with `held`, so it was the identity on the fixture. It is dropped. The two answers it restated are the main cases' ("every pin held" with unpinned 0, safe; "a TLS entry left in demuxer-lavf-o" with unpinned 1, not). The fixture's comment, test_mpv's docstring and ARCHITECTURE-PLAYER 20.3 now say the helper alone runs the vectors, since nothing in the model reads `http-proxy`.
+- **Sibling search** (rule 15).
+  - Other places a failed spawn ladders only what it launched:
+    - The no-socket branch has no connection and so no peer. A backgrounded player that has not bound within the spawn window is left, relayed (its relay lives while it does) and fed nothing; the next start adopts it (its relay answers) or ladders it (it does not answer).
+    - `stop_fresh_spawn` (D-PLY-57) leaves a backgrounded player, as that row's "Not covered" already states. It is reached only after `player_foreign`, which such a player does not draw, since its command line reads current.
+    - Inside `spawn_player`, a relay exec failure kills M, G's own child, within microseconds of the fork, usually before M's exec. A player a wrapper had already backgrounded would be left idle, with no relay, and read older at the next start.
+    - None of the three is fed anything, so none is changed here.
+  - Other verbs whose watchdog sums relay questions:
+    - start and restart: relayStartMs + 3 (walked);
+    - probe: one, `relay_status` (walked);
+    - the orphan check: one, started detached with no watchdog;
+    - `status`: none, under the same control watchdog, which it now shares at 10 s.
+  - Other node halves of a shared fixture that take an argument from the very field they are compared with: none found. The search was tests/Model.test.js for a fixture check whose call reads the vector's answer field (held, safe, want, expected, ok, valid, refused, result, verdict); every other `tlsFixture` check calls the model on the vector's inputs.
+
+### The recheck of 68593a1 (2026-11-16, the lead): three corrections and three rows
+
+The recheck upheld the review's four fixes and found three Low items, all settled here by the lead under the owner's standing authority of 2026-11-09:
+
+- **The subreaper test's stated reason.** `test_a_wrapper_that_backgrounds_the_player_leaves_it_its_relays_child` was added on the premise that the spawn's own relay check could pass by a race, a relay answering as the ancestor of the launched pid's zombie before it reaps it. The recheck measured that premise away: with the spawn's subreaper call removed, and again with `wait_for_relay` forced to pass, the new test and `WrapperSpawnTest`'s background case were each red at the start's exit code, never at the parent check, because relay_register asks that the relay be an ancestor of the PEER, the player itself. The test is kept as the direct statement of the property; its docstring, the paragraph above and the board row now say what holds it.
+- **`play`'s watchdog given as 8 s in two places.** The shipped comment above `STREAM_LOOKUP_TIMEOUT_S` (`bin/helper/08-player-verbs.py`) now reads the control slot's 8 s plus the relay's two questions, 10 s; and `test_the_shipping_lookup_is_resolve_within_under_its_bound` (`tests/test_stream_lookup.py`) reads `watchdogMs.play` from `tests/fixtures/player-bounds.json` and asserts the lookup, both relay questions and the zap's connect inside it with 2 s to spare, where it compared the lookup and one connect against a copied `8.0 - 2.0`. Mutant: the fixture's `play` set to 8000 -- red (1 failure); restored -- green, 20 of 20 in the module.
+- **The board row's 9 s and its test count**: the Costs clause now gives 10 s, and the test_relay_player count notes the two tests the review added.
+
+Also settled by the lead, from the correctness review's observations and the lanes' open questions:
+
+- `spawn_player` no longer returns a `relayPid` read off the player's parent. Nothing signalled it, and `relay_refused_count`'s only real input was the pid relay_register recorded from the relay's own answer (SO_PEERCRED); the fallback is gone, so no relay pid anywhere in the helper is read off ancestry. The four tests whose stand-in outcome carried the key no longer do.
+- Two stale design-time comments in `bin/helper/12-relay.py` (the rtmps and rtsps measurement "still to be made", and two "next step of the design") now say what was built and measured.
+- A `proxy` in `--ytdl-raw-options` is stated as part of the `--ytdl` residual in ARCHITECTURE-PLAYER 20's open list and the board row, not refused: READ in mpv 0.41.0's ytdl hook, not measured.
+- Filed: **D-PLY-66** (a relay refusal at a zap reads as an ordinary failed open, and an HLS or DASH one as a playlist-file sentence), **D-PLY-67** (a current-build player that outlives its relay is acted on only at the next zap, shell start or shell exit; recommended bound: `status` asks the relay), and **F-HARNESS-113** (the live-state guard goes red when the owner's running shell saves `state.json` during a gate).
+- Renumbered: the branch filed its player-scenario row under the number `dev` gave the lock guard's row the same night (F-HARNESS-85's follow-up); the branch's is **F-HARNESS-112** everywhere.
+
+### F-HARNESS-112: player-scenario's L7, L8 and L10 rewritten for decision 15 (lane-fh112, 2026-11-16)
+
+The scenario lane filed F-HARNESS-112 with 21 reds in L7, L8 and L10 on 866bf34, two of them unexplained: the shell named no channel during the hold (`NOFIELD`), and L7's player gave no reply to the read of load-auto-profiles (`NOREPLY`). Every call below is the lead's, under the owner's standing authority of 2026-11-09, as the brief for this lane set it, or this lane's where marked.
+
+**The reading, confirmed.** Each cell slept until 19 s after the shell loaded (`L7_PAST`, and the same shape in L8 and L10) and only then read its premises. Decision 15 stops an older player at the hold's end when its channel is not deliverable, and the hold is armed when the probe answers. So by the time the premises were read, the player had already been stopped: about 16.3 s after the load in the scenario lane's second transcript (L7: loaded at 18485.386, P0 last seen at 18501.688, premises read at 19.0 s). Both reds follow from that stop:
+- `stopUnadoptedPlayer` sets now-playing to null, and `qa_field` reads that as `NOFIELD`.
+- A socket with no player is `NOREPLY` to the scenario's `get`.
+
+The same transcript holds the control. L10's FIRST shell read the same two premises inside its hold, through `until_eq`, and both passed (`t:live1 false`). In the code, Service.qml's probe handler sets now-playing from the stash before `openOlderRestart` for an older player, whether it is safe or not; only a player that is not older and not safe is stopped there. Read inside the hold, every premise holds. The reds were the harness's. Nothing in the product changes.
+
+**The cells, rewritten** (`scripts/dev-harness/player-scenario.sh`). Each cell reads its premises inside the hold, then asserts decision 15:
+- **Inside the hold:**
+  - the shell has adopted P0 and names its channel, with no list;
+  - L7's probe has migrated load-auto-profiles;
+  - the probe's mark (D-SINK-72) is on P0, where a new premise first finds none before any probe of this build;
+  - P0 holds the socket alone, with no stop line and no restart line. This is read after the other premises, and it is what shows they were read inside the hold.
+- **At the hold's end:** P0 is first missed within the window `L_HOLD_LO`-`L_HOLD_HI`, 13-23 s after the moment the scenario first saw the shell name the channel. The shell arms the 15 s hold in that same turn. The window allows 2 s for that reading's own lag, and 7 s for `player stop`'s longest ladder (player-bounds.json's ladder("")) plus 1 s for the detached helper's start.
+- **Once P0 is gone:**
+  - the bar names nothing (`NOFIELD`);
+  - there is one stop line, the fixed text `the player another build started cannot be restarted and will not verify ...`, and no restart line.
+- **From `ipc refresh` until 8 s after the list landed:** nothing holds the socket at any 50 ms sample, the bar still names nothing, and the lines are unchanged.
+- **Throughout:** no player card, no other notice, and the coredump journal +0.
+- **New helpers:** the `mark`, `since` and `p0rel` verbs of the scenario's python, `l_wait_gone` (a wait with a deadline, reported when it gives up) and `l_in_window`.
+
+**Two settlements in the cells.**
+- **L8 stays a cell of its own (this lane's call).** The brief offered, as an example, that L8 might now prove a pinned v0.16.0 player is stopped and NOT migrated, with no mark written. Measured, the probe DOES mark it. Its read-back counts the relay pin, which no pre-relay player holds, so `migrate_tls` marks it before its writes. So L8 asserts what was measured: the player's load-auto-profiles reads false from its own argv, it has no mark before the probe, it is marked migrated inside the hold, and it is stopped at the hold's end like L7's.
+  - It is not folded into L7, because its player is the other shape an upgrade meets (the pin block on its own argv), and it shows the missing relay alone is enough.
+- **L10's second shell.** That the second shell reads the player as migrated from the first shell's mark cannot be observed apart on this branch. Its own probe finds the player unsafe for want of a relay, and marks it again whether or not the mark is there. So L10 asserts the following:
+  - the mark is on P0 after the first shell and inside the second shell's hold;
+  - P0 outlived the first shell, which wrote no stop or restart line;
+  - P0 is stopped at the SECOND shell's hold's end, and the late list starts nothing.
+- **The notices.** The first green run read `0 1 0` on all three cells' notice checks. Read off the stub's log, the extra notice was `Playlist refreshed` (one per cell, from the scenario's own `ipc refresh`), beside each shell start's `Bar setting ignored`. The stop itself raised no notice. `notify_others` now excludes those two lever notices, and nothing else. That red run is also the evidence that the check sees a notice.
+
+**Runs.** Each run was player-scenario in its own nested headless cage under `scripts/dev-harness/private-bus.sh`:
+- the cage was `WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1`;
+- the outer command ran under `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u WAYLAND_DISPLAY`, with a scratch `XDG_RUNTIME_DIR` (`/tmp/claude-1000/rt.*`, holding the cage's socket and the harness folder), the heavy lock held, and nice 10;
+- the cage's child refused any display but the nested one, put a refusing `hyprctl` and a logging notifier first on PATH, set `ulimit -c 0` and the software-GPU lever (`OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`).
+
+The crash journal read 87 before and after every run, and no cage, player or bus was left after any. Nothing was signalled by this lane. The scenario's own teardown (`run.sh reap`) ran as it always does.
+
+| Run | Tree | Transcript | Result | L7, L8, L10 |
+|---|---|---|---|---|
+| green1 (05:53:44-05:58:53 CST) | c1eabe7 + the cells | `player-20261116-055344-1165803` | 187 passed, 12 failed, 2 skipped | 43 of 46; the 3 notice checks red (`Playlist refreshed`, above); P0 first missed 15.49, 15.44, 15.30 s after the channel was named |
+| mut1 (05:59:44-06:05:34) | the mutant `if (s.unsafe === true) return "defer"` in the expired branch of `Model.olderRestartDisposition` | `player-20261116-055944-1181653` | 181 passed, 18 failed | 9 red: per cell, the window (P0 still held the socket at the 23 s deadline: `23.01 NONE`), "names no channel, one stop line" (`t:live1 0 0`) and "nothing held the socket after the refresh" (`max:1 p0:yes`). The deferred player was stopped only when the list landed, so the late-list line check stayed green |
+| mutB (06:06:04-06:11:43) | the mutant `return "hold"` there instead (D-SINK-71's late delivery for an unsafe player) | `player-20261116-060604-1198071` | 178 passed, 21 failed | 12 red: the same 9 and the late-list check (`t:live1 0 1`: the list restarted P0 into a new player) |
+| green2 (06:12:08-06:17:27) | c1eabe7 + the final cells | `player-20261116-061208-1214210` | **190 passed, 9 failed, 2 skipped** (199 assertions, the floor 200 met) | **46 of 46**; P0 first missed 15.27, 15.14, 15.29 s after the channel was named |
+
+- **What stayed the same in every run.** The 9 failures of green2, and those beside the L reds in the others, are the window checks every cage run fails, because hyprctl cannot answer in a nested compositor: P1 twice, P4, P5, P8, P6, P11, and P12 twice. The 2 SKIPs are L1's and L4's window checks. Every other L check (L1, L1b, L2, L3, L4, L5, L9) was green in all four runs, the mutants included.
+- **What could not go red.** In each cell, the "never two players" check and the "list landed" control are guards, green under both mutants. The no-card check carries over from the old cells.
+- **The floor.** `EXPECTED_CHECKS` goes from 193 to 200: L7 15 -> 15, L8 9 -> 14, L10 15 -> 17. `scripts/qa-lib-test.sh`'s floor-versus-file check holds it.
+
+**Sibling search (rule 15).**
+- **Other premise reads taken after a computed deadline**, searched as a sleep against a load time (`+ 19 - time.monotonic()` and its kin) in every `scripts/dev-harness/*.sh`. Only these three cells had one. What is left is `l_wait_gone`'s deadline, which waits for an outcome and reads no premise.
+- **Other scenarios that assert D-SINK-71's or D-SINK-72's deferral or late replacement:**
+  - tls-scenario's S6 asserts that an adopted older player is replaced. It is asserted with the channel list present from the start, which is decision 15's restart of a deliverable channel. This was read, not run, here; its windowless arm is F-HARNESS-111.
+  - key-scenario has none.
+- **The model and the service.** `tests/Model.test.js`, `tests/Model.spec.qml` (`test_olderRestartUnderQtsEngine`, with its `expired, unsafe -> stop` vectors) and the node service harness's relay-less stop at the hold's end already hold decision 15: their vectors ask `stop` of exactly the input both mutants change (read, not run under the mutants here), and this cell is that rule's observation at the sink.
+- **The documents that describe the cells.** `docs/QA.md`'s plan rows PLY-RST-29, -30, -32 and -33 stated the old expectations; each now carries a dated bracket with the new ones. ARCHITECTURE-PLAYER's 4.5.2 bracket and section 20's open list named F-HARNESS-112 as open; both now say what was fixed. The scenario's own header, its `--baseline` notes for 6b5ba6c and c510985 (which were runs of the old cells), and its floor comment are rewritten in the same file.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with. The gate does not run player-scenario (it needs a compositor); what it holds of this change is the floor-versus-file check in `scripts/qa-lib-test.sh` and the ASCII and control-character scans over `scripts/dev-harness/`. No floor in `scripts/check.sh` moved: the node, python, spec and predicate counts are the ones the recheck of 68593a1 left.
+
+### The relay's internals: the branch's conformance review, the relay's own findings (lane-relay-internals, 2026-11-16)
+
+A read-only conformance review of the `dsink102` branch confirmed a set of Low findings; this lane settles the ones in the relay process itself, on the branch with no new id (they are D-SINK-102's own, unreleased), and the next lane takes the rest. Every call below is the lead's, under the owner's standing authority of 2026-11-09. Nothing here touched the owner's desktop, install, player or state: every run was headless (`env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`), with a decoy HOME, a short scratch TMPDIR and runtime folder and a core limit of 0, every mutant batch through the heavy lock; no name was resolved live (the lookups the new tests make reach a stated `getaddrinfo` or the `stream_resolve` seam, literals only), and the crash journal read 87 before and after every run that started a stub player.
+
+**What changed, by finding.**
+
+- **The relay's SIGTERM to its child alone.** A relay that does not lead its process group (none the spawn starts: the spawn makes it the leader) sent SIGTERM to its `--child` by pid, checked only to be over 1, and a reaped child's pid could have been reused. It now takes a pidfd for the child at its start, before its reaper can reap anything, holds it to be its own child (`waitid(P_PIDFD, ..., WNOWAIT)`, which leaves a dead child to the reaper), refuses to start when either fails (`relay_child_pidfd`, `relay_refused`), and signals that child only through the pidfd, which answers ESRCH once the child is reaped. The group signal is sent only to the group whose id is the relay's own pid. Measured: a pidfd opens on a zombie child and signals it, answers ESRCH after the reap, and `waitid` on a pidfd of a process that is not the caller's child raises ChildProcessError (one throwaway probe of this lane's own children).
+- **A SIGTERMed relay's leftovers.** After a SIGTERM the relay stopped at `RELAY_TERM_GRACE_S` whatever was left, so a user's wrapper that ignored the SIGTERM, and the real player under it (no death signal of its own), outlived it with a dead proxy. Now, once the grace has passed, the relay removes its socket and then, when a child of the group it leads is still alive (`relay_group_child_alive`: `waitpid(-<its pid>, WNOHANG)`, a doubt read as alive), sends SIGKILL to that group, itself included. What stays: a real player that has LEFT the group (a wrapper that calls setsid) outlives a SIGTERM as it outlives a SIGKILL; stated in section 20.2 and 20.9, the relay's docstring and D-PLY-67's row.
+- **A typed URL's first hop.** The first upstream connection under a typed `--url`'s token got the first hop's freedom wherever it went. It now gets it only when it is to the URL's own host (`host_key`), and, where it connects to this machine (loopback), the URL's own port too (`RelayTypedPolicy`, `own_host_match`'s reading); any other first connection is judged as a later hop and spends the first. The same holds through the user's proxy, where an unresolvable target passes on the first hop only when it is the URL's host. Nothing under the token is known to open before the typed URL itself (read); the rule is so that nothing that does -- a URL a user's `--ytdl` hook substitutes, say -- inherits its freedom.
+- **The lookups' threads.** `resolve_within` saved, set and restored the process-wide thread stack size around each lookup's start, and two relay threads interleaving left it at the lookup's 1 MiB for every later serving thread (reproduced: 1048576 where 524288 was set, on 26400dd's code). The four are now one step under `RESOLVE_LOCK`, and the relay's own thread starts (`relay_start`: a serving connection, a control connection, a pump) take the same lock, so none starts inside that window. Two starts stay outside it, by design: the reaper, which starts before anything is served, and the grace timer, started from the SIGTERM handler, which must not take a lock the main thread may hold when the signal lands. A lookup that outlives its bound leaves its thread running on the resolver's own clock, and the relay asks one per upstream connection, so the threads the relay's lookups hold are capped: `RESOLVE_WORKERS` counts the threads whose lookup has not returned, under the same lock, and a caller that passes `limit` gets `ResolveBusy` before any thread once that many are outstanding. `stream_resolve` passes `RELAY_LOOKUPS_MAX` (64, `RELAY_CONNECTIONS_MAX`: the lookups' threads are bounded by the same number as the connections that ask them), and so does the relay's lookup of the user's own proxy (`relay_proxy_lookup`); `relay_lookup` answers it as `RelayReply(502, RELAY_LOOKUP_FAILED)`, not as an OSError, so `check_proxied` cannot read it as a name that does not resolve. `player play` asks `stream_resolve` once per channel and never nears it. The helper's fetches pass no limit and look up exactly as before (their suites green: `test_fetch_bounds`, `test_destinations`, `test_host_names`, `test_m3u_bounds`, `test_stream_lookup`, `test_player_bounds`). No verb's watchdog depends on the cap, so it is not in `tests/fixtures/player-bounds.json` or `Model.PLAYER_BOUNDS`. Two test stand-ins of `resolve_within` gained the `limit` keyword the real one now takes (rule 10: a double that refused it would be stricter than the code, and broke): `tests/test_player_bounds.py`'s walk and `tests/test_stream_lookup.py`'s shipping-lookup test, which now also asserts the cap is passed.
+- **Two document claims.** CLAUDE.md's relay entry said every request is judged by `stream_answer_refusal`; a typed URL's token is judged by `DestinationPolicy` across its connections, as section 20.1 said, and the relay's own header comment had the same overstatement (rule 15). Section 20.7, 20.5's refusal list and `01-core.py`'s bounds comment said a head is bounded "from its first byte; no idle timeout before it"; a connection's FIRST head is bounded from the connection's start (a connection that sends nothing is answered 408), and only a later head waits for its first byte, and over either bound a later head closes the connection with no reply (the pump thread may be writing to the client), where 20.5 listed 431 and 408. All corrected; 20.2 now says the relay exits once its children are gone and `RELAY_LINGER_S` later, not "once the group is gone".
+- **A replaced load's token** (live until a ninth registration evicts it): no change. Every document already states it, and the review's re-read settled it there.
+- **The staggered connect.** Confirmed by reading `connect_staggered`: an attempt that fails at once adds nothing to the attempts in flight and leaves `next_start` as it was, and an attempt starts only when nothing is in flight or `next_start` has passed, so the next attempt after an immediate failure starts at once; only a failure that poll reports can come before `next_start`, which is why that branch resets it. The docstring is accurate; no code change. What was missing was a test that the losing and timed-out attempts are closed (below).
+
+**Tests (18 new; the python suite runs 2527, 7 skipped in this lane's decoy-HOME run).** `tests/test_relay.py` gains 16 and `tests/test_relay_player.py` 2:
+
+| Test | Holds | Red on 26400dd's code | Red under |
+|---|---|---|---|
+| TypedUrlTest: a later connection to the first one's host waits for it to settle | the settle wait itself: a second connection to the first's own LAN host, made while the first is in its lookup, passes once the first has connected | no | M9: the later connection skips the settle wait |
+| TypedUrlTest: a first connection to another host is a later hop and spends the first | first-hop freedom bound to the typed host | yes | M10: the first hop not bound to the typed host |
+| TypedUrlTest: on this machine the first hop is the typed host's own port (a literal and a name that answers loopback) | ... and to its port on loopback | yes | M10; M11: the port not compared on loopback (the name case) |
+| TypedUrlTest: through the user's proxy only the typed host passes unresolved on the first hop | the proxied first hop | yes | M10; M12: `RelayTypedPolicy.check_proxied` gone |
+| KeepAliveTest: a later head that stalls after its first byte closes the connection at its bound | the later head's bound | no | M16: no deadline after a later head's first byte |
+| TunnelTest: a tunnel ends both sides when either side ends | an origin's close reaches the client, a client's end reaches the origin | no | M17: the pump's close of both sides gone (the origin case); M17b, the serving thread's close alone gone, stays green by design, because the pump's close also ends the upstream; the two gone together (the double) red in both cases |
+| ControlTest: a control peer of another uid gets no reply and registers nothing | the control side's SO_PEERCRED uid check | no | M6: no uid check |
+| ConnectionBoundsTest: past the connection cap a client gets 503 and reaches no origin | `RELAY_CONNECTIONS_MAX` | no | M14: no cap |
+| ConnectionBoundsTest: past the control cap a control connection is closed unanswered | `RELAY_CONTROL_MAX` | no | M15: no cap |
+| LookupThreadsTest: interleaved lookups leave the stack size as they found it | the lock (a start held open 0.2 s, a second caller 0.1 s in) | yes (1048576 left for 524288) | M18: a fresh lock per call |
+| LookupThreadsTest: past the outstanding lookups cap a connection is 502 and reaches no origin | the cap, over the SHIPPING `stream_resolve` and `resolve_within` with a stated `getaddrinfo`: two lookups held past their bound, then a literal target refused at once without a lookup, then served once the two end | yes | M19: `stream_resolve` passes no limit |
+| DeadFirstAddressTest: the staggered connect (amended) and every attempt ends at the bound (amended) | the losing attempt and every timed-out one closed, read off every socket the connect created | no | M13: the attempts in flight not closed at the end |
+| LifecycleTest: a socket that replaced the relay's own at its path survives the relay's exit | the same-inode guard | no | M5: unlink unconditionally |
+| LifecycleTest: a SIGTERM kills a child of its group that ignores it once the grace is over | the escalation (a wrapper ignoring SIGTERM, and its child with no death signal) | yes | M4: no escalation |
+| LifecycleTest: it refuses a child that is not its own | the start's pidfd and own-child check | yes | M3: no own-child check |
+| LifecycleTest: off its group's lead a SIGTERM reaches its child through the pidfd | the off-lead branch delivers | no | M2: the off-lead branch sends nothing |
+| LifecycleTest: off its group's lead a SIGTERM never reaches a reaped child's reused pid | the pidfd, in a pid namespace of its own (`unshare -rpf --mount-proc`): the child reaped, its pid handed to an impostor through `ns_last_pid`, the relay then asked to stop | no (26400dd's code still checked its reaped set; the window it left was the race between the reap and that check) | M1: the child signalled by pid after the reap |
+| SpawnPlayerTest: the relay's control socket is owner-only whatever the umask | the umask 077 at the bind, after a shipping `player start` under umask 022: `srwx------` | no | M8: no umask at the bind |
+| RelayRequestIdentityTest: a relay pid that is not the answering process gets no answer | `relay_request`'s pid comparison (another pid only compared, never signalled) | no | M7: the comparison skipped |
+| test_stream_lookup's shipping-lookup test (amended) | `stream_resolve` passes the cap | yes | M19 |
+
+8 of the 21 new or amended tests are red on 26400dd's code (the rest hold behaviour the branch already had, which nothing held); each of the 20 single-decision mutants of the shipping code turns its tests red except M17b, by design as above, and the double turns both tunnel cases red. Each mutant ran on a fresh scratch copy of the tree, sealed, running only its tests; the pid-namespace tests signal only inside their namespace, and every process any of them starts is signalled only through a pidfd whose command line the test read first.
+
+**Rule 15, what was searched and cleared.** Every signal the helper sends: the spawn's SIGKILL of a player whose relay failed to exec targets a child the spawn forked and never reaped, so its pid cannot be reused; `stop_ladder`'s signals hold each pid to the socket's token, its uid and its start time first (unchanged, not this lane's); the two `kill(pid, 0)` are existence probes; the relay's group signals now name its own pid. Every `os.unlink` of a socket: the spawn's removal of a stale relay socket (a socket only, under the lock) and `player stop`'s of one a killed relay left (under the lock, only when no player is left) both act before a new relay binds, and the relay's own is the guarded one. Every `threading.stack_size` call: `resolve_within` and the relay's one setting at its start, before anything is served. Every thread the relay starts: the three serving kinds under the lock, the reaper and the grace timer outside it, as said. Every `resolve_within` caller: the fetches through `bounded_create_connection` and `DestinationPolicy.check_proxied` (no limit, unchanged), `stream_resolve` and `relay_proxy_lookup` (capped). Every first-hop grant to a typed URL: a fetch's first hop is its own URL by construction (urllib's first request), so only the relay's needed binding. Every umask around a bind: the spawn's process-wide 077 in the relay's process, and `bind_relay_listeners`'s, now held by a test.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with; the python floor moves 2509 -> 2527.
+
+### The launch and load findings: the branch's conformance review, the rest (lane-launch-load, 2026-11-16)
+
+The read-only conformance review of the `dsink102` branch confirmed Low findings in the relay process (settled by lane-relay-internals, above) and in the spawn, the load and the documents around them; this lane settles the rest, on the branch with no new id (they are D-SINK-102's own, unreleased). Every call below is the lead's, under the owner's standing authority of 2026-11-09. Nothing here touched the owner's desktop, install, player or state: every run was headless (`env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`), with a decoy HOME, a short scratch TMPDIR and runtime folder and a soft core limit of 0, every mutant batch and scenario run through the heavy lock; nothing was resolved live (R15's server is the literal 11.0.0.1 inside the rig's own network namespace), and the crash journal read 87 before and after every run that started a player, stub or real.
+
+**What changed, by finding.**
+
+- **A relay pid read off the player's parent.** `SpawnPlayerTest.start_player` took the relay's pid as `proc_parent(player)` and one test SIGKILLed it (through a pidfd command-line check, which is what kept it from the user's `systemd --user` manager on a tree with no relay). The pid now comes from the relay's own answer, `relay_status(...)["_pid"]` -- SO_PEERCRED on its control socket, asked as the ancestor of that player -- and `relay_pidfd` still checks its command line on a pidfd before any test holds it; `proc_parent` is left only in read-only assertions (the relay is the player's parent; a backgrounded player is its relay's child). The sweep, below, found three more signals whose pid came from ancestry, all in the harness.
+- **The orphan check's leftover socket.** Its `relay_gone` stop settled the mpv socket and left the killed relay's `.relay` file. `settle_under_lock` takes `relay`, and removes the relay socket under the same lock once no player is left, as `player stop` does; the orphan check passes it after its ladder.
+- **The spawn's relay wait.** `wait_for_relay` called `relay_status(..., 0.0)`, so each question had 10 ms for connect, a thread start in the relay and the reply. It now asks one anchor at a time with `relay_status_once` (relay_status's one question, lifted out so both ask it), each inside min(`RELAY_IPC_S`, the time left in `RELAY_START_S`). A relay not yet listening again still refuses at once, so the poll is no slower. Section 20.7's table says so, and the bounds walk now models a spawned relay that answers just inside the bound each question is handed from `RELAY_IPC_S` before the wait's end, so the walk spends `RELAY_START_S` whole with its last question at its own bound, and asserts that bound was handed (walked: a start that meets a wedged player 47.07 s, one that replaces another build's 51.05 s, against 53.25 s, and a restart 50.05 s against 52.45 s -- each watchdog less the 5 s margin -- with the last question handed 1.0 s less a poll; on a863b59's code 46.08 and 49.06 s, the largest bound handed 0.01 s).
+- **The registration's own refusal.** No test reached `relay_register`'s shape check (a token of 32 lowercase hex digits, a port of 1-65535): the relay-gone test closes the relay and the gate refuses first. A play test now changes the FakeRelay's `load` reply ten ways in the helper's reading of it (not ok, upper case, 31 and 33 digits, not hex, a number; port 0, 65536, a boolean, a string) and asserts `not_running` with `outdated` in `RELAY_REGISTER_REFUSAL`'s words, no command to the player and no load.
+- **A start's registration failure.** Inside `player start` or `player restart` that refusal is a local start failure (`Model.playerStartFailure` reads `not_running` as local; only `play` is routed to a start), and the player the start spawned was left idle on the socket. The start's error branch now stops it, as it stops D-PLY-57's (`stop_fresh_spawn`, from the SIGTERM rung, by pid, the process the socket answers never a target), when the error is that refusal. The two documents' sentences that routed every case to `player start` now say which is which.
+- **The stale comment beside the play-time lookup's bound.** The comment beside `STREAM_LOOKUP_TIMEOUT_S` still said the player resolves the name again and that redirects and segment hosts are judged by nobody here. It now states the relay's residuals as section 20.9 does: from a playlist that is not local, http, https and rtmps judged at the relay, rtmp, rtsp and srt pinned, mms and mmsh refused; open, the user's own proxy, `--ytdl`, the wrapper cases, and a typed `--url`'s non-relayed schemes.
+- **A wrapper's environment.** A user's `mpv` wrapper that exports a lowercase `no_proxy` or `http_proxy` for the real player hands FFmpeg what the spawn strips, and the read-back, which reads mpv's properties, cannot see it. Stated as a residual of the wrapper case in section 20.9, CLAUDE.md's relay entry and D-SINK-102's Open list (the wrapper is the user's own code, PO-5's shape); no code change.
+- **The spawn's descriptor hygiene.** No test could go red for it. The relay runs non-dumpable, so its own /proc fd table is closed to this uid (measured: EACCES on the first attempt), and a probe in `relay_argv`'s place reads it at the relay's exec and then execs the real relay in place, keeping its pid, descriptors and argv: the relay inherits exactly 0-4 not close-on-exec, 3 and 4 two sockets, and the player holds neither socket, nor a pipe this test left inheritable. Section 20.2 states the close loop's 4096 bound (`min(SC_OPEN_MAX, 4096)`; the loop is unchanged).
+- **The spawn's core limit for the relay.** The relay sets RLIMIT_CORE (0, 0) again at its own start, so its /proc limits after a start cannot tell the spawn's call from its own (the review's re-read was right); the same probe reads the limit at the exec, with this process's soft limit raised from 0 to one byte so an inherited limit shows.
+- **A relay socket path past sun_path.** It was refused at the bind, after a restart's ladder or an adoption's replacement had stopped the older player, so a socket path of 102-107 bytes ended the start with no player at all. `player start` and `player restart` ask `relay_socket_path` before the lock; the test holds an older player (the stub mpv with another build's argv, which logs every command) on a 104-byte socket path through both verbs: `spawn_failed`, `RELAY_PATH_TOO_LONG`, the older player running and told nothing, nothing launched.
+- **A wrapper's appended proxy.** Refuted as a gap by the review's re-read (an appended `--http-proxy` leaves mpv's `http-proxy` reading something other than the pin, and the read-back refuses every load; a test holds a non-pin value refused). `launch_verdict`'s docstring, which said an appending wrapper has the last word whatever it answers, now says what the read-backs enforce under it.
+- **Stale comments.** `model/mpv.mjs` (a `--demuxer-lavf-o` `http_proxy` token is refused, not told), the player-argv fixture's comment, `disable_core_dumps`' and `helper_arguments`' docstrings (`spawn_player` with explicit environments, not `spawn_detached`); rule 15 found three more naming `spawn_detached` as current: tests/test_player.py's spawn docstring, tls-scenario.sh's MPV_HOME comment and CLAUDE.md's D-SINK-39 entry (bracketed). The rest of that name are history (section 20.2 already says it is gone).
+- **rtmps through the relay.** The scenario's R15 is an rtmps channel to `rtmps://11.0.0.1:18936/r15/x`, a server inside the rig's namespace that counts and holds each connection and answers nothing, so the load waits in its TLS handshake (start `ok`, first load `unknown`) while the rig reads the load's token off the player's per-file `http-proxy` and asks the relay that token's counts (`{"op":"count"}`): the premise (the server accepted a connection), the token, an upstream connection for it, and every accepted connection one the relay made for it. The CONNECT reaches the relay before any TLS or RTMP byte, so no TLS rtmp server is needed. The R15 note above and the rig's docstring said "unit-level (tests/test_relay.py)", which held only the relay's half; both corrected.
+- **A typed URL's schemes.** A typed `--url` is relayed only for http, https and rtmps; its mms, mmsh and rtsp-tunnel connections, redirects included, stay direct (a typed URL is the user's own, the CLI's PO-5 shape). Stated in sections 20.5 and 20.9 and CLAUDE.md's relay entry; no code change.
+- **The remoteSchemes vectors.** The fixture's comment said its vectors run through `parse_m3u` and `player_target`; they met `stream_entry_refusal` only. Each now also meets `parse_m3u`, over a `playlist_source` built from its `source` (held equal to it), and `player_target`, over a cache written from it: kept or skipped and counted in the fixture's words, played or refused `unsupported_scheme` (in the fixture's `play` sentence for `remote`), and nothing looked up for a refused one.
+
+**Tests.** The python suite runs 2534 (2527 before: 7 new in tests/test_relay_player.py; 3 amended there and 2 in tests/test_player_bounds.py); qa-lib-test.sh runs 709 (702: qa_signal_named's five, qa_stop_named's two); the relay scenario 108 (104: R15's four).
+
+| Test | Holds | Red on a863b59's code | Red under |
+|---|---|---|---|
+| SpawnPlayerTest: the relay holds its two listeners and the player neither | the spawn's descriptor hygiene | no | the player's close of 3 and 4 removed; the close loop removed (the inheritable pipe) |
+| SpawnPlayerTest: the relay starts with a zero core limit from the spawn | the spawn's core limit for the relay | no | G's `disable_core_dumps()` before the relay's exec removed, the relay's own kept |
+| SpawnPlayerTest: a start whose load the relay did not register stops the player it spawned | a start's registration failure | yes (the spawn left on the socket) | (the code before it) |
+| RelayPathTooLongTest, start and restart | a relay socket path past sun_path | yes, both (the older player stopped) | (the code before it) |
+| LoadRegistrationTest: a registration the relay answers out of shape refuses the play | the registration's shape | no | the shape check dropped to `isinstance` alone: 7 of its 10 subtests (not ok, a number and a string stay refused by design) |
+| WaitForRelayTest: a relay that takes 50 ms to answer is waited for | the relay wait's per-question bound | yes | (the code before it) |
+| WaitForRelayTest: each question capped by the time left, one anchor at a time | the relay wait's per-question bound | yes | each question given `RELAY_IPC_S` uncapped |
+| ProbeAndOrphanRelayTest: the orphan check (amended) | the orphan check's leftover socket | yes (the socket left) | (the code before it) |
+| PlayerWorstPathWalkTest: start and restart (amended) | the relay wait, walked | yes, both (0.01 s handed) | (the code before it) |
+| RefusedSchemeTest: the shared vectors (amended) | the vectors through parse and play | no | the play-time remote-scheme refusal in `player_target` removed: 4 subtests red (the unamended test called `stream_entry_refusal` alone, which that mutant leaves as it was: read, not run) |
+| qa-lib-test: qa_signal_named (5), qa_stop_named (2) | the sweep's helpers | yes, all 7 (absent) | -- |
+| relay-scenario R15 (4) | rtmps through the relay | -- | the per-file `http-proxy` emptied for rtmps, so the player connects direct as an FFmpeg that stopped handing rtmps's TLS the option would: 105 passed, 3 failed (the premise green: the server accepted the direct connection) |
+
+Each mutant ran on a fresh scratch copy of the tree, sealed, running only its tests; the scenario mutant through `relay-scenario.sh check-tree --tree`.
+
+**Rule 15: the sweep for signals whose pid came from ancestry** (tests/, scripts/dev-harness/, scripts/qa-lib.sh; every `kill`, `os.kill`, `killpg`, `pidfd_send_signal`, `send_signal`, `.kill()` and `.terminate()`, and every reader of ancestry: `proc_parent`, `getppid`, `PPid`, `ps -o ppid`, `pgrep -P`, `/proc/<pid>/task/*/children`). Fixed, the same way -- a pid that is not read off ancestry where one exists, and every signal through a pidfd whose command line is checked first (`qa_signal_named`, `qa_stop_named`, new in qa-lib.sh): run.sh's cleanup found the quickshell under its `timeout` wrapper by `pgrep -P`; it now finds it by exact name and by its own command line naming this run's root (`quickshell -p <root>`) and stops it through `qa_stop_named`. key-scenario's S4 read its stand-ins off a subshell's /proc child list and TERMed them; the subshell now records each as it starts it (`$!`), and each is signalled through `qa_signal_named` (the check-tree arm runs it: 12 passed, no stand-in left). key-scenario's ORPHANS -- the live shell's helpers, which outlive its SIGKILL -- are still read off the recorded shell's children, because a helper the shell starts has no answer of its own to read and a /proc-wide scan by command line could reach another lane's helpers over the same tree; each is now signalled only through a pidfd once its command line runs this run's helper (the tree under test's, or a slow tree under the run's `$WORK`), where it was `kill -KILL` by pid (qa-lib-test's pin on that read stands). [2026-11-16, the branch's recheck, lane-settle: ACCEPTED as the lead's call under the owner's standing authority of 2026-11-09. The rule exists to keep a signal off a process's ANCESTORS -- a player's parent read off /proc was the user's own `systemd --user` on a tree with no relay -- and these pids are the DESCENDANTS of a shell the run started and recorded (run.sh's qs.pid); none is signalled as read, each going through `kill_orphan`'s pidfd and command-line check. What stays: a pid reused, inside the cleanup, by another session's helper over the same tree, which the needle cannot tell from this run's. The reasoning is a comment at both reads in key-scenario.sh.] Cleared: test_relay_player's two other `proc_parent` reads and test_player_bounds' stand-in for it (read-only, or a double); test_relay.py's launcher `getppid` (a check, no signal); tls_pins_rig's /proc children walk and key-scenario's `helper_jobs` (read-only); clip-scenario's `pgrep -P` counts (read-only); player-scenario's `ppid_of` and `pgrep -P` (read-only checks); key-scenario's `ps -o ppid` (an echo); text-scenario's, tls-scenario's and the text spike's `ours` (the pid comes from the listener, `ss`, and the parent read only guards it); relay_rig's R16 (SO_PEERCRED, a pidfd); test_relay.py's, test_player.py's and the rigs' pidfd reaps (recorded or self-reported pids, checked first); test_clipboard's, test_proto_v4's and test_release's kills and the spikes' (Popen's or a stub's own report, not ancestry; test_clipboard's has no command-line check, which is outside this sweep).
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with; the floors move: python 2527 -> 2534, the relay scenario 104 -> 108, qa-lib-test 702 -> 709.
+
+### The recheck's items: the branch's last Low and Info findings (lane-settle, 2026-11-16)
+
+The independent recheck of the `dsink102` branch found it ready to merge, with three Low findings (one measured, two read), three Info items and four notes from the lanes before it. This lane settles them; every call below is the lead's, under the owner's standing authority of 2026-11-09. Nothing touched the owner's desktop, install, player or state: every run was headless (`env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`), with a decoy HOME, a short scratch TMPDIR and runtime folder and a soft core limit of 0, through the heavy lock; nothing was resolved live (the proxy's name is answered by a stated getaddrinfo, every other address is a loopback literal); no signal went to a pid read off ancestry; and the crash journal read 87 before and after every run that started a stub player.
+
+**What changed, by item.**
+
+1. **Something other than a socket at the relay's socket path** (D-SINK-102). `player start` and `player restart` now ask `check_socket_path(relay_socket_path(sock), RELAY_PATH_BLOCKED)` before the lock, beside the length check that was already there, in `bind_relay_listeners`' own words (`socket_path_blocked`, `RELAY_PATH_BLOCKED`); the bind still asks it under the lock. Measured on de058b3 by the new test: both verbs answered `socket_path_blocked` with the older player already stopped.
+2. **A fresh spawn refused before its load** (D-PLY-57, widened). Every `HelperError` `player_start`'s try block can raise after `adopt_or_spawn` returned a spawn, enumerated: `feed_gate`'s `player_foreign` (twice, the start's own and `apply_channel`'s); `ipc_error` from the log subscription and from the stand-down's read (`applied_by_another_client`); in `apply_channel`, `relay_register`'s `not_running`, `assert_tls_verification`'s `tls_unverified` and `ipc_error` from its reads and writes, `ipc_error` from the pause, track, title, user-agent and stash commands and from the neutral headers' `command`, and `ipc_error` from the `loadfile` command itself; nothing after the load raises (the bookkeeping catches its own); and in the stand-down branch, `ipc_error` from the owner claim's write. The rule now: the spawn is stopped (`stop_fresh_spawn`, from the SIGTERM rung, by pid) on every one of them EXCEPT two, which keep today's behaviour -- an error from the `loadfile` command or after it (`apply_channel` sets `target["loadSent"]` just before it, and a lost reply may be a channel that plays), and the stand-down's claim (a newer channel another client applied plays on that spawn). A failure of the stand-down's read itself stops the spawn: no load was seen, and the start was about to load over it. The `not_found` half of D-PLY-57's bystander test, which asserted that any other refusal keeps the spawn, now holds the kept case instead: mpv took the `loadfile` and its reply never came. Not walked: the error branch replaces the first-load window and the relay's first-load count with at most one IPC bound and the TERM rung's ladder, inside the start's watchdog (player-bounds.json's `tail` and `relay` terms).
+3. **key-scenario's orphans from the recorded shell's child list** (D-SINK-102's conformance review). Accepted, with the reasoning as a comment at both `pgrep -P` reads: the rule keeps a signal off a process's ANCESTORS (a player's parent read off /proc was the user's `systemd --user` on a tree with no relay); these are DESCENDANTS of a shell the run started and recorded, a helper has no answer of its own to read, a /proc-wide scan by command line could reach another session's helpers, and each pid goes through `kill_orphan` (a pidfd whose command line must run this run's helper). What stays: a pid reused, inside the cleanup, by another session's helper over the same tree. Recorded in the section above too.
+4. **test_clipboard's reap** (F-HARNESS-114), and the sweep, below. The reap opens a pidfd, reads the command line, requires the stub's path among its items, and only then signals through the pidfd.
+5. **The D-SINK-102 row's "judges EVERY answer by `stream_answer_refusal`"** now says inline that this is a playlist's token, a typed URL's being judged by `DestinationPolicy`.
+6. **The cap on the lookup of the user's own proxy's name** (D-SINK-102) gained its test (LookupThreadsTest): the workers held at `RELAY_LOOKUPS_MAX` by two target lookups that never answer, through the shipping lookup and a stated getaddrinfo; the next target answered by the stand-in for the play-time lookup, so the proxy's own lookup meets the cap: 502 `RELAY_LOOKUP_FAILED` at once (under 0.3 s), the proxy's name never asked, the proxy never reached; once the held lookups end, the same request reaches the proxy (200).
+7. **A typed URL's first hop** (D-SINK-102). Kept as recorded; nothing done.
+8. **F-HARNESS-112's row** names its fix commit, 26400dd; player-scenario's header names both mutants, "defer" and "hold" (the counts are in "F-HARNESS-112", above).
+9. **The relay's exit on the escalation path** (D-SINK-102) is a death by SIGKILL (-9 as a Popen returncode reads it), stated in section 20.2 with the fact that SIGKILL writes no core.
+
+**Tests.** The python suite runs 2540 (2534 before: 4 new in tests/test_relay_player.py, 1 in tests/test_relay.py, 1 in tests/test_clipboard.py; 1 amended in tests/test_player.py). Each mutant ran on a scratch copy of the tree, sealed, running only its tests; the de058b3 runs on an export of that commit with the new tests copied in (the one constant de058b3 lacks, `RELAY_PATH_BLOCKED`, written as its literal sentence).
+
+| Test | Holds | Red on de058b3's code | Red under |
+|---|---|---|---|
+| SpawnPathBlockedTest: a relay socket path holding a file (start, restart) | item 1 | yes, both (the older player stopped) | the pre-lock check asking the length alone: both |
+| SpawnPathBlockedTest: an options file path holding a folder (start, restart) | D-PLY-68 | yes, both (the older player stopped) | the pre-lock check dropped: both |
+| FreshSpawnRefusedBeforeItsLoadTest: the TLS read-back's spawn stopped and fed nothing | item 2 | yes (the spawn left on the socket) | (the code before it) |
+| FreshSpawnRefusedBeforeItsLoadTest: a spawn a newer channel plays on kept | item 2's kept case | no (de058b3 kept every such spawn) | the stand-down's keep dropped |
+| FeedGateTest: only what this start launched (amended: a loadfile whose reply never came keeps its spawn) | item 2's kept case | no (as above) | `loadSent` dropped from the keep |
+| LookupThreadsTest: the user's proxy's name past the cap | item 6 | no | `limit=` dropped from `relay_proxy_lookup` |
+| ClipboardVerbTestCase: the reap signals no pid whose command line is not the stub | item 4 | yes (SIGKILLed, -9) | (the code before it) |
+
+**Rule 15, item 1's siblings: a refusal a spawn meets at a path the user owns, after the older player is stopped** (`player_start`, `adopt_or_spawn`, `bind_relay_listeners`, `spawn_player`, `write_mpv_args` and what they call). Found: a folder at the options file's path (`write_mpv_args`' rename, EISDIR), filed and fixed as D-PLY-68, asked before the lock when the start has tokens. Cleared: `ensure_player_dirs` (warnings, never a refusal); `mpv_args_config`'s `bad_arguments` (the filter refuses every such token first); the options file's temporary name (it carries the helper's own pid, so nothing can be asked of it before the lock); `bind_relay_listeners`' `spawn_failed` (descriptors or memory, not a path); `spawn_player`'s `mpv_missing` and exec failures (the PATH lookup is the grandchild's at its exec, and asking it first would race it; an mpv removed under a running player is D-PLY-54's class); `settle_socket` (never refuses).
+
+**Rule 15, item 2's siblings: another spawn left idle on a refusal.** `adopt_or_spawn`'s own failures (no socket, a relay that never answers) already ladder their spawn; `play` spawns nothing; `player probe` and the orphan check spawn nothing. Cleared.
+
+**Rule 15, item 6's siblings: a lookup the relay makes without its cap.** `relay_lookup` (stream_resolve, held by the cap test above it) and `relay_proxy_lookup` (now held); every other `resolve_within` caller is a fetch's or the play-time lookup's, one per verb, outside the relay. Cleared.
+
+**The sweep: every signal in tests/ and scripts/ whose pid is not the caller's own child and has no identity check** (`kill`, `os.kill`, `killpg`, `pidfd_send_signal`, `send_signal`, `.kill()`, `.terminate()`, `pkill`, and each pid's origin). Fixed, filed as F-HARNESS-114: argv-scenario's cleanup TERMed whoever held port 8766, by the listener's pid, and its trap sits above the port-in-use refusal (rewind-scenario's SERVER_OWNED case): now `qa_signal_named` against `$WORK/slow.py`; player-scenario's L5 listener on port 8769 was TERMed by the listener's pid even when the premise had not found it to be the scenario's own process: the pid is now kept only when it is the scenario's `$!`; the detached harness shell went by a recorded pid with no check (run.sh's `stop_detached_shell`, now `qa_stop_named` against the root; key-scenario's O4 and player-scenario's P14 KILLs, now `qa_signal_named` against `$SCRATCH/root`); P14's players, KILLed from a `pgrep -f` list, now through `qa_signal_named` against the socket token; test_clipboard's reap (item 4); test_release's `stop_recorded_sleep`, which read the command line and then signalled by pid, now through a pidfd opened first; qa-lib-test's "old form" (a `pkill -f` pattern, now a TERM to its two recorded children), its listener stand-in (now `qa_signal_named` against its directory) and its orphan stand-in's belt-and-braces KILL (it carries a marker now, and is KILLed through `qa_signal_named` against it). Open, in F-HARNESS-114: the nested cage's child in `cage_stop` (clip, logo, key and open scenarios, the first-open spike), a self-reported pid TERMed unchecked; it execs `sleep`, so a check needs the child to name the run first, a change to five live-only scripts this lane did not run. Cleared, each the caller's own child by `$!` or Popen and not yet collected: test_proto_v4's probe, release.py's process group (its leader not yet reaped), the live-rewind spike's players, the chno, chno-entry, id-rotate and sources scenarios' harness, argv's and rewind's sweeps, rewind's streams, player-scenario's sampler, private-bus.sh's bus, the filewatch spike's shell and burners, the first-open spike's probe, sources' silent listener, qa-sources-scenarios' harness (its pid file written from `$!` in the same shell), qa-lib-test's other stand-ins (pin, wrapper, deaf, kind, zombie parent, other, server, player stand-ins). Cleared, ownership established before the signal: rewind's listener (SERVER_OWNED), key-scenario's slow listener (a port the kernel chose for this run's server), the text spike's server (its parent checked), the text, tls and sources scenarios' servers (`ours`, then `qa_stop_pid`), run.sh's recorded fixture server (its command line checked first). Checked by command line and then signalled by pid, not through a pidfd (cleared by the sweep's criterion, stated in F-HARNESS-114's row): `qa_reap_players`, qa-player-scenarios' `signal_scratch_player`, key-scenario's `init_pids` reaps, player-scenario's P11 SIGSTOP. Already through a pidfd: test_player's and test_relay_player's reaps, test_relay's, the rigs', `qa_signal_named` and `qa_stop_named`, key-scenario's `kill_orphan`. The live-only scripts' edits were checked with `bash -n` and not run; qa-lib-test's run in the gate.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with; the python floor moves 2534 -> 2540.
