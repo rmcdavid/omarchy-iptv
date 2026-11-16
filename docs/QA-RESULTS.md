@@ -19453,6 +19453,23 @@ refused create undone.**
   `lstat` following a link (1: the link removed), no undo at a refusal
   (4), no undo at the failed open (1), the word on every refusal (1).
   Sealed; `test_state` 112 of 112.
+- The undo, rechecked (2026-11-15, the lead, after the branch's recheck).
+  The recheck's probe found the identity test alone too generous: a `cp`
+  of a backup onto the name between the create and the refusal opens the
+  run's OWN inode with `O_TRUNC` and writes into it, the identity still
+  matches, and the undo removed the restored backup (`unreachable` and
+  `unconfirmed` alike). The removal now also needs the inode empty
+  (`st_size == 0` on the same `lstat`); a written inode is left, with
+  `created: "left"` and the clause "the file it created was left, because
+  something was written into it". What no syscall closes is now stated
+  for both shapes: a replacement or an in-place write landing between the
+  `lstat` and the `unlink` is removed with it. One test,
+  `test_a_created_file_written_into_in_place_is_left_with_its_bytes`
+  (the real chmod to 0644 and an in-place write inside the patched
+  chmod, so the read-back refuses `unconfirmed`): red on d726878's helper
+  (`removed`, the backup lost), green on the fix; `test_state` 113 of 113.
+  The size test is the one decision the old helper lacks, so the red run
+  is its mutant.
 
 ### D-STATE-9: QSaveFile reads a state.json link by its literal path (the D-SINK-103 settle lane, 2026-11-14)
 

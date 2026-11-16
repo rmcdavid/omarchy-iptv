@@ -7855,7 +7855,7 @@ states are the lead's, and none is cited here).**
   its open: 15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
   medians 18.4, 23.2 and 17.4,
   `spikes/state-private/RESULT-2026-11-14-interval.txt`,
-  `RESULT-2026-11-15-interval.txt` and, on the committed helper,
+  `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and, on the committed helper,
   `RESULT-2026-11-15-interval-committed.txt`).]
 - (5) The R22 question carried from round 18 (2): a change made in a
   mid-session block is dropped on three ways back, as on 0.14.2. R29a

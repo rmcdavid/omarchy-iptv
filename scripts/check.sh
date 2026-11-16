@@ -917,7 +917,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3727}
 # removed), red on 106092c's helper 5 of 6 and under five single-decision
 # mutants (QA-RESULTS "D-SINK-103", the settle lane); the suite runs 2433,
 # 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2433}
+# 2026-11-15, the lead after the branch's recheck: 2433 -> 2434 -- one
+# StatePrivateTest test, an in-place write into the created file before the
+# refusal left with its bytes, red on d726878's helper (QA-RESULTS
+# "D-SINK-103", "The undo, rechecked"); the suite runs 2434, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2434}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

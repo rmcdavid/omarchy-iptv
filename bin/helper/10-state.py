@@ -841,6 +841,14 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
             "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
 
 
+# undo_state_private_create's reason when the inode it created is no longer
+# empty: another program wrote into it in place (a `cp` of a backup onto
+# the name opens it with O_TRUNC and writes into the SAME inode), and
+# those bytes are not ours to remove (the recheck of D-SINK-103,
+# 2026-11-15).
+STATE_PRIVATE_WRITTEN = "written"
+
+
 def state_private_refusal(why: str, reason: str = "", created: tuple[str, str] = ("", "")) -> HelperError:
     """The one sentence `state private` refuses with (D-SINK-103): what it
     found, never the path, and that nothing may be written. `why` is a fixed
@@ -856,11 +864,16 @@ def state_private_refusal(why: str, reason: str = "", created: tuple[str, str] =
         "unconfirmed": "state.json could not be made private (%s)" % (reason or "error"),
     }
     word, failure = created
+    if failure == STATE_PRIVATE_WRITTEN:
+        left = "; the file it created was left, because something was written into it"
+    elif failure:
+        left = "; the empty file it created was left, because it could not be removed (%s)" % failure
+    else:
+        left = "; the empty file it created was left, because the path no longer names it"
     tails = {
         "": "",
         "removed": "; the empty file it created was removed",
-        "left": ("; the empty file it created was left, because it could not be removed (%s)" % failure) if failure
-        else "; the empty file it created was left, because the path no longer names it",
+        "left": left,
     }
     extra: dict[str, Any] = {"why": why}
     if word:
@@ -888,15 +901,20 @@ def undo_state_private_create(made: StatePrivateMade) -> tuple[str, str]:
     names THAT inode -- an lstat at the folder the file was created in (no
     link at the name is followed, and the folder is the one held open since
     the create, so a re-pointed folder link does not move the removal) whose
-    st_dev and st_ino are the creating descriptor's. Anything else at the
-    name -- a file another writer renamed over it, a link, nothing -- is left
-    as it is. -> (word, reason): ("removed", ""), ("left", "") when the
-    name no longer names it, ("left", strerror) when the lstat or the unlink
-    failed. What no syscall closes: a replacement landing between this
-    lstat and the unlink, which takes an account that can write that
-    folder -- this one, renaming over a file the plugin made a moment ago,
-    or another, whose write to a folder it can write is not defended
-    anyway (D-SINK-103's row)."""
+    st_dev and st_ino are the creating descriptor's -- AND that inode is
+    still empty. Anything else at the name -- a file another writer renamed
+    over it, a link, nothing -- is left as it is, and so is the run's own
+    inode once something has been written into it in place (a `cp` of a
+    backup onto the name truncates and writes the same inode; the recheck of
+    2026-11-15 lost such a backup to the identity test alone). -> (word,
+    reason): ("removed", ""), ("left", "") when the name no longer names
+    it, ("left", STATE_PRIVATE_WRITTEN) when the inode holds bytes,
+    ("left", strerror) when the lstat or the unlink failed. What no syscall
+    closes: a replacement, or an in-place write, landing between this lstat
+    and the unlink, which takes an account that can write that folder or
+    that file -- this one, over a file the plugin made a moment ago, or
+    another, whose write to a folder it can write is not defended anyway
+    (D-SINK-103's row)."""
     try:
         st = os.stat(made.name, dir_fd=made.folder_fd, follow_symlinks=False)
     except FileNotFoundError:
@@ -905,6 +923,8 @@ def undo_state_private_create(made: StatePrivateMade) -> tuple[str, str]:
         return "left", error.strerror or type(error).__name__
     if (st.st_dev, st.st_ino) != made.identity:
         return "left", ""
+    if st.st_size != 0:
+        return "left", STATE_PRIVATE_WRITTEN
     try:
         os.unlink(made.name, dir_fd=made.folder_fd)
     except FileNotFoundError:

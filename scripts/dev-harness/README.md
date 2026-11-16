@@ -2581,14 +2581,14 @@ None is part of the gate.
   `linkat` of its temporary: the writer's OPEN raises no event (an unnamed
   `O_TMPFILE`), so the figure is an upper bound on the window the fix
   leaves, from the chmod to the open (`RESULT-2026-11-14-interval.txt`,
-  `RESULT-2026-11-15-interval.txt` and, on the committed helper,
+  `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and, on the committed helper,
   `RESULT-2026-11-15-interval-committed.txt`, 12 runs a case each). It needs a SHORT
   `TMPDIR`: the private bus's socket sits under the work folder, and a
   long scratch path makes `private-bus.sh` refuse every run (rc 2,
   `events:0`). `cost` times the helper's `state private` and `state mode`
   (the model's argv) and a bare `python3 -I` under `cost.py`, wall and the
   child's CPU (`RESULT-2026-11-14-cost.txt` at load 2.9,
-  `RESULT-2026-11-15-cost.txt` at load 4, `RESULT-2026-11-15-cost-committed.txt`
+  `RESULT-2026-11-15-cost.txt` (run on an uncommitted part; QA-RESULTS) at load 4, `RESULT-2026-11-15-cost-committed.txt`
   at load 1 on the committed helper). Needs gdb and quickshell
   (asked for in every mode); not part of the gate.
 - `spikes/state-literal-link/measure.sh [case...]`: where Qt's QSaveFile,

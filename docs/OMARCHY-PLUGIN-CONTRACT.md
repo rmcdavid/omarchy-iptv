@@ -1389,7 +1389,7 @@ of a file the view creates, a re-point and what re-arms after one, by round
     inotify to the writer's link of its temporary, which follows the open
     (15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
     `spikes/state-private/RESULT-2026-11-14-interval.txt`,
-    `RESULT-2026-11-15-interval.txt` and
+    `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and
     `RESULT-2026-11-15-interval-committed.txt`) -- still gets the umask's
     0644, or the file's own, until the after-save `state mode` about a
     quarter of a second after the save lands. "Resolves" above

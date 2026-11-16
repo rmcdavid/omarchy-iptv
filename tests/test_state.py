@@ -532,6 +532,26 @@ class StatePrivateTest(unittest.TestCase):
             "; the empty file it created was left, because the path no longer names it"))
         self.assertEqual(self.path.read_text(encoding="utf-8"), "theirs")
 
+    def test_a_created_file_written_into_in_place_is_left_with_its_bytes(self):
+        # A `cp` of a backup onto the name before the refusal (the recheck of
+        # 2026-11-15): it opens the run's OWN inode with O_TRUNC and writes
+        # into it, so the identity still matches and only the size says the
+        # bytes are someone else's. The real chmod makes the file writable as
+        # a filesystem that keeps its own modes would leave it, 0644, which
+        # the read-back refuses as unconfirmed.
+        real_chmod = os.chmod
+        backup = json.dumps(v2(favorites=["t:restored"])) + "\n"
+
+        def copy_in_place(*_a, **_k):
+            real_chmod(self.path, 0o644)
+            with open(self.path, "w", encoding="utf-8") as handle:     # O_TRUNC, the same inode
+                handle.write(backup)
+        code, payload, _ = self.private_under(copy_in_place)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(payload["error"]["message"].endswith(
+            "; the file it created was left, because something was written into it"))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), backup)
+
     def test_a_link_put_at_the_path_to_the_created_file_is_not_followed_to_remove_it(self):
         # The path now names a LINK whose target is the very file the run
         # created: lstat sees the link, so nothing is removed -- neither the

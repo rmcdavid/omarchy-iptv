@@ -2272,7 +2272,7 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    20 ms, measured to the writer's link of its temporary, which follows the
    open (15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
    `spikes/state-private/RESULT-2026-11-14-interval.txt`,
-   `RESULT-2026-11-15-interval.txt` and
+   `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and
    `RESULT-2026-11-15-interval-committed.txt`) -- gets a 0644
    file, made 0600 by the after-save `state mode` about a quarter of a
    second later.] B23-B31 drive the

@@ -3722,7 +3722,12 @@ Performance budget (10k channels):
    -- a target that is not a regular file, one another account owns, and one
    whose mode it cannot set and read back; a refusal after it created the
    file removes what it created, while the name still names that inode
-   (never through a link), so a refusal leaves no empty `state.json` of its
+   (never through a link) and that inode is still empty (a `cp` of a backup
+   onto the name writes into the same inode, and is left) -- except a
+   replacement or an in-place write landing between the undo's lstat and
+   its unlink, which is removed with it (no syscall closes that; it takes
+   an account that can write that folder or that file) -- so a refusal
+   leaves no empty `state.json` of its
    own for the next start to read as no valid state (one is still left when
    the write after a `created` answer fails and the shell stops, D-SINK-103's
    row). It leaves every folder as it is.
@@ -3739,7 +3744,7 @@ Performance budget (10k channels):
    16.3-29.6 ms, median 18.4, over 48 runs at load 3.3-4.0,
    `spikes/state-private/RESULT-2026-11-14-interval.txt`, 18.2-41.7 ms,
    median 23.2, over 48 at load 3.3-4.2 beside another lane's work,
-   `RESULT-2026-11-15-interval.txt`, and 15.3-27.3 ms, median 17.4, over
+   `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS), and 15.3-27.3 ms, median 17.4, over
    48 on the committed helper at load 0.6-1.2,
    `RESULT-2026-11-15-interval-committed.txt`; reasoned to be the helper's exit, the
    shell's exit handler and the write job's start, CPU work that grows with
@@ -3748,7 +3753,7 @@ Performance budget (10k channels):
    whatever its mode); and the cost: one more helper run before every write
    (about a quarter of a second of CPU and wall at load 2.9,
    `RESULT-2026-11-14-cost.txt` in the same spike; a median of 372 ms at
-   load 4, `RESULT-2026-11-15-cost.txt`, and of 247 ms at load 1 on the
+   load 4, `RESULT-2026-11-15-cost.txt` (run on an uncommitted part; QA-RESULTS), and of 247 ms at load 1 on the
    committed helper, `RESULT-2026-11-15-cost-committed.txt`), which widens
    the read-to-write gap to that run
    (D-SRC-48's shape) and is lost with the change if the shell stops inside
