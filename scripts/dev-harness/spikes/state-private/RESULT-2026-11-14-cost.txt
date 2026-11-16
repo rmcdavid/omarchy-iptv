@@ -1,0 +1,43 @@
+# scripts/dev-harness/spikes/state-private/measure.sh cost 12, 2026-11-15T03:25Z, the dsink103 tree over 7c1784c with the settle lane's uncommitted edits (the sealed stub as bin/omarchy-iptv holds it), python 3.14.8-1 under private-bus.sh (its own HOME), env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME
+# load before 2.93 3.42 3.01
+   RUN private  1 rc=0 wall=274.9 cpu=270.5 reply=kept
+   RUN mode     1 rc=0 wall=276.5 cpu=270.4 reply=kept/kept
+   RUN bare     1 rc=0 wall=18.3 cpu=17.8
+   RUN private  2 rc=0 wall=284.3 cpu=278.8 reply=kept
+   RUN mode     2 rc=0 wall=263.0 cpu=259.6 reply=kept/kept
+   RUN bare     2 rc=0 wall=18.6 cpu=18.1
+   RUN private  3 rc=0 wall=267.2 cpu=264.5 reply=kept
+   RUN mode     3 rc=0 wall=259.3 cpu=256.9 reply=kept/kept
+   RUN bare     3 rc=0 wall=24.5 cpu=23.2
+   RUN private  4 rc=0 wall=274.3 cpu=268.8 reply=kept
+   RUN mode     4 rc=0 wall=262.6 cpu=260.2 reply=kept/kept
+   RUN bare     4 rc=0 wall=17.9 cpu=17.5
+   RUN private  5 rc=0 wall=262.8 cpu=260.3 reply=kept
+   RUN mode     5 rc=0 wall=267.5 cpu=264.7 reply=kept/kept
+   RUN bare     5 rc=0 wall=18.2 cpu=17.8
+   RUN private  6 rc=0 wall=253.1 cpu=250.9 reply=kept
+   RUN mode     6 rc=0 wall=259.4 cpu=257.1 reply=kept/kept
+   RUN bare     6 rc=0 wall=18.3 cpu=17.9
+   RUN private  7 rc=0 wall=262.7 cpu=260.1 reply=kept
+   RUN mode     7 rc=0 wall=261.6 cpu=259.2 reply=kept/kept
+   RUN bare     7 rc=0 wall=17.8 cpu=17.3
+   RUN private  8 rc=0 wall=261.7 cpu=257.4 reply=kept
+   RUN mode     8 rc=0 wall=266.6 cpu=261.7 reply=kept/kept
+   RUN bare     8 rc=0 wall=23.9 cpu=23.2
+   RUN private  9 rc=0 wall=273.2 cpu=269.7 reply=kept
+   RUN mode     9 rc=0 wall=259.9 cpu=257.0 reply=kept/kept
+   RUN bare     9 rc=0 wall=18.2 cpu=17.6
+   RUN private 10 rc=0 wall=253.2 cpu=250.3 reply=kept
+   RUN mode    10 rc=0 wall=264.4 cpu=261.0 reply=kept/kept
+   RUN bare    10 rc=0 wall=17.9 cpu=17.3
+   RUN private 11 rc=0 wall=262.8 cpu=259.0 reply=kept
+   RUN mode    11 rc=0 wall=255.0 cpu=252.4 reply=kept/kept
+   RUN bare    11 rc=0 wall=17.7 cpu=17.2
+   RUN private 12 rc=0 wall=256.1 cpu=253.5 reply=kept
+   RUN mode    12 rc=0 wall=272.8 cpu=269.2 reply=kept/kept
+   RUN bare    12 rc=0 wall=17.6 cpu=17.2
+   COST private n=12 wall 253.1-284.3 median 262.8 ms, cpu 250.3-278.8 median 260.2 ms
+   COST mode    n=12 wall 255.0-276.5 median 262.8 ms, cpu 252.4-270.4 median 259.9 ms
+   COST bare    n=12 wall 17.6-24.5 median 18.2 ms, cpu 17.2-23.2 median 17.7 ms
+# load after 2.86 3.40 3.00
+# exit 0

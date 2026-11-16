@@ -2,8 +2,8 @@ diff --git a/Service.qml b/Service.qml
 index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -5366,7 +5366,7 @@
-           root.stateSavesInFlight = 0
+@@ -6387,7 +6387,7 @@ Item {
+           root.statePrivateCreated = false   // D-SINK-103: the created file holds our text now
            root.stateSaveFailed = false
            root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
 -          root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo

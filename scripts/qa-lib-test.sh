@@ -1919,6 +1919,12 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # whose context carried the lastPersistFailure clear that lane A2 removed
 # from mergeForeignText (D-SRC-67, lane A's second finding: a write-only
 # property) -- the same decision.
+# D-SINK-103 (2026-11-14, dsink103) re-made r25a-keep-landed, r26a-no-read
+# and r27a-no-wait, whose context the `state private` step before every
+# write moved -- the same decisions. The two that skip the READ now send the
+# write through `state private` as the read's finish does, so each still
+# removes the read and nothing else (node over each, QA-RESULTS
+# "D-SINK-103").
 is "all nineteen key-mutation patches still apply to this tree (git apply --check)" \
    "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval r27a-no-wait r27a-wait-never-released; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
 is "and the key-mutations folder holds exactly those nineteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "19"

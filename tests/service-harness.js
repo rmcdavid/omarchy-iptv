@@ -61,6 +61,33 @@ function makeIds(h) {
       }
     }
   })
+  // D-SINK-103: `state private` RUNS, as cacheProc does, because every write
+  // of state.json now waits for its reply: setting `running` queues the
+  // helper's work on the file as the double holds it (helperPrivate below,
+  // the shipping helper's branches, pinned by tests/test_state.py's
+  // StatePrivateTest), then the reload a chmod or a creation raises -- an
+  // inotify event the view answers with reload(), asked BEFORE the exit is
+  // handled, the order that leaves the shell the most to get wrong -- then
+  // the exit, through Service.handleStatePrivateExit, the handler the real
+  // Connections calls. `h.privateHang` leaves it running (a stalled
+  // filesystem) for the watchdog; `h.privateAnswer()` replaces the helper's
+  // answer ({ code, reply, raises }); h.privateExit() delivers a held exit.
+  const statePrivateProc = { name: "statePrivateProc", command: [], environment: {}, signals: [], signal(n) { this.signals.push(n) }, _running: false }
+  Object.defineProperty(statePrivateProc, "running", {
+    get() { return statePrivateProc._running },
+    set(v) {
+      statePrivateProc._running = v
+      if (v !== true) return
+      h.privateRuns.push(statePrivateProc.command.slice())
+      if (h.privateHang) return
+      h.later.push({ fn: () => {
+        if (!statePrivateProc._running) return
+        const out = h.privateAnswer ? h.privateAnswer() : helperPrivate(h.stateFile)
+        if (out.raises) h.stateFile.reload()
+        h.later.push({ fn: () => { if (!statePrivateProc._running) return; statePrivateProc._running = false; h.root.handleStatePrivateExit(out.code, out.reply) }, args: [] })
+      }, args: [] })
+    }
+  })
   // Timers do not run; restart() and stop() are COUNTED, so a test can see
   // that a watchdog was armed (R23c) without the harness running its clock.
   const timer = name => ({ name, restarts: 0, stops: 0, restart() { this.restarts++ }, stop() { this.stops++ }, start() {}, running: false })
@@ -87,6 +114,9 @@ function makeIds(h) {
     // D-SRC-49: the `state mode` run after a landed save; its exit is
     // delivered by the test (h.stateModeExit), with the helper's own reply.
     stateModeProc: proc("stateModeProc"),
+    // D-SINK-103: `state private` before every write; it runs (above).
+    statePrivateProc,
+    statePrivateWatchdog: timer("statePrivateWatchdog"),
     hyprWhichProc: proc("hyprWhichProc"),
     hyprInfoProc: proc("hyprInfoProc"),
     hyprInfoStdout: { text: "" },
@@ -766,10 +796,50 @@ function helperInit(file, code, empty) {
   return { reply: JSON.stringify({ ok: true, kind: "state", action: "init", found, created: found === "absent" }) + "\n", raises }
 }
 
+// D-SINK-103: the REAL helper's `state private`, as a double that is not more
+// forgiving than it (rule 10) -- each branch is state_private's in
+// bin/helper/10-state.py, pinned by tests/test_state.py's StatePrivateTest:
+//   a regular file of ours  made 0600 when it is not ("changed": a chmod,
+//                           which raises a reload while the view watches),
+//                           else "kept" (no chmod, nothing raised)
+//   nothing there, or a     CREATED 0600 and EMPTY ("created"), which a
+//   link whose target's     watching view sees as a change (sequence U: a
+//   folder exists           missing file that appears reloads)
+//   "file-0000"             ours: made 0600 ("changed"), readable again
+//   "dir-0000"              unreachable: the run leaves every folder as it
+//                           is, and an O_PATH open through a 0000 folder fails
+//   "is-dir"                refused, not-a-file
+//   "file-foreign"          refused, not-owned
+//   "dir-foreign",          refused, unreachable (the open fails)
+//   "dangling-link-nodir",
+//   "not-a-dir"
+//   "folder-link"           refused by the folder-link check, with no `why`
+// A refusal is exit 1 and changes nothing.
+function helperPrivate(file) {
+  const line = o => JSON.stringify(o) + "\n"
+  const refuse = why => ({ code: 1, raises: false, reply: line({ ok: false, kind: "state", error: { code: "state_not_private", message: "state.json ...; nothing may be written to it" }, why, action: "private" }) })
+  if (file.fault === "is-dir") return refuse("not-a-file")
+  if (file.fault === "file-foreign") return refuse("not-owned")
+  if (file.fault === "dir-0000" || file.fault === "dir-foreign" || file.fault === "dangling-link-nodir" || file.fault === "not-a-dir") return refuse("unreachable")
+  if (file.fault === "folder-link") return { code: 1, raises: false, reply: line({ ok: false, kind: "state", error: { code: "state_unreadable", message: "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written" }, action: "private" }) }
+  let how = "kept", raises = false
+  if (!file.exists || file.fault === "dangling-link") {
+    file.exists = true; file.disk = ""; file.mode = 0o600; file.dirAbsent = false
+    if (file.fault === "dangling-link") file.fault = null
+    how = "created"; raises = file.watchArmed
+  } else if (file.fault === "file-0000" || file.mode !== 0o600) {
+    if (file.fault === "file-0000") file.fault = null
+    file.mode = 0o600
+    how = "changed"; raises = file.watchArmed
+  }
+  return { code: 0, raises, reply: line({ ok: true, kind: "state", action: "private", file: how }) }
+}
+
 function bootService(serviceText, Model, o) {
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], detachedRuns: [], turns: 0, cacheHang: false,
-              notifyRuns: [], notifyServer: null, notifyHang: false, allowDetachedNotice: 0 }
+              notifyRuns: [], notifyServer: null, notifyHang: false, allowDetachedNotice: 0,
+              privateRuns: [], privateHang: false, privateAnswer: null }
   // F-HARNESS-100: `section`, `bare` and `barSections` (own key, undefined
   // allowed: the 4.0.x kit) place the entry and choose the host's kit.
   const kit = { section: opts.section, bare: opts.bare }
@@ -1060,7 +1130,7 @@ function bootService(serviceText, Model, o) {
   // verb in flight (`root.playerTimeoutMs`), read at each restart() the way
   // QML's Timer reads it; h.elapse fires its own onTriggered, which TERMs a
   // running helper (recorded in playerProc.signals) and flags the exit.
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog", "olderRestartTimer"]) h.timed.push(treeTimer(id))
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "statePrivateWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog", "olderRestartTimer"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),
@@ -1077,6 +1147,21 @@ function bootService(serviceText, Model, o) {
       text = JSON.stringify({ ok: true, kind: "state", action: "mode", folder: "kept", file }) + "\n"
     }
     root.handleStateModeExit(io.code === undefined ? 0 : io.code, text)
+    h.runLater()
+    return true
+  }
+  // D-SINK-103: a `state private` left running by h.privateHang, ended now
+  // with the double's answer for the file (or `reply` / `code` as given),
+  // through the shipping exit handler. False when none runs.
+  h.privateExit = (o2) => {
+    const io = o2 || {}
+    const p = ids.statePrivateProc
+    if (!p._running) return false
+    const out = io.reply !== undefined ? { code: io.code === undefined ? 0 : io.code, reply: io.reply, raises: false } : helperPrivate(h.stateFile)
+    if (out.raises) h.stateFile.reload()
+    h.runLater()
+    p._running = false
+    root.handleStatePrivateExit(out.code, out.reply)
     h.runLater()
     return true
   }

@@ -1798,7 +1798,10 @@ edit the control's copy and the next bound write would overwrite it.
    created at the umask's mode after a re-point, is private within the
    stub's start rather than until the next shell start; one interpreter
    start per landed save, `ARCHITECTURE.md` section 5's 2026-10-24
-   amendment]**); `sources/` and every `sources/<key>/` are 0700
+   amendment]** **[2026-11-14, D-SINK-103: "within the stub's start" was
+   the save landing at 0644 and this repair about a quarter of a second
+   later, measured; the file is now made 0600 before every write by the
+   helper's `state private`, and this repair is the second layer]**); `sources/` and every `sources/<key>/` are 0700
    (`mkdir -p -m 700` and `ensure_private_dir`); every helper write is the
    existing `O_EXCL` temp + `chmod 0600` + `os.replace`. Removal deletes
    known file names only. **The host's `shell.json` is not in that list and
@@ -7842,6 +7845,18 @@ states are the lead's, and none is cited here).**
   D-SRC-49) makes it 0600 within the helper's start; the exposure is those
   milliseconds, no longer the session. R29a's descope of the stalled-read
   handling is untouched: nothing here touches a read path or a save path.]
+  [2026-11-14, D-SINK-103: "those milliseconds" were about a quarter of a
+  second, one helper run, measured. The helper's `state private` now runs
+  between the read and the write and creates a missing file 0600, so (b)
+  and (c) no longer create it at 0644; what remains of (b) and (c) -- the
+  2 s watchdog's save goes through the same run -- is the time between
+  that run's last look at the file (its chmod, when it makes one) and the
+  writer's open, about 20 ms (measured to the writer's link, which follows
+  its open: 15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
+  medians 18.4, 23.2 and 17.4,
+  `spikes/state-private/RESULT-2026-11-14-interval.txt`,
+  `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and, on the committed helper,
+  `RESULT-2026-11-15-interval-committed.txt`).]
 - (5) The R22 question carried from round 18 (2): a change made in a
   mid-session block is dropped on three ways back, as on 0.14.2. R29a
   removes the stall door into it; a read that answers with a load failure

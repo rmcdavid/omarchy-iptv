@@ -1,0 +1,233 @@
+# scripts/dev-harness/spikes/state-private/measure.sh both (all five cases), 2026-11-15T00:48Z, the dsink103 tree over 7c1784c, quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3, gdb 18.1, umask 0022, load 1.79 2.53 2.54
+== CASE new ORDER fix
+    DEBUG qml: PROBE loadFailed 2
+   SPAWN
+    DEBUG qml: PROBE pre 0 {"ok": true, "kind": "state", "action": "private", "file": "created"}
+    DEBUG qml: PROBE write
+   OPENAT c1/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod 600 0 0 state/state.json
+   LINKAT c1/state/state.json
+   SNAP linkat 600 0 0 state/state.json
+   LINKAT c1/state/state.json.ZtDUlo
+   SNAP linkat 600 0 0 state/state.json
+   RENAME
+   SNAP rename 600 0 0 state/state.json
+   SNAP rename 600 348 1 state/state.json.ZtDUlo
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 600 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=new order=fix stops=7 files-seen=6 exposed=0 final=600
+== CASE e644 ORDER fix
+   SNAP before 644 101 0 state/state.json
+   OPENAT c2/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+   SPAWN
+   SNAP spawn 644 101 0 state/state.json
+    DEBUG qml: PROBE pre 0 {"ok": true, "kind": "state", "action": "private", "file": "changed"}
+    DEBUG qml: PROBE write
+   OPENAT c2/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod 600 101 0 state/state.json
+   LINKAT c2/state/state.json
+   SNAP linkat 600 101 0 state/state.json
+   LINKAT c2/state/state.json.xQqQCS
+   SNAP linkat 600 101 0 state/state.json
+   RENAME
+   SNAP rename 600 101 0 state/state.json
+   SNAP rename 600 348 1 state/state.json.xQqQCS
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 600 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=e644 order=fix stops=8 files-seen=7 exposed=0 final=600
+== CASE e600 ORDER fix
+   SNAP before 600 101 0 state/state.json
+   OPENAT c3/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+   SPAWN
+   SNAP spawn 600 101 0 state/state.json
+    DEBUG qml: PROBE pre 0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+    DEBUG qml: PROBE write
+   OPENAT c3/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod 600 101 0 state/state.json
+   LINKAT c3/state/state.json
+   SNAP linkat 600 101 0 state/state.json
+   LINKAT c3/state/state.json.rFMOYG
+   SNAP linkat 600 101 0 state/state.json
+   RENAME
+   SNAP rename 600 101 0 state/state.json
+   SNAP rename 600 348 1 state/state.json.rFMOYG
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 600 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=e600 order=fix stops=8 files-seen=7 exposed=0 final=600
+== CASE link644 ORDER fix
+   SNAP before link state/state.json -> wide/state.json
+   SNAP before 644 101 0 wide/state.json
+   OPENAT c4/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+   SNAP spawn 644 101 0 wide/state.json
+    DEBUG qml: PROBE pre 0 {"ok": true, "kind": "state", "action": "private", "file": "changed"}
+    DEBUG qml: PROBE write
+   OPENAT c4/wide flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod link state/state.json -> wide/state.json
+   SNAP fchmod 600 101 0 wide/state.json
+   LINKAT c4/wide/state.json
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 600 101 0 wide/state.json
+   LINKAT c4/wide/state.json.rNQCmt
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 600 101 0 wide/state.json
+   RENAME
+   SNAP rename link state/state.json -> wide/state.json
+   SNAP rename 600 101 0 wide/state.json
+   SNAP rename 600 348 1 wide/state.json.rNQCmt
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+   SNAP spawn 600 348 1 wide/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after link state/state.json -> wide/state.json
+   SNAP after 600 348 1 wide/state.json
+   VERDICT case=link644 order=fix stops=8 files-seen=7 exposed=0 final=600
+== CASE linkabsent ORDER fix
+   SNAP before link state/state.json -> wide/state.json
+    DEBUG qml: PROBE loadFailed 2
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+    DEBUG qml: PROBE pre 0 {"ok": true, "kind": "state", "action": "private", "file": "created"}
+    DEBUG qml: PROBE write
+   OPENAT c5/wide flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod link state/state.json -> wide/state.json
+   SNAP fchmod 600 0 0 wide/state.json
+   LINKAT c5/wide/state.json
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 600 0 0 wide/state.json
+   LINKAT c5/wide/state.json.iIwLbr
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 600 0 0 wide/state.json
+   RENAME
+   SNAP rename link state/state.json -> wide/state.json
+   SNAP rename 600 0 0 wide/state.json
+   SNAP rename 600 348 1 wide/state.json.iIwLbr
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+   SNAP spawn 600 348 1 wide/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after link state/state.json -> wide/state.json
+   SNAP after 600 348 1 wide/state.json
+   VERDICT case=linkabsent order=fix stops=7 files-seen=6 exposed=0 final=600
+== CASE new ORDER base
+    DEBUG qml: PROBE loadFailed 2
+    DEBUG qml: PROBE write
+   OPENAT c6/state flags=0x490002 mode=0666
+   OPENAT c6/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0644
+   LINKAT c6/state/state.json
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 644 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=new order=base stops=5 files-seen=1 exposed=1 final=600 EXPOSED spawn:state.json:644
+== CASE e644 ORDER base
+   SNAP before 644 101 0 state/state.json
+   OPENAT c7/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+    DEBUG qml: PROBE write
+   OPENAT c7/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0644
+   SNAP fchmod 644 101 0 state/state.json
+   LINKAT c7/state/state.json
+   SNAP linkat 644 101 0 state/state.json
+   LINKAT c7/state/state.json.NDqrdK
+   SNAP linkat 644 101 0 state/state.json
+   RENAME
+   SNAP rename 644 101 0 state/state.json
+   SNAP rename 644 348 1 state/state.json.NDqrdK
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 644 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=e644 order=base stops=7 files-seen=6 exposed=2 final=600 EXPOSED rename:state.json.NDqrdK:644 spawn:state.json:644
+== CASE e600 ORDER base
+   SNAP before 600 101 0 state/state.json
+   OPENAT c8/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+    DEBUG qml: PROBE write
+   OPENAT c8/state flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0600
+   SNAP fchmod 600 101 0 state/state.json
+   LINKAT c8/state/state.json
+   SNAP linkat 600 101 0 state/state.json
+   LINKAT c8/state/state.json.npCbbW
+   SNAP linkat 600 101 0 state/state.json
+   RENAME
+   SNAP rename 600 101 0 state/state.json
+   SNAP rename 600 348 1 state/state.json.npCbbW
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn 600 348 1 state/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"}
+   SNAP after 600 348 1 state/state.json
+   VERDICT case=e600 order=base stops=7 files-seen=6 exposed=0 final=600
+== CASE link644 ORDER base
+   SNAP before link state/state.json -> wide/state.json
+   SNAP before 644 101 0 wide/state.json
+   OPENAT c9/state/state.json flags=0x80000 mode=00
+    DEBUG qml: PROBE loaded
+    DEBUG qml: PROBE write
+   OPENAT c9/wide flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0644
+   SNAP fchmod link state/state.json -> wide/state.json
+   SNAP fchmod 644 101 0 wide/state.json
+   LINKAT c9/wide/state.json
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 644 101 0 wide/state.json
+   LINKAT c9/wide/state.json.EWYJox
+   SNAP linkat link state/state.json -> wide/state.json
+   SNAP linkat 644 101 0 wide/state.json
+   RENAME
+   SNAP rename link state/state.json -> wide/state.json
+   SNAP rename 644 101 0 wide/state.json
+   SNAP rename 644 348 1 wide/state.json.EWYJox
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+   SNAP spawn 644 348 1 wide/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}
+   SNAP after link state/state.json -> wide/state.json
+   SNAP after 600 348 1 wide/state.json
+   VERDICT case=link644 order=base stops=7 files-seen=6 exposed=2 final=600 EXPOSED rename:state.json.EWYJox:644 spawn:state.json:644
+== CASE linkabsent ORDER base
+   SNAP before link state/state.json -> wide/state.json
+    DEBUG qml: PROBE loadFailed 2
+    DEBUG qml: PROBE write
+   OPENAT c10/wide flags=0x490002 mode=0666
+   OPENAT c10/wide flags=0x490002 mode=0600
+   FCHMOD fd=22 mode=0644
+   SNAP fchmod link state/state.json -> wide/state.json
+   LINKAT c10/wide/state.json
+   SNAP linkat link state/state.json -> wide/state.json
+    DEBUG qml: PROBE saved
+   SPAWN
+   SNAP spawn link state/state.json -> wide/state.json
+   SNAP spawn 644 348 1 wide/state.json
+    DEBUG qml: PROBE post 0 {"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}
+   SNAP after link state/state.json -> wide/state.json
+   SNAP after 600 348 1 wide/state.json
+   VERDICT case=linkabsent order=base stops=5 files-seen=1 exposed=1 final=600 EXPOSED spawn:state.json:644
+# exit 0

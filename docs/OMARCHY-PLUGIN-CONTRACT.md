@@ -1361,6 +1361,44 @@ of a file the view creates, a re-point and what re-arms after one, by round
     releases the held save to its read at 2 s and the save is written
     without it at 2 s more (pinned on lane-sweep-a3, `R27a / R29a (<tag>):
     the write wait is BOUNDED ...`).]
+    **[2026-11-14, D-SINK-103: HOW the write gets that mode, and through
+    what, measured on quickshell 0.3.2.r7.g2b4501a / qt6-base 6.12.0 under
+    gdb, offscreen, on a private bus, umask 0022
+    (`scripts/dev-harness/spikes/state-private/RESULT-2026-11-14.txt`).
+    `atomicWrites` is QSaveFile (`QSaveFile::commit` is in the binary's
+    import table). The write opens an unnamed temporary,
+    `openat(<folder>, O_TMPFILE | O_RDWR | O_CLOEXEC, 0600)`, in the folder
+    of the file the path RESOLVES to -- a `state.json` link's target's
+    folder, not the state folder -- writes the text into it, `fchmod`s it to
+    the mode the existing file had when the write opened (for no file, the
+    mode a first `O_TMPFILE` opened `0666` got from the umask, read and
+    discarded empty), and links it under the target's name -- which, with no
+    file there, is the whole commit -- or, when one is there, under
+    `<name>.XXXXXX`, renamed over the target. So the text is never in a NAMED file at a mode other than the
+    old file's; over a 0644 file the named temporary holds it at 0644 from
+    the link to the rename, and the file after; over a 0600 file nothing is
+    ever wider than 0600. The mode is read when the write OPENS (a
+    QThreadPool job after `setText`), so a file made 0600 before `setText`
+    is written 0600 -- the plugin's `state private` before every write rests
+    on this, observed for all five shapes (absent, 0644, 0600, a link to a
+    0644 target in a 0755 folder, a link to nothing). So the two windows
+    above no longer create a 0644 file: `state private` creates a missing
+    one 0600 and empty before the write. A re-point, or a 0644 file put at
+    the path, landing between that run's last look at the file (its chmod,
+    when it makes one) and the writer's open -- about 20 ms, measured by
+    inotify to the writer's link of its temporary, which follows the open
+    (15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
+    `spikes/state-private/RESULT-2026-11-14-interval.txt`,
+    `RESULT-2026-11-15-interval.txt` (run on an uncommitted part; QA-RESULTS) and
+    `RESULT-2026-11-15-interval-committed.txt`) -- still gets the umask's
+    0644, or the file's own, until the after-save `state mode` about a
+    quarter of a second after the save lands. "Resolves" above
+    is QSaveFile's own reading of a link, which is LEXICAL -- a relative
+    target joined to the link's literal folder, `..` read as text, hop by
+    hop -- and differs from the kernel's when a folder on the way is a link
+    (D-STATE-9, measured on the installed libQt6Core 6.12.0,
+    `scripts/dev-harness/spikes/state-literal-link/RESULT-2026-11-14.txt`);
+    the mode it gives is still the KERNEL-resolved file's.]**
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the

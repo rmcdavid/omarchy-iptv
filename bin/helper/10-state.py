@@ -827,8 +827,10 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
     written into at that mode for the rest of the session, provider URLs
     included; `state init` repaired it only at the next start. The service
     runs this after every save that LANDS (one interpreter start, the
-    sealed stub, about 30 ms of CPU), so the window is the milliseconds
-    between the save and this repair. Both repairs are chmod_if_kind: an
+    sealed stub) [2026-11-14, D-SINK-103: about 250 ms of CPU, measured,
+    not the ~30 ms this said, so the window was about a quarter of a
+    second; the file is now made 0600 BEFORE every write by `state
+    private`, and this repair is the second layer]. Both repairs are chmod_if_kind: an
     O_PATH descriptor, the KIND checked on the inode (a directory at the
     file's path, a link to nothing, a FIFO: untouched), and no chmod at all
     when the mode is already right -- so in the steady state this raises no
@@ -839,12 +841,229 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
             "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
 
 
+# undo_state_private_create's reason when the inode it created is no longer
+# empty: another program wrote into it in place (a `cp` of a backup onto
+# the name opens it with O_TRUNC and writes into the SAME inode), and
+# those bytes are not ours to remove (the recheck of D-SINK-103,
+# 2026-11-15).
+STATE_PRIVATE_WRITTEN = "written"
+
+
+def state_private_refusal(why: str, reason: str = "", created: tuple[str, str] = ("", "")) -> HelperError:
+    """The one sentence `state private` refuses with (D-SINK-103): what it
+    found, never the path, and that nothing may be written. `why` is a fixed
+    word the service's journal line carries (Model.statePrivateReply).
+    `created`, only on a refusal after the run created the file itself, is
+    what became of that file (undo_state_private_create's answer):
+    "removed", or "left" -- a fixed word in the reply's `created`, and a
+    clause of the sentence, which never names the path either."""
+    sentences = {
+        "not-a-file": "state.json is not a regular file",
+        "not-owned": "state.json belongs to another account",
+        "unreachable": "state.json could not be reached (%s)" % (reason or "error"),
+        "unconfirmed": "state.json could not be made private (%s)" % (reason or "error"),
+    }
+    word, failure = created
+    if failure == STATE_PRIVATE_WRITTEN:
+        left = "; the file it created was left, because something was written into it"
+    elif failure:
+        left = "; the empty file it created was left, because it could not be removed (%s)" % failure
+    else:
+        left = "; the empty file it created was left, because the path no longer names it"
+    tails = {
+        "": "",
+        "removed": "; the empty file it created was removed",
+        "left": left,
+    }
+    extra: dict[str, Any] = {"why": why}
+    if word:
+        extra["created"] = word
+    return HelperError("state_not_private", sentences[why] + "; nothing may be written to it" + tails[word], **extra)
+
+
+class StatePrivateMade:
+    """The file `state private` CREATED, for undo_state_private_create:
+    an O_PATH descriptor on the folder it was created in, its name there,
+    and the (st_dev, st_ino) of the created inode, read off the creating
+    descriptor itself."""
+
+    def __init__(self, folder_fd: int, name: str, identity: tuple[int, int]) -> None:
+        self.folder_fd = folder_fd
+        self.name = name
+        self.identity = identity
+
+
+def undo_state_private_create(made: StatePrivateMade) -> tuple[str, str]:
+    """Remove the empty file `state private` created, when the run refuses
+    after creating it (the claims check of D-SINK-103, 2026-11-14): left
+    there, the next start reads it as not a valid state, the no-write mode,
+    for a file nobody but this run made. Removed only while the name still
+    names THAT inode -- an lstat at the folder the file was created in (no
+    link at the name is followed, and the folder is the one held open since
+    the create, so a re-pointed folder link does not move the removal) whose
+    st_dev and st_ino are the creating descriptor's -- AND that inode is
+    still empty. Anything else at the name -- a file another writer renamed
+    over it, a link, nothing -- is left as it is, and so is the run's own
+    inode once something has been written into it in place (a `cp` of a
+    backup onto the name truncates and writes the same inode; the recheck of
+    2026-11-15 lost such a backup to the identity test alone). -> (word,
+    reason): ("removed", ""), ("left", "") when the name no longer names
+    it, ("left", STATE_PRIVATE_WRITTEN) when the inode holds bytes,
+    ("left", strerror) when the lstat or the unlink failed. What no syscall
+    closes: a replacement, or an in-place write, landing between this lstat
+    and the unlink, which takes an account that can write that folder or
+    that file -- this one, over a file the plugin made a moment ago, or
+    another, whose write to a folder it can write is not defended anyway
+    (D-SINK-103's row)."""
+    try:
+        st = os.stat(made.name, dir_fd=made.folder_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return "left", ""
+    except OSError as error:
+        return "left", error.strerror or type(error).__name__
+    if (st.st_dev, st.st_ino) != made.identity:
+        return "left", ""
+    if st.st_size != 0:
+        return "left", STATE_PRIVATE_WRITTEN
+    try:
+        os.unlink(made.name, dir_fd=made.folder_fd)
+    except FileNotFoundError:
+        return "left", ""
+    except OSError as error:
+        return "left", error.strerror or type(error).__name__
+    return "removed", ""
+
+
+def state_private_open(path: str) -> tuple[int, str, StatePrivateMade | None]:
+    """The descriptor `state private` judges, and what it did to get it:
+    "found" for a file already at the path (through a link, as the FileView
+    writes through one), "created" for one it created 0600 and empty
+    because nothing was there. An O_PATH descriptor opens no FIFO and needs
+    no permission on its target, so a 0000 file of ours is still repaired
+    (chmod_if_kind's reasoning). Nothing at the path, or a link to nothing:
+    the file is created with O_EXCL and O_NOFOLLOW at what the link names --
+    a name another writer takes in between is opened instead, never written
+    through -- with no folder created on the way (a missing folder is
+    `unreachable`, which the FileView's own write would have made 0755).
+    The third value is what it created (StatePrivateMade, its folder held
+    open) or None; the caller closes it, and undoes the create if it
+    refuses."""
+    try:
+        return os.open(path, os.O_PATH | os.O_CLOEXEC), "found", None
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    target = os.path.realpath(path) if os.path.islink(path) else path
+    folder, name = os.path.split(target)
+    try:
+        # The folder by descriptor, so the removal of what this creates is
+        # made in the folder it was created in (undo_state_private_create).
+        folder_fd = os.open(folder or ".", os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError as error:
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    try:
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600,
+                     dir_fd=folder_fd)
+    except FileExistsError:
+        os.close(folder_fd)
+        try:
+            return os.open(path, os.O_PATH | os.O_CLOEXEC), "found", None
+        except OSError as error:
+            raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    except OSError as error:
+        os.close(folder_fd)
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__)
+    # The umask can only narrow 0600 (a 0277 umask gives 0400, which
+    # QSaveFile refuses to replace): the mode is set and read back below,
+    # on the descriptor this returns, like any file found there.
+    try:
+        st = os.fstat(fd)
+    finally:
+        os.close(fd)
+    made = StatePrivateMade(folder_fd, name, (st.st_dev, st.st_ino))
+    try:
+        return os.open(path, os.O_PATH | os.O_CLOEXEC), "created", made
+    except OSError as error:
+        undone = undo_state_private_create(made)
+        os.close(folder_fd)
+        raise state_private_refusal("unreachable", error.strerror or type(error).__name__, created=undone)
+
+
+def state_private(path: str) -> dict[str, Any]:
+    """`state private` (D-SINK-103, 2026-11-14): make state.json private
+    BEFORE the service writes it, and say so only once it is.
+
+    Why before. The service writes state.json through Quickshell's FileView
+    with atomicWrites, which is Qt's QSaveFile, and QSaveFile gives the new
+    file the mode the OLD one had: measured on Quickshell 0.3.2 / Qt 6.12.0
+    under gdb (QA-RESULTS "D-SINK-103", dev branch), the text is written into
+    an unnamed O_TMPFILE created 0600 in the TARGET's folder (through a
+    link, the folder the link points into), fchmod-ed to the old file's
+    mode -- read when the write opens -- linked under a temporary name and
+    renamed over the target. Over a 0644 file, the temporary is 0644 from
+    the link to the rename and the file 0644 after it, holding the new text
+    either way; with nothing there, the mode is the umask's (0644 at 022).
+    Over a 0600 file nothing is ever wider than 0600. So this makes the file
+    0600 (creating it 0600 and empty when nothing is there), and the service
+    writes only on this reply; `state mode` after the save stays, as the
+    second layer.
+
+    Refused, exit 1, nothing changed: a target that is not a regular file
+    (`not-a-file`: a directory, a FIFO), one another account owns
+    (`not-owned`: a chmod would fail anyway, and the rename would put our
+    text in its folder), one that cannot be reached or created
+    (`unreachable`) and a mode that could not be set or read back
+    (`unconfirmed`). The FILE only: the state folder is left as it is --
+    `state init` at every start and `state mode` after every landed save
+    repair it, as before -- because a folder this run made writable would
+    change what a 0500 folder does to the write that follows, and nothing in
+    the folder is readable once the file and the writer's temporary are
+    0600. Through a link, the folder the link points into is never touched.
+    A refusal after this run CREATED the file removes what it created first,
+    while the name it created (the path's, or what a link at the path names)
+    still names that inode (undo_state_private_create), and says what
+    became of it in the reply's `created`; so a filesystem that keeps its
+    own modes leaves no empty state.json of this run's behind, unless
+    something else took the name meanwhile (the claims check of
+    D-SINK-103, 2026-11-14).
+    -> {"file": "kept"|"changed"|"created"}"""
+    fd, how, made = state_private_open(path)
+
+    def refuse(why: str, reason: str = "") -> HelperError:
+        return state_private_refusal(why, reason, undo_state_private_create(made) if made is not None else ("", ""))
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise refuse("not-a-file")
+        if st.st_uid != os.geteuid():
+            raise refuse("not-owned")
+        changed = False
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            try:
+                os.chmod("/proc/self/fd/%d" % fd, 0o600)
+            except OSError as error:
+                raise refuse("unconfirmed", error.strerror or type(error).__name__)
+            changed = True
+        # Read back on the same inode: the reply is the mode the file HAS.
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or stat.S_IMODE(st.st_mode) != 0o600:
+            raise refuse("unconfirmed", "mode %o" % stat.S_IMODE(st.st_mode))
+    finally:
+        os.close(fd)
+        if made is not None:
+            os.close(made.folder_fd)
+    return {"file": "created" if how == "created" else ("changed" if changed else "kept")}
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     action = args.action
-    if action in ("init", "mode"):
+    if action in ("init", "mode", "private"):
         # FIRST, before the path is even named: everything after this can
         # touch a filesystem that hangs. `mode` runs after every landed save
-        # against the same path, so it has the same bound.
+        # against the same path, and `private` before every save
+        # (D-SINK-103), so they have the same bound.
         signal.alarm(STATE_INIT_DEADLINE)
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
@@ -871,6 +1090,13 @@ def cmd_state(args: argparse.Namespace) -> int:
             return EXIT_OK
         if broken:
             raise HelperError("state_unreadable", "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written")
+        if action == "private":
+            # D-SINK-103: the file made 0600 before the service writes it;
+            # the service writes only on this reply. Reads nothing.
+            payload_private: dict[str, Any] = {"ok": True, "kind": "state", "action": action}
+            payload_private.update(state_private(path))
+            emit(payload_private)
+            return EXIT_OK
         if action == "init":
             # R22a: `found` first -- the lstat witness, before anything is
             # repaired. The init NEVER rewrites a file that exists, whatever

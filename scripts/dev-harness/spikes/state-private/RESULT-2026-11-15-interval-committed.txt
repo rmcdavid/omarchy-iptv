@@ -1,0 +1,60 @@
+# scripts/dev-harness/spikes/state-private/measure.sh interval 12 (e644 link644 new linkabsent), 2026-11-16T02:17Z, the dsink103 tree at 106092c with the settle lane's edits as committed beside this file (the stub's entry ("10-state.py", 61816, 0x67b81393)), quickshell 0.3.2.r7.g2b4501a-1 qt6-base 6.12.0-3 umask 0022, offscreen, each probe shell on a private bus (private-bus.sh: no service directories, its own HOME), run under the heavy lock as: flock heavy.lock timeout 900 nice -n 10 env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME HOME=<decoy under the lane's scratch> TMPDIR=<a short scratch folder> measure.sh interval 12; the resumed settle lane's run on the helper it commits, the only workflow running
+# load before 0.57 0.88 0.69 2026-11-16T02:17:28Z
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:15.8 rename:15.8 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:15.3 rename:15.4 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:16.8 rename:16.9 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:16.3 rename:16.3 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:17.8 rename:17.8 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:16.3 rename:16.4 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:18.2 rename:18.2 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:16.7 rename:16.7 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:17.7 rename:17.8 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:16.4 rename:16.4 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:17.1 rename:17.1 apart:yes events:4
+   INTERVAL case=e644 order=fix rc=0 pre:changed start:chmod link:18.1 rename:18.1 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:22.6 rename:22.6 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:16.7 rename:16.8 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.1 rename:17.1 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.7 rename:17.7 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.9 rename:17.9 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.5 rename:17.5 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.1 rename:17.1 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.6 rename:17.6 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.3 rename:17.4 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.5 rename:17.5 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.4 rename:17.4 apart:yes events:4
+   INTERVAL case=link644 order=fix rc=0 pre:changed start:chmod link:17.0 rename:17.0 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:27.3 rename:27.3 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.8 rename:17.8 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:16.1 rename:16.1 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.4 rename:17.4 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.0 rename:17.0 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.5 rename:17.5 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:16.6 rename:16.6 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:18.3 rename:18.3 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:16.2 rename:16.2 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.4 rename:17.4 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:16.6 rename:16.6 apart:yes events:4
+   INTERVAL case=new order=fix rc=0 pre:created start:create link:17.6 rename:17.6 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:16.2 rename:16.2 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:18.1 rename:18.1 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:15.9 rename:15.9 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.5 rename:17.5 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.0 rename:17.0 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.6 rename:17.6 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.8 rename:17.8 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.6 rename:17.6 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.2 rename:17.2 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.8 rename:17.8 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.4 rename:17.4 apart:yes events:4
+   INTERVAL case=linkabsent order=fix rc=0 pre:created start:create link:17.0 rename:17.0 apart:yes events:4
+# exit 0 load after 1.16 1.01 0.75 2026-11-16T02:18:43Z
+# summary of the INTERVAL lines above, computed from them (link, ms: the helper's chmod or create to the writer's linkat; an upper bound on the time to its open):
+#   e644         n=12 15.3-18.2 median 16.8
+#   link644      n=12 16.7-22.6 median 17.4
+#   new          n=12 16.1-27.3 median 17.4
+#   linkabsent   n=12 15.9-18.1 median 17.4
+#   start:chmod  n=24 15.3-22.6 median 17.2
+#   start:create n=24 15.9-27.3 median 17.4
+#   all          n=48 15.3-27.3 median 17.4
+#   runs not timed (rc non-zero, no link, or start and link in one read): 0

@@ -336,6 +336,291 @@ class StateModeTest(unittest.TestCase):
         self.assertEqual(proc.stderr, "")
 
 
+class StatePrivateTest(unittest.TestCase):
+    """`state private` (D-SINK-103, 2026-11-14): what the service runs BEFORE
+    every write of state.json, and writes only on its confirmed reply. The
+    FileView's atomic writer (QSaveFile) gives the new file the mode the old
+    one had, read when the write opens, and the umask's mode to a file it
+    creates -- measured under gdb, docs/QA-RESULTS.md "D-SINK-103" -- so this
+    makes the file 0600 first: through a link (the folder the link points
+    into is the one QSaveFile writes its temporary in), creating it 0600 and
+    empty when nothing is there, and refusing, with nothing changed, a target
+    that is not a regular file of this account. Every case reads the kernel
+    (stat), never the code."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        self.path = pathlib.Path(self.dir) / "state.json"
+        os.mkdir(self.dir, 0o700)
+        # The maintainer's shape: a folder other accounts can enter.
+        self.wide = pathlib.Path(self.tmp.name) / "dotfiles"
+        self.wide.mkdir()
+        os.chmod(self.wide, 0o755)
+
+    def state(self, *args):
+        return run("state", "--state-dir", self.dir, *args)
+
+    def mode(self, path):
+        return os.stat(path).st_mode & 0o777
+
+    def test_the_maintainers_case_a_0644_target_through_a_link_into_a_wide_folder_is_made_0600(self):
+        target = self.wide / "state.json"
+        content = json.dumps(v2(favorites=["t:restored"])) + "\n"   # valid, and holding no credential
+        target.write_text(content, encoding="utf-8")
+        os.chmod(target, 0o644)
+        self.path.symlink_to(target)
+        code, payload, err = self.state("private")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "private", "file": "changed"})
+        self.assertEqual(self.mode(target), 0o600)
+        self.assertTrue(self.path.is_symlink())                       # the link is left a link
+        self.assertEqual(target.read_text(encoding="utf-8"), content)  # read nothing, wrote nothing
+        self.assertEqual(self.mode(self.wide), 0o755)                  # not the plugin's folder: untouched
+
+    def test_a_0644_file_at_the_path_is_made_0600_and_no_folder_is_touched(self):
+        # The FILE only: `state init` and `state mode` repair the folder, as
+        # before, and a 0500 folder still refuses the write that follows (the
+        # held-save premise key-scenario's B19 and B30 stage).
+        self.path.write_text(json.dumps(v2()) + "\n", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        os.chmod(self.dir, 0o755)
+        code, payload, _ = self.state("private")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "private", "file": "changed"})
+        self.assertEqual((self.mode(self.path), self.mode(self.dir)), (0o600, 0o755))
+        os.chmod(self.dir, 0o500)
+        try:
+            code, payload, _ = self.state("private")
+            self.assertEqual((code, payload["file"], self.mode(self.dir)), (0, "kept", 0o500))
+        finally:
+            os.chmod(self.dir, 0o700)
+
+    def test_a_0600_file_is_kept_and_not_chmoded_at_all(self):
+        # The steady state: no chmod is no IN_ATTRIB on the file the shell
+        # watches, so the run before every save raises no reload.
+        from unittest import mock
+        self.path.write_text("{}", encoding="utf-8")
+        os.chmod(self.path, 0o600)
+        with mock.patch("os.chmod") as chmod:
+            code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["file"]), (0, "kept"))
+        chmod.assert_not_called()
+
+    def test_nothing_at_the_path_is_created_0600_and_empty(self):
+        code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["file"]), (0, "created"))
+        self.assertEqual(self.mode(self.path), 0o600)
+        self.assertEqual(self.path.read_bytes(), b"")
+        self.assertFalse(self.path.is_symlink())
+
+    def test_a_link_to_nothing_creates_its_target_0600_through_the_link(self):
+        target = self.wide / "state.json"
+        self.path.symlink_to(target)
+        code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["file"]), (0, "created"))
+        self.assertTrue(self.path.is_symlink())
+        self.assertEqual(self.mode(target), 0o600)
+        self.assertEqual(target.read_bytes(), b"")
+
+    def test_a_link_into_a_missing_folder_is_refused_and_creates_no_folder(self):
+        self.path.symlink_to(self.wide / "gone" / "state.json")
+        code, payload, err = self.state("private")
+        self.assertEqual(code, 1)
+        self.assertEqual((payload["ok"], payload["error"]["code"], payload["why"]), (False, "state_not_private", "unreachable"))
+        self.assertFalse((self.wide / "gone").exists())
+        self.assertNotIn(self.tmp.name, json.dumps(payload) + err)    # the sentence names no path
+
+    def test_a_directory_at_the_path_is_refused_and_left_as_it_is(self):
+        self.path.mkdir()
+        os.chmod(self.path, 0o755)
+        code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["why"]), (1, "not-a-file"))
+        self.assertEqual(self.mode(self.path), 0o755)
+
+    def test_a_fifo_at_the_path_is_refused_at_once(self):
+        os.mkfifo(self.path, 0o644)
+        code, payload, _ = self.state("private")        # an O_PATH open: nothing blocks
+        self.assertEqual((code, payload["why"]), (1, "not-a-file"))
+        self.assertEqual(self.mode(self.path), 0o644)
+
+    def test_a_target_another_account_owns_is_refused_and_not_touched(self):
+        # A REAL foreign file, not a mock: the link points at a root-owned
+        # regular file this account can read and not chmod.
+        foreign = pathlib.Path("/etc/passwd")
+        if os.stat(foreign).st_uid == os.geteuid():
+            self.skipTest("/etc/passwd belongs to this account")
+        before = os.stat(foreign)
+        self.path.symlink_to(foreign)
+        code, payload, err = self.state("private")
+        self.assertEqual((code, payload["why"]), (1, "not-owned"))
+        self.assertEqual(payload["error"]["message"], "state.json belongs to another account; nothing may be written to it")
+        self.assertEqual(os.stat(foreign).st_mode, before.st_mode)
+        self.assertNotIn("/etc", json.dumps(payload) + err)
+
+    def test_a_mode_that_cannot_be_set_is_refused_unconfirmed(self):
+        from unittest import mock
+        self.path.write_text("{}", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        with mock.patch("os.chmod", side_effect=PermissionError(1, "Operation not permitted")):
+            code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertEqual(self.mode(self.path), 0o644)
+
+    def test_a_chmod_that_succeeds_and_changes_nothing_is_refused_unconfirmed(self):
+        # A filesystem that answers chmod and keeps its own modes (vfat, some
+        # FUSE mounts): the reply is the mode the file HAS, read back, never
+        # the chmod's word for it.
+        from unittest import mock
+        self.path.write_text("{}", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        with mock.patch("os.chmod", return_value=None):
+            code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertEqual(self.mode(self.path), 0o644)
+
+    # A file the run CREATED and then could not confirm (the claims check of
+    # D-SINK-103, 2026-11-14): on a filesystem that keeps its own modes the
+    # first save to a missing target used to leave an empty state.json
+    # behind, which the next start reads as not a valid state. The run now
+    # removes what it created -- only while the path still names that inode,
+    # never through a link -- and says which in the reply's `created` word.
+    # The narrow umask makes the new file 0400 and the chmod that changes
+    # nothing keeps it there: the kernel's answer, as a vfat mount gives it.
+    def private_under(self, chmod):
+        from unittest import mock
+        old = os.umask(0o277)
+        try:
+            with mock.patch("os.chmod", side_effect=chmod):
+                return self.state("private")
+        finally:
+            os.umask(old)
+
+    def test_a_file_it_created_and_could_not_make_private_is_removed(self):
+        code, payload, err = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertFalse(os.path.lexists(self.path), "the empty file it created was left behind")
+        self.assertEqual(os.listdir(self.dir), [])
+        self.assertEqual(payload["created"], "removed")
+        self.assertEqual(payload["error"]["message"],
+                         "state.json could not be made private (mode 400); nothing may be written to it;"
+                         " the empty file it created was removed")
+        self.assertNotIn(self.tmp.name, json.dumps(payload) + err)
+
+    def test_a_link_to_nothing_whose_created_target_is_refused_keeps_the_link_and_loses_the_target(self):
+        target = self.wide / "state.json"
+        self.path.symlink_to(target)
+        code, payload, _ = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertTrue(self.path.is_symlink())                       # the user's link, left a link
+        self.assertFalse(os.path.lexists(target), "the empty target it created was left behind")
+        self.assertEqual(os.listdir(self.wide), [])
+        self.assertEqual(payload["created"], "removed")
+
+    def test_a_created_file_replaced_meanwhile_is_left_as_it_is(self):
+        # Another writer's rename lands over the new file before the refusal:
+        # the path names another inode, which is not ours to remove.
+        def replace(*_a, **_k):
+            spare = os.path.join(self.dir, "theirs")
+            with open(spare, "w", encoding="utf-8") as handle:
+                handle.write("theirs")
+            os.replace(spare, self.path)
+        code, payload, _ = self.private_under(replace)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(payload["error"]["message"].endswith(
+            "; the empty file it created was left, because the path no longer names it"))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "theirs")
+
+    def test_a_created_file_written_into_in_place_is_left_with_its_bytes(self):
+        # A `cp` of a backup onto the name before the refusal (the recheck of
+        # 2026-11-15): it opens the run's OWN inode with O_TRUNC and writes
+        # into it, so the identity still matches and only the size says the
+        # bytes are someone else's. The real chmod makes the file writable as
+        # a filesystem that keeps its own modes would leave it, 0644, which
+        # the read-back refuses as unconfirmed.
+        real_chmod = os.chmod
+        backup = json.dumps(v2(favorites=["t:restored"])) + "\n"
+
+        def copy_in_place(*_a, **_k):
+            real_chmod(self.path, 0o644)
+            with open(self.path, "w", encoding="utf-8") as handle:     # O_TRUNC, the same inode
+                handle.write(backup)
+        code, payload, _ = self.private_under(copy_in_place)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(payload["error"]["message"].endswith(
+            "; the file it created was left, because something was written into it"))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), backup)
+
+    def test_a_link_put_at_the_path_to_the_created_file_is_not_followed_to_remove_it(self):
+        # The path now names a LINK whose target is the very file the run
+        # created: lstat sees the link, so nothing is removed -- neither the
+        # link (unlink would take it) nor the file behind it.
+        moved = pathlib.Path(self.dir) / "moved.json"
+        def relink(*_a, **_k):
+            os.rename(self.path, moved)
+            os.symlink(moved, self.path)
+        code, payload, _ = self.private_under(relink)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(self.path.is_symlink())
+        self.assertEqual(moved.read_bytes(), b"")
+
+    def test_a_refusal_of_a_file_it_found_names_no_creation(self):
+        self.path.write_text("{}", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        code, payload, _ = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertNotIn("created", payload)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{}")
+
+    def test_a_created_file_the_path_cannot_reach_again_is_removed(self):
+        # The other refusal after the create: the O_PATH open of the path
+        # that follows it fails (here an EACCES the kernel would give a link
+        # re-pointed into a folder this account cannot search), so the run
+        # answers `unreachable` -- and removes the file it created first.
+        from unittest import mock
+        real_open = os.open
+        created = []
+
+        def open_failing_after_the_create(path, flags, *args, **kwargs):
+            if flags & os.O_CREAT and flags & os.O_EXCL:
+                created.append(path)
+            elif created and flags == os.O_PATH | os.O_CLOEXEC and os.path.basename(os.fspath(path)) == "state.json":
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, flags, *args, **kwargs)
+        with mock.patch("os.open", side_effect=open_failing_after_the_create):
+            code, payload, _ = self.state("private")
+        self.assertEqual(len(created), 1)
+        self.assertEqual((code, payload["why"]), (1, "unreachable"))
+        self.assertFalse(os.path.lexists(self.path), "the empty file it created was left behind")
+        self.assertEqual(payload["created"], "removed")
+        self.assertEqual(payload["error"]["message"],
+                         "state.json could not be reached (Permission denied); nothing may be written to it;"
+                         " the empty file it created was removed")
+
+    def test_a_folder_link_to_nothing_is_refused(self):
+        os.rmdir(self.dir)
+        os.symlink(os.path.join(self.tmp.name, "gone"), self.dir)
+        code, payload, _ = self.state("private")
+        self.assertEqual((code, payload["ok"], payload["error"]["code"]), (1, False, "state_unreadable"))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "gone")))
+
+    def test_the_verb_as_the_service_runs_it_under_a_narrow_umask(self):
+        # The subprocess, with the argv Model.statePrivateArgv builds, on the
+        # absent file under a 0277 umask: the file is still 0600 -- set, not
+        # hoped for -- so QSaveFile, which refuses a target its owner may not
+        # write, can still replace it.
+        import subprocess, sys
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "private"],
+                              capture_output=True, text=True, timeout=30, preexec_fn=lambda: os.umask(0o277))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0]), {"ok": True, "kind": "state", "action": "private", "file": "created"})
+        self.assertEqual(self.mode(self.path), 0o600)
+        self.assertEqual(proc.stderr, "")
+
+
 class SessionKeyTest(unittest.TestCase):
     """state.json `session` (ARCHITECTURE-PLAYER.md 4.6, section 8, PO-3).
 

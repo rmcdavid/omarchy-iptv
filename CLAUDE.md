@@ -1187,6 +1187,22 @@ requests and raise the batch.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
    `$XDG_RUNTIME_DIR/omarchy-iptv/`. Modes 0700 for directories, 0600 for files.
+   **[2026-11-14, D-SINK-103: a file is made private BEFORE a write that can
+   carry a credential, never repaired after it. The service's FileView
+   (`atomicWrites`, Qt's QSaveFile) gives the new `state.json` the mode the
+   old one had when the write opens -- its temporary too, from the link to
+   the rename -- and the umask's to one it creates, measured under gdb
+   (`scripts/dev-harness/spikes/state-private/`). So a 0644 file put back at
+   the path, or behind the supported link into a folder other accounts can
+   enter, held each new credential at 0644 for the 233-272 ms until the
+   after-save `state mode` (raised by the marketplace maintainer on #14290
+   against 0.19.1). Every write now waits for the helper's `state private`
+   (0600 through the link, created 0600 when absent, a non-regular or
+   foreign target refused) and is issued only on its confirmed reply; the
+   after-save repair stays as the second layer. A writer of your own creates
+   its file 0600 itself (`os.open(..., 0o600)` and an fchmod, as
+   `write_text_atomic` does); a writer you do not control is asked how it
+   picks the mode before it is handed the text.]**
 7. Performance budgets: the guide opens in under 150 ms with a 10,000 channel
    cache, typing stays responsive, and the helper parses 10,000 channels in
    under a second.

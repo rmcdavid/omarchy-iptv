@@ -19145,3 +19145,380 @@ on its own side).
 **Release preconditions**, read on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line 0.19.1; `premise_exception_problems` returns []; origin `main` 34fac24 equals the local `main`; no v0.19.1 tag.
 
 **The open requests.** #14817 (`[Verify]: IPTV 0.19.0`, the request the finding was raised on) stays open, unapprovable once `main` moves; #14290, #13611 and #12636 stay open as filed (F-M3-4). The owner asked for 0.19.1's own request and a reply on #14817 once fixed (2026-11-13).
+
+### D-SINK-103: state.json is made private before a write, not repaired after it (the lane dsink103, 2026-11-14)
+
+**The finding.** The marketplace maintainer on
+omacom/omarchy-plugin-marketplace#14290, reviewing 0.19.1 (main 9e006be):
+"Medium, conditional -- provider credentials can be written with public file
+permissions". With the supported `state.json` link pointing into a folder
+other accounts can traverse, a valid state file with no credential put back
+at 0644 kept that mode when the plugin next saved a credential-bearing
+source; "Quickshell's atomic writer preserves the existing mode; tightening
+happens only in a separate helper after the save". Confirmed by behaviour,
+three ways, on this machine's quickshell 0.3.2.r7.g2b4501a-1 and qt6-base
+6.12.0-3, umask 0022.
+
+**1. The mechanism, under gdb** (`scripts/dev-harness/spikes/state-private/
+measure.sh both`, `RESULT-2026-11-14.txt`). One FileView declared as
+`stateFile` is (`atomicWrites: true`), offscreen, on a private bus, gdb's
+child, stopped at every syscall the writer makes in the case's folders and
+at each process spawn; at each stop every file's mode and whether it holds
+the marker credential. 0.19.1's order (write, then `state mode`):
+
+| case | the writer's syscalls | a file holding the credential readable by others |
+|---|---|---|
+| `new` (nothing there) | `openat(state, O_TMPFILE, 0666)` (dry run, discarded), `openat(state, O_TMPFILE, 0600)`, `fchmod 0644`, `linkat -> state.json` | `state.json` 644 until the repair |
+| `e644` | `openat(state, O_TMPFILE, 0600)`, `fchmod 0644`, `linkat -> state.json` (fails, exists), `linkat -> state.json.XXXXXX`, `rename` | the temporary 644 at the rename; `state.json` 644 until the repair |
+| `e600` | the same, `fchmod 0600` | none |
+| `link644` (the maintainer's) | `openat(wide, O_TMPFILE, 0600)` -- the LINK TARGET's folder -- `fchmod 0644`, two `linkat`, `rename` | the temporary 644 in the 0755 folder; the target 644 until the repair |
+| `linkabsent` | as `new`, in the target's folder | the target 644 until the repair |
+
+So the temporary is unnamed while the text is written into it, takes the
+OLD file's mode (read when the write opens; the umask's for none) before it
+gets a name, and the file keeps it. The fix's order (`state private`, the
+write only on its confirmed reply, then `state mode`): `fchmod 0600` in
+every case, and no file holding the credential is ever wider than 0600 (0
+sightings in all five).
+
+**2. How long, without gdb** (`measure.sh timed 12 new e644 link644`,
+`RESULT-2026-11-14-timed.txt`, load 1.6-2.5, `../../mode-observer.py`
+reading every file after every inotify batch). 0.19.1's order: every run
+saw the file holding the credential at 0644, for 233.4-272.4 ms (median
+239.1, 36 runs) -- the time the after-save `state mode` takes to reach its
+chmod, one helper run. The fix's order: 0 sightings in 36 of 36. A helper
+`state` run measured on its own is 248-284 ms wall, 245-274 ms CPU (12
+each, `private` and `mode`; the bare interpreter is 17 ms): the stub
+compiles every part on every run. [Those figures had no transcript and no
+load. Re-measured by the settle lane with a committed tool, `measure.sh
+cost 12` (`cost.py`: the model's argv for each verb and a bare `python3
+-I -c pass`, interleaved, wall around spawn and reap, CPU from the child's
+rusage), `RESULT-2026-11-14-cost.txt`, load 2.9: `private` 253.1-284.3 ms
+wall (median 262.8) and 250.3-278.8 ms CPU (median 260.2); `mode`
+255.0-276.5 ms wall (median 262.8) and 252.4-270.4 ms CPU (median 259.9);
+the bare interpreter 17.6-24.5 ms wall (median 18.2).] ARCHITECTURE.md's P23 note had it at
+"about 30 ms of CPU" and the D-SINK-22 row at "milliseconds"; both are
+corrected in dated brackets.
+
+**3. The real Service.qml** (key-scenario's new PRIVATE segment, B42 and
+B43, each in its own nested headless cage on a private bus under `env -u
+DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+QT_QPA_PLATFORMTHEME`, a scratch `XDG_RUNTIME_DIR`). The target put back at
+0644 mid-session by a rename over it, then an in-app `updateSource` with a
+marker credential in the guide URL, watched by `mode-observer.py`:
+- `--only PRIVATE --baseline 7c1784c`: 15 passed, 2 failed
+  (key-20261114-182348-410901): B42 `edit:true restored:644 observed:yes
+  exposed:2 final:600 span:261.0 0/state.json:644 at-path:link folder:755`,
+  B43 `... exposed:2 final:600 span:269.9 ...`.
+- `--only PRIVATE` on the fix: 17 passed, 0 failed
+  (key-20261114-182320-409262, and again after the observer's streams were
+  redirected, key-20261114-191154-505781): B42 and B43 `observed:yes
+  exposed:0 final:600`.
+
+**The design, and why.** The lead's call under the owner's standing
+authority of 2026-11-09 (the owner's word of 2026-11-14: fix the
+maintainer's findings): a write that can carry a credential never lands in,
+or passes through, a file other accounts can read; the target is made
+private before the shell writes. The measurement shows the pre-tightening
+reaches what QSaveFile reads -- it copies the mode at OPEN, after `setText`
+-- so no helper-side writer or temporary-free path was needed. Every write
+of `state.json` now waits for the helper's new `state private`
+(`state_private`, `bin/helper/10-state.py`), run between the read (R26a)
+and the write (`Model.stateSavePlan` answers `private`; its confirmed
+finish answers `write`): an `O_PATH` open through the link, `fstat`, refuse
+`not-a-file` or `not-owned` (another uid), `chmod` through `/proc/self/fd`
+to 0600 when it is not, read back (`unconfirmed` when it is not 0600); with
+nothing there, create 0600 and empty, `O_EXCL | O_NOFOLLOW` at what a link
+names, no folder made (`unreachable` when its folder is missing). It leaves
+every folder alone: the first version repaired the state folder like
+`state mode`, which would have made a 0500 folder writable before the write
+-- the held-save premise of key-scenario's B19 and B30 -- so it was taken
+out; `state init` and `state mode` repair the folder as before. The service
+(`requestStatePrivate`, `statePrivateProc`, `finishStatePrivate`) writes
+only on a reply `Model.statePrivateReply` confirms (fail closed: a refusal,
+an empty reply, another verb's line, an unknown word or a non-zero exit is
+no); a run that does not confirm fails the save as a failed write does
+(`noteStateWriteFailed`, now shared with `onSaveFailed`: `state_write_failed`
+once per episode, one journal line with a fixed word); a run that does not
+answer is TERMed at `stateInitTimeoutMs` (15 s) and its save failed then,
+and a save asked while it still lives fails at once (`still-running`),
+never waiting on it. Saves asked while it runs join it (the write carries
+memory as it is then). When it creates the file, a watching view may load
+that empty file before the exit is handled; `Model.statePrivateEcho` keeps
+that load from being read as an unparsed state (the no-write mode) while
+the run is out or after it answered `created` until our write reports.
+`state mode` after the landing stays, as the second layer.
+
+**Write sites, rule 15** (searched by shape: everything that creates or
+replaces a file in the shipped QML and the helper parts --
+`grep -n 'setText(\|atomicWrites\|FileView {'` over the shipped QML;
+`grep -n 'O_CREAT\|open(.*"w\|write_text\|write_bytes\|mkstemp\|os.replace\|os.rename'`
+over `bin/helper/*.py` -- and every place a mode is repaired after a write):
+- the shell writes ONE file itself, `stateFile.setText` (Service.qml);
+  the other FileViews (channels, EPG, statuses, manifest) are read only;
+  no Process takes stdin. Fixed here.
+- the host's `shell.json`, which the shell writes through
+  `updateEntryInline`: keys only since D-SINK-19 (a URL there is the user's
+  own `omarchy bar set`), and its mode is D-SINK-18's shield, run BEFORE a
+  persist, with its stated residual. Cleared.
+- the helper's `write_text_atomic` and `write_bytes_atomic` (every cache
+  file, the status files, the logos, and the `state` verbs' writes of
+  `state.json`, through a link included): `O_EXCL` at 0600, `fchmod 0600`,
+  `os.replace` -- the temporary is never wider and the new inode is 0600
+  whatever the old one was. Cleared.
+- `init_state_file` (`O_EXCL` 0600 and `fchmod`, an existing file only
+  chmod-ed), `write_mpv_args` (`O_EXCL | O_NOFOLLOW` 0600 in the 0700
+  runtime folder), the player's lock (0600, no credential), `cache
+  migrate`'s `os.replace` of files the helper wrote 0600. Cleared.
+- mode repaired after a write: only D-SRC-49's `state mode` (now the second
+  layer) and D-SRC-15's `state init` (before the first write of a session).
+
+**Tests.** Red first on 7c1784c, then single-decision mutants of the fix.
+- node (`tests/Model.test.js`, through the shipping Service.qml and model
+  on the service harness, whose new `statePrivateProc` double runs the
+  helper's branches on the fake file -- a chmod or a creation raises the
+  reload BEFORE the exit is handled, the order that leaves the shell the most
+  to get wrong): eleven new checks -- the D-SINK-103 plan table, the reply
+  reader (16 replies), the echo rule, the maintainer's case (the mode each
+  write MEETS is recorded at `setText`: 600 on the fix, 644 on 7c1784c), the
+  steady state and the join (one run, one write for three saves), three
+  replies that do not confirm (a refusal, an empty reply, another verb's),
+  the created file loaded before the exit, the watchdog and the
+  still-running refusal, a block set during the run -- and six re-levelled:
+  R26a's plan table (the verify's finish reads `private`), D-SINK-22 (b)
+  (the re-point between the read and the write: created 600 by the run, red
+  on 7c1784c at 644), R11's and R13's structural reads of the failure path
+  (now `noteStateWriteFailed`), R14's of the plan call, R26b's of who may
+  write (`statePrivateDone`, raised only on a confirmed reply), and the two
+  argv sweeps (D-SINK-50, D-SINK-48) that now name `statePrivateArgv`. With
+  `IPTV_SERVICE_QML` / `IPTV_MODEL` at 7c1784c: 15 of 3727 red. Six
+  single-decision mutants of the fix, each red: the plan writing at the
+  read's finish (11), the reply reader confirming a refusal (2), no echo
+  rule (2), the watchdog TERMing without failing the save (1), a second
+  save waiting on a still-running run (1), a refusal still writing (4). On
+  the fix 3727 / 0, both own-echo modes.
+- python: `tests/test_state.py` `StatePrivateTest`, 13 tests through the
+  shipping verb (in process and as the service runs it, under a 0277
+  umask), over the kernel's own answers: the maintainer's link into a 0755
+  folder, a 0644 file, a 0600 file not chmod-ed at all, nothing there
+  (created 0600 and empty), a link to nothing (its target created), a link
+  into a missing folder (refused, no folder made), a directory and a FIFO
+  (refused, unchanged), a real root-owned file behind the link (`/etc/passwd`,
+  refused `not-owned`, unchanged), a chmod that fails (`unconfirmed`), a
+  folder link to nothing, a chmod that succeeds and changes nothing (a
+  filesystem that keeps its own modes: `unconfirmed`); red on 7c1784c 13 of
+  13 (the verb does not exist: 12 errors, 1 failure). [Six more since the
+  settle lane, for the undo of a refused create, below.] Four single-decision
+  mutants of `state_private`, each red: no chmod (3), no owner check (1),
+  no kind check (2), no read-back (1). A fifth, no fchmod after the create,
+  survived -- the read-back path chmods any file found at another mode,
+  the created one included -- so that fchmod was redundant and is gone.
+- QML spec: `test_statePrivateInV4`, the plan, the reply and the echo in the
+  engine that runs them.
+- live: key-scenario B42 and B43 above; the full run on the fix, 141
+  passed, 0 failed (key-20261114-182416-412475, 590.7 s), B19's and B30's
+  held-save premise among them (`held:true folder:500 repaired:+0`): `state
+  private` leaves the folder alone, so a 0500 folder still refuses the
+  write.
+- the three key-mutation patches whose context the step moved
+  (`r25a-keep-landed`, `r26a-no-read`, `r27a-no-wait`) are re-made, the two
+  that remove the read handing the write to `state private` as the read's
+  finish does; through node, 24, 82 and 31 failures of 3727.
+
+**Costs** (stated in the board row and ARCHITECTURE.md section 8 standard
+5): one more helper run before every write, about a quarter of a second of
+CPU and wall here (`RESULT-2026-11-14-cost.txt`, above), so a save lands
+that much later; the read-to-write gap grows from one turn to that run, so
+another program's replacement of the file landing inside it, unseen by the
+view's watch (D-SRC-29's shapes), is written over, as one landing during
+the write is today (D-SRC-48); a shell stopped inside it loses the change,
+which memory held; and a `state.json` on a filesystem whose modes cannot be
+set to 0600 (a FAT or SMB mount without Unix permissions, some FUSE mounts)
+now fails every save, told once and journalled at each, where 0.19.1 saved
+it at the mount's mode (reasoned from the refusal, not mounted).
+
+**What stays open.** The time between the run's last look at the file
+(its chmod, when it makes one) and the writer's open, about 20 ms: a re-point,
+or a 0644 file put at the path, landing in it gets or keeps 0644 until the
+after-save repair. Measured to the writer's LINK, not its open (below), so
+an upper bound: 17.3-23.2 ms over 10 runs at load 2.3-2.7 by the branch's
+review (no transcript kept), 16.3-29.6 ms over 48 runs at load 3.3-4.0
+by the settle lane (`RESULT-2026-11-14-interval.txt`), 18.2-41.7 ms over
+48 more at load 3.3-4.2 by its resumed run (`RESULT-2026-11-15-interval.txt`),
+and 15.3-27.3 ms over 48 on the committed helper at load 0.6-1.2
+(`RESULT-2026-11-15-interval-committed.txt`); the parts --
+the helper's exit, the shell's exit handler, the write job's start -- are
+reasoned, not timed apart. A target folder another account can WRITE (it
+can replace the file or the link whatever its mode). An empty `state.json`
+left when the write after a `created` answer fails and the shell stops,
+which the next start reads as not a valid state (the no-write mode, told);
+the second way to leave one, with the shell running, is closed below.
+
+**The settle lane (2026-11-14): the window timed with a transcript, and a
+refused create undone.**
+- The window, `measure.sh interval 12` (`interval.py`, new: one inotify
+  watch on the folder that holds `state.json`, every event stamped with
+  CLOCK_MONOTONIC at its read and nothing else done between reads), the
+  fix's order, offscreen, each probe shell on a private bus with its own
+  HOME and no display variables, `RESULT-2026-11-14-interval.txt`. The
+  start is the helper's IN_ATTRIB on `state.json` (its chmod; `e644`,
+  `link644`) or its IN_CREATE (`new`, `linkabsent`); the end is the first
+  IN_CREATE of `state.json.XXXXXX`, the writer's `linkat` of its temporary.
+  The writer's OPEN is not observable this way: it opens an unnamed
+  `O_TMPFILE` (no event), fchmods it, writes and commits before it links
+  (`RESULT-2026-11-14.txt`, under gdb), so the figure is an upper bound on
+  the chmod-to-open time. 48 of 48 runs timed, every start and link in two
+  reads: chmod starts 16.3-25.8 ms (median 17.6, 24 runs), create starts
+  16.9-29.6 ms (median 19.0, 24 runs), all 16.3-29.6 ms (median 18.4), at
+  load 3.3-4.0 (one-minute, before and after). A 0600 file is not chmod-ed
+  and raises nothing (`e600`, `start:none`): there the window starts at the
+  helper's read-back, which inotify cannot see.
+- The window again (2026-11-15 in the morning, the resumed settle lane,
+  after the machine's reboot had cleared the first run's scratch; on a
+  helper part the lane changed again that day, 61550 bytes, CRC-32
+  0xb4913725 by the RESULT's header):
+  the same `measure.sh interval 12` under the heavy lock, a decoy HOME and
+  a short TMPDIR, `RESULT-2026-11-15-interval.txt`. 48 of 48 timed, every
+  start and link apart: chmod starts 18.2-27.6 ms (median 23.1), create
+  starts 18.3-41.7 ms (median 23.9; the 41.7 a single `linkabsent` run,
+  the next highest 29.7), all 18.2-41.7 ms (median 23.2), at load
+  3.3-4.2 while another lane's work shared the four cores. So "about 20
+  ms" holds as a median and the tail reaches about 40 ms on a busy
+  machine. The kept D-STATE-9 run below was re-run that evening with the
+  driver as committed, `state-literal-link/RESULT-2026-11-15.txt`, and
+  every line after its header is the same as the first run's.
+- The cost again, `measure.sh cost 12` on the same morning part,
+  `RESULT-2026-11-15-cost.txt`, load 4.0-4.1: `private` 295.1-435.2 ms
+  wall (median 371.9) and 291.7-396.9 ms CPU (median 362.2); `mode`
+  283.7-403.7 ms wall (median 371.7); a bare `python3 -I` 20.7-44.1 ms
+  wall (median 25.2), against 17.6-24.5 the day before. The bare
+  interpreter's median rose in about the same proportion as the helper's
+  (18.2 to 25.2 ms, 262.8 to 371.9 ms), so this reads as the same machine
+  busier, not a costlier helper, and the run on the committed helper
+  below, at load 1, bears that out: "about a quarter of a second" is the
+  figure at load 1 to 3, and at load 4 the median was 0.37 s.
+- The window and the cost a third time, on the committed helper (the
+  stub's entry `("10-state.py", 61816, 0x67b81393)`; 2026-11-15 in the
+  evening, the lane resumed again after the lead's session ended, the
+  only workflow running), each under the heavy lock and `nice -n 10`,
+  with a decoy HOME and a short TMPDIR. `measure.sh interval 12`,
+  `RESULT-2026-11-15-interval-committed.txt`: 48 of 48 timed, every start
+  and link apart; chmod starts 15.3-22.6 ms (median 17.2), create starts
+  15.9-27.3 ms (median 17.4), all 15.3-27.3 ms (median 17.4), at load
+  0.6-1.2. `measure.sh cost 12`, `RESULT-2026-11-15-cost-committed.txt`,
+  load 0.9-1.0: `private` 235.5-259.9 ms wall (median 247.0) and
+  233.4-257.2 ms CPU (median 244.7); `mode` 235.5-258.9 ms wall (median
+  245.9); the bare interpreter 16.7-18.4 ms wall (median 17.4). So over
+  144 runs in three sets at load 0.6-4.2 the window measured 15.3-41.7
+  ms, medians 17.4, 18.4 and 23.2: about 20 ms, longer on a busy machine,
+  and the README says 15-42 ms. The morning's part was not kept, so its
+  headers' word that the part they name as committed (61615 bytes,
+  0x6883bb8f) "differs from it only by one docstring sentence" is
+  unchecked -- no 65-byte deletion from that part gives 0xb4913725 -- and
+  that part is not the committed one either: two docstring edits of the
+  resumed lane's made it 61816 bytes. The committed run is the one the
+  figures rest on.
+- The undo. The claims check found a second way to leave an empty
+  `state.json`: `state_private_open` created the file 0600 and empty
+  (`O_EXCL`), and when `state_private` then refused -- `unconfirmed` on a
+  filesystem that keeps its own modes, or any refusal after the create --
+  it exited 1 with the file left, so the first save to a missing target
+  on such a mount left an empty file that the next start reads as not a
+  valid state. Now a refusal after the create removes what the run
+  created (`undo_state_private_create`, `bin/helper/10-state.py`): the
+  create is made through an `O_PATH` descriptor on its folder, held open,
+  and the created inode's `st_dev`/`st_ino` are read off the creating
+  descriptor; the removal is an `lstat` at that folder (`os.stat(name,
+  dir_fd=..., follow_symlinks=False)`) and an `unlink` at it only while the
+  identity matches. A link at the name is never followed, a file renamed
+  over it or nothing there is left, and the reply carries `created:
+  "removed"` or `"left"` beside its `why`, with a clause in its sentence
+  that names no path. What no syscall closes: a replacement landing between
+  that `lstat` and the `unlink`, which takes an account that can write that
+  folder (this one, or another, which the row already does not defend
+  against). `StatePrivateTest` gains six tests. Five
+  run under a 0277 umask with a chmod that changes nothing (the seam the
+  lane's vfat-shaped test uses): the created file removed, a link to
+  nothing whose created target is removed and the link kept, a replacement
+  renamed over the created file left, a link put at the name to the
+  created file not followed (both the link and the file kept), and a
+  refusal of a file it FOUND naming no creation. The sixth fails the
+  `O_PATH` open of the path that follows the create (EACCES), the other
+  refusal after it: `unreachable`, the file removed. Red on 106092c's
+  helper 5 of 6 (three failures, "the empty file it created was left
+  behind"; two errors, no `created` word: the replacement and the link
+  cases, which guard the inode check and go red under its mutants).
+  Five single-decision mutants,
+  each red: no inode check (2: the replacement and the link removed), the
+  `lstat` following a link (1: the link removed), no undo at a refusal
+  (4), no undo at the failed open (1), the word on every refusal (1).
+  Sealed; `test_state` 112 of 112.
+- The undo, rechecked (2026-11-15, the lead, after the branch's recheck).
+  The recheck's probe found the identity test alone too generous: a `cp`
+  of a backup onto the name between the create and the refusal opens the
+  run's OWN inode with `O_TRUNC` and writes into it, the identity still
+  matches, and the undo removed the restored backup (`unreachable` and
+  `unconfirmed` alike). The removal now also needs the inode empty
+  (`st_size == 0` on the same `lstat`); a written inode is left, with
+  `created: "left"` and the clause "the file it created was left, because
+  something was written into it". What no syscall closes is now stated
+  for both shapes: a replacement or an in-place write landing between the
+  `lstat` and the `unlink` is removed with it. One test,
+  `test_a_created_file_written_into_in_place_is_left_with_its_bytes`
+  (the real chmod to 0644 and an in-place write inside the patched
+  chmod, so the read-back refuses `unconfirmed`): red on d726878's helper
+  (`removed`, the backup lost), green on the fix; `test_state` 113 of 113.
+  The size test is the one decision the old helper lacks, so the red run
+  is its mutant.
+
+### D-STATE-9: QSaveFile reads a state.json link by its literal path (the D-SINK-103 settle lane, 2026-11-14)
+
+**The finding.** The D-SINK-103 review measured it offscreen on a private
+bus under gdb with a FileView of its own (not kept), and filed it: with the
+state folder a link and `state.json` a link whose relative target climbs
+with `..`, the FileView's save lands in a different file than the one the
+plugin reads. Its claims check reproduced it with a scratch `QSaveFile`
+probe against the installed libQt6Core and corrected three of the row's
+claims. That probe is now kept, with the layout moved into a driver so the
+shipping helper can run between the layout and the save:
+`scripts/dev-harness/spikes/state-literal-link/` (`probe.cpp`,
+`measure.sh`, `README.md`), run against qt6-base 6.12.0-3 offscreen, each
+probe on a private bus with no display variables,
+`RESULT-2026-11-14.txt`, and again on 2026-11-15 with the driver and the
+helper as committed, under the heavy lock, `nice -n 10` and a decoy HOME,
+`RESULT-2026-11-15.txt`: every line after the header the same.
+
+**What it shows**, ten cases (`state -> T/state`, `T/state/state.json ->
+../wide/state.json`; the kernel reads `T/wide/state.json`, `QSaveFile`
+writes `wide/state.json`):
+- `NEW` lands in the literal file in every case where a folder is there:
+  `QFileInfo::symLinkTarget` names it, `realpath` names the other.
+- The mode is the KERNEL-resolved file's, read at the open, or the umask's
+  0644 when there is none -- never the replaced file's own: real 0600 with
+  nothing literal, 0600; real 0644, 0644; real 0600 over a 0644 literal
+  file, 0600; real 0644 over a 0600 literal file, 0644; no real file, 0644.
+  So on 0.19.1 the misplaced file was 0644 only when the real file was
+  0644 or missing, which corrects the row's "it also left the misplaced
+  file at 0644".
+- With the shipping helper's `state private` first (the argv
+  `Model.statePrivateArgv` builds): over a 0644 real file it answered
+  `changed` and the misplaced file came out 0600; with no real file it
+  answered `created` (the real target 0600 and empty) and the misplaced
+  file came out 0600. The row's "comes out 0600 since D-SINK-103" holds.
+- `nodir`, no folder at the literal location: `open failed: No such file
+  or directory`, nothing written -- every save fails, told, instead of
+  landing elsewhere. That is the row's missing precondition.
+- `chain`, a second link at the literal location: the second hop is read
+  against the FIRST hop's literal folder (`a/state.json -> ../wide/...`
+  wrote `wide/state.json`), hop by hop, as the claims check reasoned.
+- `above`, a linked PARENT of a real state folder with `../../x/state.json`:
+  `NEW` in `home/.local/x/state.json` while the plugin reads
+  `data/x/state.json`. Any linked folder the target's `..` climbs out of.
+
+The Qt source is not on this machine, so how `QSaveFile` reaches these
+answers is read from its behaviour, not its code. The row's guard is
+reworded to compare FILES, not strings: `QDir::cleanPath` resolves no link
+and `realpath` resolves every one, so a supported layout (a link inside a
+linked state folder, or a target through a linked folder) gives two
+strings for one file. Still open, P4; nothing in the shipped code changed
+for it.
