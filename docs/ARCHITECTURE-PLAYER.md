@@ -1217,7 +1217,7 @@ past the hold, the older player was gone 16.2-16.3 s after the shell loaded,
 nothing replaced it when the list landed, and in L8 no player was on the
 socket after the refresh; L7, L8 and L10, which assert the deferral and the
 late replacement above, read red there, and two of their premises are not
-explained by this decision (F-HARNESS-110). L1-L5 and L9 stay green: older
+explained by this decision (F-HARNESS-112). L1-L5 and L9 stay green: older
 tags' players are replaced, and this tree's own launch reads `current` byte
 for byte with the relay's port.]**
 
@@ -4278,7 +4278,13 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
 - **`--ytdl=yes`** (PO-5): yt-dlp's own page fetches are outside the
   relay -- mpv 0.41.0's built-in ytdl hook hands yt-dlp no `--proxy` of
   mpv's (READ) -- so with that token a channel from an internet playlist
-  can make yt-dlp fetch any address. The footer's handoff line is
+  can make yt-dlp fetch any address. And a `proxy` in `--ytdl-raw-options`
+  (warned beside `--ytdl`) is set by the same hook as the resolved
+  stream's per-file `stream-lavf-o` `http_proxy`, after the helper's
+  read-back, so that stream goes through the user's proxy, not the relay
+  (READ in the hook, not measured). Both stay the `--ytdl` residual
+  (PO-10), warned rather than refused: the lead's call under the owner's
+  standing authority of 2026-11-09. The footer's handoff line is
   unchanged; the README says it.
 - **A user's `mpv` wrapper whose CHILD is the real player** (D-PLY-55)
   survives a SIGKILLed relay: the death signal is set on the process the
@@ -4296,8 +4302,8 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   the next zap, stopped by the orphan check at a shell's exit, and read
   unsafe by the probe at a shell start or after a lost player socket; the
   ten-second health tick's `status` does not ask the relay, so while the
-  shell runs and nobody changes channel the interval is unbounded (the
-  lead's question).
+  shell runs and nobody changes channel the interval is unbounded
+  (D-PLY-67, with the recommended bound: `status` asks the relay).
 - **Sign-in headers FFmpeg copies to a GLOBAL redirect or segment host**
   the provider chose: the relay judges where a request goes, not what it
   carries, and a global host is not this machine or the LAN (19.2's
@@ -4318,9 +4324,9 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   (mpv's "Failed to open" line, or for HLS and DASH
   `Model.unopenedFormatSentence`), not as "Refused a local address", which
   only a start tells, from the relay's count of the first load's refusals
-  (decision 19's premise, measured not to hold; the wording is the lead's
-  to settle).
+  (decision 19's premise, measured not to hold; the wording is open as
+  D-PLY-66).
 - **The harness**: player-scenario's L7, L8 and L10 assert the deferral
-  decision 15 replaced (F-HARNESS-110), and the windowless arm of
+  decision 15 replaced (F-HARNESS-112), and the windowless arm of
   tls-scenario starts its own players with no relay, so its loads are
   refused before they are sent (F-HARNESS-111).

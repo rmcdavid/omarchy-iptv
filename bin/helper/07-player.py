@@ -1699,7 +1699,9 @@ def spawn_player(argv: list[str], cwd: str, proxy_fd: int, control_fd: int,
     relay; after the second G kills M first. The player and the relay start
     in parallel, so the relay's interpreter is off the launch path; a
     connection the player makes before the relay accepts waits in the
-    listener's backlog. -> pid (M's), relayPid (G's) and stderrFd."""
+    listener's backlog. -> pid (M's) and stderrFd. The relay's pid is not
+    returned: the helper learns it only from the relay's own answer on its
+    control socket (SO_PEERCRED, relay_register), never off M's ancestry."""
     opened: list[int] = []
     prctl = _prctl()
     player_env = player_environment() if env is None else env
@@ -1838,7 +1840,7 @@ def spawn_player(argv: list[str], cwd: str, proxy_fd: int, control_fd: int,
         os.close(log_r)
         raise HelperError("spawn_failed", "the player did not report a pid")
     os.set_blocking(log_r, False)
-    return {"pid": pid, "relayPid": proc_parent(pid), "stderrFd": log_r}
+    return {"pid": pid, "stderrFd": log_r}
 
 
 # The un-redacted tail of a partial line, per fd, between calls to

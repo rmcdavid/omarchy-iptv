@@ -357,16 +357,21 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         child, and the start answers ok. Without the spawn's own call the
         player is reparented above the relay, which is then no ancestor of it,
         and the start answers spawn_failed with the player left running
-        (measured by the review of 7c281d8). The parent is read off the
+        (measured by the review of 7c281d8). That start fails before this
+        test's parent check is reached, and so does WrapperSpawnTest's
+        background case: what holds a backgrounded player under its relay at
+        any start that answers ok is relay_register's check that the relay is
+        an ancestor of the PEER, the player itself (measured by the recheck,
+        with wait_for_relay forced to pass). This test states the property
+        directly; it adds no coverage of a race. The parent is read off the
         kernel, and only read."""
         self.background_wrapper()
         code, payload, _, stderr = self.player_start()
         self.assertEqual(code, 0, stderr)
         found = helper.find_player(self.sock)
         self.assertEqual(len(found), 1, found)          # the wrapper has exited
-        # Asked even of a start that answered ok: a relay that happened to
-        # answer as the launched pid's ancestor before it reaped that pid
-        # would pass the spawn's own check with the player elsewhere.
+        # The property itself, read off the kernel (relay_register's peer
+        # check is what makes a start that answered ok imply it).
         parent = helper.proc_parent(found[0]["pid"])
         argv = ([os.fsdecode(a) for a in pathlib.Path("/proc/%d/cmdline" % parent).read_bytes().split(b"\0") if a]
                 if parent > 1 else [])
@@ -656,7 +661,7 @@ class FirstLoadRefusalTest(MpvTestCase):
             client = helper.MpvIpc(self.sock, 1.0)
             client.connect()
             return {"spawned": False, "client": client, "pid": holder.pid, "vouched": holder.pid,
-                    "replaced": 0, "carry": {}, "relayPid": 0}
+                    "replaced": 0, "carry": {}}
 
         def literal_only(name, port):
             # The relay's lookup of its target: a literal answers itself, and

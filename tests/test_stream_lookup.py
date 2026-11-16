@@ -211,9 +211,14 @@ class PlayTargetTest(unittest.TestCase):
         with mock.patch.object(helper, "resolve_within", lambda h, p, t: calls.append((h, p, t)) or [answer(GLOBAL)]):
             self.assertEqual(helper.stream_resolve(NAME, 80), [answer(GLOBAL)])
         self.assertEqual(calls, [(NAME, 80, helper.STREAM_LOOKUP_TIMEOUT_S)])
-        # Under the shell's 8 s watchdog over one `play` (Service.qml,
-        # controlTimeoutMs), with the zap's own connect beside it.
-        self.assertLessEqual(helper.STREAM_LOOKUP_TIMEOUT_S + helper.DEFAULT_IPC_TIMEOUT, 8.0 - 2.0)
+        # Under the shell's watchdog over one `play` (Service.qml,
+        # controlTimeoutMs, Model.playerWatchdogMs("play")), read from the
+        # bounds fixture both suites run rather than copied: the lookup, the
+        # relay's two questions and the zap's own connect, with 2 s to spare.
+        bounds = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "player-bounds.json")
+                            .read_text(encoding="utf-8"))
+        self.assertLessEqual(helper.STREAM_LOOKUP_TIMEOUT_S + 2 * helper.RELAY_IPC_S + helper.DEFAULT_IPC_TIMEOUT,
+                             bounds["watchdogMs"]["play"] / 1000.0 - 2.0)
 
     def test_a_loopback_relays_channels_name_the_lan_and_its_own_port_only(self):
         urls = ["http://%s/live/1.ts" % NAME, "http://%s:34400/live/2.ts" % NAME, "http://%s:631/" % NAME,
@@ -392,7 +397,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         client = helper.MpvIpc(self.sock, 1.0)
         client.connect()
         return {"spawned": False, "client": client, "pid": self.holder.pid, "vouched": self.holder.pid,
-                "replaced": 0, "carry": {}, "relayPid": 0}
+                "replaced": 0, "carry": {}}
 
     def verb(self, verb, cid, *more):
         if verb == "play":

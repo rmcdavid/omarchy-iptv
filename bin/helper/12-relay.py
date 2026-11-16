@@ -14,8 +14,8 @@ from __future__ import annotations
 # nobody here had judged.
 #
 # The relay is the fix for everything the player fetches over http and
-# https. The player is pinned to it as its HTTP proxy (the launch path, the
-# next step of the design), and FFmpeg then never resolves a proxied target:
+# https. The player is pinned to it as its HTTP proxy (spawn_player's launch
+# argv, and a per-file value on every load apply_channel makes), and FFmpeg then never resolves a proxied target:
 # it connects to this relay's 127.0.0.1 port and hands it the NAME, in an
 # absolute-form request line for plain http and in a CONNECT for https
 # (READ in FFmpeg n9.0.2's http.c and tls.c; MEASURED by the design's rigs
@@ -53,8 +53,9 @@ from __future__ import annotations
 #
 # What stays outside it, stated in the design: the protocols that never ask
 # an HTTP proxy (the design pins rtmp, rtsp and srt to the judged literal
-# and refuses mms and mmsh from a playlist that is not local; whether rtmps
-# and rtsps reach the relay is for a measurement still to be made), the user's own
+# and refuses mms and mmsh from a playlist that is not local; rtmps reaches
+# the relay as a CONNECT, and rtsps, which never asks it, is in no
+# playlist's scheme list -- both measured headless), the user's own
 # --ytdl, and, through the user's own proxy, a name that proxy resolves
 # differently from this machine (check_proxied's residual, ARCHITECTURE.md
 # section 6).
@@ -253,7 +254,7 @@ class StreamPolicy:
 
 def relay_policy_record(raw: Any) -> dict[str, Any] | None:
     """A `load` request's policy, as the helper builds it (apply_channel,
-    the next step of the design), or None when it is not one:
+    through relay_register), or None when it is not one:
       * a playlist's: cached_source's record -- `host` (its host_key, "" for
         a local file), `port` (an int or null), `loopback` and `local`
         (booleans), and `class` (one of ADDRESS_CLASSES, `unresolved`, or

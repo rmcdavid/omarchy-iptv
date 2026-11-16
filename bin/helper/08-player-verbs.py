@@ -104,8 +104,9 @@ def cached_source(document: dict[str, Any]) -> dict[str, Any]:
 # slow answer to the helper and a fast one to the player is a free pass.
 #
 # The bound is not DEFAULT_TIMEOUT, the fetches' 20 s: the shell's watchdog
-# over one `play` is 8 s (Service.qml, controlTimeoutMs), so a lookup the
-# fetches' bound let run would be killed with the zap's reply. 3 s, and the
+# over one `play` (Service.qml, controlTimeoutMs) is the control slot's 8 s
+# plus the relay's two questions, 10 s (Model.playerWatchdogMs("play")), so
+# a lookup the fetches' bound let run would be killed with the zap's reply. 3 s, and the
 # start's and restart's watchdogs carry it (Model.PLAYER_BOUNDS.lookupMs,
 # the player-bounds fixture).
 #
@@ -1040,7 +1041,7 @@ def relay_register(sock_path: str, target: dict[str, Any], peer: int) -> tuple[s
     return relay_proxy_url(token, port), port
 
 
-def relay_refused_count(sock_path: str, target: dict[str, Any], relay_pid: Any) -> int:
+def relay_refused_count(sock_path: str, target: dict[str, Any]) -> int:
     """How many of the target's load's connections its relay refused, or 0
     when it cannot say (no token, a relay gone). Asked of the relay by its
     own pid (target `relayPid`, as relay_register found it), because the
@@ -1051,7 +1052,7 @@ def relay_refused_count(sock_path: str, target: dict[str, Any], relay_pid: Any) 
     if not isinstance(token, str):
         return 0
     reply = relay_request(sock_path, {"op": "count", "token": token}, 0,
-                          relay_pid=target.get("relayPid") or relay_pid)
+                          relay_pid=target.get("relayPid") or 0)
     refused = reply.get("refused") if isinstance(reply, dict) and reply.get("ok") is True else 0
     return refused if isinstance(refused, int) and not isinstance(refused, bool) and refused > 0 else 0
 
@@ -1550,8 +1551,7 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
                     # would hit the player we are keeping. Signal the rest by pid.
                     warnings.append("stopped %d other player process(es) on this socket" % len(others))
                     stop_ladder(sock_path, others, "term", ipc_timeout)
-                return {"spawned": False, "client": client, "pid": keep, "vouched": keep, "replaced": 0, "carry": {},
-                        "relayPid": 0}
+                return {"spawned": False, "client": client, "pid": keep, "vouched": keep, "replaced": 0, "carry": {}}
             # Another build's player, or nothing of ours: replaced, never fed.
             for record in found:
                 limit_core_of(int(record["pid"]))
@@ -1623,7 +1623,7 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
     if carry:
         apply_carry(client, carry, ipc_timeout)
     return {"spawned": True, "client": client, "pid": launched["pid"], "launchErrors": errors,
-            "vouched": launched["pid"], "replaced": replaced, "carry": carry, "relayPid": launched["relayPid"]}
+            "vouched": launched["pid"], "replaced": replaced, "carry": carry}
 
 
 def bind_relay_listeners(sock_path: str) -> tuple[Any, Any]:
@@ -1816,7 +1816,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     # literal is: the shell's card and the channel marked failed
     # (PLAYER_START_CHANNEL_REFUSALS). The player shows it only as a failed
     # open (measured), so the relay's count of the load's refusals decides.
-    if first_load.get("state") == "failed" and relay_refused_count(sock, target, outcome["relayPid"]) > 0:
+    if first_load.get("state") == "failed" and relay_refused_count(sock, target) > 0:
         log("player %s: %s" % (verb, RELAY_LOAD_REFUSAL))
         emit(error_payload(kind, HelperError("local_address", RELAY_LOAD_REFUSAL), id=args.id or None, seq=seq))
         return EXIT_ERROR

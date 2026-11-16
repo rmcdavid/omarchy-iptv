@@ -722,7 +722,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         client = helper.MpvIpc(self.sock, 1.0)
         client.connect()
         return {"spawned": False, "client": client, "pid": self.holder.pid, "vouched": self.holder.pid,
-                "replaced": 0, "carry": {}, "relayPid": 0}
+                "replaced": 0, "carry": {}}
 
     def start(self, verb, cid):
         with mock.patch.object(helper, "adopt_or_spawn", lambda *a, **k: self.outcome()), \
