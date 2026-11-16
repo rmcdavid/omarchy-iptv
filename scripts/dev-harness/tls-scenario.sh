@@ -667,12 +667,27 @@ except (OSError, ValueError):
 if not argv:
     print("NOARGV")
     raise SystemExit(0)
+# F-HARNESS-115 (2026-11-16): the one value taken from the live argv is the
+# port of the relay pin, `--http-proxy=http://127.0.0.1:<port>`, which the
+# kernel chose at the spawn; 0 when the argv holds none (every tree before
+# the relay). player-scenario's relay_port reads it the same way.
+pins = [a for a in argv if a.startswith(b"--http-proxy=http://127.0.0.1:")]
 try:
+    port = int(pins[0].rsplit(b":", 1)[1]) if len(pins) == 1 else 0
+except ValueError:
+    port = 0
+try:
+    import inspect
     loader = importlib.machinery.SourceFileLoader("omarchy_iptv_tls_launch", sys.argv[1])
     spec = importlib.util.spec_from_loader("omarchy_iptv_tls_launch", loader)
     helper = importlib.util.module_from_spec(spec)
     loader.exec_module(helper)
-    forms = [("plain", helper.mpv_launch_argv(sys.argv[2], [])), ("include", helper.mpv_launch_argv(sys.argv[2], ["--osd-level=1"]))]
+    # A builder that takes the relay's port is handed the one the player was
+    # launched on; an older tree's builder has no such parameter.
+    extra = {}
+    if port and "relay_port" in inspect.signature(helper.mpv_launch_argv).parameters:
+        extra = {"relay_port": port}
+    forms = [("plain", helper.mpv_launch_argv(sys.argv[2], [], **extra)), ("include", helper.mpv_launch_argv(sys.argv[2], ["--osd-level=1"], **extra))]
 except BaseException:
     print("NOBUILDER")
     raise SystemExit(0)

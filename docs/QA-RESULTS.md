@@ -20099,3 +20099,24 @@ I also searched every sweep for a URL on a player's argv:
 The relay's own argv carries no `--input-ipc-server=` element (`relay_argv`), so `player_count`, `staged_alive` and the teardown count, which match that token, count players only, and S1's "no player left behind" and the teardown read green.
 
 **The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with. No floor moves: this lane adds no test.
+
+### The relay merge's review, settled (the lead, 2026-11-16)
+
+The merge review of 76a382f found nothing that blocked the push, and `dev` was pushed at 76a382f. This section settles its two Low findings and lands F-HARNESS-115's fix.
+
+**F-HARNESS-115, fixed.** `tree_launch` in `scripts/dev-harness/tls-scenario.sh` now takes the relay pin's port off the live argv, which it reads the way player-scenario's `relay_port` does, and hands it to the builder when the builder takes `relay_port`. An older tree's builder is called as before.
+- Before the fix, on 44b736d: 50 passed, 1 failed (tls-20261116-110309-1737682, the section above).
+- With the fix, on 76a382f plus this change: **51 passed, 0 failed** (tls-20261116-114336-1812639, 11:43:36 to 11:44:33). The control read `include`.
+- The run used the same rig as the section above: a nested headless cage on a private bus, under the heavy lock at nice 10, with the session's display variables dropped. It had a scratch XDG_RUNTIME_DIR and TMPDIR, a soft core limit of 0, the software-GPU lever, and a refusing hyprctl and a logging notifier first on PATH. The private bus is what kept the four "Stream failed" cards off the desktop.
+- After the run, no cage, mpv or rig port was left. The owner's quickshell was the only one running. The crash journal read 87 before and after.
+- The harness log's 12 TypeErrors all come from the staged pre-TLS tree's `Guide.qml`, none from the tree under test.
+
+**F-HARNESS-114, the two lines the sweep missed.** The review found two `pkill -f` lines still in `scripts/qa-sources-scenarios.sh`'s `harness_stop`, the belt-and-braces stops of the scratch shell and of the fixture server. Each is now a `pgrep -x` candidate list, with every candidate signalled only through `qa_signal_named` once its own command line names this run's `$SCRATCH/root` or `$SCRATCH/fixtures`. The script drives the desktop and was not run; it was checked with `bash -n`.
+
+qa-lib-test gains one check: no shell script under `scripts/` calls `pkill` on a code line. EXPECTED goes 753 -> 754.
+- Red on 76a382f: the new suite was run over a detached checkout of 76a382f, the same way the gate runs it. It read 753 passed, 1 failed, and the one failure was this check (got 2, want 0).
+- Green on this tree.
+
+The rule-15 search was `^[[:space:]]*pkill` over every `*.sh` under `scripts/` and `tests/`. It found only those two lines. `tests/test_release.py`'s `pkill` is a README fixture string the release check reads, not a call.
+
+**CLAUDE.md.** The opening section's "Neither can be approved as filed" sentence was made false by the 2026-11-16 re-point. It now carries a dated bracket saying so.

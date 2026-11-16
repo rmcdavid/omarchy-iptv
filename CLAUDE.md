@@ -91,7 +91,9 @@ target 9e006be and #14817 34fac24, all five open, labelled `validated` and
 commit is our HEAD, and one edited to 787a33b would be refused as already
 the listing. Once `main` moves, either could be approved only if its Target
 commit were edited to the HEAD of that day, by a maintainer, as he edited
-#11935, or by us.
+#11935, or by us. **[2026-11-16: no longer so. Both now target 9e006be,
+our `main` HEAD, so either can be approved as filed while `main` stays
+there, which is why the owner holds it.]**
 
 ## Branches: `dev` is the tree, `main` is the artifact
 

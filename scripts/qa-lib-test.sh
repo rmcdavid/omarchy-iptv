@@ -1238,6 +1238,14 @@ qa_signal_named KILL "$TMP/sp-orphan" "$sp_orphan"
 # goes through the ladder behind its ownership guard.
 is "run.sh ends nothing by a pkill pattern any more (code lines; its comments may say the word)" \
    "$(qa_count '^ *pkill -f' "$ROOT/scripts/dev-harness/run.sh")" "0"
+# F-HARNESS-114, 2026-11-16 (the relay merge's review): the sweep that
+# cleared run.sh missed two in qa-sources-scenarios.sh, so the same shape is
+# now held over every shell script the repository keeps under scripts/.
+pk_files=()
+while IFS= read -r -d '' f; do pk_files+=("$f"); done \
+  < <(find "$ROOT/scripts" -type f -name '*.sh' -print0)
+is "no shell script under scripts/ ends anything by a pkill call (code lines)" \
+   "$( (( ${#pk_files[@]} )) && grep -aE -- '^[[:space:]]*pkill([[:space:]]|$)' "${pk_files[@]}" | wc -l | tr -d ' ')" "0"
 # [2026-11-16, D-SINK-102's conformance review: the quickshell
 # under the timeout wrapper, which run.sh did not record itself, goes
 # through qa_stop_named, the same ladder with each signal checked on a
@@ -3949,7 +3957,10 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # 2026-11-16, the merge of dsink102 into dev (lane-merge): 737 + 16 = 753,
 # dev's lock guard and scenario reads beside the branch's relay scenario,
 # qa_cmdline_sans_relay_pin and qa_signal_named / qa_stop_named.
-EXPECTED=753
+# 753 -> 754 the same day (F-HARNESS-114, the relay merge's review): no
+# pkill call in any shell script under scripts/. Red on 76a382f, where
+# qa-sources-scenarios.sh still had two.
+EXPECTED=754
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

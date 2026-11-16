@@ -161,9 +161,18 @@ harness_stop() {
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
     rm -f "$SCRATCH/logs/run.pid"
   fi
-  # Belt and braces, scoped to THIS scratch dir (see run.sh cleanup).
-  pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
-  pkill -f "http.server 8765 --bind 127.0.0.1 --directory $SCRATCH/fixtures" 2>/dev/null
+  # Belt and braces, scoped to THIS scratch dir (see run.sh cleanup). Found
+  # by exact name, and each signalled only through a pidfd once its own
+  # command line still names this run's scratch folder (qa_signal_named):
+  # these were `pkill -f` patterns until 2026-11-16 (F-HARNESS-114, found by
+  # the relay merge's review), and a pattern reaches whatever matches it.
+  local p
+  for p in $(pgrep -x quickshell 2>/dev/null); do
+    qa_signal_named TERM "$SCRATCH/root" "$p"
+  done
+  for p in $(pgrep -x python3 2>/dev/null); do
+    qa_signal_named TERM "$SCRATCH/fixtures" "$p"
+  done
   return 0
 }
 
