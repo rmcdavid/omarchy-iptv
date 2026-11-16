@@ -4862,7 +4862,9 @@ QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
   import order wherever QtQuick is imported at 6.12, D-HOST-9; `scripts/check-theme-names.py` refuses it),
   `Style.*`, `Border.*`. A literal
   color requires a `// CONVENTION-EXCEPTION: <reason>` comment on the line
-  above; the scaffold has none.
+  above; the scaffold has none. **[2026-11-16, F-GATE-17: held by
+  `scripts/check-color-literals.py` in the gate, which accepts the comment
+  on the literal's own line too and asks none for `"transparent"`.]**
 - Fonts: `Style.font.menuFamily` on the overlay, `bar.fontFamily` in the bar.
 - Keyboard first: every action reachable without the mouse; mouse selection
   goes through `PointerMoveGate` so hover never fights the keyboard cursor.

@@ -80,6 +80,11 @@
 #                                Qt 6.12's QtQuick `Color` beat the theme's in
 #                                any import order; D-HOST-9), and the dev
 #                                harness's own root by name (F-HARNESS-89)
+#  20. colour literal guard      (scripts/check-color-literals.py: no shipped
+#                                .qml writes a hex colour, "white", "black",
+#                                a named colour where the code says colour, or
+#                                a Qt.rgba of numbers without a
+#                                CONVENTION-EXCEPTION comment; F-GATE-17)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -951,6 +956,11 @@ TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
 # three shipped .qml files when it landed. A floor for the text format
 # guard's reason: a scanner that stopped seeing names would judge nothing.
 THEME_NAME_USES_MIN=${THEME_NAME_USES_MIN:-279}
+# The colour literal guard (F-GATE-17, 2026-11-16): the 7 "transparent" fills
+# in Guide.qml when it landed, the only colour literals the shipped QML
+# holds. A floor for the same reason: a scanner that read no literal at all
+# would call any file clean.
+COLOUR_LITERALS_MIN=${COLOUR_LITERALS_MIN:-7}
 # The helper regex guard: 34 regex calls across the eleven helper parts when
 # it landed (2026-10-21, lane-bounds-h, R30g). A floor for the text format
 # guard's reason -- a scan that finds nothing has reviewed nothing. 36 once
@@ -1886,6 +1896,27 @@ if python3 "$ROOT/scripts/check-theme-names.py" --root "$ROOT" --host "$SHELL_DI
   ok "theme name guard, the dev harness root (none shadowed)"
 else
   cat "$harnessnames_log"; bad "theme name guard, the dev harness root"
+fi
+
+step "colour literal guard (no shipped QML writes a colour as a literal without saying why)"
+# F-GATE-17 (2026-11-16): constraint 1's other half. A hex colour, "white",
+# "black", an SVG colour name where the code says colour, or a Qt.rgba of
+# numbers needs a CONVENTION-EXCEPTION comment; until this step the rule was
+# graded by a grep in docs/QA.md that nobody ran. "transparent" is counted
+# and allowed (no paint is not a colour a theme supplies), and the count is
+# the floor: a scanner that stopped seeing literals would pass anything.
+colourlit_log=$CHECK_TMP/colour-literals.log
+if python3 "$ROOT/scripts/check-color-literals.py" --root "$ROOT" >"$colourlit_log" 2>&1; then
+  colourlit_n=$(grep -oE '^colour literal guard: [0-9]+ colour literal' "$colourlit_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $colourlit_n ]]; then
+    cat "$colourlit_log"; bad "colour literal guard printed no count at all"
+  elif (( colourlit_n < COLOUR_LITERALS_MIN )); then
+    cat "$colourlit_log"; bad "colour literal guard read $colourlit_n literal(s), expected at least $COLOUR_LITERALS_MIN"
+  else
+    ok "colour literal guard ($colourlit_n colour literals read, none unexcused)"
+  fi
+else
+  cat "$colourlit_log"; bad "colour literal guard"
 fi
 
 step "helper regex guard (every helper regex has a reviewed cost)"

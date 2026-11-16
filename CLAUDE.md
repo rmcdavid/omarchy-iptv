@@ -294,8 +294,12 @@ requests and raise the batch.
    in every shipped QML file, any unqualified host-kit name that a Qt or Quickshell module the file
    imports also exports, read from the installed qmltypes and qmldir files:
    versioned or not, and as a type, a member or a spread.
-   A literal needs a `CONVENTION-EXCEPTION` comment saying why (no check
-   enforces this half yet: F-GATE-17).
+   A literal needs a `CONVENTION-EXCEPTION` comment saying why, on its line
+   or in the `//` comment directly above: `scripts/check-color-literals.py`
+   refuses, in every shipped QML file, a hex colour, `"white"`, `"black"`, a
+   named colour where the code says colour, and a `Qt.rgba` of numbers
+   without one (F-GATE-17, 2026-11-16). `"transparent"` needs none. No check
+   holds a METRIC literal to `Style.*` yet (F-GATE-24).
 2. argv-only process launching. Never `bash -c`, never string interpolation
    into a command, never `shell=True`. Playlist-derived data reaches mpv or
    curl as argv items, never as shell text.

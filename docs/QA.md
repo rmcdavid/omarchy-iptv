@@ -294,7 +294,7 @@ the reading under test.
 | TC-UI-03 | error with cache (banner, UX 4.6) and without cache | M 5.4 US7 step 3, US1 step 4 | banner spec (height `Style.space(28)`, urgent tint, glyph U+F0026, 140 ms fade); empty error state with glyph U+F0503 |
 | TC-UI-04 | now-playing cues (UX 4.7) | M 5.4 US3 step 4 | bold name + U+F040A + footer, column unchanged |
 | TC-UI-05 | theme switch, guide closed and open (QB1, QB3) | M 5.5 | `omarchy theme set tokyo-night`, `catppuccin-latte`, back to `retropc`: overlay and bar re-skin live, no restart, no new journal warnings |
-| TC-UI-06 | no hardcoded colors (UX 5.9) | A `grep -nE '#[0-9a-fA-F]{3,8}\b|"white"|"black"|Qt\.rgba\(' *.qml` | only lines with `CONVENTION-EXCEPTION` |
+| TC-UI-06 | no hardcoded colors (UX 5.9) | A the gate's colour literal guard, `python3 scripts/check-color-literals.py` (F-GATE-17, 2026-11-16; before it, a grep nobody ran) | exit 0: every colour literal it reads is `"transparent"` or carries `CONVENTION-EXCEPTION` |
 | TC-UI-07 | fonts from tokens | A `grep -n 'font.family' *.qml` | only `Style.font.menuFamily`, `bar.fontFamily`, `root.fontFamily` bound to those |
 | TC-UI-08 | animations (UX 5.8) | M 5.4 US2 step 1 | no open/close fade; banner 140 ms; label width 180 ms |
 | TC-UI-09 | footer hints per mode (UX 6.2) | M 5.4 US2 steps 2, 3, 8 | four exact strings |
