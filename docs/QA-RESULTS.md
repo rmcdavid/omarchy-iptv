@@ -19155,7 +19155,7 @@ answered the player differently from the helper's lookup a moment earlier.
 Built on the branch `dsink102`, cut from dev 7c1784c: 05267a1 (the judgment
 of one answer lifted out of the play-time lookup), a0e3f14 (the relay,
 `bin/helper/12-relay.py`), 866bf34 (the player bound to it) and the
-scenario's commit. Unmerged and unreleased. Every call in it is the lead's
+scenario's commit, 365db65; the documents followed on 2026-11-16. Unmerged and unreleased. Every call in it is the lead's
 under the owner's standing authority of 2026-11-09 (decisions 1-19 of the
 design of 2026-11-14; decision 10, refusing mms and mmsh, was the owner's
 question and became the lead's call on 2026-11-15).
@@ -19422,3 +19422,10 @@ while the shell runs with no zap that interval is unbounded. The documents
 the docs plan names (ARCHITECTURE-PLAYER section 20, the README's limits and
 mpvArgs paragraphs, the CHANGELOG lines, CLAUDE.md's rule-5 entry and its
 "42" allowlist count, the decisions log row) are not in this commit.
+[2026-11-16: they are in the documents' commit, which also measured the
+branch's relay idle with one child at 22.3 MB resident and two threads,
+twice, with the tree's own `player relay` started on listeners a scratch
+rig bound and a `sleep` as its child; no signal was sent, and the relay
+exited 0 and removed its socket when the sleep ended. And a Unix socket
+bound under umask 077, as `bind_relay_listeners` binds the control socket,
+reads `srwx------` (0700), not 0600: owner-only either way.]

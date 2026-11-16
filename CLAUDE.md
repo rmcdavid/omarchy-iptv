@@ -92,7 +92,8 @@ commit were edited to the HEAD of that day, by a maintainer, as he edited
 ## Branches: `dev` is the tree, `main` is the artifact
 
 You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
-the files in `ALLOWLIST` in `scripts/release.py` (42 since D-REL-5 split the
+the files in `ALLOWLIST` in `scripts/release.py` (43 since D-SINK-102 added
+the relay's part, `bin/helper/12-relay.py`; 42 after D-REL-5 split the
 model into `Model.mjs` and `model/` and D-REL-7 split the helper into
 `bin/omarchy-iptv` and `bin/helper/`), exported from a
 clean, green `dev` by `scripts/release.py build`, committed onto `main` with
@@ -1136,6 +1137,14 @@ requests and raise the batch.
      The lesson: a check on what a string SAYS is not a check on where it
      GOES, and a residual stated about the second question is the next
      finding about it.]**
+     **[2026-11-14, D-SINK-102, raised by the marketplace maintainer on
+     #14290 against 0.19.1: the open items above -- a name that answers
+     the player differently a moment later, an HTTP redirect the stream
+     server sends, HLS and DASH segment hosts -- are closed for a playlist
+     that is not local by the relay the player is pinned to, which judges
+     every connection against the address it connects to; see "The
+     relay" below. What stays open of them is the user's own proxy, which
+     resolves a target on its own side.]**
      The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.
@@ -1161,6 +1170,56 @@ requests and raise the batch.
      formats the library will accept, and enumerate the demuxers that open
      other URLs (docs/ARCHITECTURE-PLAYER.md 4.12.2) rather than the ones a
      reviewer happened to try.
+   - **The relay** (D-SINK-102, 2026-11-14, the marketplace maintainer's
+     finding on #14290 against 0.19.1; on the `dsink102` branch, unmerged
+     and unreleased, as this is written), which is both the closure of the
+     last open items of "Where provider data sends this machine" and a sink
+     of its own. The player's http, https and rtmps connections go out
+     only through a relay the helper runs as mpv's PARENT,
+     `bin/helper/12-relay.py` behind the internal `player relay` verb (the
+     player asks for SIGKILL when the relay dies, and the relay is a child
+     subreaper) -- all but mmsh's and rtsp's HTTP tunnel's, which take no
+     proxy option and are played only from a local playlist.
+     `--http-proxy=http://127.0.0.1:<port>` opens the pin
+     block with no credential, so on its own it denies everything, and
+     each load the helper makes registers a token for that load's playlist
+     rule over the relay's control socket and carries it as the per-file
+     `http-proxy`. The relay judges every request and every CONNECT -- the
+     stream, each redirect hop, each HLS or DASH playlist, segment, key and
+     init section -- by `stream_answer_refusal`, the play-time lookup's own
+     per-answer rule (rule 12), through `bounded_create_connection` against
+     the address it connects to, so a redirect or a changed DNS answer
+     cannot reach this machine or the LAN. FFmpeg resolves no proxied
+     target (read), and TLS stays end to end, checked against the name.
+     The read-back holds mpv's `http-proxy` to the pin or the current
+     file's per-file token form and refuses the load otherwise;
+     `--http-proxy` and a `--demuxer-lavf-o` `http_proxy` key are refused,
+     the second because mpv applies the demuxer's options after the
+     network options (a plain mpv.conf line sent the HLS reopen past the
+     relay, measured). mpv's environment loses lowercase `http_proxy` and
+     `no_proxy` (FFmpeg honoured a per-hop `no_proxy` past the option,
+     measured); the relay chains to the user's own proxy by FFmpeg's rules,
+     where a target is judged by name (the fetches' residual). rtmp, rtsp
+     and srt never ask a proxy, so `player_target` hands them the literal
+     its lookup judged (rtsp forced to interleaved tcp); mms and mmsh from a
+     playlist that is not local are refused at the parse and at play; rtmps
+     was measured relayed, and rtsps measured not to be, and it was never a
+     scheme the plugin plays. The relay holds request lines and headers --
+     credentials -- in memory, writes them nowhere, answers with no host in
+     any refusal, runs non-dumpable with RLIMIT_CORE (0, 0), serves only
+     peers of this uid (the proxy port by /proc/net/tcp, the control socket
+     by SO_PEERCRED), and exits with its player. A player of this build
+     whose relay does not answer reads `older`: replaced, never fed. Open:
+     a user's `mpv` wrapper whose CHILD is the real player survives a
+     SIGKILLed relay with a dead proxy until it is replaced, and an account
+     that binds the freed port meanwhile receives its plain-http requests,
+     credentials and the load's token included; the ten-second health
+     tick does not ask the relay, so with no zap that interval is
+     unbounded. And the rebinding half is READ in FFmpeg's source and
+     measured with literal targets only, never with a name resolved live.
+     docs/ARCHITECTURE-PLAYER.md section 20 is the specification. The
+     lesson: a check-then-use on a name is a residual the moment someone
+     else does the use; the fix is to own the use, not to check harder.
    - **The player's configuration surface** (D-SINK-43, -44, -45, -46, -51,
      -52, -53, -59, -60, -61, -63, D-PLY-46; 2026-10-29). The TLS entry's
      "last word" was one token; the review and the rechecks of its fixes
@@ -1185,7 +1244,8 @@ requests and raise the batch.
      checks against the program itself does not.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
-   state at `~/.local/state/omarchy-iptv/state.json`, socket under
+   state at `~/.local/state/omarchy-iptv/state.json`, socket (and, since
+   D-SINK-102, the player's relay's control socket `mpv.sock.relay`) under
    `$XDG_RUNTIME_DIR/omarchy-iptv/`. Modes 0700 for directories, 0600 for files.
 7. Performance budgets: the guide opens in under 150 ms with a 10,000 channel
    cache, typing stays responsive, and the helper parses 10,000 channels in
