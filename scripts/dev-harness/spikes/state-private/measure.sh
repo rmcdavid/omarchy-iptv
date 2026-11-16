@@ -7,6 +7,8 @@
 #
 #   measure.sh [ORDER] [CASE...]
 #   measure.sh timed [N] [CASE...]
+#   measure.sh interval [N] [CASE...]
+#   measure.sh cost [N]
 #     ORDER  fix   `state private` before the write, the write only on its
 #                  confirmed reply, `state mode` after it (D-SINK-103)
 #            base  the write, then `state mode` (0.19.1's order)
@@ -26,6 +28,19 @@
 #            a file holding the new credential was readable by group or
 #            other (`span`, ms) -- the window the after-save repair leaves,
 #            at this machine's load
+#     interval no gdb, the fix's order only: each case N times (default
+#            12) watched by ./interval.py, which times, by inotify, the
+#            helper's chmod (IN_ATTRIB) or create (IN_CREATE) of
+#            state.json to the writer's first IN_CREATE, the linkat of its
+#            temporary, and to the rename. The writer's OPEN raises no
+#            event (an unnamed O_TMPFILE), so `link` is an upper bound on
+#            the window D-SINK-103 leaves open, from the chmod to the open
+#            (default cases: e644 link644 new linkabsent; e600 is not
+#            chmod-ed and reads start:none)
+#     cost   the helper's `state private` and `state mode` (the model's
+#            argv) and a bare `python3 -I -c pass`, interleaved, N times
+#            each (default 12) over a 0600 state.json: wall and CPU (the
+#            child's rusage) per run, and the load before and after
 #
 # Runs shell.qml (one FileView declared as Service.qml's stateFile is) under
 # gdb -- ptrace_scope is 1 here, so the probe is gdb's child -- offscreen, on
@@ -51,13 +66,15 @@ for tool in gdb quickshell node python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "SKIP state-private: $tool is not on PATH" >&2; exit 77; }
 done
 ORDERS="fix base"
-TIMED=0 REPEAT=12
+TIMED=0 REPEAT=12 COST=0
 case ${1:-both} in
   fix|base) ORDERS=$1; shift ;;
   both) (( $# )) && shift ;;
   timed) TIMED=1; shift; [[ ${1:-} =~ ^[0-9]+$ ]] && { REPEAT=$1; shift; } ;;
+  interval) TIMED=2; ORDERS=fix; shift; [[ ${1:-} =~ ^[0-9]+$ ]] && { REPEAT=$1; shift; } ;;
+  cost) COST=1; shift; [[ ${1:-} =~ ^[0-9]+$ ]] && { REPEAT=$1; shift; } ;;
 esac
-CASES=${*:-new e644 e600 link644 linkabsent}
+if (( TIMED == 2 )); then CASES=${*:-e644 link644 new linkabsent}; else CASES=${*:-new e644 e600 link644 linkabsent}; fi
 HELPER=${HELPER:-$ROOT/bin/omarchy-iptv}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/d103.XXXXXX") || exit 2
 chmod 700 "$WORK"
@@ -87,6 +104,23 @@ run_case() {
   esac
   post=$(argv_of mode "$state")
   [[ $order == fix ]] && pre=$(argv_of private "$state")
+  if (( TIMED == 2 )); then
+    local obs=$c/obs i rc where=$state
+    [[ $case == link* ]] && where=$wide
+    python3 -I "$HERE/interval.py" "$obs" "$where" >"$c/obs.log" 2>&1 &
+    local obs_pid=$!
+    for ((i = 0; i < 50; i++)); do [[ -s $obs ]] && break; sleep 0.1; done
+    env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME \
+      XDG_RUNTIME_DIR="$WORK/rt" QT_QPA_PLATFORM=offscreen QML_DISK_CACHE_PATH="$WORK/qmlcache" \
+      PROBE_FILE="$file" PROBE_MARKER="$MARKER" PROBE_PRE="$pre" PROBE_POST="$post" \
+      "$ROOT/scripts/dev-harness/private-bus.sh" "$WORK/b$N" 60 /usr/bin/quickshell -p "$WORK/cfg" >"$c/qs.log" 2>&1
+    rc=$?
+    sleep 0.3
+    kill -TERM "$obs_pid" 2>/dev/null; wait "$obs_pid" 2>/dev/null
+    echo "   INTERVAL case=$case order=$order rc=$rc $(grep -a -o '"file": "[a-z]*"' "$c/qs.log" | head -1 | tr -d '" ' | sed 's/^file:/pre:/') $(cat "$obs")"
+    rm -rf -- "$c"
+    return 0
+  fi
   if (( TIMED )); then
     local obs=$c/obs i rc
     python3 -I "$ROOT/scripts/dev-harness/mode-observer.py" "$obs" "$MARKER" "$state" "$wide" >"$c/obs.log" 2>&1 &
@@ -192,6 +226,14 @@ print("   VERDICT case=%s order=%s stops=%d files-seen=%d exposed=%d final=%s%s"
       % (case, order, stops, seen, len(exposed), final, (" EXPOSED " + " ".join(exposed)) if exposed else ""))
 PY
 }
+if (( COST )); then
+  mkdir -m 700 "$WORK/cost"
+  printf '%s\n' "$SEED" >"$WORK/cost/state.json"; chmod 600 "$WORK/cost/state.json"
+  env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME \
+    "$ROOT/scripts/dev-harness/private-bus.sh" "$WORK/bc" 600 \
+    python3 -I "$HERE/cost.py" "$REPEAT" "$(argv_of private "$WORK/cost")" "$(argv_of mode "$WORK/cost")"
+  exit $?
+fi
 for order in $ORDERS; do
   for case in $CASES; do
     if (( TIMED )); then

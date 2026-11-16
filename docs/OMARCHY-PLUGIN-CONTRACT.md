@@ -1381,7 +1381,24 @@ of a file the view creates, a re-point and what re-arms after one, by round
     QThreadPool job after `setText`), so a file made 0600 before `setText`
     is written 0600 -- the plugin's `state private` before every write rests
     on this, observed for all five shapes (absent, 0644, 0600, a link to a
-    0644 target in a 0755 folder, a link to nothing).]**
+    0644 target in a 0755 folder, a link to nothing). So the two windows
+    above no longer create a 0644 file: `state private` creates a missing
+    one 0600 and empty before the write. A re-point, or a 0644 file put at
+    the path, landing between that run's last look at the file (its chmod,
+    when it makes one) and the writer's open -- about 20 ms, measured by
+    inotify to the writer's link of its temporary, which follows the open
+    (15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
+    `spikes/state-private/RESULT-2026-11-14-interval.txt`,
+    `RESULT-2026-11-15-interval.txt` and
+    `RESULT-2026-11-15-interval-committed.txt`) -- still gets the umask's
+    0644, or the file's own, until the after-save `state mode` about a
+    quarter of a second after the save lands. "Resolves" above
+    is QSaveFile's own reading of a link, which is LEXICAL -- a relative
+    target joined to the link's literal folder, `..` read as text, hop by
+    hop -- and differs from the kernel's when a folder on the way is a link
+    (D-STATE-9, measured on the installed libQt6Core 6.12.0,
+    `scripts/dev-harness/spikes/state-literal-link/RESULT-2026-11-14.txt`);
+    the mode it gives is still the KERNEL-resolved file's.]**
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the

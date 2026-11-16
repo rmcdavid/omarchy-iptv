@@ -1,0 +1,44 @@
+# scripts/dev-harness/spikes/state-private/measure.sh cost 12, 2026-11-15T15:42Z, the dsink103 tree at 106092c with the settle lane's uncommitted edits (the sealed stub, 10-state.py 61550 0xb4913725; the committed part differs from it only by one docstring sentence, 61615 0x6883bb8f), python 3.14.8-1 under private-bus.sh (its own HOME), run under the heavy lock as: flock heavy.lock timeout 600 env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME HOME=<decoy under the lane's scratch> TMPDIR=<a short scratch folder> measure.sh cost 12; the resumed settle lane's check of RESULT-2026-11-14-cost.txt, with another lane's python process at 95% of one of the machine's 4 cores in top a minute after the run
+private-bus.sh: bus pid 19286 at unix:path=/tmp/claude-1000/d3.BLfBwI/d103.c2ZFHK/bc/dbus-sjOthoVDfO,guid=1ed08af37e6460a16290f8506af9d2ff
+# load before 3.98 3.22 1.96
+   RUN private  1 rc=0 wall=361.0 cpu=341.2 reply=kept
+   RUN mode     1 rc=0 wall=310.6 cpu=281.3 reply=kept/kept
+   RUN bare     1 rc=0 wall=24.9 cpu=23.7
+   RUN private  2 rc=0 wall=414.1 cpu=384.0 reply=kept
+   RUN mode     2 rc=0 wall=400.4 cpu=390.3 reply=kept/kept
+   RUN bare     2 rc=0 wall=28.9 cpu=27.6
+   RUN private  3 rc=0 wall=382.9 cpu=365.0 reply=kept
+   RUN mode     3 rc=0 wall=317.2 cpu=283.0 reply=kept/kept
+   RUN bare     3 rc=0 wall=22.5 cpu=19.1
+   RUN private  4 rc=0 wall=318.6 cpu=312.7 reply=kept
+   RUN mode     4 rc=0 wall=379.1 cpu=364.0 reply=kept/kept
+   RUN bare     4 rc=0 wall=26.3 cpu=24.9
+   RUN private  5 rc=0 wall=380.6 cpu=364.7 reply=kept
+   RUN mode     5 rc=0 wall=403.7 cpu=375.1 reply=kept/kept
+   RUN bare     5 rc=0 wall=26.3 cpu=25.3
+   RUN private  6 rc=0 wall=391.4 cpu=374.9 reply=kept
+   RUN mode     6 rc=0 wall=401.9 cpu=388.4 reply=kept/kept
+   RUN bare     6 rc=0 wall=25.3 cpu=24.7
+   RUN private  7 rc=0 wall=435.2 cpu=396.9 reply=kept
+   RUN mode     7 rc=0 wall=395.1 cpu=387.3 reply=kept/kept
+   RUN bare     7 rc=0 wall=25.1 cpu=24.5
+   RUN private  8 rc=0 wall=395.5 cpu=386.2 reply=kept
+   RUN mode     8 rc=0 wall=388.0 cpu=379.9 reply=kept/kept
+   RUN bare     8 rc=0 wall=24.1 cpu=23.7
+   RUN private  9 rc=0 wall=363.2 cpu=359.7 reply=kept
+   RUN mode     9 rc=0 wall=349.4 cpu=325.5 reply=kept/kept
+   RUN bare     9 rc=0 wall=44.1 cpu=24.3
+   RUN private 10 rc=0 wall=310.1 cpu=306.9 reply=kept
+   RUN mode    10 rc=0 wall=364.3 cpu=354.5 reply=kept/kept
+   RUN bare    10 rc=0 wall=21.6 cpu=19.5
+   RUN private 11 rc=0 wall=354.0 cpu=340.3 reply=kept
+   RUN mode    11 rc=0 wall=283.7 cpu=280.8 reply=kept/kept
+   RUN bare    11 rc=0 wall=20.7 cpu=20.2
+   RUN private 12 rc=0 wall=295.1 cpu=291.7 reply=kept
+   RUN mode    12 rc=0 wall=334.9 cpu=321.8 reply=kept/kept
+   RUN bare    12 rc=0 wall=25.2 cpu=24.5
+   COST private n=12 wall 295.1-435.2 median 371.9 ms, cpu 291.7-396.9 median 362.2 ms
+   COST mode    n=12 wall 283.7-403.7 median 371.7 ms, cpu 280.8-390.3 median 359.2 ms
+   COST bare    n=12 wall 20.7-44.1 median 25.2 ms, cpu 19.1-27.6 median 24.4 ms
+# load after 4.14 3.27 1.99
+# exit 0

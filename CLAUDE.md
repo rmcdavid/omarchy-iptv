@@ -1194,7 +1194,7 @@ requests and raise the batch.
    the rename -- and the umask's to one it creates, measured under gdb
    (`scripts/dev-harness/spikes/state-private/`). So a 0644 file put back at
    the path, or behind the supported link into a folder other accounts can
-   enter, held each new credential at 0644 for the 234-272 ms until the
+   enter, held each new credential at 0644 for the 233-272 ms until the
    after-save `state mode` (raised by the marketplace maintainer on #14290
    against 0.19.1). Every write now waits for the helper's `state private`
    (0600 through the link, created 0600 when absent, a non-regular or

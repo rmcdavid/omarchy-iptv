@@ -19189,7 +19189,14 @@ saw the file holding the credential at 0644, for 233.4-272.4 ms (median
 chmod, one helper run. The fix's order: 0 sightings in 36 of 36. A helper
 `state` run measured on its own is 248-284 ms wall, 245-274 ms CPU (12
 each, `private` and `mode`; the bare interpreter is 17 ms): the stub
-compiles every part on every run. ARCHITECTURE.md's P23 note had it at
+compiles every part on every run. [Those figures had no transcript and no
+load. Re-measured by the settle lane with a committed tool, `measure.sh
+cost 12` (`cost.py`: the model's argv for each verb and a bare `python3
+-I -c pass`, interleaved, wall around spawn and reap, CPU from the child's
+rusage), `RESULT-2026-11-14-cost.txt`, load 2.9: `private` 253.1-284.3 ms
+wall (median 262.8) and 250.3-278.8 ms CPU (median 260.2); `mode`
+255.0-276.5 ms wall (median 262.8) and 252.4-270.4 ms CPU (median 259.9);
+the bare interpreter 17.6-24.5 ms wall (median 18.2).] ARCHITECTURE.md's P23 note had it at
 "about 30 ms of CPU" and the D-SINK-22 row at "milliseconds"; both are
 corrected in dated brackets.
 
@@ -19300,7 +19307,8 @@ over `bin/helper/*.py` -- and every place a mode is repaired after a write):
   refused `not-owned`, unchanged), a chmod that fails (`unconfirmed`), a
   folder link to nothing, a chmod that succeeds and changes nothing (a
   filesystem that keeps its own modes: `unconfirmed`); red on 7c1784c 13 of
-  13 (the verb does not exist: 12 errors, 1 failure). Four single-decision
+  13 (the verb does not exist: 12 errors, 1 failure). [Six more since the
+  settle lane, for the undo of a refused create, below.] Four single-decision
   mutants of `state_private`, each red: no chmod (3), no owner check (1),
   no kind check (2), no read-back (1). A fifth, no fchmod after the create,
   survived -- the read-back path chmods any file found at another mode,
@@ -19319,14 +19327,181 @@ over `bin/helper/*.py` -- and every place a mode is repaired after a write):
 
 **Costs** (stated in the board row and ARCHITECTURE.md section 8 standard
 5): one more helper run before every write, about a quarter of a second of
-CPU and wall here, so a save lands that much later; the read-to-write gap
-grows from one turn to that run, so another program's replacement of the
-file landing inside it, unseen by the view's watch (D-SRC-29's shapes), is
-written over, as one landing during the write is today (D-SRC-48); a shell
-stopped inside it loses the change, which memory held.
+CPU and wall here (`RESULT-2026-11-14-cost.txt`, above), so a save lands
+that much later; the read-to-write gap grows from one turn to that run, so
+another program's replacement of the file landing inside it, unseen by the
+view's watch (D-SRC-29's shapes), is written over, as one landing during
+the write is today (D-SRC-48); a shell stopped inside it loses the change,
+which memory held; and a `state.json` on a filesystem whose modes cannot be
+set to 0600 (a FAT or SMB mount without Unix permissions, some FUSE mounts)
+now fails every save, told once and journalled at each, where 0.19.1 saved
+it at the mount's mode (reasoned from the refusal, not mounted).
 
-**What stays open.** The one turn between the run's answer and the writer's
-open; a target folder another account can WRITE (it can replace the file or
-the link whatever its mode); an empty `state.json` left when the write after
-a `created` answer fails and the shell stops, which the next start reads as
-not a valid state (the no-write mode, told).
+**What stays open.** The time between the run's last look at the file
+(its chmod, when it makes one) and the writer's open, about 20 ms: a re-point,
+or a 0644 file put at the path, landing in it gets or keeps 0644 until the
+after-save repair. Measured to the writer's LINK, not its open (below), so
+an upper bound: 17.3-23.2 ms over 10 runs at load 2.3-2.7 by the branch's
+review (no transcript kept), 16.3-29.6 ms over 48 runs at load 3.3-4.0
+by the settle lane (`RESULT-2026-11-14-interval.txt`), 18.2-41.7 ms over
+48 more at load 3.3-4.2 by its resumed run (`RESULT-2026-11-15-interval.txt`),
+and 15.3-27.3 ms over 48 on the committed helper at load 0.6-1.2
+(`RESULT-2026-11-15-interval-committed.txt`); the parts --
+the helper's exit, the shell's exit handler, the write job's start -- are
+reasoned, not timed apart. A target folder another account can WRITE (it
+can replace the file or the link whatever its mode). An empty `state.json`
+left when the write after a `created` answer fails and the shell stops,
+which the next start reads as not a valid state (the no-write mode, told);
+the second way to leave one, with the shell running, is closed below.
+
+**The settle lane (2026-11-14): the window timed with a transcript, and a
+refused create undone.**
+- The window, `measure.sh interval 12` (`interval.py`, new: one inotify
+  watch on the folder that holds `state.json`, every event stamped with
+  CLOCK_MONOTONIC at its read and nothing else done between reads), the
+  fix's order, offscreen, each probe shell on a private bus with its own
+  HOME and no display variables, `RESULT-2026-11-14-interval.txt`. The
+  start is the helper's IN_ATTRIB on `state.json` (its chmod; `e644`,
+  `link644`) or its IN_CREATE (`new`, `linkabsent`); the end is the first
+  IN_CREATE of `state.json.XXXXXX`, the writer's `linkat` of its temporary.
+  The writer's OPEN is not observable this way: it opens an unnamed
+  `O_TMPFILE` (no event), fchmods it, writes and commits before it links
+  (`RESULT-2026-11-14.txt`, under gdb), so the figure is an upper bound on
+  the chmod-to-open time. 48 of 48 runs timed, every start and link in two
+  reads: chmod starts 16.3-25.8 ms (median 17.6, 24 runs), create starts
+  16.9-29.6 ms (median 19.0, 24 runs), all 16.3-29.6 ms (median 18.4), at
+  load 3.3-4.0 (one-minute, before and after). A 0600 file is not chmod-ed
+  and raises nothing (`e600`, `start:none`): there the window starts at the
+  helper's read-back, which inotify cannot see.
+- The window again (2026-11-15 in the morning, the resumed settle lane,
+  after the machine's reboot had cleared the first run's scratch; on a
+  helper part the lane changed again that day, 61550 bytes, CRC-32
+  0xb4913725 by the RESULT's header):
+  the same `measure.sh interval 12` under the heavy lock, a decoy HOME and
+  a short TMPDIR, `RESULT-2026-11-15-interval.txt`. 48 of 48 timed, every
+  start and link apart: chmod starts 18.2-27.6 ms (median 23.1), create
+  starts 18.3-41.7 ms (median 23.9; the 41.7 a single `linkabsent` run,
+  the next highest 29.7), all 18.2-41.7 ms (median 23.2), at load
+  3.3-4.2 while another lane's work shared the four cores. So "about 20
+  ms" holds as a median and the tail reaches about 40 ms on a busy
+  machine. The kept D-STATE-9 run below was re-run that evening with the
+  driver as committed, `state-literal-link/RESULT-2026-11-15.txt`, and
+  every line after its header is the same as the first run's.
+- The cost again, `measure.sh cost 12` on the same morning part,
+  `RESULT-2026-11-15-cost.txt`, load 4.0-4.1: `private` 295.1-435.2 ms
+  wall (median 371.9) and 291.7-396.9 ms CPU (median 362.2); `mode`
+  283.7-403.7 ms wall (median 371.7); a bare `python3 -I` 20.7-44.1 ms
+  wall (median 25.2), against 17.6-24.5 the day before. The bare
+  interpreter's median rose in about the same proportion as the helper's
+  (18.2 to 25.2 ms, 262.8 to 371.9 ms), so this reads as the same machine
+  busier, not a costlier helper, and the run on the committed helper
+  below, at load 1, bears that out: "about a quarter of a second" is the
+  figure at load 1 to 3, and at load 4 the median was 0.37 s.
+- The window and the cost a third time, on the committed helper (the
+  stub's entry `("10-state.py", 61816, 0x67b81393)`; 2026-11-15 in the
+  evening, the lane resumed again after the lead's session ended, the
+  only workflow running), each under the heavy lock and `nice -n 10`,
+  with a decoy HOME and a short TMPDIR. `measure.sh interval 12`,
+  `RESULT-2026-11-15-interval-committed.txt`: 48 of 48 timed, every start
+  and link apart; chmod starts 15.3-22.6 ms (median 17.2), create starts
+  15.9-27.3 ms (median 17.4), all 15.3-27.3 ms (median 17.4), at load
+  0.6-1.2. `measure.sh cost 12`, `RESULT-2026-11-15-cost-committed.txt`,
+  load 0.9-1.0: `private` 235.5-259.9 ms wall (median 247.0) and
+  233.4-257.2 ms CPU (median 244.7); `mode` 235.5-258.9 ms wall (median
+  245.9); the bare interpreter 16.7-18.4 ms wall (median 17.4). So over
+  144 runs in three sets at load 0.6-4.2 the window measured 15.3-41.7
+  ms, medians 17.4, 18.4 and 23.2: about 20 ms, longer on a busy machine,
+  and the README says 15-42 ms. The morning's part was not kept, so its
+  headers' word that the part they name as committed (61615 bytes,
+  0x6883bb8f) "differs from it only by one docstring sentence" is
+  unchecked -- no 65-byte deletion from that part gives 0xb4913725 -- and
+  that part is not the committed one either: two docstring edits of the
+  resumed lane's made it 61816 bytes. The committed run is the one the
+  figures rest on.
+- The undo. The claims check found a second way to leave an empty
+  `state.json`: `state_private_open` created the file 0600 and empty
+  (`O_EXCL`), and when `state_private` then refused -- `unconfirmed` on a
+  filesystem that keeps its own modes, or any refusal after the create --
+  it exited 1 with the file left, so the first save to a missing target
+  on such a mount left an empty file that the next start reads as not a
+  valid state. Now a refusal after the create removes what the run
+  created (`undo_state_private_create`, `bin/helper/10-state.py`): the
+  create is made through an `O_PATH` descriptor on its folder, held open,
+  and the created inode's `st_dev`/`st_ino` are read off the creating
+  descriptor; the removal is an `lstat` at that folder (`os.stat(name,
+  dir_fd=..., follow_symlinks=False)`) and an `unlink` at it only while the
+  identity matches. A link at the name is never followed, a file renamed
+  over it or nothing there is left, and the reply carries `created:
+  "removed"` or `"left"` beside its `why`, with a clause in its sentence
+  that names no path. What no syscall closes: a replacement landing between
+  that `lstat` and the `unlink`, which takes an account that can write that
+  folder (this one, or another, which the row already does not defend
+  against). `StatePrivateTest` gains six tests. Five
+  run under a 0277 umask with a chmod that changes nothing (the seam the
+  lane's vfat-shaped test uses): the created file removed, a link to
+  nothing whose created target is removed and the link kept, a replacement
+  renamed over the created file left, a link put at the name to the
+  created file not followed (both the link and the file kept), and a
+  refusal of a file it FOUND naming no creation. The sixth fails the
+  `O_PATH` open of the path that follows the create (EACCES), the other
+  refusal after it: `unreachable`, the file removed. Red on 106092c's
+  helper 5 of 6 (three failures, "the empty file it created was left
+  behind"; two errors, no `created` word: the replacement and the link
+  cases, which guard the inode check and go red under its mutants).
+  Five single-decision mutants,
+  each red: no inode check (2: the replacement and the link removed), the
+  `lstat` following a link (1: the link removed), no undo at a refusal
+  (4), no undo at the failed open (1), the word on every refusal (1).
+  Sealed; `test_state` 112 of 112.
+
+### D-STATE-9: QSaveFile reads a state.json link by its literal path (the D-SINK-103 settle lane, 2026-11-14)
+
+**The finding.** The D-SINK-103 review measured it offscreen on a private
+bus under gdb with a FileView of its own (not kept), and filed it: with the
+state folder a link and `state.json` a link whose relative target climbs
+with `..`, the FileView's save lands in a different file than the one the
+plugin reads. Its claims check reproduced it with a scratch `QSaveFile`
+probe against the installed libQt6Core and corrected three of the row's
+claims. That probe is now kept, with the layout moved into a driver so the
+shipping helper can run between the layout and the save:
+`scripts/dev-harness/spikes/state-literal-link/` (`probe.cpp`,
+`measure.sh`, `README.md`), run against qt6-base 6.12.0-3 offscreen, each
+probe on a private bus with no display variables,
+`RESULT-2026-11-14.txt`, and again on 2026-11-15 with the driver and the
+helper as committed, under the heavy lock, `nice -n 10` and a decoy HOME,
+`RESULT-2026-11-15.txt`: every line after the header the same.
+
+**What it shows**, ten cases (`state -> T/state`, `T/state/state.json ->
+../wide/state.json`; the kernel reads `T/wide/state.json`, `QSaveFile`
+writes `wide/state.json`):
+- `NEW` lands in the literal file in every case where a folder is there:
+  `QFileInfo::symLinkTarget` names it, `realpath` names the other.
+- The mode is the KERNEL-resolved file's, read at the open, or the umask's
+  0644 when there is none -- never the replaced file's own: real 0600 with
+  nothing literal, 0600; real 0644, 0644; real 0600 over a 0644 literal
+  file, 0600; real 0644 over a 0600 literal file, 0644; no real file, 0644.
+  So on 0.19.1 the misplaced file was 0644 only when the real file was
+  0644 or missing, which corrects the row's "it also left the misplaced
+  file at 0644".
+- With the shipping helper's `state private` first (the argv
+  `Model.statePrivateArgv` builds): over a 0644 real file it answered
+  `changed` and the misplaced file came out 0600; with no real file it
+  answered `created` (the real target 0600 and empty) and the misplaced
+  file came out 0600. The row's "comes out 0600 since D-SINK-103" holds.
+- `nodir`, no folder at the literal location: `open failed: No such file
+  or directory`, nothing written -- every save fails, told, instead of
+  landing elsewhere. That is the row's missing precondition.
+- `chain`, a second link at the literal location: the second hop is read
+  against the FIRST hop's literal folder (`a/state.json -> ../wide/...`
+  wrote `wide/state.json`), hop by hop, as the claims check reasoned.
+- `above`, a linked PARENT of a real state folder with `../../x/state.json`:
+  `NEW` in `home/.local/x/state.json` while the plugin reads
+  `data/x/state.json`. Any linked folder the target's `..` climbs out of.
+
+The Qt source is not on this machine, so how `QSaveFile` reaches these
+answers is read from its behaviour, not its code. The row's guard is
+reworded to compare FILES, not strings: `QDir::cleanPath` resolves no link
+and `realpath` resolves every one, so a supported layout (a link inside a
+linked state folder, or a target through a linked folder) gives two
+strings for one file. Still open, P4; nothing in the shipped code changed
+for it.

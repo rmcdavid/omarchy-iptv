@@ -1863,6 +1863,10 @@ function stateLoadDecision(ctx) {
 // umask's, so a state.json the user put at the path at 0644, or one a save
 // created after a re-point, is made 0600 (and its folder 0700) within the
 // stub's start rather than at the next shell start. Argv only, no URL.
+// [2026-11-14, D-SINK-103: that start came about a quarter of a second
+// after the save landed, measured, and that was the window; the file is
+// now made 0600 BEFORE every write (statePrivateArgv), and this run is the
+// second layer.]
 function stateModeArgv(helperPath, stateDir) {
   return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "mode"])
 }

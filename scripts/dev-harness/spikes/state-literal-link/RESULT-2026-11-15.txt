@@ -1,0 +1,75 @@
+# scripts/dev-harness/spikes/state-literal-link/measure.sh (all ten cases), 2026-11-16T02:19Z, the dsink103 tree at 106092c with the settle lane's edits as committed beside this file (the stub's entry ("10-state.py", 61816, 0x67b81393), for the -private cases), probe.cpp built against the installed libQt6Core, qt6-base 6.12.0-3 gcc 16.2.1+r23+gd564253eb6c8-1 umask 0022, offscreen, each probe on a private bus (private-bus.sh), run under the heavy lock as: flock heavy.lock timeout 600 nice -n 10 env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME HOME=<decoy under the lane's scratch> TMPDIR=<a short scratch folder> measure.sh; the resumed settle lane's check of RESULT-2026-11-14.txt with the driver as committed, load 0.78 0.93 0.73
+== CASE r600
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 600 text 'REAL'
+  FILE wide/state.json mode 600 text 'NEW'
+  VERDICT case=r600 read=T/wide/state.json landed=wide/state.json:600 same-file=NO
+== CASE r644
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 644 text 'REAL'
+  FILE wide/state.json mode 644 text 'NEW'
+  VERDICT case=r644 read=T/wide/state.json landed=wide/state.json:644 same-file=NO
+== CASE r600-l644
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 600 text 'REAL'
+  FILE wide/state.json mode 600 text 'NEW'
+  VERDICT case=r600-l644 read=T/wide/state.json landed=wide/state.json:600 same-file=NO
+== CASE r644-l600
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 644 text 'REAL'
+  FILE wide/state.json mode 644 text 'NEW'
+  VERDICT case=r644-l600 read=T/wide/state.json landed=wide/state.json:644 same-file=NO
+== CASE none
+  symLinkTarget wide/state.json
+  realpath      (none)
+  commit 1
+  FILE T/wide/state.json absent
+  FILE wide/state.json mode 644 text 'NEW'
+  VERDICT case=none read=(none) landed=wide/state.json:644 same-file=NO
+== CASE nodir
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  open failed: No such file or directory
+  FILE T/wide/state.json mode 600 text 'REAL'
+  FILE wide/state.json absent
+  VERDICT case=nodir read=T/wide/state.json landed=none same-file=n/a open-failed
+== CASE r644-private
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "changed"}
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 600 text 'REAL'
+  FILE wide/state.json mode 600 text 'NEW'
+  VERDICT case=r644-private read=T/wide/state.json landed=wide/state.json:600 same-file=NO
+== CASE none-private
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "created"}
+  symLinkTarget wide/state.json
+  realpath      T/wide/state.json
+  commit 1
+  FILE T/wide/state.json mode 600 text ''
+  FILE wide/state.json mode 600 text 'NEW'
+  VERDICT case=none-private read=T/wide/state.json landed=wide/state.json:600 same-file=NO
+== CASE chain
+  symLinkTarget a/state.json
+  realpath      T/a/state.json
+  commit 1
+  FILE T/a/state.json mode 600 text 'REAL'
+  FILE a/state.json link
+  FILE wide/state.json mode 600 text 'NEW'
+  VERDICT case=chain read=T/a/state.json landed=wide/state.json:600 same-file=NO
+== CASE above
+  symLinkTarget home/.local/x/state.json
+  realpath      data/x/state.json
+  commit 1
+  FILE data/x/state.json mode 600 text 'REAL'
+  FILE home/.local/x/state.json mode 600 text 'NEW'
+  VERDICT case=above read=data/x/state.json landed=home/.local/x/state.json:600 same-file=NO
+# exit 0

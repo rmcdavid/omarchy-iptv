@@ -2224,7 +2224,9 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    in-app edit, and becomes what the session holds. A link re-pointed at a
    file that does not exist yet creates nothing and begins the mode (item 4;
    node only) -- outside the three windows of milliseconds the folder-link
-   bracket below names, in which the save still creates it at 0644. Until that next save the guide shows what it had and
+   bracket below names, in which the save still creates it at 0644
+   [2026-11-14, D-SINK-103: at 0600 now, by the helper's `state private`
+   before the write; the folder-link bracket below says what is left]. Until that next save the guide shows what it had and
    nothing is written (FRESH, stated: node `R26d (...): FRESH, stated --
    ...`), so nothing is lost; the README says to restart to see the change
    at once. The README's advice changes from "restart straight after such
@@ -2261,7 +2263,19 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    closed (R27a window a, kept: a save asked while our write is out waits
    for it, at most 2 s, then reads); the second is unchanged; the third, the
    2 s watchdog firing, is open again exactly as here -- R27a and R28a
-   closed it and R29a withdrew both (item 9).] B23-B31 drive the
+   closed it and R29a withdrew both (item 9).]
+   [2026-11-14, D-SINK-103: neither remaining window creates it at 0644 any
+   more -- every write waits for the helper's `state private`, which
+   creates a missing file 0600 and empty first. Only a re-point, or a 0644
+   file put at the path, landing in the time between that run's last look
+   at the file (its chmod, when it makes one) and the writer's open -- about
+   20 ms, measured to the writer's link of its temporary, which follows the
+   open (15.3-41.7 ms over 144 runs in three sets at load 0.6-4.2,
+   `spikes/state-private/RESULT-2026-11-14-interval.txt`,
+   `RESULT-2026-11-15-interval.txt` and
+   `RESULT-2026-11-15-interval-committed.txt`) -- gets a 0644
+   file, made 0600 by the after-save `state mode` about a quarter of a
+   second later.] B23-B31 drive the
    links now; the README says that after re-pointing and restarting, the
    NEW folder is what loads.]
    [Round 15, D-SRC-34: a `state.json` link into a folder the user cannot
@@ -2393,7 +2407,12 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    0.14.2: a write without its read lands over whatever the file holds, so
    another program's change made while the read was stalled can be lost,
    and a re-pointed link or an empty linked folder can get a `state.json`
-   created at the umask's mode (`ARCHITECTURE.md` section 5). Measured live
+   created at the umask's mode (`ARCHITECTURE.md` section 5)
+   [2026-11-14, D-SINK-103: no longer at the umask's mode -- that save too
+   waits for the helper's `state private`, which creates the missing file
+   0600 before the write; up to and including 0.19.1 it was created 0644
+   and made 0600 about a quarter of a second after the save landed (up to
+   and including 0.15.0, at the next start)]. Measured live
    on lane-sweep-a3 with round 2's slow-file rig (a FUSE passthrough that
    stalls only quickshell's read of `state.json`; transcript
    `key-20261020-184229-2540898`): an edit and a second asked while the

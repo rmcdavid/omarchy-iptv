@@ -4945,8 +4945,11 @@ Item {
 
   // The write the read decided, issued only on a confirmed reply, from this
   // turn (the Process's exit, never one of stateFile's own handlers, R26b),
-  // so the gap between the file being 0600 and the writer opening it is one
-  // turn. Anything else writes nothing: the save fails the way a failed
+  // so the gap between the file being 0600 and the writer opening it is the
+  // helper's exit, this handler and the write job's start, not one turn:
+  // about 20 ms, measured to the writer's link, which follows its open
+  // (D-SINK-103, spikes/state-private/RESULT-2026-11-14-interval.txt).
+  // Anything else writes nothing: the save fails the way a failed
   // write fails (noteStateWriteFailed: the in-memory state stands, the user
   // is told once per episode, the next change writes it).
   function finishStatePrivate(reply) {

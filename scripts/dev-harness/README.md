@@ -2553,8 +2553,9 @@ None is part of the gate.
   carries -- always the latest `saved`'s. The default set is named `r23g`. Needs cage;
   not part of the gate (`tests/test_harness_home.py` runs it with a stand-in
   `cage` only to check where it writes).
-- `spikes/state-private/measure.sh [fix|base|both] [case...]` and
-  `measure.sh timed [N] [case...]`: what mode Quickshell's FileView with
+- `spikes/state-private/measure.sh [fix|base|both] [case...]`,
+  `measure.sh timed [N] [case...]`, `measure.sh interval [N] [case...]` and
+  `measure.sh cost [N]`: what mode Quickshell's FileView with
   `atomicWrites` (Qt's QSaveFile) gives `state.json` and every temporary it
   writes through (D-SINK-103). `shell.qml` beside it is one FileView
   declared as the service's `stateFile` making one write of a marker
@@ -2572,8 +2573,36 @@ None is part of the gate.
   printed: in 0.19.1's order an unnamed `O_TMPFILE` created 0600 in the
   target's folder, fchmod-ed to the old file's mode (or the umask's, read
   off a dry-run temporary), linked and renamed -- 0644 sightings in `new`,
-  `e644`, `link644`, `linkabsent`, a 234-272 ms span -- and in the fix's
-  order none. Needs gdb and quickshell; not part of the gate.
+  `e644`, `link644`, `linkabsent`, a 233-272 ms span -- and in the fix's
+  order none. `interval` (the D-SINK-103 settle lane, 2026-11-14) runs the
+  fix's order without gdb under `interval.py`, one inotify watch on the
+  folder that holds `state.json`, and times the helper's chmod (IN_ATTRIB)
+  or create (IN_CREATE) of the file to the writer's first IN_CREATE, the
+  `linkat` of its temporary: the writer's OPEN raises no event (an unnamed
+  `O_TMPFILE`), so the figure is an upper bound on the window the fix
+  leaves, from the chmod to the open (`RESULT-2026-11-14-interval.txt`,
+  `RESULT-2026-11-15-interval.txt` and, on the committed helper,
+  `RESULT-2026-11-15-interval-committed.txt`, 12 runs a case each). It needs a SHORT
+  `TMPDIR`: the private bus's socket sits under the work folder, and a
+  long scratch path makes `private-bus.sh` refuse every run (rc 2,
+  `events:0`). `cost` times the helper's `state private` and `state mode`
+  (the model's argv) and a bare `python3 -I` under `cost.py`, wall and the
+  child's CPU (`RESULT-2026-11-14-cost.txt` at load 2.9,
+  `RESULT-2026-11-15-cost.txt` at load 4, `RESULT-2026-11-15-cost-committed.txt`
+  at load 1 on the committed helper). Needs gdb and quickshell
+  (asked for in every mode); not part of the gate.
+- `spikes/state-literal-link/measure.sh [case...]`: where Qt's QSaveFile,
+  the FileView's atomic writer, saves through a `state.json` link whose
+  relative target climbs out of a LINKED folder with `..`, and which mode
+  it gives the file (D-STATE-9). `probe.cpp`, built against the installed
+  libQt6Core, saves through `QSaveFile` and prints each file's mode and
+  first line; the driver lays out ten cases, two with the shipping
+  helper's `state private` first, and runs each probe offscreen on
+  `private-bus.sh` with no display variables. `RESULT-2026-11-14.txt`: the
+  save lands at the link's literal location, `..` read as text hop by hop,
+  at the mode of the file the KERNEL resolves; with no folder there the
+  open fails. Needs g++ and the Qt 6 Core development files; not part of
+  the gate. Its README holds the cases.
 - `spikes/folder-link/measure.py <helper>`: what the helper does over a
   symbolic link at each folder it makes private (D-SINK-19 round 15, R25c):
   the helper as a subprocess, no display, one line per verb with its exit,
