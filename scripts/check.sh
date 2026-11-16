@@ -908,7 +908,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3727}
 # folder link, the verb as the service runs it under a 0277 umask), red on
 # 7c1784c 13 of 13 and under four single-decision mutants (QA-RESULTS
 # "D-SINK-103"); the suite runs 2427, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2427}
+# 2026-11-14, the dsink103 settle lane: 2427 -> 2433 -- six StatePrivateTest
+# tests of the undo of a refused create (five under a 0277 umask and a chmod
+# that changes nothing: the created file removed, a link's created target
+# removed and the link kept, a replacement left, a link to the created file
+# not followed, a found file's refusal naming no creation; and one whose
+# open of the path after the create fails, `unreachable`, the file
+# removed), red on 106092c's helper 5 of 6 and under five single-decision
+# mutants (QA-RESULTS "D-SINK-103", the settle lane); the suite runs 2433,
+# 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2433}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

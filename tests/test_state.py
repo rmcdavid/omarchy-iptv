@@ -480,6 +480,104 @@ class StatePrivateTest(unittest.TestCase):
         self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
         self.assertEqual(self.mode(self.path), 0o644)
 
+    # A file the run CREATED and then could not confirm (the claims check of
+    # D-SINK-103, 2026-11-14): on a filesystem that keeps its own modes the
+    # first save to a missing target used to leave an empty state.json
+    # behind, which the next start reads as not a valid state. The run now
+    # removes what it created -- only while the path still names that inode,
+    # never through a link -- and says which in the reply's `created` word.
+    # The narrow umask makes the new file 0400 and the chmod that changes
+    # nothing keeps it there: the kernel's answer, as a vfat mount gives it.
+    def private_under(self, chmod):
+        from unittest import mock
+        old = os.umask(0o277)
+        try:
+            with mock.patch("os.chmod", side_effect=chmod):
+                return self.state("private")
+        finally:
+            os.umask(old)
+
+    def test_a_file_it_created_and_could_not_make_private_is_removed(self):
+        code, payload, err = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertFalse(os.path.lexists(self.path), "the empty file it created was left behind")
+        self.assertEqual(os.listdir(self.dir), [])
+        self.assertEqual(payload["created"], "removed")
+        self.assertEqual(payload["error"]["message"],
+                         "state.json could not be made private (mode 400); nothing may be written to it;"
+                         " the empty file it created was removed")
+        self.assertNotIn(self.tmp.name, json.dumps(payload) + err)
+
+    def test_a_link_to_nothing_whose_created_target_is_refused_keeps_the_link_and_loses_the_target(self):
+        target = self.wide / "state.json"
+        self.path.symlink_to(target)
+        code, payload, _ = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertTrue(self.path.is_symlink())                       # the user's link, left a link
+        self.assertFalse(os.path.lexists(target), "the empty target it created was left behind")
+        self.assertEqual(os.listdir(self.wide), [])
+        self.assertEqual(payload["created"], "removed")
+
+    def test_a_created_file_replaced_meanwhile_is_left_as_it_is(self):
+        # Another writer's rename lands over the new file before the refusal:
+        # the path names another inode, which is not ours to remove.
+        def replace(*_a, **_k):
+            spare = os.path.join(self.dir, "theirs")
+            with open(spare, "w", encoding="utf-8") as handle:
+                handle.write("theirs")
+            os.replace(spare, self.path)
+        code, payload, _ = self.private_under(replace)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(payload["error"]["message"].endswith(
+            "; the empty file it created was left, because the path no longer names it"))
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "theirs")
+
+    def test_a_link_put_at_the_path_to_the_created_file_is_not_followed_to_remove_it(self):
+        # The path now names a LINK whose target is the very file the run
+        # created: lstat sees the link, so nothing is removed -- neither the
+        # link (unlink would take it) nor the file behind it.
+        moved = pathlib.Path(self.dir) / "moved.json"
+        def relink(*_a, **_k):
+            os.rename(self.path, moved)
+            os.symlink(moved, self.path)
+        code, payload, _ = self.private_under(relink)
+        self.assertEqual((code, payload["why"], payload["created"]), (1, "unconfirmed", "left"))
+        self.assertTrue(self.path.is_symlink())
+        self.assertEqual(moved.read_bytes(), b"")
+
+    def test_a_refusal_of_a_file_it_found_names_no_creation(self):
+        self.path.write_text("{}", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        code, payload, _ = self.private_under(lambda *a, **k: None)
+        self.assertEqual((code, payload["why"]), (1, "unconfirmed"))
+        self.assertNotIn("created", payload)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{}")
+
+    def test_a_created_file_the_path_cannot_reach_again_is_removed(self):
+        # The other refusal after the create: the O_PATH open of the path
+        # that follows it fails (here an EACCES the kernel would give a link
+        # re-pointed into a folder this account cannot search), so the run
+        # answers `unreachable` -- and removes the file it created first.
+        from unittest import mock
+        real_open = os.open
+        created = []
+
+        def open_failing_after_the_create(path, flags, *args, **kwargs):
+            if flags & os.O_CREAT and flags & os.O_EXCL:
+                created.append(path)
+            elif created and flags == os.O_PATH | os.O_CLOEXEC and os.path.basename(os.fspath(path)) == "state.json":
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, flags, *args, **kwargs)
+        with mock.patch("os.open", side_effect=open_failing_after_the_create):
+            code, payload, _ = self.state("private")
+        self.assertEqual(len(created), 1)
+        self.assertEqual((code, payload["why"]), (1, "unreachable"))
+        self.assertFalse(os.path.lexists(self.path), "the empty file it created was left behind")
+        self.assertEqual(payload["created"], "removed")
+        self.assertEqual(payload["error"]["message"],
+                         "state.json could not be reached (Permission denied); nothing may be written to it;"
+                         " the empty file it created was removed")
+
     def test_a_folder_link_to_nothing_is_refused(self):
         os.rmdir(self.dir)
         os.symlink(os.path.join(self.tmp.name, "gone"), self.dir)
