@@ -20120,3 +20120,94 @@ qa-lib-test gains one check: no shell script under `scripts/` calls `pkill` on a
 The rule-15 search was `^[[:space:]]*pkill` over every `*.sh` under `scripts/` and `tests/`. It found only those two lines. `tests/test_release.py`'s `pkill` is a README fixture string the release check reads, not a call.
 
 **CLAUDE.md.** The opening section's "Neither can be approved as filed" sentence was made false by the 2026-11-16 re-point. It now carries a dated bracket saying so.
+
+## Round 2 of the security review, lane-r2a, 2026-11-16: what the helper prints
+
+Lane-r2a built round 2's first two steps on the branch `r2-build`, cut from `dev` at 1118ffb. Every call is the lead's under the owner's standing authority of 2026-11-09. Every count below was measured in this worktree. "Red on 1118ffb" means the new test was run against a `git archive` of 1118ffb with only the new test and its fixture copied in. A mutant is one decision of the shipping code broken on a scratch copy of the tree (the helper resealed with `split-helper.py --seal`), with only the new tests run. No cage, no live scenario, no player and no name lookup was run. The crash journal read 87 before and after every gate run.
+
+### D-SINK-110: one reading for the title, the notification body and the helper's stderr
+
+**What changed.**
+- `shown_text` (bin/helper/01-core.py) and its mirror `Model.shownText` (model/privacy.mjs) redact first and remove the controls after.
+- A control between a URL's scheme start and its first run character, as the text without its controls reads its URLs, is deleted before the redaction. So is one up to an already withheld host's `]` (D-EPG-18).
+- Every other control is read as U+0001 and removed after.
+- `player_title_text`, `log()`, `notifyNameText`, `notifyReasonText`, and the notification's cached time and state path now take this reading.
+- main()'s traceback takes `shown_lines`, the same reading with a line feed kept as itself.
+
+**The fixture.** tests/fixtures/shown-text.json holds 21 vectors, each with `py`, `js` and `mustNotAppear`:
+- the six typo-port shapes (U+0001, DEL, U+0081, U+009B and TAB in the port, and a port that is a control alone);
+- a control outside any address;
+- a text with no control;
+- a control in the mark;
+- a control after the `//` before an IPv6 literal;
+- one or more vectors for each mutant below.
+
+Its sweep is built the same way by both suites: every source text of shown-names.json, redaction-vectors.json and url-mark.json, with one of 9 controls (U+0001, TAB, LF, CR, ESC, DEL, U+0081, U+0085, U+009B) at every code point position. That is 102,834 inputs. The sweep also takes 37,188 pairs: two of U+0001, TAB and U+009B at every pair of positions of five credential shapes. Three properties are asserted (the fixture's `sweep.about`):
+1. No mustNotAppear piece shows that the plain redaction of the source withholds.
+2. Nothing shows that the old reading (controls deleted, then redacted) withheld.
+3. With only non-delimiter controls outside every scheme and mark (64,348 inputs), nothing shows that the plain redaction of the input withholds.
+
+The helper runs the sweep through `player_title_text`, the model through `notifyReasonText`.
+
+**Red first.**
+
+| Suite | On 1118ffb | On this tree |
+|---|---|---|
+| tests/test_shown_text.py (new, 12 tests) | 8 of 12 red: 4 errors (no `shown_text` / `shown_lines`); `log()` wrote ESC and U+009B raw; the traceback kept ESC and a DEL; property 3 failed on 640 of 64,348 inputs | 12 of 12 green; property 3 fails on 0 |
+| tests/Model.test.js (3 new checks) | 3 of 3735 red: no `shownText`; `notifyNameText` gave `News my.user`; the sweep's property 3 failed | 0 of 3735 red |
+| tests/Model.spec.qml (`test_shownTextInV4`) | 1 of 100 red (no `shownText` in V4) | 100 of 100 green |
+
+Properties 1 and 2 are green on 1118ffb too. They are guards, and the mutants below turn them red.
+
+The critique's red-first claim for the traceback did NOT reproduce. 1118ffb's traceback printed `ValueError: News http://[host withheld]` for `News http://my.user:12<U+0001>34/pw@cdn.test/x`, because it redacted the raw text, as the row does. Its red is the control written raw (ESC, DEL), which the test asserts.
+
+**Mutants (helper).** Each mutant was run against tests/test_shown_text.py. The counts are failing inputs per property out of the sweep.
+
+| Mutant | Tests red | Property 1 | Property 2 | Property 3 |
+|---|---|---|---|---|
+| delete the controls, then redact (the old order) | 6 | 0 | 0 | 640 |
+| U+FDD0 as the stand-in | 6 | 0 | 594 | 288 |
+| no transparent span | 3 | 774 | 783 | 0 |
+| the span ends at the mark's end, not the run's first character | 3 | 18 | 27 | 0 |
+| no D-EPG-18 extension | 3 | 756 | 756 | 0 |
+| stand-ins left in the output | 2 | -- | -- | -- |
+| the traceback read one line at a time | 1 | -- | -- | -- |
+| log() back on the plain redaction | 1 | -- | -- | -- |
+| shown_lines reading a line feed as a control | 3 | -- | -- | -- |
+
+**Mutants (model).** The three node checks were run against `Model.shownText` with the same six reading mutants:
+- the old order: 3 red;
+- U+FDD0: 2 red;
+- no transparent span: 2 red;
+- the span to the mark's end: 2 red;
+- no D-EPG-18 extension: 2 red;
+- stand-ins kept: 1 red.
+
+**url-mark.json.** No pin moved. Every `pyDeleting` and `jsDeleting` vector, and the fuzz's `deleting` leak sets, read exactly as recorded through the new sinks. Both suites were green with the fixture unchanged (test_url_marks, test_cut_urls, test_epg_fold, test_group_split, test_redaction_cost, test_attr_grammar, test_mpv, test_helper and test_bar_shown_names: 257 tests). So nothing needed re-recording under the "withholds the same or more" assertion.
+
+**Measured beyond the design.**
+- *The traceback is read whole.* The settlement said "line by line". A credential token ends only at a space, so 1118ffb's whole-trace redaction withheld `qqqqqq:zz<LF>zz@cdn.test`, where one line at a time printed `qqqqqq:zz` (measured). Deleting a line feed as a control joined the line before a URL to its scheme (`x<LF>http://...` read as `xhttp`). `shown_lines` keeps line feeds as the plain reading reads them.
+- *The journal's reading moved.* `log()` and the traceback were the plain redaction with controls kept, not the deleting reading. Against the plain reading, the new one withholds more in 7,998 of the 102,834 inputs and less in 1,722. All 1,722 hold a TAB, LF or CR, or a control in a URL's scheme or mark, which is the title's stated residual. The design's decision 1 puts `log()` on this reading; this is recorded as an open question for the lead.
+- *Idempotence holds except in one cosmetic case.* 27 of the 102,834 read differently on a second pass: a URL whose run is sentence punctuation and a control (`x http://.<C> y`) reads `x http://. y`, then `x [url]. y`. No credential is involved.
+
+**Cost**, best of 5 over 2,000 names at load about 2:
+
+| Name | Helper `shown_text` | Old title reading | Model `shownText` | Old body reading |
+|---|---|---|---|---|
+| URL name holding a control | 36.2 us | 13.4 us | 3.3 us | 1.8 us |
+| URL name, no control | 12.7 us | 13.0 us | 1.6 us | 1.5 us |
+| Plain name | 0.4 us | 0.6 us | 0.2 us | 0.2 us |
+
+Nothing runs the reading per row.
+
+**Rule 15.** I searched every place that does the same job.
+- *Every helper `_CONTROL_CHARS.sub` / `_CONTROL_WS.sub` before a redaction.*
+  - Changed: `player_title_text`.
+  - Cleared: `sanitize_input` and the label cleaners in 10-state.py (input fields, not sinks); `_fold_url` (fold_space's stored text, D-SINK-79's reading, unchanged and pinned by url-mark's `pyFold`); 03-io-playlist.py's strerror fold (the OS's text).
+- *Every helper stderr writer.*
+  - Changed: `log()` and main()'s traceback.
+  - Cleared: the stub's two lines (bin/omarchy-iptv), which are fixed text.
+- *Every model `.replace(CONTROL_RE, "")` before `sinkText` / `scrubUrls`.*
+  - Changed: `notifyNameText`, `notifyReasonText`, the `playlistError` card's cached time and the `stateUnreadable` card's path.
+  - Cleared: the body's exit deletion (after the composition); `sanitizeInput`, `sanitizeUrlInput` and the paste cleaner (input).
+- *The shell's journal relays* (`console.warn(... Model.redactUrls(text.trim()))` in Service.qml) read the helper's stderr, which now carries no control. They are not changed here.

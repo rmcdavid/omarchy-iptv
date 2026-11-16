@@ -760,7 +760,10 @@
         "urlShown",
         "redactUrls",
         "scrubUrls",
-        "sinkText"
+        "sinkText",
+        "SHOWN_STAND_IN",
+        "isControlCode",
+        "shownText"
       ]
     },
     {

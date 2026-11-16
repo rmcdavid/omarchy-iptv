@@ -177,7 +177,7 @@ export {
   isUrlDelimiterAt, trailingPunctuationLength, SLASH_ALIKE_CODES,
   isSlashAlikeCode, isUrlFillerCode, isMarkStandInCode, urlAt, urlList,
   redactionCanChange, SPACELESS_RANGES, isSpacelessCode, NAMED_SCHEMES,
-  credentialSpans, redactTokens, redactUrls, scrubUrls, sinkText
+  credentialSpans, redactTokens, redactUrls, scrubUrls, sinkText, shownText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

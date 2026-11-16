@@ -260,7 +260,11 @@ fail=0
 # branch's 98 was the floor catching up with the base's 98, not a new
 # function; the merged spec runs 99 (dev's test_statePrivateInV4 beside the
 # branch's amended functions).
-QML_SPEC_MIN=${QML_SPEC_MIN:-99}
+# 2026-11-16, lane-r2a (round 2 of the security review, D-SINK-110): 99 ->
+# 100 -- test_shownTextInV4, a sample of the shared shown-text fixture
+# through Model.shownText and the notification's reading in the engine that
+# composes the card, red on 1118ffb's model; the spec runs 100.
+QML_SPEC_MIN=${QML_SPEC_MIN:-100}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -571,7 +575,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-99}
 # Both floors trailed the base, which ran 3716: dev's D-SINK-103 adds 11
 # (3727) and the branch's D-SINK-102 nets 5 over that base (its 3721); the
 # merged suite runs 3732, 0 failures.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3732}
+# 2026-11-16, lane-r2a (round 2 of the security review, D-SINK-110): 3732 ->
+# 3735 -- the shared shown-text fixture's vectors through Model.shownText
+# and notifyReasonText, the typo-port name and body, and the fixture's sweep
+# (140,022 inputs, three properties); all three red on 1118ffb's model and
+# under six single-decision mutants of shownText (QA-RESULTS "Round 2 of
+# the security review, lane-r2a"); the suite runs 3735.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3735}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1009,7 +1019,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3732}
 # and 25 more in the five commits after its merge, which left the floor at
 # 2434) and the branch 126 (its 2540); the merged suite runs 2585, 1
 # skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2585}
+# 2026-11-16, lane-r2a (round 2 of the security review, D-SINK-110): 2585
+# -> 2597 -- tests/test_shown_text.py's 12: the shared shown-text fixture's
+# vectors, the fast path, idempotence, its sweep (the run's size and three
+# properties) and the stderr writers (log(), the traceback kept in lines and
+# read whole, shown_lines). 8 red on 1118ffb's helper, the rest each red
+# under a named single-decision mutant (QA-RESULTS "Round 2 of the security
+# review, lane-r2a"); the suite runs 2597, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2597}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

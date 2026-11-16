@@ -316,16 +316,19 @@ function playerPauseArgv(socket, state) {
 // redaction, as the player's title does (apply_channel): a TAB inside a
 // password then no longer splits the URL there (D-SINK-34's cost) on this
 // sink; and the whole body loses any left at the exit, before the escape.
-// The name and the reason as notifyArgv composes them for a body: the
-// controls deleted first (F-SINK-16), then redacted; the name cleaned and
-// never empty. Named so the node suite's sweeps call what the notification
-// shows rather than a composition of their own (the review of cbd6679).
+// The name and the reason as notifyArgv composes them for a body: as
+// shownText reads them (D-SINK-110), redacted as the row redacts them and
+// with no control left; the name cleaned and never empty. Named so the node
+// suite's sweeps call what the notification shows rather than a composition
+// of their own (the review of cbd6679). Until D-SINK-110 the controls were
+// deleted BEFORE the redaction, and a control inside a typo-shaped
+// address's port made a numeric port of it and printed the username.
 function notifyNameText(name) {
-  return cleanName(sinkText(str(name).replace(CONTROL_RE, ""))) || "Channel"
+  return cleanName(shownText(name)) || "Channel"
 }
 
 function notifyReasonText(reason) {
-  return scrubUrls(str(reason).replace(CONTROL_RE, ""))
+  return shownText(reason)
 }
 
 function notifyArgv(event, params, replaceId) {
@@ -372,8 +375,9 @@ function notifyArgv(event, params, replaceId) {
     // and both reached this argv unscrubbed while the name and the reason
     // were scrubbed, so the sink held only what today's callers happen to
     // pass. Both go through the same scrub now; a clock and a path are
-    // unchanged by it.
-    var tail = p.cachedAt ? "Using cached copy from " + scrubUrls(str(p.cachedAt).replace(CONTROL_RE, "")) + "." : "Open the guide for details."
+    // unchanged by it. Since D-SINK-110 it is shownText, the body's one
+    // reading.
+    var tail = p.cachedAt ? "Using cached copy from " + shownText(p.cachedAt) + "." : "Open the guide for details."
     spec = { title: "Playlist error", body: "Could not fetch the playlist (" + (reason || "unknown error") + "). " + tail, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.playlistError }
   } else if (event === "epgError") {
     spec = { title: "Guide data error", body: "Could not fetch the EPG (" + (reason || "unknown error") + "). Channels still work.", glyph: GLYPHS.alert, urgency: "low", id: NOTIFY_IDS.epgError }
@@ -389,7 +393,7 @@ function notifyArgv(event, params, replaceId) {
     // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
     // same reason as the refusal above. A reason and a PATH, never a URL.
     // R27e: and the mid-session title when the block began after a load.
-    var told = stateUnreadableNotice(p.reason, scrubUrls(str(p.path).replace(CONTROL_RE, "")), p.midSession === true)
+    var told = stateUnreadableNotice(p.reason, shownText(p.path), p.midSession === true)
     spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   } else if (event === "mergeDropped") {
     // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and
@@ -1512,6 +1516,83 @@ function sinkText(value) {
   var s = str(value)
   return redactionCanChange(s) ? redactUrls(s) : s
 }
+
+// D-SINK-110 (2026-11-16): what shownText puts where a control stood that it
+// does not delete before the redaction. U+0001 is FILLER that the reading
+// crosses and never counts (it is not WIDE), never takes for a colon (it is
+// no STAND_IN), and it ends no run and no token. Not U+FDD0, the first
+// choice measured: that is a STAND_IN and a COUNTED code point, so two of
+// them inside one credential's username let the token rule print part of
+// it. The helper's SHOWN_STAND_IN is the mirror.
+var SHOWN_STAND_IN = "\u0001"
+
+function isControlCode(c) {
+  return c <= 0x1f || (c >= 0x7f && c <= 0x9f)
+}
+
+// D-SINK-110: provider text as the notification body prints it -- redacted
+// as the guide row redacts it (sinkText) and with no control character
+// left. The helper's shown_text is the mirror (the player's title and its
+// stderr); the shared shown-text fixture (dev branch) holds both.
+//
+// The body used to DELETE the controls and then redact (F-SINK-16), so a
+// control inside the port of a typo-shaped address made a numeric port of
+// it: `News http://my.user:12<U+0001>34/pw@cdn.test/x` printed
+// `News my.user`, the username, where the row withholds the host. The
+// order is now the other way round, and the controls are read in two ways:
+// - a control between a URL's scheme start and its first run character, as
+//   the text with its controls deleted reads its URLs (urlList), is
+//   TRANSPARENT and is deleted before the redaction, as the body always
+//   read it, so `http:<DEL>//...` is still a URL; and when that text holds
+//   HOST_WITHHELD right at a mark's end (D-EPG-18) the span runs through
+//   that token's `]`;
+// - every other control becomes SHOWN_STAND_IN, which the reading crosses
+//   and never counts and which ends no run: a control inside a port leaves
+//   it non-numeric, as the row reads it;
+// and every control left in the redacted text is deleted. A text with no
+// control is sinkText's answer itself. Idempotent; linear.
+function shownText(value) {
+  var s = str(value)
+  var holes = []
+  for (var i = 0; i < s.length; i++) {
+    if (isControlCode(s.charCodeAt(i))) holes.push(i)
+  }
+  if (holes.length === 0) return sinkText(s)
+  var bare = s.replace(CONTROL_RE, "")
+  // The kept character j of `bare` stands at j + (the controls before it) in
+  // `s`; shift[h] is how many kept characters precede control h.
+  var shift = []
+  for (var h = 0; h < holes.length; h++) shift.push(holes[h] - h)
+  var place = function (j) {
+    var lo = 0
+    var hi = shift.length
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1
+      if (shift[mid] <= j) lo = mid + 1
+      else hi = mid
+    }
+    return j + lo
+  }
+  var spans = []
+  var urls = urlList(bare)
+  for (var u = 0; u < urls.length; u++) {
+    var url = urls[u]
+    var end = urlAlreadyWithheld(bare, url) ? place(url.markEnd + HOST_WITHHELD.length - 1) + 1 : place(url.markEnd)
+    spans.push([place(url.start), end])
+  }
+  var out = ""
+  var copied = 0
+  var si = 0
+  for (var k = 0; k < holes.length; k++) {
+    var at = holes[k]
+    while (si < spans.length && spans[si][1] <= at) si++
+    out += s.substring(copied, at)
+    if (!(si < spans.length && spans[si][0] <= at)) out += SHOWN_STAND_IN
+    copied = at + 1
+  }
+  out += s.substring(copied)
+  return sinkText(out).replace(CONTROL_RE, "")
+}
 export {
   CONFIG_SHIELD_UNKNOWN, CONFIG_SHIELD_PRIVATE, CONFIG_SHIELD_EXPOSED,
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
@@ -1531,5 +1612,5 @@ export {
   SPACELESS_RANGES, isSpacelessCode, countedEnds, tokenCredential,
   NAMED_SCHEMES, OPENING_CHARS, unnamedSchemeCredential, credentialSpans,
   redactTokens, urlAlreadyWithheld, urlShownEnd, urlShown, redactUrls,
-  scrubUrls, sinkText
+  scrubUrls, sinkText, SHOWN_STAND_IN, isControlCode, shownText
 }

@@ -899,11 +899,14 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
 
 def player_title_text(name: str) -> str:
     """What apply_channel sets as the player's title and media title (after
-    the `$>` prefix on the title): the name with every control character
-    deleted, then redacted (F-SINK-14, F-SINK-16). A function so the tests
-    that hold a cut name to this sink call it rather than copy it
-    (D-SINK-75)."""
-    return redact_urls(_CONTROL_CHARS.sub("", name))
+    the `$>` prefix on the title): the name as shown_text prints it, which
+    is redacted as the guide row redacts it and holds no control character
+    (F-SINK-14, F-SINK-16). It deleted the controls BEFORE the redaction
+    until D-SINK-110 (2026-11-16), and a control in a typo-shaped
+    address's port then made a numeric port of it and printed the
+    username. A function so the tests that hold a cut name to this sink
+    call it rather than copy it (D-SINK-75)."""
+    return shown_text(name)
 
 
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
@@ -972,9 +975,11 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # F-SINK-16: and with no control character in it. The parse keeps a
     # playlist's C0 and C1 controls in a name (ESC, BEL and U+009B measured),
     # and a toplevel title is printed raw by tools a user runs in a terminal;
-    # a name never means anything by one, so none goes to the player. Dropped
-    # BEFORE the redaction, so a tab or a line break inside a password no
-    # longer splits the URL there (D-SINK-34's cost) on this sink.
+    # a name never means anything by one, so none goes to the player. Read
+    # as the guide row reads them and removed AFTER the redaction since
+    # D-SINK-110 (shown_text): a control inside a mark is still deleted
+    # before it, so a tab or a line break inside a `://` does not hide the
+    # URL, and one anywhere else no longer makes a port of digits.
     shown = player_title_text(target["name"])
     for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)

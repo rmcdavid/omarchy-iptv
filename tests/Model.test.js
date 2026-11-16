@@ -4722,6 +4722,103 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   }, [])
 })()
 
+// D-SINK-110 (2026-11-16): the notification body reads a control character
+// as the guide row reads it and removes it after the redaction. It deleted
+// every control BEFORE the redaction (F-SINK-16), so a control inside the
+// port of a typo-shaped address made a port of digits and the body printed
+// the username (`News my.user`) where the row withholds the host.
+// tests/fixtures/shown-text.json is the one fixture both mirrors run
+// (tests/test_shown_text.py runs the helper's shown_text over it): its
+// vectors through Model.shownText and the two composers that use it, and its
+// sweep, the inputs built the same way as the helper's suite builds them (one
+// control at every code point position of three fixtures' texts, two at every
+// pair of positions of five credential shapes), through notifyReasonText,
+// the body's own reading, against the fixture's three properties.
+;(function () {
+  const fs = require("fs"), path = require("path")
+  const SHOWN = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/shown-text.json"), "utf8"))
+  const SWEEP = SHOWN.sweep
+  const CONTROL = new RegExp("[" + String.fromCharCode(0) + "-" + String.fromCharCode(0x1f) + String.fromCharCode(0x7f) + "-" + String.fromCharCode(0x9f) + "]")
+  const CONTROLS = new RegExp(CONTROL.source, "g")
+  const clean = function (s) { return s.replace(CONTROLS, "").split(Model.HOST_WITHHELD).join("") }
+  const pieces = function (out, must) {
+    const seen = clean(out)
+    if (must.length) return must.filter(function (m) { return m !== "" && seen.indexOf(m) !== -1 })
+    return seen.match(/q+|z+/g) || []
+  }
+  const beyond = function (out, ref, must) {
+    const shown = clean(ref)
+    return pieces(out, must).filter(function (p) { return shown.indexOf(p) === -1 })
+  }
+  checkCall("D-SINK-110: every shown-text vector reads as the fixture says through Model.shownText and the notification's reason, shows none of its mustNotAppear and no control, and is read again unchanged", function () {
+    const bad = []
+    SHOWN.vectors.forEach(function (v) {
+      const got = Model.shownText(v.text)
+      if (got !== v.js) bad.push([v.why, "shownText", got])
+      if (Model.notifyReasonText(v.text) !== v.js) bad.push([v.why, "notifyReasonText", Model.notifyReasonText(v.text)])
+      if (v.mustNotAppear.some(function (m) { return got.indexOf(m) !== -1 }) || CONTROL.test(got)) bad.push([v.why, "shows", got])
+      if (Model.shownText(v.js) !== v.js) bad.push([v.why, "again", Model.shownText(v.js)])
+    })
+    return [SHOWN.vectors.length >= 21, bad]
+  }, [true, []])
+  checkCall("D-SINK-110: the notification's body and its name read the typo-shaped port as the row does: `[host withheld]`, never the username", function () {
+    const name = "News http://my.user:12" + String.fromCharCode(1) + "34/pw@cdn.test/x"
+    const a = Model.notifyArgv("streamFailed", { name: name, reason: name })
+    return [Model.notifyNameText(name), a[a.length - 1].indexOf("my.user") === -1, a[a.length - 1].indexOf("pw") === -1]
+  }, ["News [host withheld]", true, true])
+  checkCall("D-SINK-110: the fixture's sweep through notifyReasonText -- (1) no mustNotAppear piece the plain redaction of the source withholds, (2) nothing the old reading (controls deleted, then redacted) withholds, (3) with only non-delimiter controls outside every URL's scheme start to first run character, nothing the plain redaction withholds", function () {
+    const sources = []
+    SWEEP.sources.forEach(function (src) {
+      JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", src.file), "utf8"))[src.list].forEach(function (row) {
+        let must = []
+        for (const key of src.must) if (row[key] && row[key].length) { must = row[key]; break }
+        sources.push([row[src.text], must])
+      })
+    })
+    const nonDelimiter = new Set(SWEEP.nonDelimiterControls)
+    const counts = { one: 0, pairs: 0, property3: 0 }
+    const failed = { 1: [], 2: [], 3: [] }
+    const judge = function (text, must, plainBase) {
+      const out = Model.notifyReasonText(text)
+      if (must.length && pieces(out, must).some(function (p) { return pieces(plainBase, must).indexOf(p) === -1 })) failed[1].push(text)
+      if (beyond(out, Model.sinkText(text.replace(CONTROLS, "")), must).length) failed[2].push(text)
+      const holes = []
+      for (let i = 0; i < text.length; i++) if (CONTROL.test(text.charAt(i))) holes.push(i)
+      if (holes.some(function (i) { return !nonDelimiter.has(text.charAt(i)) })) return
+      const kept = []
+      for (let i = 0; i < text.length; i++) if (!CONTROL.test(text.charAt(i))) kept.push(i)
+      const bare = kept.map(function (i) { return text.charAt(i) }).join("")
+      const place = function (j) { return j < kept.length ? kept[j] : text.length }
+      const spans = Model.urlList(bare).map(function (u) { return [place(u.start), place(u.markEnd)] })
+      if (holes.some(function (i) { return spans.some(function (s) { return s[0] <= i && i < s[1] }) })) return
+      counts.property3++
+      if (beyond(out, Model.sinkText(text), must).length) failed[3].push(text)
+    }
+    sources.forEach(function (row) {
+      const points = Array.from(row[0])
+      const plainBase = Model.sinkText(row[0])
+      SWEEP.controls.forEach(function (c) {
+        for (let p = 0; p <= points.length; p++) {
+          judge(points.slice(0, p).join("") + c + points.slice(p).join(""), row[1], plainBase)
+          counts.one++
+        }
+      })
+    })
+    SWEEP.pairs.bases.forEach(function (base) {
+      for (let i = 0; i <= base.length; i++) for (let j = i; j <= base.length; j++) {
+        SWEEP.pairs.controls.forEach(function (c1) {
+          SWEEP.pairs.controls.forEach(function (c2) {
+            judge(base.slice(0, i) + c1 + base.slice(i, j) + c2 + base.slice(j), [], "")
+            counts.pairs++
+          })
+        })
+      }
+    })
+    return [counts.one >= 100000, counts.pairs >= 37188, counts.property3 >= 40000,
+            failed[1].slice(0, 4), failed[2].slice(0, 4), failed[3].slice(0, 4)]
+  }, [true, true, true, [], [], []])
+})()
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect

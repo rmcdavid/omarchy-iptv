@@ -2370,6 +2370,110 @@ def redact_urls(text: Any) -> str:
     return "".join(out)
 
 
+# What shown_text puts where a control stood that it does not delete before
+# the redaction (D-SINK-110): U+0001, which the reading crosses as FILLER,
+# never counts (it is not WIDE), never takes for a colon (it is no
+# STAND_IN), and which ends no run and no token (it is none of the six
+# delimiters and no space). Not U+FDD0, the first choice measured: that is
+# a STAND_IN and a COUNTED code point, so two of them inside one
+# credential's username let the token rule print part of it.
+SHOWN_STAND_IN = "\x01"
+
+
+def shown_text(value: Any) -> str:
+    """Provider or user text as every helper sink of free text prints it
+    (D-SINK-110, 2026-11-16): redacted as the guide row redacts it, and
+    with no control character (_CONTROL_CHARS) left in it. The player's
+    window title and media title (player_title_text) and the helper's
+    stderr (log, and main()'s traceback through shown_lines).
+    Model.shownText is the mirror for the notification body; the shared
+    shown-text fixture (dev branch) holds both.
+
+    Those sinks used to DELETE the controls and then redact (F-SINK-14,
+    F-SINK-16), so a control inside the port of a typo-shaped address made
+    a numeric port of it: `News http://my.user:12<U+0001>34/pw@cdn.test/x`
+    printed `News http://my.user`, the username, where the guide row,
+    which redacts the raw text, withholds the host. The order is now the
+    other way round, and the controls are read in two ways:
+    - a control between a URL's scheme start and its first run character,
+      as the text with its controls deleted reads its URLs (next_url),
+      is TRANSPARENT and is deleted before the redaction, as the deleting
+      sinks always read it, so `http:<DEL>//...` and `:/<TAB>/` are still
+      URLs here; and when that text holds HOST_WITHHELD right at a mark's
+      end (D-EPG-18, a line a redactor already printed) the span runs
+      through that token's `]`;
+    - every other control becomes SHOWN_STAND_IN, which the reading
+      crosses and never counts, and which ends no run: so a control inside
+      a port leaves it non-numeric, as the row reads it, and a control in
+      a username or a password moves no cap;
+    and every control left in the redacted text is deleted.
+
+    Without the transparent span, a control inside a fullwidth or
+    slash-alike mark broke the one-odd-character mark and the path printed;
+    a stand-in right after the `//` broke an IPv6 literal's bracket.
+
+    A text with no control is redact_urls' answer itself, which is what
+    the deleting sinks printed for it. What remains, stated: a TAB, LF or
+    CR in a URL's scheme, mark or username, or a control in its scheme, is
+    read as the text without it reads (R32a's dotted-username residual
+    then prints as it does there). Idempotent. Linear: one reading of the
+    text without its controls, one pass over the controls, one redaction."""
+    return _shown(value, False)
+
+
+def shown_lines(value: Any) -> str:
+    """shown_text for a text of several lines (main()'s traceback,
+    D-SINK-110): the same reading, except that a line feed is no control
+    to it -- never deleted, never read as SHOWN_STAND_IN, and kept in what
+    it prints -- so the text keeps its lines and a line feed is read as
+    the plain redaction reads it, a delimiter that ends a URL's run.
+    Deleting one inside a scheme joined the line before it to the URL
+    (`x<LF>http://...` read as the scheme `xhttp`, measured). Read whole,
+    not line by line: a credential token ends only at a space, so the
+    redaction of the whole text withholds `qqqqqq:zz<LF>zz@cdn.test`
+    where one of each line alone printed `qqqqqq:zz` (measured)."""
+    return _shown(value, True)
+
+
+def _shown(value: Any, lines: bool) -> str:
+    s = "" if value is None else str(value)
+    if s.isprintable() or _CONTROL_CHARS.search(s) is None:
+        return redact_urls(s)
+    holes = [m.start() for m in _CONTROL_CHARS.finditer(s) if not (lines and s[m.start()] == "\n")]
+    if not holes:
+        return redact_urls(s)
+    bare = "".join(s[a + 1:b] for a, b in zip([-1] + holes, holes + [len(s)]))
+    # The kept character j of `bare` stands at j + (the controls before it)
+    # in `s`; shift[h] is how many kept characters precede control h.
+    shift = [at - h for h, at in enumerate(holes)]
+
+    def place(j: int) -> int:
+        return j + bisect.bisect_right(shift, j)
+
+    spans: list[tuple[int, int]] = []
+    for start, _, mark_end, _ in UrlReading(bare, 0, None, True).urls:
+        if bare.startswith(HOST_WITHHELD, mark_end):
+            end = place(mark_end + len(HOST_WITHHELD) - 1) + 1
+        else:
+            end = place(mark_end)
+        spans.append((place(start), end))
+    out: list[str] = []
+    copied = 0
+    si = 0
+    for at in holes:
+        while si < len(spans) and spans[si][1] <= at:
+            si += 1
+        out.append(s[copied:at])
+        if not (si < len(spans) and spans[si][0] <= at):
+            out.append(SHOWN_STAND_IN)
+        copied = at + 1
+    out.append(s[copied:])
+    shown = redact_urls("".join(out))
+    if lines:
+        return "\n".join(_CONTROL_CHARS.sub("", line) for line in shown.split("\n"))
+    return _CONTROL_CHARS.sub("", shown)
+
+
 # How far past its limit cut_free_text reads a run for its credential, at
 # least: the window is the limit or this, whichever is longer.
 CUT_CREDENTIAL_WINDOW = 4096
@@ -2507,7 +2611,11 @@ def cut_free_text(text: str, limit: int, separator: str = "") -> str:
 
 
 def log(message: str) -> None:
-    sys.stderr.write("omarchy-iptv: %s\n" % redact_urls(message))
+    """One line on stderr, which the shell writes to the journal: the
+    message as shown_text prints it (D-SINK-110), so a control in it is
+    never written to a terminal and never splits an address before the
+    redaction reads it."""
+    sys.stderr.write("omarchy-iptv: %s\n" % shown_text(message))
 
 
 # ------------------------------------------------------- normalization

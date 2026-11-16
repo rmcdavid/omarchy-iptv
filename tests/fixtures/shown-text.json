@@ -1,0 +1,277 @@
+{
+ "about": "D-SINK-110 (2026-11-16): one reading of provider text for the helper's sinks of free text and the notification body. The helper's shown_text (bin/helper/01-core.py; the player's window title and media title through player_title_text, log(), and main()'s traceback through shown_lines) and the model's Model.shownText (the notification body through notifyNameText and notifyReasonText) both run this fixture: tests/test_shown_text.py and tests/Model.test.js. The text is redacted as the guide row redacts it and every control character is removed AFTER the redaction; a control between a URL's scheme start and its first run character, as the text without its controls reads its URLs, is deleted before it, and every other control is read as U+0001. `py` is exactly what shown_text prints and `js` exactly what shownText prints (the helper keeps the scheme, as redaction-vectors.json says); `mustNotAppear` holds for both.",
+ "credentialsAreFake": "Every credential here is synthetic (qqqqqq / zzzzzz, my.user / pw) on hosts under the reserved .test TLD.",
+ "sweep": {
+  "about": "Both suites build the same inputs: each source text below with one of `controls` inserted at every code point position, and each of `pairs.bases` with two of `pairs.controls` at every pair of positions (the first at or before the second). Each input's sink output -- the window title (player_title_text) in the helper, the notification reason (notifyReasonText) in the model -- is judged by the pieces it shows: a source's mustNotAppear entries that appear in it, or, for a source with none, its maximal runs of `q` or `z`, each compared with the controls and `[host withheld]` taken out. Three properties: (1) for a source with mustNotAppear, the output shows no entry the plain redaction of the source text itself withholds; (2) the output shows nothing the sinks' old reading -- the controls deleted, then the plain redaction -- withholds; (3) when every control in the input is one of `nonDelimiterControls` and stands outside every URL's scheme start to first run character as the text without its controls reads its URLs, the output shows nothing the plain redaction of the input withholds.",
+  "sources": [
+   {
+    "file": "shown-names.json",
+    "list": "names",
+    "text": "name",
+    "must": [
+     "mustNotAppear"
+    ]
+   },
+   {
+    "file": "redaction-vectors.json",
+    "list": "vectors",
+    "text": "text",
+    "must": [
+     "displayMustNotAppear",
+     "mustNotAppear"
+    ]
+   },
+   {
+    "file": "url-mark.json",
+    "list": "vectors",
+    "text": "text",
+    "must": []
+   }
+  ],
+  "controls": [
+   "\u0001",
+   "\t",
+   "\n",
+   "\r",
+   "\u001b",
+   "\u007f",
+   "\u0081",
+   "\u0085",
+   "\u009b"
+  ],
+  "nonDelimiterControls": [
+   "\u0001",
+   "\u001b",
+   "\u007f",
+   "\u0081",
+   "\u0085",
+   "\u009b"
+  ],
+  "pairs": {
+   "bases": [
+    "Backup qqqqqq:zzzzzz@cdn.test/x",
+    "Watch http://qqqqqq:zzzzzz@cdn.test/x",
+    "News qqqqqq:zzzzzz@cdn.test",
+    "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+    "News http://my.qqqq:1234/zzzz@cdn.test/x"
+   ],
+   "controls": [
+    "\u0001",
+    "\t",
+    "\u009b"
+   ]
+  },
+  "measured": "2026-11-16 on the dev tree with D-SINK-110: 102,834 one-control inputs and 37,188 pairs, 0 failing any property in either suite. On 1118ffb's sinks (the controls deleted before the redaction) property (3) fails; the counts are in QA-RESULTS (dev branch), section D-SINK-110."
+ },
+ "vectors": [
+  {
+   "why": "D-SINK-110: U+0001 inside the port of a typo-shaped address leaves the port non-numeric, as the guide row reads it, so the host is withheld; deleting it first made the port 1234 and printed the username",
+   "text": "News http://my.user:12\u000134/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: DEL inside the port of a typo-shaped address leaves the port non-numeric, as the guide row reads it, so the host is withheld; deleting it first made the port 1234 and printed the username",
+   "text": "News http://my.user:12\u007f34/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: U+0081 inside the port of a typo-shaped address leaves the port non-numeric, as the guide row reads it, so the host is withheld; deleting it first made the port 1234 and printed the username",
+   "text": "News http://my.user:12\u008134/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: U+009B inside the port of a typo-shaped address leaves the port non-numeric, as the guide row reads it, so the host is withheld; deleting it first made the port 1234 and printed the username",
+   "text": "News http://my.user:12\u009b34/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a TAB inside the port of a typo-shaped address leaves the port non-numeric, as the guide row reads it, so the host is withheld; deleting it first made the port 1234 and printed the username",
+   "text": "News http://my.user:12\t34/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a port that is a control alone reads as non-numeric too",
+   "text": "News http://my.user:\u0001/pw@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "my.user",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control outside every address is removed after the redaction, and the name keeps its words",
+   "text": "News\u001b[1m HD\u009b",
+   "py": "News[1m HD",
+   "js": "News[1m HD",
+   "mustNotAppear": []
+  },
+  {
+   "why": "D-SINK-110: a text with no control is the plain redaction's answer itself",
+   "text": "Watch http://qqqqqq:zzzzzz@cdn.test/x",
+   "py": "Watch http://cdn.test",
+   "js": "Watch cdn.test",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zzzzzz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control inside the mark is deleted before the redaction, so the address is still read as one",
+   "text": "Watch http:\u007f//qqqqqq:zzzzzz@cdn.test/x",
+   "py": "Watch http://cdn.test",
+   "js": "Watch cdn.test",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zzzzzz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control right after the `//` is deleted before the redaction, so a bracketed literal keeps its bracket",
+   "text": "See http://\u0001[2001:db8::5]:8080/live/qqqqqq/zzzzzz/1.ts",
+   "py": "See http://[2001:db8::5]",
+   "js": "See [2001:db8::5]",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zzzzzz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: deleting the controls before the redaction reads this port as digits and prints the username",
+   "text": "\u0001News http://my.qqqq:\u00011234/zzzz@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "qqqq",
+    "zzzz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: deleting the controls before the redaction reads this port as digits and prints the username",
+   "text": "\u0001News http://my.qqqq:\t1234/zzzz@cdn.test/x",
+   "py": "News http://[host withheld]",
+   "js": "News [host withheld]",
+   "mustNotAppear": [
+    "qqqq",
+    "zzzz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: two stand-ins inside one credential: U+0001 is never counted, so the token's cap does not move",
+   "text": "\u00e9q\u0001qqqqq:zz\u00e9zz@cdn.test",
+   "py": "[host withheld]",
+   "js": "[host withheld]",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: two stand-ins inside one credential: U+0001 is never counted, so the token's cap does not move",
+   "text": "\u00e9q\tqqqqq:zz\u00e9zz@cdn.test",
+   "py": "[host withheld]",
+   "js": "[host withheld]",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: two stand-ins inside one credential: U+0001 is never counted, so the token's cap does not move",
+   "text": "\u00e9q\nqqqqq:zz\u00e9zz@cdn.test",
+   "py": "[host withheld]",
+   "js": "[host withheld]",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zz"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control between the scheme and the run is deleted before the redaction (D-EPG-18's token kept whole)",
+   "text": "See HTTPS://[\u0001host withheld]",
+   "py": "See https://[host withheld]",
+   "js": "See [host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "HTTPS"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control between the scheme and the run is deleted before the redaction (D-EPG-18's token kept whole)",
+   "text": "See HTTPS://[\thost withheld]",
+   "py": "See https://[host withheld]",
+   "js": "See [host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "HTTPS"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control after the `//` and before the run's first character is deleted before the redaction",
+   "text": "See http://\u0001[host withhold] x",
+   "py": "See http://[redacted] withhold] x",
+   "js": "See [url] withhold] x",
+   "mustNotAppear": [
+    "[host"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control after the `//` and before the run's first character is deleted before the redaction",
+   "text": "See http://\t[host withhold] x",
+   "py": "See http://[redacted] withhold] x",
+   "js": "See [url] withhold] x",
+   "mustNotAppear": [
+    "[host"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control inside an already withheld host's token is deleted through the token's `]` (D-EPG-18)",
+   "text": "See HTTPS://[\u001bhost withheld]",
+   "py": "See https://[host withheld]",
+   "js": "See [host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "HTTPS"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control inside an already withheld host's token is deleted through the token's `]` (D-EPG-18)",
+   "text": "See HTTPS://[h\u0001ost withheld]",
+   "py": "See https://[host withheld]",
+   "js": "See [host withheld]",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]",
+    "HTTPS"
+   ]
+  }
+ ]
+}

@@ -682,7 +682,10 @@ def main(argv: list[str] | None = None) -> int:
             # and that import's own failure used to replace the answer
             # below with nothing at all (the shell's `no_output`).
             trace = "%s (no traceback: it could not be loaded)\n" % message
-        sys.stderr.write(bounded_text(redact_urls(trace), INTERNAL_TRACE_MAX, keep_tail=True))
+        # D-SINK-110: through shown_lines, log()'s reading with the lines
+        # kept, so a control in it is read as the guide row reads it before
+        # the redaction and none reaches the journal.
+        sys.stderr.write(bounded_text(shown_lines(trace), INTERNAL_TRACE_MAX, keep_tail=True))
         emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": message}})
         return EXIT_ERROR
 

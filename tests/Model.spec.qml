@@ -1324,6 +1324,31 @@ TestCase {
     compare(Model.isUrlFillerCode(0x2215), false)
   }
 
+  // D-SINK-110 (2026-11-16), in V4, the engine that composes the
+  // notification: Model.shownText reads a control as the guide row reads it
+  // and removes it after the redaction. A sample of the shared shown-text
+  // fixture (node and the helper run all of it, and its sweep).
+  function test_shownTextInV4() {
+    function c(code) { return String.fromCharCode(code) }
+    var cases = [
+      ["News http://my.user:12" + c(0x1) + "34/pw@cdn.test/x", "News [host withheld]"],
+      ["News http://my.user:12" + c(0x9b) + "34/pw@cdn.test/x", "News [host withheld]"],
+      ["News http://my.user:12" + c(0x9) + "34/pw@cdn.test/x", "News [host withheld]"],
+      ["News http://my.user:" + c(0x1) + "/pw@cdn.test/x", "News [host withheld]"],
+      ["News" + c(0x1b) + "[1m HD" + c(0x9b), "News[1m HD"],
+      ["Watch http:" + c(0x7f) + "//qqqqqq:zzzzzz@cdn.test/x", "Watch cdn.test"],
+      ["See http://" + c(0x1) + "[2001:db8::5]:8080/live/qqqqqq/zzzzzz/1.ts", "See [2001:db8::5]"],
+      [c(0xe9) + "q" + c(0x1) + "qqqqq:zz" + c(0xe9) + "zz@cdn.test", "[host withheld]"],
+      ["See HTTPS://[" + c(0x1) + "host withheld]", "See [host withheld]"],
+      ["Watch http://qqqqqq:zzzzzz@cdn.test/x", "Watch cdn.test"]
+    ]
+    for (var i = 0; i < cases.length; i++) {
+      compare(Model.shownText(cases[i][0]), cases[i][1], "shownText " + i)
+      compare(Model.notifyReasonText(cases[i][0]), cases[i][1], "notifyReasonText " + i)
+    }
+    compare(Model.notifyNameText(cases[0][0]), "News [host withheld]")
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.
