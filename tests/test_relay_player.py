@@ -593,6 +593,99 @@ class RelayPathTooLongTest(test_player.GateTestCase):
                 self.assertEqual(self.spawned_launches(), [])
 
 
+class SpawnPathBlockedTest(test_player.GateTestCase):
+    """RelayPathTooLongTest's siblings (the branch's recheck, 2026-11-16):
+    the two other refusals a spawn meets at a path that is the user's --
+    something other than a socket at `<socket>.relay` (D-SINK-102,
+    bind_relay_listeners' socket_path_blocked), and a folder at the options
+    file's path when the start has tokens to write there (D-PLY-68,
+    write_mpv_args' runtime_unwritable) -- are asked by `player start` and
+    `player restart` before the lock, in the spawn's own words, so the older
+    player is neither stopped nor told anything, nothing is launched, and
+    what sits at the path is left as it was. Each was refused only at the
+    spawn, after the restart's ladder or the adoption's replacement had
+    stopped the older player, so the start ended with no player at all."""
+
+    def assert_refused_before_anything_is_stopped(self, extra, code_and_message):
+        old = self.old_player("older")
+        before = self.told(old.pid)
+        for verb in ("start", "restart"):
+            with self.subTest(verb=verb):
+                code, payload, _, stderr = test_player.run(
+                    "player", verb, "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
+                    "--seq", "1", "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "4",
+                    "--first-load-timeout", "1", *extra)
+                self.assertEqual((code, payload["error"]["code"], payload["error"]["message"]),
+                                 (1,) + code_and_message, stderr)
+                self.assertIsNone(old.poll(), "the older player was stopped")
+                self.assertEqual(self.told(old.pid), before, "the older player was told something")
+                self.assertEqual([record["pid"] for record in helper.find_player(self.sock)], [old.pid])
+                self.assertEqual(self.spawned_launches(), [])
+
+    def test_a_relay_socket_path_holding_a_file_is_refused_before_the_older_player_is_touched(self):
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        path = pathlib.Path(helper.relay_socket_path(self.sock))
+        path.write_text("the user's own file\n", encoding="utf-8")
+        self.assert_refused_before_anything_is_stopped((), ("socket_path_blocked", helper.RELAY_PATH_BLOCKED))
+        self.assertEqual(path.read_text(encoding="utf-8"), "the user's own file\n")
+
+    def test_an_options_file_path_holding_a_folder_is_refused_before_the_older_player_is_touched(self):
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        folder = helper.mpv_args_path(self.sock, helper.player_dirs(self.sock))
+        os.mkdir(folder, 0o700)
+        self.assert_refused_before_anything_is_stopped(
+            ("--mpv-arg=--osd-level=1",), ("runtime_unwritable", "could not write the player's options (Is a directory)"))
+        self.assertTrue(os.path.isdir(folder))
+
+
+class FreshSpawnRefusedBeforeItsLoadTest(test_player.GateTestCase):
+    """D-PLY-57's rule, widened on 2026-11-16 (the branch's recheck): a
+    fresh spawn this start fed nothing is stopped on every refusal that
+    comes before its load. Here the TLS read-back's: a user's `mpv` wrapper
+    on PATH appends its own `--http-proxy` after this build's whole launch
+    argv, so the player's `http-proxy` names something other than its
+    relay's pin, every load is refused `tls_unverified` (read_tls_state),
+    and the spawn was left idle and unfed on the socket, a black window the
+    next start found. Through the shipping start over the stub mpv, which
+    applies its argv's last word as mpv does."""
+
+    def test_a_fresh_spawn_the_tls_read_back_refuses_is_stopped_and_fed_nothing(self):
+        test_player.WrapperSpawnTest.wrap(self, 'exec REAL "$@" --http-proxy=http://127.0.0.1:9')
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"), stderr)
+        launches = self.spawned_launches()
+        self.assertEqual(len(launches), 1, "the player never started")
+        self.assertEqual(launches[0]["applied"][-1], "--http-proxy=http://127.0.0.1:9")
+        told = [c for c in self.told(launches[0]["pid"]) if isinstance(c, list)]
+        self.assertEqual([c for c in told if c[:1] == ["loadfile"]], [])
+        self.assertEqual(helper.find_player(self.sock), [], "the spawn the read-back refused was left on the socket")
+
+    def test_a_spawn_a_newer_channel_plays_on_is_kept_when_the_start_then_fails(self):
+        """The other side of the rule: a start that stands down (another
+        client's channel already on its spawn, applied_by_another_client)
+        and then fails writing its owner claim keeps the spawn, which is
+        playing that client's channel. The newer channel is stated through
+        the seam; the claim's write fails as a dead connection does."""
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        newer = {"id": "t:espn.us", "name": "ESPN", "entryId": 1, "verb": "play", "loaded": True}
+        shipping = test_player.helper
+        real = shipping.MpvIpc.try_command
+
+        def claim_fails(client, *args):
+            if args[:2] == ("set_property", shipping.USER_DATA_OWNER):
+                raise shipping.HelperError("ipc_error", "mpv closed the connection")
+            return real(client, *args)
+
+        with mock.patch.object(shipping, "applied_by_another_client", lambda client: dict(newer)), \
+                mock.patch.object(shipping.MpvIpc, "try_command", claim_fails):
+            code, payload, _, stderr = self.player_start("--owner-pid", str(os.getpid()))
+        self.assertEqual((code, payload["error"]["code"]), (1, "ipc_error"), stderr)
+        launches = self.spawned_launches()
+        self.assertEqual(len(launches), 1, "the player never started")
+        self.assertEqual([record["pid"] for record in helper.find_player(self.sock)], [launches[0]["pid"]])
+
+
 # ---- the load ----------------------------------------------------------------
 
 class LoadRegistrationTest(MpvTestCase):

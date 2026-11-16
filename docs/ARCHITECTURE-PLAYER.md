@@ -1264,7 +1264,14 @@ stream opens.
 - D-PLY-57: after `player_foreign` the helper's own spawn is left running.
   **[2026-11-14: fixed. The start stops what it launched, from the SIGTERM
   rung and by pid, before it releases the lock; an adopted player and any
-  process it did not launch are left as they were.]**
+  process it did not launch are left as they were.]** **[2026-11-16, the
+  branch's recheck: and after every refusal that comes before the start's
+  load, not only `player_foreign` -- the relay's registration refusal, the
+  TLS read-back's `tls_unverified` (a wrapper that appends its own
+  `--http-proxy`), an `ipc_error` before the load. Kept: a spawn whose
+  loadfile the start sent, and one a newer channel already plays on (the
+  stand-down). The lead's call under the owner's standing authority of
+  2026-11-09.]**
 - D-PLY-58: the health relaunch of an adopted stash from another source.
 - D-PLY-65: a start sends its log subscription, which carries no channel,
   on the connection before the build gate judges the peer.
@@ -3933,15 +3940,18 @@ with literal targets only (20.9).
    socket on 127.0.0.1 at a port the kernel chooses, backlog 64 (the
    proxy), and a Unix socket at `<socket>.relay` in the 0700 runtime
    directory, bound under umask 077 (the control socket). A stale socket
-   there is removed, anything else there is refused (`socket_path_blocked`),
-   and a path that does not fit `sun_path` (107 bytes) is `spawn_failed`
-   (`RELAY_PATH_TOO_LONG`) -- asked by `player start` and `player restart`
-   before the lock, so before a restart's ladder or an adoption's
-   replacement has stopped anything (the conformance review: it
-   was asked at the bind, after the older player had gone, and a socket
-   path of 102-107 bytes ended the start with no player at all).
+   there is removed, anything else there is refused (`socket_path_blocked`,
+   `RELAY_PATH_BLOCKED`), and a path that does not fit `sun_path` (107
+   bytes) is `spawn_failed` (`RELAY_PATH_TOO_LONG`) -- both asked by
+   `player start` and `player restart` before the lock too, so before a
+   restart's ladder or an adoption's replacement has stopped anything (the
+   conformance review: the length was asked at the bind, after the older
+   player had gone, and a socket path of 102-107 bytes ended the start with
+   no player at all; its recheck found the non-socket the same way).
 2. It composes the argv with the pin (`mpv_launch_argv(...,
-   relay_port=<port>)`) and writes the private options file (D-SINK-47).
+   relay_port=<port>)`) and writes the private options file (D-SINK-47);
+   a folder in that file's place is refused before the lock as well, in
+   the words its write would answer (D-PLY-68).
 3. setsid and the double fork, as before. The grandchild G makes itself the
    leader of its own process group, moves every descriptor it needs above
    the two fixed numbers, puts `/dev/null` on 0 and 1 and the launch-window
@@ -4019,7 +4029,9 @@ child still alive in the group it leads -- a user's wrapper that ignored
 the SIGTERM, or the real player under it, which has no death signal of its
 own -- is killed with the whole group, SIGKILL to the group whose id is the
 relay's own pid, after the relay has removed its socket, and the relay dies
-of it too (`relay_group_child_alive`). A relay that does not lead its group
+of it too (`relay_group_child_alive`), so on that path its exit status is a
+death by SIGKILL (-9, as a Popen returncode reads it), not 0 (SIGKILL's
+default action writes no core, so no coredump entry follows it). A relay that does not lead its group
 (none the spawn starts) signals its own child alone, through a pidfd it
 took at its start, before its reaper could reap anything, so a reaped
 child's reused pid is never reached; a relay whose `--child` is not its own

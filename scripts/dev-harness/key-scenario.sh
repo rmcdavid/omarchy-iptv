@@ -956,6 +956,21 @@ cleanup() {
   # inside that window and found the orphan; before this line only the O
   # segment's own recording (just before its deliberate SIGKILL) fed
   # ORPHANS, so a signal between the slow start and that line stranded it.
+  # A child list is ancestry read downward, and that is accepted here (the
+  # lead's call under the owner's standing authority of 2026-11-09, made on
+  # 2026-11-16, the branch's recheck): the rule exists to keep a signal off a
+  # process's ANCESTORS -- a player's parent read off /proc was the user's
+  # own `systemd --user` on a tree with no relay -- and these are the
+  # DESCENDANTS of a shell this run started and recorded (run.sh's qs.pid).
+  # A helper the shell starts has no answer of its own to read, and a
+  # /proc-wide scan by command line could reach another session's helpers
+  # over the same tree. No pid read here is signalled as read: each goes
+  # through kill_orphan, a pidfd whose command line must still run this
+  # run's helper (the tree under test's, or a slow tree under $WORK), so a
+  # pid that exited and was reused is never reached -- unless the process
+  # that reused it is another session's helper over this same tree, which
+  # the needle cannot tell from this run's: that needs a reuse, inside this
+  # cleanup, by a process carrying that exact command-line prefix.
   if (( SHELL_STARTED )) && [[ -n $SHELL_PID ]] && kill -0 "$SHELL_PID" 2>/dev/null; then
     ORPHANS="$ORPHANS $(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' ')"
   fi
@@ -1799,9 +1814,15 @@ shell_arm() {
   seed_args=(--playlist "$seed_playlist"); seed_key="(none)"
   [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
   # The crash: SIGKILL by the recorded pid, the slow helper's sleeping child
-  # recorded first (it is orphaned by the kill and reaped by pid below).
+  # recorded first (it is orphaned by the kill and reaped by pid below). Its
+  # child list is read as cleanup's is, and accepted for the same reasons
+  # (the comment there): descendants of the recorded shell, each signalled
+  # only through kill_orphan's pidfd and command-line check.
   orphan=$(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' '); ORPHANS="$ORPHANS $orphan"
-  kill -KILL "$SHELL_PID" 2>/dev/null
+  # The shell itself by the pid run.sh recorded (not this script's child),
+  # through a pidfd once its command line still names this run's root
+  # (F-HARNESS-114).
+  qa_signal_named KILL "$SCRATCH/root" "$SHELL_PID"
   for ((i = 0; i < 50; i++)); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 0.1; done
   for p in $orphan; do kill_orphan "$p"; done
   rm -f "$SCRATCH/qs.pid"; SHELL_STARTED=0

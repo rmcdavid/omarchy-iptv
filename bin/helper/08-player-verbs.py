@@ -999,8 +999,11 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # text, `X-A: 1,2` arrived as `X-A: 1`). The named form
     # ({"name": "loadfile", ...}) was measured equal; the array form is the
     # one every double of the player and the harness stub read.
-    data = client.command("loadfile", target["url"], "replace", -1,
-                          channel_load_options(target, default, proxy))
+    options = channel_load_options(target, default, proxy)
+    # From here the player may hold this load, so a `player start` that
+    # fails now keeps its spawn rather than stopping it (player_start).
+    target["loadSent"] = True
+    data = client.command("loadfile", target["url"], "replace", -1, options)
     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
     if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
         entry_id = None
@@ -1420,15 +1423,17 @@ def player_runtime(sock_path: str) -> str:
     return directory
 
 
-def check_socket_path(sock_path: str) -> None:
+def check_socket_path(sock_path: str, refusal: str = "the socket path is not a socket") -> None:
     """A regular file at the socket path is never unlinked and never spawned
-    over (it is the user's, or a sign something else owns the path)."""
+    over (it is the user's, or a sign something else owns the path).
+    `refusal` is the sentence: the relay's control socket path is asked the
+    same way, in bind_relay_listeners' words (RELAY_PATH_BLOCKED)."""
     try:
         mode = os.lstat(sock_path).st_mode
     except OSError:
         return
     if not stat.S_ISSOCK(mode):
-        raise HelperError("socket_path_blocked", "the socket path is not a socket")
+        raise HelperError("socket_path_blocked", refusal)
 
 
 def ensure_player_dirs(dirs: dict[str, str], warnings: list[str]) -> None:
@@ -1654,7 +1659,7 @@ def bind_relay_listeners(sock_path: str) -> tuple[Any, Any]:
     except OSError:
         mode = None
     if mode is not None and not stat.S_ISSOCK(mode):
-        raise HelperError("socket_path_blocked", "the player's relay socket path is not a socket")
+        raise HelperError("socket_path_blocked", RELAY_PATH_BLOCKED)
     # D-PLY-31's shape: no descriptor or no memory for a listener is the
     # player that could not be started, `spawn_failed` with the error's words.
     proxy = control = None
@@ -1719,7 +1724,9 @@ def stop_fresh_spawn(sock_path: str, launched_pid: int, ipc_timeout: float) -> N
     """D-PLY-57 (2026-11-14): after `player_foreign` the player this start
     launched is stopped, not left behind. It was idle and unfed, a black
     window under --force-window=immediate, and it held the socket token, so
-    the next start found it. Only what this start launched: the launched pid
+    the next start found it. [2026-11-16: after every refusal that comes
+    before this start's load, not only that one (player_start says which).]
+    Only what this start launched: the launched pid
     and the token holders that descend from it (a user's `mpv` wrapper runs
     the player as its child). From the SIGTERM rung, by pid: the quit rung
     goes over the socket, and the process that answers the socket is the one
@@ -1755,15 +1762,22 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     client = None
     newer: dict[str, Any] | None = None
     outcome: dict[str, Any] | None = None
+    target: dict[str, Any] | None = None
     try:
         target = player_target(args.id, "", args.cache_dir)
         player_runtime(sock)
         check_socket_path(sock)
-        # D-SINK-102: a relay socket path past sun_path is refused HERE,
-        # before the restart's ladder and the adoption's replacement stop
-        # anything: refused at the spawn (bind_relay_listeners), it ended a
-        # start with the older player already stopped and none in its place.
-        relay_socket_path(sock)
+        # D-SINK-102: a relay socket path past sun_path, or one that holds
+        # anything but a socket, is refused HERE, before the restart's
+        # ladder and the adoption's replacement stop anything: refused at the
+        # spawn (bind_relay_listeners), it ended a start with the older
+        # player already stopped and none in its place. The spawn asks the
+        # second again, under the lock.
+        check_socket_path(relay_socket_path(sock), RELAY_PATH_BLOCKED)
+        # D-PLY-68: and the options file's path, where this start has
+        # tokens to write there (write_mpv_args asks it again at the spawn).
+        if mpv_args:
+            check_mpv_args_path(mpv_args_path(sock, player_dirs(sock)))
         lock_fd = acquire_lock(player_lock_path(sock), args.lock_timeout)
         check_seq(read_lock_record(lock_fd), seq, verb)
         write_lock_record(lock_fd, seq, verb)
@@ -1820,12 +1834,20 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         if client is not None:
             client.close()
         # D-PLY-57: under the lock still, so no other start finds the spawn.
-        # D-SINK-102: and the same after the relay refused the load's
-        # registration (relay_register): a local start failure, whose spawn
-        # was otherwise left idle on the socket until the next start read it
-        # older.
-        refused_load = error.code == "not_running" and error.message == RELAY_REGISTER_REFUSAL
-        if (error.code == "player_foreign" or refused_load) and outcome is not None and outcome["spawned"]:
+        # A spawn this start fed nothing is of no use, and left idle on the
+        # socket the next start finds it, so it is stopped on EVERY refusal
+        # before its load: player_foreign, the relay's refusal of the load's
+        # registration (relay_register), the TLS read-back's tls_unverified
+        # (a wrapper that appends its own --http-proxy, say), an ipc_error
+        # from any command before the load, and the stand-down's own read
+        # (applied_by_another_client) failing. Kept, as before: a spawn whose
+        # loadfile this start sent (`loadSent`, set by apply_channel just
+        # before it; what follows the load cannot raise), and one a newer
+        # channel already plays on (the stand-down's claim), whose owner is
+        # another client (the lead's call under the owner's standing
+        # authority of 2026-11-09, made on 2026-11-16).
+        fed = newer is not None or bool(target is not None and target.get("loadSent"))
+        if outcome is not None and outcome["spawned"] and not fed:
             stop_fresh_spawn(sock, int(outcome["pid"]), args.ipc_timeout)
         if lock_fd >= 0:
             release_lock(lock_fd)

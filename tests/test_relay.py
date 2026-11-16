@@ -1523,6 +1523,57 @@ class LookupThreadsTest(Fixture):
         self.assertEqual([at for at in asked if at[0] == "hang.qqqqqq.test"], [("hang.qqqqqq.test", 80)] * 2)
         self.assertEqual(asked.count(("127.0.0.1", origin.port)), 1)
 
+    def test_past_the_outstanding_lookups_cap_the_users_proxy_is_not_looked_up_and_the_connect_is_502(self):
+        """The lookup of the user's own proxy's NAME (relay_proxy_lookup) is
+        held to RELAY_LOOKUPS_MAX as every lookup the relay makes is (the
+        branch's recheck, 2026-11-16: no test reached it). The workers are
+        held at the cap by two target lookups that never answer, through the
+        shipping lookup and a stated getaddrinfo; the next target is answered
+        by the suite's stand-in for the play-time lookup, so the proxy's own
+        lookup is the one that meets the cap: 502 RELAY_LOOKUP_FAILED at
+        once, the proxy's name never asked and the proxy never reached. Once
+        the held lookups end the same request reaches the proxy, by the
+        stated answer for its name (a literal of this test's own listener)."""
+        self.classes({"127.0.0.1": "global"})
+        proxy = Origin(self)
+        release = threading.Event()
+        self.addCleanup(release.set)
+        lookup, asked = stated_getaddrinfo(("hang.qqqqqq.test",), release)
+
+        def named(host, port, *rest, **kwargs):
+            text = host.decode("utf-8", "replace") if isinstance(host, bytes) else str(host)
+            if text == "proxy.qqqqqq.test":
+                asked.append((text, port))
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+            return lookup(host, port, *rest, **kwargs)
+        targets = Resolver({"cdn.qqqqqq.test": ["127.0.0.1"]})
+        refused = b"HTTP/1.1 502 " + helper.RELAY_LOOKUP_FAILED.encode()
+        base = helper.RESOLVE_WORKERS["live"]
+        with mock.patch.object(helper, "resolve_within", REAL_RESOLVE_WITHIN), \
+                mock.patch.object(socket, "getaddrinfo", named), \
+                mock.patch.object(helper, "STREAM_LOOKUP_TIMEOUT_S", 0.3), \
+                mock.patch.object(helper, "RELAY_LOOKUPS_MAX", base + 2):
+            relay = Relay(self, {"http_proxy": "http://proxy.qqqqqq.test:%d" % proxy.port})
+            token = relay.register(REMOTE)
+            for _ in range(2):
+                self.assertEqual(exchange(relay, get("http://hang.qqqqqq.test/x", token))[0], 502)
+            self.assertEqual(helper.RESOLVE_WORKERS["live"], base + 2)
+            target = get("http://cdn.qqqqqq.test:8080/live/1.ts", token)
+            with mock.patch.object(helper, "stream_resolve", targets):
+                started = time.monotonic()
+                status, head, _ = exchange(relay, target)
+                elapsed = time.monotonic() - started
+                self.assertEqual(head.split(b"\r\n")[0], refused)
+                self.assertLess(elapsed, 0.3, "the refusal waited for a lookup")
+                self.assertEqual(targets.asked, [("cdn.qqqqqq.test", 8080)])
+                self.assertEqual((proxy.accepted, [at for at in asked if at[0] == "proxy.qqqqqq.test"]), (0, []))
+                release.set()
+                self.assertTrue(wait_for(lambda: helper.RESOLVE_WORKERS["live"] == base))
+                self.assertEqual(exchange(relay, target)[0], 200)
+        self.assertEqual(proxy.accepted, 1)
+        self.assertEqual([at for at in asked if at[0] == "proxy.qqqqqq.test"], [("proxy.qqqqqq.test", proxy.port)])
+        self.assertEqual(targets.unexpected, [])
+
 
 # ----------------------------------------------------- nothing named
 

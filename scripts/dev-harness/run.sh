@@ -496,8 +496,11 @@ stop_detached_shell() {
   # file is gone, because a shell this script did not record is one it
   # cannot tell from another harness's. The shell is not our child (an
   # earlier invocation started it), which is why the ladder polls `kill -0`
-  # and never `wait`s.
-  qa_stop_pid "$pid" 5 "detached harness shell"
+  # and never `wait`s. [2026-11-16, F-HARNESS-114: and so every signal to
+  # it goes through a pidfd once its command line still names this
+  # instance's root (`quickshell -p <root>`, qa_stop_named), where a bare
+  # recorded pid could have been reused since the earlier invocation.]
+  qa_stop_named "$pid" "$(qs_root)" 5 "detached harness shell"
   rm -f "$pidfile"
   return 0
 }

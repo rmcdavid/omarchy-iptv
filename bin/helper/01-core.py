@@ -342,6 +342,7 @@ RELAY_SOCKET_SUFFIX = ".relay"
 RELAY_SUN_PATH_MAX = 107
 RELAY_SPAWN_FAILED = "could not start the player's relay"
 RELAY_PATH_TOO_LONG = "the player's relay socket path is too long"
+RELAY_PATH_BLOCKED = "the player's relay socket path is not a socket"
 RELAY_GONE = "the player's relay does not answer"
 # The two names FFmpeg reads from the environment (http.c and tls.c, through
 # getenv_utf8: lowercase only, measured), which the player's environment

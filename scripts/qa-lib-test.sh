@@ -892,7 +892,9 @@ is "a test listener came up within 5 s" "$lo_up" "1"
 st "qa_listener_owned: the listener whose argv names the needle is ours" 0 qa_listener_owned "$lo_port" "$lo_dir"
 st "qa_listener_owned: the same listener is someone else's for another needle" 1 qa_listener_owned "$lo_port" "$TMP/some-other-harness/fixtures"
 lo_pid=$(ss -ltnpH "sport = :$lo_port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n 1 | cut -d= -f2)
-[[ -n $lo_pid ]] && kill "$lo_pid" 2>/dev/null
+# Through a pidfd once its command line still names this test's directory
+# (F-HARNESS-114): the pid is the listener's, not necessarily our child.
+[[ -n $lo_pid ]] && qa_signal_named TERM "$lo_dir" "$lo_pid"
 kill "$lo_wrapper" 2>/dev/null; wait "$lo_wrapper" 2>/dev/null
 for ((i = 0; i < 50; i++)); do qa_listener_owned "$lo_port" "$lo_dir"; [[ $? == 2 ]] && break; sleep 0.1; done
 st "qa_listener_owned: nothing listening answers 2, not 'someone else'" 2 qa_listener_owned "$lo_port" "$lo_dir"
@@ -924,8 +926,11 @@ rp_scr="$TMP/rp-scratch"
 "$TMP/rp-honour/mpv" "--input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_kind=$!
 "$rp_bin/mpv" "--input-ipc-server=$TMP/rp-other/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_other=$!
 sleep 0.3
-# The old form, verbatim from run.sh's reap_player: TERM by pattern, and done.
-pkill -f "input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+# The old form, run.sh's reap_player: TERM, and done. It sent that TERM by a
+# `pkill -f` pattern on this socket, which reached exactly these two; they are
+# this shell's own children, so it goes to their recorded pids (no pattern
+# signals anything here: D-SINK-102's conformance review, 2026-11-16).
+kill -TERM "$rp_deaf" "$rp_kind" 2>/dev/null
 sleep 0.5
 is "old form: run.sh's TERM-only reap leaves a TERM-ignoring player running" \
    "$(kill -0 "$rp_deaf" 2>/dev/null && echo alive || echo gone)" "alive"
@@ -1153,7 +1158,7 @@ is "a zombie counts as gone within one poll, and nothing is sent or said" \
 kill -KILL "$sp_zparent" 2>/dev/null; wait "$sp_zparent" 2>/dev/null
 # Not our child: the detached shell `run.sh reap` ends was started by an
 # earlier invocation. A grandchild whose parent has gone is the same shape.
-sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & echo $!) )
+sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' "$TMP/sp-orphan" >/dev/null 2>&1 & echo $!) )
 sleep 0.2
 is "control: the orphan is alive and is not our child" \
    "$(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone) $(ps -o ppid= -p "$sp_orphan" | tr -d ' ' | awk -v me=$$ '{print ($1 == me) ? "child" : "notchild"}')" "alive notchild"
@@ -1222,8 +1227,12 @@ is "a server.pid naming a process that is not the server (a recycled pid) signal
 # ended by its recorded pid here, whatever the checks above found. The
 # first red run against a9d20f9's run.sh left the deaf server stand-in
 # behind (reap did not end it, and nothing else did) for twenty minutes.
-kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" "$sp_orphan" 2>/dev/null
+kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
 wait "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
+# The orphan is not our child, and qa_stop_pid above has normally ended it,
+# so its pid may be anyone's by now: signalled through a pidfd once its
+# command line still carries its own marker (F-HARNESS-114).
+qa_signal_named KILL "$TMP/sp-orphan" "$sp_orphan"
 # The shapes, as bookkeeping (rule 14: the driven checks above are the
 # proof): no `pkill -f` is left in run.sh, and every scenario server kill
 # goes through the ladder behind its ownership guard.
@@ -1233,9 +1242,10 @@ is "run.sh ends nothing by a pkill pattern any more (code lines; its comments ma
 # under the timeout wrapper, which run.sh did not record itself, goes
 # through qa_stop_named, the same ladder with each signal checked on a
 # pidfd against its command line; the recorded wrapper still goes through
-# qa_stop_pid.]
-is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid (or, for the shell it did not record, qa_stop_named)" \
-   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_\(pid\|named\) "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
+# qa_stop_pid. F-HARNESS-114, the same day: the detached shell, recorded by
+# an EARLIER invocation, goes through qa_stop_named against its root.]
+is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid (or, for a shell this invocation did not start, qa_stop_named)" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_\(pid\|named\) "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_named "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
 sp_scen=""
 for sc in text tls sources; do
   sp_scen="$sp_scen$sc:$(qa_count 'kill "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh"):$(qa_count 'qa_stop_pid "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh") "

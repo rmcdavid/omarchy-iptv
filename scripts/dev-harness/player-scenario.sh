@@ -120,9 +120,12 @@
 # its counter-case (L8) and D-SINK-72's mark across a second shell (L10),
 # with baselines 6b5ba6c and c510985 to match; those runs were of the old
 # cells and say nothing about these. These cells' past-the-hold checks are
-# red under a single-decision mutant of the shipping
-# Model.olderRestartDisposition that DEFERS an expired, unsafe episode where
-# it stops it (counts in docs/QA-RESULTS.md, "F-HARNESS-112").
+# red under each of two single-decision mutants of the shipping
+# Model.olderRestartDisposition: one that DEFERS an expired, unsafe episode
+# where it stops it ("defer"), and one that HOLDS it for the list where it
+# stops it ("hold", D-SINK-71's late delivery, which the late list then
+# restarts into a new player) (counts in docs/QA-RESULTS.md,
+# "F-HARNESS-112").
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
 # tree and run the same checks against it. Against the last pre-M2-02 commit
@@ -1329,9 +1332,13 @@ ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P14 no player to abandon"
 until_session "t:live1" 10 || true
 is "P14 the play wrote a session record" "$(session_id)" "t:live1"
-kill -KILL "$(shell_pid)" 2>/dev/null
+# The shell by the pid run.sh recorded, and the players by the socket token,
+# each through a pidfd once its command line still names this run (the
+# shell's root, the scratch socket): neither is this shell's own child
+# (F-HARNESS-114).
+qa_signal_named KILL "$SCRATCH/root" "$(shell_pid)"
 sleep 0.5
-for pid in $(player_pids); do kill -KILL "$pid" 2>/dev/null; done
+for pid in $(player_pids); do qa_signal_named KILL "--input-ipc-server=$SOCK" "$pid"; done
 until_eq 0 8 player_count || true
 : >"$SCRATCH/harness.log"
 "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart-shell failed (see $LOG)"; exit 1; }
@@ -1893,6 +1900,11 @@ for i in $(seq 1 50); do
   sleep 0.1
 done
 ck "L5 premise: the logging server holds its port and is the process this scenario started" '[[ -n $L5_PID && $L5_PID == "$L5_STARTED" ]]'
+# Only that process is ever signalled (cleanup, and the end of L5): a
+# listener another run left on the fixed port is whoever answered ss, and a
+# premise that failed used to leave its pid here for a bare TERM
+# (F-HARNESS-114).
+[[ $L5_PID == "$L5_STARTED" ]] || L5_PID=""
 : >"$SCRATCH/harness.log"
 OMARCHY_IPTV_PLUGIN_ROOT="$L4_DIR" QS_DISABLE_FILE_WATCHER=1 "$RUN" --detach --serve --timeout 0 --playlist "$FIX/l4.m3u" >>"$LOG" 2>&1
 wait_log 'service loaded' 20 || bad "L4 the v0.16.0 harness did not start (see $LOG)"

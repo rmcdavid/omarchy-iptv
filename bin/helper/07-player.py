@@ -997,6 +997,20 @@ def remove_mpv_args(path: str) -> None:
         pass
 
 
+def check_mpv_args_path(path: str) -> None:
+    """D-PLY-68: the refusal write_mpv_args meets at a folder in the options
+    file's place (its rename cannot replace one: EISDIR), asked by `player
+    start` and `player restart` before the lock, in the same words, so
+    before a restart's ladder or an adoption's replacement has stopped
+    anything. Anything else there is replaced by that rename, as before."""
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return
+    if stat.S_ISDIR(mode):
+        raise runtime_unwritable("write the player's options", IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR)))
+
+
 def mpv_pin_block(where: dict[str, str], relay_port: int = 0) -> list[str]:
     """Mirror of Model.mpvPinBlock: the trailing pins, the contained resume
     folder first (a named profile moved it: measured), then the relay pin

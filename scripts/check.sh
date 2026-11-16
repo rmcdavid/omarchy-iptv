@@ -948,7 +948,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # spawn's relay wait's per-question bound (two). 4 red on a863b59's code
 # (plus the orphan check's relay socket and the two walks, amended), the
 # rest each red under a named single-decision mutant; the suite runs 2534.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2534}
+# 2026-11-16, dsink102 (the branch's recheck, lane-settle): 2534 -> 2540 --
+# tests/test_relay_player.py's 4: something other than a socket at the
+# relay's socket path and a folder at the options file's path (D-PLY-68)
+# each refused before the older player is touched, a fresh spawn the TLS
+# read-back refuses stopped, and one a newer channel plays on kept;
+# tests/test_relay.py's 1, the cap on the lookup of the user's proxy's name;
+# tests/test_clipboard.py's 1, its reap's identity check (F-HARNESS-114).
+# 4 red on de058b3's code, the rest each red under a named single-decision
+# mutant; one amended (tests/test_player.py, D-PLY-57's kept case); the
+# suite runs 2540.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2540}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

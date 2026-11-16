@@ -21,6 +21,7 @@ import json
 import os
 import pathlib
 import resource
+import signal
 import subprocess
 import sys
 import tempfile
@@ -112,12 +113,51 @@ class ClipboardVerbTestCase(unittest.TestCase):
 
     def reap_stubs(self):
         """Belt and braces: the verb must have reaped every stub itself (that
-        is what the tests assert), so this finds nothing on a green run."""
+        is what the tests assert), so this finds nothing on a green run.
+        Each pid is the stub's own report, not a child of this process, so
+        it is signalled only through a pidfd, once the command line read
+        after the pidfd was opened still runs this test's stub: a pid that
+        exited and was reused is never reached (the rule since 2026-11-15:
+        never signal a pid whose command line was not checked through a
+        pidfd)."""
+        stub = os.fsencode(str(self.bin / "wl-paste"))
         for pid in self.pids:
             try:
-                os.kill(pid, 9)
-            except ProcessLookupError:
+                fd = os.pidfd_open(pid)
+            except OSError:
+                continue
+            try:
+                with open("/proc/%d/cmdline" % pid, "rb") as handle:
+                    items = handle.read().split(b"\0")
+                if stub in items:
+                    signal.pidfd_send_signal(fd, signal.SIGKILL)
+            except OSError:
                 pass
+            finally:
+                os.close(fd)
+
+    def test_the_reap_signals_no_pid_whose_command_line_is_not_the_stub(self):
+        """reap_stubs' identity check: a pid on its list that does not run
+        the stub -- here a process this test starts and owns, standing in
+        for a stub pid the kernel has handed to something else -- is left
+        alone. It was SIGKILLed by pid alone."""
+        other = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(100):
+                with open("/proc/%d/cmdline" % other.pid, "rb") as handle:
+                    if handle.read():
+                        break
+                time.sleep(0.01)
+            self.pids.append(other.pid)
+            self.reap_stubs()
+            time.sleep(0.1)
+            self.assertIsNone(other.poll(), "the reap signalled a process that is not the stub")
+        finally:
+            if other.pid in self.pids:
+                self.pids.remove(other.pid)
+            other.kill()
+            other.wait(timeout=5)
 
     def run_verb(self, mode="exact", data=b"", deadline="2", path=None, **extra):
         self.payload.write_bytes(data)

@@ -908,9 +908,14 @@ class FeedGateTest(GateTestCase):
     def test_only_what_this_start_launched_is_stopped_after_player_foreign(self):
         """D-PLY-57: another process that holds the socket token and that
         this start did not launch (it appears after the spawn, so the
-        adoption never saw it) is not a target. And a start refused for any
-        other reason leaves its spawn up, as before: the idle player is what
-        the next play uses."""
+        adoption never saw it) is not a target. And a start whose load went
+        out keeps its spawn: here mpv took the loadfile and its reply never
+        came (the connection's own error, raised after the command was
+        sent), so the player may be playing it. Until 2026-11-16 this half
+        held that a start refused for any other reason kept its spawn; since
+        then every refusal BEFORE the load stops it
+        (FreshSpawnRefusedBeforeItsLoadTest, in the dev branch's
+        tests/test_relay_player.py)."""
         os.makedirs(self.runtime, 0o700)
         bystanders = []
 
@@ -930,14 +935,20 @@ class FeedGateTest(GateTestCase):
         self.assertIsNone(bystanders[0].poll())
         self.reap_process(bystanders[0])
 
-        def fail(*_args, **_kwargs):
-            raise helper.HelperError("not_found", "no such channel")
+        real_command = helper.MpvIpc.command
 
-        with unittest.mock.patch.object(helper, "apply_channel", fail):
+        def reply_lost(client, *args):
+            data = real_command(client, *args)
+            if args[:1] == ("loadfile",):
+                raise helper.HelperError("ipc_error", "mpv did not answer within 1.0 s")
+            return data
+
+        with unittest.mock.patch.object(helper.MpvIpc, "command", reply_lost):
             code, payload, _, _ = self.player_start()
-        self.assertEqual((code, payload["error"]["code"]), (1, "not_found"))
+        self.assertEqual((code, payload["error"]["code"]), (1, "ipc_error"))
         launches = self.spawned_launches()
         self.assertEqual(len(launches), 2)
+        self.assertIn("loadfile", [c[0] for c in self.told(launches[1]["pid"]) if isinstance(c, list) and c])
         self.assertEqual([r["pid"] for r in helper.find_player(self.sock)], [launches[1]["pid"]])
 
 
