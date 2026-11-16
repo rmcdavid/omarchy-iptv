@@ -20043,3 +20043,59 @@ The independent recheck of the `dsink102` branch found it ready to merge, with t
 **The sweep: every signal in tests/ and scripts/ whose pid is not the caller's own child and has no identity check** (`kill`, `os.kill`, `killpg`, `pidfd_send_signal`, `send_signal`, `.kill()`, `.terminate()`, `pkill`, and each pid's origin). Fixed, filed as F-HARNESS-114: argv-scenario's cleanup TERMed whoever held port 8766, by the listener's pid, and its trap sits above the port-in-use refusal (rewind-scenario's SERVER_OWNED case): now `qa_signal_named` against `$WORK/slow.py`; player-scenario's L5 listener on port 8769 was TERMed by the listener's pid even when the premise had not found it to be the scenario's own process: the pid is now kept only when it is the scenario's `$!`; the detached harness shell went by a recorded pid with no check (run.sh's `stop_detached_shell`, now `qa_stop_named` against the root; key-scenario's O4 and player-scenario's P14 KILLs, now `qa_signal_named` against `$SCRATCH/root`); P14's players, KILLed from a `pgrep -f` list, now through `qa_signal_named` against the socket token; test_clipboard's reap (item 4); test_release's `stop_recorded_sleep`, which read the command line and then signalled by pid, now through a pidfd opened first; qa-lib-test's "old form" (a `pkill -f` pattern, now a TERM to its two recorded children), its listener stand-in (now `qa_signal_named` against its directory) and its orphan stand-in's belt-and-braces KILL (it carries a marker now, and is KILLed through `qa_signal_named` against it). Open, in F-HARNESS-114: the nested cage's child in `cage_stop` (clip, logo, key and open scenarios, the first-open spike), a self-reported pid TERMed unchecked; it execs `sleep`, so a check needs the child to name the run first, a change to five live-only scripts this lane did not run. Cleared, each the caller's own child by `$!` or Popen and not yet collected: test_proto_v4's probe, release.py's process group (its leader not yet reaped), the live-rewind spike's players, the chno, chno-entry, id-rotate and sources scenarios' harness, argv's and rewind's sweeps, rewind's streams, player-scenario's sampler, private-bus.sh's bus, the filewatch spike's shell and burners, the first-open spike's probe, sources' silent listener, qa-sources-scenarios' harness (its pid file written from `$!` in the same shell), qa-lib-test's other stand-ins (pin, wrapper, deaf, kind, zombie parent, other, server, player stand-ins). Cleared, ownership established before the signal: rewind's listener (SERVER_OWNED), key-scenario's slow listener (a port the kernel chose for this run's server), the text spike's server (its parent checked), the text, tls and sources scenarios' servers (`ours`, then `qa_stop_pid`), run.sh's recorded fixture server (its command line checked first). Checked by command line and then signalled by pid, not through a pidfd (cleared by the sweep's criterion, stated in F-HARNESS-114's row): `qa_reap_players`, qa-player-scenarios' `signal_scratch_player`, key-scenario's `init_pids` reaps, player-scenario's P11 SIGSTOP. Already through a pidfd: test_player's and test_relay_player's reaps, test_relay's, the rigs', `qa_signal_named` and `qa_stop_named`, key-scenario's `kill_orphan`. The live-only scripts' edits were checked with `bash -n` and not run; qa-lib-test's run in the gate.
 
 **The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with; the python floor moves 2534 -> 2540.
+
+### The relay merge's scenario runs (lane-scenarios, 2026-11-16)
+
+**Why these two.** `relay-merge` 44b736d is dev 18cded1 with the `dsink102` branch (65c1191) merged into it, and `scripts/dev-harness/run.sh`, `key-scenario.sh` and `tls-scenario.sh` were changed on both sides. Dev changed run.sh's and tls-scenario's lock guard to `qa_screen_locked` (F-HARNESS-85), added key-scenario's PRIVATE segment, B42 and B43 (D-SINK-103), and made tls-scenario's S5 read the argv item by item (F-HARNESS-52, `argv_tls`). The branch made run.sh find the quickshell under its `timeout` wrapper by name and command line and stop it through a pidfd (`qa_stop_named`), made key-scenario signal its orphans and its stand-ins through `qa_signal_named` (`kill_orphan`, S4's recorded stand-ins, O4's KILL), and made tls-scenario's S5 S-03 sweep read past the relay pin (`qa_cmdline_sans_relay_pin`). Neither live arm had run on the merged tree. tls-scenario's live arm had not run with the relay at all: the branch read it and did not run it (section F of the D-SINK-102 section above).
+
+**Rig.** Each run had its own nested headless cage (`WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1`) on a private bus (`scripts/dev-harness/private-bus.sh`, with its own HOME and a soft core limit of 0). The outer command ran under `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, with a scratch `XDG_RUNTIME_DIR` (`mktemp -d /tmp/claude-1000/rt.XXXXXX`, so the cage's socket was `wayland-0` inside it) and a short scratch TMPDIR, through the shared heavy lock at nice 10. A refusing `hyprctl` and a logging `omarchy-notification-send` were first on PATH. key-scenario starts its own cage as the release step does, inside the private bus. tls-scenario ran as the cage's child, which refuses any display other than the nested one and any runtime outside the scratch one, unsets DISPLAY and the signature again, and sets `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`. Both drivers were copied from the branch's cell drivers. The crash journal (`MESSAGE_ID=fc2e22bc...`) read 87 before and after every run. After every run there was no cage, no player, no relay, no harness shell and no rig port left, and the owner's shell was the only quickshell. The scratch runtimes were removed once their transcripts had been copied out.
+
+**key-scenario live** (the release recipe's step), on 44b736d, clean tree: **141 passed, 0 failed**: 140 lettered checks and the floor line. Shell arm 587.5 s, 10:52:59 to 11:02:47 CST, load 0.07 at the start and 2.55 at the end. Transcript `key-20261116-105259-1696082` (141 PASS, 0 FAIL). Against the last recorded counts:
+- 0.19.1's pre-cut run read 139 / 0 (key-20261113-075721-2994103).
+- The branch's run on 866bf34 read 139 / 0 (key-20261116-000705-449297). It predates D-SINK-103.
+- Dev's full run on the D-SINK-103 fix read 141 / 0 (key-20261114-182416-412475).
+
+The merged tree carries both sides, and B42 and B43 are the two checks over 139. Both sides' changes were exercised and green: B42 and B43; S4 (the stand-ins recorded and signalled through pidfds); O1..O6, B10, B14, B17 and B18 (the KILLs and the orphans through `kill_orphan`); and T1 (`the shell, the compositor and the nested socket are gone: gone`). No check failed, so there was no cage-limited red to name. The harness log's 1,902 lines carry no TypeError, ReferenceError or SyntaxError.
+
+**tls-scenario, its live arm** (no arguments: G1..G10, S1..S6, the privacy sweep and the teardown; the stage tree is the default `--pre-tls b731882^`, 0.12.1), on 44b736d, clean tree: **50 passed, 1 failed**, 51 assertions, 11:03:08 to 11:04:06 CST, load 1.82 to 3.33. Transcript `tls-20261116-110309-1737682`. The last recorded live run read 51 / 0 on e3734a8 (tls-20261102-024445-2726841).
+
+What passed:
+- S1..S5, with the relay in place, all green:
+  - the attacker refused with no GET (S1, S3, and S6's zap);
+  - the CA named through a profile and on the argv both played (S2, S4);
+  - the options file read `profile, tls-ca-file, gpu-sw, ao, hwdec` with nothing reserved;
+  - the argv read `yes:2 last:1` (dev's `argv_tls`);
+  - no URL but the relay pin on the argv (the branch's sweep).
+- S6 is the replacement of an older player with the channel list present from the start, which is decision 15's restart of a deliverable channel. Green in every check but one:
+  - the 0.12.1 player played the attacker and outlived its shell;
+  - the upgraded shell met it (`pid`);
+  - one restart line, no reload line, no rejection line;
+  - the already-open stream stopped (pieces 1 -> 4 -> 5 -> 5, one close);
+  - the staged process was gone;
+  - the attacker saw no new request across the adoption;
+  - the zap after it was refused with 0 GETs;
+  - the CA-signed control played.
+
+The one red is `S6 control: the player playing it is the tree's own launch (neither), not the staged player`. It is the harness's, and it was there before the merge. `tree_launch` composes the tree's launch with no relay port, so its pin names port 0, while the live player carries the port its relay bound. player-scenario's two readers were taught that port on the branch (365db65); this one was not, because tls-scenario's live arm was not run there. Filed as **F-HARNESS-115**, not fixed here. Filing rather than fixing a red that predates the merge is the lead's call under the owner's standing authority of 2026-11-09, made in this lane's brief.
+
+The cause was measured. `tree_launch` was changed to read the pin's port off the live argv the way player-scenario's `relay_port` does, applied to the working tree for one run and reverted at once (the tree's `git diff HEAD` was empty again before anything else ran). On that run the arm read **51 passed, 0 failed**, with the control reading `include` (11:05:13 to 11:06:10 CST, journal 87 -> 87, transcript `tls-20261116-110513-1743123`).
+
+No tls check is cage-limited: the scenario asks the compositor nothing.
+
+The harness log of each tls run holds 12 TypeError lines. All 12 come from the 0.12.1 stage tree's own Guide.qml: `Cannot read property 'text' of undefined` and its siblings, reading the theme's colour names, which is D-HOST-9's shape on Qt 6.12. None comes from the tree under test.
+
+The run's four failure cards ("TLS Probe 1, 3, 6 and 7 did not play") went to the logging stand-in and to nobody else. Probe 6 is the restarted stage channel, refused by the replacement player as it should be. The cards' reason is the last stderr line that does not warn (D-PLY-29), and for the same refusal it read `tls: Peer certificate failed verification` in S1 of the first run and `Failed to open https://127.0.0.1.` in every other refused case of both runs. That was observed and not asserted, and no check reads it.
+
+**Rule 15, for F-HARNESS-115.** I searched every reader that compares a live player's argv with a tree's own builder (`mpv_launch_argv`, `compose_launch_argv`, `launch_verdict` under scripts/ and the rigs):
+- player-scenario's `composed` and its L9 reader already take the port.
+- `tests/tls_pins_rig.py` composes with no relay at all, which is F-HARNESS-111, already filed.
+- The two live-rewind spikes read no live player.
+
+I also searched every sweep for a URL on a player's argv:
+- player-scenario's P2 and P5 and tls-scenario's S5 read past the pin.
+- rewind-scenario's argv read checks two cache tokens and is blind to the pin.
+- qa-player-scenarios' cold phase greps replies, not an argv.
+
+The relay's own argv carries no `--input-ipc-server=` element (`relay_argv`), so `player_count`, `staged_alive` and the teardown count, which match that token, count players only, and S1's "no player left behind" and the teardown read green.
+
+**The gate.** `scripts/check.sh` through the heavy lock (nice 10, timeout 1800, the headless environment above, a short TMPDIR, a scratch XDG_RUNTIME_DIR), its real exit status captured, green on exactly the tree this section was committed with. No floor moves: this lane adds no test.
