@@ -253,22 +253,29 @@ class MemoryLimitTest(unittest.TestCase):
         self.assertNotIn(SECRET, stdout + stderr)
 
     def test_very_low_limit_refuses_an_ordinary_playlist_in_one_sentence(self):
-        # 2,000 entries, about 60 KB: a playlist whose parse must ask for
-        # memory beyond the limit. The limit is absolute and the helper is
-        # already past it when it is set, so a run fails only once it needs
-        # NEW memory, and a list as small as LocalHttp's own one-entry
-        # playlist could be parsed inside what the interpreter had already
-        # freed: on 2026-11-09 the same helper parsed it under the limit at
-        # one path and was refused at another, the heap's slack moving with
-        # the length of the path it ran from.
-        body = ("#EXTM3U\n" + entries(2000, extra=' group-title="News"')).encode("ascii")
+        # MAX_CHANNELS entries, about 3.2 MB: a playlist whose parse cannot
+        # be done without memory beyond the limit. The limit is absolute and
+        # the helper is already past it when it is set, so a run fails only
+        # once it needs NEW memory, and how much it can do inside what the
+        # interpreter had already freed moves with the allocator and with
+        # the helper's own size. LocalHttp's one-entry playlist was parsed
+        # under the limit at one path and refused at another (2026-11-09),
+        # and the 2,000 entries that replaced it were 2.5 times a boundary
+        # that moves (F-GATE-23, measured 2026-11-16 with glibc's mmap
+        # threshold at 1 MiB and at 32 MiB: 600 entries parsed 8 of 8, 800
+        # were refused 5 of 8, 1,000 were refused 8 of 8). This body is
+        # sixty times that boundary and costs the test no time.
+        body = ("#EXTM3U\n" + entries(helper.MAX_CHANNELS, extra=' group-title="News"')).encode("ascii")
 
         def ordinary(handler):
             handler.send_response(200)
             handler.send_header("Content-Type", "audio/x-mpegurl")
             handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()
-            handler.wfile.write(body)
+            try:
+                handler.wfile.write(body)
+            except OSError:
+                pass               # a refused helper may hang up mid-body
 
         server = LocalHttp({"/ordinary": ordinary})
         self.addCleanup(server.httpd.shutdown)
