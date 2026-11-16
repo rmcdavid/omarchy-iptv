@@ -158,7 +158,7 @@ trap cleanup EXIT
 # cleanup reaps instead of stranding the shell, the server or the cage.
 trap 'exit 130' INT
 trap 'exit 143' TERM
-pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
+qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "screen is locked, or its lock cannot be asked (qa_screen_locked)"; exit 2; }
 grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use"; exit 2; }
 
 # F-M3-1 half (b): the run's own evidence goes to disk, not only to whatever
@@ -234,7 +234,7 @@ list_hits=$(probe_hits)
 [[ $list_hits -eq 0 ]] && pass "T3 zero probe requests after the list open" || fail "T3" "$list_hits probe request(s) for $(probe_distinct) distinct names after the list open: $(probe_paths)"
 
 # ---- WALL view: the real chord, then the same instrument
-pgrep -x hyprlock >/dev/null && { fail "T4" "screen locked before the keystroke; refusing to type"; echo "text-scenario: $PASS passed, $FAIL failed"; exit 1; }
+qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { fail "T4" "screen locked (or its lock cannot be asked) before the keystroke; refusing to type"; echo "text-scenario: $PASS passed, $FAIL failed"; exit 1; }
 via="key"
 qa_key "$RUN" -M ctrl g -m ctrl; sleep 0.6
 if [[ $(gf 'g["wallView"]') != true ]]; then

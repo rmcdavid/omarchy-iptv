@@ -1094,6 +1094,55 @@ qa_target_nested() {
   return 0
 }
 
+# qa_screen_locked <wayland-display> <real-runtime-dir>
+#   Is the screen a keystroke would land on LOCKED? F-HARNESS-85 (2026-11-16).
+#   The guard used to be `pgrep -x hyprlock` alone, in run.sh and copied into
+#   five scenarios, and on Omarchy 4 it could never fire: hyprlock is gone and
+#   the shell locks the session itself, with an editable password field. One
+#   definition now, so the next host change is answered once.
+#     0  locked: hyprlock is running, or the target is the session's own
+#        Hyprland and the host's own query says a session lock is held.
+#     1  not locked: neither of those, on a host whose answer can be read; or
+#        the target is nested (qa_target_nested), where the desk's lock takes
+#        no key from a harness and only hyprlock is asked.
+#     2  cannot tell: the target is the session's own and the host's query is
+#        absent on a host with no hyprlock either, or it answered anything but
+#        0 or 1 (its own 2, "undetermined", included), or it did not answer
+#        within 5 s. A caller treats 2 as locked: a guard that reads "I could
+#        not ask" as "unlocked" is the defect this replaces.
+#   The host's query is `omarchy-hyprland-session-locked` (Omarchy 4: exit 0
+#   locked, 1 unlocked, 2 undetermined; it reads `hyprctl -j monitors` and
+#   writes nothing), found on PATH or under ${OMARCHY_PATH:-/usr/share/omarchy}.
+#   `-x` on the pgrep is load-bearing: `-f` matched an ancestor shell whose
+#   command line held the word and refused every key with nothing locked.
+qa_screen_locked() {
+  local wl=${1-} rt=${2-} q rc
+  pgrep -x hyprlock >/dev/null 2>&1 && return 0
+  qa_target_nested "$wl" "$rt" && return 1
+  q=$(command -v omarchy-hyprland-session-locked 2>/dev/null) \
+    || q="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-hyprland-session-locked"
+  if [[ ! -x $q ]]; then
+    command -v hyprlock >/dev/null 2>&1 && return 1
+    return 2
+  fi
+  timeout 5 "$q" >/dev/null 2>&1; rc=$?
+  case $rc in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+# qa_unlocked <wayland-display> <real-runtime-dir>
+#   True only when qa_screen_locked says "not locked" (its 1). Locked and
+#   cannot-tell are both false, so a scenario's own refusal is one line:
+#     qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { ...; exit 2; }
+qa_unlocked() {
+  local rc=0
+  qa_screen_locked "$@" || rc=$?
+  (( rc == 1 ))
+}
+
 # ------------------------------------------------------ AF_UNIX socket paths
 
 # F-HARNESS-104 (2026-11-09). Between 19:29 on 2026-11-08 and 03:15 the next

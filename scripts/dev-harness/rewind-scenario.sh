@@ -375,7 +375,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # ---- preflight
-pgrep -x hyprlock >/dev/null && { echo "screen is locked" >&2; exit 2; }
+qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "screen is locked, or its lock cannot be asked (qa_screen_locked)" >&2; exit 2; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required for the local stream" >&2; exit 2; }
 command -v mpv >/dev/null || { echo "mpv is required" >&2; exit 2; }
 command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }

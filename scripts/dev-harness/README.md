@@ -376,9 +376,19 @@ exactly like a guide that did not react, and `sky` arriving as `ky` still
 filters 20 rows to 3. So both verbs ask first and **exit 3** naming what they
 found, rather than typing into an unknown surface. Two refusals:
 
-* **`hyprlock` is up.** Never escapable, no flag. `pgrep -x hyprlock` -- `-x`,
-  the process *name*, because `-f` matched an ancestor shell whose command line
-  merely contained the word and refused every keystroke with nothing locked.
+* **The screen is locked, or the lock cannot be asked.** Never escapable, no
+  flag. One predicate, `qa_screen_locked` in `scripts/qa-lib.sh`, which the
+  scenarios that check for themselves call too. It asks two things. First
+  `pgrep -x hyprlock` -- `-x`, the process *name*, because `-f` matched an
+  ancestor shell whose command line merely contained the word and refused
+  every keystroke with nothing locked. Then, when the keys go to the session's
+  own Hyprland, the host's `omarchy-hyprland-session-locked`: Omarchy 4 has no
+  hyprlock and locks with the shell itself, so the name alone could never
+  refuse there (F-HARNESS-85). An answer that is neither "locked" nor
+  "unlocked" -- the host's own "undetermined", a query that is missing on a
+  host with no hyprlock, one that does not answer in 5 s -- is refused as
+  "cannot tell". Toward a nested compositor only hyprlock is asked: the desk's
+  lock takes no key from a cage.
 * **The guide has not got the keyboard.** Asked over `ipc focusState`, which
   walks the guide for the deepest `activeFocus` item; `activeFocus`, not
   `focus`, because a window that loses activation keeps `focus` true while the

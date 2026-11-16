@@ -16,7 +16,7 @@
 #   run.sh key [--to-compositor] <wtype args...>
 #                                    send keys to the guide (wtype). REFUSES, exit 3,
 #                                    unless the harness guide holds the keyboard, and
-#                                    always refuses while hyprlock is up (F-M3-1)
+#                                    always refuses while the screen is locked (F-M3-1)
 #   run.sh type <text>               type text and PROVE it arrived (F-HARNESS-1). Same
 #                                    two refusals; no --to-compositor (see below)
 #   run.sh clean                     wipe the scratch dirs (cache, state, runtime)
@@ -80,7 +80,7 @@
 # like a guide that did not react, and `sky` arriving as `ky` still filters 20
 # rows to 3. So both verbs ask the harness where the keyboard is first
 # (`ipc focusState`) and exit 3 naming what they found. Two kinds of refusal:
-#   hyprlock is up      -- never escapable, no flag, nothing to pass.
+#   the screen is locked, or cannot be asked -- never escapable, no flag.
 #   the guide has not got the keyboard -- escapable with --to-compositor, which
 #     must come FIRST (everything after it is wtype's, and wtype's own `--`
 #     means "the rest is text") and exists for a chord aimed at the COMPOSITOR
@@ -729,7 +729,13 @@ start_server() {
 # the match was an ancestor shell whose own command line contained the word
 # `hyprlock`. A check that can refuse every keystroke forever because of what
 # some parent process is called is not a check.
-screen_locked() { pgrep -x hyprlock >/dev/null 2>&1; }
+#
+# F-HARNESS-85 (2026-11-16): on Omarchy 4 there is no hyprlock to find. The
+# shell locks the session itself, so the question is qa_screen_locked's
+# (scripts/qa-lib.sh): hyprlock by name, and, when the keys go to the
+# session's own Hyprland, the host's own `omarchy-hyprland-session-locked`.
+# Its three answers are kept apart so the refusal can say which it was.
+screen_locked() { qa_screen_locked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME"; }
 
 # How long to wait for the harness to say where the keyboard is. BOUNDED,
 # because an unbounded wait is a bug and not patience (rule 3): `qs ipc`
@@ -884,8 +890,13 @@ PY
 
 # The lock refusal, shared by both verbs so the message cannot drift.
 refuse_if_locked() {
-  screen_locked || return 0
-  echo "[run.sh] $1 REFUSED: hyprlock is running. A keystroke now registers as a FAILED UNLOCK ATTEMPT (CLAUDE.md parallel rule 6), so this refusal has no escape hatch." >&2
+  local rc=0
+  screen_locked || rc=$?
+  case $rc in
+    1) return 0 ;;
+    0) echo "[run.sh] $1 REFUSED: the screen is LOCKED (hyprlock is running, or the host reports a session lock). A keystroke now registers as a FAILED UNLOCK ATTEMPT (CLAUDE.md parallel rule 6), so this refusal has no escape hatch." >&2 ;;
+    *) echo "[run.sh] $1 REFUSED: I cannot tell whether the screen is locked (the host's omarchy-hyprland-session-locked is missing, undetermined or silent), and a key typed at a lock prompt is a FAILED UNLOCK ATTEMPT (CLAUDE.md parallel rule 6). This refusal has no escape hatch." >&2 ;;
+  esac
   return 1
 }
 

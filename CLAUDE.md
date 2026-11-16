@@ -1455,7 +1455,15 @@ This project is built by role lanes running in separate git worktrees.
    Omarchy 4 this check can never fire -- hyprlock is removed and the shell
    locks the screen itself, with an editable field and a two-minute lockout
    after ten failures -- so no harness keystroke reaches the real desktop
-   until the guard asks the host's own `omarchy-hyprland-session-locked`.]** The harness checks this for you now:
+   until the guard asks the host's own `omarchy-hyprland-session-locked`.]**
+   **[2026-11-16, F-HARNESS-85 fixed: the guard is `qa_screen_locked`
+   (`scripts/qa-lib.sh`), hyprlock by name and then, toward the session's
+   own Hyprland, the host's `omarchy-hyprland-session-locked`; anything but
+   its "unlocked" refuses, "cannot tell" included. A rig of your own calls
+   `qa_unlocked`, never a bare `pgrep`. It has not been watched against a
+   really locked desk (F-HARNESS-110), so a desk session still starts from
+   an unlocked screen the owner can see.]**
+   The harness checks this for you now:
    `run.sh key` and `run.sh type` refuse with exit 3 if hyprlock is running,
    and that refusal has no escape hatch. They also refuse unless the GUIDE
    holds the keyboard, which it answers itself over `ipc focusState` -- the

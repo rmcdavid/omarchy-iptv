@@ -159,7 +159,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if pgrep -x hyprlock >/dev/null; then echo "screen is locked; refusing to type"; exit 2; fi
+if ! qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME"; then echo "screen is locked, or its lock cannot be asked (qa_screen_locked); refusing to type"; exit 2; fi
 command -v ffmpeg >/dev/null || { echo "ffmpeg missing"; exit 2; }
 
 # F-M3-1 half (b), and this is the scenario it happened to: a live run of THIS

@@ -196,7 +196,7 @@
 #
 # HOLDS THE DISPLAY in live mode: it starts seven harnesses (S6 is two of them)
 # and each one opens a real mpv window on the current Wayland session. It sends
-# no keystroke, so it needs no focus; it refuses to run under hyprlock anyway,
+# no keystroke, so it needs no focus; it refuses to run under a locked screen anyway,
 # because a player window over a lock screen is nobody's idea of a measurement.
 #
 # Ports 8773 (the attacker) and 8774 (the CA-signed provider). 8765 is
@@ -396,7 +396,7 @@ done
 # printed for it (qa-lib.sh item 3). scripts/qa-lib-test.sh drives four of these
 # refusals and asserts that no transcript lands, and that a refusing run never
 # asks which pid holds a port.
-pgrep -x hyprlock >/dev/null && { echo "the screen is locked; refusing to open a player over a lock prompt" >&2; exit 2; }
+qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "the screen is locked, or its lock cannot be asked (qa_screen_locked); refusing to open a player over a lock prompt" >&2; exit 2; }
 for tool in openssl ffmpeg curl python3 ss; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool is not on PATH; this scenario needs it" >&2; exit 2; }
 done

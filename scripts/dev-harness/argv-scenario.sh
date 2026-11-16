@@ -117,7 +117,7 @@ trap cleanup EXIT
 # cleanup reaps instead of stranding the shell, the server or the cage.
 trap 'exit 130' INT
 trap 'exit 143' TERM
-pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
+qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "screen is locked, or its lock cannot be asked (qa_screen_locked)"; exit 2; }
 grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use"; exit 2; }
 
 # F-M3-1 half (b). The transcript matters more here than anywhere: this

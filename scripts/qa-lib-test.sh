@@ -2032,6 +2032,21 @@ echo "$@" >>"$WTYPE_LOG"
 FG_WTYPE
 chmod +x "$FG/bin/wtype"
 
+# F-HARNESS-85: the host's own lock query, stubbed. Omarchy 4 locks with the
+# shell, not hyprlock, and run.sh asks `omarchy-hyprland-session-locked` when
+# the keys go to the session's own Hyprland. The stub answers what
+# $FG/lock.rc holds (1, "unlocked", unless a case says otherwise) and logs
+# each call, so a desk case below never reaches the real host's query.
+cat >"$FG/bin/omarchy-hyprland-session-locked" <<FG_LOCKQ
+#!/bin/bash
+echo asked >>"$FG/lock.calls"
+rc=\$(cat "$FG/lock.rc" 2>/dev/null || echo 1)
+[[ \$rc == hang ]] && { sleep 30; exit 1; }
+exit "\$rc"
+FG_LOCKQ
+chmod +x "$FG/bin/omarchy-hyprland-session-locked"
+echo 1 >"$FG/lock.rc"
+
 # $1 = what the stub qs writes to stdout, $2 = a line for stderr ("" for none),
 # $3 = the stub's exit code. Writes the reply, then runs the verb. Every call
 # the stub receives is logged, so the ROUTING (which config root was asked) is
@@ -2142,6 +2157,100 @@ is "a reply with no windowActive refuses (fail closed)" "$(fg_run key j)" "3 0"
 ck "as 'cannot tell', without the SKIP tag" 'grep -q "so I cannot tell" "$FG/out" && ! grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
 fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":null}" "" 0
 is "and so does a null one" "$(fg_run key j)" "3 0"
+
+# F-HARNESS-85 (2026-11-16): the lock guard asks the host. Until this day the
+# guard was `pgrep -x hyprlock` alone, which on Omarchy 4 can never fire, and
+# every case below but the unlocked one typed: "0 2" where "3 0" stands. The
+# target is fg_word's hermetic runtime; the reply is a focused guide, so the
+# lock is the only thing that can refuse.
+fg_lock() {   # fg_lock <desk|cage> <stub answer> <verb...> -> "<exit> <wtype calls> <host asked 0|1>"
+  local where=$1 out; echo "$2" >"$FG/lock.rc"; shift 2
+  : >"$FG/lock.calls"
+  fg_stub "$FG_OPEN" "" 0
+  out=$(HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-${where/desk/tn} fg_run "$@")
+  echo 1 >"$FG/lock.rc"
+  printf '%s %s\n' "$out" "$([[ -s $FG/lock.calls ]] && echo 1 || echo 0)"
+}
+is "the desk, the host says unlocked: the key is sent, and the host WAS asked" "$(fg_lock desk 1 key j)" "0 2 1"
+is "the desk, the host says a session lock is held: refused, nothing typed" "$(fg_lock desk 0 key j)" "3 0 1"
+ck "and the refusal says LOCKED, with no escape hatch" 'grep -q "key REFUSED: the screen is LOCKED" "$FG/out" && grep -q "no escape hatch" "$FG/out"'
+is "--to-compositor does not pass a lock" "$(fg_lock desk 0 key --to-compositor -k Escape)" "3 0 1"
+is "type refuses a lock too" "$(fg_lock desk 0 type sky)" "3 0 1"
+ck "worded as type's" 'grep -q "type REFUSED: the screen is LOCKED" "$FG/out"'
+is "the host's own 'undetermined' (2) is a refusal, never an unlocked" "$(fg_lock desk 2 key j)" "3 0 1"
+ck "and it says it cannot tell, not that it is locked" 'grep -q "I cannot tell whether the screen is locked" "$FG/out" && ! grep -q "the screen is LOCKED" "$FG/out"'
+is "any other answer from the host is a refusal" "$(fg_lock desk 7 key j)" "3 0 1"
+is "a host query that does not answer is a refusal, inside its 5 s bound" "$(fg_lock desk hang key j)" "3 0 1"
+is "toward a nested compositor the desk's lock is not asked, and the key is sent" "$(fg_lock cage 0 key j)" "0 2 0"
+# No host query at all. The real one sits in /usr/bin beside every tool
+# run.sh needs (and under the host's own bin), so a directory cannot simply
+# be dropped from PATH: PATH becomes a mirror of /usr/bin, links to
+# everything there but the query and hyprlock, and OMARCHY_PATH names an
+# empty tree. The only copies left are the ones a case installs.
+mkdir -p "$FG/mirror"
+find /usr/bin -maxdepth 1 -mindepth 1 ! -name omarchy-hyprland-session-locked ! -name hyprlock -exec ln -s -t "$FG/mirror" {} +
+fl_path=$FG/mirror
+mkdir -p "$FG/nohost" "$FG/old/bin"
+mv "$FG/bin/omarchy-hyprland-session-locked" "$FG/lockq.kept"
+is "the desk, no host query and no hyprlock installed: refused, it cannot tell" \
+   "$(PATH=$fl_path OMARCHY_PATH=$FG/nohost fg_lock desk 1 key j)" "3 0 0"
+ck "worded as cannot tell" 'grep -q "I cannot tell whether the screen is locked" "$FG/out"'
+printf '#!/bin/bash\nexit 0\n' >"$FG/old/bin/hyprlock"; chmod +x "$FG/old/bin/hyprlock"
+is "the desk, no host query but hyprlock INSTALLED and not running (a host before 4): the key is sent" \
+   "$(PATH=$FG/old/bin:$fl_path OMARCHY_PATH=$FG/nohost fg_lock desk 1 key j)" "0 2 0"
+mkdir -p "$FG/nohost/bin"; cp "$FG/lockq.kept" "$FG/nohost/bin/omarchy-hyprland-session-locked"
+is "a query found only under OMARCHY_PATH is asked, and its lock refuses" \
+   "$(PATH=$fl_path OMARCHY_PATH=$FG/nohost fg_lock desk 0 key j)" "3 0 1"
+rm -f "$FG/nohost/bin/omarchy-hyprland-session-locked"
+mv "$FG/lockq.kept" "$FG/bin/omarchy-hyprland-session-locked"
+# hyprlock itself, by NAME, wherever the keys go: a stand-in process named
+# hyprlock (a script, so its comm is the file's name), ended by its own pid.
+fl_bin="$TMP/fl-bin"; mkdir -p "$fl_bin"
+printf '#!/bin/bash\nwhile :; do sleep 0.1; done\n' >"$fl_bin/hyprlock"; chmod +x "$fl_bin/hyprlock"
+"$fl_bin/hyprlock" >/dev/null 2>&1 & fl_pid=$!
+for ((fl_i = 0; fl_i < 50; fl_i++)); do [[ $(cat "/proc/$fl_pid/comm" 2>/dev/null) == hyprlock ]] && break; sleep 0.1; done
+is "a running hyprlock refuses toward a nested compositor too, the host not asked" "$(fg_lock cage 1 key j)" "3 0 0"
+kill "$fl_pid" 2>/dev/null; wait "$fl_pid" 2>/dev/null
+# The REAL host query, when this machine has one, over a stub hyprctl: the
+# three answers the predicate reads are the three the host's script gives, and
+# a lock it reports stops run.sh's key. The unlocked fixture is the owner's
+# desk as read on 2026-11-16 (one monitor, WINDOWED and CANDIDATE). No real
+# lock was observed: that needs the display (the row says so).
+fl_host=${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-hyprland-session-locked
+if [[ -x $fl_host ]] && command -v jq >/dev/null 2>&1; then
+  mkdir -p "$FG/hq"
+  fl_real() {   # fl_real <monitors json | FAIL> -> the real host query's exit status
+    if [[ $1 == FAIL ]]; then printf '#!/bin/bash\nexit 1\n' >"$FG/hq/hyprctl"
+    else printf '#!/bin/bash\ncat <<%s\n%s\nHQ_EOF\n' "'HQ_EOF'" "$1" >"$FG/hq/hyprctl"; fi
+    chmod +x "$FG/hq/hyprctl"
+    PATH="$FG/hq:$PATH" "$fl_host" >/dev/null 2>&1; echo $?
+  }
+  FL_LOCKED='[{"name":"eDP-1","solitaryBlockedBy":["LOCK","WINDOWED"]}]'
+  is "the real host query: a monitor blocked by LOCK is 0, locked" "$(fl_real "$FL_LOCKED")" "0"
+  is "the real host query: the desk as read unlocked is 1" "$(fl_real '[{"name":"eDP-1","solitaryBlockedBy":["WINDOWED","CANDIDATE"]}]')" "1"
+  is "the real host query: a monitor it could not read past WORKSPACE is 2" "$(fl_real '[{"name":"eDP-1","solitaryBlockedBy":["WORKSPACE"]}]')" "2"
+  is "the real host query: a hyprctl that fails is 2" "$(fl_real FAIL)" "2"
+  fl_real "$FL_LOCKED" >/dev/null
+  mv "$FG/bin/omarchy-hyprland-session-locked" "$FG/lockq.kept"; ln -s "$fl_host" "$FG/bin/omarchy-hyprland-session-locked"
+  fg_stub "$FG_OPEN" "" 0
+  is "run.sh key over the REAL host query reporting a lock: refused, nothing typed" \
+     "$(PATH="$FG/hq:$PATH" HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-tn fg_run key j)" "3 0"
+  rm -f "$FG/bin/omarchy-hyprland-session-locked"; mv "$FG/lockq.kept" "$FG/bin/omarchy-hyprland-session-locked"
+else
+  echo "NOTE the host's omarchy-hyprland-session-locked (or jq) is not installed here: its five checks are counted without being run"
+  for fl_i in 1 2 3 4 5; do ck "host query absent on this machine (not run)" 'true'; done
+fi
+
+# qa_unlocked, the scenarios' one-line form, called here: true for the host's
+# "unlocked" alone. And the copies are gone: no harness script asks for
+# hyprlock by name itself any more (a sibling sweep, rule 15, kept as a check
+# so a sixth copy is refused; what the predicate DOES is held above).
+fl_unlocked() { echo "$1" >"$FG/lock.rc"; HYPRLAND_INSTANCE_SIGNATURE=tnsig PATH="$FG/bin:$PATH" qa_unlocked wayland-tn "$TN" && echo yes || echo no; echo 1 >"$FG/lock.rc"; }
+is "qa_unlocked: the host's unlocked is yes" "$(fl_unlocked 1)" "yes"
+is "qa_unlocked: a lock is no" "$(fl_unlocked 0)" "no"
+is "qa_unlocked: cannot tell is no" "$(fl_unlocked 2)" "no"
+is "no harness script asks pgrep for hyprlock itself: qa_screen_locked is the one place" \
+   "$(grep -l 'pgrep[^|;&]*hyprlock' "$ROOT"/scripts/dev-harness/*.sh "$ROOT"/scripts/*.sh 2>/dev/null | grep -v '/qa-lib-test\.sh$' | sed 's|.*/||' | tr '\n' ' ')" "qa-lib.sh "
 
 # A focused Sources field is still the guide: role is reported, never refused on.
 fg_stub "${FG_OPEN/\"role\":\"catcher\"/\"role\":\"other\"}" "" 0
@@ -3679,7 +3788,9 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # that are sourced here taken whole (F-HARNESS-56).
 # 683 -> 693 on 2026-11-14: shot's seven over a stub hyprctl and grim
 # (F-HARNESS-58) and P10's three over a stub python3 (F-HARNESS-55).
-EXPECTED=693
+# 693 -> 718 on 2026-11-16: the lock guard's twenty-five (F-HARNESS-85): the
+# host's query stubbed, absent, and the real one over a stub hyprctl.
+EXPECTED=718
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
