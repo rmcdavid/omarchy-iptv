@@ -188,6 +188,13 @@ ZONE_PLURAL = "%d entries skipped: their addresses are IPv6 literals whose zones
 ZONE_SINGULAR = "1 entry skipped: its address is an IPv6 literal whose zone is not a number"
 
 
+def refused_scheme(url):
+    """D-SINK-102, decision 10: whether a vector's scheme is one a playlist
+    that is not local may not list at all (STREAM_REMOTE_REFUSED_SCHEMES),
+    which is asked before this module's rules."""
+    return url.split(":", 1)[0].lower() in getattr(helper, "STREAM_REMOTE_REFUSED_SCHEMES", ())
+
+
 def remote(host="prov.example.test"):
     """playlist_source of an http playlist whose last hop connected to a
     global address: not local."""
@@ -249,7 +256,8 @@ class LabelGateTest(unittest.TestCase):
 
     def test_a_remote_playlists_one_label_hosts_are_refused_and_its_others_kept(self):
         got = [(ascii(u), helper.stream_entry_refusal(u, remote())[0]) for u in LABEL_REFUSED + LABEL_CONTROLS]
-        self.assertEqual(got, [(ascii(u), "label") for u in LABEL_REFUSED] + [(ascii(u), "") for u in LABEL_CONTROLS])
+        self.assertEqual(got, [(ascii(u), "remote" if refused_scheme(u) else "label") for u in LABEL_REFUSED]
+                         + [(ascii(u), "") for u in LABEL_CONTROLS])
 
     def test_a_local_playlist_keeps_them(self):
         got = [(name, ascii(u), helper.stream_entry_refusal(u, source)[0])
@@ -314,7 +322,8 @@ class LabelParseTest(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual((document.get("sourceClass"), document.get("sourceLocal")), ("global", False))
         self.assertEqual([ascii(c["url"]) for c in document["channels"]], [ascii(u) for u in LABEL_CONTROLS])
-        self.assertIn(LABEL_PLURAL % len(LABEL_REFUSED), reply.get("warnings") or [], reply)
+        self.assertIn(LABEL_PLURAL % len([u for u in LABEL_REFUSED if not refused_scheme(u)]),
+                      reply.get("warnings") or [], reply)
         self.assertEqual([where for where, text in (("stdout", stdout), ("stderr", stderr), ("cache", written))
                           if LEAK in text], [])
 
@@ -347,7 +356,8 @@ class ZoneGateTest(unittest.TestCase):
                 # From a public list a link-local or other non-global literal
                 # is D-SINK-41's `local` first, which is asked before.
                 older = helper.stream_host_refused(u, source)
-                want.append((name, ascii(u), "local" if older else "zone"))
+                remote_kind = not source.get("local") and refused_scheme(u)
+                want.append((name, ascii(u), "remote" if remote_kind else "local" if older else "zone"))
             for u in ZONE_CONTROLS:
                 want.append((name, ascii(u), "local" if helper.stream_host_refused(u, source) else ""))
         self.assertEqual(got, want)
@@ -397,7 +407,9 @@ class PlayTargetTest(unittest.TestCase):
         ids = write_cache(directory, LABEL_REFUSED + LABEL_CONTROLS, local=False)
         sentence = getattr(helper, "STREAM_LABEL_REFUSAL", "<no STREAM_LABEL_REFUSAL>")
         got = [self.outcome(directory, cid) for cid in ids]
-        self.assertEqual(got, [("local_address", sentence, False)] * len(LABEL_REFUSED)
+        remote_sentence = getattr(helper, "STREAM_REMOTE_REFUSAL", "<no STREAM_REMOTE_REFUSAL>")
+        self.assertEqual(got, [("unsupported_scheme", remote_sentence, False) if refused_scheme(u)
+                               else ("local_address", sentence, False) for u in LABEL_REFUSED]
                          + [("played", u) for u in LABEL_CONTROLS])
 
     def test_the_playlists_own_one_label_host_plays_from_the_cache(self):
@@ -462,7 +474,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.label_ids = write_cache(self.public, LABEL_REFUSED + LABEL_CONTROLS[:1], local=False)
         self.file = os.path.join(self.dir, "file")
         self.zone_ids = write_cache(self.file, ZONE_REFUSED + ZONE_CONTROLS[:1], local=True)
-        self.server = FakeMpv(self.sock)
+        self.server = FakeMpv(self.sock, props={"http-proxy": "http://127.0.0.1:%d" % self.relay_for(self.sock).port})
         self.addCleanup(self.server.close)
         self.install_identity_seam(helper)
         self.holder = self.identity(self.sock)
@@ -480,7 +492,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         client = helper.MpvIpc(self.sock, 1.0)
         client.connect()
         return {"spawned": False, "client": client, "pid": self.holder.pid, "vouched": self.holder.pid,
-                "replaced": 0, "carry": {}}
+                "replaced": 0, "carry": {}, "relayPid": 0}
 
     def start(self, verb, cache, cid):
         with mock.patch.object(helper, "adopt_or_spawn", lambda *a, **k: self.outcome()), \
@@ -497,7 +509,9 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         zone = [self.play(self.file, "--id", cid) for cid in self.zone_ids[:-1]]
         zone += [self.play(self.file, "--url", url) for url in ZONE_REFUSED]
         zone += [self.start(verb, self.file, cid) for verb in ("start", "restart") for cid in self.zone_ids[:-1]]
-        self.assertEqual(self.codes(label), [(helper.EXIT_ERROR, "local_address", False)] * len(label))
+        refused = [refused_scheme(u) for u in LABEL_REFUSED[:len(self.label_ids) - 1]]
+        self.assertEqual(self.codes(label), [(helper.EXIT_ERROR, "unsupported_scheme" if r else "local_address", False)
+                                             for r in refused * 3])
         self.assertEqual(self.codes(zone), [(helper.EXIT_ERROR, "unsupported_scheme", False)] * len(zone))
         self.assertEqual(self.loads(), [])
         self.assertNotIn(LEAK, json.dumps(self.server.commands))

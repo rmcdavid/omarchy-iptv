@@ -175,3 +175,81 @@ def loopback_reads_public(helper, address="127.0.0.1"):
         text = str(value).split("%", 1)[0]
         return "global" if text == address else real(value)
     return unittest.mock.patch.object(helper, "address_class", classify)
+
+
+class FakeRelay:
+    """D-SINK-102: the player's relay for a test whose player is a double --
+    the FakeMpv on the socket, a holder process for its identity -- run IN
+    the test process on real sockets: a TCP listener on 127.0.0.1 and the
+    control socket at the path the helper derives (relay_socket_path).
+
+    Why it exists. Since D-SINK-102 the build gate reads a player as this
+    build's only when its relay answers as the player's (player_verdict),
+    and every load registers a token with it (relay_register) before any
+    line about a channel. With no relay every play would refuse with
+    `not_running`, and the suite would test nothing past the gate.
+
+    Why it is no more forgiving than the real relay (rule 10): it IS the
+    real relay's code -- the helper's own RelayServer and RelayState, the
+    control protocol, the token table, the 407 to a request no load
+    registered, the per-token counts -- with nothing stood in for. What
+    differs is where it runs. In the test process, so the kernel names the
+    test process as the control socket's listener (SO_PEERCRED), and that
+    process is the PARENT of every holder process a test starts, as the
+    spawn makes the real relay the player's parent: relay_request's
+    ancestor check passes for a holder this test started and for nothing
+    else. It has no child to reap and never exits on its own; close() stops
+    it and removes its socket. A socket no FakeRelay was started for has no
+    relay at all, and the helper meets exactly what it meets on a machine
+    where the relay is gone.
+
+    A test that sends it a PROXY request states the answers of the relay's
+    lookup itself (stream_resolve): under the suite's stand-in every name,
+    a literal included, would answer SUITE_STREAM_ADDRESS, a public address
+    the relay would then connect to."""
+
+    def __init__(self, helper, sock_path):
+        import socket
+        import threading
+        self.helper = helper
+        self.path = helper.relay_socket_path(sock_path)
+        os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+        self.proxy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.proxy.bind(("127.0.0.1", 0))
+        self.proxy.listen(64)
+        self.port = self.proxy.getsockname()[1]
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+        self.control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.control.bind(self.path)
+        self.control.listen(4)
+        self.state = helper.RelayState(self.port, helper.player_build())
+        self.server = helper.RelayServer(self.proxy, self.control, self.state)
+        self.thread = threading.Thread(target=self.server.serve, daemon=True)
+        self.thread.start()
+
+    def tokens(self):
+        """The tokens registered, oldest first."""
+        with self.state.lock:
+            return [entry.token for entry in self.state.tokens]
+
+    def policies(self):
+        """The policy record each registered load carries, oldest first."""
+        with self.state.lock:
+            return [dict(entry.record) for entry in self.state.tokens]
+
+    def close(self):
+        self.server.stop()
+        self.thread.join(2)
+        for sock in (self.proxy, self.control):
+            try:
+                sock.close()
+            except OSError:
+                pass
+        self.server.close()
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass

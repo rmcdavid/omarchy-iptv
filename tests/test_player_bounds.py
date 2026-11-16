@@ -44,6 +44,18 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
                 self.assertTrue(hasattr(helper, name), "the helper has no %s" % name)
                 self.assertEqual(as_ms(getattr(helper, name), unit), BOUNDS["helper"][key])
 
+    def test_a_dead_answer_costs_the_relay_a_stagger_not_its_connect_bound(self):
+        """D-SINK-102: the relay tries a name's answers
+        RELAY_ATTEMPT_STAGGER_S apart, RELAY_ATTEMPTS_IN_FLIGHT at once, so
+        answers that hang before a live one delay it by staggers -- all of
+        them together well inside a start's first-load window -- and never by
+        RELAY_CONNECT_S, which is past it. tests/test_relay.py observes the
+        stagger on a real connect."""
+        h = BOUNDS["helper"]
+        dead = (helper.RELAY_ATTEMPTS_IN_FLIGHT - 1) * as_ms(helper.RELAY_ATTEMPT_STAGGER_S, "s")
+        self.assertLess(dead, h["firstLoadMs"] // 2)
+        self.assertGreater(as_ms(helper.RELAY_CONNECT_S, "s"), h["firstLoadMs"])
+
     def test_the_fixture_names_every_bound_it_holds(self):
         # A number with no helper name beside it is a number nothing here can
         # pin (engineering rule 13): the two key sets are the same set.
@@ -67,9 +79,10 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
         self.assertEqual(parser.parse_args(["player", "restart"] + session).from_rung, "term")
 
     def test_the_spawn_waits_its_named_bounds_for_the_pid_and_the_exec(self):
-        # spawn_detached run for real up to the fork, which answers a child
-        # that never reports: the two pipe reads are recorded with the bound
-        # each was given, and the spawn refuses as it always has.
+        # spawn_player (spawn_detached until D-SINK-102) run for real up to
+        # the fork, which answers a child that never reports: the two pipe
+        # reads are recorded with the bound each was given, and the spawn
+        # refuses as it always has.
         seen = []
 
         def read_pipe(fd, timeout):
@@ -80,7 +93,7 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
                 mock.patch.object(helper.os, "fork", return_value=2 ** 22 + 7), \
                 mock.patch.object(helper.os, "waitpid", side_effect=ChildProcessError()):
             with self.assertRaises(helper.HelperError) as caught:
-                helper.spawn_detached(["--idle=once"], "/")
+                helper.spawn_player(["--idle=once"], "/", -1, -1)
         self.assertEqual(caught.exception.code, "spawn_failed")
         self.assertEqual([as_ms(t, "s") for t in seen], [BOUNDS["helper"]["spawnPidMs"], BOUNDS["helper"]["spawnMs"]])
 
@@ -210,13 +223,48 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         clock.t += timeout - _JUST_INSIDE
         return [(2, 1, 6, "", ("93.184.216.34", port))]
 
-    real_spawn = helper.spawn_detached
+    real_spawn = helper.spawn_player
 
-    def spawn(argv, cwd="/"):
-        launched = real_spawn(argv, cwd)
+    def spawn(argv, cwd, proxy_fd, control_fd, env=None):
+        launched = real_spawn(argv, cwd, proxy_fd, control_fd, env)
         state["phase"] = "bind"
         state["bind_at"] = clock.t
         return launched
+
+    # D-SINK-102: the relay, at its bounds. Its listeners are doubles (nothing
+    # is bound), its port the one the found player's command line names; a
+    # spawned relay answers its status only just inside RELAY_START_S, and
+    # every other question -- the adopted player's status, the load's
+    # registration, the first-load count -- just inside the bound the code
+    # hands relay_request.
+    walk_port = 40000
+
+    class Listener:
+        def getsockname(self):
+            return ("127.0.0.1", walk_port)
+
+        def fileno(self):
+            return -1
+
+        def close(self):
+            pass
+
+    def relay_request(sock_path, request, peer, timeout=None, relay_pid=0):
+        timeout = helper.RELAY_IPC_S if timeout is None else timeout
+        op = request.get("op")
+        if op == "status" and state["phase"] in ("bind", "spawned"):
+            if state.get("relay_up_at") is None:
+                state["relay_up_at"] = clock.t + helper.RELAY_START_S - _JUST_INSIDE
+            if clock.t < state["relay_up_at"]:
+                return None
+        else:
+            clock.t += timeout - _JUST_INSIDE
+        reply = {"ok": True, "port": walk_port, "build": helper.player_build(), "_pid": 4243}
+        if op == "load":
+            reply.update(token="a" * 32)
+        if op == "count":
+            reply.update(refused=0, upstream=1)
+        return reply
 
     class Sock:
         def __init__(self, answers, then_all=False):
@@ -273,7 +321,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                            "prefetch-playlist": False, "load-console": False,
                            helper.MPV_AUTO_PROFILES_PROP: False, helper.MPV_RESET_PROP: [],
                            "drag-and-drop": False,
-                           "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE}}
+                           "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE},
+                           # D-SINK-102: and the relay pin, at the walk's port.
+                           "http-proxy": "http://127.0.0.1:%d" % walk_port}
                 for option in helper.PER_FILE_TLS_OPTIONS:
                     answers["option-info/%s/set-from-commandline" % option] = True
                 data = answers.get(command[1])
@@ -314,7 +364,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         mock.patch.object(helper, "limit_core_of", lambda pid: True),
 
         mock.patch.object(helper, "_read_pipe", read_pipe),
-        mock.patch.object(helper, "spawn_detached", spawn),
+        mock.patch.object(helper, "spawn_player", spawn),
         mock.patch.object(helper, "MpvIpc", Ipc),
         mock.patch.object(helper, "emit", replies.append),
         mock.patch.object(helper, "log", lambda message: None),
@@ -335,6 +385,12 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         patches += [mock.patch.object(helper, "player_peer", lambda client: 777 if state["phase"] == "found" else 4242),
                     mock.patch.object(helper, "launch_verdict",
                                       lambda pid, sock: "older" if older and pid == 777 else "current")]
+    if hasattr(helper, "relay_request"):        # a tree before the relay (a --baseline run) has none
+        patches += [mock.patch.object(helper, "launch_reading",
+                                      lambda pid, sock: ("older", None) if older and pid == 777 else ("current", walk_port)),
+                    mock.patch.object(helper, "relay_request", relay_request),
+                    mock.patch.object(helper, "bind_relay_listeners", lambda sock: (Listener(), Listener())),
+                    mock.patch.object(helper, "proc_parent", lambda pid: 4243)]
     for patch in patches:
         patch.start()
     try:

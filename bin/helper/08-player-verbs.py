@@ -147,7 +147,14 @@ def stream_resolve(name: str | bytes, port: int) -> list[Any]:
 
 
 def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
-    """D-SINK-101: `url` a cached channel's address, `source` cached_source's
+    """stream_lookup's verdict alone."""
+    return stream_lookup(url, source)[0]
+
+
+def stream_lookup(url: str, source: dict[str, Any]) -> tuple[str, list[Any]]:
+    """D-SINK-101, and beside the verdict the answers it judged (D-SINK-102:
+    player_target pins a scheme that never asks a proxy to the first of
+    them), [] where nothing was looked up or nothing answered. `url` a cached channel's address, `source` cached_source's
     record of its playlist. -> "" when the channel may be handed on,
     `local` or `port` (_class_refusal's answer for an address its host name
     resolved to), or `lookup` (the name could not be looked up within
@@ -174,11 +181,11 @@ def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname or ""
     except ValueError:
-        return "lookup"
+        return "lookup", []
     if host == "" or host_class(host) != "":
-        return ""
+        return "", []
     if source.get("local") and not source.get("loopback"):
-        return ""
+        return "", []
     scheme = parts.scheme.lower()
     # stream_entry_refusal's reading of the port: the scheme's default only
     # for a port the URL does not name, and a port that does not parse none.
@@ -194,12 +201,38 @@ def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:
     except (OSError, ValueError, HelperError):
         answers = []
     if not answers:
-        return "" if own and source.get("class") == "unresolved" else "lookup"
+        return ("" if own and source.get("class") == "unresolved" else "lookup"), []
     for answer in answers:
         refusal = stream_answer_refusal(address_class(answer[4][0]), host, port, scheme, source)
         if refusal:
-            return refusal
-    return ""
+            return refusal, []
+    return "", list(answers)
+
+
+def pin_stream_url(url: str, address: str) -> str:
+    """D-SINK-102: `url` with its host NAME replaced by `address`, an answer
+    the play-time lookup judged, everything else as written -- the userinfo,
+    the port, the path, the query -- and an IPv6 address in brackets. "" when
+    the URL is not in the one shape this rewrites: `scheme://authority...`
+    whose authority's host is a name (stream_host_name_refused has refused a
+    bracket or a second colon in one). FFmpeg's lookup of a literal makes no
+    query, so the player then connects to the address that was judged."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    head = url[:len(parts.scheme) + 3]
+    netloc = parts.netloc
+    if head.lower() != parts.scheme + "://" or url[len(head):len(head) + len(netloc)] != netloc or not netloc:
+        return ""
+    userinfo, at, hostport = netloc.rpartition("@")
+    name, colon, port = hostport.partition(":")
+    if not name or "[" in hostport or ":" in port:
+        return ""
+    if address.startswith("[") or "%" in address or "/" in address:
+        return ""
+    literal = "[%s]" % address if ":" in address else address
+    return head + userinfo + at + literal + colon + port + url[len(head) + len(netloc):]
 
 
 def stream_answer_refusal(kind: str, host: str, port: int | None, scheme: str, source: dict[str, Any]) -> str:
@@ -310,7 +343,14 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
     if stream_zone_refused(urllib.parse.urlsplit(url).netloc):
         raise HelperError("unsupported_scheme", STREAM_ZONE_REFUSAL)
+    scheme = stream_scheme(url)
+    transport = ""
     if source is not None:
+        # D-SINK-102, decision 10: a scheme whose connections nothing here
+        # can judge, from a playlist that is not local -- refused before
+        # anything is looked up (STREAM_REMOTE_REFUSED_SCHEMES).
+        if not source.get("local") and scheme in STREAM_REMOTE_REFUSED_SCHEMES:
+            raise HelperError("unsupported_scheme", STREAM_REMOTE_REFUSAL)
         if stream_host_refused(url, source):
             raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
                                                "chose; not played" % (url_host(url) or "the host"))
@@ -318,7 +358,7 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
             raise HelperError("local_address", STREAM_LABEL_REFUSAL)
         # D-SINK-101: last, so a name every rule above refuses is never
         # looked up (D-SINK-83's lesson: the lookup is a disclosure).
-        resolved = stream_lookup_refusal(url, source)
+        resolved, answers = stream_lookup(url, source)
         if resolved == "lookup":
             raise HelperError("unchecked_address", STREAM_LOOKUP_REFUSAL)
         if resolved:
@@ -327,7 +367,34 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         if drop_sign_in_headers(held, source):
             log("play: dropped a sign-in header for another host")
         headers = held.get("headers") or {}
-    return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
+        # D-SINK-102, decision 9: a scheme that never asks an HTTP proxy, from
+        # a playlist that is not local, is handed the address its lookup
+        # judged in place of its host name, so the player looks nothing up
+        # and a name cannot answer it otherwise a moment later. A name with
+        # no answer -- the own host of a source fetched through a proxy,
+        # which the lookup lets pass -- leaves nothing to hand over.
+        if not source.get("local") and scheme in STREAM_PINNED_SCHEMES:
+            if host_class(url_host(url)) == "":
+                pinned = pin_stream_url(url, str(answers[0][4][0])) if answers else ""
+                if not pinned:
+                    raise HelperError("unchecked_address", STREAM_PIN_REFUSAL)
+                url = pinned
+            # The server's SETUP reply could otherwise choose where RTP is
+            # sent (the udp transport) and the http tunnel ignores the proxy.
+            transport = "tcp" if scheme == "rtsp" else ""
+        relay = {key: source[key] for key in ("host", "port", "loopback", "local", "class") if key in source}
+    else:
+        relay = {"origin": ORIGIN_USER, "host": url_host(url), "port": url_port(url)}
+    # D-SINK-102: a header that would address the relay, not the server.
+    dropped = [key for key in headers if str(key).lower() in RELAY_HEADER_NAMES]
+    for key in dropped:
+        headers.pop(key, None)
+    if dropped:
+        log("play: dropped a proxy header the relay would read")
+    target = {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group, "relay": relay}
+    if transport:
+        target["transport"] = transport
+    return target
 
 
 def tls_properties_safe(verify: Any, option_count: Any, unpinned: Any) -> bool:
@@ -457,7 +524,43 @@ def read_profile_threats(client: MpvIpc) -> int | None:
     return per_file_profile_threats(profiles if ok else None, loose)
 
 
-def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
+# D-SINK-102: mpv's name for the relay pin, as a property.
+MPV_HTTP_PROXY_PROP = "http-proxy"
+
+
+def relay_proxy_held(value: Any, relay_port: Any) -> bool:
+    """Whether mpv's `http-proxy` reads as the relay pin for `relay_port`:
+    exactly `http://127.0.0.1:<port>` (the launch pin, which mpv restores
+    when a file ends) or, during a file the helper loaded, that file's
+    per-file value, `http://iptv:<32 lowercase hex>@127.0.0.1:<port>`
+    (measured on mpv 0.41.0: those two forms verbatim, and nothing else).
+    Any other value is a runtime set by another client (an idle one
+    persists, measured), and `option-info/http-proxy/set-from-commandline`
+    reads true whatever was set, so the string is the only reading. The
+    token in the second form is not compared: one the relay never issued
+    reaches nothing, and before a zap the current file's is the previous
+    load's. Mirrored in the player-tls fixture's `httpProxy` vectors."""
+    if not isinstance(value, str) or not isinstance(relay_port, int) or isinstance(relay_port, bool):
+        return False
+    if not 0 < relay_port < 65536:
+        return False
+    tail = "@%s:%d" % (RELAY_HOST, relay_port)
+    if value == "http://%s:%d" % (RELAY_HOST, relay_port):
+        return True
+    head = "http://%s:" % RELAY_USER
+    if not value.startswith(head) or not value.endswith(tail):
+        return False
+    token = value[len(head):-len(tail)]
+    return len(token) == 32 and all(char in "0123456789abcdef" for char in token)
+
+
+def relay_proxy_url(token: str, relay_port: int) -> str:
+    """The per-file value of one load: the relay pin with that load's token
+    as Basic proxy credentials (FFmpeg sends it after the relay's 407)."""
+    return "http://%s:%s@%s:%d" % (RELAY_USER, token, RELAY_HOST, relay_port)
+
+
+def read_tls_state(client: MpvIpc, relay_port: int | None = None) -> tuple[Any, Any, Any]:
     """The D-SINK-16 readings, taken OFF the player.
 
     Read back rather than inferred from a set_property reply, because a
@@ -479,6 +582,15 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
     profiles that could undo a loose option after this read
     (read_profile_threats). A player launched with the pin block reads 0 on
     all four.
+
+    D-SINK-102: and a fifth, the relay pin (relay_proxy_held for
+    `relay_port`, the port of this player's relay): `http-proxy` naming
+    anything else counts one, folded into the same sum, and is never SET
+    here -- a change during a file would turn away the stream's next
+    segment, and under --idle=once could end the player before the load
+    arrives. A player launched without the pin, every release through
+    0.19.x, reads one here and is replaced rather than fed. No value is
+    logged or returned: the per-file form carries a token.
     """
     ok, verify = client.try_command("get_property", MPV_TLS_VERIFY_PROP)
     verify = verify if ok and isinstance(verify, bool) else None
@@ -509,7 +621,9 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
     ok, resets = client.try_command("get_property", MPV_RESET_PROP)
     reset_on = (0 if not resets else 1) if ok and isinstance(resets, list) else None
     threats = read_profile_threats(client)
-    parts = (demuxer_unsafe, auto_on, reset_on, threats)
+    ok, proxy = client.try_command("get_property", MPV_HTTP_PROXY_PROP)
+    proxy_off = (0 if relay_proxy_held(proxy, relay_port) else 1) if ok and isinstance(proxy, str) else None
+    parts = (demuxer_unsafe, auto_on, reset_on, threats, proxy_off)
     unpinned = None if any(part is None for part in parts) else sum(parts)
     return verify, count, unpinned
 
@@ -551,7 +665,7 @@ def secure_player(client: MpvIpc) -> None:
     # the read-back below report a player that is not safe as one that is.
 
 
-def assert_tls_verification(client: MpvIpc, label: str) -> None:
+def assert_tls_verification(client: MpvIpc, label: str, relay_port: int | None = None) -> None:
     """Make this player verify the stream's certificate, or REFUSE to load.
 
     D-SINK-16. The security-critical difference from this sequence's other
@@ -568,7 +682,7 @@ def assert_tls_verification(client: MpvIpc, label: str) -> None:
     `success` reply says nothing about the value that ended up there.
     """
     secure_player(client)
-    verify, count, unpinned = read_tls_state(client)
+    verify, count, unpinned = read_tls_state(client, relay_port)
     if tls_properties_safe(verify, count, unpinned):
         return
     # Diagnosable without being a sink: a three-valued flag and two counts,
@@ -578,7 +692,7 @@ def assert_tls_verification(client: MpvIpc, label: str) -> None:
     raise HelperError("tls_unverified", "the player would not verify the stream's certificate")
 
 
-def migrate_tls(client: MpvIpc) -> dict[str, Any]:
+def migrate_tls(client: MpvIpc, relay_port: int | None = None) -> dict[str, Any]:
     """Make an ADOPTED player verify, and say whether it had to be changed.
 
     D-SINK-16, the half `apply_channel` cannot reach: a player started before
@@ -619,7 +733,7 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     set leaves this answering exactly as it did before (this probe still says
     `migrated`), and a mark that cannot be read reads "not marked".
     """
-    verify, count, unpinned = read_tls_state(client)
+    verify, count, unpinned = read_tls_state(client, relay_port)
     if tls_properties_safe(verify, count, unpinned):
         return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": read_tls_mark(client)}
     # Before the writes, so that a probe cut off between them and its reply
@@ -628,7 +742,7 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     if not set_tls_mark(client):
         log("player probe: could not mark the player as migrated")
     secure_player(client)
-    verify, count, unpinned = read_tls_state(client)
+    verify, count, unpinned = read_tls_state(client, relay_port)
     return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": True}
 
 
@@ -764,7 +878,8 @@ def feed_gate(client: MpvIpc, vouched_pid: int | None = None) -> int:
                          or launch_verdict(peer, client.path) == "current"):
             return peer
         raise HelperError("player_foreign", FEED_REFUSED_FOREIGN)
-    if launch_verdict(peer, client.path) != "current":
+    # D-SINK-102: and its relay answers as this player's (player_verdict).
+    if player_verdict(peer, client.path) != "current":
         raise HelperError("not_running", FEED_REFUSED_OLDER, outdated=True)
     return peer
 
@@ -799,7 +914,11 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     """
     # Restart on adoption, and before anything else: the process this
     # connection reaches was launched by this build, or it is fed nothing.
-    feed_gate(client, vouched_pid)
+    peer = feed_gate(client, vouched_pid)
+    # D-SINK-102: the load's token, registered with this player's relay
+    # before any line about a channel, so every connection the load makes is
+    # judged by this channel's own rule (relay_register).
+    proxy, relay_port = relay_register(client.path, target, peer)
     # D-SINK-16, and the first thing after the gate, because every line
     # below it is a line that tells the player something about a channel. mpv
     # keeps `tls-verify` across a loadfile the way it keeps `pause`, `aid` and
@@ -808,7 +927,7 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # callers turn that into a failed play. Raised BEFORE the title, so a
     # player that cannot be secured is not even relabelled with a channel it
     # will never load.
-    assert_tls_verification(client, label)
+    assert_tls_verification(client, label, relay_port)
     # PAUSE LIVE TV: mpv keeps `pause` across a loadfile, so tuning a new
     # channel while paused would load it PAUSED while every surface said
     # playing -- a black screen the user has no reason to suspect. Cleared
@@ -868,7 +987,7 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # ({"name": "loadfile", ...}) was measured equal; the array form is the
     # one every double of the player and the harness stub read.
     data = client.command("loadfile", target["url"], "replace", -1,
-                          channel_load_options(target, default))
+                          channel_load_options(target, default, proxy))
     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
     if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
         entry_id = None
@@ -896,7 +1015,48 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     return entry_id
 
 
-def channel_load_options(target: dict[str, Any], default_agent: str) -> IpcPairs:
+RELAY_REGISTER_REFUSAL = "the player's relay did not take the channel; play again to replace the player"
+RELAY_LOAD_REFUSAL = ("the stream led the player to an address on this machine or a local network, which this "
+                      "channel's playlist may not reach; not played")
+
+
+def relay_register(sock_path: str, target: dict[str, Any], peer: int) -> tuple[str, int]:
+    """Register one load with the player's relay (D-SINK-102) and -> the
+    load's per-file proxy value (relay_proxy_url) and the relay's port. The
+    relay is this player's when it answers as an ancestor of `peer`
+    (relay_request); its token and port are taken only in their own shapes.
+    A relay that does not answer is `not_running` with `outdated`, the
+    build gate's refusal: the shell's `player start` then replaces the
+    player with one whose relay does. The token and the relay's pid ride on
+    the target for the start's first-load query (relay_refused_count)."""
+    reply = relay_request(sock_path, {"op": "load", "policy": target.get("relay") or {}}, peer)
+    token = reply.get("token") if isinstance(reply, dict) and reply.get("ok") is True else None
+    port = reply.get("port") if isinstance(reply, dict) else None
+    if (not isinstance(token, str) or len(token) != 32 or not all(char in "0123456789abcdef" for char in token)
+            or not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536):
+        raise HelperError("not_running", RELAY_REGISTER_REFUSAL, outdated=True)
+    target["relayToken"] = token
+    target["relayPid"] = int(reply.get("_pid") or 0)
+    return relay_proxy_url(token, port), port
+
+
+def relay_refused_count(sock_path: str, target: dict[str, Any], relay_pid: Any) -> int:
+    """How many of the target's load's connections its relay refused, or 0
+    when it cannot say (no token, a relay gone). Asked of the relay by its
+    own pid (target `relayPid`, as relay_register found it), because the
+    player whose load failed has usually exited by now and an ancestor
+    check against it can no longer be made; the relay lingers to answer
+    (RELAY_LINGER_S)."""
+    token = target.get("relayToken")
+    if not isinstance(token, str):
+        return 0
+    reply = relay_request(sock_path, {"op": "count", "token": token}, 0,
+                          relay_pid=target.get("relayPid") or relay_pid)
+    refused = reply.get("refused") if isinstance(reply, dict) and reply.get("ok") is True else 0
+    return refused if isinstance(refused, int) and not isinstance(refused, bool) and refused > 0 else 0
+
+
+def channel_load_options(target: dict[str, Any], default_agent: str, proxy: str = "") -> IpcPairs:
     """The PER-FILE options of the helper's own loadfile of a channel, in
     order (2026-10-29). Per file, because mpv restores each of them when the
     file ends and applies none of them to an entry the helper did not load.
@@ -922,6 +1082,17 @@ def channel_load_options(target: dict[str, Any], default_agent: str) -> IpcPairs
       channel only (D-SINK-55): its demuxer opens the RTP transport itself,
       which the user's own --rtsp-transport=udp needs; every other entry keeps
       the pin block's list.
+    - `http-proxy` (D-SINK-102): the relay pin with this load's token
+      (relay_register), so every http and https connection the load makes --
+      each redirect hop, each HLS and DASH open -- reaches the relay, which
+      judges it by this channel's own rule. Per file, so an entry the helper
+      did not load meets the launch pin, which denies everything.
+    - for an rtsp channel pinned to its judged address (player_target,
+      `transport` tcp): `rtsp-transport=tcp` and
+      `demuxer-lavf-o-append=rtsp_transport=tcp`, the second because
+      demuxer-lavf-o is applied after the network options and beat a user's
+      own demuxer key (measured), and NOT the rtp,udp addition: interleaved
+      rtsp needs neither (measured playing without them).
     """
     user_agent, referrer, fields = header_values(target.get("headers") or {})
     pairs = IpcPairs([("demuxer", "lavf"),
@@ -929,7 +1100,12 @@ def channel_load_options(target: dict[str, Any], default_agent: str) -> IpcPairs
                       ("referrer", referrer),
                       ("http-header-fields-clr", "")])
     pairs.extend(("http-header-fields-append", line) for line in fields)
-    if stream_scheme(str(target.get("url") or "")) == "rtsp":
+    if proxy:
+        pairs.append((MPV_HTTP_PROXY_PROP, proxy))
+    if target.get("transport") == "tcp":
+        pairs.append(("rtsp-transport", "tcp"))
+        pairs.append(("demuxer-lavf-o-append", "%s=tcp" % MPV_RTSP_TRANSPORT_KEY))
+    elif stream_scheme(str(target.get("url") or "")) == "rtsp":
         pairs.append(("demuxer-lavf-o-append", "%s=%s,%s" % (MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST,
                                                              MPV_RTSP_PROTOCOLS)))
     return pairs
@@ -1352,7 +1528,8 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         client = probe_client(sock_path, ipc_timeout)
         if client is not None:
             peer = player_peer(client)
-            if launch_verdict(peer, sock_path) == "current":
+            # D-SINK-102: this build's AND its relay answers (player_verdict).
+            if player_verdict(peer, sock_path) == "current":
                 keep = peer if any(record["pid"] == peer for record in found) else _connected_pid(client, found)
                 # D-SINK-39, D-SINK-16's shape: this player was forked by whoever
                 # ran before, so its core limit is whatever it inherited then.
@@ -1373,7 +1550,8 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
                     # would hit the player we are keeping. Signal the rest by pid.
                     warnings.append("stopped %d other player process(es) on this socket" % len(others))
                     stop_ladder(sock_path, others, "term", ipc_timeout)
-                return {"spawned": False, "client": client, "pid": keep, "vouched": keep, "replaced": 0, "carry": {}}
+                return {"spawned": False, "client": client, "pid": keep, "vouched": keep, "replaced": 0, "carry": {},
+                        "relayPid": 0}
             # Another build's player, or nothing of ours: replaced, never fed.
             for record in found:
                 limit_core_of(int(record["pid"]))
@@ -1394,14 +1572,23 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
     # as soon as the socket answers -- mpv binds it only after reading its
     # whole command line -- and on every way out of the launch.
     options = mpv_args_path(sock_path, where)
-    if mpv_args:
-        write_mpv_args(options, mpv_args)
+    # D-SINK-102: the relay's two listeners, bound HERE so the relay never
+    # chooses an address, and the player's argv pinned to the port.
+    proxy, control = bind_relay_listeners(sock_path)
     try:
-        launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
-        errors: list[str] = []
-        client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+        if mpv_args:
+            write_mpv_args(options, mpv_args)
+        try:
+            launched = spawn_player(mpv_launch_argv(sock_path, mpv_args, where, relay_port=proxy.getsockname()[1]),
+                                    where["cwd"], proxy.fileno(), control.fileno())
+            errors: list[str] = []
+            client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+        finally:
+            remove_mpv_args(options)
     finally:
-        remove_mpv_args(options)
+        relay_port = proxy.getsockname()[1]
+        proxy.close()
+        control.close()
     if client is None:
         drain_launch_stderr(launched["stderrFd"], errors)
         os.close(launched["stderrFd"])
@@ -1411,10 +1598,72 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         raise HelperError("no_socket", "the player did not open its socket" + (": %s" % detail if detail else ""))
     drain_launch_stderr(launched["stderrFd"], errors)
     os.close(launched["stderrFd"])
+    # D-SINK-102: the relay answers as this player's, or the player goes --
+    # as an ancestor of the pid the spawn reported or of the process the
+    # socket reaches, which under a wrapper that backgrounds the real player
+    # and exits is the only one left. Which process that is, is the build
+    # gate's question.
+    if not wait_for_relay(sock_path, (launched["pid"], player_peer(client)), relay_port):
+        client.close()
+        stop_ladder(sock_path, [{"pid": launched["pid"], "startTime": proc_start_time(launched["pid"])}], "term", ipc_timeout)
+        settle_socket(sock_path)
+        raise HelperError("spawn_failed", RELAY_SPAWN_FAILED)
     if carry:
         apply_carry(client, carry, ipc_timeout)
     return {"spawned": True, "client": client, "pid": launched["pid"], "launchErrors": errors,
-            "vouched": launched["pid"], "replaced": replaced, "carry": carry}
+            "vouched": launched["pid"], "replaced": replaced, "carry": carry, "relayPid": launched["relayPid"]}
+
+
+def bind_relay_listeners(sock_path: str) -> tuple[Any, Any]:
+    """D-SINK-102: the relay's proxy listener (127.0.0.1, a port the kernel
+    chooses, RELAY_BACKLOG deep) and its control socket (relay_socket_path,
+    created under umask 077 in the 0700 runtime folder after a stale one is
+    removed; a non-socket there is the user's and is never removed). Both
+    listening before the spawn, which hands them to the relay."""
+    import socket as sockets
+    path = relay_socket_path(sock_path)
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        mode = None
+    if mode is not None and not stat.S_ISSOCK(mode):
+        raise HelperError("socket_path_blocked", "the player's relay socket path is not a socket")
+    # D-PLY-31's shape: no descriptor or no memory for a listener is the
+    # player that could not be started, `spawn_failed` with the error's words.
+    proxy = control = None
+    try:
+        proxy = sockets.socket(sockets.AF_INET, sockets.SOCK_STREAM | sockets.SOCK_CLOEXEC)
+        control = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM | sockets.SOCK_CLOEXEC)
+        proxy.bind((RELAY_HOST, 0))
+        proxy.listen(RELAY_BACKLOG)
+        if mode is not None:
+            os.unlink(path)
+        saved = os.umask(PLAYER_UMASK)
+        try:
+            control.bind(path)
+        finally:
+            os.umask(saved)
+        control.listen(RELAY_CONTROL_MAX)
+    except OSError as error:
+        for held in (proxy, control):
+            if held is not None:
+                held.close()
+        raise HelperError("spawn_failed", "could not start mpv: %s" % (error.strerror or type(error).__name__)) from None
+    return proxy, control
+
+
+def wait_for_relay(sock_path: str, anchors: tuple[int, ...], relay_port: int, timeout: float = RELAY_START_S) -> bool:
+    """Whether the relay a spawn started answers as the player's
+    (relay_status: an ancestor of one of `anchors`, serving `relay_port`,
+    this build) within `timeout`, asked again until then."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        for anchor in anchors:
+            if relay_status(sock_path, anchor, relay_port, 0.0) is not None:
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(SPAWN_POLL_S)
 
 
 def _connected_pid(client: MpvIpc, found: list[dict[str, Any]]) -> int:
@@ -1549,6 +1798,16 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
                       else observe_first_load(client, entry_id, args.first_load_timeout, outcome.get("launchErrors")))
     finally:
         client.close()
+    # D-SINK-102: a first load that failed because the relay refused where
+    # it led -- a redirect, an HLS or DASH open, an address its name answered
+    # the relay -- is the channel's own refusal, `local_address`, as a
+    # literal is: the shell's card and the channel marked failed
+    # (PLAYER_START_CHANNEL_REFUSALS). The player shows it only as a failed
+    # open (measured), so the relay's count of the load's refusals decides.
+    if first_load.get("state") == "failed" and relay_refused_count(sock, target, outcome["relayPid"]) > 0:
+        log("player %s: %s" % (verb, RELAY_LOAD_REFUSAL))
+        emit(error_payload(kind, HelperError("local_address", RELAY_LOAD_REFUSAL), id=args.id or None, seq=seq))
+        return EXIT_ERROR
     reply = {"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
              "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
              "firstLoad": first_load, "warnings": warnings,
@@ -1580,6 +1839,7 @@ def player_stop(args: argparse.Namespace) -> int:
         found = find_player(sock)
         if not found:
             settle_socket(sock)
+            unlink_relay_socket(sock)
             emit({"ok": True, "kind": "player.stop", "running": False, "rung": "", "pid": None})
             return EXIT_OK
         result = stop_ladder(sock, found, args.from_rung, args.ipc_timeout)
@@ -1588,6 +1848,8 @@ def player_stop(args: argparse.Namespace) -> int:
         # unlink safe across the wait. The deadline is the ladder's own,
         # nearly all of it unspent.
         settle_socket(sock, result.get("deadline"))
+        if not result["running"]:
+            unlink_relay_socket(sock)
         emit({"ok": True, "kind": "player.stop", "running": bool(result["running"]),
               "rung": result["rung"], "pid": int(found[0]["pid"])})
         return EXIT_OK
@@ -1598,6 +1860,19 @@ def player_stop(args: argparse.Namespace) -> int:
     finally:
         if lock_fd >= 0:
             release_lock(lock_fd)
+
+
+def unlink_relay_socket(sock_path: str) -> None:
+    """D-SINK-102: a relay socket left behind (a relay that was killed does
+    not remove its own), under the player lock, and only when no player is
+    left to have a relay and only when it is a socket. Quiet: gone is the
+    goal; a live relay keeps serving the descriptor it holds."""
+    try:
+        path = relay_socket_path(sock_path)
+        if stat.S_ISSOCK(os.lstat(path).st_mode):
+            os.unlink(path)
+    except (OSError, HelperError):
+        pass
 
 
 def player_probe(args: argparse.Namespace) -> int:
@@ -1632,6 +1907,10 @@ def player_probe(args: argparse.Namespace) -> int:
             # the process this probe's connection reached was launched by this
             # build (launch_verdict). One word; null when nothing answered.
             "launch": None,
+            # D-SINK-102, additive: whether the player's relay answered as
+            # its own (relay_status, a read). null when nothing answered.
+            # A player with no relay reads "older" in `launch` too.
+            "relay": None,
         }
         client = probe_client(sock, args.ipc_timeout) if found else None
         if client is None:
@@ -1646,10 +1925,18 @@ def player_probe(args: argparse.Namespace) -> int:
             return EXIT_OK
         try:
             payload["responsive"] = True
+            # D-SINK-102: which build launched it and the port of its relay
+            # pin, off /proc (no property is touched), and whether that relay
+            # answers. The pin's port is what the read-back below holds the
+            # player's http-proxy to; a player launched with none (every
+            # release through 0.19.x) reads unsafe there and is replaced.
+            peer = player_peer(client)
+            verdict, relay_port = launch_reading(peer, sock)
+            payload["relay"] = verdict == "current" and relay_status(sock, peer, relay_port) is not None
             # D-SINK-16, before any other property is touched: whatever else
             # this probe learns, a player that is not verifying stops being one
             # here rather than at the next zap.
-            payload["tls"] = migrate_tls(client)
+            payload["tls"] = migrate_tls(client, relay_port)
             # 2026-10-29: and the pins that are not about the TLS peer, best
             # effort (pin_adopted_player); the readings above are the gate.
             failed = pin_adopted_player(client, sock)
@@ -1665,7 +1952,7 @@ def player_probe(args: argparse.Namespace) -> int:
             # Restart on adoption: a read, after the security writes above, so
             # an older player is migrated, pinned and limited for the hold
             # before the shell replaces it.
-            payload["launch"] = launch_verdict(player_peer(client), sock)
+            payload["launch"] = "current" if payload["relay"] else ("older" if verdict == "current" else verdict)
             ok, idle = client.try_command("get_property", "idle-active")
             payload["idle"] = bool(idle) if ok and idle is not None else None
             ok, version = client.try_command("get_property", "mpv-version")
@@ -1727,12 +2014,37 @@ def player_orphan_check(args: argparse.Namespace) -> int:
             return EXIT_OK
         client = probe_client(sock, args.ipc_timeout)
         claim = None
+        relay_gone = False
         if client is not None:
             try:
+                # D-SINK-102: a player of THIS build whose relay
+                # does not answer -- a wrapper's child that outlived a relay
+                # killed outright -- has a pin naming a port nothing of ours
+                # holds, and its next plain-http request would carry the
+                # channel's address, headers and token to whatever binds it.
+                # It is stopped here whoever claims it. This check and the
+                # probe are the two that act on such a player besides a zap
+                # (`play` reads it `older` and the shell replaces it): the
+                # probe runs at each shell start and after a lost player
+                # socket, this check at each shell exit
+                # (Component.onDestruction). Between them nothing bounds it:
+                # the ten-second health tick's `status` does not ask the
+                # relay. A player whose relay died with it -- every other
+                # case, by its death signal -- is not this player.
+                peer = player_peer(client)
+                verdict, relay_port = launch_reading(peer, sock)
+                relay_gone = verdict == "current" and relay_status(sock, peer, relay_port) is None
                 ok, data = client.try_command("get_property", USER_DATA_OWNER)
                 claim = data if ok and isinstance(data, dict) else None
             finally:
                 client.close()
+        if relay_gone:
+            result = stop_ladder(sock, found, "", args.ipc_timeout)
+            settle_under_lock(sock)
+            log("player orphan-check: %s; stopped it" % RELAY_GONE)
+            emit({"ok": True, "kind": "player.orphan-check", "stopped": not result["running"],
+                  "reason": "relay_gone", "rung": result["rung"]})
+            return EXIT_OK
         if (not isinstance(claim, dict) or int(claim.get("pid") or 0) != owner_pid or owner_pid <= 0
                 or claim_token(claim) != mine):
             emit({"ok": True, "kind": "player.orphan-check", "stopped": False, "reason": "reassigned"})

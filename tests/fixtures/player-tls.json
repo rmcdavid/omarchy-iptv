@@ -48,7 +48,8 @@
     "verify": "tls-verify",
     "streamOptions": "stream-lavf-o",
     "demuxerOptions": "demuxer-lavf-o",
-    "autoProfiles": "load-auto-profiles"
+    "autoProfiles": "load-auto-profiles",
+    "httpProxy": "http-proxy"
   },
   "cases": [
     {
@@ -285,5 +286,82 @@
       "safe": false,
       "action": "stop"
     }
-  ]
+  ],
+  "httpProxy": {
+    "_comment": [
+      "D-SINK-102: what mpv's `http-proxy` may read before a load (relay_proxy_held): the relay pin for the",
+      "player's own relay port, verbatim, or the current file's per-file value, the pin with that load's",
+      "token as Basic credentials (measured on mpv 0.41.0: those two forms and nothing else). Any other",
+      "value counts one in `unpinned`, which tests/test_mpv.py reads off a FakeMpv holding it through the",
+      "shipping read_tls_state, and which tests/Model.test.js runs through Model.tlsPropertiesSafe."
+    ],
+    "port": 48510,
+    "cases": [
+      {
+        "name": "the launch pin, which mpv holds idle and restores when a file ends",
+        "value": "http://127.0.0.1:48510",
+        "held": true
+      },
+      {
+        "name": "a file the helper loaded: the pin with that load's token",
+        "value": "http://iptv:0123456789abcdef0123456789abcdef@127.0.0.1:48510",
+        "held": true
+      },
+      {
+        "name": "mpv's own default, which every player of 0.19.x and before holds",
+        "value": "",
+        "held": false
+      },
+      {
+        "name": "another port of this machine",
+        "value": "http://127.0.0.1:48511",
+        "held": false
+      },
+      {
+        "name": "another loopback address",
+        "value": "http://127.0.0.2:48510",
+        "held": false
+      },
+      {
+        "name": "a proxy another client set at runtime",
+        "value": "http://proxy.example.test:3128",
+        "held": false
+      },
+      {
+        "name": "another scheme",
+        "value": "https://127.0.0.1:48510",
+        "held": false
+      },
+      {
+        "name": "a path after the port",
+        "value": "http://127.0.0.1:48510/",
+        "held": false
+      },
+      {
+        "name": "another proxy user",
+        "value": "http://user:0123456789abcdef0123456789abcdef@127.0.0.1:48510",
+        "held": false
+      },
+      {
+        "name": "a token with an uppercase digit",
+        "value": "http://iptv:0123456789abcdef0123456789abcdeF@127.0.0.1:48510",
+        "held": false
+      },
+      {
+        "name": "a token one digit short",
+        "value": "http://iptv:0123456789abcdef0123456789abcde@127.0.0.1:48510",
+        "held": false
+      },
+      {
+        "name": "a token with a password of its own past it",
+        "value": "http://iptv:0123456789abcdef0123456789abcdef:x@127.0.0.1:48510",
+        "held": false
+      },
+      {
+        "name": "no reading at all",
+        "value": null,
+        "held": false
+      }
+    ]
+  }
 }

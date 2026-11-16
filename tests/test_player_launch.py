@@ -37,6 +37,8 @@ helper = load_helper()
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "player-launch.json"
 VECTORS = json.loads(FIXTURE.read_text(encoding="utf-8"))
 HOLDER = "import time\ntime.sleep(30)\n"
+# D-SINK-102: the relay port a composed tail is pinned to (the fixture's).
+RELAY_PORT = 40123
 
 
 def edited(argv, edit, fill=lambda a: a):
@@ -108,7 +110,8 @@ class LaunchCase(unittest.TestCase):
 
     def current_tail(self, include, sock=None):
         sock = sock or self.sock
-        return helper.mpv_launch_argv(sock, ["--x"] if include else [], helper.player_dirs(sock))[1:]
+        return helper.mpv_launch_argv(sock, ["--x"] if include else [], helper.player_dirs(sock),
+                                      relay_port=RELAY_PORT)[1:]
 
     def case_argv(self, case, sock=None):
         sock = sock or self.sock
@@ -147,8 +150,11 @@ class LaunchVerdictVectorTest(LaunchCase):
         # longer one, an element moved, the tail cut short -- red under the
         # comparison read off by one, order-blind or as joined bytes.
         verdicts = [c["verdict"] for c in cases]
-        self.assertGreaterEqual(verdicts.count("current"), 7)
-        self.assertGreaterEqual(verdicts.count("older"), 16)
+        self.assertGreaterEqual(verdicts.count("current"), 9)
+        self.assertGreaterEqual(verdicts.count("older"), 23)
+        # D-SINK-102: the relay pin's tolerance is exactly its own form.
+        pins = [c["verdict"] for c in cases if c["name"].startswith("D-SINK-102")]
+        self.assertEqual(pins, ["current", "current"] + ["older"] * 7)
         self.assertIn("unknown", verdicts)
         appended = [c["verdict"] for c in cases if "append" in c.get("edit", {})]
         self.assertGreaterEqual(appended.count("current"), 2)
@@ -157,12 +163,14 @@ class LaunchVerdictVectorTest(LaunchCase):
         self.assertEqual(edges, ["older"] * 5)
 
     def test_the_older_shapes_are_the_tags_own_and_differ_from_this_build_only_where_they_should(self):
-        """v0.16.0's argv is this tree's less the marker (the shapes were
-        composed by v0.16.0's own helper), so the marker is what tells them
-        apart; v0.15.0's carries its user token on the argv itself."""
+        """v0.16.0's argv is this tree's less the marker and the relay pin
+        (the shapes were composed by v0.16.0's own helper), so those two are
+        what tell them apart; v0.15.0's carries its user token on the argv
+        itself."""
         older = VECTORS["older"]
         mine = [a for a in self.case_argv({"prefix": ["mpv"], "tail": "current", "include": False}) if
-                not a.startswith("--script-opts-append=%s=" % helper.PLAYER_BUILD_KEY)]
+                not a.startswith("--script-opts-append=%s=" % helper.PLAYER_BUILD_KEY)
+                and not a.startswith("--http-proxy=")]
         self.assertEqual(self.case_argv({"shape": "v0.16.0"}), mine)
         self.assertIn("--osd-duration=4321", older["v0.15.0"])
         self.assertNotIn("--osd-duration=4321", older["v0.16.0-include"])
@@ -228,8 +236,8 @@ class PlayerBuildTest(unittest.TestCase):
         sock = "/run/user/1000/omarchy-iptv/mpv.sock"
         marker = helper.mpv_build_marker(helper.player_build())
         for tokens in ([], ["--cache=yes"]):
-            argv = helper.mpv_launch_argv(sock, tokens)
-            pins = helper.mpv_pin_block(helper.player_dirs(sock))
+            argv = helper.mpv_launch_argv(sock, tokens, relay_port=RELAY_PORT)
+            pins = helper.mpv_pin_block(helper.player_dirs(sock), RELAY_PORT)
             self.assertEqual(argv.count(marker), 1, tokens)
             # after layer 1 of TLS, before the options file and the pin block
             self.assertEqual(argv.index(marker), argv.index(helper.MPV_TLS_VERIFY) + 1, tokens)

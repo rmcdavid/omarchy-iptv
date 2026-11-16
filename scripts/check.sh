@@ -243,7 +243,7 @@ fail=0
 # (test_addressAccessibleValueInV4, test_labelSinkTextInV4,
 # test_round4cInV4 to test_round4fInV4), each red on its pass's base
 # (QA-RESULTS "Round 3", "Round 4"); the spec runs 97.
-QML_SPEC_MIN=${QML_SPEC_MIN:-97}
+QML_SPEC_MIN=${QML_SPEC_MIN:-98}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -531,7 +531,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-97}
 # 2026-11-13, dsink101: 3695 -> 3696 -- D-SINK-101's sentence for
 # `unchecked_address` and its local routing (red on e17fc04's model); the
 # suite runs 3696.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
+# 2026-11-15, dsink102 (D-SINK-102, the player pinned to its relay): 3696
+# -> 3721 -- the relay pin in the launch argv and its shared vectors, the
+# refused --http-proxy and demuxer http_proxy, the bounds' relay terms, the
+# probe's `relay` field, olderPlayerUnsafe, the destination rules' 5, and
+# the service stopping a relay-less player at the hold's end; 41 of them
+# red on 7c1784c's model and the rest under named mutants; the suite runs 3721.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -897,7 +903,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3696}
 # peer-uid filter, the control socket, a typed URL's first hop, a dead first
 # address, and the verb's lifecycle -- red 58 of 58 on 7c1784c and under 22
 # single-decision mutants of the relay; the suite runs 2474, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2474}
+# 2026-11-15, dsink102 (the launch path, the load and the adoption bound to
+# the relay): 2474 -> 2506 -- tests/test_relay_player.py's 29 (the build
+# gate's relay, the spawn, the load's token and read-back, pinned and
+# refused schemes, the first load the relay refused, the probe and the
+# orphan check), the relay pin's shared vectors, the stagger bound and the
+# relay pin's read-back forms; 28 of the 29 red on 7c1784c and every one
+# under a named single-decision mutant; the suite runs 2506.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2506}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -945,7 +958,11 @@ HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # tree's read-back asks -- set-from-commandline for every option the pin block
 # holds, the demuxer's two lists from its argv -- held by two more measured
 # transcripts in the replay and five cases naming the rules.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-43}
+# 43 -> 47 on 2026-11-15 (dsink102): the stub learned http-proxy, the
+# relay pin, from the argv and per file -- two transcripts measured on mpv
+# 0.41.0 (relay-pin, relay-none; re-measured on 2026-11-15, 12 steps, 0
+# differ) and the per-file read-back case.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-47}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
 # check-tree): 32 checks over the shipping helper as a subprocess and the
 # shell's Image as a probe under an address-space rlimit, plus its own "ran

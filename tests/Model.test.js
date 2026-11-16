@@ -6149,9 +6149,10 @@ check("buildMpvArgv idles at startup so the first channel arrives over IPC (PO-1
 // channel including the first. These four are the structural replacement for
 // the retired "buildMpvArgv url after --" invariant.
 check("buildMpvArgv carries no URL, on any channel (S-03)", (() => {
-  const a = Model.buildMpvArgv({ socketPath: "/s", name: "BBC One", url: "http://u:p@h.test/live/token/1.m3u8", headers: { "User-Agent": "VLC" }, extraArgs: [] })
-  return [a.filter(t => /:\/\//.test(t)).length, a.indexOf("--") !== -1, a.join(" ").indexOf("u:p@") !== -1]
-})(), [0, false, false])
+  const a = Model.buildMpvArgv({ socketPath: "/s", name: "BBC One", url: "http://u:p@h.test/live/token/1.m3u8", headers: { "User-Agent": "VLC" }, extraArgs: [], relayPort: 4321 })
+  // D-SINK-102: the one address is the relay pin, this machine's relay.
+  return [a.filter(t => /:\/\//.test(t)), a.indexOf("--") !== -1, a.join(" ").indexOf("u:p@") !== -1]
+})(), [["--http-proxy=http://127.0.0.1:4321"], false, false])
 check("buildMpvArgv sends no header options even for a channel with headers (S-03)", (() => {
   const a = Model.buildMpvArgv({ socketPath: "/s", headers: { "User-Agent": "VLC", Referer: "http://ref.test/", "X-Token": "secret" } })
   return a.filter(t => /^--(user-agent|referrer|http-header-fields)/.test(t))
@@ -6180,7 +6181,7 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
 // Restart on adoption: with no build given the marker names none -- the word
 // the helper uses for a build that is not one (mpv_build_marker).
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--script-opts-append=omarchy_iptv-build=unknown", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--script-opts-append=omarchy_iptv-build=unknown", "--watch-later-dir=/watch-later", "--http-proxy=http://127.0.0.1:0", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -6960,8 +6961,10 @@ checkCall("mpv options: the pin block is the fixture's, in its order, the TLS to
   const dirs = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", "/st")
   const block = mpvOptions.pinBlock
   return {
-    constant: JSON.stringify(Model.MPV_PIN_BLOCK) === JSON.stringify(block.slice(1)),
-    composed: JSON.stringify(Model.mpvPinBlock(dirs)) === JSON.stringify(block.map(t => t.replace("{watchLater}", dirs.watchLater))),
+    constant: JSON.stringify(Model.MPV_PIN_BLOCK) === JSON.stringify(block.slice(2)),
+    // D-SINK-102: the relay pin is the block's second element, its port the spawn's.
+    relayPin: block[1] === "--http-proxy=http://127.0.0.1:{relayPort}",
+    composed: JSON.stringify(Model.mpvPinBlock(dirs, 43210)) === JSON.stringify(block.map(t => t.replace("{watchLater}", dirs.watchLater).replace("{relayPort}", "43210"))),
     last: Model.MPV_PIN_BLOCK[Model.MPV_PIN_BLOCK.length - 1] === Model.MPV_TLS_VERIFY,
     // An option pinned with several tokens (input-commands, demuxer-lavf-o)
     // is one base.
@@ -6970,7 +6973,7 @@ checkCall("mpv options: the pin block is the fixture's, in its order, the TLS to
   }
 }, (() => {
   const pinned = mpvOptionNames.filter(n => mpvOptions.options[n].class === "pinned" && mpvOptions.options[n].type !== "alias").sort()
-  return { constant: true, composed: true, last: true, bases: pinned, pinnedClass: pinned }
+  return { constant: true, relayPin: true, composed: true, last: true, bases: pinned, pinnedClass: pinned }
 })())
 checkCall("mpv options: whatever the user's tokens say, every pinned option's LAST word is the pin block's", () => {
   // The contrary value of each pinned option, injected PAST the filter so the
@@ -7012,9 +7015,14 @@ checkCall("D-SINK-43: demuxerNamesTls reads the raw token, every spelling, and o
    "--demuxer-lavf-o=ca_file=/c", "--demuxer-lavf-o=live_start_index=-1", "--stream-lavf-o=verify=0", "--hwdec=verify"]
     .map(t => Model.demuxerNamesTls(Model.mpvOptionBase(t.split("=")[0]), t)),
   [true, true, true, true, false, false, false])
-check("D-SINK-51: --http-proxy is kept and told, because the proxy gets a plain-http stream's whole URL",
-  Model.splitMpvArgs("--http-proxy=http://u:pw@proxy.example:3128"),
-  { args: ["--http-proxy=http://u:pw@proxy.example:3128"], rejected: [], warnings: ["mpvArg --http-proxy hands the stream address to another program"] })
+// D-SINK-102 withdrew D-SINK-51's warning: the option is the relay's pin.
+check("D-SINK-102: --http-proxy is refused as a token, being the relay's pin, and a demuxer http_proxy with it",
+  [Model.splitMpvArgs("--http-proxy=http://u:pw@proxy.example:3128"),
+   Model.splitMpvArgs("--demuxer-lavf-o=http_proxy=http://u:pw@proxy.example:3128").rejected,
+   Model.splitMpvArgs("--demuxer-lavf-o-append=live_start_index=-1,http_proxy=http://p:1").rejected],
+  [{ args: [], rejected: ["--http-proxy=http://u:pw@proxy.example:3128"], warnings: ["mpvArg --http-proxy refused: reserved by the plugin"] },
+   ["--demuxer-lavf-o=http_proxy=http://u:pw@proxy.example:3128"],
+   ["--demuxer-lavf-o-append=live_start_index=-1,http_proxy=http://p:1"]])
 
 // ---- MPV_RESERVED (ARCHITECTURE-PLAYER.md 4.12, plus D-SINK-2) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
@@ -7048,7 +7056,8 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
 // --load-console with mpv's alias --load-osd-console (D-SINK-61), pinned off.
 // 59 the same day (lane-p2a): --load-stats-overlay (D-SINK-67), pinned off.
-check("MPV_RESERVED holds exactly 59 entries", Object.keys(Model.MPV_RESERVED).length, 59)
+// 60 since D-SINK-102 (2026-11-14): --http-proxy, pinned to the relay.
+check("MPV_RESERVED holds exactly 60 entries", Object.keys(Model.MPV_RESERVED).length, 60)
 // D-SINK-52 (owner, 2026-10-29: pin and refuse): a --script-opts token that
 // sets an OSC command or carries ${ is refused, by text, in this mirror as in
 // the helper; every other key, and PO-10's ytdl warning, stand.
@@ -7216,8 +7225,19 @@ check("playerStash reads a record written before the writer was named", Model.pl
 const probeFixture = playerFixture.playerProbe
 const probeBody = JSON.stringify(probeFixture.reply)
 check("parsePlayerProbe: a live player, from the shared vector",
-  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls, launch: p.launch } })(),
+  (() => { const p = Model.parsePlayerProbe(probeBody); return { valid: p.valid, running: p.running, responsive: p.responsive, pid: p.pid, idle: p.idle, seq: p.seq, stashId: p.stash.id, ownerPid: p.owner.pid, rewind: p.rewind, tls: p.tls, launch: p.launch, relay: p.relay } })(),
   probeFixture.parsed)
+// D-SINK-102: the probe's additive `relay` field is true, false or null --
+// null for a helper too old to say, and for anything that is not a boolean.
+check("parsePlayerProbe: `relay` keeps true and false and reads anything else as null",
+  [true, false, "true", 1, null, undefined].map(v => Model.parsePlayerProbe(JSON.stringify(Object.assign({}, probeFixture.reply, { relay: v }))).relay)
+    .concat([Model.parsePlayerProbe("").relay]),
+  [true, false, null, null, null, null, null])
+// D-SINK-102, decision 15: which older players cannot be made safe.
+check("olderPlayerUnsafe: unsafe when the TLS readings are not safe or the relay said it did not answer; a relay null (an old helper) keeps the TLS verdict",
+  [[{ safe: true }, true], [{ safe: true }, null], [{ safe: true }, undefined], [{ safe: true }, false],
+   [{ safe: false }, true], [{ safe: false }, null], [null, true], [{ safe: "yes" }, true]].map(a => typeof Model.olderPlayerUnsafe === "function" ? Model.olderPlayerUnsafe(a[0], a[1]) : "none"),
+  [false, false, false, true, true, true, true, true])
 // Restart on adoption (N2): `launch` is one of the helper's three words or
 // null -- absent (a helper too old to say), renamed, another word, another
 // type, all null, which the shell reads as today's path.
@@ -7271,6 +7291,12 @@ const tlsFixture = JSON.parse(require("fs").readFileSync(require("path").join(__
 checkCall("tlsPropertiesSafe: the shared fixture, every case, by name",
   () => tlsFixture.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(c.verify, c.optionCount, c.unpinned)),
   tlsFixture.cases.map(c => c.name + ": " + c.safe))
+// D-SINK-102: the relay pin's forms, read by the helper into `unpinned` (one
+// for a value it does not hold, tests/test_mpv.py over the same vectors), and
+// what that count makes of an otherwise safe player here.
+checkCall("tlsPropertiesSafe: the relay pin's forms, as the helper folds them into unpinned (the shared httpProxy vectors)",
+  () => tlsFixture.httpProxy.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(true, 0, c.held ? 0 : 1)),
+  tlsFixture.httpProxy.cases.map(c => c.name + ": " + c.held))
 // The fixture earns its keep only if it holds both answers and the readings that
 // cannot be taken at all.
 check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both absent readings",
@@ -7838,9 +7864,13 @@ check("player fixture has all four tables", [playerFixture.mpvArgv.length > 0, p
 check("player fixture pins the whole reserved set", playerFixture.mpvReserved.slice().sort(), Object.keys(Model.MPV_RESERVED).sort())
 for (const v of playerFixture.mpvArgv) {
   const filtered = Model.splitMpvArgs((v.mpvArgs || []).join(" "))
-  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args, build: v.build }), v.argv)
+  check("fixture mpvArgv: " + v.name, Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: filtered.args, build: v.build, relayPort: v.relayPort }), v.argv)
   if (v.rejected) check("fixture mpvArgv rejects: " + v.name, filtered.rejected, v.rejected)
 }
+// D-SINK-102: the relay pin itself, the shared `relayPin` table (the python
+// suite runs mpv_relay_pin over the same cases).
+checkCall("mpvRelayPin: every shared relayPin vector, a port and each shape that is not one",
+  () => playerFixture.relayPin.cases.map(c => typeof Model.mpvRelayPin === "function" ? Model.mpvRelayPin(c.port) : "none"), playerFixture.relayPin.cases.map(c => c.pin))
 // D-SINK-13. The exact-array checks above already catch a dropped trailing
 // token, but only by accident of transcription: nothing in them says which
 // element matters or why. This says it once, off the fixture's own
@@ -18210,6 +18240,24 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
               [stops(unsafe.h), unsafe.h.root.nowPlaying, unsafe.h.root.olderRestartOwed === true, UNSAFE.migrated]]
     }, [[0, ["t:y"], 0, 0], [0, false], [0, true, true, 0], [1, null, false, true]])
 
+    // D-SINK-102, decisions 15 and 16 (the lead's calls under the owner's
+    // standing authority of 2026-11-09): a player whose relay does not answer
+    // reads as one that cannot be made safe (Model.olderPlayerUnsafe), so when
+    // its channel never becomes deliverable it is STOPPED at the hold's end,
+    // as a player whose TLS readings are unsafe is, not deferred to play on
+    // with nothing judging its connections; the same reply from a relay that
+    // answers, or from a helper too old to say (no field), is deferred.
+    checkCall("D-SINK-102 (service): a probe whose relay did not answer -- TLS readings safe, `relay` false -- is stopped at the hold's end when no list lands; `relay` true or absent is deferred and nothing is stopped", () => {
+      const run = extra => {
+        const { h } = boot()
+        reattach(h, probeOf(Object.assign({ tls: SAFE }, extra)))
+        attach(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+        return [stops(h), h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      }
+      return [run({ relay: false }), run({ relay: true }), run({})]
+    }, [[1, null], [0, "t:x"], [0, "t:x"]])
+
     // rc-sk71: the owner's other rules, on the LATE path the fix opens (the
     // cases above run them with the list in time, or before the expiry).
     const startsKeep = slots => startArgs(slots).map(c => idOf(c) + (c.indexOf("--keep-pause") !== -1 ? " keep" : ""))
@@ -21673,14 +21721,16 @@ check("D-PERF-11: a fragment holding a line terminator is the one shape the old 
 checkCall("D-SINK-24 (R32b): mpvRejectedLine names a refused option and prints the word <token> for anything else -- never a value, never a bare token", () => {
   const r = Model.splitMpvArgs("--ytdl=yes --stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test --vo=gpu")
   return [r.rejected.length, Model.mpvRejectedLine(r.rejected), Model.mpvRejectedLine([]), Model.mpvRejectedLine(null)]
-}, [2, "omarchy-iptv: ignoring mpvArgs tokens: --stream-lavf-o <token>", "", ""])
+  // D-SINK-102: the bare `--http-proxy` is refused too now (the relay's pin), by its name.
+}, [3, "omarchy-iptv: ignoring mpvArgs tokens: --stream-lavf-o --http-proxy <token>", "", ""])
 checkCall("D-SINK-24 (R32b): the recheck's shapes -- a bearer value, a basic-auth value and a scheme-less proxy -- reach the line as <token> only", () => {
   const lines = ["--http-header-fields=Authorization: Bearer eyJSECRETTOKEN", "--http-header-fields=\"Authorization: Basic dXNlcjpwYXNzd29yZA==\"",
                  "--http-proxy user:pw@proxy.example.test:3128", "--http-proxy http://user:pw@proxy.example.test:3128", "; rm -rf /"]
     .map(t => Model.mpvRejectedLine(Model.splitMpvArgs(t).rejected))
   return [lines, lines.some(l => /SECRET|dXNl|user|pw@|3128|rm/.test(l))]
-}, [["omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token>",
-     "omarchy-iptv: ignoring mpvArgs tokens: <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token> <token> <token>"], false])
+  // D-SINK-102: the bare `--http-proxy` is refused too now, by its name only.
+}, [["omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: --http-proxy <token>",
+     "omarchy-iptv: ignoring mpvArgs tokens: --http-proxy <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token> <token> <token>"], false])
 checkCall("D-SINK-24 (R32b'): mpvRejectedName is the text before `=` ONLY when that name is option-shaped (`^--[a-z0-9][a-z0-9-]*$`), and <token> otherwise -- a token refused BECAUSE its name is not option-shaped is exactly the one whose name can carry anything", () =>
   ["--stream-lavf-o=http_proxy=x", "--no-tls-verify", "--a://u:p@h", "-x", "x=y", "", "--", "--u:pw@h=1", "--Authorization:Bearer-SECRET=1", "--Profile=x", "--a b=1", "--x=", "--9x", "---x"].map(Model.mpvRejectedName),
   ["--stream-lavf-o", "--no-tls-verify", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "--x", "--9x", "<token>"])
@@ -21699,7 +21749,7 @@ checkCall("D-SINK-24: Service.issuePlayerSession's journal line (the harness's c
   try { h.root.issuePlayerSession("start", { id: "t:x", name: "X" }, "") } catch (e) { /* see above */ }
   const lines = h.warnings.filter(w => /ignoring mpvArgs tokens/.test(w))
   return [lines.length, lines.some(w => /user|pw@|:3128|http_proxy|proxy\.example/.test(w)), lines[0]]
-}, [1, false, "omarchy-iptv: ignoring mpvArgs tokens: --stream-lavf-o <token>"])
+}, [1, false, "omarchy-iptv: ignoring mpvArgs tokens: --stream-lavf-o --http-proxy <token>"])
 
 // ---- F-HARNESS-39 (R32c): mergeSetField's null-prototype maps, pinned ----
 //
@@ -22449,13 +22499,14 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
 
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3) is refreshed once whatever its age; one written under them (4, the D-SINK-95 and D-SINK-96 reading) or later is not", () =>
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4) is refreshed once whatever its age; one written under them (5, D-SINK-102's refused schemes) or later is not", () =>
     [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 3 }),
-     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 4 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
+     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 5 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
      Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null),
      Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
-     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }), Model.DESTINATION_RULES],
-    [true, true, false, true, false, false, true, true, 4])
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }), Model.DESTINATION_RULES,
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 4 })],
+    [true, true, false, true, false, false, true, true, 5, true])
 
   // Service.qml's own functions (tests/service-harness.js): every URL-carrying
   // spawn says where its URL came from, through the one assignment, reset
@@ -22506,7 +22557,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3), and leaves one written under them", () => {
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4), and leaves one written under them", () => {
     const runs = status => {
       const h = boot([rec(LAN)])
       h.root.playlistStatus = status
@@ -22519,8 +22570,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 }),
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 }),
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 3 }),
-            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 4 })]
-  }, [1, 1, 1, 1, 0])
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 4 }),
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 5 })]
+  }, [1, 1, 1, 1, 1, 0])
 })()
 
 // ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----
@@ -22623,7 +22675,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // proxy password, the keys of a prune -- are in the second and never in
   // the first.
   checkCall("D-SINK-48 (service): no spawn's command carries a source key, a channel id, a scope or a user token -- the zap, the player start and restart, the playlist and guide runs, the probe, the dead-channel mark, the logo run and the cache jobs -- and each still reaches the helper whole", () => {
-    const SCOPE = "g:Sports http://u:s3cret@cdn.test/x", ID = "u:1a2b3c4d", TOKEN = "--http-proxy=http://alice:S3cretPw@proxy.test:3128"
+    const SCOPE = "g:Sports http://u:s3cret@cdn.test/x", ID = "u:1a2b3c4d", TOKEN = "--ytdl-raw-options=proxy=http://alice:S3cretPw@proxy.test:3128"
     const h = H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: true, mpvArgs: TOKEN + " --volume=50" },
                                           stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
     const runs = []
@@ -22677,7 +22729,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // when there are no tokens.
   checkCall("D-SINK-47: the launch argv carries no user token -- a credentialed proxy, an API-key header -- and names the private options file once, where the tokens stood, right before the pin block; with no tokens, no file is named", () => {
     const S = "/run/user/1000/omarchy-iptv/mpv.sock", ST = "/home/u/.local/state/omarchy-iptv"
-    const user = M.splitMpvArgs("--http-proxy=http://alice:S3cret@proxy.test:3128 --http-header-fields=X-Api-Key:k3y --volume=50").args
+    const user = M.splitMpvArgs("--ytdl-raw-options=proxy=http://alice:S3cret@proxy.test:3128 --http-header-fields=X-Api-Key:k3y --volume=50").args
     const a = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: user })
     const none = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: [] })
     const pins = M.mpvPinBlock(M.playerDirs(S, ST))

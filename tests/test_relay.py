@@ -1237,15 +1237,42 @@ class LifecycleTest(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="relay-life-")
         os.chmod(self.dir, 0o700)
         self.addCleanup(shutil.rmtree, self.dir, True)
-        self.pids = []
+        self.processes = []
+        self.pidfds = []
         self.addCleanup(self.reap)
 
     def reap(self):
-        for pid in self.pids:
+        # Only processes this test started: the launchers through their Popen
+        # (which sends nothing once it has reaped one, so a reused pid is
+        # never reached), and each child the relay names through a pidfd taken
+        # while its command line named this test's directory (track).
+        for fd in self.pidfds:
             try:
-                os.kill(pid, signal.SIGKILL)
+                signal.pidfd_send_signal(fd, signal.SIGKILL)
             except OSError:
                 pass
+            os.close(fd)
+        for process in self.processes:
+            if process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(5)
+                except subprocess.TimeoutExpired:
+                    pass
+
+    def track(self, pid):
+        """Pin the relay's child `pid` for the cleanup, once its command
+        line names this test's own directory; never a pid read off ancestry."""
+        fd = os.pidfd_open(pid)
+        try:
+            if os.fsencode(self.dir) not in pathlib.Path("/proc/%d/cmdline" % pid).read_bytes():
+                raise AssertionError("pid %d is not this test's child; not tracking it" % pid)
+            signal.pidfd_send_signal(fd, 0)
+        except BaseException:
+            os.close(fd)
+            raise
+        self.pidfds.append(fd)
+        return pid
 
     def start(self, child_argv, environ=None):
         proxy = socket.socket()
@@ -1265,7 +1292,7 @@ class LifecycleTest(unittest.TestCase):
                                     str(HELPER)] + child_argv, pass_fds=(proxy.fileno(), control.fileno()),
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err, env=env,
                                    start_new_session=True)
-        self.pids.append(process.pid)
+        self.processes.append(process)
         proxy.close()
         control.close()
         return process, path
@@ -1319,8 +1346,8 @@ class LifecycleTest(unittest.TestCase):
         argv, env = self.stub(60)
         process, path = self.start(argv, env)
         child = self.status(path)["child"]
-        self.pids.append(child)
-        os.kill(process.pid, signal.SIGKILL)
+        self.track(child)
+        process.kill()
         process.wait(5)
         self.assertTrue(self.gone(child, 2.0))
 
@@ -1338,8 +1365,8 @@ class LifecycleTest(unittest.TestCase):
                   "time.sleep(60)\n", marker]
         process, path = self.start(player)
         child = self.status(path)["child"]
-        self.pids.append(child)
-        os.kill(process.pid, signal.SIGTERM)
+        self.track(child)
+        process.send_signal(signal.SIGTERM)
         self.assertEqual(process.wait(10), 0)
         self.assertTrue(self.gone(child, 3.0))
         self.assertEqual(pathlib.Path(marker).read_text() if os.path.exists(marker) else "", "term")
@@ -1395,7 +1422,7 @@ class LifecycleTest(unittest.TestCase):
                 sock.sendall(raw)
                 read_reply(sock)
         self.assertNotIn(token.encode(), b"\0".join(cmdline))
-        os.kill(process.pid, signal.SIGTERM)
+        process.send_signal(signal.SIGTERM)
         process.wait(10)
         self.assertEqual(pathlib.Path(self.dir, "stderr").read_bytes(), b"")
 

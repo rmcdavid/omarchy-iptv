@@ -1108,6 +1108,13 @@ def player_relay(args: argparse.Namespace) -> int:
         raise HelperError("relay_refused", RELAY_INHERITED_REFUSAL)
     proxy = relay_inherited(3, socket.AF_INET)
     control = relay_inherited(4, socket.AF_UNIX)
+    # The control socket's SO_PEERCRED names the process that last called
+    # listen(2) on it, and the spawn that bound it has exited; listening again
+    # here makes it name this relay, which is what relay_request asks of it
+    # (measured: a re-listen in a child moved the answer from the binder to
+    # the child). A connection already queued keeps the binder's, and is
+    # refused by that check and asked again.
+    control.listen(RELAY_CONTROL_MAX)
     for name in (URL_ENV, ARGS_ENV):
         os.environ.pop(name, None)
     disable_core_dumps()
@@ -1150,6 +1157,9 @@ def player_relay(args: argparse.Namespace) -> int:
             except OSError:
                 break
             reaped.add(pid)
+        # Still the port's holder, so nothing else can bind it, and still
+        # answering a start's last count (RELAY_LINGER_S).
+        time.sleep(RELAY_LINGER_S)
         server.stop()
 
     signals.signal(signals.SIGTERM, terminate)

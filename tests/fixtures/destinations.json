@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite (a host of one DNS label off the playlist's host is no hint at all, not a refusal, since D-SINK-83: tests/fixtures/provider-hosts.json); the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports. D-SINK-57's scope (the lead, 2026-10-29, after the owner's \"on this machine, only the relay's own port is the playlist's host\"): a LOOPBACK source is a local source, whose LAN channels pass, but its channel whose literal host is loopback must be on the source's own port (any loopback spelling); another port, or a source that records none, is refused at parse time (`reason` `port`, counted apart) and at play time. rc-p1c (2026-10-29): an unspecified literal (0.0.0.0, `::`) is this machine to a connect, so under a loopback source it is held to the source's port the same way.",
+ "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite (a host of one DNS label off the playlist's host is no hint at all, not a refusal, since D-SINK-83: tests/fixtures/provider-hosts.json); the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports. D-SINK-57's scope (the lead, 2026-10-29, after the owner's \"on this machine, only the relay's own port is the playlist's host\"): a LOOPBACK source is a local source, whose LAN channels pass, but its channel whose literal host is loopback must be on the source's own port (any loopback spelling); another port, or a source that records none, is refused at parse time (`reason` `port`, counted apart) and at play time. rc-p1c (2026-10-29): an unspecified literal (0.0.0.0, `::`) is this machine to a connect, so under a loopback source it is held to the source's port the same way. `remoteSchemes` (D-SINK-102, 2026-11-14): the schemes a playlist that is not local may not list, the parse's and play's fixed sentences for them, and vectors through stream_entry_refusal -- the python suite (tests/test_relay_player.py).",
  "classes": [
   "global",
   "loopback",
@@ -10,7 +10,7 @@
   "multicast",
   "reserved"
  ],
- "destinationRules": 4,
+ "destinationRules": 5,
  "env": {
   "url": "OMARCHY_IPTV_URL",
   "origin": "OMARCHY_IPTV_ORIGIN",
@@ -1772,5 +1772,146 @@
    "url": "",
    "port": null
   }
- ]
+ ],
+ "remoteSchemes": {
+  "_comment": [
+   "D-SINK-102, decision 10 (the lead's call under the owner's standing authority of 2026-11-09): from a",
+   "playlist that is not local, the schemes whose connections no proxy option reaches are refused, at the",
+   "parse (stream_entry_refusal's `remote`, counted apart in one fixed sentence) and at play",
+   "(player_target, `unsupported_scheme`). mms and mmsh are; rtmps is relayed and kept; rtsps is no scheme",
+   "the plugin plays from any playlist (`scheme`). A local playlist keeps every scheme it kept before.",
+   "Run by tests/test_relay_player.py through the shipping stream_entry_refusal, parse_m3u and",
+   "player_target; the sentences are the helper's constants, joined here by value (rule 13)."
+  ],
+  "refused": [
+   "mms",
+   "mmsh"
+  ],
+  "parseOne": "%d entry skipped: an mms or mmsh stream, whose connections nothing here can judge, from a playlist that is not on this machine or a local network",
+  "parseMany": "%d entries skipped: mms or mmsh streams, whose connections nothing here can judge, from a playlist that is not on this machine or a local network",
+  "play": "refused a stream of a kind whose connections nothing here can judge, from a playlist that is not on this machine or a local network; not played",
+  "vectors": [
+   {
+    "url": "mms://media.example.test/live",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": "remote"
+   },
+   {
+    "url": "mmsh://media.example.test/live",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": "remote"
+   },
+   {
+    "url": "MMSH://media.example.test/x",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": "remote"
+   },
+   {
+    "url": "mms://127.0.0.1/x",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": "remote"
+   },
+   {
+    "url": "rtmps://cdn.example.test/app/x",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": ""
+   },
+   {
+    "url": "rtmp://cdn.example.test/app/x",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": ""
+   },
+   {
+    "url": "rtsps://cam.example.test/s",
+    "source": {
+     "host": "provider.example.test",
+     "local": false,
+     "port": 443,
+     "loopback": false,
+     "class": "global"
+    },
+    "reason": "scheme"
+   },
+   {
+    "url": "mms://media.example.test/live",
+    "source": {
+     "host": "192.168.1.5",
+     "local": true,
+     "port": 80,
+     "loopback": false,
+     "class": "private"
+    },
+    "reason": ""
+   },
+   {
+    "url": "mmsh://192.168.1.9/live",
+    "source": {
+     "host": "192.168.1.5",
+     "local": true,
+     "port": 80,
+     "loopback": false,
+     "class": "private"
+    },
+    "reason": ""
+   },
+   {
+    "url": "mms://media.example.test/live",
+    "source": {
+     "host": "",
+     "local": true,
+     "port": null,
+     "loopback": false,
+     "class": ""
+    },
+    "reason": ""
+   },
+   {
+    "url": "rtsps://cam.example.test/s",
+    "source": {
+     "host": "",
+     "local": true,
+     "port": null,
+     "loopback": false,
+     "class": ""
+    },
+    "reason": "scheme"
+   }
+  ]
+ }
 }

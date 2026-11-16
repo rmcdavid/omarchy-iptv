@@ -236,13 +236,16 @@ ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
 # group cut, or split at a `;`, inside a URL whose mark a control, a
 # zero-width or combining character, a fullwidth colon or a slash look-alike
 # breaks, or inside a scheme-less `user:pass@host`, and a tvg-id holding one,
-# each of which every sink then prints in part). A cache written under an
+# each of which every sink then prints in part); 5 is D-SINK-102's
+# refusal of mms and mmsh from a playlist that is not local (a cache
+# before it can hold such a channel, which player_target then refuses at
+# every play). A cache written under an
 # older version, or carrying none, is refetched once, whatever its age, when
 # its source is the active one: the active source's at the next start, each other source's at
 # its next swap, and each shows its old cache until that refetch lands -- or,
 # if it fails, until a later one succeeds (Model.cacheBeforeDestinationRules,
 # read by Service.qml's applyFreshness for the active cache only).
-DESTINATION_RULES = 4
+DESTINATION_RULES = 5
 # The same for a guide window (its meta line's `guideRules`): 1 is the fold
 # that keeps a URL's run whole (D-SINK-79: a window written before it can hold
 # a title or a detail split inside a URL, which every sink prints as the
@@ -261,8 +264,8 @@ GUIDE_RULES = 2
 # relay the player is pinned to as its HTTP proxy (12-relay.py), which looks
 # every target up itself and connects only to an address it judged. Its
 # bounds. RELAY_IPC_S is one control request each way and RELAY_START_S the
-# spawn's wait for a new relay's status (the spawn, the next step of the
-# design, waits them; Model.PLAYER_BOUNDS mirrors both there). The lookup is
+# spawn's wait for a new relay's status (adopt_or_spawn; Model.PLAYER_BOUNDS
+# mirrors both, and RELAY_ATTEMPT_STAGGER_S, in no verb's sum). The lookup is
 # the play-time lookup's own, STREAM_LOOKUP_TIMEOUT_S; RELAY_CONNECT_S
 # bounds the connect attempts to one target, all of them together, which
 # start RELAY_ATTEMPT_STAGGER_S apart, at most RELAY_ATTEMPTS_IN_FLIGHT at
@@ -289,6 +292,11 @@ RELAY_DRAIN_S = 0.25
 # On SIGTERM the relay passes the signal to its process group and waits at
 # most this long for the group to go before it exits.
 RELAY_TERM_GRACE_S = 2.0
+# Once its last child has gone the relay keeps answering its control socket
+# this long before it exits, so a start whose first load just failed can
+# still ask how many of that load's connections were refused (the player
+# under --idle=once exits on that failure, and the relay with it).
+RELAY_LINGER_S = 1.0
 # Each connection is served by at most two threads; this bounds their
 # address space, not what they use.
 RELAY_THREAD_STACK_BYTES = 512 * 1024
@@ -303,6 +311,61 @@ RELAY_CONNECT_FAILED = "Could not connect"
 RELAY_CONTROL_REFUSAL = "the player's relay refused that request"
 RELAY_INHERITED_REFUSAL = ("the player's relay runs only as the player's spawn starts it, with its two listeners; "
                            "not started")
+# The launch path's half (D-SINK-102). The proxy listener is 127.0.0.1 on a
+# port the kernel chooses, RELAY_BACKLOG deep; the control socket is the
+# player's socket path plus RELAY_SOCKET_SUFFIX, in the same 0700 runtime
+# folder, and its path must fit sun_path (RELAY_SUN_PATH_MAX bytes, the
+# kernel's 108 less the terminating NUL) or the spawn is refused. The pin
+# names the listener exactly (mpv_relay_pin), with no credential: on its own
+# it denies everything, and each load the helper registers carries its own
+# token per file (RELAY_PROXY_USER_FORM).
+RELAY_HOST = "127.0.0.1"
+RELAY_BACKLOG = 64
+RELAY_SOCKET_SUFFIX = ".relay"
+RELAY_SUN_PATH_MAX = 107
+RELAY_SPAWN_FAILED = "could not start the player's relay"
+RELAY_PATH_TOO_LONG = "the player's relay socket path is too long"
+RELAY_GONE = "the player's relay does not answer"
+# The two names FFmpeg reads from the environment (http.c and tls.c, through
+# getenv_utf8: lowercase only, measured), which the player's environment
+# never carries: `http_proxy` so that nothing but the pin names a proxy, and
+# `no_proxy` because FFmpeg judges it per hop even with the option set
+# (measured: a redirect into a matching host went direct). Each is copied to
+# its uppercase spelling where that is absent, which FFmpeg ignores and a
+# child program the user enabled (yt-dlp under --ytdl=yes) reads.
+PLAYER_PROXY_ENV = (("http_proxy", "HTTP_PROXY"), ("no_proxy", "NO_PROXY"))
+# D-SINK-102, decision 10 (the lead's call under the owner's standing
+# authority of 2026-11-09): from a playlist that is not local, the schemes
+# whose connections no proxy option reaches and whose address cannot be
+# pinned are refused, at the parse and at play. mmsh opens its HTTP child
+# with no options and that child follows redirects (read in FFmpeg n9.0.2's
+# mmsh.c; measured going direct to a LAN stand-in), and mpv opens mms as
+# mmsh. rtsps, whose TLS takes only the environment's proxy (measured:
+# neither the per-file nor the global option reached it), needs no entry
+# here: it was never one of STREAM_SCHEMES, so it is refused from every
+# playlist as a scheme the plugin does not play. rtmps is NOT refused: its
+# TLS connect was measured going through the relay as a CONNECT carrying
+# the load's token.
+STREAM_REMOTE_REFUSED_SCHEMES = frozenset(("mms", "mmsh"))
+STREAM_REMOTE_REFUSAL = ("refused a stream of a kind whose connections nothing here can judge, from a playlist that is "
+                         "not on this machine or a local network; not played")
+# And the parse's sentence for them, for one entry and for many (the
+# destinations fixture's `remoteSchemes` holds both).
+PARSE_REMOTE_SCHEME_ONE = ("%d entry skipped: an mms or mmsh stream, whose connections nothing here can judge, "
+                           "from a playlist that is not on this machine or a local network")
+PARSE_REMOTE_SCHEME_MANY = ("%d entries skipped: mms or mmsh streams, whose connections nothing here can judge, "
+                            "from a playlist that is not on this machine or a local network")
+# And the schemes that never ask an HTTP proxy but can be handed the
+# address the helper judged: from a playlist that is not local, their host
+# name is replaced by the first address its play-time lookup answered
+# (player_target), so the player looks nothing up. None of them has a
+# redirect FFmpeg follows (rtmp, srt: read; rtsp: its 3xx needs `rtsp` on
+# the protocol list, which never holds it).
+STREAM_PINNED_SCHEMES = frozenset(("rtmp", "rtsp", "srt"))
+STREAM_PIN_REFUSAL = ("could not look up the stream's host name to hand the player the address it leads to; not played")
+# A channel header that would address the relay, not the stream server:
+# dropped at play time (player_target), with one log line and no value.
+RELAY_HEADER_NAMES = frozenset(("proxy-authorization", "proxy-connection"))
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON

@@ -113,18 +113,18 @@ SHIELDED = shield_environment()
 # stderr, like every other failure. Generated, and checked by the gate, by
 # the split script on the dev branch.
 HELPER_PARTS = (
-    ("01-core.py", 176476, 0x69eca363),
-    ("02-sources.py", 136997, 0x56564166),
+    ("01-core.py", 180817, 0x3c64b073),
+    ("02-sources.py", 137697, 0xfd373fba),
     ("03-io-playlist.py", 90527, 0x1fe65ed6),
     ("04-epg.py", 89085, 0x39adbb38),
     ("05-ipc-logos.py", 58781, 0x6ef79829),
     ("06-failed.py", 50848, 0x9d957e6c),
-    ("07-player.py", 94587, 0xca69be17),
-    ("08-player-verbs.py", 136401, 0xc25e534a),
+    ("07-player.py", 110223, 0xe4448c0a),
+    ("08-player-verbs.py", 154156, 0x7b25a625),
     ("09-cache.py", 27452, 0x5b4704f4),
     ("10-state.py", 50986, 0x3a76dd1b),
     ("11-cli.py", 42345, 0xbf1b5aec),
-    ("12-relay.py", 51505, 0x5fb8ec37),
+    ("12-relay.py", 52134, 0x28b744a1),
 )
 
 

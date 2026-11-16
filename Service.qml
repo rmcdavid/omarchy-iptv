@@ -87,8 +87,9 @@ Item {
   // the single control slot: a helper that never exits blocks every later
   // zap and every health check for the rest of the session. Generous next to
   // a ~130 ms run and next to the helper's own --ipc-timeout, because this
-  // is the belt and braces, not the deadline.
-  readonly property int controlTimeoutMs: 8 * 1000
+  // is the belt and braces, not the deadline. D-SINK-102: 8 s plus one
+  // question to the player's relay, which `play` now asks (Model says why).
+  readonly property int controlTimeoutMs: Model.playerWatchdogMs("play")
   // M5-01 (2.3): the gap between a seek reply and the next seek run.
   readonly property int seekThrottleMs: 300
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
@@ -3791,7 +3792,10 @@ Item {
     root.armPlayerSocket()
     playerWatchdog.restart()
     root.reconcileNowPlaying()
-    if (older) root.openOlderRestart(!tls.safe, migrated, probe.pid, stash)
+    // D-SINK-102, decision 15: a player with no relay pin reads unsafe in
+    // its TLS readings, and one whose relay does not answer is unsafe too, so
+    // either is restarted or stopped, never deferred (Model.olderPlayerUnsafe).
+    if (older) root.openOlderRestart(Model.olderPlayerUnsafe(tls, probe.relay), migrated, probe.pid, stash)
     root.reestablishAdopted()
     // D-PLY-35: a stopped start's player, found and adopted.
     root.settleTimedOutPlay(true)

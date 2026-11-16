@@ -157,7 +157,8 @@ class PlayTargetTest(unittest.TestCase):
     def test_a_remote_playlists_name_that_resolves_to_a_global_address_plays(self):
         urls = ["http://%s/live/1.ts" % NAME, "https://%s:8443/live/2.m3u8" % NAME, "rtsp://%s/s" % NAME]
         got, resolver = self.outcomes(REMOTE, urls, {NAME: [GLOBAL, "2606:4700::1111"]})
-        self.assertEqual(got, [("played", u) for u in urls])
+        # D-SINK-102: the rtsp channel is handed the address it was judged by.
+        self.assertEqual(got, [("played", u) for u in urls[:2]] + [("played", "rtsp://%s/s" % GLOBAL)])
         self.assertEqual(resolver.asked, [(NAME, 80), (NAME, 8443), (NAME, 554)])
 
     def test_one_refused_address_among_global_ones_refuses_it_whichever_comes_first(self):
@@ -336,7 +337,9 @@ class PlayTargetTest(unittest.TestCase):
         wide = "Stra" + chr(0xDF) + "e.qqqqqq.test"
         urls = ["rtsp://me:pw@%s:8554/s" % upper, "rtsp://%s/s" % wide]
         got, resolver = self.outcomes(REMOTE, urls, {upper: [GLOBAL], wide.encode("utf-8"): ["127.0.0.1"]})
-        self.assertEqual(got, [("played", urls[0])] + self.refused())
+        # D-SINK-102: and played at the address it was judged by, the
+        # userinfo and the port as written.
+        self.assertEqual(got, [("played", "rtsp://me:pw@%s:8554/s" % GLOBAL)] + self.refused())
         self.assertEqual(resolver.asked, [(upper, 8554), (wide.encode("utf-8"), 554)])
 
     def test_resolve_within_hands_a_bytes_name_to_the_resolver_as_bytes(self):
@@ -373,7 +376,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.cache = os.path.join(self.dir, "cache")
         self.urls = ["http://%s/live/1.ts" % NAME, "http://down.qqqqqq.test/live/2.ts", "http://ok.qqqqqq.test/live/3.ts"]
         self.ids = write_cache(self.cache, self.urls, REMOTE)
-        self.server = FakeMpv(self.sock)
+        self.server = FakeMpv(self.sock, props={"http-proxy": "http://127.0.0.1:%d" % self.relay_for(self.sock).port})
         self.addCleanup(self.server.close)
         self.install_identity_seam(helper)
         self.holder = self.identity(self.sock)
@@ -389,7 +392,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         client = helper.MpvIpc(self.sock, 1.0)
         client.connect()
         return {"spawned": False, "client": client, "pid": self.holder.pid, "vouched": self.holder.pid,
-                "replaced": 0, "carry": {}}
+                "replaced": 0, "carry": {}, "relayPid": 0}
 
     def verb(self, verb, cid, *more):
         if verb == "play":

@@ -33,7 +33,7 @@ import unittest.mock
 
 from helper_loader import HELPER, load_helper
 from test_mpv import (FakeMpv, IdentitySeam, PINNED_CMDLINE, PINNED_PROPS, current_props, hold_launch,
-                      launch_argv, load_options)
+                      launch_argv, load_options, relay_proxy)
 
 helper = load_helper()
 
@@ -176,7 +176,10 @@ state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o
                        "prefetch-playlist": False, "load-console": True,
                        # lane-p2a (2026-10-29): and the stats overlay loaded,
                        # mpv 0.41's default (measured: True).
-                       "load-stats-overlay": True})
+                       "load-stats-overlay": True,
+                       # D-SINK-102: mpv's own default for the relay pin's
+                       # option, "" (under --no-config).
+                       "http-proxy": ""})
 # What this player answers for properties a test sets up (the carry's volume,
 # mute, fullscreen and pause), as JSON in STUB_MPV_PROPS.
 state["props"].update(json.loads(os.environ.get("STUB_MPV_PROPS", "") or "{}"))
@@ -211,6 +214,8 @@ for arg in argv:
         state["props"][base] = current
     elif name in ("stream-lavf-o", "demuxer-lavf-o"):
         state["props"][base] = dict(pair.partition("=")[::2] for pair in value.split(",") if pair)
+    elif name == "http-proxy":
+        state["props"]["http-proxy"] = value
 
 
 def orderly_exit(code):
@@ -367,6 +372,10 @@ def _handle(conn):
                                    "playlist_entry_id": state["entry"]})
                 state["entry"] += 1
                 state["url"] = command[1]
+                # D-SINK-102: a per-file http-proxy reads back verbatim while
+                # its file is current (measured on mpv 0.41.0).
+                if len(command) > 4 and isinstance(command[4], dict) and "http-proxy" in command[4]:
+                    state["props"]["http-proxy"] = command[4]["http-proxy"]
                 reply = {"error": "success", "data": {"playlist_entry_id": state["entry"]}, "request_id": rid}
                 events.append({"event": "start-file", "playlist_entry_id": state["entry"]})
                 if load == "ok":
@@ -637,7 +646,8 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
         """A real process carrying a player's launch argv for this socket
         (`current` by default: see the class), registered as the identity the
         FakeMpv's connection reaches."""
-        process = hold_launch(self.sock, launch, ignore_term)
+        port = self.relay_for(self.sock).port if launch == "current" else 0
+        process = hold_launch(self.sock, launch, ignore_term, port)
         self.addCleanup(self.reap_process, process)
         self.identities[self.sock] = process.pid
         return process
@@ -645,7 +655,7 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
     def start_current(self, **kwargs):
         """A FakeMpv answering as a player THIS build launched (current_props,
         cmdline PINNED_CMDLINE), the pair of a `current` sleeper."""
-        props = current_props(self.sock, **{"mpv-version": "mpv 0.41.0"})
+        props = current_props(self.sock, relay_port=self.relay_for(self.sock).port, **{"mpv-version": "mpv 0.41.0"})
         props.update(kwargs.pop("props", {}) or {})
         return self.start(props=props, cmdline=PINNED_CMDLINE, **kwargs)
 
@@ -810,7 +820,7 @@ class FeedGateTest(GateTestCase):
         process (an in-process FakeMpv), and the kernel names that one. No seam
         is set: the gate reads `unknown` for the process it reaches."""
         os.makedirs(self.runtime, 0o700)
-        holder = hold_launch(self.sock, "current")
+        holder = hold_launch(self.sock, "current", relay_port=self.relay_for(self.sock).port)
         self.addCleanup(self.reap_process, holder)
         server = self.start_current()
         code, payload, _, _ = self.play()
@@ -1241,7 +1251,9 @@ class StartTest(PlayerTestCase):
             value with `,`, `#`, quotes and a trailing backslash come back
             exactly.
         """
-        proxy = "--http-proxy=http://alice:%s@proxy.test:3128" % PASSWORD
+        # D-SINK-102: `--http-proxy` is the relay's pin, refused as a token;
+        # the credentialed option a user may still keep is yt-dlp's own proxy.
+        proxy = "--ytdl-raw-options=proxy=http://alice:%s@proxy.test:3128" % PASSWORD
         header = '--user-agent=a,b "c" #d \\'
         private = ["--cache-dir", self.cache, "--id", "t:bbc1.uk", "--scope", "g:Sports http://u:%s@cdn.test/x" % TOKEN,
                    "--mpv-arg=" + proxy, "--mpv-arg=" + header, "--mpv-arg=--volume=50"]
@@ -1268,7 +1280,7 @@ class StartTest(PlayerTestCase):
             self.assertFalse(any(secret.encode() in line for line in seen), secret)
         launch = self.spawned_launches()[0]
         raw, include = launch["argv"], launch["include"]
-        for secret in (PASSWORD, "alice", "--volume=50", "--user-agent", "--http-proxy"):
+        for secret in (PASSWORD, "alice", "--volume=50", "--user-agent", "--ytdl-raw-options"):
             self.assertNotIn(secret, " ".join(raw), secret)
         path = os.path.join(self.runtime, helper.MPV_ARGS_FILE)
         self.assertEqual([a for a in raw if a.startswith("--include=")], ["--include=" + path])
@@ -1341,6 +1353,11 @@ class StartTest(PlayerTestCase):
         self.assertEqual(code, 0, stderr)
         argv = self.spawned_argv()[0]
         joined = " ".join(argv)
+        # D-SINK-102: the one element with a scheme in it is the relay pin,
+        # which names this machine's relay and nothing of the channel.
+        pins = [a for a in argv if helper.relay_pin_port(a.encode()) is not None]
+        self.assertEqual(len(pins), 1, argv)
+        joined = " ".join(a for a in argv if a not in pins)
         for secret in (PASSWORD, TOKEN, "user:", "provider.test", "://", "/live/", "VLC/3.0.20", "ref.test", "BBC One HD"):
             self.assertNotIn(secret, joined, secret)
         self.assertNotIn("--", argv, "the URL separator is gone with the URL")
@@ -1349,7 +1366,7 @@ class StartTest(PlayerTestCase):
         self.assertIn("--ytdl=no", argv)
         self.assertIn("--title=$>IPTV", argv)
         self.assertIn("--force-media-title=IPTV", argv)
-        self.assertEqual(argv, helper.mpv_launch_argv(self.sock, [])[1:])
+        self.assertEqual(argv, helper.mpv_launch_argv(self.sock, [], relay_port=helper.relay_pin_port(pins[0].encode()))[1:])
 
     def test_first_load_failure_names_the_host_and_never_a_path_credentials_tail(self):
         """R32a' (D-SINK-29), the SINK PATH: mpv's error-level log line names
@@ -1707,7 +1724,9 @@ class WorkingDirectoryTest(PlayerTestCase):
         argv = self.spawned_argv()[0]
         self.assertEqual([t for t in argv if t.startswith("--watch-later-dir=")],
                          ["--watch-later-dir=%s" % self.later] * 2)
-        self.assertEqual(argv[-len(helper.MPV_PIN_BLOCK) - 1], "--watch-later-dir=%s" % self.later)
+        # The pin block opens with it, then the relay pin (D-SINK-102).
+        self.assertEqual(argv[-len(helper.MPV_PIN_BLOCK) - 2], "--watch-later-dir=%s" % self.later)
+        self.assertIsNotNone(helper.relay_pin_port(argv[-len(helper.MPV_PIN_BLOCK) - 1].encode()))
 
     def test_a_directory_that_cannot_be_created_warns_and_still_plays(self):
         # "What happens when it does not exist" has a second half: what
@@ -2484,8 +2503,9 @@ class RestartTest(PlayerTestCase):
         # 2026-10-29: the channel's headers ride its loadfile, per file, and
         # no GLOBAL property is ever given a provider's value.
         loads = [command for command in server.commands if command[0] == "loadfile"]
-        self.assertEqual(loads[-1][4].pairs, load_options("VLC/3.0.20", "http://ref.test/", loads[-1][4].pairs[4:]
-                                                           and [p[1] for p in loads[-1][4].pairs[4:]]))
+        fields = [p[1] for p in loads[-1][4].pairs[4:] if p[0] == "http-header-fields-append"]
+        self.assertEqual(loads[-1][4].pairs, load_options("VLC/3.0.20", "http://ref.test/", fields,
+                                                          proxy=relay_proxy(self.relay_for(self.sock))))
         sent = [command for command in server.commands if command[0] == "set_property"]
         self.assertNotIn(["set_property", "user-agent", "VLC/3.0.20"], sent)
         self.assertNotIn(["set_property", "referrer", "http://ref.test/"], sent)
@@ -2502,7 +2522,7 @@ class RestartTest(PlayerTestCase):
         self.assertIn(["set_property", "http-header-fields", []], sent)
         # And per file, the second channel's own: none of the first's.
         loads = [command for command in server.commands if command[0] == "loadfile"]
-        self.assertEqual(loads[-1][4].pairs, load_options())
+        self.assertEqual(loads[-1][4].pairs, load_options(proxy=relay_proxy(self.relay_for(self.sock))))
         self.assertIsNone(idle.poll())
 
 
@@ -2636,7 +2656,8 @@ class ProbeTlsTest(PlayerTestCase):
                                    "stream-lavf-o": {"tls_verify": "0"}})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        # D-SINK-102: unpinned 1 -- a player another build launched holds no relay pin.
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 1, "migrated": True})
         self.assertIs(server.props["tls-verify"], True)
         self.assertIs(server.props["load-auto-profiles"], False)
         self.assertEqual(server.props["stream-lavf-o"], {})
@@ -2675,7 +2696,8 @@ class ProbeTlsTest(PlayerTestCase):
         self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False}, refuse={"tls-verify"})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 0, "migrated": True})
+        # D-SINK-102: unpinned 1 -- a player another build launched holds no relay pin.
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 1, "migrated": True})
         self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"],
                                                     payload["tls"]["unpinned"]))
 
@@ -2710,7 +2732,8 @@ class ProbeTlsTest(PlayerTestCase):
                    refuse={"stream-lavf-o"})
         code, payload, stdout, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "unpinned": 0, "migrated": True})
+        # D-SINK-102: unpinned 1 -- a player another build launched holds no relay pin.
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "unpinned": 1, "migrated": True})
         for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
             self.assertNotIn(secret, stdout + stderr, secret)
 
@@ -2748,7 +2771,8 @@ class ProbeTlsTest(PlayerTestCase):
         code, second, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
         self.assertEqual((first["tls"], second["tls"]),
-                         ({"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True},) * 2)
+                         # D-SINK-102: unpinned 1 -- a player another build launched holds no relay pin.
+                         ({"verify": True, "optionCount": 0, "unpinned": 1, "migrated": True},) * 2)
         self.assertEqual(server.user_data.get(self.MARK), "migrated")
         # On before the writes, so a probe cut off between them leaves it.
         names = [c[:2] for c in server.commands]
@@ -2816,7 +2840,8 @@ class ProbeTlsTest(PlayerTestCase):
         server = self.start(props={"mpv-version": "mpv 0.41.0"}, refuse={"user-data/" + self.MARK})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
+        # D-SINK-102: unpinned 1 -- a player another build launched holds no relay pin.
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 1, "migrated": True})
         self.assertIs(server.props["tls-verify"], True)
         self.assertNotIn(self.MARK, server.user_data)
         self.assertIn("could not mark the player as migrated", stderr)
@@ -2848,8 +2873,8 @@ class ProbeTlsTest(PlayerTestCase):
         server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False})
         original = helper.migrate_tls
 
-        def read_only(client):
-            verify, count, unpinned = helper.read_tls_state(client)
+        def read_only(client, relay_port=None):
+            verify, count, unpinned = helper.read_tls_state(client, relay_port)
             return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": False}
         helper.migrate_tls = read_only
         self.addCleanup(setattr, helper, "migrate_tls", original)
@@ -2857,8 +2882,8 @@ class ProbeTlsTest(PlayerTestCase):
         self.assertEqual(code, 0, stderr)
         # unpinned 3: load-auto-profiles reads mpv's "auto", and (D-SINK-55,
         # 2026-10-29) the demuxer map holds no protocol whitelist, and
-        # (D-SINK-62, lane-p1c) no format whitelist.
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 3, "migrated": False},
+        # (D-SINK-62, lane-p1c) no format whitelist, and (D-SINK-102) no relay pin.
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 4, "migrated": False},
                          "the mutation must be visible in the reply, or the tests above are decoration")
         self.assertIs(server.props["tls-verify"], False)
 
@@ -3568,7 +3593,8 @@ class ParityTest(unittest.TestCase):
         # 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
         # --load-console with mpv's alias --load-osd-console (D-SINK-61).
         # 59 the same day (lane-p2a): --load-stats-overlay (D-SINK-67).
-        self.assertEqual(len(names), 59)
+        # 60 since D-SINK-102 (2026-11-14): --http-proxy, pinned to the relay.
+        self.assertEqual(len(names), 60)
         self.assertIn("--load-stats-overlay", names)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
@@ -3638,7 +3664,8 @@ class ParityTest(unittest.TestCase):
         for vector in self.fixture["mpvArgv"]:
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
             dirs = helper.player_dirs(vector["socketPath"], vector["stateDir"])
-            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs, build=vector["build"]),
+            self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs, build=vector["build"],
+                                                    relay_port=vector["relayPort"]),
                              vector["argv"], vector["name"])
             # D-SINK-47: and the private file's lines, which only python writes.
             self.assertEqual(helper.mpv_args_config(args).splitlines(), vector["include"], vector["name"])
@@ -3831,10 +3858,22 @@ class ParityTest(unittest.TestCase):
             self.assertEqual(args, [], name)
             self.assertEqual(rejected, ["--no" + name[1:]], name)
 
+    def test_the_relay_pin_matches_every_shared_vector(self):
+        """D-SINK-102: mpv_relay_pin over the fixture's `relayPin` cases, a
+        port and every shape that is not one; tests/Model.test.js runs
+        Model.mpvRelayPin over the same table."""
+        cases = self.fixture["relayPin"]["cases"]
+        self.assertEqual([helper.mpv_relay_pin(c["port"]) for c in cases], [c["pin"] for c in cases])
+        self.assertIn(True, [c["port"] is True for c in cases])
+        # and the reader takes back exactly the pins the composer makes of a port
+        self.assertEqual([helper.relay_pin_port(c["pin"].encode()) for c in cases],
+                         [None if c["pin"].endswith(":0") else c["port"] for c in cases])
+
     def test_the_launch_argv_never_carries_a_channel(self):
-        argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", [])
+        argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", [], relay_port=4321)
         self.assertNotIn("--", argv)
-        self.assertEqual([token for token in argv if "://" in token], [])
+        # D-SINK-102: the relay pin is the one address, this machine's relay.
+        self.assertEqual([token for token in argv if "://" in token], ["--http-proxy=http://127.0.0.1:4321"])
         self.assertTrue(all(token.startswith("--") for token in argv[1:]))
 
     def test_stop_escalation_matches_every_shared_vector(self):

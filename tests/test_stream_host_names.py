@@ -690,7 +690,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         self.sock = os.path.join(self.dir, "mpv.sock")
         self.cache = os.path.join(self.dir, "cache")
         self.ids = pre_rule_cache(self.cache)
-        self.server = FakeMpv(self.sock)
+        self.server = FakeMpv(self.sock, props={"http-proxy": "http://127.0.0.1:%d" % self.relay_for(self.sock).port})
         self.addCleanup(self.server.close)
         self.install_identity_seam(helper)
         self.holder = self.identity(self.sock)
@@ -722,7 +722,7 @@ class PlayerWireTest(IdentitySeam, unittest.TestCase):
         client = helper.MpvIpc(self.sock, 1.0)
         client.connect()
         return {"spawned": False, "client": client, "pid": self.holder.pid, "vouched": self.holder.pid,
-                "replaced": 0, "carry": {}}
+                "replaced": 0, "carry": {}, "relayPid": 0}
 
     def start(self, verb, cid):
         with mock.patch.object(helper, "adopt_or_spawn", lambda *a, **k: self.outcome()), \

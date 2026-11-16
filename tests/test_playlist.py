@@ -966,11 +966,19 @@ class QaFixtureTest(unittest.TestCase):
 
     def test_qa_schemes(self):
         result = self.parse("qa-schemes.m3u")
+        # D-SINK-102, decision 10: parse_m3u's default source is a playlist
+        # that is not local, from which mms and mmsh are skipped and counted.
         self.assertEqual([c["tvgId"] for c in result["channels"]],
-                         ["ok-http", "ok-https", "ok-rtsp", "ok-udp", "ok-rtp", "ok-rtmp", "ok-rtmps", "ok-mms", "ok-mmsh", "ok-srt",
+                         ["ok-http", "ok-https", "ok-rtsp", "ok-udp", "ok-rtp", "ok-rtmp", "ok-rtmps", "ok-srt",
                           "ok-upper", "ok-space", "ok-inner-space"])
-        self.assertEqual(sorted(result["warnings"]), ["2 URL lines without #EXTINF skipped", "22 entries skipped: unsupported URL scheme"])
-        self.assertEqual(result["channels"][11]["url"], "http://padded.example.test/ok.m3u8")
+        self.assertEqual(sorted(result["warnings"]), ["2 URL lines without #EXTINF skipped",
+                                                      helper.PARSE_REMOTE_SCHEME_MANY % 2,
+                                                      "22 entries skipped: unsupported URL scheme"])
+        self.assertEqual(result["channels"][9]["url"], "http://padded.example.test/ok.m3u8")
+        # A local playlist keeps them, as every scheme.
+        local = helper.parse_m3u((FIXTURES / "qa-schemes.m3u").read_bytes().decode("utf-8"),
+                                 helper.playlist_source("file", ""))
+        self.assertEqual([c["tvgId"] for c in local["channels"]][7:9], ["ok-mms", "ok-mmsh"])
 
     def test_qa_empty_and_not_a_playlist(self):
         empty = self.parse("qa-empty.m3u")

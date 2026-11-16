@@ -1,5 +1,5 @@
 {
- "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again. The two transcripts pinned-p1c and prepin-p1c (lane-p1c, 2026-10-29: the tree's launch argv after the format list, prefetch and console pins, and sec-int 124589e's before them) were taken the same way except that prlimit execs mpv directly, with no timeout wrapper, and the player is stopped by the pid held.",
+ "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again. The two transcripts pinned-p1c and prepin-p1c (lane-p1c, 2026-10-29: the tree's launch argv after the format list, prefetch and console pins, and sec-int 124589e's before them) were taken the same way except that prlimit execs mpv directly, with no timeout wrapper, and the player is stopped by the pid held. The two transcripts relay-pin and relay-none (D-SINK-102, 2026-11-14) were taken the same way, prlimit execing mpv directly, the player started idle with the tree's launch argv (relay pin at port 48510, build 0.19.1+0a1b2c3d, the user's --vo=null --ao=null where the tokens stand, no --force-window) and the same argv without the pin, each quit over IPC; the crash journal unchanged.",
  "mpv": "mpv v0.41.0",
  "measured": "2026-10-29",
  "transcripts": [
@@ -6753,6 +6753,231 @@
      "reply": {
       "error": "success",
       "data": "no"
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "relay-pin",
+   "what": "a player launched with the tree's launch argv after the relay pin landed (D-SINK-102), idle: the pin reads verbatim, is set from the command line, and an idle runtime set persists and reads back with set-from-commandline still true",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--vo=null",
+    "--ao=null",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--script-opts-append=omarchy_iptv-build=0.19.1+0a1b2c3d",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--http-proxy=http://127.0.0.1:48510",
+    "--load-scripts=no",
+    "--scripts-clr",
+    "--input-commands-clr",
+    "--input-commands-append=keybind ctrl+v ignore",
+    "--load-auto-profiles=no",
+    "--player-operation-mode=cplayer",
+    "--load-select=no",
+    "--load-console=no",
+    "--load-stats-overlay=no",
+    "--prefetch-playlist=no",
+    "--load-unsafe-playlists=no",
+    "--save-watch-history=no",
+    "--log-file=",
+    "--reset-on-next-file-clr",
+    "--osd-playlist-entry=title",
+    "--drag-and-drop=no",
+    "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+    "--stream-lavf-o-clr",
+    "--demuxer-lavf-propagate-opts=yes",
+    "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+    "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "http-proxy"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "http://127.0.0.1:48510"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/http-proxy/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/http-proxy/set-locally"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "http-proxy",
+      "http://127.0.0.1:9"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "http-proxy"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "http://127.0.0.1:9"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/http-proxy/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "http-proxy",
+      "http://127.0.0.1:48510"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "http-proxy"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "http://127.0.0.1:48510"
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "relay-none",
+   "what": "the same argv without the relay pin, which every player of 0.19.x and before was launched with: mpv's own default",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--vo=null",
+    "--ao=null",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--script-opts-append=omarchy_iptv-build=0.19.1+0a1b2c3d",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--load-scripts=no",
+    "--scripts-clr",
+    "--input-commands-clr",
+    "--input-commands-append=keybind ctrl+v ignore",
+    "--load-auto-profiles=no",
+    "--player-operation-mode=cplayer",
+    "--load-select=no",
+    "--load-console=no",
+    "--load-stats-overlay=no",
+    "--prefetch-playlist=no",
+    "--load-unsafe-playlists=no",
+    "--save-watch-history=no",
+    "--log-file=",
+    "--reset-on-next-file-clr",
+    "--osd-playlist-entry=title",
+    "--drag-and-drop=no",
+    "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+    "--stream-lavf-o-clr",
+    "--demuxer-lavf-propagate-opts=yes",
+    "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+    "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "http-proxy"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/http-proxy/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
      }
     },
     {
