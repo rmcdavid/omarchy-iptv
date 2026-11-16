@@ -1067,14 +1067,26 @@ def player_stash(channel_id: str, name: str, group: str, scope: str, source_key:
     reading wave two's evidence leaned on. Now that both sides carry a real
     intent number the two can be COMPARED, which is the point, but the
     writer has to be named outright rather than inferred from a zero.
+
+    D-SINK-104 (2026-11-16): the name and the group are stored as shown_text
+    prints them, and the scope only when it reads plainly (scope_reading),
+    so the record at rest in the player is the one every reply prints: the
+    status and probe replies printed it raw beside a redacted title. The
+    shell restores the name and the group only to draw them, through its own
+    reading, and replaces both from the cache when the channel is found
+    (Service.reconcileNowPlaying), which also scopes an empty `launchedFrom`
+    to the channel's first group. Cost: a channel no longer in the playlist
+    at a reattach, whose group's name reads as an address or holds a
+    credential or a control, zaps nowhere until another channel is chosen.
+    The id stays as it is: `play` takes it back.
     """
     return {
         "schema": PLAYER_STASH_SCHEMA,
         "playing": bool(playing),
         "id": str(channel_id or ""),
-        "name": str(name or ""),
-        "group": str(group or ""),
-        "launchedFrom": str(scope or ""),
+        "name": shown_text(str(name or "")),
+        "group": shown_text(str(group or "")),
+        "launchedFrom": scope_reading(str(scope or "")),
         "sourceKey": str(source_key or ""),
         "since": int(since or 0),
         "entryId": entry_id if isinstance(entry_id, int) and entry_id > 0 else None,

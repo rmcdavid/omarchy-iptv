@@ -1,0 +1,37 @@
+{
+ "about": "D-SINK-105 (2026-11-16): the code points every helper reply, both status files (playlist-status.json, epg-status.json) and every IPC reply of the shell (Model.ipcJson) write as a JSON escape: DEL and the C1 controls, the line and paragraph separators, and the twelve text-direction controls (Unicode's Bidi_Control set). Inside a JSON string only, so every parser reads the same value. tests/test_reply_shown.py puts one string of every code point but the surrogates through the helper's emit and write_status (REPLY_ESCAPE_RANGES), and tests/Model.test.js through Model.ipcJson; each asserts every code point here is escaped and every other one printable is written as it is. `notEscaped` are format characters left alone on purpose: escaping a zero-width joiner would break an emoji.",
+ "ranges": [
+  [
+   "U+007F",
+   "U+009F"
+  ],
+  [
+   "U+2028",
+   "U+2029"
+  ],
+  [
+   "U+061C",
+   "U+061C"
+  ],
+  [
+   "U+200E",
+   "U+200F"
+  ],
+  [
+   "U+202A",
+   "U+202E"
+  ],
+  [
+   "U+2066",
+   "U+2069"
+  ]
+ ],
+ "notEscaped": [
+  "U+00AD",
+  "U+200B",
+  "U+200C",
+  "U+200D",
+  "U+2060",
+  "U+FEFF"
+ ]
+}

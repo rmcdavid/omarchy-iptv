@@ -1138,13 +1138,19 @@ class TitleControlsTest(MpvTestCase):
         code, payload, _, stderr = self.play("--id", "t:ctl.test")
         self.assertEqual(code, 0, stderr)
         # The cache really holds the controls: this is the parse's output, not
-        # a name the test made up after it.
-        self.assertIn("\x1b", payload["name"])
-        self.assertIn("\x9b", payload["name"])
+        # a name the test made up after it. Read from channels.json, since the
+        # reply prints the name as the title shows it (D-SINK-104,
+        # 2026-11-16); it carried the controls until then.
+        with open(os.path.join(self.cache, helper.CHANNELS_FILE), encoding="utf-8") as fh:
+            stored = [c["name"] for c in json.load(fh)["channels"] if c["id"] == "t:ctl.test"]
+        self.assertEqual(len(stored), 1)
+        self.assertIn("\x1b", stored[0])
+        self.assertIn("\x9b", stored[0])
         titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
         forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
         self.assertEqual(titles, ["$>News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
         self.assertEqual(forced, ["News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
+        self.assertEqual(payload["name"], forced[0])
 
 
 class CutNameTitleTest(MpvTestCase):

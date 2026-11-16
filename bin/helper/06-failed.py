@@ -850,7 +850,7 @@ def cmd_play(args: argparse.Namespace) -> int:
                                  source_key_of(cache_dir(args.cache_dir)), since or int(time.time()),
                                  record_seq(read_lock_file(sock)), verb="play")
         entry_id = apply_channel(client, target, stash=stash, label="play")
-        payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["name"]}
+        payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["shown"]}
         if session:
             # Additive, and tied to the additive flags: without --scope /
             # --since the reply is byte-identical to v0.2.1's.
@@ -917,7 +917,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             # which is a sink (rule 5), so it is redacted like every other
             # provider string -- it had gone out verbatim since M2-02 and no
             # consumer in the shell reads it (F-SINK-12, from the review).
-            "mediaTitle": redact_urls(values["media-title"]) if isinstance(values["media-title"], str) else None,
+            # D-SINK-104: and since 2026-11-16 as shown_text reads it, the
+            # reading the boundary gives every reply's provider text.
+            "mediaTitle": shown_text(values["media-title"]) if isinstance(values["media-title"], str) else None,
             "pathHost": (url_host(path_value) or ("local file" if path_value.startswith("/") else "")) if isinstance(path_value, str) and path_value else None,
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,

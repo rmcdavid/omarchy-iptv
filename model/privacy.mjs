@@ -1553,6 +1553,14 @@ function isControlCode(c) {
 // control is sinkText's answer itself. Idempotent; linear.
 function shownText(value) {
   var s = str(value)
+  // The controls that end the text are deleted, as the old reading deleted
+  // every control: nothing follows them for an address to run on to, and
+  // read as SHOWN_STAND_IN one would hold an address's sentence punctuation
+  // inside its run (`... http://h.test/x.<LF>` printed `h.test` and lost
+  // the `.`).
+  var cut = s.length
+  while (cut > 0 && isControlCode(s.charCodeAt(cut - 1))) cut--
+  if (cut < s.length) s = s.substring(0, cut)
   var holes = []
   for (var i = 0; i < s.length; i++) {
     if (isControlCode(s.charCodeAt(i))) holes.push(i)

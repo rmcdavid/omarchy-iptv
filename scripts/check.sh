@@ -264,7 +264,11 @@ fail=0
 # 100 -- test_shownTextInV4, a sample of the shared shown-text fixture
 # through Model.shownText and the notification's reading in the engine that
 # composes the card, red on 1118ffb's model; the spec runs 100.
-QML_SPEC_MIN=${QML_SPEC_MIN:-100}
+# 2026-11-16, lane-r2a (round 2, D-SINK-105, -111): 100 -> 101 --
+# test_replyEscapesAndWithheldIdInV4, Model.ipcJson's escape set and
+# reconcileVerdict's withheld record in the engine that answers the IPC
+# verbs, red on cc4a798's model; the spec runs 101.
+QML_SPEC_MIN=${QML_SPEC_MIN:-101}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -581,7 +585,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-100}
 # (140,022 inputs, three properties); all three red on 1118ffb's model and
 # under six single-decision mutants of shownText (QA-RESULTS "Round 2 of
 # the security review, lane-r2a"); the suite runs 3735.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3735}
+# 2026-11-16, lane-r2a (round 2, D-SINK-104, -105, -111): 3735 -> 3738 --
+# Model.ipcJson over every code unit against the shared reply-escapes
+# fixture, Model.ID_WITHHELD and reconcileVerdict reading a withheld record
+# as nothing to compare, and a reattach whose record carries no scope,
+# through Service.qml's own reconcileNowPlaying. The first two red on
+# cc4a798's model, each of the three red under a named single-decision
+# mutant (QA-RESULTS "Round 2 of the security review, lane-r2a"); the suite
+# runs 3738.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3738}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1026,7 +1038,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3735}
 # read whole, shown_lines). 8 red on 1118ffb's helper, the rest each red
 # under a named single-decision mutant (QA-RESULTS "Round 2 of the security
 # review, lane-r2a"); the suite runs 2597, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2597}
+# 2026-11-16, lane-r2a (round 2, D-SINK-104, -105, -111): 2597 -> 2621 --
+# tests/test_reply_shown.py's 24: the escapes over every code point through
+# emit and write_status, every REPLY_READINGS path at emit and in a status
+# file, the scope and id readings, the shared withheld-ids fixture, every
+# state verb, the playlist and guide status files, play and status against
+# FakeMpv, and the write side (the target, tracks, the first load). All 24
+# red on cc4a798's helper, and every one of 38 single-decision mutants red
+# (QA-RESULTS "Round 2 of the security review, lane-r2a"); the suite runs
+# 2621, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2621}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

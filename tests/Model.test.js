@@ -4819,6 +4819,93 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   }, [true, true, true, [], [], []])
 })()
 
+// D-SINK-105 (2026-11-16): the shell's IPC replies and the helper's replies
+// and status files escape one set of code points -- DEL, the C1 controls,
+// U+2028, U+2029 and the twelve text-direction controls (Unicode's Bidi_Control set) -- held by
+// tests/fixtures/reply-escapes.json, which tests/test_reply_shown.py runs
+// through the helper's emit and write_status. Model.ipcJson escaped the first
+// three and wrote the direction controls raw into the terminal that ran
+// `omarchy-shell ipc call`. One string of every code unit but the surrogates
+// goes through ipcJson: every code unit in the set is escaped and no other
+// printable one is, and the text parses back to the same value.
+;(function () {
+  const ESC = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/reply-escapes.json"), "utf8"))
+  const set = new Set()
+  ESC.ranges.forEach(function (r) { for (let c = parseInt(r[0].substring(2), 16); c <= parseInt(r[1].substring(2), 16); c++) set.add(c) })
+  checkCall("D-SINK-105: Model.ipcJson escapes exactly reply-escapes.json's code points, over every code unit but the surrogates, and parses back to the same value", function () {
+    let all = ""
+    for (let c = 0; c <= 0xffff; c++) if (c < 0xd800 || c > 0xdfff) all += String.fromCharCode(c)
+    const out = Model.ipcJson({ x: all })
+    const wrong = []
+    for (let c = 0x20; c <= 0xffff; c++) {
+      if (c >= 0xd800 && c <= 0xdfff) continue
+      const ch = String.fromCharCode(c)
+      const hex = c.toString(16)
+      const escaped = out.indexOf("\\u" + "0000".substring(hex.length) + hex) !== -1
+      const raw = out.indexOf(ch) !== -1
+      if (set.has(c) && (raw || !escaped)) wrong.push((raw ? "raw U+" : "unescaped U+") + hex)
+      if (!set.has(c) && ch !== "\"" && ch !== "\\" && !raw) wrong.push("escaped U+" + hex)
+      if (wrong.length > 6) break
+    }
+    return [set.size, wrong, JSON.parse(out).x === all, ESC.notEscaped.some(function (u) { return set.has(parseInt(u.substring(2), 16)) })]
+  }, [47, [], true, false])
+})()
+
+// D-SINK-111 (2026-11-16): the helper's replies print a `t:` id whose tvg-id
+// part the parse refuses -- one 0.18.0 or earlier stored, holding a
+// credential -- as one token, in the state replies and in the player's record
+// the status and probe replies print (tests/test_reply_shown.py runs the
+// predicate over tests/fixtures/withheld-ids.json). The health tick compares
+// that record's id with the channel the shell names, and a cache written
+// before 0.19.0 can still hold such a row, so the shell may be playing it:
+// read as "diverged", the token made the tick re-apply a channel the player
+// was already on. It names no channel, so it is nothing to compare.
+;(function () {
+  const IDS = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/withheld-ids.json"), "utf8"))
+  checkCall("D-SINK-111: Model.ID_WITHHELD is the fixture's token, and reconcileVerdict reads a record carrying it as nothing to compare, whatever the shell names; a record naming another channel still diverges", function () {
+    const legacy = IDS.withheld[0]
+    const record = function (id) { return { schema: 1, playing: true, id: id, name: "News", group: "", launchedFrom: "", sourceKey: "ka", since: 7, entryId: 2, seq: 1, verb: "play" } }
+    return [Model.ID_WITHHELD === IDS.token,
+            Model.reconcileVerdict(record(IDS.token), { id: legacy }, "ka").state,
+            Model.reconcileVerdict(record(IDS.token), { id: "t:news.us" }, "ka").state,
+            Model.reconcileVerdict(record("t:other.us"), { id: legacy }, "ka").state,
+            Model.reconcileVerdict(record(legacy), { id: legacy }, "ka").state]
+  }, [true, "unknown", "unknown", "diverged", "agree"])
+})()
+
+// D-SINK-104 (2026-11-16): the record the player carries keeps the zap ring's
+// scope only when it reads plainly; otherwise it is "" and a reattach scopes
+// the ring to the channel's first group (Service.reconcileNowPlaying) -- the
+// same scope the record held whenever the channel is still in the playlist,
+// `g:Sports@HD` included, which reads as a credential token. Through the
+// service's own reconcileNowPlaying, as the service harness runs it.
+;(function () {
+  const H = require("./service-harness.js")
+  const fs = require("fs"), path = require("path")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const URL = "http://cdn.test/a.m3u"
+  const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
+  const rec = { key, url: URL, epgUrl: "", kind: "http", label: "cdn.test", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 1, groupCount: 1 }
+  const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: key, entryMigrated: true }) + "\n"
+  const reattach = function (group, inPlaylist) {
+    const h = H.bootService(svcText, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
+    const channels = M.prepareChannels([{ id: "t:p.test", name: "P", group: group, url: "http://s.example.test/p.ts", chno: "101" }])
+    h.root.channels = channels
+    const index = M.keyedMap()
+    if (inPlaylist) index["t:p.test"] = channels[0]
+    h.root.channelIndex = index
+    h.root.playerSourceKey = key
+    h.root.nowPlaying = { id: "t:p.test", name: "P", group: "shown", launchedFrom: "", since: 7 }
+    h.root.reconcilePending = true
+    h.root.reconcileNowPlaying()
+    return [h.compileErrors.length, h.root.nowPlaying.launchedFrom, h.root.nowPlaying.group]
+  }
+  checkCall("D-SINK-104: a reattach whose record carries no scope scopes the zap ring to the channel's first group when the channel is in the playlist (`g:Sports@HD` reads as a credential token and comes back as itself), and leaves it empty when it is not", function () {
+    return [reattach("Sports", true), reattach("Sports@HD", true), reattach("Sports", false)]
+  }, [[0, M.groupScopeId("Sports"), "Sports"], [0, M.groupScopeId("Sports@HD"), "Sports@HD"], [0, "", "shown"]])
+})()
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect

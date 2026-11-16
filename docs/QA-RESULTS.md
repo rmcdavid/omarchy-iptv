@@ -20211,3 +20211,131 @@ Nothing runs the reading per row.
   - Changed: `notifyNameText`, `notifyReasonText`, the `playlistError` card's cached time and the `stateUnreadable` card's path.
   - Cleared: the body's exit deletion (after the composition); `sanitizeInput`, `sanitizeUrlInput` and the paste cleaner (input).
 - *The shell's journal relays* (`console.warn(... Model.redactUrls(text.trim()))` in Service.qml) read the helper's stderr, which now carries no control. They are not changed here.
+
+### D-SINK-104, D-SINK-105 and D-SINK-111: the reply boundary, its escapes and the withheld ids
+
+**What changed** (bin/helper/03-io-playlist.py unless named).
+- `REPLY_READINGS` is one table of every reply or status-file field that prints provider text, typed text or a channel id, by path, with its reading:
+  - `text` is `shown_text`;
+  - `scope` keeps the value only when `shown_text` leaves it unchanged, else "";
+  - `id` prints `ID_WITHHELD` when `channel_id_withheld` refuses the id.
+- `shown_reply` applies the table, copying only the containers on a listed path. It leaves a `clipboard` reply alone.
+- `emit`, a new `write_status` (playlist-status.json and epg-status.json on success) and `write_status_quietly` (both on failure) print through it and through `reply_text`. `reply_text` is json.dumps with `REPLY_ESCAPE_RANGES` written as escapes, and lone surrogates as before.
+- Write side:
+  - `error_payload` reads its message with `shown_text` and its `id` with the id reading;
+  - main()'s three error messages (11-cli.py) read with `shown_text`;
+  - `player_stash` (07-player.py) stores name and group through `shown_text` and the scope through `scope_reading`;
+  - `player_target` carries `shown`, which the play and start replies print;
+  - `track_text`, the first load's reason and file error, and the status reply's `mediaTitle` read with `shown_text`.
+- `tvg_id_refused` (02-sources.py) is the parse's tvg-id rule lifted into one function, which `make_channel` and `channel_id_withheld` both call.
+- Model: `ipcJson` takes the same escape set, and `reconcileVerdict` reads a record whose id is `ID_WITHHELD` as "unknown".
+
+**The direction controls are twelve, not eleven.** The design's set lists U+061C, U+200E, U+200F, U+202A..U+202E and U+2066..U+2069. That is twelve code points, Unicode's Bidi_Control set. The design and the settlement said "the eleven bidi controls". The table and both fixtures carry all twelve: 47 code points in all.
+
+**The fields changed, and the shell's reader of each** (read in Service.qml and the model before the change):
+
+| Field | Reply or file | Shell reader | Effect of the change |
+|---|---|---|---|
+| `error.message` | every error reply, both status files | `Model.parseHelperStatus` and `statusReason` | The network patterns still match: a message names hosts, not URLs. |
+| `warnings[]` | the playlist reply and its file, epg-status.json, the start reply | `Model.statusWarnings` | Redacted again there. |
+| `name`, `playing.name` | play and start replies | `Model.replyTarget` | Names a card only, through `notifyNameText` again. |
+| `firstLoad.reason`, `firstLoad.fileError` | start reply | `deathReport` | Matches `fileError` exactly after a trim against mpv's fixed strings, which `shown_text` leaves unchanged. |
+| the stash's `name`, `group`, `launchedFrom`, `id` | status and probe replies | the probe restore (all four), `reconcileVerdict` (`id`), `reconcileNowPlaying` (an empty scope falls back to the channel's first group) | Covered by the node checks below. |
+| `mediaTitle` | status reply | none | -- |
+| `tracks[]`'s `lang`, `title`, `codec` | tracks reply | `Model.parseTracks` | Redacted again there. |
+| the state replies' fields | state replies | only `found` from `init`; `mode` and `private` are fixed words | -- |
+| status files | -- | the two FileViews, through `parseHelperStatus` | An escape is the same value to JSON.parse. |
+| `Model.ipcJson`'s reply | IPC replies | scripts that parse it | Same values. |
+
+The `id` of an ok `play` or `player start` reply and that start's `playing.id` are NOT read. `replyTarget` and `sessionIntentRepair` match both against the channel the shell asked for, so a token there would read as another channel. The shell reads an error reply's `id` nowhere.
+
+**Red first, on cc4a798 (step 1's commit).**
+
+| Suite | On cc4a798 | On this tree |
+|---|---|---|
+| tests/test_reply_shown.py (new, 24 tests) | 24 of 24 red: 14 errors (no `REPLY_READINGS`, `write_status`, `scope_reading`, `ID_WITHHELD`, `channel_id_withheld` or target `shown`) and 10 failures | 24 of 24 green |
+| tests/Model.test.js (3 new checks) | 2 of 3738 red | 0 of 3738 red |
+| tests/Model.spec.qml (`test_replyEscapesAndWithheldIdInV4`) | 1 of 101 red | 0 of 101 red |
+
+The python failures on cc4a798:
+- All 23 table paths printed a credential piece or a raw escape-set character at emit.
+- Every state verb (`show`, `init`, `source list`, `favorite add`, `clear-recents`) printed `qqqqqq`, `zzzzzz`, U+009B, U+2028 and U+202E.
+- The playlist reply and its status file, and epg-status.json, held them too.
+- The play reply's raw U+2028 split the reply line for a `str.splitlines` reader. That made the play test an error on cc4a798, not a failure.
+- The first-load reason and the track rows kept their C1 controls.
+
+The node failures on cc4a798:
+- `ipcJson` wrote all twelve direction controls raw (the check lists the first seven).
+- `reconcileVerdict` read a withheld record as "diverged" for any channel the shell names.
+
+The reattach check passes on cc4a798 too. It pins the cost statement, so its red is a mutant's (below).
+
+The measured `state show` case the settlement asked for is `test_the_legacy_id_prints_withheld_and_stays_in_the_file`. Its favorites print `[id withheld]`, and state.json keeps `t:qqqqqq:zzzzzz@cdn.test`. It is red on cc4a798. The first draft of T2 exempted ids from the "no credential piece" assertion; this suite exempts nothing but `clipboard.text`.
+
+**Mutants (helper), each run against tests/test_reply_shown.py.**
+- *Each of the 23 table paths dropped, one at a time:* every one is red. At least the emit, status-file and table-names tests fail, and the verb-level test of that path fails as well where one exists (warnings, the state fields, the stash fields).
+- *Other single-decision mutants, each red:*
+  - emit bypassing `shown_reply`;
+  - `write_status` bypassing it;
+  - `reply_text` without its escapes;
+  - the direction-control range U+202A..U+202E dropped;
+  - U+200D escaped too (the "nothing else escaped" side);
+  - the scope reading keeping everything;
+  - the id reading keeping everything;
+  - a clipboard reply read;
+  - the error reply's `id` printed raw;
+  - the stash's name stored raw;
+  - the stash's scope stored raw;
+  - `track_text` on the plain redaction;
+  - the first load's reason on the plain redaction;
+  - the target's `shown` set to the raw name;
+  - the tvg-id rule without its `:`/`@` arm.
+
+**Mutants (model), each running the three node checks.**
+- `ipcJson` without U+202A..U+202E, or with U+200D added: the escapes check red.
+- `reconcileVerdict` without its `ID_WITHHELD` test: the id check red.
+- Service.qml's `reconcileNowPlaying` without its `groupScopeId(group)` fallback (through `IPTV_SERVICE_QML`): the reattach check red.
+
+**Cost**, best of 5 at load about 2.2:
+
+| Reply | Through the boundary | Before |
+|---|---|---|
+| A logo line | 7.2 us | 3.8 us |
+| A playlist reply with 20 listed warnings that name a credentialed channel | 0.32 ms | 0.013 ms |
+| A state reply with 200 hidden groups holding a credentialed URL, 50 recents and 300 favorites | 3.0 ms | 0.13 ms |
+
+No reply carries channel rows, and the parse does no new work per row.
+
+**Rule 15.**
+- *Every stdout writer:* `emit` (changed). The stub's damaged-part refusal (bin/omarchy-iptv) is fixed text.
+- *Every status-file writer:* the playlist and guide status writes (changed, all four sites).
+  - The other `write_json_atomic` targets are data at 0600 and are left: channels.json, epg-now.json, epg-window.txt, state.json, failed.json and logo-failed.json.
+- *Every reply composer that redacted provider text with the plain redaction:*
+  - changed: `error_payload`, the config shield's message, `folder_unusable`, the internal message, `track_text`, the first load's two fields, `mediaTitle`;
+  - left: `ended_verdict`'s detail (07-player.py), the mirror of `Model.endedVerdict` over mpv's fixed `file_error` strings, and `drain_launch_stderr`'s lines, mpv's launch output. Both reach a reply only as `firstLoad.reason`, which the boundary reads again.
+- *Every printer of a channel id:*
+  - Withheld: the state replies, the player's record and the error replies.
+  - Left as stated in D-SINK-111's row: the ok `play` and `player start` replies and `playing.id`, which the shell matches; the `failed` replies, whose marks are pruned to ids the current cache holds; and the shell's own IPC status and channel replies, which print what the shell holds. Each can print such an id only while a cache written before 0.19.0 holds the row.
+- *Every JSON writer of the shell:* every IPC verb answers through `Model.ipcJson` (Service.qml's `IpcHandler`). The other `JSON.stringify` calls write state.json, a status the shell keeps itself, and mpv commands.
+
+**Measured beyond the design.** A raw U+2028 in a reply splits it for any reader that splits lines the way Python's `str.splitlines` does (the play test's error on cc4a798). The escapes close that too.
+
+**An amendment to D-SINK-110's reading, found by this step.** Putting the first load's reason through `shown_text` turned three existing tests red:
+- test_player's `test_first_load_failure_names_the_host_and_never_a_path_credentials_tail`;
+- two cases of test_player_endings (the player-endings fixture's `reply`).
+
+Each wanted `Failed to open http://prov.test.` and got the line without its final `.`. mpv's log lines end with a line feed, and step 1's reading read that last control as U+0001. U+0001 is no sentence punctuation, so it held the `.` inside the address's run, and the redaction dropped it with the path.
+
+The controls that END a text are now deleted before the reading, in both mirrors (`_shown`, `Model.shownText`). That is the old reading for them: nothing follows them for an address to run on to. In `shown_lines` a line feed among them is kept. A control after the punctuation and before more text is still read as U+0001, which the plain redaction reads the same way (`See http://h.test/x.<U+0001> more` prints no `.` in either).
+- The shown-text fixture gains a vector for each case: 23 vectors.
+- The first is red on cc4a798 (`Failed to open http://cdn.test`), in both suites' vector checks (test_shown_text's, and the node check, which makes 3 of 3738 red on cc4a798 with the two below).
+- tests/test_shown_text.py and the three node checks stay green with the change.
+- The three player tests read as they did on 1118ffb.
+
+**Two existing tests changed, each to the new contract.**
+- test_mpv's `test_title_and_media_title_carry_no_control_character` proved the cache held the controls by reading the play reply's name. The reply now prints the name as the title shows it, so the test reads channels.json for the controls, and asserts the reply's name equals the title. The reply withholds more; the title's pins are unchanged.
+- test_player_bounds' stand-in for `player_target` returns the target's new `shown` key. A double keeps the shape of what it stands in for (rule 10).
+
+**A test fix of this lane's own.** The first draft of tests/test_reply_shown.py ran `state init` in-process without disarming the verb's own SIGALRM. That is F-HARNESS-27's shape, which test_state's runner already guards. A batch that ran 30 s past it died with rc 142 and no summary, twice. The runner now disarms the alarm on the way out, as test_state's does.
+
+**The first-load mutant.** The first version of the first-load test survived the mutant that put the reason back on the plain redaction. Its log line was one both readings withhold. The line now holds a dotted username with a TAB in its port, which the plain reading prints, and an ESC outside the address, and the mutant is red. All 38 helper mutants are red.

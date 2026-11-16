@@ -451,6 +451,7 @@
         "PLAYER_START_CHANNEL_REFUSALS",
         "playerStartFailure",
         "replyTarget",
+        "ID_WITHHELD",
         "reconcileVerdict",
         "sessionIntentRepair",
         "OWNER_TOKEN_RE",

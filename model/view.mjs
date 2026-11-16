@@ -140,10 +140,16 @@ function ipcNowPlaying(np, chno) {
 // an 8-bit CSI and U+009D an OSC. Escaped as `\u009b`, the reply is the same
 // JSON value to any parser and carries no control a terminal reads.
 // U+2028 and U+2029 are escaped with them, so the reply is also a valid
-// JavaScript string literal in any engine.
+// JavaScript string literal in any engine. D-SINK-105 (2026-11-16): and the
+// twelve text-direction controls (Unicode's Bidi_Control set) (U+061C, U+200E, U+200F, U+202A..U+202E,
+// U+2066..U+2069), which a terminal reorders a line by; the helper's replies
+// and both status files escape the same set (REPLY_ESCAPE_RANGES), held by
+// the shared reply-escapes fixture (dev branch). The other format
+// characters are left alone: escaping a zero-width joiner would break an
+// emoji in a terminal.
 function ipcJson(value) {
   var text = JSON.stringify(value === undefined ? null : value)
-  return text.replace(/[\u007f-\u009f\u2028\u2029]/g, function (c) {
+  return text.replace(/[\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, function (c) {
     var hex = c.charCodeAt(0).toString(16)
     return "\\u" + "0000".substring(hex.length) + hex
   })

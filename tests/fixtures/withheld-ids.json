@@ -1,0 +1,30 @@
+{
+ "about": "D-SINK-111 (2026-11-16): the channel ids a helper reply prints as `token` -- a `t:` id whose tvg-id part the parse reads as absent (tvg_id_refused: a mark the redactors' reading finds, or a `:` with an `@` after it), which 0.18.0 and earlier stored in favorites, recents, the last-played and session records and the player's record. state.json keeps them. tests/test_reply_shown.py runs the helper's channel_id_withheld over both lists and the parse over every unsuffixed `t:` tail; tests/Model.test.js holds Model.ID_WITHHELD to `token`, which the shell's health tick reads as nothing to compare (Model.reconcileVerdict).",
+ "credentialsAreFake": "Every credential here is synthetic (qqqqqq / zzzzzz) on hosts under the reserved .test TLD.",
+ "token": "[id withheld]",
+ "withheld": [
+  "t:qqqqqq:zzzzzz@cdn.test",
+  "t:qqqqqq:zzzzzz@cdn.test#2",
+  "t:http://qqqqqq:zzzzzz@cdn.test/x",
+  "t:https://cdn.test/live/qqqqqq/zzzzzz/1.ts",
+  "t:a:b@c",
+  "t:qqqqqq:\u200b//zzzzzz@cdn.test",
+  "t:http:\u0001//cdn.test/live/qqqqqq",
+  "t:cdn.test:8080:qqqqqq@zzzzzz"
+ ],
+ "kept": [
+  "t:news.us",
+  "t:CNN.us@HD",
+  "t:CNN.us@HD#2",
+  "t:x:y",
+  "t:bbc1.uk",
+  "t:a@b:c",
+  "n:bf6daa9c",
+  "u:d4c55ad5",
+  "u:d4c55ad5#2",
+  "n:qqqqqq:zzzzzz@cdn.test",
+  "favorites",
+  "",
+  "t:"
+ ]
+}

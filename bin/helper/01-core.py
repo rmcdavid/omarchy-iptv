@@ -2439,6 +2439,18 @@ def _shown(value: Any, lines: bool) -> str:
     s = "" if value is None else str(value)
     if s.isprintable() or _CONTROL_CHARS.search(s) is None:
         return redact_urls(s)
+    # The controls that end the text are deleted, as the old reading deleted
+    # every control: nothing follows them for an address to run on to, and
+    # read as SHOWN_STAND_IN one would hold an address's sentence
+    # punctuation inside its run (`... http://h.test/x.<LF>` printed
+    # `http://h.test` and lost the `.`; mpv's log lines end that way). In
+    # lines, a line feed among them is kept.
+    cut = len(s)
+    while cut > 0 and "\x00" <= s[cut - 1] <= "\x9f" and not " " <= s[cut - 1] <= "~":
+        cut -= 1
+    if cut < len(s):
+        tail = "\n" * s.count("\n", cut) if lines else ""
+        return _shown(s[:cut], lines) + tail
     holes = [m.start() for m in _CONTROL_CHARS.finditer(s) if not (lines and s[m.start()] == "\n")]
     if not holes:
         return redact_urls(s)

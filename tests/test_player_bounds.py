@@ -225,7 +225,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         if hasattr(helper, "stream_lookup_refusal"):
             assert helper.stream_lookup_refusal(url, {"host": "p.example.test", "port": 80, "loopback": False,
                                                       "local": False}) == ""
-        return {"id": cid, "url": url, "name": "X", "headers": {"User-Agent": "u"}, "group": "G"}
+        # The shape player_target returns, `shown` included (D-SINK-104).
+        return {"id": cid, "url": url, "name": "X", "shown": "X", "headers": {"User-Agent": "u"}, "group": "G"}
 
     def resolve(host, port, timeout, limit=None):
         clock.t += timeout - _JUST_INSIDE

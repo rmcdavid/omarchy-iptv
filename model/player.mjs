@@ -399,15 +399,25 @@ function replyTarget(status, nowPlaying) {
 // channel they did not choose while the interface agreed with the mistake.
 //
 //   agree     the player's record names what the shell wants
-//   unknown   nothing to compare: no record, no intent, or a record from a
-//             different playlist whose ids mean something else. Never a
-//             verdict, so an old helper or a foreign player raises nothing
+//   unknown   nothing to compare: no record, no intent, a record from a
+//             different playlist whose ids mean something else, or a record
+//             whose id the helper withheld (ID_WITHHELD). Never a verdict,
+//             so an old helper or a foreign player raises nothing
 //   diverged  they name different channels. `repair` is the id to re-apply
+//
+// D-SINK-111 (2026-11-16): the helper's replies print a record's id as
+// ID_WITHHELD when it is a `t:` id whose tvg-id part the parse refuses (one
+// stored by 0.18.0 or earlier, holding a credential), and a cache written
+// before 0.19.0 can still hold that row, so the shell may be playing it. The
+// token names no channel, so it is nothing to compare: read as "diverged",
+// the health tick would re-apply a channel the player is already on.
+var ID_WITHHELD = "[id withheld]"
+
 function reconcileVerdict(stash, nowPlaying, sourceKey) {
   var np = nowPlaying && str(nowPlaying.id) !== "" ? nowPlaying : null
   var record = playerStash(stash)
   var unknown = { state: "unknown", repair: "", wanted: np ? str(np.id) : "", playing: record ? record.id : "" }
-  if (!np || !record || record.playing === false) return unknown
+  if (!np || !record || record.playing === false || record.id === ID_WITHHELD) return unknown
   var active = str(sourceKey)
   if (active !== "" && record.sourceKey !== "" && record.sourceKey !== active) return unknown
   if (record.id === str(np.id)) return { state: "agree", repair: "", wanted: str(np.id), playing: record.id }
@@ -1345,7 +1355,7 @@ export {
   PLAYER_WATCHDOG_MARGIN_MS, PLAYER_BIRTH_EDGE_MS, playerLadderMs,
   playerWatchdogMs, playFork, playForkBlind, zapArgs, PLAY_UNREADABLE,
   HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
-  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
+  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget, ID_WITHHELD,
   reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
   playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
   playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,

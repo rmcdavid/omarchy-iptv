@@ -404,7 +404,10 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         headers.pop(key, None)
     if dropped:
         log("play: dropped a proxy header the relay would read")
-    target = {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group, "relay": relay}
+    # D-SINK-104: `shown` is the name as every reply prints it and the
+    # window title shows it (shown_text), read once here.
+    target = {"id": channel_id or "", "url": url, "name": name, "shown": shown_text(name), "headers": headers,
+              "group": group, "relay": relay}
     if transport:
         target["transport"] = transport
     return target
@@ -1356,7 +1359,7 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
             event = str(message.get("event") or "")
             mine = entry_id is None or message.get("playlist_entry_id") == entry_id
             if event == "log-message" and str(message.get("level") or "") in ("error", "fatal"):
-                text = redact_urls(str(message.get("text") or "")).strip()
+                text = shown_text(str(message.get("text") or "")).strip()
                 if text and not player_log_warning(text):
                     last_error, named = text, True
                 elif text and not named:
@@ -1394,7 +1397,7 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                     # already redacted, here, inside python (section 6).
                     # D-PLY-36: and the reply says it was an end-file, with
                     # mpv's own file_error beside the reason.
-                    file_error = redact_urls(str(message.get("file_error") or ""))
+                    file_error = shown_text(str(message.get("file_error") or ""))
                     return first_load_result("failed", last_error or verdict["reason"],
                                              "end-file", file_error)
                 return {"state": "unknown", "reason": ""}
@@ -1883,7 +1886,7 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         emit(error_payload(kind, HelperError("local_address", RELAY_LOAD_REFUSAL), id=args.id or None, seq=seq))
         return EXIT_ERROR
     reply = {"ok": True, "kind": kind, "spawned": bool(outcome["spawned"]), "pid": int(outcome["pid"]),
-             "id": target["id"] or None, "name": target["name"], "entryId": entry_id, "seq": seq,
+             "id": target["id"] or None, "name": target["shown"], "entryId": entry_id, "seq": seq,
              "firstLoad": first_load, "warnings": warnings,
              # Additive, and the two fields the shell's repair reads: whether
              # this verb's own channel is what the player ended up on, and what
@@ -2257,11 +2260,13 @@ TRACK_MAX_CODEC = 64
 
 
 def track_text(value: Any, limit: int) -> str:
-    """A track's free-text field, redacted and then cut to `limit` code points
-    (the cut after the redaction, so a URL is never half-redacted)."""
+    """A track's free-text field, as shown_text prints it and then cut to
+    `limit` code points (the cut after the redaction, so a URL is never
+    half-redacted). shown_text since D-SINK-104: a control in a track's
+    title went out raw."""
     if not isinstance(value, str):
         return ""
-    return redact_urls(value)[:limit]
+    return shown_text(value)[:limit]
 
 
 def track_rows(data: Any, omitted: list[int] | None = None) -> list[dict[str, Any]]:

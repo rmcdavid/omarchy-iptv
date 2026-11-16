@@ -1349,6 +1349,26 @@ TestCase {
     compare(Model.notifyNameText(cases[0][0]), "News [host withheld]")
   }
 
+  // D-SINK-105 and D-SINK-111 (2026-11-16), in V4, the engine that answers
+  // the IPC verbs and runs the health tick: Model.ipcJson escapes the shared
+  // reply-escapes set (DEL, C1, U+2028/9 and the twelve direction controls)
+  // and nothing else, and reconcileVerdict reads a record whose id the helper
+  // withheld as nothing to compare.
+  function test_replyEscapesAndWithheldIdInV4() {
+    var ranges = [[0x7f, 0x9f], [0x2028, 0x2029], [0x61c, 0x61c], [0x200e, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069]]
+    var text = ""
+    for (var r = 0; r < ranges.length; r++) for (var c = ranges[r][0]; c <= ranges[r][1]; c++) text += String.fromCharCode(c)
+    var kept = String.fromCharCode(0x200b) + String.fromCharCode(0x200d) + String.fromCharCode(0xfeff) + "a"
+    var out = Model.ipcJson({ x: text + kept })
+    compare(out.indexOf("\\u202e") !== -1 && out.indexOf("\\u061c") !== -1 && out.indexOf("\\u009b") !== -1, true)
+    for (var i = 0; i < text.length; i++) compare(out.indexOf(text.charAt(i)), -1, "raw U+" + text.charCodeAt(i).toString(16))
+    compare(out.indexOf(kept) !== -1, true)
+    compare(JSON.parse(out).x, text + kept)
+    var record = { schema: 1, playing: true, id: Model.ID_WITHHELD, name: "News", sourceKey: "ka", since: 7 }
+    compare(Model.ID_WITHHELD, "[id withheld]")
+    compare(Model.reconcileVerdict(record, { id: "t:news.us" }, "ka").state, "unknown")
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.

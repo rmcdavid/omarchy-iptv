@@ -1916,6 +1916,36 @@ def bounded_option(key: str, value: str, store: dict[str, str], bounds: dict[str
         store[key] = value
 
 
+def tvg_id_refused(tvg_id: str) -> bool:
+    """Whether the parse reads a tvg-id as absent: one holding a mark the
+    redactors' reading finds (url_mark_any, D-SINK-80, D-SINK-95), or a `:`
+    with an `@` after it, the token a redactor withholds (D-SINK-96); kept,
+    the row's `t:` id would carry it raw. One function since D-SINK-111
+    (2026-11-16), which asks it of a stored id's tail too."""
+    colon = tvg_id.find(":")
+    return url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0)
+
+
+# D-SINK-111 (2026-11-16): what a helper reply prints in place of a channel
+# id channel_id_withheld refuses. Model.ID_WITHHELD is the mirror, and the
+# shared withheld-ids fixture (dev branch) holds both to it.
+ID_WITHHELD = "[id withheld]"
+
+
+def channel_id_withheld(channel_id: Any) -> bool:
+    """D-SINK-111: whether a reply prints `channel_id` as ID_WITHHELD. A
+    `t:` id is the row's tvg-id, and one the parse refuses today
+    (tvg_id_refused) can still be stored: 0.18.0 and earlier made
+    `t:qqqqqq:zzzzzz@cdn.test` from tvg-id="qqqqqq:zzzzzz@cdn.test" (0.17.0
+    `t:http://...` too), and nothing re-derives a stored favorite, recent,
+    session or player record (remap_state_file maps id scheme 1 alone). A
+    `#n` suffix (suffix_ids) is part of the tail it asks. Every other id is
+    a hash and is never withheld. The record itself is unchanged: dropping
+    such ids from state.json waits for the owner's word."""
+    text = channel_id if isinstance(channel_id, str) else ""
+    return text.startswith("t:") and tvg_id_refused(text[2:])
+
+
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str], index: int = 1,
@@ -1943,8 +1973,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # D-SINK-95 and D-SINK-96 (2026-11-11): so is a tvg-id holding a mark the
     # redactors' reading finds (url_mark_any), or a `:` with an `@` after it,
     # the token a redactor withholds; kept, the id would carry it raw.
-    colon = tvg_id.find(":")
-    if url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0):
+    if tvg_id_refused(tvg_id):
         tvg_id = ""
     tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).

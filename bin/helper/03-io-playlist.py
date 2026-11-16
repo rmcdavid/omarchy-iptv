@@ -1576,20 +1576,152 @@ def read_json(path: str) -> Any:
         return None
 
 
-def emit(payload: Any) -> None:
-    text = json.dumps(payload, ensure_ascii=False) + "\n"
+# D-SINK-105 (2026-11-16): the code points every helper reply and both
+# status files write as a JSON escape: DEL and the C1 controls, the line and
+# paragraph separators -- Model.ipcJson's set since F-SINK-16 -- and the
+# twelve text-direction controls (Unicode's Bidi_Control set) (U+061C, U+200E, U+200F, U+202A..U+202E,
+# U+2066..U+2069). json.dumps with ensure_ascii=False wrote them raw, so a
+# reply or a pasted status file put U+009B, an 8-bit CSI, and a direction
+# override into a terminal. Inside a JSON string only, where an escape is
+# the same value to every parser. The other format characters stay as they
+# are: escaping a zero-width joiner would break an emoji. The shared
+# reply-escapes fixture (dev branch) holds this list and Model.ipcJson's.
+REPLY_ESCAPE_RANGES = ((0x7F, 0x9F), (0x2028, 0x2029), (0x061C, 0x061C), (0x200E, 0x200F),
+                       (0x202A, 0x202E), (0x2066, 0x2069))
+_REPLY_ESCAPES = {code: "%su%04x" % (chr(92), code) for low, high in REPLY_ESCAPE_RANGES
+                  for code in range(low, high + 1)}
+
+
+def reply_text(payload: Any, separators: tuple[str, str] | None = None) -> str:
+    """The JSON text of a reply or a status file: json.dumps with
+    ensure_ascii=False, every REPLY_ESCAPE_RANGES code point written as its
+    escape (D-SINK-105), and a lone surrogate as its own when one is held
+    (D-STATE-8: asked of the text and not of the stream, whose error
+    handler is the locale's; under C it is surrogateescape, which writes
+    some halves as raw bytes that are not UTF-8)."""
+    text = json.dumps(payload, ensure_ascii=False, separators=separators).translate(_REPLY_ESCAPES)
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
-        # D-STATE-8, the reply's half: a verb that prints what a JSON file
-        # held (`state show`, and every state verb's reply) met the same half
-        # pair on stdout, after its write had landed, and answered `internal`.
-        # Asked of the text and not of the stream, whose error handler is the
-        # locale's: under C it is surrogateescape, which writes some halves
-        # as raw bytes that are not UTF-8. A reply is small; the write of a
-        # whole cache file (write_json_atomic) pays for no such check.
         text = escape_half_pairs(text)
-    sys.stdout.write(text)
+    return text
+
+
+# D-SINK-104 (2026-11-16): the reply boundary. Every field a helper reply or
+# a status file prints that holds provider text, text the user typed, or a
+# channel id, by its path, with `[]` for each element of a list, and the
+# reading it is printed through. One table for every kind of reply, read by
+# emit, write_status and write_status_quietly, so a verb added later prints
+# its fields this way the day it uses a path here. The readings:
+#   text   shown_text: as the guide shows it, an address as its host,
+#          a credential withheld, no control left (D-SINK-110);
+#   scope  the zap ring's scope, kept only when shown_text leaves it
+#          unchanged, else "" (a reattached shell then scopes the ring to
+#          the channel's first group, Service.reconcileNowPlaying);
+#   id     a channel id, ID_WITHHELD when channel_id_withheld refuses it
+#          (D-SINK-111): in the state verbs' replies, which the shell does
+#          not read, and in the player's record, whose id the shell's
+#          health tick compares (Model.reconcileVerdict reads ID_WITHHELD as
+#          nothing to compare). An error reply's `id` is read in
+#          error_payload. The `id` of an ok `play` or `player start` reply
+#          and that start's `playing.id` are NOT read: the shell matches
+#          both against the channel it asked for (Model.replyTarget,
+#          sessionIntentRepair), and a cache holding such a row is one
+#          written before 0.19.0.
+# They were printed raw until then: the state verbs' hidden groups, saved
+# searches and recents, last-played and session names; the playlist and
+# guide warnings that name a channel; the play and start replies' name; and
+# the player's record (its stash), which the status and probe replies print.
+# A `clipboard` reply is never read: its text is the user's paste, which
+# the reply hands back as it is. What is NOT here, stated: a source's
+# label (`state.sources[].label`), and every host a reply names.
+REPLY_READINGS = (
+    ("error.message", "text"),
+    ("warnings[]", "text"),
+    ("name", "text"),
+    ("playing.name", "text"),
+    ("firstLoad.reason", "text"),
+    ("firstLoad.fileError", "text"),
+    ("stash.name", "text"),
+    ("stash.group", "text"),
+    ("stash.launchedFrom", "scope"),
+    ("mediaTitle", "text"),
+    ("tracks[].lang", "text"),
+    ("tracks[].title", "text"),
+    ("tracks[].codec", "text"),
+    ("state.recents[].name", "text"),
+    ("state.lastPlayed.name", "text"),
+    ("state.session.name", "text"),
+    ("state.hiddenGroups[]", "text"),
+    ("state.savedSearches[].query", "text"),
+    ("stash.id", "id"),
+    ("state.favorites[]", "id"),
+    ("state.recents[].id", "id"),
+    ("state.lastPlayed.id", "id"),
+    ("state.session.id", "id"),
+)
+
+
+def scope_reading(value: str) -> str:
+    """The `scope` reading: the zap ring's scope as it is when shown_text
+    leaves it unchanged, else "" (D-SINK-104). `g:Sports@HD` reads as a
+    credential token, so it is "" too: a reattach then falls back to the
+    channel's first group, which is that same scope when the channel is
+    found."""
+    return value if shown_text(value) == value else ""
+
+
+def id_reading(value: str) -> str:
+    """The `id` reading (D-SINK-111)."""
+    return ID_WITHHELD if channel_id_withheld(value) else value
+
+
+_REPLY_READERS = {"text": shown_text, "scope": scope_reading, "id": id_reading}
+
+
+def _reading_tree(readings: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    tree: dict[str, Any] = {}
+    for path, reading in readings:
+        node = tree
+        steps = []
+        for part in path.split("."):
+            steps.extend([part[:-2], "[]"] if part.endswith("[]") else [part])
+        for step in steps[:-1]:
+            node = node.setdefault(step, {})
+        node[steps[-1]] = reading
+    return tree
+
+
+def _read_reply(value: Any, tree: Any) -> Any:
+    if isinstance(tree, str):
+        return _REPLY_READERS[tree](value) if isinstance(value, str) else value
+    if "[]" in tree:
+        return [_read_reply(item, tree["[]"]) for item in value] if isinstance(value, list) else value
+    if not isinstance(value, dict):
+        return value
+    out = dict(value)
+    for key, sub in tree.items():
+        if key in out:
+            out[key] = _read_reply(out[key], sub)
+    return out
+
+
+_REPLY_TREE = _reading_tree(REPLY_READINGS)
+
+
+def shown_reply(payload: Any) -> Any:
+    """`payload` with every REPLY_READINGS field read as the table says,
+    copying only the containers on a listed path that the payload holds; a
+    `clipboard` reply is returned as it is (D-SINK-104)."""
+    if not isinstance(payload, dict) or payload.get("kind") == "clipboard":
+        return payload
+    return _read_reply(payload, _REPLY_TREE)
+
+
+def emit(payload: Any) -> None:
+    """One reply on stdout, through the reply boundary (shown_reply,
+    D-SINK-104) and its escapes (reply_text, D-SINK-105)."""
+    sys.stdout.write(reply_text(shown_reply(payload)) + "\n")
     sys.stdout.flush()
 
 
@@ -1597,16 +1729,27 @@ def error_payload(kind: str, error: HelperError, **extra: Any) -> dict[str, Any]
     payload: dict[str, Any] = {
         "ok": False,
         "kind": kind,
-        "error": {"code": error.code, "message": redact_urls(error.message)},
+        "error": {"code": error.code, "message": shown_text(error.message)},
     }
     payload.update(error.extra)
     payload.update(extra)
+    # D-SINK-111: the id the shell asked for, which a refusal echoes and
+    # nothing reads back.
+    if isinstance(payload.get("id"), str):
+        payload["id"] = id_reading(payload["id"])
     return payload
+
+
+def write_status(path: str, status: dict[str, Any]) -> None:
+    """A fetch's status file (playlist-status.json, epg-status.json), through
+    the reply boundary as a reply is (D-SINK-104, D-SINK-105), at 0600 in
+    its 0700 folder; an OSError is the caller's."""
+    write_text_atomic(path, reply_text(shown_reply(status), (",", ":")) + "\n")
 
 
 def write_status_quietly(path: str, status: dict[str, Any]) -> None:
     try:
-        write_json_atomic(path, status)
+        write_status(path, status)
     except OSError as io_error:
         log("could not write %s: %s" % (os.path.basename(path), io_error))
 
@@ -1758,7 +1901,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # judge, so the run fails as the first write's failure does. A
         # folder made a link to nothing in between is R25c's (D-SRC-73).
         try:
-            write_json_atomic(status_path, status)
+            write_status(status_path, status)
         except FolderUnusable:
             raise
         except OSError as io_error:

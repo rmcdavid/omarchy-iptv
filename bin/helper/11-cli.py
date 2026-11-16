@@ -186,7 +186,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         if payload["changed"]:
             log("config shield: %s %s -> %s" % (result["file"], result["modeBefore"], result["modeAfter"]))
     else:
-        payload["error"] = {"code": result["code"], "message": redact_urls(result["message"])}
+        payload["error"] = {"code": result["code"], "message": shown_text(result["message"])}
         log("config shield: %s (%s, mode %s)" % (result["message"], result["verdict"], result["modeBefore"]))
     emit(payload)
     return EXIT_OK if payload["ok"] else EXIT_ERROR
@@ -660,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
         # R25c: not a bug -- a folder the verb needs is a link to nothing, or
         # not a folder. One sentence, the exit every refusal has.
         log("%s: %s" % (args.command, error.sentence))
-        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": redact_urls(error.sentence)}})
+        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": shown_text(error.sentence)}})
         return EXIT_ERROR
     except HelperError as error:
         # D-PLY-38: a refusal raised where a verb has no net of its own
@@ -673,7 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
-        message = bounded_text(redact_urls("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        message = bounded_text(shown_text("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
         try:
             import traceback
             trace = traceback.format_exc()

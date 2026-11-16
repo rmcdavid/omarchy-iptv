@@ -1683,7 +1683,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
         # so the run fails as a write of the window does. The window itself
         # is on disk, which `stale` says.
         try:
-            write_json_atomic(status_path, status)
+            write_status(status_path, status)
         except FolderUnusable:
             raise
         except OSError as io_error:

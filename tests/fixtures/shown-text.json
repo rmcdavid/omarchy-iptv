@@ -272,6 +272,27 @@
     "[url]",
     "HTTPS"
    ]
+  },
+  {
+   "why": "D-SINK-110: the controls that end a text are deleted, so an address's sentence punctuation before them is put back (mpv's log lines end with a line feed)",
+   "text": "Failed to open http://qqqqqq:zzzzzz@cdn.test/live/1.ts.\n",
+   "py": "Failed to open http://cdn.test.",
+   "js": "Failed to open cdn.test.",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zzzzzz",
+    "live/1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-110: a control after the punctuation and before more text is still read as U+0001, inside the run",
+   "text": "See http://qqqqqq:zzzzzz@cdn.test/x.\u0001 more",
+   "py": "See http://cdn.test more",
+   "js": "See cdn.test more",
+   "mustNotAppear": [
+    "qqqqqq",
+    "zzzzzz"
+   ]
   }
  ]
 }
