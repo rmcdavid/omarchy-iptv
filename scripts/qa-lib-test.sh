@@ -3380,6 +3380,61 @@ is "every player start a scenario driver runs itself drops both" "$p10_all $p10_
 
 # ======================================= AF_UNIX socket paths (F-HARNESS-104)
 
+section "scenario readers taken out and run / F-HARNESS-57, F-HARNESS-52"
+
+# Two reads a live scenario makes, each a function in its scenario so that it
+# can be taken out whole (qa_extract) and run here on inputs chosen to fool
+# the read it replaced. Neither scenario runs in the gate; these do.
+SR=$TMP/sr; mkdir -p "$SR"
+SRC_SC=$ROOT/scripts/dev-harness/sources-scenario.sh
+TLS_SC=$ROOT/scripts/dev-harness/tls-scenario.sh
+
+# F-HARNESS-57: "sources() carries no URL" was `! grep -q "://"` over the
+# reply, which a dead IPC satisfies. The first case is that one: on the old
+# line it PASSED.
+st "sources_reply_clean is taken out of sources-scenario.sh whole" 0 qa_extract "$SRC_SC" '^sources_reply_clean\(\) \{' '^\}$'
+qa_extract "$SRC_SC" '^sources_reply_clean\(\) \{' '^\}$' >"$SR/src.sh" && . "$SR/src.sh"
+st "a dead IPC's empty reply is NOT a reply without a URL" 1 sources_reply_clean "" k1
+is "(the old line's own expression passes that empty reply)" "$(! grep -q "://" <<<"" && echo passes)" "passes"
+st "a reply that names the source and holds no URL is clean" 0 sources_reply_clean '[{"id":"k1","label":"A","host":"h.test"},{"id":"k2","label":"B"}]' k1
+st "the same reply with a URL anywhere in it is not" 1 sources_reply_clean '[{"id":"k1","label":"A","host":"http://h.test/x"}]' k1
+st "a reply that does not name the source is not" 1 sources_reply_clean '[{"id":"k2","label":"B"}]' k1
+st "the harness's answer with no service, [], is not" 1 sources_reply_clean '[]' k1
+st "a reply that is not JSON is not" 1 sources_reply_clean 'QSFAIL: no running instances' k1
+st "a JSON reply that is not a list is not" 1 sources_reply_clean '{"id":"k1"}' k1
+st "an EMPTY id to look for proves nothing, so it is not" 1 sources_reply_clean '[{"id":"","label":"A"}]' ""
+is "and the scenario's check calls it with the reply and the active key" \
+   "$(qa_count '^check "sources\(\) answers, naming the active source, and carries no URL" .sources_reply_clean "\$\(ipc sources\)" "\$K1".$' "$SRC_SC")" "1"
+
+# F-HARNESS-52: S5 read the LAST token and the COUNT of `--tls-verify=yes`
+# from the space-joined command line. A stand-in whose argv holds the token
+# only INSIDE one item's value reads as both layers there, and as neither
+# item by item.
+st "argv_tls is taken out of tls-scenario.sh whole" 0 qa_extract "$TLS_SC" '^argv_tls\(\) \{' '^\}$'
+qa_extract "$TLS_SC" '^argv_tls\(\) \{' '^\}$' >"$SR/tls.sh" && . "$SR/tls.sh"
+printf '#!/bin/bash\nwhile :; do sleep 0.1; done\n' >"$SR/standin"; chmod +x "$SR/standin"
+sr_start() {   # sr_start <args...> -> sets sr_pid once its argv can be read
+  "$SR/standin" "$@" >/dev/null 2>&1 & sr_pid=$!
+  local i; for ((i = 0; i < 50; i++)); do [[ $(qa_cmdline "$sr_pid" 2>/dev/null) == *standin* ]] && break; sleep 0.1; done
+}
+sr_stop() { kill "$sr_pid" 2>/dev/null; wait "$sr_pid" 2>/dev/null; }
+sr_start --idle=once --tls-verify=yes --profile=evil --tls-verify=yes
+is "an honest argv: two items, and the last is the token" "$(argv_tls "$sr_pid")" "yes:2 last:1"
+sr_stop
+sr_start --idle=once "--force-media-title=a --tls-verify=yes b --tls-verify=yes"
+is "the token only INSIDE one item's value: no item, and not the last" "$(argv_tls "$sr_pid")" "yes:0 last:0"
+sr_joined=$(qa_cmdline "$sr_pid")
+is "(the joined string S5 used to read calls that same argv both layers)" \
+   "$(awk '{ print $NF }' <<<"$sr_joined") $(grep -o -- '--tls-verify=yes' <<<"$sr_joined" | wc -l | tr -d ' ')" "--tls-verify=yes 2"
+sr_stop
+sr_start --tls-verify=yes --profile=evil
+is "the token present but not last" "$(argv_tls "$sr_pid")" "yes:1 last:0"
+sr_stop
+is "an empty pid is NOARGV, never the kernel's command line" "$(argv_tls "")" "NOARGV"
+is "a pid that is not a number is NOARGV" "$(argv_tls "12x")" "NOARGV"
+is "S5 reads both from argv_tls, and the joined-string reads are gone" \
+   "$(qa_count '^s5_tls=\$\(argv_tls "\$s5_pid"\)$' "$TLS_SC") $(qa_count '(awk|grep -o).*<<<"\$s5_cmd"' "$TLS_SC")" "1 0"
+
 section "qa_sock_fits / qa_cage_runtime_fits / F-HARNESS-104: a socket path that cannot fit"
 
 # Four nested cages aborted on 2026-11-08 and 09, each leaving a core and a
@@ -3790,7 +3845,9 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # (F-HARNESS-58) and P10's three over a stub python3 (F-HARNESS-55).
 # 693 -> 718 on 2026-11-16: the lock guard's twenty-five (F-HARNESS-85): the
 # host's query stubbed, absent, and the real one over a stub hyprctl.
-EXPECTED=718
+# 718 -> 737 the same day: sources_reply_clean's eleven (F-HARNESS-57) and
+# argv_tls's eight (F-HARNESS-52), each function taken out of its scenario.
+EXPECTED=737
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

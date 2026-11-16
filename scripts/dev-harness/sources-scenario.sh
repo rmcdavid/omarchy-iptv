@@ -68,6 +68,26 @@ py()   { python3 -c 'import json,sys; d=json.loads(sys.argv[2]); v=eval(sys.argv
 svc()  { py "d['service']$1" "$(ipc state)"; }
 key_of() { python3 -c 'import json,sys; s=[x for x in json.load(open(sys.argv[1]))["sources"] if x["label"]==sys.argv[2]]; print(s[0]["key"] if s else "")' "$STATE" "$1"; }
 
+# sources_reply_clean <reply> <id>: does `ipc sources` ANSWER, and carry no
+# URL? F-HARNESS-57: the check was `! grep -q "://"` over the reply alone,
+# and an IPC that answers nothing carries no URL either, so it passed on a
+# dead harness. The reply must parse, be a list, and name <id> exactly once
+# (the positive control) before its lack of "://" means anything.
+# scripts/qa-lib-test.sh runs this function, taken out of this file.
+sources_reply_clean() {
+  python3 -I - "${1-}" "${2-}" <<'PY'
+import json
+import sys
+try:
+    rows = json.loads(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+named = isinstance(rows, list) and sum(
+    1 for row in rows if isinstance(row, dict) and row.get("id") == sys.argv[2]) == 1
+raise SystemExit(0 if named and sys.argv[2] and "://" not in sys.argv[1] else 1)
+PY
+}
+
 cleanup() {
   # F-HARNESS-32: the silent listener by TERM, a bound, then KILL
   # (qa_stop_pid). The harness run.sh is TERMed and WAITED for, not killed:
@@ -219,7 +239,7 @@ wait_gone "$CACHE/sources/$KBAD" 5
 check "nothing saved: no record, no directory, state.json untouched by the add" \
   '[[ "$(py "len([s for s in d if s['\''id'\'']=='\''$KBAD'\''])" "$(ipc sources)")" == 0 && ! -e "$CACHE/sources/$KBAD" && "$(python3 -c "import json;print(len(json.load(open(\"$STATE\"))[\"sources\"]))")" == 1 ]]'
 check "signals() lists the failed probe, host only" 'grep -q "sourceProbeFinished" < <(ipc signals) && ! grep -q "://" < <(ipc signals)'
-check "sources() carries no URL" '! grep -q "://" < <(ipc sources)'
+check "sources() answers, naming the active source, and carries no URL" 'sources_reply_clean "$(ipc sources)" "$K1"'
 check "re-submitting is a fresh add with the same id (the form is the retry)" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")")" == "('\''ok'\'', '\''$KBAD'\'')" ]]'
 wait_for false 15 svc "['probing']" || true
 check "removeSource of the never-recorded id -> unknown_source" '[[ "$(py "d['\''code'\'']" "$(ipc removeSource "$KBAD")")" == unknown_source ]]'

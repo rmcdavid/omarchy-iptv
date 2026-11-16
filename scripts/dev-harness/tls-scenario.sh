@@ -759,6 +759,30 @@ print("tvno:%d notv:%d lavf:%d evil:%d ca:%d" % (
 PY
 }
 
+# argv_tls <pid>: where `--tls-verify=yes` stands on a player's argv, read
+# ITEM by item off /proc/<pid>/cmdline: "yes:<how many items are exactly
+# that token> last:<1 when the final item is exactly it, else 0>", or NOARGV.
+# F-HARNESS-52: S5 took these two from qa_cmdline's space-joined string
+# (`awk '{print $NF}'` and `grep -o`), so one item whose VALUE ended in
+# " --tls-verify=yes" -- MPV_ARG_RE allows spaces after the `=` -- read as
+# both layers. argv_opts above is the shape. scripts/qa-lib-test.sh runs this
+# function, taken out of this file.
+argv_tls() {
+  python3 -I - "${1-}" <<'PY'
+import sys
+try:
+    with open("/proc/%d/cmdline" % int(sys.argv[1]), "rb") as handle:
+        argv = [part for part in handle.read().split(b"\0") if part]
+except (OSError, ValueError):
+    argv = []
+if not argv:
+    print("NOARGV")
+    raise SystemExit(0)
+token = b"--tls-verify=yes"
+print("yes:%d last:%d" % (sum(1 for a in argv if a == token), 1 if argv[-1] == token else 0))
+PY
+}
+
 # ---- the certificates. Three openssl runs, every argument a literal or a path
 # this run created: no shell text is composed out of anything (rule 2).
 #
@@ -1239,8 +1263,10 @@ printf '   info S5: options file %s; argv %s\n' "${s5_opts:-NONE}" "$s5_argv"
 # S-03 sweeps once compared their secrets against the KERNEL command line and
 # passed.
 s5_cmd=$(qa_cmdline "$s5_pid")
-s5_last=$(awk '{ print $NF }' <<<"$s5_cmd")
-s5_yes=$(grep -o -- '--tls-verify=yes' <<<"$s5_cmd" | wc -l | tr -d ' ')
+# F-HARNESS-52: the position and the count are read item by item (argv_tls),
+# not from the joined string above, which a value with a space in it forges.
+s5_tls=$(argv_tls "$s5_pid")
+s5_yes=0; [[ $s5_tls =~ ^yes:([0-9]+)\ last:[01]$ ]] && s5_yes=${BASH_REMATCH[1]}
 segment_info S5 s5
 is "S5 the escape survives the hostile profile and the reserved tokens" "$s5_outcome" "played"
 ck "S5 the stream was fetched (control: $s5_hits)" '(( s5_hits >= 1 ))'
@@ -1268,7 +1294,7 @@ ck "S5 layer 3: --no-tls-verify never reached mpv either" '[[ $s5_seen == yes &&
 # working. Asserted on the argv the player is actually running, like its
 # siblings above.
 ck "S5 layer 5: --stream-lavf-o never reached mpv, which the trailing token could not have stopped" '[[ $s5_seen == yes && $s5_opts == *" stream-lavf-o:no "* && $s5_argv == *" lavf:0 "* ]]'
-is "S5 layer 2: the LAST token of the composed argv re-asserts verification" "$s5_last" "--tls-verify=yes"
+is "S5 layer 2: the LAST item of the composed argv re-asserts verification ($s5_tls)" "${s5_tls##* }" "last:1"
 ck "S5 layer 1 and 2 are both there: $s5_yes occurrences of --tls-verify=yes" '(( s5_yes >= 2 ))'
 ck "S5 and S-03 still holds: no URL and no credential on the argv" \
    '[[ "$s5_cmd" != *"://"* && "$s5_cmd" != *"$CRED_PASS"* ]]'
