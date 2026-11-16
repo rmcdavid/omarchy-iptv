@@ -110,15 +110,21 @@ def cached_source(document: dict[str, Any]) -> dict[str, Any]:
 # start's and restart's watchdogs carry it (Model.PLAYER_BOUNDS.lookupMs,
 # the player-bounds fixture).
 #
-# What stays open, by design: the player resolves the name AGAIN, a moment
-# later, and a name that answers the helper with a global address and the
-# player with a local one (DNS rebinding) is not caught. The helper cannot
-# hand the player the address it checked: an https stream's certificate is
-# checked against the name, and a URL rewritten to the address fails it. An
-# HTTP redirect the stream server sends, and HLS and DASH segment hosts,
-# are followed by FFmpeg itself and judged by nobody here; and through a
-# proxy the proxy resolves the name, so the helper's answer is about this
-# machine's resolver only (ARCHITECTURE-PLAYER 19.2, dev branch).
+# [2026-11-16, D-SINK-102] What this lookup alone left open -- the player
+# resolving the name again (DNS rebinding), a redirect the stream server
+# sends, HLS and DASH playlists, segments and keys on other hosts -- is the
+# relay's (ARCHITECTURE-PLAYER 20.5 and 20.9 state it exactly). For a
+# playlist that is not local: http, https and rtmps are judged at the relay,
+# which looks every target up itself and judges each answer by
+# stream_answer_refusal against the address it connects to (FFmpeg resolves
+# no proxied target); rtmp, rtsp and srt are pinned, handed the literal this
+# lookup judged (pin_stream_url); mms and mmsh are refused
+# (STREAM_REMOTE_REFUSED_SCHEMES). What stays open: the user's own proxy,
+# which resolves a target by name on its own side; `--ytdl`'s fetches; and a
+# user's `mpv` wrapper -- its child outliving a killed relay, and whatever
+# environment it sets for the real player. A typed `--url` is relayed for
+# http, https and rtmps only; its mms, mmsh and rtsp-tunnel connections stay
+# direct, the user's own URL (the CLI's PO-5 shape).
 STREAM_LOOKUP_TIMEOUT_S = 3.0
 STREAM_LOOKUP_REFUSAL = ("could not look up the stream's host name to check where it leads; not played")
 STREAM_RESOLVED_REFUSAL = ("the stream's host name leads to an address on this machine or a local network that "
@@ -1033,8 +1039,11 @@ def relay_register(sock_path: str, target: dict[str, Any], peer: int) -> tuple[s
     relay is this player's when it answers as an ancestor of `peer`
     (relay_request); its token and port are taken only in their own shapes.
     A relay that does not answer is `not_running` with `outdated`, the
-    build gate's refusal: the shell's `player start` then replaces the
-    player with one whose relay does. The token and the relay's pid ride on
+    build gate's refusal. Through `play` the shell then routes it to
+    `player start`, which replaces the player with one whose relay does;
+    inside a `player start` or `player restart` it is a local start failure,
+    and the player that start spawned is stopped (player_start). The token
+    and the relay's pid ride on
     the target for the start's first-load query (relay_refused_count)."""
     reply = relay_request(sock_path, {"op": "load", "policy": target.get("relay") or {}}, peer)
     token = reply.get("token") if isinstance(reply, dict) and reply.get("ok") is True else None
@@ -1672,12 +1681,22 @@ def bind_relay_listeners(sock_path: str) -> tuple[Any, Any]:
 
 def wait_for_relay(sock_path: str, anchors: tuple[int, ...], relay_port: int, timeout: float = RELAY_START_S) -> bool:
     """Whether the relay a spawn started answers as the player's
-    (relay_status: an ancestor of one of `anchors`, serving `relay_port`,
-    this build) within `timeout`, asked again until then."""
+    (relay_status_once: an ancestor of one of `anchors`, serving
+    `relay_port`, this build) within `timeout`, asked again until then.
+
+    One anchor at a time, and each question has min(RELAY_IPC_S, the time
+    left in `timeout`) for its whole exchange: the bound a question to the
+    relay has everywhere else. It had 10 ms (relay_status with no time of
+    its own), so a relay that answered slower than that on a loaded
+    machine -- connect, a thread started per control connection, the reply
+    -- read as never answering, and the start failed (the conformance
+    review). A relay not yet listening again refuses at once, so the poll
+    is no slower for it."""
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         for anchor in anchors:
-            if relay_status(sock_path, anchor, relay_port, 0.0) is not None:
+            left = max(0.0, deadline - time.monotonic())
+            if relay_status_once(sock_path, anchor, relay_port, min(RELAY_IPC_S, left)) is not None:
                 return True
         if time.monotonic() >= deadline:
             return False
@@ -1740,6 +1759,11 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         target = player_target(args.id, "", args.cache_dir)
         player_runtime(sock)
         check_socket_path(sock)
+        # D-SINK-102: a relay socket path past sun_path is refused HERE,
+        # before the restart's ladder and the adoption's replacement stop
+        # anything: refused at the spawn (bind_relay_listeners), it ended a
+        # start with the older player already stopped and none in its place.
+        relay_socket_path(sock)
         lock_fd = acquire_lock(player_lock_path(sock), args.lock_timeout)
         check_seq(read_lock_record(lock_fd), seq, verb)
         write_lock_record(lock_fd, seq, verb)
@@ -1796,7 +1820,12 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         if client is not None:
             client.close()
         # D-PLY-57: under the lock still, so no other start finds the spawn.
-        if error.code == "player_foreign" and outcome is not None and outcome["spawned"]:
+        # D-SINK-102: and the same after the relay refused the load's
+        # registration (relay_register): a local start failure, whose spawn
+        # was otherwise left idle on the socket until the next start read it
+        # older.
+        refused_load = error.code == "not_running" and error.message == RELAY_REGISTER_REFUSAL
+        if (error.code == "player_foreign" or refused_load) and outcome is not None and outcome["spawned"]:
             stop_fresh_spawn(sock, int(outcome["pid"]), args.ipc_timeout)
         if lock_fd >= 0:
             release_lock(lock_fd)
@@ -2058,7 +2087,9 @@ def player_orphan_check(args: argparse.Namespace) -> int:
                 client.close()
         if relay_gone:
             result = stop_ladder(sock, found, "", args.ipc_timeout)
-            settle_under_lock(sock)
+            # The relay was killed, so it never removed its own socket: gone
+            # with the mpv socket, under the lock, as player_stop does.
+            settle_under_lock(sock, relay=not result["running"])
             log("player orphan-check: %s; stopped it" % RELAY_GONE)
             emit({"ok": True, "kind": "player.orphan-check", "stopped": not result["running"],
                   "reason": "relay_gone", "rung": result["rung"]})

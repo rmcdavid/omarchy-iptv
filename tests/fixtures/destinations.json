@@ -1780,8 +1780,9 @@
    "parse (stream_entry_refusal's `remote`, counted apart in one fixed sentence) and at play",
    "(player_target, `unsupported_scheme`). mms and mmsh are; rtmps is relayed and kept; rtsps is no scheme",
    "the plugin plays from any playlist (`scheme`). A local playlist keeps every scheme it kept before.",
-   "Run by tests/test_relay_player.py through the shipping stream_entry_refusal, parse_m3u and",
-   "player_target; the sentences are the helper's constants, joined here by value (rule 13)."
+   "Each vector is run by tests/test_relay_player.py through the shipping stream_entry_refusal, parse_m3u",
+   "(over a playlist_source built from its `source`) and player_target (over a cache written from it);",
+   "the sentences are the helper's constants, joined here by value (rule 13)."
   ],
   "refused": [
    "mms",

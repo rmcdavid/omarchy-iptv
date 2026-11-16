@@ -1856,8 +1856,9 @@ def default_socket_path() -> str:
 def disable_core_dumps() -> None:
     """RLIMIT_CORE (0, 0), soft AND hard, on the process that calls this
     (D-SINK-39). Called in a CHILD between fork and exec -- the player's
-    (spawn_detached) and wl-paste's (read_clipboard, as Popen's
-    preexec_fn) -- and never in this helper itself.
+    and its relay's (spawn_player; the relay calls it again at its own
+    start) and wl-paste's (read_clipboard, as Popen's preexec_fn) -- and
+    never in this helper itself.
 
     Why a child needs its own lever: this helper is non-dumpable from its
     first statement (the stub's shield), but the kernel sets dumpable back

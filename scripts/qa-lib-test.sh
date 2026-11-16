@@ -1163,6 +1163,41 @@ is "a process that is not our child is ended all the same, without a wait" \
 st "an empty pid is nothing to do, status 0" 0 qa_stop_pid ""
 st "a pid that is not a number is refused with 2" 2 qa_stop_pid "12ab"
 st "a pid that is already gone is 0" 0 qa_stop_pid "$sp_kind"
+
+# qa_signal_named / qa_stop_named (D-SINK-102's conformance review):
+# a pid the harness found by ancestry (a process's children) is signalled
+# only through a pidfd, and only while its command line carries an item that
+# begins with the run's needle. Stand-ins of this suite's own, each started
+# with its marker as an argument item; a needle cannot match across items.
+sn_mark="$TMP/sn-mark"
+python3 -c 'import time; time.sleep(30)' "$sn_mark/one" two >/dev/null 2>&1 & sn_one=$!
+python3 -c 'import time; time.sleep(30)' "$TMP/sn-other" >/dev/null 2>&1 & sn_other=$!
+python3 -c 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)' "$sn_mark/deaf" >/dev/null 2>&1 & sn_deaf=$!
+for ((i = 0; i < 50; i++)); do
+  [[ $(tr '\0' ' ' <"/proc/$sn_one/cmdline" 2>/dev/null) == *sn-mark* && $(tr '\0' ' ' <"/proc/$sn_deaf/cmdline" 2>/dev/null) == *sn-mark* \
+     && $(tr '\0' ' ' <"/proc/$sn_other/cmdline" 2>/dev/null) == *sn-other* ]] && break
+  sleep 0.05
+done
+qa_signal_named TERM "$sn_mark/one two" "$sn_one"; sn_rc=$?
+is "qa_signal_named: a needle that only matches across two command-line items is not a match, and nothing is sent" \
+   "$sn_rc $(kill -0 "$sn_one" 2>/dev/null && echo alive || echo gone)" "1 alive"
+qa_signal_named TERM "$sn_mark/" "$sn_other"; sn_rc=$?
+is "qa_signal_named: a process whose command line does not name the run is left alone (1)" \
+   "$sn_rc $(kill -0 "$sn_other" 2>/dev/null && echo alive || echo gone)" "1 alive"
+qa_signal_named TERM "$sn_mark/" "$sn_one"; sn_rc=$?
+wait "$sn_one" 2>/dev/null
+is "qa_signal_named: one whose command line names it is signalled through its pidfd (0)" \
+   "$sn_rc $(kill -0 "$sn_one" 2>/dev/null && echo alive || echo gone)" "0 gone"
+st "qa_signal_named: a pid that is gone is 2" 2 qa_signal_named TERM "$sn_mark/" "$sn_one"
+is "qa_signal_named refuses a signal it does not name, an empty needle and a pid that is not a number (2 2 2)" \
+   "$(qa_signal_named HUP "$sn_mark/" "$sn_other"; echo -n "$? "; qa_signal_named TERM "" "$sn_other"; echo -n "$? "; qa_signal_named TERM "$sn_mark/" 12ab; echo -n "$?")" "2 2 2"
+sn_err=$(qa_stop_named "$sn_deaf" "$sn_mark/" 1 "stand-in" 2>&1 >/dev/null); sn_rc=$?
+is "qa_stop_named ends a TERM-ignoring process that names the run by KILL, through its pidfd, and reports 0" \
+   "$sn_rc $(kill -0 "$sn_deaf" 2>/dev/null && echo alive || echo gone) $([[ $sn_err == *"sending KILL"* ]] && echo said || echo silent)" "0 gone said"
+sn_err=$(qa_stop_named "$sn_other" "$sn_mark/" 1 "stand-in" 2>&1 >/dev/null); sn_rc=$?
+is "qa_stop_named leaves one that does not name the run alone, says so, and reports 3" \
+   "$sn_rc $(kill -0 "$sn_other" 2>/dev/null && echo alive || echo gone) $([[ $sn_err == *"left alone"* ]] && echo said || echo silent)" "3 alive said"
+kill -KILL "$sn_other" 2>/dev/null; wait "$sn_other" 2>/dev/null
 # run.sh, DRIVEN: a deaf stand-in whose command line carries this scratch
 # directory's fixture-server pattern, recorded in server.pid the way
 # start_server records the real one; `run.sh reap` on that directory ends it
@@ -1194,8 +1229,13 @@ wait "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
 # goes through the ladder behind its ownership guard.
 is "run.sh ends nothing by a pkill pattern any more (code lines; its comments may say the word)" \
    "$(qa_count '^ *pkill -f' "$ROOT/scripts/dev-harness/run.sh")" "0"
-is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid" \
-   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
+# [2026-11-16, D-SINK-102's conformance review: the quickshell
+# under the timeout wrapper, which run.sh did not record itself, goes
+# through qa_stop_named, the same ladder with each signal checked on a
+# pidfd against its command line; the recorded wrapper still goes through
+# qa_stop_pid.]
+is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid (or, for the shell it did not record, qa_stop_named)" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_\(pid\|named\) "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
 sp_scen=""
 for sc in text tls sources; do
   sp_scen="$sp_scen$sc:$(qa_count 'kill "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh"):$(qa_count 'qa_stop_pid "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh") "
@@ -3718,7 +3758,11 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # lever refusals above the transcript (3). Red on a tree without the
 # scenario: all four failed. 697 -> 702 the same day: qa_cmdline_sans_relay_pin's
 # five over three sleepers of the suite's own (red where qa-lib.sh lacks it).
-EXPECTED=702
+# 702 -> 709 on 2026-11-16 (dsink102, lane-launch-load, D-SINK-102's
+# conformance review): qa_signal_named's five and qa_stop_named's
+# two, over stand-ins of the suite's own. Red where qa-lib.sh lacks them:
+# all seven failed.
+EXPECTED=709
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

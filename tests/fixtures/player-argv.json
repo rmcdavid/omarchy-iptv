@@ -946,7 +946,7 @@
       "while it plays (allowed, PO-5's shape) and is said out loud (PO-10).",
       "`--demuxer-cache-unlink-files` is RESERVED, not warned: see mpvReserved.",
       "2026-10-29 (lane-p1b): `listenText` is D-SINK-53's sentence, for an --rtsp-transport that makes every",
-      "rtsp channel bind RTP/RTCP ports; and --demuxer-lavf-o carrying http_proxy is a handoff (D-SINK-59)."
+      "rtsp channel bind RTP/RTCP ports. A --demuxer-lavf-o carrying http_proxy, a handoff under D-SINK-59, is refused since D-SINK-102."
     ],
     "text": " hands the stream address to another program",
     "cases": [

@@ -968,7 +968,9 @@ requests and raise the batch.
      (QA-RESULTS "D-SINK-39").
      The lever is RLIMIT_CORE, the one setting that inherits across fork AND
      exec: `spawn_detached`'s grandchild sets it to (0, 0) as its last act
-     before `execvp` (`disable_core_dumps`), and `read_clipboard`'s wl-paste
+     before `execvp` (`disable_core_dumps`) [2026-11-14, D-SINK-102:
+     `spawn_player` now, in the player it forks and in the relay it execs,
+     which sets it again at its own start], and `read_clipboard`'s wl-paste
      -- the helper's only other child, holding the clipboard the form's
      paste path carries a provider URL through -- gets the same as a
      `preexec_fn`. Both halves, because anything in the child's own address
@@ -1179,7 +1181,10 @@ requests and raise the batch.
      `bin/helper/12-relay.py` behind the internal `player relay` verb (the
      player asks for SIGKILL when the relay dies, and the relay is a child
      subreaper) -- all but mmsh's and rtsp's HTTP tunnel's, which take no
-     proxy option and are played only from a local playlist.
+     proxy option and are played only from a local playlist or a typed
+     `--url`. A typed `--url` is relayed only for http, https and rtmps;
+     its mms, mmsh and rtsp-tunnel connections, redirects included, stay
+     direct, because it is the user's own URL (the CLI's PO-5 shape).
      `--http-proxy=http://127.0.0.1:<port>` opens the pin
      block with no credential, so on its own it denies everything, and
      each load the helper makes registers a token for that load's playlist
@@ -1213,7 +1218,11 @@ requests and raise the batch.
      peers of this uid (the proxy port by /proc/net/tcp, the control socket
      by SO_PEERCRED), and exits with its player. A player of this build
      whose relay does not answer reads `older`: replaced, never fed. Open:
-     a user's `mpv` wrapper whose CHILD is the real player survives a
+     a user's `mpv` wrapper that exports a lowercase `no_proxy` or
+     `http_proxy` for the real player hands FFmpeg what the spawn strips,
+     and the read-back, which reads mpv's properties, cannot see it (the
+     wrapper is the user's own code, PO-5's shape); a user's `mpv` wrapper
+     whose CHILD is the real player survives a
      SIGKILLed relay with a dead proxy until it is replaced (a SIGTERMed
      relay kills what is left of its process group once its grace is over,
      so there only a real player that left the group, under a wrapper that

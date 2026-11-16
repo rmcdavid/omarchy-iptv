@@ -35,10 +35,14 @@
 #   ... --tree <dir>                  against a prepared plugin tree
 #
 # `--baseline 9e006be` (0.19.1, the release the finding is against) must red
-# R1..R8, R10, R11 (the sinks are reached), R12, R16, R17's relay count, R18
-# and R19 (there is no relay), and leave the controls (R9, R13b, R14's
-# redirect) and the teardown green. Counts in docs/QA-RESULTS.md (dev branch)
-# "D-SINK-102".
+# R1..R8, R10, R11 (the sinks are reached), R12, R15, R16, R17's relay count,
+# R18 and R19 (there is no relay), and leave the controls (R9, R13b, R14's
+# redirect) and the teardown green. R15 (2026-11-16, the conformance
+# review) is an rtmps channel whose every connection must be one
+# the relay made for that load's token: the only arm that goes red if mpv or
+# FFmpeg stops handing rtmps's TLS the per-file proxy. Counts in
+# docs/QA-RESULTS.md (dev branch) "D-SINK-102" and "The launch and load
+# findings".
 #
 # A machine without python3, mpv, ffmpeg, openssl, unshare, ip or
 # journalctl, or one that cannot make a network namespace with a dummy

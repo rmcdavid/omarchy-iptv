@@ -1216,13 +1216,20 @@ def launch_verdict(pid: Any, sock_path: str) -> str:
     feed_gate). An older build cannot produce this prefix, because the marker
     element in it carries the version and the CRC of the helper's part
     table, so reading an appended tail as "current" admits no other build's
-    player. It does NOT police the user's own wrapper: a wrapper that
-    appends has taken the pin block's last word (D-SINK-13 layer 2) whatever
-    this answers, because the replacement a stricter answer would ask for
-    runs through the same wrapper and appends the same tokens again -- that
-    is the user's own configuration, PO-5's shape, like a token in mpvArgs.
-    The stricter reading this replaced cost such a user a new player window
-    at every channel change and every shell restart, and protected nothing.
+    player. It does NOT police the user's own wrapper's appended options
+    here: a wrapper that appends has taken the pin block's last word
+    (D-SINK-13 layer 2) for whatever no read-back holds, because the
+    replacement a stricter answer would ask for runs through the same
+    wrapper and appends the same tokens again -- that is the user's own
+    configuration, PO-5's shape, like a token in mpvArgs. The stricter
+    reading this replaced cost such a user a new player window at every
+    channel change and every shell restart, and protected nothing. What a
+    read-back holds is enforced there whatever this answers: an appended
+    `--http-proxy` (mpv takes the last) leaves the player's `http-proxy`
+    reading something other than the relay pin, so read_tls_state counts it
+    unpinned and every load into that player is refused before any channel
+    line (D-SINK-102, 20.3); and an appended `--tls-verify=no` is the
+    TLS read-back's (D-SINK-16).
 
     The exception: a socket option among the appended elements
     (`--input-ipc-server` in any of mpv's spellings) reads "older". mpv obeys
@@ -1415,14 +1422,27 @@ def relay_status(sock_path: str, peer: int, port: int | None, timeout: float = R
         return None
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        left = deadline - time.monotonic()
-        reply = relay_request(sock_path, {"op": "status"}, peer, max(0.01, left))
-        if (isinstance(reply, dict) and reply.get("ok") is True and reply.get("port") == port
-                and reply.get("build") == player_build()):
+        reply = relay_status_once(sock_path, peer, port, deadline - time.monotonic())
+        if reply is not None:
             return reply
         if time.monotonic() + SPAWN_POLL_S >= deadline:
             return None
         time.sleep(SPAWN_POLL_S)
+
+
+def relay_status_once(sock_path: str, peer: int, port: int | None, timeout: float) -> dict[str, Any] | None:
+    """relay_status's one question, asked once, its whole exchange inside
+    `timeout` (10 ms at the least): the relay's status when it answers as
+    the ancestor of `peer` for `port` and this build, None otherwise. A relay
+    not yet listening again refuses at once (the ancestor check), so None
+    can come long before the bound."""
+    if port is None:
+        return None
+    reply = relay_request(sock_path, {"op": "status"}, peer, max(0.01, timeout))
+    if (isinstance(reply, dict) and reply.get("ok") is True and reply.get("port") == port
+            and reply.get("build") == player_build()):
+        return reply
+    return None
 
 
 def player_verdict(peer: Any, sock_path: str, timeout: float = RELAY_IPC_S) -> str:
@@ -2026,7 +2046,7 @@ def settle_socket(sock_path: str, deadline: float | None = None) -> bool:
 
 
 def settle_under_lock(sock_path: str, deadline: float | None = None,
-                      lock_timeout: float = SETTLE_LOCK_TIMEOUT) -> bool:
+                      lock_timeout: float = SETTLE_LOCK_TIMEOUT, relay: bool = False) -> bool:
     """The settle for the two call sites that hold no lock of their own
     (X1/X2, ruling CL8).
 
@@ -2039,13 +2059,23 @@ def settle_under_lock(sock_path: str, deadline: float | None = None,
     A call site that cannot take the lock does not unlink. Another verb owns
     the socket at this instant and will settle it itself, and neither of
     these two verbs is worth failing over a leftover file.
+
+    `relay` (D-SINK-102): the relay socket too, under the same lock and only
+    while no player is left on the socket to have a relay (a start that
+    took the lock before this one has spawned its own, and bound its own
+    relay socket), as player_stop removes it. The orphan check passes it
+    after stopping a player whose relay was killed, which never removes its
+    own.
     """
     try:
         lock_fd = acquire_lock(player_lock_path(sock_path), lock_timeout)
     except (HelperError, OSError):
         return False
     try:
-        return settle_socket(sock_path, deadline)
+        settled = settle_socket(sock_path, deadline)
+        if relay and not find_player(sock_path):
+            unlink_relay_socket(sock_path)
+        return settled
     finally:
         release_lock(lock_fd)
 

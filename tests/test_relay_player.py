@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import pathlib
+import resource
 import shutil
 import signal
 import socket
@@ -250,16 +251,31 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
     starts the REAL relay (`player relay`, this helper) as the player's
     parent. The kernel is asked, not the code."""
 
+    def relay_port(self):
+        """The relay pin's port on the spawned player's argv, as the stub mpv
+        recorded it."""
+        argv = self.spawned_argv()[0]
+        ports = [helper.relay_pin_port(a.encode()) for a in argv if a.startswith("--http-proxy=")]
+        self.assertEqual(len(ports), 1, "no relay pin on the spawned player's argv")
+        return ports[0]
+
     def start_player(self):
+        """`player start`, and the player's pid and its relay's. The relay's
+        pid is the relay's own answer on its control socket -- relay_status's
+        `_pid`, the kernel's SO_PEERCRED for the process that listens there,
+        asked as the ancestor of THIS player -- never a pid read off the
+        player's parent (the conformance review): on a tree with no
+        relay that parent is the user's own `systemd --user` manager
+        (relay_pidfd says what that cost). relay_pidfd then checks its
+        command line on a pidfd before any test holds it."""
         code, payload, _, stderr = self.player_start()
         self.assertEqual(code, 0, stderr)
         found = helper.find_player(self.sock)
         self.assertEqual(len(found), 1)
         player = found[0]["pid"]
-        relay = helper.proc_parent(player)
-        # Fail here, before any test holds the pid, when the parent is not this
-        # player's relay: on a tree with no relay it is the user's systemd
-        # --user manager (relay_pidfd says why that matters).
+        status = helper.relay_status(self.sock, player, self.relay_port())
+        self.assertIsNotNone(status, "the spawned player's relay does not answer as its relay")
+        relay = status["_pid"]
         os.close(relay_pidfd(relay, player))
         return payload, player, relay
 
@@ -284,12 +300,107 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         # reads its environment, which keeps the session's proxy as its upstream
         with self.assertRaises(PermissionError):
             proc_environ(relay)
-        argv = self.spawned_argv()[0]
-        port = [helper.relay_pin_port(a.encode()) for a in argv if a.startswith("--http-proxy=")]
-        status = helper.relay_status(self.sock, player, port[0])
+        status = helper.relay_status(self.sock, player, self.relay_port())
         self.assertIsNotNone(status)
         self.assertEqual(status["child"], player)
-        self.assertEqual(status["_pid"], relay)
+        # Read only: the process that answers as the relay is the player's
+        # parent, as the spawn makes it. Nothing signals a pid read this way.
+        self.assertEqual(helper.proc_parent(player), relay)
+
+    @staticmethod
+    def fd_table(pid):
+        """/proc/<pid>/fd: descriptor number -> what it names. Readable for
+        the player (dumpable after its exec), not for the relay, which runs
+        non-dumpable from its stub's shield: the relay's table is what
+        probed_start's probe records at its exec."""
+        table = {}
+        for name in os.listdir("/proc/%d/fd" % pid):
+            try:
+                table[int(name)] = os.readlink("/proc/%d/fd/%s" % (pid, name))
+            except OSError:
+                pass
+        return table
+
+    # What the probe in relay_argv's place records, at the exec and before it
+    # opens anything that lasts: its core limit, and each descriptor it holds
+    # with what it names and whether it survives an exec (no O_CLOEXEC in
+    # fdinfo's octal flags). Then it execs the real relay in place, keeping
+    # its pid, its descriptors and its argv, and the start goes on as ever.
+    RELAY_PROBE = (
+        "import json, os, sys\n"
+        "fds = {}\n"
+        "for name in os.listdir('/proc/self/fd'):\n"
+        "    try:\n"
+        "        link = os.readlink('/proc/self/fd/' + name)\n"
+        "        flags = [l for l in open('/proc/self/fdinfo/' + name) if l.startswith('flags:')][0]\n"
+        "    except OSError:\n"
+        "        continue\n"
+        "    fds[name] = [link, not int(flags.split()[1], 8) & 0o2000000]\n"
+        "core = [l for l in open('/proc/self/limits') if l.startswith('Max core file size')][0].split()[4:6]\n"
+        "fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+        "os.write(fd, json.dumps({'core': core, 'fds': fds}).encode()); os.close(fd)\n"
+        "os.execv(sys.argv[2], sys.argv[2:])\n")
+
+    def probed_start(self):
+        """start_player with RELAY_PROBE in relay_argv's place -> (what the
+        probe recorded, the player's pid, the relay's pid)."""
+        record = os.path.join(self.dir, "relay-probe.json")
+        real = test_player.helper.relay_argv()
+        with mock.patch.object(test_player.helper, "relay_argv",
+                               lambda: [real[0], "-I", "-c", self.RELAY_PROBE, record] + real):
+            _, player, relay = self.start_player()
+        probed = json.loads(pathlib.Path(record).read_text(encoding="utf-8"))
+        return probed, player, relay
+
+    def test_the_relay_holds_its_two_listeners_and_the_player_neither(self):
+        """The spawn's descriptor hygiene (the conformance review):
+        G hands the two listeners to fds 3 and 4 and closes 5 up to 4095
+        (`min(SC_OPEN_MAX, 4096)`, ARCHITECTURE-PLAYER 20.2), and the player
+        closes 3 and 4 before its exec, so mpv -- and everything mpv or a
+        wrapper starts -- holds neither the proxy listener nor the control
+        socket. The relay inherits exactly 0-4, 3 and 4 the two sockets (its
+        own later descriptors, its child's pidfd and its wake pipe, are
+        close-on-exec), and a descriptor this process leaves inheritable (a
+        pipe) reaches neither process. The kernel is asked: /proc at the
+        relay's exec (probed_start) and the player's /proc/<pid>/fd."""
+        leak_r, leak_w = os.pipe()
+        self.addCleanup(os.close, leak_r)
+        self.addCleanup(os.close, leak_w)
+        os.set_inheritable(leak_w, True)
+        leaked = os.readlink("/proc/self/fd/%d" % leak_w)
+        probed, player, relay = self.probed_start()
+        table = {int(fd): link for fd, (link, _) in probed["fds"].items()}
+        kept = sorted(int(fd) for fd, (_, survives) in probed["fds"].items() if survives)
+        self.assertEqual(kept, [0, 1, 2, 3, 4], table)
+        listeners = {table[3], table[4]}
+        self.assertTrue(all(link.startswith("socket:[") for link in listeners), table)
+        self.assertEqual(len(listeners), 2)
+        self.assertNotIn(leaked, set(table.values()), "the relay inherited this test's pipe")
+        held = set(self.fd_table(player).values())
+        self.assertEqual(listeners & held, set(), "the player holds a relay listener")
+        self.assertNotIn(leaked, held, "the player inherited this test's pipe")
+
+    def test_the_relay_starts_with_a_zero_core_limit_from_the_spawn(self):
+        """The spawn sets RLIMIT_CORE (0, 0) in G before it execs the relay
+        (the conformance review), the only layer between that exec
+        and the stub's shield, for the relay holds the session's environment
+        less the private names. The relay sets it again at its own start, so
+        /proc/<relay>/limits after a start cannot tell the spawn's call from
+        the relay's: the probe (probed_start) reads it at the exec. The
+        relay's pid is its own answer (start_player)."""
+        inherited = resource.getrlimit(resource.RLIMIT_CORE)
+        if inherited[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process; the spawn cannot be told apart from it")
+        # A soft limit of 0 raised to one byte (the hard one is not 0, above),
+        # so an inherited limit reads as something other than 0: a core of
+        # one byte is no core, and nothing here crashes.
+        if inherited[0] == 0:
+            resource.setrlimit(resource.RLIMIT_CORE, (1, inherited[1]))
+            self.addCleanup(resource.setrlimit, resource.RLIMIT_CORE, inherited)
+        probed, player, relay = self.probed_start()
+        self.assertEqual(probed["core"], ["0", "0"], "the relay was exec'd with the core limit it inherited")
+        self.assertEqual(test_player.core_limit_of(relay), ("0", "0"))
+        self.assertEqual(test_player.core_limit_of(player), ("0", "0"))
 
     def test_the_relays_control_socket_is_owner_only_whatever_the_umask(self):
         """bind_relay_listeners binds the control socket under umask 077, so
@@ -422,6 +533,65 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         self.assertEqual((code, payload["running"]), (0, False), stderr)
         self.assertFalse(os.path.lexists(path))
 
+    def test_a_start_whose_load_the_relay_did_not_register_stops_the_player_it_spawned(self):
+        """The relay answered the spawn's status, and then its registration of
+        the load came back out of shape (relay_register's refusal, reached
+        here through the shipping start): a local start failure,
+        `not_running` with `outdated` in RELAY_REGISTER_REFUSAL's words, and
+        the player this start spawned is stopped as D-PLY-57's is, where it
+        was left idle on the socket until the next start read it older (the
+        conformance review). The relay's own answer is changed in
+        the helper's reading of it; the relay itself is the real one."""
+        real = test_player.helper.relay_request
+
+        def out_of_shape(sock_path, request, peer, *args, **kwargs):
+            reply = real(sock_path, request, peer, *args, **kwargs)
+            if isinstance(request, dict) and request.get("op") == "load" and isinstance(reply, dict):
+                return dict(reply, token="not-a-token")
+            return reply
+
+        with mock.patch.object(test_player.helper, "relay_request", out_of_shape):
+            code, payload, _, stderr = self.player_start()
+        self.assertEqual((code, payload["error"]["code"], payload.get("outdated"), payload["error"]["message"]),
+                         (1, "not_running", True, helper.RELAY_REGISTER_REFUSAL), stderr)
+        self.assertEqual(len(self.spawned_launches()), 1, "the player never started")
+        self.assertEqual(helper.find_player(self.sock), [], "the player this start spawned was left on the socket")
+
+
+class RelayPathTooLongTest(test_player.GateTestCase):
+    """A socket path that mpv can bind (104 bytes, sun_path holds 107) but
+    whose relay socket (`.relay`, 6 more) it cannot: `player start` and
+    `player restart` answer spawn_failed RELAY_PATH_TOO_LONG BEFORE they stop
+    anything (the conformance review). It was refused at the
+    spawn, after the restart's ladder or the adoption's replacement had
+    stopped the older player, so the start ended with no player at all. The
+    older player here is the stub mpv with another build's argv, which logs
+    every command it is told."""
+
+    def setUp(self):
+        super().setUp()
+        base = os.path.join(self.dir, "r")
+        self.runtime = base + "x" * (104 - len(os.fsencode(os.path.join(base, "mpv.sock"))))
+        self.sock = os.path.join(self.runtime, "mpv.sock")
+        self.assertEqual(len(os.fsencode(self.sock)), 104)
+        self.assertGreater(len(os.fsencode(self.sock + helper.RELAY_SOCKET_SUFFIX)), helper.RELAY_SUN_PATH_MAX)
+
+    def test_a_relay_socket_path_past_sun_path_is_refused_before_the_older_player_is_touched(self):
+        old = self.old_player("older")
+        before = self.told(old.pid)
+        for verb in ("start", "restart"):
+            with self.subTest(verb=verb):
+                code, payload, _, stderr = test_player.run(
+                    "player", verb, "--socket", self.sock, "--cache-dir", self.cache, "--id", "t:bbc1.uk",
+                    "--seq", "1", "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "4",
+                    "--first-load-timeout", "1")
+                self.assertEqual((code, payload["error"]["code"], payload["error"]["message"]),
+                                 (1, "spawn_failed", helper.RELAY_PATH_TOO_LONG), stderr)
+                self.assertIsNone(old.poll(), "the older player was stopped")
+                self.assertEqual(self.told(old.pid), before, "the older player was told something")
+                self.assertEqual([record["pid"] for record in helper.find_player(self.sock)], [old.pid])
+                self.assertEqual(self.spawned_launches(), [])
+
 
 # ---- the load ----------------------------------------------------------------
 
@@ -464,6 +634,48 @@ class LoadRegistrationTest(MpvTestCase):
         self.assertEqual((code, payload["error"]["code"], payload.get("outdated")), (1, "not_running", True))
         time.sleep(0.05)
         self.assertEqual(server.commands, [])
+
+    def test_a_registration_the_relay_answers_out_of_shape_refuses_the_play_before_any_line(self):
+        """relay_register's own refusal (the conformance review): the
+        relay answers the gate's status, so the play reaches the
+        registration, and the registration's reply is refused unless it is
+        `ok` with a token of 32 lowercase hex digits and a port in
+        1-65535 -- `not_running` with `outdated` in RELAY_REGISTER_REFUSAL's
+        words, with no command sent to the player and no load. The relay is
+        the FakeRelay; only the helper's reading of its `load` reply is
+        changed, one way per subtest."""
+        changes = [("not ok", lambda r: dict(r, ok=False)),
+                   ("token upper case", lambda r: dict(r, token=r["token"].upper())),
+                   ("token 31 digits", lambda r: dict(r, token=r["token"][:31])),
+                   ("token 33 digits", lambda r: dict(r, token=r["token"] + "0")),
+                   ("token not hex", lambda r: dict(r, token="g" * 32)),
+                   ("token a number", lambda r: dict(r, token=12345)),
+                   ("port 0", lambda r: dict(r, port=0)),
+                   ("port 65536", lambda r: dict(r, port=65536)),
+                   ("port a boolean", lambda r: dict(r, port=True)),
+                   ("port a string", lambda r: dict(r, port=str(r["port"])))]
+        real = helper.relay_request
+        for label, change in changes:
+            with self.subTest(label):
+                server = self.start()
+
+                def answer(sock_path, request, peer, *args, change=change, **kwargs):
+                    reply = real(sock_path, request, peer, *args, **kwargs)
+                    if isinstance(request, dict) and request.get("op") == "load" and isinstance(reply, dict):
+                        return change(reply)
+                    return reply
+
+                try:
+                    with mock.patch.object(helper, "relay_request", answer):
+                        code, payload, _, stderr = self.play("--id", "t:espn.us")
+                    self.assertEqual((code, (payload.get("error") or {}).get("code"), payload.get("outdated"),
+                                      (payload.get("error") or {}).get("message")),
+                                     (1, "not_running", True, helper.RELAY_REGISTER_REFUSAL), stderr)
+                    time.sleep(0.05)
+                    self.assertEqual(server.commands, [])
+                finally:
+                    server.close()
+                    self.server = None
 
     def test_a_proxy_another_client_set_refuses_the_load_before_any_channel_line(self):
         for value in ("http://proxy.example.test:3128", "", "http://127.0.0.1:9"):
@@ -619,7 +831,16 @@ class RefusedSchemeTest(unittest.TestCase):
     def test_the_shared_vectors_and_sentences_are_the_helpers(self):
         """tests/fixtures/destinations.json `remoteSchemes`: the refused set
         and the three fixed sentences are the helper's own (rule 13), and
-        every vector meets stream_entry_refusal as the fixture says."""
+        every vector meets the three shipping functions its comment names
+        (the conformance review): stream_entry_refusal answers
+        its reason; parse_m3u, over a playlist_source built from the
+        vector's source, keeps it, skips and counts it in parseOne's words
+        (`remote`) or as an unsupported scheme (`scheme`); and player_target,
+        over a cache the parse would write from that source, plays it or
+        refuses it `unsupported_scheme` (in the fixture's `play` sentence for
+        `remote`). Only cdn.example.test is ever looked up, by the suite's
+        stated answers."""
+        lk = test_stream_lookup
         table = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "destinations.json")
                            .read_text(encoding="utf-8"))["remoteSchemes"]
         self.assertEqual(sorted(helper.STREAM_REMOTE_REFUSED_SCHEMES), table["refused"])
@@ -628,6 +849,38 @@ class RefusedSchemeTest(unittest.TestCase):
         got = [(v["url"], v["source"]["local"], helper.stream_entry_refusal(v["url"], v["source"])[0])
                for v in table["vectors"]]
         self.assertEqual(got, [(v["url"], v["source"]["local"], v["reason"]) for v in table["vectors"]])
+        root = tempfile.mkdtemp(prefix="omarchy-iptv-schemes-")
+        self.addCleanup(shutil.rmtree, root, True)
+        for at, vector in enumerate(table["vectors"]):
+            url, source, reason = vector["url"], vector["source"], vector["reason"]
+            with self.subTest(url=url, local=source["local"]):
+                if source["host"] == "":
+                    built, cached = helper.playlist_source("file", ""), dict(lk.FILE)
+                else:
+                    built = helper.playlist_source("http", "http://%s:%d/list" % (source["host"], source["port"]),
+                                                   source["class"], source["class"])
+                    cached = {"sourceHost": source["host"], "sourceClass": source["class"],
+                              "sourceLocal": source["local"], "sourcePort": source["port"]}
+                self.assertEqual(built, {key: source[key] for key in built})
+                parsed = lk.helper.parse_m3u("#EXTM3U\n#EXTINF:-1,C\n%s\n" % url, built)
+                self.assertEqual([c["url"] for c in parsed["channels"]], [url] if reason == "" else [])
+                skipped = {"": [], "remote": [helper.PARSE_REMOTE_SCHEME_ONE % 1],
+                           "scheme": ["1 entry skipped: unsupported URL scheme"]}[reason]
+                self.assertEqual(parsed["warnings"], skipped)
+                directory = os.path.join(root, str(at))
+                ids = lk.write_cache(directory, [url], cached)
+                resolver, patch = lk.resolving({"cdn.example.test": [lk.GLOBAL]})
+                with patch:
+                    try:
+                        target = lk.helper.player_target(ids[0], "", directory)
+                        played = ("played", target["url"].split(":", 1)[0].lower())
+                    except lk.helper.HelperError as error:
+                        played = (error.code, error.message == helper.STREAM_REMOTE_REFUSAL)
+                expected = {"": ("played", url.split(":", 1)[0].lower()), "remote": ("unsupported_scheme", True),
+                            "scheme": ("unsupported_scheme", False)}[reason]
+                self.assertEqual(played, expected)
+                if reason != "":
+                    self.assertEqual(resolver.asked, [])
         # Both answers and both kinds of source are held, and every refused
         # scheme is refused from a remote list and kept from a local one.
         reasons = {(v["source"]["local"], v["reason"]) for v in table["vectors"]}
@@ -653,6 +906,52 @@ class RefusedSchemeTest(unittest.TestCase):
         self.assertEqual(got[:2] + got[3:], [refusal] * 3 + self.URLS[4:])
         self.assertEqual(got[2][0], "unsupported_scheme")          # rtsps: no scheme the plugin plays
         self.assertEqual(resolver.asked, [("cdn.example.test", 443), ("cdn.example.test", 80)])
+
+
+# ---- the spawn's wait for its relay -----------------------------------------
+
+class WaitForRelayTest(unittest.TestCase):
+    """wait_for_relay asks one anchor at a time, and each question has
+    min(RELAY_IPC_S, the time left in its bound) for its whole exchange (the
+    conformance review): each had 10 ms, so a relay that
+    answered slower than that on a loaded machine read as never answering
+    and the start failed spawn_failed. relay_request is a double that
+    records each bound it is handed and answers only a bound of 50 ms or
+    more, a relay that takes 50 ms to answer; nothing is connected."""
+
+    PORT = 4321
+
+    def wait(self, timeout, answer_for=(11, 12)):
+        handed = []
+
+        def slow_relay(sock_path, request, peer, timeout=None, relay_pid=0):
+            handed.append((peer, timeout))
+            if timeout is None or timeout < 0.05 or peer not in answer_for:
+                return None
+            return {"ok": True, "port": self.PORT, "build": helper.player_build(), "_pid": 99}
+
+        with mock.patch.object(helper, "relay_request", slow_relay):
+            started = time.monotonic()
+            ok = helper.wait_for_relay("/nonexistent-relay-wait/mpv.sock", (11, 12), self.PORT, timeout)
+        return ok, handed, time.monotonic() - started
+
+    def test_a_relay_that_takes_50_ms_to_answer_is_waited_for(self):
+        ok, handed, _ = self.wait(helper.RELAY_START_S)
+        self.assertTrue(ok, handed)
+        self.assertEqual(handed[0][0], 11)
+        self.assertAlmostEqual(handed[0][1], helper.RELAY_IPC_S, delta=0.05)
+
+    def test_each_question_is_capped_by_the_time_left_and_one_anchor_is_asked_at_a_time(self):
+        ok, handed, spent = self.wait(0.3)
+        self.assertTrue(ok, handed)
+        self.assertTrue(0.25 < handed[0][1] <= 0.3, handed)
+        ok, handed, spent = self.wait(0.3, answer_for=(12,))
+        self.assertTrue(ok, handed)
+        self.assertEqual([peer for peer, _ in handed[:2]], [11, 12])
+        ok, handed, spent = self.wait(0.3, answer_for=())
+        self.assertFalse(ok)
+        self.assertTrue(all(t is not None and t <= helper.RELAY_IPC_S for _, t in handed), handed)
+        self.assertLess(spent, 0.3 + 2 * helper.SPAWN_POLL_S + 0.1)
 
 
 # ---- whose answer relay_request trusts ---------------------------------------
@@ -759,13 +1058,23 @@ class ProbeAndOrphanRelayTest(test_player.PlayerTestCase):
         self.assertEqual((payload["relay"], payload["launch"], payload["tls"]["unpinned"]), (False, "older", 0))
 
     def test_the_orphan_check_stops_a_player_whose_relay_is_gone_whoever_claims_it(self):
+        """And it removes the socket file the killed relay left (a relay
+        killed outright never removes its own), under the player lock once
+        no player is left, as `player stop` does (the conformance review):
+        the FakeRelay's close removes its socket, so the file a killed relay
+        leaves is put back here, with nothing listening."""
         idle = self.player()
         self.relay_for(self.sock).close()
+        path = helper.relay_socket_path(self.sock)
+        stale = socket.socket(socket.AF_UNIX)
+        stale.bind(path)
+        stale.close()
         code, payload, _, stderr = test_player.run("player", "orphan-check", "--socket", self.sock,
                                                    "--owner-pid", "1", "--grace", "0", "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         self.assertEqual((payload["reason"], payload["stopped"]), ("relay_gone", True))
         self.assertTrue(gone(idle.pid, 3.0))
+        self.assertFalse(os.path.lexists(path), "the dead relay's socket was left behind")
 
     def test_the_orphan_check_leaves_a_player_whose_relay_answers_to_its_claim(self):
         idle = self.player()

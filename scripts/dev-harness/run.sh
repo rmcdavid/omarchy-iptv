@@ -271,13 +271,20 @@ cleanup() {
   # F-HARNESS-32: by recorded pid, TERM then KILL after a bound (qa_stop_pid,
   # scripts/qa-lib.sh), never a `pkill -f` pattern -- what this did not
   # start it cannot end. The foreground shell sits under `timeout`, so the
-  # quickshell beneath it is found by PARENT and exact name (never `-f`) and
-  # ended too, or a KILL on the wrapper would orphan it.
+  # quickshell beneath it is ended too, or a KILL on the wrapper would
+  # orphan it. It is found by exact name and by its own command line, which
+  # names this run's root (`quickshell -p <root>`), never by its parent
+  # (D-SINK-102's conformance review: no signal goes to a pid read
+  # off ancestry), and every signal to it goes through a pidfd once that
+  # command line still names the root (qa_stop_named).
   stop_recorded_server
   if [[ -n $QS_PID ]]; then
-    local inner; inner=$(pgrep -P "$QS_PID" -x quickshell 2>/dev/null | head -1)
+    local inner="" root p; root=$(qs_root)
+    for p in $(pgrep -x quickshell 2>/dev/null); do
+      [[ $(tr '\0' '\n' <"/proc/$p/cmdline" 2>/dev/null | sed -n '2,3p' | tr '\n' ' ') == "-p $root " ]] && inner=$p && break
+    done
     qa_stop_pid "$QS_PID" 5 "harness shell"
-    [[ -n $inner ]] && qa_stop_pid "$inner" 5 "quickshell under the timeout wrapper"
+    [[ -n $inner ]] && qa_stop_named "$inner" "$root" 5 "quickshell under the timeout wrapper"
   fi
   # --keep-player is for the restart scenario, which must outlive the shell
   # exactly the way the real player does.

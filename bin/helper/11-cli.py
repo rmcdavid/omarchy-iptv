@@ -602,9 +602,10 @@ def helper_arguments(argv: list[str], environ: Any) -> list[str]:
     handed over in ARGS_ENV (D-SINK-47, D-SINK-48; ARGS_ENV says why).
 
     ARGS_ENV is taken OUT of `environ` on every run, flag or not: os.environ's
-    pop unsets it in the C environment, so the one child this helper starts
-    with its environment -- the detached player, exec'd by spawn_detached --
-    and wl-paste never inherit it. (The kernel's copy at exec, the one
+    pop unsets it in the C environment, so wl-paste never inherits it; the
+    player and its relay are exec'd by spawn_player with explicit
+    environments that leave it out as well (player_environment, and the
+    relay's copy). (The kernel's copy at exec, the one
     /proc/<pid>/environ reads, is untouched; the shield is what closes that.)
 
     A flag with no list, a list that is not JSON, not a list of strings, or

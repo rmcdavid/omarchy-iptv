@@ -1487,7 +1487,7 @@ class StartTest(PlayerTestCase):
         The two assertions above this one live in ParityTest and call
         mpv_launch_argv directly. This one goes through the whole shipping path
         - the `player start` CLI, filter_mpv_args, mpv_launch_argv,
-        spawn_detached, exec - and reads the argv back out of the recording the
+        spawn_player, exec - and reads the argv back out of the recording the
         stub mpv writes about ITSELF. So it is the argv a real mpv would have
         received, not the argv a builder returned.
 

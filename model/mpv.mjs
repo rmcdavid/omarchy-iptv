@@ -180,8 +180,9 @@ function mpvArgWarning(token) {
 }
 
 // Every cost one token carries, in a fixed order. D-SINK-65 made one token
-// able to carry two: a `--demuxer-lavf-o` holding both FFmpeg's http_proxy
-// (D-SINK-59) and a binding rtsp_transport is told both.
+// able to carry two. A `--demuxer-lavf-o` holding FFmpeg's http_proxy, which
+// D-SINK-59 warned of, is refused since D-SINK-102 and warns of nothing; one
+// holding a binding rtsp_transport is told that.
 function mpvArgWarningLines(token) {
   var out = []
   var name = mpvHandoffName(token)

@@ -41,6 +41,8 @@ Servers (threads of this process, so nothing of theirs outlives it):
   ka      http://11.0.0.1:18085    a keep-alive provider (HTTP/1.1, R17)
   rtsp    rtsp://11.0.0.1:18554    a fake RTSP server (R14)
   rtrap   tcp 127.0.0.1:18555      an RTSP listener on this machine: no accept
+  rtmps   tcp 11.0.0.1:18936       R15's rtmps server: counts and holds each
+                                   connection and answers nothing
 
 Checks, each asserting the FIXED behaviour (relay-scenario.sh --baseline
 9e006be reds R1..R8, R10, R11 and the relay-only checks; the controls stay
@@ -73,8 +75,13 @@ green):
   R14  an rtsp channel whose server 302s to 127.0.0.1: rtrap accepts
        nothing; and an rtsp control, with the user's `--rtsp-transport=udp`,
        is set up interleaved over TCP and plays
-  R15  rtmps through the relay is unit-level (tests/test_relay.py) and was
-       measured by the design's headless rig: no TLS rtmp server here
+  R15  an rtmps channel to 11.0.0.1: its connection reaches the server only
+       through the relay -- the relay counts an upstream connection for that
+       load's token, one for every connection the server accepted, so
+       nothing connected directly. The CONNECT reaches the relay before any
+       TLS or RTMP byte, so no TLS rtmp server is needed: the server holds
+       the connection and answers nothing, and the load waits in its TLS
+       handshake while the rig reads the token off the player
   R16  the relay SIGKILLed during play: the player is gone within 2 s, and
        no server logs a request after it
   R17  a keep-alive HLS stream: the provider served more requests than it
@@ -113,9 +120,9 @@ import time
 
 PUB_IP, LAN_IP, LO_IP = "11.0.0.1", "10.0.0.1", "127.0.0.1"
 PORTS = {"pub": 18080, "pubs": 18443, "trap": 18081, "traps": 18444, "lan": 18082, "lpl": 18083,
-         "uproxy": 18084, "ka": 18085, "rtsp": 18554, "rtrap": 18555}
+         "uproxy": 18084, "ka": 18085, "rtsp": 18554, "rtrap": 18555, "rtmps": 18936}
 ADDRS = {"pub": PUB_IP, "pubs": PUB_IP, "trap": LO_IP, "traps": LO_IP, "lan": LAN_IP, "lpl": LO_IP,
-         "uproxy": LO_IP, "ka": PUB_IP, "rtsp": PUB_IP, "rtrap": LO_IP}
+         "uproxy": LO_IP, "ka": PUB_IP, "rtsp": PUB_IP, "rtrap": LO_IP, "rtmps": PUB_IP}
 PUB = "http://%s:%d" % (PUB_IP, PORTS["pub"])
 PUBS = "https://%s:%d" % (PUB_IP, PORTS["pubs"])
 TRAP = "http://%s:%d" % (LO_IP, PORTS["trap"])
@@ -325,6 +332,32 @@ def serve_rtsp(ts_path: str) -> None:
     while True:
         conn, _ = lsock.accept()
         threading.Thread(target=client, args=(conn,), daemon=True).start()
+
+
+def serve_rtmps() -> None:
+    """R15's server on 11.0.0.1: accepts, counts and holds each connection,
+    reading what arrives and answering nothing, so an rtmps load waits in its
+    TLS handshake (mpv's network timeout is 60 s) while the rig asks the
+    relay about it. Closed when the peer closes, or after 90 s."""
+    lsock = socket.socket()
+    lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    lsock.bind((ADDRS["rtmps"], PORTS["rtmps"]))
+    lsock.listen(8)
+
+    def hold(conn):
+        conn.settimeout(90)
+        try:
+            while conn.recv(4096):
+                pass
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    while True:
+        conn, _ = lsock.accept()
+        accepted("rtmps")
+        threading.Thread(target=hold, args=(conn,), daemon=True).start()
 
 
 def serve_rtrap() -> None:
@@ -540,6 +573,8 @@ def routes(names: dict[str, list[str]]) -> dict[str, list[tuple[str, str]]]:
     # R14: rtsp.
     chan("R14 rtsp 302 to this machine", RTSP + "/r14/redir")
     chan("C14 rtsp control", RTSP + "/live")
+    # R15: rtmps, to a server that holds the connection and answers nothing.
+    chan("R15 rtmps", "rtmps://%s:%d/r15/x" % (PUB_IP, PORTS["rtmps"]))
     # R17: a keep-alive provider.
     R["ka", "/ka/v.m3u8"] = m3u8(vod("ts", ts, KA + "/m/ts/"))
     chan("R17 keep-alive HLS", KA + "/ka/v.m3u8")
@@ -573,6 +608,7 @@ def start_servers(work: str, names: dict[str, list[str]]) -> None:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=serve_rtsp, args=(os.path.join(WWW, "long.ts"),), daemon=True).start()
     threading.Thread(target=serve_rtrap, daemon=True).start()
+    threading.Thread(target=serve_rtmps, daemon=True).start()
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         up = 0
@@ -840,6 +876,25 @@ class Rig:
         except (OSError, ValueError):
             return 0, None
 
+    def relay_count(self, token: str) -> dict | None:
+        """The relay's counts for one load's token (`{"op":"count"}` on its
+        control socket), or None."""
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(2)
+                s.connect(self.sock + ".relay")
+                s.sendall(json.dumps({"op": "count", "token": token}).encode() + b"\n")
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = s.recv(8192)
+                    if not chunk:
+                        break
+                    buf += chunk
+                reply = json.loads(buf.split(b"\n", 1)[0])
+                return reply if isinstance(reply, dict) and reply.get("ok") is True else None
+        except (OSError, ValueError):
+            return None
+
     def via_relay(self, port: int, token: str, url: str) -> int:
         """One absolute-form GET through the relay with `token`, as FFmpeg
         sends it after the 407; -> the status the relay answered, 0 for none."""
@@ -1026,9 +1081,6 @@ def cases(rig: Rig, playlists: dict) -> None:
               "transports %r" % [e.get("transport", "") for e in setups])
     rig.check("R14 control: it plays", first_state(reply) == "playing" and rig.playing(),
               "got %s/%s" % (code(reply), first_state(reply)))
-    print("NOTE R15: rtmps through the relay is unit-level (tests/test_relay.py) and was measured by"
-          " the design's headless rig; this rig serves no TLS rtmp", flush=True)
-
     # R17: keep-alive through the relay.
     _, status = rig.relay_status()
     up_before = (status or {}).get("upstream", -1)
@@ -1043,6 +1095,29 @@ def cases(rig: Rig, playlists: dict) -> None:
               0 < got_acc < got_req)
     rig.check("R17: every connection ka accepted is one the relay made (relay upstream +%d)" % up, up == got_acc,
               "relay upstream +%d, ka accepted %d" % (up, got_acc))
+
+    # R15: rtmps through the relay. FFmpeg's rtmps hands its options to tls,
+    # which tunnels through the per-file http-proxy with a CONNECT before any
+    # TLS or RTMP byte (measured by the design's rig, QA-RESULTS "D-SINK-102"); the relay judges
+    # 11.0.0.1 and connects. The token is read off the player while the
+    # load still waits in its handshake (the server answers nothing), and
+    # the relay is asked that token's counts: every connection the server
+    # accepted must be one the relay made for it. An FFmpeg that stopped
+    # handing the option to rtmps's tls would connect directly, and the
+    # relay would count none.
+    acc_before = accepts("rtmps")
+    reply = rig.start("pub", "R15 rtmps")
+    token, _ = rig.token()
+    counts = rig.relay_count(token) if token else None
+    got_acc = accepts("rtmps") - acc_before
+    up = (counts or {}).get("upstream", -1)
+    rig.check("R15 premise: the rtmps channel's connection reached its server (%d accepted; start %s/%s)"
+              % (got_acc, code(reply), first_state(reply)), got_acc >= 1)
+    rig.check("R15: the rtmps load's token is on the player's per-file http-proxy", bool(token))
+    rig.check("R15: the relay made an upstream connection for that load's token (+%d)" % up, up >= 1)
+    rig.check("R15: every connection the rtmps server accepted is one the relay made for that token,"
+              " so nothing connected directly", up == got_acc, "relay upstream %d, rtmps accepted %d" % (up, got_acc))
+    rig.stop()
 
     # R19: a zap from a public channel to a local playlist's channel.
     played(rig, "R19 public live channel", "pub", "LIVE public", "pub", "/m/ts/", least=1)

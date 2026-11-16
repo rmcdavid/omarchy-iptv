@@ -241,7 +241,12 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
 
     # D-SINK-102: the relay, at its bounds. Its listeners are doubles (nothing
     # is bound), its port the one the found player's command line names; a
-    # spawned relay answers its status only just inside RELAY_START_S, and
+    # spawned relay refuses its status at once (as one not yet listening
+    # again does) until RELAY_IPC_S before RELAY_START_S runs out, and from
+    # then on answers just inside the bound the code hands each question, so
+    # the wait spends RELAY_START_S whole with its last question at its own
+    # bound (min(RELAY_IPC_S, the time left): the conformance
+    # review; `learned["relay_tries"]` holds the bounds it was handed); and
     # every other question -- the adopted player's status, the load's
     # registration, the first-load count -- just inside the bound the code
     # hands relay_request.
@@ -262,11 +267,11 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         op = request.get("op")
         if op == "status" and state["phase"] in ("bind", "spawned"):
             if state.get("relay_up_at") is None:
-                state["relay_up_at"] = clock.t + helper.RELAY_START_S - _JUST_INSIDE
+                state["relay_up_at"] = clock.t + helper.RELAY_START_S - helper.RELAY_IPC_S
             if clock.t < state["relay_up_at"]:
                 return None
-        else:
-            clock.t += timeout - _JUST_INSIDE
+            learned.setdefault("relay_tries", []).append(timeout)
+        clock.t += timeout - _JUST_INSIDE
         reply = {"ok": True, "port": walk_port, "build": helper.player_build(), "_pid": 4243}
         if op == "load":
             reply.update(token="a" * 32)
@@ -438,11 +443,23 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertLessEqual(spent, budget, "player %s walked %.3f s, past its watchdog's %.3f s less the margin"
                              % (verb, spent, budget))
 
+    def assert_the_relay_wait_spent_its_bound(self, learned):
+        """The spawn's wait for its relay asked its last question with the
+        bound a relay question has, RELAY_IPC_S less what the poll had
+        already spent of it, and never more: each question had 10 ms before
+        the conformance review, and the wait's walk then spent
+        about RELAY_IPC_S less than RELAY_START_S."""
+        tries = learned.get("relay_tries") or []
+        self.assertTrue(tries, "the walk's spawn never asked its relay")
+        self.assertLessEqual(max(tries), helper.RELAY_IPC_S)
+        self.assertGreater(max(tries), helper.RELAY_IPC_S - 2 * helper.SPAWN_POLL_S, tries)
+
     def test_a_start_that_meets_a_wedged_player_fits_its_watchdog(self):
-        spent, reply, signals, _ = walk_long_path("start")
+        spent, reply, signals, learned = walk_long_path("start")
         self.assertTrue(reply and reply.get("ok"), reply)
         self.assertEqual(signals, [15, 9])            # one ladder, from quit
         self.assertGreater(spent, 37.0)               # the long path really was walked
+        self.assert_the_relay_wait_spent_its_bound(learned)
         self.assert_inside_its_watchdog("start", spent)
 
     def test_a_start_that_replaces_another_builds_player_fits_its_watchdog(self):
@@ -461,10 +478,11 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assert_inside_its_watchdog("start", spent)
 
     def test_a_restart_whose_ladder_leaves_the_player_fits_its_watchdog(self):
-        spent, reply, signals, _ = walk_long_path("restart")
+        spent, reply, signals, learned = walk_long_path("restart")
         self.assertTrue(reply and reply.get("ok"), reply)
         self.assertEqual(signals, [15, 9, 15, 9])     # its own ladder, then adopt_or_spawn's
         self.assertGreater(spent, 40.0)
+        self.assert_the_relay_wait_spent_its_bound(learned)
         self.assert_inside_its_watchdog("restart", spent)
 
     def test_a_play_leaves_mpvs_round_trips_what_its_8_s_left_them(self):

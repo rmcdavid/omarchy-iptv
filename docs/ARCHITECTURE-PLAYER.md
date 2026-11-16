@@ -1008,7 +1008,14 @@ standing authority of 2026-11-09): the verdict gains the player's relay
 - `apply_channel` registers its load with the relay right after the gate
   and before the TLS assertion (section 20.3); a relay that does not
   answer the registration is `not_running` with `outdated`, the gate's own
-  refusal, which the shell routes to `player start`.
+  refusal. Through `play` the shell routes it to `player start`
+  (`Model.playFailureVerdict`), which replaces the player; inside a
+  `player start` or `player restart` it is a local start failure
+  (`Model.playerStartFailure` reads `not_running` as local, and the
+  shell's card says the player could not be started), and the player that
+  start spawned is stopped as D-PLY-57's is [2026-11-16, the conformance
+  review: this sentence routed every case to `player start`, and
+  a start's spawn was left idle on the socket].
 - The probe's reply carries `relay`, and its `launch` reads `older` for a
   player of this build whose relay does not answer. An older build's
   player, launched with no pin, has its `http-proxy` counted as unpinned in
@@ -3927,15 +3934,29 @@ with literal targets only (20.9).
    proxy), and a Unix socket at `<socket>.relay` in the 0700 runtime
    directory, bound under umask 077 (the control socket). A stale socket
    there is removed, anything else there is refused (`socket_path_blocked`),
-   and a path that does not fit `sun_path` (107 bytes) is `spawn_failed`.
+   and a path that does not fit `sun_path` (107 bytes) is `spawn_failed`
+   (`RELAY_PATH_TOO_LONG`) -- asked by `player start` and `player restart`
+   before the lock, so before a restart's ladder or an adoption's
+   replacement has stopped anything (the conformance review: it
+   was asked at the bind, after the older player had gone, and a socket
+   path of 102-107 bytes ended the start with no player at all).
 2. It composes the argv with the pin (`mpv_launch_argv(...,
    relay_port=<port>)`) and writes the private options file (D-SINK-47).
 3. setsid and the double fork, as before. The grandchild G makes itself the
    leader of its own process group, moves every descriptor it needs above
    the two fixed numbers, puts `/dev/null` on 0 and 1 and the launch-window
    pipe on 2, hands the listeners to fds 3 and 4, closes every other
-   descriptor, makes itself a child subreaper (PR_SET_CHILD_SUBREAPER), and
-   forks the player M.
+   descriptor from 5 up to 4095 (`min(SC_OPEN_MAX, 4096)`: CPython opens
+   every descriptor close-on-exec, PEP 446, so only one the helper itself
+   inherited without that flag, numbered above 4095, could pass), makes
+   itself a child subreaper (PR_SET_CHILD_SUBREAPER), and forks the player
+   M. SpawnPlayerTest holds what results through the shipping `player
+   start`: the relay inherits exactly 0-4, 3 and 4 the two sockets, and the
+   player holds neither, nor a descriptor the caller left inheritable (read
+   by a probe at the relay's exec, which then execs the relay in place,
+   because the relay runs non-dumpable and its /proc fd table is closed to
+   its own uid; red without the player's close of 3 and 4, and without the
+   loop).
 4. M asks for SIGKILL when its parent dies (PR_SET_PDEATHSIG) and then
    checks that its parent is still G -- a parent gone before the prctl
    would leave it with no death signal at all -- closes 3 and 4, reports
@@ -3944,8 +3965,9 @@ with literal targets only (20.9).
    binary with no set-id bit and no file capabilities (prctl(2), READ);
    measured: the player was gone in about 5 ms after a SIGKILL of its
    parent, across mpv's exec, and the scenario's R16 observes it within 2 s.
-5. G sets its own core limit, points stderr at `/dev/null`, and execs the
-   relay: `<the helper's interpreter> -I <the stub, resolved through any
+5. G sets its own core limit (held at the relay's exec by the same probe:
+   red with that call removed and the relay's own kept), points stderr at
+   `/dev/null`, and execs the relay: `<the helper's interpreter> -I <the stub, resolved through any
    link> player relay --child=<M>` (`relay_argv`: never from the argv or
    the environment, so `player start` is no arbitrary-exec verb). It
    inherits the stub's shield, so it is non-dumpable before any part is
@@ -3958,7 +3980,10 @@ with literal targets only (20.9).
    the relay accepts waits in the listener's backlog. The helper waits for
    mpv's socket (unchanged), removes the options file, closes its own copies
    of the listeners, and then waits up to `RELAY_START_S` (5 s) for the
-   relay to answer `status` as the player's (`wait_for_relay`: an ancestor
+   relay to answer `status` as the player's, one question at a time, each
+   inside min(`RELAY_IPC_S`, the time left) for its whole exchange (each
+   had 10 ms until the conformance review, so a relay slower than
+   that on a loaded machine read as never answering) (`wait_for_relay`: an ancestor
    of the pid the spawn reported, or of the process the socket reaches,
    which under a wrapper that backgrounds the real player is the only one
    left, on the pinned port, for this build). A relay that never answers is
@@ -4000,7 +4025,8 @@ took at its start, before its reaper could reap anything, so a reaped
 child's reused pid is never reached; a relay whose `--child` is not its own
 child is refused at its start (`relay_child_pidfd`). `player stop` removes
 a relay socket a killed relay left, under the lock and only when no player
-is left.
+is left, and so does the orphan check once it has stopped a player whose
+relay was gone (`settle_under_lock`'s `relay`; the conformance review).
 
 **Relay death.** The kernel sends the player SIGKILL (PDEATHSIG). A pinned
 proxy that is not listening fails closed, ECONNREFUSED with no fallback to
@@ -4034,8 +4060,15 @@ judged by that stream's rule, never the next channel's (R19 observes it
 after a zap from a public channel to a local one). A port per load (closed
 ports for another account to bind) and one policy switched at each load
 (the old stream's last requests judged by the new channel's rule) were
-rejected. A relay that does not answer the registration is `not_running`
-with `outdated`, which the shell routes to `player start`.
+rejected. A relay that does not answer the registration, or answers it out
+of shape (a token that is not 32 lowercase hex digits, a port outside
+1-65535), is `not_running` with `outdated` (`RELAY_REGISTER_REFUSAL`). Through
+`play` the shell routes that to `player start`, which replaces the player;
+inside a `player start` or `player restart` it is a local start failure, the
+shell's card says the player could not be started, and the player that start
+spawned is stopped (`stop_fresh_spawn`, D-PLY-57's), where it was left idle
+on the socket until the next start read it older (the conformance review,
+2026-11-16; LoadRegistrationTest and SpawnPlayerTest hold both).
 
 **The read-back.** `read_tls_state` reads `http-proxy` as a fifth reading
 folded into `unpinned` (`relay_proxy_held`): it must be exactly the pin for
@@ -4147,7 +4180,14 @@ directly.
 - **rtmps: relayed.** rtmp hands its stream options to tls, which tunnels
   through CONNECT: measured with the per-file option, a CONNECT carrying the
   load's token after one 407, TLS verified end to end against the rig's CA,
-  RTMP's handshake through the tunnel, nothing direct.
+  RTMP's handshake through the tunnel, nothing direct. The relay cannot tell
+  that CONNECT from an https one, so its half is tests/test_relay.py's; the
+  player's half -- that mpv and FFmpeg hand rtmps's TLS the per-file proxy
+  at all -- is the scenario's R15 (since 2026-11-16, the conformance
+  review): an rtmps channel to a server inside the rig's
+  namespace that holds the connection and answers nothing, where every
+  connection the server accepted must be one the relay counted for that
+  load's token.
 - **rtmp, rtsp and srt: pinned to the judged address** (decision 9). None
   of them ever asks an HTTP proxy (measured for rtmp and rtsp over TCP,
   READ for srt), so FFmpeg would resolve the name itself, afresh at every
@@ -4196,7 +4236,11 @@ directly.
 From a LOCAL playlist every scheme is as before, except that http and https
 go through the relay under the local rule, so a loopback relay source's
 redirects are now held to its own port too (R13). A typed `--url` is
-relayed under the user-origin rule and never pinned.
+relayed only for http, https and rtmps, under the user-origin rule, and is
+never pinned or refused by scheme: its mms, mmsh and rtsp-tunnel
+connections, redirects included, stay direct, because a typed URL is the
+user's own (the CLI's PO-5 shape; the lead's call under the owner's
+standing authority of 2026-11-09, on the conformance review).
 
 ### 20.6 The user's proxy
 
@@ -4233,7 +4277,7 @@ own host is refused, as D-SINK-101 already refuses it at play.
 | Name (01-core.py) | Value | What it bounds |
 |---|---|---|
 | `RELAY_IPC_S` | 1 s | one control request, both ways |
-| `RELAY_START_S` | 5 s | a spawn's wait for its new relay's status |
+| `RELAY_START_S` | 5 s | a spawn's wait for its new relay's status; each question in it has min(`RELAY_IPC_S`, the time left) for its whole exchange, one anchor at a time |
 | `STREAM_LOOKUP_TIMEOUT_S` | 3 s | the relay's lookup of one target (the play-time lookup's own) |
 | `RELAY_CONNECT_S` | 10 s | every connect attempt to one target, together |
 | `RELAY_ATTEMPT_STAGGER_S`, `RELAY_ATTEMPTS_IN_FLIGHT` | 0.2 s, 3 | the staggered connect |
@@ -4364,6 +4408,21 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   (ARCHITECTURE.md section 6, D-SINK-58): the relay's table is the same.
 - **A local playlist's schemes other than http and https** -- mmsh, rtsp's
   HTTP tunnel, a user's udp rtsp transport -- are as before, local trust.
+- **A typed `--url`'s mms, mmsh and rtsp-tunnel connections** are neither
+  relayed nor pinned, redirects included: only http, https and rtmps reach
+  the relay (20.5). A typed URL is the user's own, the CLI's PO-5 shape.
+- **A user's `mpv` wrapper that sets the real player's environment** (the
+  wrapper case, D-PLY-55): the spawn strips lowercase `http_proxy` and
+  `no_proxy` only from what the helper execs (20.4), so a wrapper that
+  exports them again -- one that sources a profile carrying
+  `no_proxy=localhost,127.0.0.1`, say -- hands FFmpeg a `no_proxy` it
+  judges per hop, and a matching target, a redirect to 127.0.0.1
+  included, goes direct past the relay. The read-back reads mpv's
+  properties, not the real player's environment, so nothing at load can
+  see it. The wrapper is the user's own code (PO-5's shape, as its
+  appended options are: `launch_verdict`); stated, not refused (the lead's
+  call under the owner's standing authority of 2026-11-09, on the
+  conformance review).
 - **After an upgrade**, an older build's player keeps the stream it already
   has open until it is replaced: at most the 15 s hold when its channel is
   deliverable, and stopped at the hold's end otherwise (decision 15).

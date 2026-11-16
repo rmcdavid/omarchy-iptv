@@ -938,7 +938,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # tests/test_relay_player.py's 2 (relay_request's pid comparison, the
 # control socket's mode under umask 022); 8 red on 26400dd's code and every
 # one red under a named single-decision mutant; the suite runs 2527.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2527}
+# 2026-11-16, dsink102 (the launch and load findings of the branch's
+# conformance review, lane-launch-load): 2527 -> 2534 --
+# tests/test_relay_player.py's 7: what the relay inherits at its exec and
+# the player holds (0-4, the player neither listener), the relay's core
+# limit at its exec, a start whose load the relay registered out of shape
+# (its spawn stopped), a relay socket path past sun_path refused before the
+# older player is touched, the registration's shape over `play`, and the
+# spawn's relay wait's per-question bound (two). 4 red on a863b59's code
+# (plus the orphan check's relay socket and the two walks, amended), the
+# rest each red under a named single-decision mutant; the suite runs 2534.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2534}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1056,7 +1066,11 @@ OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 # 127.0.0.1 (this machine) -- R1..R20, the teardown -- plus the scenario's
 # own crash-journal line. `--baseline 9e006be` (0.19.1) answers 55 passed,
 # 47 failed (docs/QA-RESULTS.md "D-SINK-102").
-RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-104}
+# 104 -> 108 on 2026-11-16 (lane-launch-load, the conformance review):
+# R15's four, an rtmps channel to 11.0.0.1 whose every connection must be one the relay made for that load's token; red with the
+# per-file proxy emptied for rtmps (a direct connection, as an FFmpeg that
+# stopped handing rtmps's TLS the option would make): 3 of the 4.
+RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-108}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.

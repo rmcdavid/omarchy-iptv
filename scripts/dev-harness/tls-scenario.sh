@@ -188,9 +188,10 @@
 # the harness's own scratch home since F-HARNESS-20 (qa_harness_home, which
 # keeps an MPV_HOME that names no path in the real home, as this one does not).
 # MPV_HOME is read by mpv and by nothing else, and it reaches
-# mpv because the player is exec'd with the environment it inherits
-# (bin/omarchy-iptv `spawn_detached` ends in `os.execvp`, and the service
-# assigns no `environment` to its player Process). Whether mpv honoured it is
+# mpv because the player is exec'd with the helper's environment less only
+# the private names and the two proxy names FFmpeg reads (spawn_player's
+# `player_environment`, D-SINK-102; spawn_detached's `os.execvp` before it),
+# and the service assigns no `environment` to its player Process. Whether mpv honoured it is
 # not assumed: S2 is the observation, it runs BEFORE the case that depends on it,
 # and S3 is called out as VACUOUS in the run's own output if S2 did not play.
 #
