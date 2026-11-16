@@ -317,6 +317,29 @@ REVIEWED = [
      "linear: matched at the start only; the scheme run cannot hold ':' so it backs off at most once "
      "over its length (_ADDRESS_SCHEME, D-SINK-109: at_after_authority over a source URL, and the "
      "label reading's scheme clause and authority split over a stored label, D-SINK-100)"),
+    (r"[0-9]+", "user",
+     "linear: fullmatch of one class run (_LABEL_DIGITS, the label reading's port of a `/^[0-9]+$/` "
+     "test, D-SINK-100)"),
+    (r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*", "user",
+     "linear: fullmatch from one start; every repetition opens with a literal `.` the runs cannot hold, "
+     "so each run has one split (_LABEL_ADDRESS_NAME, Model.ADDRESS_NAME_RE's port, D-SINK-100)"),
+    (r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])", "user",
+     "linear: fullmatch from one start; each repetition of the group ends at a literal `.` its classes "
+     "cannot hold, so a repetition has one end and its inner run backs off at most once over its own "
+     "label, and the last label's run the same; over a label of MAX_LABEL code points at most "
+     "(_LABEL_HOST_NAME, Model.LABEL_NAME_RE's port, D-SINK-100)"),
+    (r"[A-Za-z0-9-]+", "user",
+     "linear: fullmatch of one class run (_LABEL_LOOSE, labelLooseName's port, D-SINK-100)"),
+    (r"\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*\]", "user",
+     "linear: fullmatch; _IPV6_LITERAL's shape without its zone: a lookahead over the class without "
+     "':' and ONE run, which the closing `]` cannot extend (_LABEL_ZONELESS_IPV6, D-SINK-100)"),
+    (r"[?#;]", "user", "linear: one character class (_LABEL_TAIL_END, D-SINK-100)"),
+    (r"[./]", "user", "linear: one character class (_LABEL_QUERY_LEAD, D-SINK-100)"),
+    (r"[?;&]", "user", "linear: one character class (_LABEL_QUERY_MARK, D-SINK-100)"),
+    (r"%(2[6Ff]|3[ABDFabdf]|40|5[Cc])|&#([0-9]+);?|&#[xX]([0-9A-Fa-f]+);?|\\u00([0-9A-Fa-f]{2})|&(colon|sol|commat|quest|amp|equals|semi|bsol);", "user",
+     "linear: every branch opens with a literal `%`, `&` or a backslash; the two numeric-entity branches "
+     "share `&#` and part at the next character, each one class run with an optional `;` after it that "
+     "the run cannot hold; sub resumes past each match (_LABEL_ESCAPE, labelDecode's port, D-SINK-100)"),
     (r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", "user",
      "linear: anchored; the scheme run cannot hold ':' and the authority run has nothing after it "
      "(host_port_of)"),

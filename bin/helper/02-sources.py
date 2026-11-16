@@ -492,20 +492,474 @@ def label_key(text: Any) -> str:
     return sanitize_input(text, MAX_SOURCE_URL).lower()
 
 
-def unique_label(label: str, existing: list[str]) -> str:
-    """Model.uniqueLabel: " 2", " 3", ... appended while `label` is taken by
-    another source (case-insensitive, SR21); the cap counts code points
-    (SR22). Derived labels only; a typed label is refused instead."""
-    taken = {label_key(item) for item in existing}
+# ------------------------------------------------------------- a label as it reads
+#
+# D-SINK-100 and D-SINK-108 (2026-11-16, round 2 of the security review; the
+# lead's calls under the owner's standing authority of 2026-11-09). The
+# shell reads a source's label through Model.labelSinkText (D-SINK-98): the
+# Sources row, its accessible name, every line that names a source by its
+# label. The helper printed and compared labels as typed, so two sources
+# could READ alike (D-SINK-100) and `state source list` printed a label the
+# guide withholds (D-SINK-108). label_sink_text is a port of the model's
+# reading, function for function, and one fixture holds the two to each
+# other (the shared label-readings fixture, dev branch: vectors, and a digest
+# sweep over every label of up to three of its pieces). Where Unicode
+# differs: NFKD here is Python's (Unicode 16.0 on 3.14) and node's 17.0
+# there, so a character assigned after 16.0 is outside the agreement.
+
+_LABEL_DIGITS = re.compile(r"[0-9]+")
+_LABEL_ADDRESS_NAME = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*")
+_LABEL_HOST_NAME = re.compile(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])")
+_LABEL_LOOSE = re.compile(r"[A-Za-z0-9-]+")
+_LABEL_ZONELESS_IPV6 = re.compile(r"\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*\]")
+_LABEL_TAIL_END = re.compile(r"[?#;]")
+_LABEL_QUERY_LEAD = re.compile(r"[./]")
+_LABEL_QUERY_MARK = re.compile(r"[?;&]")
+_LABEL_SCHEME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+.-")
+_LABEL_LETTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+_LABEL_ESCAPE = re.compile(r"%(2[6Ff]|3[ABDFabdf]|40|5[Cc])|&#([0-9]+);?|&#[xX]([0-9A-Fa-f]+);?"
+                           r"|\\u00([0-9A-Fa-f]{2})|&(colon|sol|commat|quest|amp|equals|semi|bsol);")
+LABEL_ENTITY_NAMES = {"colon": ":", "sol": "/", "commat": "@", "quest": "?", "amp": "&", "equals": "=",
+                      "semi": ";", "bsol": "\\"}
+LABEL_LEAD = "([{<\"'"
+LABEL_TRAIL = ")]}>\"'.,;:!?"
+_LABEL_LINE_TERMINATORS = frozenset("\n\x0b\x0c\r\x85\u2028\u2029")
+
+
+def has_address_line_terminator(text: str) -> bool:
+    """Model.hasAddressLineTerminator: LF, VT, FF, CR, U+0085, U+2028 or
+    U+2029 anywhere."""
+    return any(ch in _LABEL_LINE_TERMINATORS for ch in text)
+
+
+def host_port_split(hostport: str) -> tuple[str, str | None] | None:
+    """Model.hostPortSplit: `host[:port]` cut at the port's `:` (after a
+    bracketed literal's `]`), with a port of digits; None when the host is
+    empty, the port is not digits, or what follows a literal's `]` is not
+    `:` and a port."""
+    host, port = hostport, None
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close == -1:
+            return None
+        host = hostport[:close + 1]
+        tail = hostport[close + 1:]
+        if tail != "":
+            if tail[0] != ":":
+                return None
+            port = tail[1:]
+    else:
+        colon = hostport.find(":")
+        if colon != -1:
+            host, port = hostport[:colon], hostport[colon + 1:]
+    if host == "":
+        return None
+    if port is not None and _LABEL_DIGITS.fullmatch(port) is None:
+        return None
+    return host, port
+
+
+def is_zoneless_ipv6_literal(host: str) -> bool:
+    """Model.isZonelessIpv6Literal: a bracketed IPv6 literal (the
+    validators' shape) with no zone."""
+    return _LABEL_ZONELESS_IPV6.fullmatch(host) is not None
+
+
+def address_accessible_host(hostport: str) -> str:
+    """Model.addressAccessibleHost: `host[:port]` as typed when its host is
+    labels of [A-Za-z0-9-] joined by `.` or a zoneless IPv6 literal, else
+    ""."""
+    split = host_port_split(hostport)
+    if split is None:
+        return ""
+    if split[0].startswith("["):
+        return hostport if is_zoneless_ipv6_literal(split[0]) else ""
+    return hostport if _LABEL_ADDRESS_NAME.fullmatch(split[0]) else ""
+
+
+def is_dotted_quad(host: str) -> bool:
+    """Model.isDottedQuad."""
+    parts = host.split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        if not (1 <= len(part) <= 3) or _LABEL_DIGITS.fullmatch(part) is None or int(part) > 255:
+            return False
+    return True
+
+
+def label_host(hostport: str) -> str:
+    """Model.labelHost: the host a LABEL may name, `host[:port]` as typed,
+    or "": two or more labels, the last starting with a letter and two
+    characters long at least, an IPv4 dotted quad, or a zoneless IPv6
+    literal, each with `:` and digits after it or nothing."""
+    split = host_port_split(hostport)
+    if split is None:
+        return ""
+    host = split[0]
+    if host.startswith("["):
+        return hostport if is_zoneless_ipv6_literal(host) else ""
+    return hostport if _LABEL_HOST_NAME.fullmatch(host) or is_dotted_quad(host) else ""
+
+
+def address_authority_split(value: str) -> tuple[str, str, str] | None:
+    """Model.addressAuthoritySplit: (scheme as typed, authority, the text
+    from the authority's closing `/`, `?` or `#` on) for `scheme://` text,
+    or None."""
+    scheme = _ADDRESS_SCHEME.match(value)
+    if scheme is None:
+        return None
+    body = value[scheme.end():]
+    cut = _AUTHORITY_END.search(body)
+    if cut is None:
+        return None
+    return scheme.group(1), body[:cut.start()], body[cut.start():]
+
+
+def address_authority_parts(value: str) -> dict[str, Any] | None:
+    """Model.addressAuthorityParts (D-SINK-97 rule c): the scheme as typed,
+    whether a userinfo is there, the host[:port] that parsed, and the text
+    from the authority's closing character on; None where rule c gives
+    stars."""
+    if has_address_line_terminator(value):
+        return None
+    split = address_authority_split(value)
+    if split is None:
+        return None
+    scheme, authority, after = split
+    lowered = scheme.lower()
+    if lowered not in SOURCE_SCHEMES:
+        return None
+    if at_after_authority(value) or host_withheld(value):
+        return None
+    if authority == "" and lowered == "file":
+        return {"scheme": scheme, "userinfo": False, "host": "", "after": after}
+    at = authority.rfind("@")
+    host = address_accessible_host(authority[at + 1:])
+    if host == "":
+        return None
+    return {"scheme": scheme, "userinfo": at != -1, "host": host, "after": after}
+
+
+def redaction_finds(text: str) -> bool:
+    """Whether Model.sinkText would CHANGE `text`: the model prints a URL it
+    finds as its host alone and a credential token as HOST_WITHHELD, so it
+    changes the text exactly when it finds either. Not `redact_urls(text) !=
+    text`: the helper prints a named scheme with its host, so `http://cdn.test`
+    comes back as itself here and as `cdn.test` there."""
+    if not redaction_can_change(text):
+        return False
+    reading = UrlReading(text, 0, text.isascii() and text.isprintable(), True)
+    return bool(reading.urls) or bool(credential_spans(text, reading))
+
+
+def label_sink_text(text: Any) -> str:
+    """Model.labelSinkText (D-SINK-98): a label as every sink of the shell
+    draws and hears it. Cut into tokens at U+0020; when any token reads as
+    an address (label_token_reads_as_address), the hosts the address tokens
+    name, joined by a space (each label_token_host's, or HOST_WITHHELD);
+    else HOST_WITHHELD when the model's free-text redactor would change the
+    label (redaction_finds); else the label as it is."""
+    s = "" if text is None else str(text)
+    hosts = [label_token_host(token) for token in s.split(" ")
+             if token != "" and label_token_reads_as_address(token)]
+    if hosts:
+        return " ".join(hosts)
+    return HOST_WITHHELD if redaction_finds(s) else s
+
+
+def label_core(token: str) -> str:
+    """Model.labelCore: the token less its leading run of LABEL_LEAD and
+    its trailing run of LABEL_TRAIL, a zoneless IPv6 literal's brackets
+    kept."""
+    a, b = 0, len(token)
+    while a < b and token[a] in LABEL_LEAD:
+        if token[a] == "[":
+            close = token.find("]", a)
+            if close != -1 and is_zoneless_ipv6_literal(token[a:close + 1]):
+                break
+        a += 1
+    while b > a and token[b - 1] in LABEL_TRAIL:
+        if token[b - 1] == "]":
+            opening = token.rfind("[", 0, b)
+            if opening >= a and is_zoneless_ipv6_literal(token[opening:b]):
+                break
+        b -= 1
+    return token[a:b]
+
+
+def label_token_reads_as_address(token: str) -> bool:
+    """Model.labelTokenReadsAsAddress: a shape clause holds of the token's
+    core, its raw text, the core of its fold, or its fold."""
+    core = label_core(token)
+    if label_shape_reads_as_address(core) or label_shape_reads_as_address(token):
+        return True
+    folded_core = label_core(label_fold(core))
+    if folded_core != core and label_shape_reads_as_address(folded_core):
+        return True
+    folded = label_fold(token)
+    return folded != token and label_shape_reads_as_address(folded)
+
+
+def label_shape_reads_as_address(t: str) -> bool:
+    """Model.labelShapeReadsAsAddress: the clauses scheme and a to e."""
+    return (_ADDRESS_SCHEME.match(t) is not None or label_slash_authority(t) is not None or label_scheme_slash(t)
+            or label_userinfo_at(t) or label_host_path(t) != "" or label_query_param(t))
+
+
+def label_slash_authority(t: str) -> str | None:
+    """Model.labelSlashAuthority (clause a)."""
+    i = t.find("//")
+    while i != -1:
+        rest = t[i + 2:]
+        cut = _AUTHORITY_END.search(rest)
+        auth = rest if cut is None else rest[:cut.start()]
+        if "@" in auth or label_host(auth) != "":
+            return auth
+        i = t.find("//", i + 1)
+    return None
+
+
+def label_scheme_slash(t: str) -> bool:
+    """Model.labelSchemeSlash (clause b): `:` then `/` or a backslash, after
+    a scheme of two or more characters."""
+    i = t.find(":")
+    while i != -1:
+        if t[i + 1:i + 2] in ("/", "\\"):
+            j, letter = i, -1
+            while j > 0 and t[j - 1] in _LABEL_SCHEME_CHARS:
+                j -= 1
+                if t[j] in _LABEL_LETTERS:
+                    letter = j
+            if letter != -1 and i - letter >= 2:
+                return True
+        i = t.find(":", i + 1)
+    return False
+
+
+def label_userinfo_at(t: str) -> bool:
+    """Model.labelUserinfoAt (clause c): an `@` with a `:` before the last
+    `@`."""
+    at = t.rfind("@")
+    return at > 0 and t.rfind(":", 0, at) != -1
+
+
+def label_host_path(t: str) -> str:
+    """Model.labelHostPath (clause d)."""
+    slash = t.find("/")
+    if slash <= 0 or slash + 1 >= len(t):
+        return ""
+    head = t[:slash]
+    host = label_host(head)
+    if host != "":
+        return host
+    at = head.rfind("@")
+    return label_host(head[at + 1:]) if at > 0 else ""
+
+
+def label_query_param(t: str) -> bool:
+    """Model.labelQueryParam (clause e)."""
+    lead = _LABEL_QUERY_LEAD.search(t)
+    if lead is None:
+        return False
+    mark = _LABEL_QUERY_MARK.search(t, lead.start() + 1)
+    return mark is not None and t.rfind("=") > mark.start()
+
+
+def label_fold(token: str) -> str:
+    """Model.labelFold: NFKD less the format characters, the escapes
+    decoded once, NFKD again."""
+    s = label_fold_nfkd(token)
+    decoded = label_decode(s)
+    return s if decoded == s else label_fold_nfkd(decoded)
+
+
+def _label_code_point(digits: str, base: int) -> int:
+    """The number `digits` spells, or 0x110000 when it is past U+10FFFF
+    (read without int() over a long run: a numeric entity's digits are the
+    provider's, and the bound is all that is asked)."""
+    trimmed = digits.lstrip("0") or "0"
+    if len(trimmed) > (7 if base == 10 else 6):
+        return 0x110000
+    return int(trimmed, base)
+
+
+def label_decode(text: str) -> str:
+    """Model.labelDecode: the escapes decoded once, left to right -- the
+    percent escapes %2F %3A %40 %3D %26 %3F %3B and %5C in either case, an
+    HTML numeric entity `&#NN;` or `&#xHH;` (its `;` optional) up to
+    U+10FFFF, a backslash-u00HH, and the HTML names of eight delimiters."""
+    if "%" not in text and "&" not in text and "\\" not in text:
+        return text
+
+    def decode(match: re.Match[str]) -> str:
+        pct, dec, hexa, uni, name = match.groups()
+        if name:
+            return LABEL_ENTITY_NAMES[name]
+        if pct:
+            cp = int(pct, 16)
+        elif dec:
+            cp = _label_code_point(dec, 10)
+        elif hexa:
+            cp = _label_code_point(hexa, 16)
+        else:
+            cp = int(uni, 16)
+        return chr(cp) if 0 <= cp <= 0x10FFFF else match.group(0)
+
+    return _LABEL_ESCAPE.sub(decode, text)
+
+
+def _host_format_code(code: int) -> bool:
+    for first, last in HOST_FORMAT_RANGES:
+        if code < first:
+            return False
+        if code <= last:
+            return True
+    return False
+
+
+def label_fold_nfkd(text: str) -> str:
+    """Model.labelFoldNfkd: NFKD, then every format character
+    (HOST_FORMAT_RANGES, Unicode's Cf) removed; ASCII text as it is."""
+    if text.isascii():
+        return text
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not _host_format_code(ord(ch)))
+
+
+def label_token_host(token: str) -> str:
+    """Model.labelTokenHost: the host an address token names, or
+    HOST_WITHHELD -- its raw reading and, when it holds an escape, its
+    decoded one, which must agree; never from the NFKD fold."""
+    host = label_token_authority(label_core(token), token)
+    decoded = label_decode(token)
+    if decoded == token:
+        return host if host != "" else HOST_WITHHELD
+    other = label_token_authority(label_core(decoded), decoded)
+    if host == "":
+        return other if other != "" else HOST_WITHHELD
+    return host if other == host else HOST_WITHHELD
+
+
+def label_head_is_authority(head: str) -> bool:
+    """Model.labelHeadIsAuthority: the head before a `//` at the token's
+    first `/` is itself an authority on any of its three readings."""
+    for reading in (head, label_decode(head), label_fold(head)):
+        if reading == "":
+            continue
+        if "@" in reading or label_host(reading) != "":
+            return True
+        colon = reading.rfind(":")
+        if colon > 0 and _LABEL_DIGITS.fullmatch(reading[colon + 1:]) and label_loose_name(reading[:colon]):
+            return True
+        if len(reading) > 1 and reading.endswith(".") and label_loose_name(reading):
+            return True
+    return False
+
+
+def label_loose_name(host: str) -> bool:
+    """Model.labelLooseName: labels of [A-Za-z0-9-] joined by single dots,
+    one or more, one trailing `.` allowed."""
+    name = host[:-1] if host.endswith(".") else host
+    if name == "":
+        return False
+    return all(_LABEL_LOOSE.fullmatch(part) is not None for part in name.split("."))
+
+
+def label_token_authority(t: str, whole: str) -> str:
+    """Model.labelTokenAuthority: the host of the LEFTMOST authority of the
+    core `t` (scheme, `//`, a:b@c, host/path), else HOST_WITHHELD, or ""
+    when none applies."""
+    if _ADDRESS_SCHEME.match(t):
+        parts = address_authority_parts(t)
+        return parts["host"] if parts is not None and label_host(parts["host"]) != "" else HOST_WITHHELD
+    slash = t.find("/")
+    head = t if slash == -1 else t[:slash]
+    if slash != -1 and t[slash + 1:slash + 2] == "/":
+        rest = t[slash + 2:]
+        if label_head_is_authority(head):
+            following = rest.find("/")
+            if "@" in (rest if following == -1 else rest[:following]):
+                return HOST_WITHHELD
+            if "@" not in head and label_host(head) == "":
+                return "" if label_decode(head) != head else HOST_WITHHELD
+        else:
+            cut = _AUTHORITY_END.search(rest)
+            auth = rest if cut is None else rest[:cut.start()]
+            if "@" in auth or label_host(auth) != "":
+                return label_host(auth[auth.rfind("@") + 1:]) or HOST_WITHHELD
+    if label_userinfo_at(t):
+        at = head.rfind("@")
+        if at == -1:
+            return HOST_WITHHELD
+        tail = head[at + 1:]
+        end = _LABEL_TAIL_END.search(tail)
+        return label_host(tail if end is None else tail[:end.start()]) or HOST_WITHHELD
+    return label_host_path(t) or label_host_path(whole)
+
+
+def label_read_key(text: Any) -> str:
+    """The key a label READS as (Model.labelReadTaken's): label_key of
+    label_sink_text of the sanitized label."""
+    return label_key(label_sink_text(sanitize_input(text, MAX_SOURCE_URL)))
+
+
+def label_keys(labels: list[Any]) -> tuple[set[str], set[str]]:
+    """(raw keys, read keys) of `labels`, built once (Model.labelKeySets).
+    An empty key takes nothing."""
+    raw: set[str] = set()
+    read: set[str] = set()
+    for label in labels:
+        key = label_key(label)
+        if key != "":
+            raw.add(key)
+        reads = label_read_key(label)
+        if reads != "":
+            read.add(reads)
+    return raw, read
+
+
+def label_keys_add(keys: tuple[set[str], set[str]], label: Any) -> None:
+    """One label added to label_keys' sets."""
+    key = label_key(label)
+    if key != "":
+        keys[0].add(key)
+    reads = label_read_key(label)
+    if reads != "":
+        keys[1].add(reads)
+
+
+def label_keys_take(keys: tuple[set[str], set[str]], label: Any) -> bool:
+    """Whether `label` is taken in label_keys' sets: its raw key is another
+    label's raw key, or it READS as another label reads (D-SINK-100)."""
+    key = label_key(label)
+    if key != "" and key in keys[0]:
+        return True
+    reads = label_read_key(label)
+    return reads != "" and reads in keys[1]
+
+
+def unique_label_over(label: str, keys: tuple[set[str], set[str]]) -> str:
+    """Model.uniqueLabelOver: " 2", " 3", ... appended while `label` is
+    taken in `keys` (label_keys_take); the cap counts code points (SR22)."""
     base = cap_code_points(sanitize_input(label, MAX_SOURCE_URL), MAX_LABEL) or "source"
-    if base.lower() not in taken:
+    if not label_keys_take(keys, base):
         return base
     for suffix in range(2, 1000):
         tail = " %d" % suffix
         candidate = cap_code_points(base, MAX_LABEL - len(tail)) + tail
-        if candidate.lower() not in taken:
+        if not label_keys_take(keys, candidate):
             return candidate
     return base
+
+
+def unique_label(label: str, existing: list[str]) -> str:
+    """Model.uniqueLabel: " 2", " 3", ... appended while `label` is taken by
+    another source -- the same label case-insensitively (SR21), or, since
+    D-SINK-100, one that READS as `label` reads (label_sink_text); the cap
+    counts code points (SR22). Derived labels only; a typed label is
+    refused instead."""
+    return unique_label_over(label, label_keys(existing))
 
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')

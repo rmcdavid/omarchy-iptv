@@ -1395,6 +1395,41 @@ TestCase {
     compare(Model.sourcesProbeLine(view), "Fetching from " + W + Model.ELLIPSIS)
   }
 
+  // D-SINK-100 and D-SINK-108 (2026-11-16), in V4, the engine that loads
+  // state.json: parseState places a derived label against every typed one,
+  // as it reads, and does it for 50 sources -- every other one typed as a
+  // credential address, the reading's worst case -- within a load's budget.
+  // The time is printed for the record (QA-RESULTS, lane-r2b).
+  function test_labelsUniqueAsTheyReadInV4() {
+    var cred = "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    compare(Model.labelSinkText(cred), "cdn.test")
+    compare(Model.labelSinkText("http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fa.m3u"), "cdn.test")
+    compare(Model.labelSinkText("http&colon;&sol;&sol;qqqqqq&colon;zzzzzz&commat;cdn.test&sol;x"), "cdn.test")
+    compare(Model.uniqueLabel("cdn.test", [cred]), "cdn.test 2")
+    function record(url, label, custom, n) {
+      var v = Model.validateSourceUrl(url, { origin: "cli" })
+      return { key: Model.sourceKey(v.url), url: v.url, epgUrl: "", kind: v.kind, label: label, labelCustom: custom, origin: "cli",
+               addedAt: 10 + n, lastUsed: 0, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    }
+    var pair = [record("http://cdn.test/a.m3u", "cdn.test", false, 1), record("http://cdn.test/b.m3u", cred, true, 2)]
+    var loaded = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: pair }))
+    compare(loaded.sources.map(function (s) { return s.label }).join("|"), "cdn.test 2|" + cred)
+    var many = []
+    for (var n = 0; n < 50; n++)
+      many.push(record("http://cdn" + n + ".test/a.m3u", n % 2 ? "http://qqqqqq:zzzzzz@cdn" + n + ".test/x.m3u" : "x", n % 2 === 1, n))
+    var text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: many })
+    var best = -1
+    for (var r = 0; r < 5; r++) {
+      var t0 = Date.now()
+      var st = Model.parseState(text)
+      var dt = Date.now() - t0
+      if (best < 0 || dt < best) best = dt
+      compare(st.sources.length, 50)
+    }
+    console.log("D-SINK-100: parseState over 50 sources in V4, best of 5: " + best + " ms")
+    verify(best < 150, "parseState over 50 sources took " + best + " ms")
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.

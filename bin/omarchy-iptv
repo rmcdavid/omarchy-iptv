@@ -114,15 +114,15 @@ SHIELDED = shield_environment()
 # the split script on the dev branch.
 HELPER_PARTS = (
     ("01-core.py", 190653, 0x168b84d7),
-    ("02-sources.py", 139193, 0x185536d0),
-    ("03-io-playlist.py", 99475, 0x6c51c526),
+    ("02-sources.py", 157105, 0x17550fdd),
+    ("03-io-playlist.py", 99541, 0x3608c470),
     ("04-epg.py", 89348, 0x28342811),
     ("05-ipc-logos.py", 60044, 0xc1da7923),
     ("06-failed.py", 50993, 0x4b191909),
     ("07-player.py", 113389, 0xce9c9811),
     ("08-player-verbs.py", 159396, 0x1f63346c),
     ("09-cache.py", 27452, 0x5b4704f4),
-    ("10-state.py", 62749, 0x8597ec07),
+    ("10-state.py", 64178, 0xa97d5065),
     ("11-cli.py", 42914, 0xaa9bae75),
     ("12-relay.py", 58605, 0xd65b00c5),
 )

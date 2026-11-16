@@ -191,6 +191,9 @@ class BoundaryTest(unittest.TestCase):
             "state.recents[].id": {"ok": True, "kind": "state", "state": {"recents": [{"id": LEGACY_ID, "name": "N"}]}},
             "state.lastPlayed.id": {"ok": True, "kind": "state", "state": {"lastPlayed": {"id": LEGACY_ID, "name": "N"}}},
             "state.session.id": {"ok": True, "kind": "state", "state": {"session": {"id": LEGACY_ID, "name": "N"}}},
+            # D-SINK-108 (lane-r2b): a label prints as the Sources list reads it.
+            "state.sources[].label": {"ok": True, "kind": "state", "state": {"sources": [
+                {"key": "0000abcd", "label": "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fa.m3u", "host": "cdn.test"}]}},
         }
 
     def test_every_field_is_read_at_emit(self):

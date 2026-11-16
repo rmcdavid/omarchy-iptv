@@ -20392,3 +20392,66 @@ The fixture-is-whole test passes on b00bb39; it guards the fixture.
 - Guide.qml: the loading line (`service.sourceHost`), the empty and failure lines (`service.statusHost`) and their accessible name, the fetching line (now `sourcesProbeLine`), the switch probe's failure line (`r.host`, now `hostForRecord`'s) -- all reached; the form's two lines re-read through `formLineHost`, unchanged.
 - Helper `source_host(`: the sites above (changed); channels.json (cleared, data); `public_source`, `public_state`'s `migrationPending` (cleared: `state source list` keeps R32a's RFC host). `url_host(`: the stream gates' and the relay's decisions (cleared, no print), `fetch_bytes`' `,` test (cleared), `pathHost` and the play-time local-address sentence (round 5's, not touched), and `fallback_channel_name`.
 - `fallback_channel_name` names a typed `play --url` with no name by its host unless `host_withheld` holds, so `http://qqqqqq.x:1234/zzzz@cdn.test/x.ts` typed on a person's own command line names the window `qqqqqq.x`. That is R32a's stated residual (a dotted username before a digits-only password prefix), and test_player pins the narrower predicate on purpose: `http://u:p@cdn.test/live/me@x/1.ts` names `cdn.test`, which the `@` arm would make `Stream`. Not changed here; recorded as an open question for the lead.
+
+### D-SINK-100 and D-SINK-108: labels unique as they read, in both mirrors, and printed that way
+
+**What changed.**
+- Helper (bin/helper/02-sources.py): `label_sink_text`, a port of `Model.labelSinkText` function for function (the token cut at U+0020, `labelCore`, the six shape clauses, `labelFold` with its two NFKD passes around `labelDecode`, `labelTokenHost` with its raw and decoded readings, `labelHeadIsAuthority`, `labelTokenAuthority`, and under them `addressAuthorityParts`, `addressAccessibleHost`, `hostPortSplit`, `labelHost`, `isDottedQuad`). The fallback, the model's `sinkText(s) !== s`, is `redaction_finds`: the model prints a URL it finds as its host and a credential as `[host withheld]`, so it changes a text exactly when it finds either, where the helper's own `redact_urls` keeps a named scheme. The pattern table gains its nine patterns (scripts/check-helper-regex.py); the scheme and authority cuts are the reviewed ones step 3 uses.
+- Uniqueness: `label_keys` / `Model.labelKeySets` build a list's raw and read keys once; `unique_label_over` / `Model.uniqueLabelOver` append ` 2`, ` 3`, ... while a candidate's raw key or its read key is taken; `unique_label` and `uniqueLabel` are those two calls.
+- `check_custom_label` refuses a typed label whose read key another source's label has, unless it equals the record's own `stored` label (`update_source_record` passes it; the exemption of `selfStoredLabel` in model/sources.mjs).
+- Load: `normalize_state` and `Model.parseState` accept the records first, then place each derived label in order against every typed label in the list and every label placed before it.
+- Printing (D-SINK-108): `REPLY_READINGS` gains `state.sources[].label` with a `label` reading, `label_sink_text`; the `duplicate` sentence (add and update) and the `label_taken` sentence quote the label through it.
+
+**The fixture.** tests/fixtures/label-readings.json, every expected value the MODEL's answer (written by a generator over Model.labelSinkText, uniqueLabel, validateLabel and parseState; the node suite holds the model to it, this lane's Python suite the helper):
+- `vectors`, 1,571: 1,500 of the 231,011 distinct labels the node suite reads through `labelSinkText` in a full run (counted by an instrumented scratch copy of the model; every check and its sweeps), drawn by `random.Random(20261116).sample` from the 224,005 no longer than 120 characters holding no lone surrogate and no code point Unicode 16.0 leaves unassigned; and deriveLabel's label for every valid URL of source-urls.json and source-labels.json. 978 of them read as something other than themselves. They are copied, not moved: the node suite's own tables stay where they are.
+- `unique` (14), `validate` (13, with `self` and the record's stored label), `states` (6 stored lists and the labels a load gives).
+- `sweep`: 42 pieces -- the design's 24 (`http://`, `//`, the credential's pieces, `@`, `cdn.test`, `/`, `?`, `username=`, `&`, `%40`, `%3A`, `&#64;`, the fullwidth colon and slash, U+200B, a space, `8080`, `.`, `(`, `)`, `nas`, `x`) and the critique's (`%2F`, `%2f`, `&#x40;`, `&#x3a`, `&colon;`, `&sol;`, `&commat;`, a backslash-u0040, `#`, `;`, `=`, `[`, `]`, a backslash, `&#58`, U+1D400) and two more (`[::1]`, `&#1114112;`, one past the U+10FFFF bound) -- every label of one to three of them, 75,894, in a fixed order, cut into 64 runs, each run's readings digested by sha256. Both suites enumerate it the same way; the whole sweep reads in about a second in each. No seeded sample was needed.
+
+**The whole corpus, once.** Both mirrors read all 231,011 labels the node suite reads: they differ on 1, `http<U+A7F1>://qqqqqq:zz zz@cdn.test/x`, which node 26 (Unicode 17.0) folds to `httpS://...` and reads `[host withheld] cdn.test`, and Python 3.14 (Unicode 16.0) leaves unfolded and reads `cdn.test`. U+A7F1 is assigned in 17.0; both readings withhold the credential. That is decision 10's stated residual.
+
+**Red first** (47906bb, step 3's commit):
+
+| Suite | On 47906bb | On this tree |
+|---|---|---|
+| tests/test_label_readings.py (new, 12 tests) | 10 of 12 red, with 5 errors among them (no `label_sink_text`, `check_custom_label` takes no `stored`, and two CLI tests whose refusal never came); `unique_label` gave `cdn.test` beside a typed credential address; the helper accepted `--label http://u2:p2@cdn.test/c.m3u` and its encoded spelling; a stored derived label listed before a typed one kept `cdn.test`; every state verb printed `qqqqqq` and `zzzzzz`; both duplicate sentences quoted the encoded label whole | 12 of 12 green |
+| tests/Model.test.js (6 new checks) | 3 of 3749 red: `uniqueLabel`, `parseState` and `addSource` gave `cdn.test` twice; the vectors, the sweep and `validateLabel` are the model's own answers and green on it | 0 of 3749 red |
+| tests/Model.spec.qml (`test_labelsUniqueAsTheyReadInV4`) | 1 of 103 red (`cdn.test` where `cdn.test 2` was wanted) | 103 of 103 green |
+
+The fixture-is-whole test and the cost test pass on 47906bb; they are guards.
+
+tests/test_reply_shown.py's BoundaryTest (lane-r2a's) gains the `state.sources[].label` case, a percent-encoded credential label: its test that the table names exactly the paths its cases name went red on this step's first gate run until it did. With the case, 3 of its 24 tests are red on 47906bb (the table test, and the label printed whole at emit and in a status file) and 24 of 24 green here. The same gate run went red once more, on the defect ledger: the record cited `selfStoredLabel` as a member of the `Model` namespace, which Model.mjs does not export; it is cited by its part now.
+
+**Mutants (helper)**, against tests/test_label_readings.py:
+
+| Mutant | Tests red |
+|---|---|
+| `label_sink_text` returns its input | 10 |
+| no NFKD fold | 2 (the vectors and the sweep) |
+| no `label_decode` | 6 |
+| the critique's first: a numeric entity needs its `;` | 2 (the vectors and the SWEEP) |
+| the critique's second: the raw reading taken over the decoded one | 1 (the SWEEP alone) |
+| `unique_label` on raw keys only | 3 |
+| the load placing a derived label against earlier rows only | 1 |
+| no unchanged-label exemption | 2 |
+| `check_custom_label` on raw keys only | 3 |
+| the label-taken sentence quoting the raw label | 1 |
+| the add's duplicate sentence quoting the raw label | 1 |
+| the update's duplicate sentence quoting the raw label | 1 |
+| `state.sources[].label` dropped from `REPLY_READINGS` | 1 |
+| the fallback through `redact_urls(s) != s` | 0: equivalent, below |
+
+The design expected the last to go red on `http://cdn.test`-shaped vectors. It did not, and cannot: a label reaches the fallback only when no token reads as an address, and the helper prints a URL unchanged only when it is a named scheme's `scheme://host` as typed, which the scheme clause, or clause b (`:/` after a scheme of two or more letters), reads first. Measured: over the 143,985 labels of the corpus and the sweep that reach the fallback, the two predicates agree on every one. `redaction_finds` stays, as the exact mirror of the model's question.
+
+**Mutants (model)**, against the node suite: `uniqueLabel` on raw keys only (3 D-SINK-100 checks red), `parseState` against earlier rows only (1), `labelKeySets` ignoring `selfId` (the existing "uniqueLabel accepts records and skips selfId" check red). In each scratch copy one more check went red, the README key table's, because the copy held no README.md.
+
+**Cost.** `label_sink_text`, best of 5 over 2,000 calls at load about 1.6: `My TV` 5.6 us, `cdn.test` 4.1 us, a credential address 11.6 us, its percent-encoded spelling 28.7 us, `Provider (cdn.test:8080/qqqqqq/zzzzzz)` 10.4 us. A load of 50 sources, every other one typed as a credential address: `normalize_state` 2.50 ms (2.84 ms on 47906bb, whose check rebuilt the taken set for every record), `Model.parseState` 0.57 ms in node (0.43 ms), and 4 ms in V4 (best of 5, at the engine's millisecond clock, printed by the spec function).
+
+**Measured beyond the design.**
+- *The vectors are copied, not moved.* The design moved the node suite's inline label tables into the fixture. They stay, and the fixture's sample carries them (and every other label the suite reads) into the cross-mirror check; moving them would have rewritten the existing checks that read them for no new coverage.
+- *The sweep needs no sample.* 75,894 labels read in about a second in either mirror, so all of them are swept on every run.
+- *The edit exemption mirrors `selfStoredLabel` exactly*: the stored label of the record being edited, custom or derived, as `sanitize_input` reads it.
+
+**Rule 15.** I searched every comparison and every printer of a source label, by shape: `uniqueLabel(`, `labelTaken(`, `labelReadTaken(` and `validateLabel(` in the model and the QML; `label_key(`, `unique_label(`, `check_custom_label(` and every `["label"]` or `.get("label")` in the helper; every helper sentence or log line with a `%s` beside a label.
+- Model comparisons: `uniqueLabel`'s four callers in source-records.mjs (add, edit, an edit's replacement record, the migration's record) and `defaultSourceLabel` take the read-aware check through `uniqueLabel` (changed with it); `parseState` (changed); `validateLabel` (read-aware since D-SINK-98, unchanged).
+- Helper comparisons: `unique_label`'s four callers in 10-state.py and `check_custom_label`'s two (changed with them); `normalize_state` (changed); `normalize_source`'s label cap (cleared: a cap, no comparison).
+- Printers: `public_source` through the reply boundary, the three sentences (changed); every other `label` in a helper sentence is the fetch's own word (`playlist`, `EPG`), cleared. The model's printers have read through `labelSinkText` since D-SINK-98.

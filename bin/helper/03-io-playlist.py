@@ -1657,6 +1657,7 @@ REPLY_READINGS = (
     ("state.session.name", "text"),
     ("state.hiddenGroups[]", "text"),
     ("state.savedSearches[].query", "text"),
+    ("state.sources[].label", "label"),
     ("stash.id", "id"),
     ("state.favorites[]", "id"),
     ("state.recents[].id", "id"),
@@ -1679,7 +1680,7 @@ def id_reading(value: str) -> str:
     return ID_WITHHELD if channel_id_withheld(value) else value
 
 
-_REPLY_READERS = {"text": shown_text, "scope": scope_reading, "id": id_reading}
+_REPLY_READERS = {"text": shown_text, "scope": scope_reading, "id": id_reading, "label": label_sink_text}
 
 
 def _reading_tree(readings: tuple[tuple[str, str], ...]) -> dict[str, Any]:

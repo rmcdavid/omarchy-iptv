@@ -4968,6 +4968,55 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
          [0, "cdn.test", "cdn.test", "cdn.test", "cdn.test", "epg.test", "Network error from cdn.test"]])
 })()
 
+// D-SINK-100 and D-SINK-108 (2026-11-16): a label as it READS, held equal in
+// both mirrors by tests/fixtures/label-readings.json, which
+// tests/test_label_readings.py runs through the helper's port
+// (label_sink_text). Every expected value in it is the model's own answer;
+// these checks hold the model to the file, so neither mirror moves alone.
+// The sweep reads every label of one to three of its pieces and compares
+// one sha256 digest per chunk, so a divergence is found down to a chunk
+// without storing the readings.
+;(function () {
+  const fs = require("fs"), path = require("path"), crypto = require("crypto")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const F = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/label-readings.json"), "utf8"))
+  checkCall("D-SINK-100: Model.labelSinkText reads every vector of the shared label-readings fixture as it says",
+    () => F.vectors.filter(v => M.labelSinkText(v.label) !== v.reads).map(v => [v.label, M.labelSinkText(v.label)]), [])
+  checkCall("D-SINK-100: the label-readings digest sweep -- every label of one to three of its pieces, read by Model.labelSinkText, digested per chunk -- is the fixture's",
+    () => {
+      const sw = F.sweep, pieces = sw.pieces, n = pieces.length, all = []
+      for (let k = 1; k <= sw.maxPieces; k++) {
+        const idx = new Array(k).fill(0)
+        while (true) {
+          all.push(idx.map(i => pieces[i]).join(""))
+          let j = k - 1
+          while (j >= 0 && ++idx[j] === n) { idx[j] = 0; j-- }
+          if (j < 0) break
+        }
+      }
+      const bad = []
+      for (let c = 0; c < sw.chunks; c++) {
+        const part = all.slice(c * sw.chunkSize, (c + 1) * sw.chunkSize).map(l => M.labelSinkText(l))
+        if (crypto.createHash("sha256").update(part.join("\n"), "utf8").digest("hex") !== sw.digests[c]) bad.push(c)
+      }
+      return [all.length, bad]
+    }, [F.sweep.count, []])
+  checkCall("D-SINK-100: uniqueLabel avoids every label that reads alike -- a derived `cdn.test` beside a typed credential address that reads `cdn.test` is `cdn.test 2` -- over the fixture's cases",
+    () => F.unique.map(c => M.uniqueLabel(c.label, c.existing)), F.unique.map(c => c.expect))
+  checkCall("D-SINK-100: validateLabel refuses a typed label that reads like another source's, except the record's own label left unchanged, over the fixture's cases",
+    () => F.validate.map(c => { const v = M.validateLabel(c.label, c.sources.map(s => ({ id: s.key, label: s.label })), c.self); return v.ok ? "ok" : v.code }),
+    F.validate.map(c => c.expect))
+  checkCall("D-SINK-100: parseState places a derived label against every typed label wherever it is listed, over the fixture's stored lists",
+    () => F.states.map(c => M.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: c.sources })).sources.map(s => s.label)),
+    F.states.map(c => c.labels))
+  checkCall("D-SINK-100: addSource -- a typed credential address and then a derived label on its host read `cdn.test` and `cdn.test 2`, in either order of the reading",
+    () => {
+      const a = M.addSource(M.emptyState(), { playlistUrl: "http://cdn.test/b.m3u", label: "http://qqqqqq:zzzzzz@cdn.test/a.m3u", origin: "cli" }, 100)
+      const b = M.addSource(a.state, { playlistUrl: "http://cdn.test/c.m3u", origin: "cli" }, 101)
+      return [a.ok, b.ok, b.state.sources.map(s => M.labelSinkText(s.label))]
+    }, [true, true, ["cdn.test", "cdn.test 2"]])
+})()
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect

@@ -29,7 +29,7 @@ import {
 } from "./epg.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, findSource, deriveLabel,
-  uniqueLabel, sameDay
+  labelKeySets, labelKeySetsAdd, uniqueLabelOver, sameDay
 } from "./sources.mjs"
 import {
   warnState, normalizeSourceRecord, activeKeyText
@@ -595,10 +595,29 @@ function parseState(text) {
     // Re-derived HERE rather than in normalizeSourceRecord, because
     // uniqueness is a property of the list and not of a record: two sources
     // on one host must not both come back as that host.
-    if (rec.labelCustom !== true) rec.label = uniqueLabel(deriveLabel(rec.url, rec.kind), state.sources)
+    //
+    // D-SINK-100 (2026-11-16, round 2 of the security review; the lead's
+    // call under the owner's standing authority of 2026-11-09): in a second
+    // pass, below, against EVERY typed label in the list wherever it is
+    // listed and every label placed before it, raw and as it reads
+    // (labelKeySets), so a stored derived label listed before a typed one
+    // that reads alike -- `cdn.test` above `http://qqqqqq:zzzzzz@cdn.test/
+    // a.m3u` -- becomes `cdn.test 2` once, at the next load, where it kept
+    // `cdn.test` beside a row that reads the same. Two typed labels stored
+    // alike stay alike until one is edited (a typed label is the user's and
+    // is never rewritten). One reading a label, so O(n) per load; the
+    // helper's normalize_state does the same.
     seenUrl[rec.url] = true
     seenKey[rec.key] = true
     state.sources.push(rec)
+  }
+  var labelSets = labelKeySets(state.sources.filter(function (r) { return r.labelCustom === true }), "")
+  for (var p = 0; p < state.sources.length; p++) {
+    var placed = state.sources[p]
+    if (placed.labelCustom !== true) {
+      placed.label = uniqueLabelOver(deriveLabel(placed.url, placed.kind), labelSets)
+      labelKeySetsAdd(labelSets, placed.label)
+    }
   }
   var favs = asList(parsed.favorites)
   if (favs.length > 0) {

@@ -1,0 +1,6948 @@
+{
+ "about": "D-SINK-100 and D-SINK-108 (2026-11-16, round 2 of the security review): a source label as it READS, held equal in both mirrors -- the helper's label_sink_text, a port of Model.labelSinkText -- and the uniqueness both readers build on it. Every expected value here is the MODEL's answer (Model.labelSinkText, uniqueLabel, validateLabel, parseState), written by a generator and checked by the node suite against the model itself; tests/test_label_readings.py holds the helper to the same file. `vectors`: 1,500 of the 231,011 labels the node suite reads through labelSinkText (every check, its sweeps included), drawn by Python's random.Random(20261116).sample from the 224,005 of them no longer than 120 characters that hold no code point unassigned in Unicode 16.0 or a lone surrogate, sorted first, and deriveLabel's label for every valid URL of source-urls.json and source-labels.json, with what it reads. `unique`: uniqueLabel(label, existing). `validate`: validateLabel / check_custom_label over the other records, `self` the record being edited (its stored label is exempt when left unchanged). `states`: the labels parseState / normalize_state give a stored list. `sweep`: every label of one to `maxPieces` of `pieces`, in order (the pieces' indices counted like a number, the first piece last to change), cut into `chunks` equal runs; each digest is the sha256 of that run's readings joined by a line feed, UTF-8. NFKD differs past Unicode 16.0 (Python 3.14) against 17.0 (node 26); every piece is assigned before 16.0. Credentials are synthetic. The full 231,011 were read by both mirrors once, on 2026-11-16: they differ on 1, a label holding U+A7F1, which Unicode 17.0 assigned (QA-RESULTS, lane-r2b).",
+ "vectors": [
+  {
+   "label": "[ cdn.test",
+   "reads": "[ cdn.test"
+  },
+  {
+   "label": "[::1] \u200b",
+   "reads": "[::1] \u200b"
+  },
+  {
+   "label": "http\u6231://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6a43//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u24e9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ud11c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6e1f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1395//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2346://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#\u200b&#58",
+   "reads": "#\u200b&#58"
+  },
+  {
+   "label": "http:\ud2d7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Prov iderz/1.ts",
+   "reads": "Prov iderz/1.ts"
+  },
+  {
+   "label": "http\u979b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " \uff1a",
+   "reads": " \uff1a"
+  },
+  {
+   "label": "http\ueaac://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ueac1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucec7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5ab8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u22f9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u40d7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucf1a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "c d/zzzzzz/playlist.m3u8",
+   "reads": "c d/zzzzzz/playlist.m3u8"
+  },
+  {
+   "label": "http\u16b1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uea59//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8ba1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1480://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3968//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u108e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test)]",
+   "reads": "cdn.test)]"
+  },
+  {
+   "label": "\u200bnas\u200b",
+   "reads": "\u200bnas\u200b"
+  },
+  {
+   "label": "http\uabaa://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&commat;8080",
+   "reads": "%40&commat;8080"
+  },
+  {
+   "label": "\\ .",
+   "reads": "\\ ."
+  },
+  {
+   "label": "http\u214f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8929//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u68d3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua080//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u69ee://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ".nas%3A",
+   "reads": ".nas%3A"
+  },
+  {
+   "label": "http\uff1b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua9c4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Providez zzzzz/1.ts",
+   "reads": "Providez zzzzz/1.ts"
+  },
+  {
+   "label": "Pr ovide/qqqqqq/zzzzzz/1.ts",
+   "reads": "Pr ovide/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "\\;nas",
+   "reads": "\\;nas"
+  },
+  {
+   "label": "x[&#1114112;",
+   "reads": "x[&#1114112;"
+  },
+  {
+   "label": "http\u2817://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " username=&#x40;",
+   "reads": " username=&#x40;"
+  },
+  {
+   "label": " \uff1a)",
+   "reads": " \uff1a)"
+  },
+  {
+   "label": "[.%2f",
+   "reads": "[.%2f"
+  },
+  {
+   "label": "http:\u610d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ube47//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub218://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";@&#64;",
+   "reads": ";@&#64;"
+  },
+  {
+   "label": "Provide rtest/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Provide rtest/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http\ube82://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/qqqqqqx",
+   "reads": "/qqqqqqx"
+  },
+  {
+   "label": "cdn. test/livts",
+   "reads": "cdn. test/livts"
+  },
+  {
+   "label": "http\uc0ae://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf757//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u04b0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040\uff0fcdn.test",
+   "reads": "\\u0040\uff0fcdn.test"
+  },
+  {
+   "label": "http\uf864://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5e3c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")]&sol;",
+   "reads": ")]&sol;"
+  },
+  {
+   "label": "=nas&",
+   "reads": "=nas&"
+  },
+  {
+   "label": "http\u3546://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon; qqqqqq",
+   "reads": "&colon; qqqqqq"
+  },
+  {
+   "label": "Providerst/live/qqqqqq/zzzzzz /1.ts",
+   "reads": "Providerst/live/qqqqqq/zzzzzz /1.ts"
+  },
+  {
+   "label": "http:\u992b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Przzzzzz/1.t s",
+   "reads": "Przzzzzz/1.t s"
+  },
+  {
+   "label": "http:\uc9bc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5a94://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " 8080?",
+   "reads": " 8080?"
+  },
+  {
+   "label": "http:\u778d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "xhttp://%3A",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": ".((",
+   "reads": ".(("
+  },
+  {
+   "label": "Prolive/qqqqqq/zz zzzz/1.ts",
+   "reads": "Prolive/qqqqqq/zz zzzz/1.ts"
+  },
+  {
+   "label": "http\u5b10://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u560a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0da7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test:8080/live/qqqqzzz/1.ts",
+   "reads": "cdn.test:8080"
+  },
+  {
+   "label": "http\u58a2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7d72//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0f&sol;",
+   "reads": "\uff0f&sol;"
+  },
+  {
+   "label": "]zzzzzz]",
+   "reads": "]zzzzzz]"
+  },
+  {
+   "label": "http:\u5aa2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5a3e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ueaee://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ".?\u200b",
+   "reads": ".?\u200b"
+  },
+  {
+   "label": "http:\ua780//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0934://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6333://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")@&sol;",
+   "reads": ")@&sol;"
+  },
+  {
+   "label": "http:\\\\qqqqdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u56b4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u66f9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc9cd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u54d5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ued19//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040&#64;http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uc1cf//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040\uff0fusername=",
+   "reads": "\\u0040\uff0fusername="
+  },
+  {
+   "label": "&#64;[@",
+   "reads": "&#64;[@"
+  },
+  {
+   "label": "#\\u0040(",
+   "reads": "#\\u0040("
+  },
+  {
+   "label": "&#x40;%2f[",
+   "reads": "&#x40;%2f["
+  },
+  {
+   "label": "http:\u6914//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud0fd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040%3A%3A",
+   "reads": "\\u0040%3A%3A"
+  },
+  {
+   "label": "%3A8080//",
+   "reads": "%3A8080//"
+  },
+  {
+   "label": "Proe/qqqqqq/ zzzzzz/1.ts",
+   "reads": "Proe/qqqqqq/ zzzzzz/1.ts"
+  },
+  {
+   "label": "%2f;%2f",
+   "reads": "%2f;%2f"
+  },
+  {
+   "label": "http\u416b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "]8080%3A",
+   "reads": "]8080%3A"
+  },
+  {
+   "label": "http:\u09c8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1223//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua2ed://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc784://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Providqq/zzzzzz/1 .ts",
+   "reads": "Providqq/zzzzzz/1 .ts"
+  },
+  {
+   "label": "http:\u40ec//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6249://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9f9a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u23a5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;%3A:",
+   "reads": "&#64;%3A:"
+  },
+  {
+   "label": "http\u7977://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6217//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2f4a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\\\\qqqq",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u4ceb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u85c8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubc79://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uab69://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/#?",
+   "reads": "/#?"
+  },
+  {
+   "label": "#&sol;&#1114112;",
+   "reads": "#&sol;&#1114112;"
+  },
+  {
+   "label": "http\u8caa://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u387a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u015d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#%2F&commat;",
+   "reads": "#%2F&commat;"
+  },
+  {
+   "label": "http\u09aa://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40\\u0040\u200b",
+   "reads": "%40\\u0040\u200b"
+  },
+  {
+   "label": "&#x40;?%2f",
+   "reads": "&#x40;?%2f"
+  },
+  {
+   "label": "http:\ue7b2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ").nas",
+   "reads": ").nas"
+  },
+  {
+   "label": "http\u6fd2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud000://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucf58//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u549e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&:?",
+   "reads": "&:?"
+  },
+  {
+   "label": "http\u40d3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2eb5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7dd0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u12f9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " (\\",
+   "reads": " (\\"
+  },
+  {
+   "label": "(&sol;:",
+   "reads": "(&sol;:"
+  },
+  {
+   "label": "http\u3361://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u785b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7428://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9a21://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud429://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uaf5c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u62b0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "]http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\ue49b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua0fb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ue144://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1035//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7d61://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a\ud835\udc00@",
+   "reads": "&#x3a\ud835\udc00@"
+  },
+  {
+   "label": "http:\u30d5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6526://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;nas(",
+   "reads": "&#1114112;nas("
+  },
+  {
+   "label": "http:\u4987//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud5bc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.tis t.m3u8",
+   "reads": "cdn.tis t.m3u8"
+  },
+  {
+   "label": "http\u4bd5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&#64;qqqqqq",
+   "reads": "%40&#64;qqqqqq"
+  },
+  {
+   "label": "Providerl ive/qqqqqq/zzzzzz/1.ts",
+   "reads": "Providerl ive/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "\uff1a=\ud835\udc00",
+   "reads": "\uff1a=\ud835\udc00"
+  },
+  {
+   "label": "&sol;/&#1114112;",
+   "reads": "&sol;/&#1114112;"
+  },
+  {
+   "label": "http\u9e81://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uab34//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\%2f&",
+   "reads": "\\%2f&"
+  },
+  {
+   "label": "http\u8333://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3957//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/zzzzzzhttp://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&#1114112;\\u0040?",
+   "reads": "&#1114112;\\u0040?"
+  },
+  {
+   "label": "http:\ud2f3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider st/live/qqqqqq/zzzzzz/1 .ts",
+   "reads": "Provider st/live/qqqqqq/zzzzzz/1 .ts"
+  },
+  {
+   "label": "http:\uc3f6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9930://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "]])",
+   "reads": "]])"
+  },
+  {
+   "label": "http\ub819://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.tes t1.ts",
+   "reads": "cdn.tes t1.ts"
+  },
+  {
+   "label": "http\u15ce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;\\/",
+   "reads": "&colon;\\/"
+  },
+  {
+   "label": "http\u9a61://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ueb4b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6c33//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdq qq/zzzzzz/1.ts",
+   "reads": "cdq qq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\ucfd1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u782f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3970//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9873//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "(=\\u0040",
+   "reads": "(=\\u0040"
+  },
+  {
+   "label": "http:\u3eb2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc5f8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2c66//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a&%2F",
+   "reads": "&#x3a&%2F"
+  },
+  {
+   "label": "http\u4699://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u208e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#%2F\uff0f",
+   "reads": "#%2F\uff0f"
+  },
+  {
+   "label": "http\u49a5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5973://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u61ed://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";.=",
+   "reads": ";.="
+  },
+  {
+   "label": "http\ud2f6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/qqqqqq:zzst/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&#64;&colon;@",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "%3A&sol;\uff0f",
+   "reads": "%3A&sol;\uff0f"
+  },
+  {
+   "label": ":\\u0040&commat;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uecaf://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test:8080qqqq/zzzzzz/1.ts",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&#64;&sol;;",
+   "reads": "&#64;&sol;;"
+  },
+  {
+   "label": "http:\u93d2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue1e6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5b68//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6691://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "( \ud835\udc00",
+   "reads": "( \ud835\udc00"
+  },
+  {
+   "label": "&#64;%2F&colon;",
+   "reads": "&#64;%2F&colon;"
+  },
+  {
+   "label": "http\u0c68://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc0ec://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua588://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4e2d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5a78//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1dda//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubb6b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\%40%40",
+   "reads": "\\%40%40"
+  },
+  {
+   "label": "]/\ud835\udc00",
+   "reads": "]/\ud835\udc00"
+  },
+  {
+   "label": "8080qqqqqq&colon;",
+   "reads": "8080qqqqqq&colon;"
+  },
+  {
+   "label": "http:\u70f4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8215://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2d67://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?&8080",
+   "reads": "?&8080"
+  },
+  {
+   "label": "[http://&",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u360a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "htttest:8080/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "htttest:8080/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http\ue17f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ube00://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc615//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u600b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://nas/",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "8080%2f.",
+   "reads": "8080%2f."
+  },
+  {
+   "label": "http\u71ca://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud58a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u34ac//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1014//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\\u200b]",
+   "reads": "\\\u200b]"
+  },
+  {
+   "label": "Provi der czz/1.ts",
+   "reads": "Provi der czz/1.ts"
+  },
+  {
+   "label": "&#64;%40&#x40;",
+   "reads": "&#64;%40&#x40;"
+  },
+  {
+   "label": "http:\u90de//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u387f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf75b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9b4c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://[::1] ",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "\\&sol;&colon;",
+   "reads": "\\&sol;&colon;"
+  },
+  {
+   "label": "http://qqqqqq:zzzzzz@t/get.php",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u4347//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F\\u0040&commat;",
+   "reads": "%2F\\u0040&commat;"
+  },
+  {
+   "label": "http:\u7e7f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040:\ud835\udc00",
+   "reads": "\\u0040:\ud835\udc00"
+  },
+  {
+   "label": "http\u8822://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf86c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f\uff1a(",
+   "reads": "%2f\uff1a("
+  },
+  {
+   "label": "qqqqqq\\u0040&sol;",
+   "reads": "qqqqqq\\u0040&sol;"
+  },
+  {
+   "label": "[] ",
+   "reads": "[] "
+  },
+  {
+   "label": " x\\u0040",
+   "reads": " x\\u0040"
+  },
+  {
+   "label": "=&#58:",
+   "reads": "=&#58:"
+  },
+  {
+   "label": "http:/qqqqqq:zzzzzz@cdn.test/x\u00ad",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u537d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f\\=",
+   "reads": "%2f\\="
+  },
+  {
+   "label": "http\ud6a8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;\u200b&#x3a",
+   "reads": "&#64;\u200b&#x3a"
+  },
+  {
+   "label": "cdqqq q/zzzzzz/1.ts",
+   "reads": "cdqqq q/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\u76b5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9b76//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2a91//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cd/qq qqqq/zzzzzz/1.ts",
+   "reads": "Provider cd/qq qqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\uef5b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1a14://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u010c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")#\\u0040",
+   "reads": ")#\\u0040"
+  },
+  {
+   "label": "//qqqqqqst/x",
+   "reads": "//qqqqqqst/x"
+  },
+  {
+   "label": "http\ue50c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test:8080/live/\u2060qqqqqq/zzzzzz/1.ts",
+   "reads": "cdn.test:8080"
+  },
+  {
+   "label": "\uff1a(zzzzzz",
+   "reads": "\uff1a(zzzzzz"
+  },
+  {
+   "label": "=\\\uff0f",
+   "reads": "=\\\uff0f"
+  },
+  {
+   "label": "\\&colon;(",
+   "reads": "\\&colon;("
+  },
+  {
+   "label": "http:\uba25//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u72c9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua739//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\ud835\udc00\uff0f&sol;",
+   "reads": "\ud835\udc00\uff0f&sol;"
+  },
+  {
+   "label": "&#[",
+   "reads": "&#["
+  },
+  {
+   "label": "http\u7c05://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "s0",
+   "reads": "s0"
+  },
+  {
+   "label": "cdn.test=",
+   "reads": "cdn.test="
+  },
+  {
+   "label": "&#64;8080)",
+   "reads": "&#64;8080)"
+  },
+  {
+   "label": "%40%2fzzzzzz",
+   "reads": "%40%2fzzzzzz"
+  },
+  {
+   "label": "cdz/playlist.m 3u8",
+   "reads": "cdz/playlist.m 3u8"
+  },
+  {
+   "label": "\uff1a%2f%2f",
+   "reads": "\uff1a%2f%2f"
+  },
+  {
+   "label": "http\u2be9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8309//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//&sol;8080",
+   "reads": "//&sol;8080"
+  },
+  {
+   "label": "http:\u6992//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u04be//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qq/zzzzzz/1 .ts",
+   "reads": "qq/zzzzzz/1 .ts"
+  },
+  {
+   "label": "http:\ub1c8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7b27//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud6e0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u62eb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":\ud835\udc00\u200b",
+   "reads": ":\ud835\udc00\u200b"
+  },
+  {
+   "label": "http:\u3039//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a&sol;&#58",
+   "reads": "&#x3a&sol;&#58"
+  },
+  {
+   "label": "http:\u4724//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "username=x&sol;",
+   "reads": "username=x&sol;"
+  },
+  {
+   "label": "http\uccc8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4de1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubf50//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua88b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " .%2F",
+   "reads": " .%2F"
+  },
+  {
+   "label": "http:\ub5df//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6626://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6ccf//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u603b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ucded://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1455://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#[8080",
+   "reads": "#[8080"
+  },
+  {
+   "label": "(&sol;&",
+   "reads": "(&sol;&"
+  },
+  {
+   "label": "http\u8794://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Prtest/live/qqqqqq/zzzzzz /1.ts",
+   "reads": "Prtest/live/qqqqqq/zzzzzz /1.ts"
+  },
+  {
+   "label": "http\u37cd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "[::1]?",
+   "reads": "[::1]?"
+  },
+  {
+   "label": "http\u9f16://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;/",
+   "reads": "&sol;/"
+  },
+  {
+   "label": "Prot/live/qqqqqq/zzzzzz/ 1.ts",
+   "reads": "Prot/live/qqqqqq/zzzzzz/ 1.ts"
+  },
+  {
+   "label": "http:\ue0f8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0f8080&#58",
+   "reads": "\uff0f8080&#58"
+  },
+  {
+   "label": "http:\u126e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\\\\\u00adqqqqqq:zzzzzz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u042b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7ef1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.testnas&#64;",
+   "reads": "cdn.testnas&#64;"
+  },
+  {
+   "label": "http:\u2122//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u85bc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u492f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9ced://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u66a3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "(&#x3ax",
+   "reads": "(&#x3ax"
+  },
+  {
+   "label": "http:\u4823//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u64a8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9721://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;]\\",
+   "reads": "&commat;]\\"
+  },
+  {
+   "label": "&#64;//(",
+   "reads": "&#64;//("
+  },
+  {
+   "label": "http\u51bc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u90a6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8e02://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Prov ider cdnqqqqq/zzzzzz/1.ts",
+   "reads": "Prov ider cdnqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\u2eab//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "@?;",
+   "reads": "@?;"
+  },
+  {
+   "label": "http:E//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test/get.p\u3000hp?username=qqqqqq&password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u19b7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc1a8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u56ad//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u364c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf538//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u472a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;//[",
+   "reads": "&#1114112;//["
+  },
+  {
+   "label": "x ?",
+   "reads": "x ?"
+  },
+  {
+   "label": "http:\u53d4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uec5a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubc07//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud697://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2Fqqqqqq&#x40;",
+   "reads": "%2Fqqqqqq&#x40;"
+  },
+  {
+   "label": "8080[::1]cdn.test",
+   "reads": "8080[::1]cdn.test"
+  },
+  {
+   "label": "http:\u5cca//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&?;",
+   "reads": "&?;"
+  },
+  {
+   "label": "&#58))",
+   "reads": "&#58))"
+  },
+  {
+   "label": "cdn/qqqqqq/zzzzzz/ playlist.m3u8",
+   "reads": "cdn/qqqqqq/zzzzzz/ playlist.m3u8"
+  },
+  {
+   "label": "\uff1a.\ud835\udc00",
+   "reads": "\uff1a.\ud835\udc00"
+  },
+  {
+   "label": "http:\u4fb6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "h11",
+   "reads": "h11"
+  },
+  {
+   "label": "http:\u77d0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7497//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdnq/zzzzzz/pl aylist.m3u8",
+   "reads": "cdnq/zzzzzz/pl aylist.m3u8"
+  },
+  {
+   "label": "http:\ufaa6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Prqqqqqq/zzzz zz/1.ts",
+   "reads": "Prqqqqqq/zzzz zz/1.ts"
+  },
+  {
+   "label": "http:\u4f81//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test&commat; ",
+   "reads": "cdn.test&commat; "
+  },
+  {
+   "label": "http\ud6ba://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc17e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u751b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cst/live/qqqqqq/zzzzzz/1.t s",
+   "reads": "Provider cst/live/qqqqqq/zzzzzz/1.t s"
+  },
+  {
+   "label": ";])",
+   "reads": ";])"
+  },
+  {
+   "label": "cdn.laylis t.m3u8",
+   "reads": "cdn.laylis t.m3u8"
+  },
+  {
+   "label": "http\u535a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubec2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc9ea://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub770//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;).",
+   "reads": "&sol;)."
+  },
+  {
+   "label": "http\u7436://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue0f9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua784//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")&#x40;username=",
+   "reads": ")&#x40;username="
+  },
+  {
+   "label": "http\u9f00://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u11df//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58&sol;//",
+   "reads": "&#58&sol;//"
+  },
+  {
+   "label": "?& ",
+   "reads": "?& "
+  },
+  {
+   "label": "http://qqqqqq:zzzzzz@cdn.test/\u3000get.php",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;%40&colon;",
+   "reads": "&#1114112;%40&colon;"
+  },
+  {
+   "label": "http:\uf22f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;(%2F",
+   "reads": "&#x40;(%2F"
+  },
+  {
+   "label": "%2f\ud835\udc00&#1114112;",
+   "reads": "%2f\ud835\udc00&#1114112;"
+  },
+  {
+   "label": "?username==",
+   "reads": "?username=="
+  },
+  {
+   "label": "http\ufb68://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "ct/qqqqqq/zzzzzz/playlist.m3u 8",
+   "reads": "ct/qqqqqq/zzzzzz/playlist.m3u 8"
+  },
+  {
+   "label": "http:\u4c0f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":&commat;nas",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u445c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "mailto:qqqd=zzzzzz",
+   "reads": "mailto:qqqd=zzzzzz"
+  },
+  {
+   "label": "http:\uc42b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4930://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test/get.=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;@&colon;",
+   "reads": "&#1114112;@&colon;"
+  },
+  {
+   "label": "&#x40;%40%2f",
+   "reads": "&#x40;%40%2f"
+  },
+  {
+   "label": "http:\\\\qq:zzzzzz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz\u200b//",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uf842//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "::%2F",
+   "reads": "::%2F"
+  },
+  {
+   "label": "http\ucdd7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;nas%40",
+   "reads": "&commat;nas%40"
+  },
+  {
+   "label": "Pro vider cdest/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Pro vider cdest/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "%3A ]",
+   "reads": "%3A ]"
+  },
+  {
+   "label": "http\u93e0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ueeae//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7d6c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8ffb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a.&sol;",
+   "reads": "&#x3a.&sol;"
+  },
+  {
+   "label": "http:\ufbf7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A([::1]",
+   "reads": "%3A([::1]"
+  },
+  {
+   "label": "http\u77a8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58x;",
+   "reads": "&#58x;"
+  },
+  {
+   "label": "http:/\u200b/qqqqqzzzzzz@cdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "[&%2f",
+   "reads": "[&%2f"
+  },
+  {
+   "label": "ht\u200btp:/qqqqqq:zzzzzz@cdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u870a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u55e7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";%2f\ud835\udc00",
+   "reads": ";%2f\ud835\udc00"
+  },
+  {
+   "label": "http\u63c3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "x%40%2F",
+   "reads": "x%40%2F"
+  },
+  {
+   "label": "@zzzzzz//",
+   "reads": "@zzzzzz//"
+  },
+  {
+   "label": "http:\u7130//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40]&",
+   "reads": "%40]&"
+  },
+  {
+   "label": "[::1]8080username=",
+   "reads": "[::1]8080username="
+  },
+  {
+   "label": "http\u81a9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A\uff0f\ud835\udc00",
+   "reads": "%3A\uff0f\ud835\udc00"
+  },
+  {
+   "label": "http:\u38bb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz&#x40;\ud835\udc00",
+   "reads": "zzzzzz&#x40;\ud835\udc00"
+  },
+  {
+   "label": "http:\u5293//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\u200b8080&sol;",
+   "reads": "\u200b8080&sol;"
+  },
+  {
+   "label": "http\uf56b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58\ud835\udc00&colon;",
+   "reads": "&#58\ud835\udc00&colon;"
+  },
+  {
+   "label": "/ &",
+   "reads": "/ &"
+  },
+  {
+   "label": "qqqqqqqqqqqq&commat;",
+   "reads": "qqqqqqqqqqqq&commat;"
+  },
+  {
+   "label": "http\uf431://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4bdc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua287//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5451//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\u200b&#x40;=",
+   "reads": "\u200b&#x40;="
+  },
+  {
+   "label": "http\u6087://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&qqqqqqnas",
+   "reads": "&qqqqqqnas"
+  },
+  {
+   "label": "P rzzz/1.ts",
+   "reads": "P rzzz/1.ts"
+  },
+  {
+   "label": "&nas;",
+   "reads": "&nas;"
+  },
+  {
+   "label": "naszzzzzz&",
+   "reads": "naszzzzzz&"
+  },
+  {
+   "label": "http:\u9c77//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5f56//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ".&#64;(",
+   "reads": ".&#64;("
+  },
+  {
+   "label": "http://qqqqqq:zztest/get.php",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&sol;\\u0040;",
+   "reads": "&sol;\\u0040;"
+  },
+  {
+   "label": "http:\u6a3c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucc8a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&commat;&commat;",
+   "reads": "%40&commat;&commat;"
+  },
+  {
+   "label": "http\u7917://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3b87//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubd41://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u876e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4e11//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u93f9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qqqqqq%2f#",
+   "reads": "qqqqqq%2f#"
+  },
+  {
+   "label": "http\u8d1a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//&#1114112;&#58",
+   "reads": "//&#1114112;&#58"
+  },
+  {
+   "label": "http\u3316://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3e62//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u502f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u56cc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;qqqqqqcdn.test",
+   "reads": "&#x40;qqqqqqcdn.test"
+  },
+  {
+   "label": "http\u4e84://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;username=cdn.test",
+   "reads": "&colon;username=cdn.test"
+  },
+  {
+   "label": "Providz/1.t s",
+   "reads": "Providz/1.t s"
+  },
+  {
+   "label": "@\\u0040[::1]",
+   "reads": "@\\u0040[::1]"
+  },
+  {
+   "label": "\uff1a&\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "//qqqqqq:zzzn.test/x",
+   "reads": "//qqqqqq:zzzn.test/x"
+  },
+  {
+   "label": "http\u99db://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?#(",
+   "reads": "?#("
+  },
+  {
+   "label": "&colon;&commat;%40",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "[::1]zzzzzz&",
+   "reads": "[::1]zzzzzz&"
+  },
+  {
+   "label": "http:\u6ec5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1d78://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u00ea//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//%2f8080",
+   "reads": "//%2f8080"
+  },
+  {
+   "label": "http\uffce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3202//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud29a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.testzzzzzz/",
+   "reads": "cdn.testzzzzzz/"
+  },
+  {
+   "label": "http:\u45d0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\u200b&colon;&#1114112;",
+   "reads": "\u200b&colon;&#1114112;"
+  },
+  {
+   "label": "http:\ub4c4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua3c6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc13e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://qqqqqq:zzzzzz@cdnt/get.php",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u419f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#[::1]%2F",
+   "reads": "#[::1]%2F"
+  },
+  {
+   "label": "http:\u5789//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdnzzzzzz",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u8576://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubfc9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6f18://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7bad://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":(&commat;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u38b5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//qqqqqq:zzzzzz@cdn.tt/x",
+   "reads": "cdn.tt"
+  },
+  {
+   "label": "http\u0736://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc1dc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1e2d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//qqqqqq8080",
+   "reads": "//qqqqqq8080"
+  },
+  {
+   "label": "zzzz/1.t s",
+   "reads": "zzzz/1.t s"
+  },
+  {
+   "label": "http:\u0495//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6e6b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?)\uff1a",
+   "reads": "?)\uff1a"
+  },
+  {
+   "label": "http\u38f9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9dae://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc50d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0712://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud087://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u46f0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u63f7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7626://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u98aa//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u42ae//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4ce0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0e4a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5958//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&commat;(",
+   "reads": "%40&commat;("
+  },
+  {
+   "label": "&colon;&#x3a#",
+   "reads": "&colon;&#x3a#"
+  },
+  {
+   "label": "?&#58&colon;",
+   "reads": "?&#58&colon;"
+  },
+  {
+   "label": "http:\u18dc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1543://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.testx&#64;",
+   "reads": "cdn.testx&#64;"
+  },
+  {
+   "label": "\\u0040\uff1a\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uff31//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0ed0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\http://;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u465b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u66b1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u765b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubc06//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uef68://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u31c4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;&#x3a&commat;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "%40;qqqqqq",
+   "reads": "%40;qqqqqq"
+  },
+  {
+   "label": "http:\u6ec8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F?\\",
+   "reads": "%2F?\\"
+  },
+  {
+   "label": "http:\u79af//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Providerqqqqq/zzzzzz/1.ts",
+   "reads": "Providerqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http\u4736://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ufed0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf6b8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;qqqqqq=",
+   "reads": "&colon;qqqqqq="
+  },
+  {
+   "label": "http\uf033://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5b2c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz:\ud835\udc00",
+   "reads": "zzzzzz:\ud835\udc00"
+  },
+  {
+   "label": "[\ud835\udc00=",
+   "reads": "[\ud835\udc00="
+  },
+  {
+   "label": "http:\u8c38//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub040://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucaad//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a\uff1a[",
+   "reads": "&#x3a\uff1a["
+  },
+  {
+   "label": "http\uad37://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf0c4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf5bc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;.)",
+   "reads": "&#1114112;.)"
+  },
+  {
+   "label": "cdn.testu 8",
+   "reads": "cdn.testu 8"
+  },
+  {
+   "label": "http\u9da1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u39a4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u63fb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u58fc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#\\u0040%40",
+   "reads": "#\\u0040%40"
+  },
+  {
+   "label": "Proviest/live/ qqqqqq/zzzzzz/1.ts",
+   "reads": "Proviest/live/ qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "x/&#x3a",
+   "reads": "x/&#x3a"
+  },
+  {
+   "label": "zzzzzz/#",
+   "reads": "zzzzzz/#"
+  },
+  {
+   "label": "http:\u2ed8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A&#64; ",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:/php?username=qqqqqq&password=zzzzzz",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u5787//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7028://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cdn.te stts",
+   "reads": "Provider cdn.te stts"
+  },
+  {
+   "label": "\\]%3A",
+   "reads": "\\]%3A"
+  },
+  {
+   "label": "http\u3248://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Providqqqqq/zzzzzz /1.ts",
+   "reads": "Providqqqqq/zzzzzz /1.ts"
+  },
+  {
+   "label": "&#64;/%2F",
+   "reads": "&#64;/%2F"
+  },
+  {
+   "label": "http:\u8bc9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u58af//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\ud835\udc00\uff0f\\u0040",
+   "reads": "\ud835\udc00\uff0f\\u0040"
+  },
+  {
+   "label": "http:/\u200b/qqqqqq:zzzzzz@cdn\u00ad.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "%2f&#x3a%2F",
+   "reads": "%2f&#x3a%2F"
+  },
+  {
+   "label": "\uff1ausername=[::1]",
+   "reads": "\uff1ausername=[::1]"
+  },
+  {
+   "label": "http:\uf024//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&sol;nas",
+   "reads": "%40&sol;nas"
+  },
+  {
+   "label": "http\u48c9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5ca3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u230a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1f89://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u090a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u316d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucff0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://username=\uff1a",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u68f0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://qqqqqq:zzzzzz",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\ued13//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucec8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4d70://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf2cb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "(username=%2F",
+   "reads": "(username=%2F"
+  },
+  {
+   "label": "http\ue2c8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4fc1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc146//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;%40username=",
+   "reads": "&#x40;%40username="
+  },
+  {
+   "label": "http:\u96a7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://.test:8080/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u5b42://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4739://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")?zzzzzz",
+   "reads": ")?zzzzzz"
+  },
+  {
+   "label": "http:\uc35a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//nas.",
+   "reads": "//nas."
+  },
+  {
+   "label": "http:\u4887//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;%2f;",
+   "reads": "&commat;%2f;"
+  },
+  {
+   "label": "http:\ud4dc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4458://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ucee5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "@(nas",
+   "reads": "@(nas"
+  },
+  {
+   "label": "http:\u799f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cqqqqqq/zzzzzz /1.ts",
+   "reads": "cqqqqqq/zzzzzz /1.ts"
+  },
+  {
+   "label": "http:\u1b17//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc05b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u98d6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6a70//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "mailto:qqqqqq@cdn.test?passwor\u2060d=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&\ud835\udc008080",
+   "reads": "&\ud835\udc008080"
+  },
+  {
+   "label": "http:\ue097//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";[//",
+   "reads": ";[//"
+  },
+  {
+   "label": "http:\u682e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u27f0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u70d3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u53b4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0dc1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u38dd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub77e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cqqqqqq/zzzzzz/playlist .m3u8",
+   "reads": "cqqqqqq/zzzzzz/playlist .m3u8"
+  },
+  {
+   "label": "http\uf699://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2953//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u96e2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&sol;?",
+   "reads": "%40&sol;?"
+  },
+  {
+   "label": "cdn.teqqqq&password=zzzzzz",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u6031://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn. t1.ts",
+   "reads": "cdn. t1.ts"
+  },
+  {
+   "label": "qqqqqq&#64;http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "cdn.test8080",
+   "reads": "cdn.test8080"
+  },
+  {
+   "label": "http:\u40db//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40=\uff1a",
+   "reads": "%40=\uff1a"
+  },
+  {
+   "label": "=.\uff1a",
+   "reads": "=.\uff1a"
+  },
+  {
+   "label": "%40=?",
+   "reads": "%40=?"
+  },
+  {
+   "label": "http\uff1a//qqqqqq:zzzzzz@cdn.est/x",
+   "reads": "cdn.est"
+  },
+  {
+   "label": "&commat;&commat;nas",
+   "reads": "&commat;&commat;nas"
+  },
+  {
+   "label": "http:\u685a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud3cf://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "x&colon;\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\ued24://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3f35://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test/geername=qqqqqq&password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5841://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9bf0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=#http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uefdc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc511//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "(\uff0f\\",
+   "reads": "(\uff0f\\"
+  },
+  {
+   "label": "8080\\&#x3a",
+   "reads": "8080\\&#x3a"
+  },
+  {
+   "label": "http\u3aa2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test/get.php?username=qqqqqq&passwor",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7170://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;(8080",
+   "reads": "&#x40;(8080"
+  },
+  {
+   "label": "http\ue9d1://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?#@",
+   "reads": "?#@"
+  },
+  {
+   "label": "qqqqqq#&#x40;",
+   "reads": "qqqqqq#&#x40;"
+  },
+  {
+   "label": "http:\u3303//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u788a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6d8c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40&&#64;",
+   "reads": "%40&&#64;"
+  },
+  {
+   "label": "http:\uf6d5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uce9d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubd28//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uec28://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3275://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7412//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;&#x3a\u200b",
+   "reads": "&colon;&#x3a\u200b"
+  },
+  {
+   "label": "http://;\u200b",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uc95d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;nas]",
+   "reads": "&colon;nas]"
+  },
+  {
+   "label": "http://cdn.test:8080/live",
+   "reads": "cdn.test:8080"
+  },
+  {
+   "label": "cdst/live/qqqqqq/zzzzzz/1.t s",
+   "reads": "cdst/live/qqqqqq/zzzzzz/1.t s"
+  },
+  {
+   "label": "]%2f(",
+   "reads": "]%2f("
+  },
+  {
+   "label": "http:\uf568//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5400//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "8080xzzzzzz",
+   "reads": "8080xzzzzzz"
+  },
+  {
+   "label": "Provider test/live/qqqqqq/z zzzzz/1.ts",
+   "reads": "Provider test/live/qqqqqq/z zzzzz/1.ts"
+  },
+  {
+   "label": "//qqqqqq:zzzzzz@cdt/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "?&commat;x",
+   "reads": "?&commat;x"
+  },
+  {
+   "label": "http\u09a7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u02d7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ufcfb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040#zzzzzz",
+   "reads": "\\u0040#zzzzzz"
+  },
+  {
+   "label": "&#x3a%2F&",
+   "reads": "&#x3a%2F&"
+  },
+  {
+   "label": "[zzzzzz&#64;",
+   "reads": "[zzzzzz&#64;"
+  },
+  {
+   "label": "http\u0e07://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u52ce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A[::1]%3A",
+   "reads": "%3A[::1]%3A"
+  },
+  {
+   "label": "http:\u72f6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn .testt.m3u8",
+   "reads": "cdn .testt.m3u8"
+  },
+  {
+   "label": "http:\u13b3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdqqq/zzzzzz/ 1.ts",
+   "reads": "cdqqq/zzzzzz/ 1.ts"
+  },
+  {
+   "label": "&#x40;[::1]zzzzzz",
+   "reads": "&#x40;[::1]zzzzzz"
+  },
+  {
+   "label": "http\u081c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u104e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue53e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0fxzzzzzz",
+   "reads": "\uff0fxzzzzzz"
+  },
+  {
+   "label": " \uff0f#",
+   "reads": " \uff0f#"
+  },
+  {
+   "label": "http\u8d17://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4300://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf3ce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0bf7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u483f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cd/qqqqqq/zz zzzz/1.ts",
+   "reads": "cd/qqqqqq/zz zzzz/1.ts"
+  },
+  {
+   "label": "http\u1103://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7de8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F&#x40;x",
+   "reads": "%2F&#x40;x"
+  },
+  {
+   "label": "&#1114112;]&#1114112;",
+   "reads": "&#1114112;]&#1114112;"
+  },
+  {
+   "label": "http\u311c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "httpqqqqq:zzzzzz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3434://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;//&#58",
+   "reads": "&sol;//&#58"
+  },
+  {
+   "label": "&colon;%40&#x40;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u7601://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3cc8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5f21://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uacf7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4176://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a?zzzzzz",
+   "reads": "&#x3a?zzzzzz"
+  },
+  {
+   "label": "()zzzzzz",
+   "reads": "()zzzzzz"
+  },
+  {
+   "label": "[::1][::1]nas",
+   "reads": "[::1][::1]nas"
+  },
+  {
+   "label": "http:\\\\q\ufeffqqqqq:zzzzzz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2f0b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub3a6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3504//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf18f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/\u200b/qqq:zzzzzz@cdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "%3A&#64;?",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u5f2a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u981b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua24d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7464://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":?]",
+   "reads": ":?]"
+  },
+  {
+   "label": "[::1][\ud835\udc00",
+   "reads": "[::1][\ud835\udc00"
+  },
+  {
+   "label": "http\uff1a//qqqqqqest/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "[::1])%40",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uc180://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u18d2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;%2F&",
+   "reads": "&#64;%2F&"
+  },
+  {
+   "label": "http://zzzzz/1.ts",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "nas/@",
+   "reads": "nas/@"
+  },
+  {
+   "label": "http\ubfbd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uf05c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc517://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58 cdn.test",
+   "reads": "&#58 cdn.test"
+  },
+  {
+   "label": "http:\uae89//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4e63://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//8080\u200b",
+   "reads": "//8080\u200b"
+  },
+  {
+   "label": "http\uef01://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40\u200bcdn.test",
+   "reads": "%40\u200bcdn.test"
+  },
+  {
+   "label": "//[http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "\ud835\udc00]=",
+   "reads": "\ud835\udc00]="
+  },
+  {
+   "label": "http\ube74://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qqqqqq//(",
+   "reads": "qqqqqq//("
+  },
+  {
+   "label": "http\u7b87://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u98c1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test/get.ph",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7c6f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8ad2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=%2f#",
+   "reads": "=%2f#"
+  },
+  {
+   "label": "(\uff0f(",
+   "reads": "(\uff0f("
+  },
+  {
+   "label": ";&#x40;;",
+   "reads": ";&#x40;;"
+  },
+  {
+   "label": "http:\u7a57//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provit/live/qqqqqq/zzzzz z/1.ts",
+   "reads": "Provit/live/qqqqqq/zzzzz z/1.ts"
+  },
+  {
+   "label": "http:\uf286//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f)&colon;",
+   "reads": "%2f)&colon;"
+  },
+  {
+   "label": "http:\u8951//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;nas&#x3a",
+   "reads": "&colon;nas&#x3a"
+  },
+  {
+   "label": "#8080&",
+   "reads": "#8080&"
+  },
+  {
+   "label": "http:\u43c6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "8080.8080",
+   "reads": "8080.8080"
+  },
+  {
+   "label": "&sol;/http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uecad//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4a19://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u130f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uab70//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubc3d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")&sol;\\u0040",
+   "reads": ")&sol;\\u0040"
+  },
+  {
+   "label": "nas =",
+   "reads": "nas ="
+  },
+  {
+   "label": "&#1114112;&#x3a\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&sol;//&sol;",
+   "reads": "&sol;//&sol;"
+  },
+  {
+   "label": "http\u587b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http://cdn.test/get.php?uname=qqqqqq&password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u00408080&#x3a",
+   "reads": "\\u00408080&#x3a"
+  },
+  {
+   "label": "http:\u8773//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5d27//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ucaf6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3684//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "nas?[::1]",
+   "reads": "nas?[::1]"
+  },
+  {
+   "label": "]\u200b%40",
+   "reads": "]\u200b%40"
+  },
+  {
+   "label": "P rovzzz/1.ts",
+   "reads": "P rovzzz/1.ts"
+  },
+  {
+   "label": "qqqqqq):",
+   "reads": "qqqqqq):"
+  },
+  {
+   "label": "http\u9904://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "htt=zzzzzz",
+   "reads": "htt=zzzzzz"
+  },
+  {
+   "label": "[&&#58",
+   "reads": "[&&#58"
+  },
+  {
+   "label": "http://zzz@cdn.test/get.php",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;&#64;\ud835\udc00",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u73f8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")//?",
+   "reads": ")//?"
+  },
+  {
+   "label": "\u200b?&#64;",
+   "reads": "\u200b?&#64;"
+  },
+  {
+   "label": "http\u62ae://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F&commat;&commat;",
+   "reads": "%2F&commat;&commat;"
+  },
+  {
+   "label": "http\ucf65://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ufe35://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf67b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\zzzzzz;",
+   "reads": "\\zzzzzz;"
+  },
+  {
+   "label": "http\u55a9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u40dc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua9bc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ".(x",
+   "reads": ".(x"
+  },
+  {
+   "label": "http:\u9ff1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cdst/live/qqqqqq/zzz zzz/1.ts",
+   "reads": "Provider cdst/live/qqqqqq/zzz zzz/1.ts"
+  },
+  {
+   "label": "http://qqqqqq:/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u00ef//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=\ud835\udc00&sol;",
+   "reads": "=\ud835\udc00&sol;"
+  },
+  {
+   "label": "nas[]",
+   "reads": "nas[]"
+  },
+  {
+   "label": "\uff1a)%2f",
+   "reads": "\uff1a)%2f"
+  },
+  {
+   "label": "http:\ue97c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;&[::1]",
+   "reads": "&#x40;&[::1]"
+  },
+  {
+   "label": "http\u4cbb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u28c8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0f&\\",
+   "reads": "\uff0f&\\"
+  },
+  {
+   "label": "http:\uc2e6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test&#1114112;\\",
+   "reads": "cdn.test&#1114112;\\"
+  },
+  {
+   "label": "http\ub5e9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://qqqqqq:\u00adzzzzzz@cdn.test/get.php",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\%2f[",
+   "reads": "\\%2f["
+  },
+  {
+   "label": "http:\u5e2c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8c7d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\\\\qqqqqq:zzzzzz@cest/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "Pve/qqqqqq/z zzzzz/1.ts",
+   "reads": "Pve/qqqqqq/z zzzzz/1.ts"
+  },
+  {
+   "label": "http\uadc7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff1a&sol;(",
+   "reads": "\uff1a&sol;("
+  },
+  {
+   "label": ")&#64;%3A",
+   "reads": ")&#64;%3A"
+  },
+  {
+   "label": "http\u6433://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uaede://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6d68://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A&colon;%40",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\ud097://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0f&#58%2F",
+   "reads": "\uff0f&#58%2F"
+  },
+  {
+   "label": "%3A=%2F",
+   "reads": "%3A=%2F"
+  },
+  {
+   "label": "http:\u09a4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a\\u0040%2f",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u246e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;@:",
+   "reads": "&#x40;@:"
+  },
+  {
+   "label": "Providert est/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Providert est/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "(%2F\\u0040",
+   "reads": "(%2F\\u0040"
+  },
+  {
+   "label": "http\u9345://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1f22://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3a38://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/\u200b/qqqqzzzzzz@cdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u6d3f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz[::1]qqqqqq",
+   "reads": "zzzzzz[::1]qqqqqq"
+  },
+  {
+   "label": "http\u8376://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "nas[::1]\ud835\udc00",
+   "reads": "nas[::1]\ud835\udc00"
+  },
+  {
+   "label": "http:\u681e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a%3A.",
+   "reads": "&#x3a%3A."
+  },
+  {
+   "label": "\\[http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "&colon;cdn.test@",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uf4d5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf46e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")&#1114112;",
+   "reads": ")&#1114112;"
+  },
+  {
+   "label": "= nas",
+   "reads": "= nas"
+  },
+  {
+   "label": "http:\ub7f1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8f3b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test/gname=qqqqqq&password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u72a0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "]\uff1ausername=",
+   "reads": "]\uff1ausername="
+  },
+  {
+   "label": "http\u06ec://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u82b7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua296//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4509//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u891d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?&commat;&sol;",
+   "reads": "?&commat;&sol;"
+  },
+  {
+   "label": "http\u7d50://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6b76://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub685//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;x?",
+   "reads": "&#x40;x?"
+  },
+  {
+   "label": "//qqqqqq:zzzzzz@cdn.tet/x",
+   "reads": "cdn.tet"
+  },
+  {
+   "label": "http\u73ce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ucdd6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provid/1. ts",
+   "reads": "Provid/1. ts"
+  },
+  {
+   "label": "http:\ufa07//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ua3be://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4e9b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provid zzzz/1.ts",
+   "reads": "Provid zzzz/1.ts"
+  },
+  {
+   "label": "http\u2c7f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzzcdn.test\ud835\udc00",
+   "reads": "zzzzzzcdn.test\ud835\udc00"
+  },
+  {
+   "label": "http:\u5648//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u61f7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubf90://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "h\u200bttp://cdn.test/get.php?username=qqqqqq&password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff1a//\\",
+   "reads": "\uff1a//\\"
+  },
+  {
+   "label": "http:\u8e93//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud5cc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")(:",
+   "reads": ")(:"
+  },
+  {
+   "label": "http\u525f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u41ba://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0fx ",
+   "reads": "\uff0fx "
+  },
+  {
+   "label": "http:\u757e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "80808080\u200b",
+   "reads": "80808080\u200b"
+  },
+  {
+   "label": "http\u2091://qqqqqq:zz zz@cdn.test/x",
+   "reads": "[host withheld] cdn.test"
+  },
+  {
+   "label": "http:\ud050//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5ba2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ueb05//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1721//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7da6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u18b5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test?%2F",
+   "reads": "cdn.test?%2F"
+  },
+  {
+   "label": "http\u1f64://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "(;\ud835\udc00",
+   "reads": "(;\ud835\udc00"
+  },
+  {
+   "label": "username=]\ud835\udc00",
+   "reads": "username=]\ud835\udc00"
+  },
+  {
+   "label": "http\uad18://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58&#1114112;&colon;",
+   "reads": "&#58&#1114112;&colon;"
+  },
+  {
+   "label": "\u200bhttp://;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u5505//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9156//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2238//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&//#",
+   "reads": "&//#"
+  },
+  {
+   "label": "&commat;naszzzzzz",
+   "reads": "&commat;naszzzzzz"
+  },
+  {
+   "label": "http\u839b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/zzzzzz/1 .ts",
+   "reads": "/zzzzzz/1 .ts"
+  },
+  {
+   "label": ":%2f.",
+   "reads": ":%2f."
+  },
+  {
+   "label": "http:\uec37//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=&commat;%40",
+   "reads": "=&commat;%40"
+  },
+  {
+   "label": "8080&sol;(",
+   "reads": "8080&sol;("
+  },
+  {
+   "label": "http:\u2fa5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7a69//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider 1. ts",
+   "reads": "Provider 1. ts"
+  },
+  {
+   "label": "http\u3214://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//=\\",
+   "reads": "//=\\"
+  },
+  {
+   "label": "%2F]8080",
+   "reads": "%2F]8080"
+  },
+  {
+   "label": ";?\\u0040",
+   "reads": ";?\\u0040"
+  },
+  {
+   "label": "http:\u9e94//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf6f1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uadb3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3e27//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "h://cdn.test:8080/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "\uff0f]&",
+   "reads": "\uff0f]&"
+  },
+  {
+   "label": "http:\uc13a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uac65//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\\\\qq\u00adqqqq:zzzzzz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u82c3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "est/qqqqqq/zzzzzz/play list.m3u8",
+   "reads": "est/qqqqqq/zzzzzz/play list.m3u8"
+  },
+  {
+   "label": "&cdn.testnas",
+   "reads": "&cdn.testnas"
+  },
+  {
+   "label": "http:\ua62a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x40;8080&#58",
+   "reads": "&#x40;8080&#58"
+  },
+  {
+   "label": "]\uff1a&#58",
+   "reads": "]\uff1a&#58"
+  },
+  {
+   "label": "http:\ue0e5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5d36://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uab0d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc853//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "username=&&colon;",
+   "reads": "username=&&colon;"
+  },
+  {
+   "label": "http\uf3e8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucde6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u41e9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":)%3A",
+   "reads": ":)%3A"
+  },
+  {
+   "label": "http\u756d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf453//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F&#64;&",
+   "reads": "%2F&#64;&"
+  },
+  {
+   "label": "&#64;\uff1a?",
+   "reads": "&#64;\uff1a?"
+  },
+  {
+   "label": "mailto:q\u00a0qqqqq@cdn.test?password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";qqqqqqnas",
+   "reads": ";qqqqqqnas"
+  },
+  {
+   "label": ":.\uff0f",
+   "reads": ":.\uff0f"
+  },
+  {
+   "label": "http\u2537://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#;?",
+   "reads": "#;?"
+  },
+  {
+   "label": "\\http://8080",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u863c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F[ ",
+   "reads": "%2F[ "
+  },
+  {
+   "label": "http:\u7c08//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "//&#x40; ",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "\uff0fzzzzzz//",
+   "reads": "\uff0fzzzzzz//"
+  },
+  {
+   "label": "Provider cdn ve/qqqqqq/zzzzzz/1.ts",
+   "reads": "Provider cdn ve/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "\ud835\udc00[&colon;",
+   "reads": "\ud835\udc00[&colon;"
+  },
+  {
+   "label": "http:\ub7ae//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;=username=",
+   "reads": "&sol;=username="
+  },
+  {
+   "label": "http:\ubaf9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Pro vit/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Pro vit/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "Provider cdn. te/1.ts",
+   "reads": "Provider cdn. te/1.ts"
+  },
+  {
+   "label": "/\u200b&sol;",
+   "reads": "/\u200b&sol;"
+  },
+  {
+   "label": "http://cdn.test/get.php?username=qqqqqq&pasord=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9da3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u13cf//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub188//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f&@",
+   "reads": "%2f&@"
+  },
+  {
+   "label": "&commat;\u200b#",
+   "reads": "&commat;\u200b#"
+  },
+  {
+   "label": "http\uf022://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040http://\uff0f",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u9d5f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\.@",
+   "reads": "\\.@"
+  },
+  {
+   "label": "http:\ucbcd//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0ceb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7852//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "x\uff1a;",
+   "reads": "x\uff1a;"
+  },
+  {
+   "label": "http\u28ba://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua0d6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ufcfe//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uff82://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf903://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf8a4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u87ad//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uce2b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "x;\u200b",
+   "reads": "x;\u200b"
+  },
+  {
+   "label": "http\u9a8d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?%40]",
+   "reads": "?%40]"
+  },
+  {
+   "label": "http:\u4dbc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0f28//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4db0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc52b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0810//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz&#1114112;\uff0f",
+   "reads": "zzzzzz&#1114112;\uff0f"
+  },
+  {
+   "label": "http\ua09c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uad9b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "username=http://qqqqqq",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "\\u0040%3Ax",
+   "reads": "\\u0040%3Ax"
+  },
+  {
+   "label": "http:\u5db5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7521://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "#[::1]/",
+   "reads": "#[::1]/"
+  },
+  {
+   "label": ";&#x3a&#1114112;",
+   "reads": ";&#x3a&#1114112;"
+  },
+  {
+   "label": "mailtoword=zzzzzz",
+   "reads": "mailtoword=zzzzzz"
+  },
+  {
+   "label": "username=(]",
+   "reads": "username=(]"
+  },
+  {
+   "label": "http:\u9e6c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%408080.",
+   "reads": "%408080."
+  },
+  {
+   "label": "http\ub8f9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9055://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0bf7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3f3d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qqqqqq;&sol;",
+   "reads": "qqqqqq;&sol;"
+  },
+  {
+   "label": "http:\u90c7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;&\uff0f",
+   "reads": "&sol;&\uff0f"
+  },
+  {
+   "label": "c dnqqqq/zzzzzz/playlist.m3u8",
+   "reads": "c dnqqqq/zzzzzz/playlist.m3u8"
+  },
+  {
+   "label": "http:\uf01c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uedcc//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff1a&commat; ",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": ";]&commat;",
+   "reads": ";]&commat;"
+  },
+  {
+   "label": "\\u0040%2f&#58",
+   "reads": "\\u0040%2f&#58"
+  },
+  {
+   "label": "?zzzzzz&#58",
+   "reads": "?zzzzzz&#58"
+  },
+  {
+   "label": "http\u298d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u760a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3e21://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5e63//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5169//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2fcdn.test\u200b",
+   "reads": "%2fcdn.test\u200b"
+  },
+  {
+   "label": "http\uafca://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uf2f6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u942c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40(&#x3a",
+   "reads": "%40(&#x3a"
+  },
+  {
+   "label": "cdtest/qqqqqq/zzzzzz/playlist.m3u 8",
+   "reads": "cdtest/qqqqqq/zzzzzz/playlist.m3u 8"
+  },
+  {
+   "label": "http:\u3150//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "@cdn.test%2f",
+   "reads": "@cdn.test%2f"
+  },
+  {
+   "label": "http\uaa04://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qqqqqq&commat;:",
+   "reads": "qqqqqq&commat;:"
+  },
+  {
+   "label": "@[::1]x",
+   "reads": "@[::1]x"
+  },
+  {
+   "label": "=\\u0040http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u5963//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0bf2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;\uff1a\ud835\udc00",
+   "reads": "&#64;\uff1a\ud835\udc00"
+  },
+  {
+   "label": "http:\u77ff//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;[::1];",
+   "reads": "&#64;[::1];"
+  },
+  {
+   "label": "%2F&#x3a ",
+   "reads": "%2F&#x3a "
+  },
+  {
+   "label": "x#&#1114112;",
+   "reads": "x#&#1114112;"
+  },
+  {
+   "label": " )#",
+   "reads": " )#"
+  },
+  {
+   "label": "http:\u0f85//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3aqqqqqq?",
+   "reads": "&#x3aqqqqqq?"
+  },
+  {
+   "label": "http\ue338://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9706//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "mail.test:20 2",
+   "reads": "mail.test:20 2"
+  },
+  {
+   "label": "http\uc563://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/)#",
+   "reads": "/)#"
+  },
+  {
+   "label": "username=[zzzzzz",
+   "reads": "username=[zzzzzz"
+  },
+  {
+   "label": "httpqqqq/zzzzzz/1.ts",
+   "reads": "httpqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\u4605//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "username=cdn.test&#58",
+   "reads": "username=cdn.test&#58"
+  },
+  {
+   "label": "]\u200b&#x40;",
+   "reads": "]\u200b&#x40;"
+  },
+  {
+   "label": "%3A=[",
+   "reads": "%3A=["
+  },
+  {
+   "label": "http:\u3d84//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u47d7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u590d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3c1b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\u200b[::1])",
+   "reads": "\u200b[::1])"
+  },
+  {
+   "label": "http\ucc24://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "qqqqqq&#x3a\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u5341//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u346b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cdnt/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Provider cdnt/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http:\u9d43//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc98c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u52f0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u99dd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u50bd//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1f10://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u34bd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u740f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u701d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://qqqqqq:zzzzzz@cdn.test/get.ph\u200bp",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2552://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\[&sol;",
+   "reads": "\\[&sol;"
+  },
+  {
+   "label": "=@x",
+   "reads": "=@x"
+  },
+  {
+   "label": "&#1114112;&#x3a&#64;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u9dfb://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8483//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;]&commat;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "cdn.test/get.php?username=qqqqqq&pass",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/qqqqqq@cdn.test/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": " /?",
+   "reads": " /?"
+  },
+  {
+   "label": "http:\u9d3c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ".]zzzzzz",
+   "reads": ".]zzzzzz"
+  },
+  {
+   "label": "http\u216b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "[host withheld] cdn.test"
+  },
+  {
+   "label": ":username=&#1114112;",
+   "reads": ":username=&#1114112;"
+  },
+  {
+   "label": "mailto:\u2060qqqqqq@cdn.test?password=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8f1d//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3fd6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\u0040%2F/",
+   "reads": "\\u0040%2F/"
+  },
+  {
+   "label": "http\u97a9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0fzzzzzz",
+   "reads": "\uff0fzzzzzz"
+  },
+  {
+   "label": "http://qqqq\ufeffqq:zz zz@cdn.test/x",
+   "reads": "[host withheld] cdn.test"
+  },
+  {
+   "label": "http:\u7e84//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u3abe://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http&#x3a;&#x2f;&#x2f;qqqqqq&#x3a;zzzzzz&#x40;cdn.test&#x2f;get.php",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\&commat;&#58",
+   "reads": "\\&commat;&#58"
+  },
+  {
+   "label": "ct/qqqqqq/zzzzzz/ playlist.m3u8",
+   "reads": "ct/qqqqqq/zzzzzz/ playlist.m3u8"
+  },
+  {
+   "label": "http:\u3864//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "mailto:qqqqqq@cdn.test?password=zzz\u00a0zzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u04d7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ue721://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7c3e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u4cc3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3737//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0b6b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "zzzzzz#&",
+   "reads": "zzzzzz#&"
+  },
+  {
+   "label": "Provider/qqqqqq /zzzzzz/1.ts",
+   "reads": "Provider/qqqqqq /zzzzzz/1.ts"
+  },
+  {
+   "label": "http\uec7a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/%3A@",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uecf7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;:#",
+   "reads": "&commat;:#"
+  },
+  {
+   "label": "cdn.te st/qqqqqqlist.m3u8",
+   "reads": "cdn.te st/qqqqqqlist.m3u8"
+  },
+  {
+   "label": "&#64;])",
+   "reads": "&#64;])"
+  },
+  {
+   "label": "http:\u6547//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0d87//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u6b1f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub0f2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5caf://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8c7b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " qqqqqqusername=",
+   "reads": " qqqqqqusername="
+  },
+  {
+   "label": "http\u0512://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u08a7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a&sol;=",
+   "reads": "&#x3a&sol;="
+  },
+  {
+   "label": "\ud835\udc00&#64;//",
+   "reads": "\ud835\udc00&#64;//"
+  },
+  {
+   "label": "http\uce8e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "clive/qqq qqq/zzzzzz/1.ts",
+   "reads": "clive/qqq qqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "x=:",
+   "reads": "x=:"
+  },
+  {
+   "label": "http://cdn.test:8080/li\u00adve/qqqqqq/zzzzzz/1.ts",
+   "reads": "cdn.test:8080"
+  },
+  {
+   "label": "cdn.test/get.php?zzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0c83://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u97e5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Pro vidz/1.ts",
+   "reads": "Pro vidz/1.ts"
+  },
+  {
+   "label": "&\\u0040@",
+   "reads": "&\\u0040@"
+  },
+  {
+   "label": "http:\u5b18//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u5c08//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&)&colon;",
+   "reads": "&)&colon;"
+  },
+  {
+   "label": "http:\u2444//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40& ",
+   "reads": "%40& "
+  },
+  {
+   "label": "http\u7d51://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "[::1]&colon;\\",
+   "reads": "[::1]&colon;\\"
+  },
+  {
+   "label": "http\ue6c8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\uff0fusername=",
+   "reads": "\uff0fusername="
+  },
+  {
+   "label": "http:\ubacb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubeb3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubd8c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4a54//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;;\uff0f",
+   "reads": "&sol;;\uff0f"
+  },
+  {
+   "label": " ] ",
+   "reads": " ] "
+  },
+  {
+   "label": "nas]qqqqqq",
+   "reads": "nas]qqqqqq"
+  },
+  {
+   "label": "http:\ua236//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua798//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u3918//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub195//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ud527//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf786://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub13b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue60b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uaf74://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ua2f1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1c1e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://http://8080",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "cdn.t/get.php?username=qqqqqq&password=zzzzzz",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u3af4//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;xnas",
+   "reads": "&#64;xnas"
+  },
+  {
+   "label": "http\uf681://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=/]",
+   "reads": "=/]"
+  },
+  {
+   "label": "http:\u5ad2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u34e0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.te s3u8",
+   "reads": "cdn.te s3u8"
+  },
+  {
+   "label": "nas//)",
+   "reads": "nas//)"
+  },
+  {
+   "label": "http:\u6fcf//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " ?%2F",
+   "reads": " ?%2F"
+  },
+  {
+   "label": "[::1]&\\u0040",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\ud76a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " %2Fusername=",
+   "reads": " %2Fusername="
+  },
+  {
+   "label": "//]?",
+   "reads": "//]?"
+  },
+  {
+   "label": "http\u2fce://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u59d5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test)&#x40;",
+   "reads": "cdn.test)&#x40;"
+  },
+  {
+   "label": "( &sol;",
+   "reads": "( &sol;"
+  },
+  {
+   "label": "http\u59ec://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a;[",
+   "reads": "&#x3a;["
+  },
+  {
+   "label": "http\u3fb0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5162://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58&?",
+   "reads": "&#58&?"
+  },
+  {
+   "label": "http:\u351c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " &#x3a",
+   "reads": " &#x3a"
+  },
+  {
+   "label": "@.//",
+   "reads": "@.//"
+  },
+  {
+   "label": "http\ud472://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ufe11//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uc82a//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";username=",
+   "reads": ";username="
+  },
+  {
+   "label": "http\uae50://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ucbc0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/qqqqqq/zzzzzz/playli st.m3u8",
+   "reads": "/qqqqqq/zzzzzz/playli st.m3u8"
+  },
+  {
+   "label": "http:\u58ed//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/\u200b/qqqqqq:zzzest/x",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\ufd1f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud303://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3Azzzzzz//",
+   "reads": "%3Azzzzzz//"
+  },
+  {
+   "label": "%2f%3A//",
+   "reads": "%2f%3A//"
+  },
+  {
+   "label": "http:\u7733//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ue545://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u95b2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;&&",
+   "reads": "&sol;&&"
+  },
+  {
+   "label": "username=%40x",
+   "reads": "username=%40x"
+  },
+  {
+   "label": "http:\u81ab//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u168a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub03e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uca7e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub6c9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "?=qqqqqq",
+   "reads": "?=qqqqqq"
+  },
+  {
+   "label": "(nas&#x3a",
+   "reads": "(nas&#x3a"
+  },
+  {
+   "label": "http\ub54c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9b18//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "@?x",
+   "reads": "@?x"
+  },
+  {
+   "label": "[%3Aqqqqqq",
+   "reads": "[%3Aqqqqqq"
+  },
+  {
+   "label": "http\u2b04://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1c81://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://cdn.test/get.php?username=qqqqqq&passw\u200bord=zzzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub4ac://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud6b0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:/et.php",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\uafac://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "]&sol;//",
+   "reads": "]&sol;//"
+  },
+  {
+   "label": "http\uae86://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub38a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u25a0//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/\\u0040//",
+   "reads": "/\\u0040//"
+  },
+  {
+   "label": "\uff0f&colon;]",
+   "reads": "\uff0f&colon;]"
+  },
+  {
+   "label": "http\ue182://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#64;&#64;=",
+   "reads": "&#64;&#64;="
+  },
+  {
+   "label": "\uff1a&#1114112;\ud835\udc00",
+   "reads": "\uff1a&#1114112;\ud835\udc00"
+  },
+  {
+   "label": "http:\u1393//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc48e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u93b3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.test.(",
+   "reads": "cdn.test.("
+  },
+  {
+   "label": "http:\ua615//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uedf4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8eb3//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue050//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5792://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\\%3A\ud835\udc00",
+   "reads": "\\%3A\ud835\udc00"
+  },
+  {
+   "label": "http\u12ad://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "[::1][[::1]",
+   "reads": "[::1][[::1]"
+  },
+  {
+   "label": "%40(\uff0f",
+   "reads": "%40(\uff0f"
+  },
+  {
+   "label": "8080x@",
+   "reads": "8080x@"
+  },
+  {
+   "label": "http:\u6c43//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "=%3A#",
+   "reads": "=%3A#"
+  },
+  {
+   "label": "&colon;#zzzzzz",
+   "reads": "&colon;#zzzzzz"
+  },
+  {
+   "label": "http:\uab3e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u47c5//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58\\u0040 ",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\uad18//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uea07//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u49bd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "\u200busername=@",
+   "reads": "\u200busername=@"
+  },
+  {
+   "label": "http\ub7a7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0217//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ";%40&sol;",
+   "reads": ";%40&sol;"
+  },
+  {
+   "label": "http\u5f12://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "):&#1114112;",
+   "reads": "):&#1114112;"
+  },
+  {
+   "label": "zzzzzz%2F&#58",
+   "reads": "zzzzzz%2F&#58"
+  },
+  {
+   "label": "%3Ahttp://%40",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http://%3A[",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\ud208://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6b9b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u8749://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ue90f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud690://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubacd//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ub8f7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&[::1]&sol;",
+   "reads": "&[::1]&sol;"
+  },
+  {
+   "label": " @%40",
+   "reads": " @%40"
+  },
+  {
+   "label": "http\u9cc4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u735c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ubbf7//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;&#64;&#58",
+   "reads": "&commat;&#64;&#58"
+  },
+  {
+   "label": "http:\uf09f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7e3f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u60a3://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u02a8://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40/&",
+   "reads": "%40/&"
+  },
+  {
+   "label": "cdn.test\ud835\udc00username=",
+   "reads": "cdn.test\ud835\udc00username="
+  },
+  {
+   "label": "http\u6fbe://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ufcdf://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4289//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucaaf//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "nas8080#",
+   "reads": "nas8080#"
+  },
+  {
+   "label": "http\ue0e9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "ce/qqqqqq/zzzzzz/1.ts",
+   "reads": "ce/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http\ub950://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&sol;(@",
+   "reads": "&sol;(@"
+  },
+  {
+   "label": "http:\ub855//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uf76e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\uada6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58//&sol;",
+   "reads": "&#58//&sol;"
+  },
+  {
+   "label": "http\u7f73://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "nas(\u200b",
+   "reads": "nas(\u200b"
+  },
+  {
+   "label": "http\uad2e://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u35c5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u51bf://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#58&#64;username=",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u6959//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u7ba7://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0c0c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2119//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ubc21://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ud3a2://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://%40\\",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u8b81//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u5d5a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&colon;.http://",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u52fd://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#1114112;%40\\",
+   "reads": "&#1114112;%40\\"
+  },
+  {
+   "label": "\uff0f&commat;.",
+   "reads": "\uff0f&commat;."
+  },
+  {
+   "label": "http\ue8b5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0424://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ue754://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x",
+   "reads": "&#x"
+  },
+  {
+   "label": "http:\ua31e//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2F[&colon;",
+   "reads": "%2F[&colon;"
+  },
+  {
+   "label": "http:\u52bd//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8b2f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider c qqqq/zzzzzz/1.ts",
+   "reads": "Provider c qqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "http\ue192://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8949//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider cdn. test/lts",
+   "reads": "Provider cdn. test/lts"
+  },
+  {
+   "label": "(&#x3a[::1]",
+   "reads": "(&#x3a[::1]"
+  },
+  {
+   "label": "Prost/l ive/qqqqqq/zzzzzz/1.ts",
+   "reads": "Prost/l ive/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "\ud835\udc00&colon;&sol;",
+   "reads": "\ud835\udc00&colon;&sol;"
+  },
+  {
+   "label": "http\u104b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub8e6://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u2a3f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u949f://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ucbf9//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u924b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\uc804://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2f6d://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f8080(",
+   "reads": "%2f8080("
+  },
+  {
+   "label": "http:\uf5c2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&&#1114112;=",
+   "reads": "&&#1114112;="
+  },
+  {
+   "label": "http\uc9d4://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "mailto:qpassword=zzzzzz",
+   "reads": "mailto:qpassword=zzzzzz"
+  },
+  {
+   "label": "http\uf614://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0c32//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "cdn.testnas(",
+   "reads": "cdn.testnas("
+  },
+  {
+   "label": "http\u33c5://qqqqqq:zz zz@cdn.test/x",
+   "reads": "[host withheld] cdn.test"
+  },
+  {
+   "label": "cdn.test/get.php?username=qzzzz",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u78e6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub40b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u0e0a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%40//\uff0f",
+   "reads": "%40//\uff0f"
+  },
+  {
+   "label": "http\ub1e0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/%2F;",
+   "reads": "/%2F;"
+  },
+  {
+   "label": "http:\u8612//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "username=%3A)",
+   "reads": "username=%3A)"
+  },
+  {
+   "label": "http\u87d9://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1fd6//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1980//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9077//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http://%3A.",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u7943://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u6a01//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u0770//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ":)&sol;",
+   "reads": ":)&sol;"
+  },
+  {
+   "label": "http://qqqqqq:zz zzcdn.test/x",
+   "reads": "[host withheld] zzcdn.test"
+  },
+  {
+   "label": ":\u200b&commat;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http\u9d8c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")&#x40;:",
+   "reads": ")&#x40;:"
+  },
+  {
+   "label": "http://cdn.te\u00a0st:8080/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "  [::1]",
+   "reads": "  [::1]"
+  },
+  {
+   "label": "http\u63ba://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ufedc://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": " \\u0040=",
+   "reads": " \\u0040="
+  },
+  {
+   "label": "http:\u5050//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u15ba://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&#x3a%2F8080",
+   "reads": "&#x3a%2F8080"
+  },
+  {
+   "label": "&#64;&#58@",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "Proqqqqqq/zzzzzz /1.ts",
+   "reads": "Proqqqqqq/zzzzzz /1.ts"
+  },
+  {
+   "label": "http\u1593://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "8080=%2F",
+   "reads": "8080=%2F"
+  },
+  {
+   "label": "http\ue13c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u4c5f//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u9429//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u1b8c://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u47eb//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider c1.ts",
+   "reads": "Provider c1.ts"
+  },
+  {
+   "label": "http:\ucab8//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Providzzzzz/1 .ts",
+   "reads": "Providzzzzz/1 .ts"
+  },
+  {
+   "label": "http\ud186://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u8568//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "/&#64;&#64;",
+   "reads": "/&#64;&#64;"
+  },
+  {
+   "label": "\ud835\udc00zzzzzz\u200b",
+   "reads": "\ud835\udc00zzzzzz\u200b"
+  },
+  {
+   "label": "\uff0f&#x3a?",
+   "reads": "\uff0f&#x3a?"
+  },
+  {
+   "label": "http:\ub6b2//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%2f&#x3a[::1]",
+   "reads": "%2f&#x3a[::1]"
+  },
+  {
+   "label": "http:\u312c//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u52d1//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "m41.example.test",
+   "reads": "m41.example.test"
+  },
+  {
+   "label": "%3A])",
+   "reads": "%3A])"
+  },
+  {
+   "label": "http\u71a0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u9832://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u7030//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "Provider c dt/live/qqqqqq/zzzzzz/1.ts",
+   "reads": "Provider c dt/live/qqqqqq/zzzzzz/1.ts"
+  },
+  {
+   "label": "cdnp laylist.m3u8",
+   "reads": "cdnp laylist.m3u8"
+  },
+  {
+   "label": "http:\u4e09//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\ue97b//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http:\u1e20//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": ")%2fcdn.test",
+   "reads": ")%2fcdn.test"
+  },
+  {
+   "label": "@/qqqqqq",
+   "reads": "@/qqqqqq"
+  },
+  {
+   "label": "http\uc589://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u2777://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\ub58a://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "http\u620b://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "&commat;(?",
+   "reads": "&commat;(?"
+  },
+  {
+   "label": "%2f[%2f",
+   "reads": "%2f[%2f"
+  },
+  {
+   "label": "http\u11d0://qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "%3A&#64;&#x40;",
+   "reads": "[host withheld]"
+  },
+  {
+   "label": "http:\u8efe//qqqqqq:zz zz@cdn.test/x",
+   "reads": "cdn.test"
+  },
+  {
+   "label": "provider.example.test",
+   "reads": "provider.example.test"
+  },
+  {
+   "label": "iptv-org.github.io",
+   "reads": "iptv-org.github.io"
+  },
+  {
+   "label": "h.test",
+   "reads": "h.test"
+  },
+  {
+   "label": "h.test:8080",
+   "reads": "h.test:8080"
+  },
+  {
+   "label": "h.test:443",
+   "reads": "h.test:443"
+  },
+  {
+   "label": "h.test:80",
+   "reads": "h.test:80"
+  },
+  {
+   "label": "[::1]:8080",
+   "reads": "[::1]:8080"
+  },
+  {
+   "label": "[2001:db8::1]",
+   "reads": "[2001:db8::1]"
+  },
+  {
+   "label": "192.168.1.10:9981",
+   "reads": "192.168.1.10:9981"
+  },
+  {
+   "label": "b\u00fccher.example",
+   "reads": "b\u00fccher.example"
+  },
+  {
+   "label": "local.m3u",
+   "reads": "local.m3u"
+  },
+  {
+   "label": "a b.m3u",
+   "reads": "a b.m3u"
+  },
+  {
+   "label": "list.m3u",
+   "reads": "list.m3u"
+  },
+  {
+   "label": "h.test:65535",
+   "reads": "h.test:65535"
+  },
+  {
+   "label": "[::1%25eth0]",
+   "reads": "[::1%25eth0]"
+  },
+  {
+   "label": "user:2024",
+   "reads": "user:2024"
+  },
+  {
+   "label": "u:1234",
+   "reads": "u:1234"
+  },
+  {
+   "label": "user",
+   "reads": "user"
+  },
+  {
+   "label": "mail.test:20",
+   "reads": "mail.test:20"
+  },
+  {
+   "label": "[2001:db8::1]:8080",
+   "reads": "[2001:db8::1]:8080"
+  },
+  {
+   "label": "nas:8000",
+   "reads": "nas:8000"
+  },
+  {
+   "label": "host.test:25461",
+   "reads": "host.test:25461"
+  },
+  {
+   "label": "cloud.test:8443",
+   "reads": "cloud.test:8443"
+  },
+  {
+   "label": "host",
+   "reads": "host"
+  },
+  {
+   "label": "[2001:db8::7]",
+   "reads": "[2001:db8::7]"
+  },
+  {
+   "label": "host.test",
+   "reads": "host.test"
+  },
+  {
+   "label": "localhost:8080",
+   "reads": "localhost:8080"
+  },
+  {
+   "label": "nas:8080",
+   "reads": "nas:8080"
+  },
+  {
+   "label": "user.name:2024",
+   "reads": "user.name:2024"
+  },
+  {
+   "label": "my list.m3u",
+   "reads": "my list.m3u"
+  },
+  {
+   "label": "h\u00ac.test",
+   "reads": "h\u00ac.test"
+  },
+  {
+   "label": "h\u00ae.test",
+   "reads": "h\u00ae.test"
+  },
+  {
+   "label": "h\u05ff.test",
+   "reads": "h\u05ff.test"
+  },
+  {
+   "label": "h\u0606.test",
+   "reads": "h\u0606.test"
+  },
+  {
+   "label": "h\u061b.test",
+   "reads": "h\u061b.test"
+  },
+  {
+   "label": "h\u061d.test",
+   "reads": "h\u061d.test"
+  },
+  {
+   "label": "h\u06dc.test",
+   "reads": "h\u06dc.test"
+  },
+  {
+   "label": "h\u06de.test",
+   "reads": "h\u06de.test"
+  },
+  {
+   "label": "h\u070e.test",
+   "reads": "h\u070e.test"
+  },
+  {
+   "label": "h\u0710.test",
+   "reads": "h\u0710.test"
+  },
+  {
+   "label": "h\u088f.test",
+   "reads": "h\u088f.test"
+  },
+  {
+   "label": "h\u0892.test",
+   "reads": "h\u0892.test"
+  },
+  {
+   "label": "h\u08e1.test",
+   "reads": "h\u08e1.test"
+  },
+  {
+   "label": "h\u08e3.test",
+   "reads": "h\u08e3.test"
+  },
+  {
+   "label": "h\u180d.test",
+   "reads": "h\u180d.test"
+  },
+  {
+   "label": "h\u180f.test",
+   "reads": "h\u180f.test"
+  },
+  {
+   "label": "h\u2010.test",
+   "reads": "h\u2010.test"
+  },
+  {
+   "label": "h\u2065.test",
+   "reads": "h\u2065.test"
+  },
+  {
+   "label": "h\u2070.test",
+   "reads": "h\u2070.test"
+  },
+  {
+   "label": "h\ufefe.test",
+   "reads": "h\ufefe.test"
+  },
+  {
+   "label": "h\uff00.test",
+   "reads": "h\uff00.test"
+  },
+  {
+   "label": "h\ufff8.test",
+   "reads": "h\ufff8.test"
+  },
+  {
+   "label": "h\ufffc.test",
+   "reads": "h\ufffc.test"
+  },
+  {
+   "label": "h\ud804\udcbc.test",
+   "reads": "h\ud804\udcbc.test"
+  },
+  {
+   "label": "h\ud804\udcbe.test",
+   "reads": "h\ud804\udcbe.test"
+  },
+  {
+   "label": "h\ud804\udccc.test",
+   "reads": "h\ud804\udccc.test"
+  },
+  {
+   "label": "h\ud804\udcce.test",
+   "reads": "h\ud804\udcce.test"
+  },
+  {
+   "label": "h\ud80d\udc2f.test",
+   "reads": "h\ud80d\udc2f.test"
+  },
+  {
+   "label": "h\ud80d\udc40.test",
+   "reads": "h\ud80d\udc40.test"
+  },
+  {
+   "label": "h\ud82f\udc9f.test",
+   "reads": "h\ud82f\udc9f.test"
+  },
+  {
+   "label": "h\ud82f\udca4.test",
+   "reads": "h\ud82f\udca4.test"
+  },
+  {
+   "label": "h\ud834\udd72.test",
+   "reads": "h\ud834\udd72.test"
+  },
+  {
+   "label": "h\ud834\udd7b.test",
+   "reads": "h\ud834\udd7b.test"
+  },
+  {
+   "label": "h\udb40\udc00.test",
+   "reads": "h\udb40\udc00.test"
+  },
+  {
+   "label": "h\udb40\udc02.test",
+   "reads": "h\udb40\udc02.test"
+  },
+  {
+   "label": "h\udb40\udc1f.test",
+   "reads": "h\udb40\udc1f.test"
+  },
+  {
+   "label": "h\udb40\udc80.test",
+   "reads": "h\udb40\udc80.test"
+  },
+  {
+   "label": "[fe80::1%25eth0]:8080",
+   "reads": "[fe80::1%25eth0]:8080"
+  },
+  {
+   "label": "[::ffff:192.0.2.1]:8443",
+   "reads": "[::ffff:192.0.2.1]:8443"
+  },
+  {
+   "label": "host.example",
+   "reads": "host.example"
+  },
+  {
+   "label": "host.example:8080",
+   "reads": "host.example:8080"
+  }
+ ],
+ "unique": [
+  {
+   "existing": [],
+   "label": "cdn.test",
+   "expect": "cdn.test"
+  },
+  {
+   "existing": [
+    "cdn.test"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "CDN.TEST"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+    "cdn.test 2"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 3"
+  },
+  {
+   "existing": [
+    "qqqqqq:zzzzzz@cdn.test"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "http%3A%2F%2Fqqqqqq%3Azzzzzz%40cdn.test%2Fa.m3u"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "cdn.test/live/qqqqqq/zzzzzz/1.ts"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 2"
+  },
+  {
+   "existing": [
+    "Sport:Live@HD"
+   ],
+   "label": "[host withheld]",
+   "expect": "[host withheld] 2"
+  },
+  {
+   "existing": [
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+   ],
+   "label": "other.test",
+   "expect": "other.test"
+  },
+  {
+   "existing": [
+    "My TV",
+    "cdn.test:8080"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test"
+  },
+  {
+   "existing": [
+    "http://qqqqqq:zzzzzz@cdn.test:8080/a.m3u"
+   ],
+   "label": "cdn.test:8080",
+   "expect": "cdn.test:8080 2"
+  },
+  {
+   "existing": [
+    "list.m3u"
+   ],
+   "label": "list.m3u",
+   "expect": "list.m3u 2"
+  },
+  {
+   "existing": [
+    "cdn.test",
+    "cdn.test 2",
+    "http://qqqqqq:zzzzzz@cdn.test/b.m3u"
+   ],
+   "label": "cdn.test",
+   "expect": "cdn.test 3"
+  }
+ ],
+ "validate": [
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "http://qqqqqq:zzzzzz@cdn.test/b.m3u",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "cdn.test"
+    }
+   ],
+   "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "cdn.test",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "CDN.TEST",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201cCDN.TEST\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "http://u2:p2@cdn.test/c.m3u",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "http%3A%2F%2Fu2%3Ap2%40cdn.test%2Fc.m3u",
+   "self": "",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    }
+   ],
+   "label": "qqqqqq:zzzzzz@other.test",
+   "self": "",
+   "expect": "ok",
+   "message": ""
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "My TV"
+    }
+   ],
+   "label": "My Radio",
+   "self": "",
+   "expect": "ok",
+   "message": ""
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    },
+    {
+     "key": "b",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/b.m3u"
+    }
+   ],
+   "label": "http://qqqqqq:zzzzzz@cdn.test/b.m3u",
+   "self": "b",
+   "expect": "ok",
+   "message": ""
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    },
+    {
+     "key": "b",
+     "label": "x"
+    }
+   ],
+   "label": "http://qqqqqq:zzzzzz@cdn.test/b.m3u",
+   "self": "b",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+    },
+    {
+     "key": "b",
+     "label": "x"
+    }
+   ],
+   "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+   "self": "b",
+   "expect": "label_taken",
+   "message": "A source named \u201ccdn.test\u201d already exists"
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "1.5/3 HD"
+    },
+    {
+     "key": "b",
+     "label": "1.5/2 HD"
+    }
+   ],
+   "label": "1.5/2 HD",
+   "self": "b",
+   "expect": "ok",
+   "message": ""
+  },
+  {
+   "sources": [
+    {
+     "key": "a",
+     "label": "1.5/3 HD"
+    },
+    {
+     "key": "b",
+     "label": "x"
+    }
+   ],
+   "label": "1.5/2 HD",
+   "self": "b",
+   "expect": "ok",
+   "message": ""
+  }
+ ],
+ "states": [
+  {
+   "sources": [
+    {
+     "key": "143a56e5",
+     "url": "http://cdn.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "2f2cf48c",
+     "url": "http://cdn.test/b.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "cdn.test 2",
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u"
+   ]
+  },
+  {
+   "sources": [
+    {
+     "key": "2f2cf48c",
+     "url": "http://cdn.test/b.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "143a56e5",
+     "url": "http://cdn.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+    "cdn.test 2"
+   ]
+  },
+  {
+   "sources": [
+    {
+     "key": "143a56e5",
+     "url": "http://cdn.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "8717d983",
+     "url": "http://cdn.test/c.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test 2",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "2f2cf48c",
+     "url": "http://cdn.test/b.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 13,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "5b8ac19a",
+     "url": "http://cdn.test/d.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "qqqqqq:zzzzzz@cdn.test",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 14,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "cdn.test 2",
+    "cdn.test 3",
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+    "qqqqqq:zzzzzz@cdn.test"
+   ]
+  },
+  {
+   "sources": [
+    {
+     "key": "2f2cf48c",
+     "url": "http://cdn.test/b.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "8717d983",
+     "url": "http://cdn.test/c.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "http://qqqqqq:zzzzzz@cdn.test/c.m3u",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "http://qqqqqq:zzzzzz@cdn.test/a.m3u",
+    "http://qqqqqq:zzzzzz@cdn.test/c.m3u"
+   ]
+  },
+  {
+   "sources": [
+    {
+     "key": "e2ea146f",
+     "url": "http://cdn.test:8080/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test:8080",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "29f70426",
+     "url": "http://other.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "other.test",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "143a56e5",
+     "url": "http://cdn.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "My TV",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 13,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "cdn.test:8080",
+    "other.test",
+    "My TV"
+   ]
+  },
+  {
+   "sources": [
+    {
+     "key": "143a56e5",
+     "url": "http://cdn.test/a.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test",
+     "labelCustom": false,
+     "origin": "cli",
+     "addedAt": 11,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    },
+    {
+     "key": "2f2cf48c",
+     "url": "http://cdn.test/b.m3u",
+     "epgUrl": "",
+     "kind": "http",
+     "label": "cdn.test 2",
+     "labelCustom": true,
+     "origin": "cli",
+     "addedAt": 12,
+     "lastUsed": 0,
+     "fetchedAt": 0,
+     "channelCount": 0,
+     "groupCount": 0
+    }
+   ],
+   "labels": [
+    "cdn.test",
+    "cdn.test 2"
+   ]
+  }
+ ],
+ "sweep": {
+  "pieces": [
+   "http://",
+   "//",
+   "qqqqqq",
+   ":",
+   "zzzzzz",
+   "@",
+   "cdn.test",
+   "/",
+   "?",
+   "username=",
+   "&",
+   "%40",
+   "%3A",
+   "&#64;",
+   "\uff1a",
+   "\uff0f",
+   "\u200b",
+   " ",
+   "8080",
+   ".",
+   "(",
+   ")",
+   "nas",
+   "x",
+   "%2F",
+   "%2f",
+   "&#x40;",
+   "&#x3a",
+   "&colon;",
+   "&sol;",
+   "&commat;",
+   "\\u0040",
+   "#",
+   ";",
+   "=",
+   "[",
+   "]",
+   "\\",
+   "&#58",
+   "\ud835\udc00",
+   "[::1]",
+   "&#1114112;"
+  ],
+  "maxPieces": 3,
+  "chunks": 64,
+  "count": 75894,
+  "chunkSize": 1186,
+  "digests": [
+   "353e68db75ebc17b3b9e4be0567aaf7478fbd7eb0366df77f346c30dd0288f47",
+   "dd373e609e0c2f5579650384c97221bed167787c0b03ce836697c72760be60b7",
+   "e73b98284dba68900f85875f42e1cec4ced69d12da8f19cd3eadded27c9b60b7",
+   "99a159c0db93f30e1410e1f3b05956464fdefdebd61946f32cf65945d3df8a3a",
+   "ded1663b874a7223d93c70959e75db34cb269dfb24c40f99beca79221cb1691e",
+   "959028e3030b3fafb578d8a391cca29a1d9f73783ecbaa11d60c29d68530af42",
+   "3cd320fb3341e37c5d366b0ad99d8ea24368d7758547d4dc75ae04783125f514",
+   "157065c5f6dc4fd74abd354214aac19d29daecb896963a6f5a4e5d35230952e4",
+   "e988fe1e210980a9a0892bc6b6340cb741d2a9094b79f0b112d72b91e7d18cee",
+   "0817fbe679f219811d460eac4c3bb877d52557ac69583526dbd5b561f60b6f95",
+   "1056bcbfff0ba160c27d5b0caa2dce28cf039907b0f25fbacb85d0ce284e9cdf",
+   "5b5c8a29ad856f5b64404c89a0eea9ed8c9e330f9f657a3bc35d3cd52569ad0a",
+   "3122c3029831b42dac0fb3dfe7125019712411c03075c2b7abeec07ec9337c0c",
+   "74b1e5af12018b3c301f61cbe8eda76e05336b8177772fae72cf20e4fa3121a4",
+   "4227144defa98e6f896fcef39830e6434a3aa5934351e0fb43a27b6239f32545",
+   "0160ebef4322a169df7d4ef3ed9e37e2de722abfaab469ee86100e4429e0e2cc",
+   "208551c020da4e35af47fe8287fa2af2a869cfdc123fbe5464e0fb4438670ce1",
+   "aedbc7a5b3cd218252a2b30e4f8a5f5f87ae858045a41b09682622272ce04877",
+   "648c964acc52129585d2a764aab1152655babed25a8bb87bd289957367698a69",
+   "c0446afdf6566571f339775a66a42c3f75dba8e9b1e4c3cd71d728efac81896e",
+   "bc350aa8035f256c7c55b35792c06904963a2296ad035d357eead0089cdc82d1",
+   "529243e87e3eeb6f7022c78b9d9bd4048049131023e91336db2994c4897fd611",
+   "51e81d010e69a126f6882c4f3d0222a40c4f8f49b3c33f7da63d1181a2e29469",
+   "617f4683f8b944f2c1dc17736d91494771e1e405e3360d9d266579b4e8a9b1e8",
+   "4563caa8ed48d95f047459ddb18ec4dc59523cb17126dae86b2654dda10e24f8",
+   "8f62a9804e09706de2201b414a4acb654186fb3c0f82ad870b94367d76dee76b",
+   "e14ce0a64a945848bc7a5b8b5b89df6be9c5dc20e8b3f6f46528e0eab66a5c36",
+   "f1783b15987b3ea7bf4f7546475092ed7cd96f55bdd1ba0a0eacc823ffecc5e9",
+   "42486f842e326dd4c1f3adada3034f4bc476ccb86e60a4a7e46a23198ffab1a2",
+   "7633d9ea80ac8a935dc371215ed594b665120c3d2f1e0724a48301f012dec53e",
+   "e06cc2bd80683143b559dee8659e0a62e4568bab3e568c0fa440944a13a75b89",
+   "450436124b9605abc03ba0ee492548eef5b221588389f864183d6373e2eb34c1",
+   "f930e12134b34807f3e7bda2822464b0f56e958e01abc0fbda20cc70801664d6",
+   "7846e2a78fc66894ff1924385bdc6b9a96b89766a5352b0ba6e020c5a27c9928",
+   "1c752434197c63add10982c5ffb8fce6ac709d4d368cc63c5a97d49a2b61aeb5",
+   "303468081efe3deb44d6c4d52bdc48f207126621511e88c881d8b30d85a34791",
+   "2f21b1406acc97824ad51c5076d15be7ac9a9a3c53d83636dfbfd43242e71eeb",
+   "be5c61e7638a2f924b727f381574ae25331800aeb74bb417ec4aee56bee86a9f",
+   "5311aa6c4bd41d15fe0ff6b378d355bb9db36c0ac0e1ba7311c46c191b18c2b4",
+   "31881d033f8c49a6c15df614f8d96b473c994b8256948aa61b74a081a3c8ad44",
+   "228bd81bc4f87d2aa75dbfcfd84364a9a4ae8bac2881ee380df655d9995ee589",
+   "3a5510af91c82020103269c2087683ee5f18bc4c61e17d98b70eaac584b862e5",
+   "b5ad75d87e4a00e25253e29d032132f4e9f014f7b00af2389d4a37b269ca15a9",
+   "55c16c72d8e202d302b6cf1f52762aede431cbb032d3a0b76170561243f0bfcd",
+   "b18e00d18b37f1a7d8210b3bec2bf1d479233dc5f6f60096a1d6a57be704c9c1",
+   "3f2f2275557b8c5a61b96f2f6d0c33a24a1bf23f5b1a5241bf6a4d1c2649f8ec",
+   "df5c6f02f5948c49af15ca8490ef57a9a5f4d66fa9c682e14ac35ce7b5f9d605",
+   "81190029004ccb4faa96241282739a3b67c872fd232f5ab8e25a6c6203a0be57",
+   "fcaf7b1ce8794896de4a2e24e2f66a0de943bdc24d869e289911ed3cb94cbf0a",
+   "450b13b9ff5b9397dfeecec198a4d1b075f9b961584ce8599d25bf98b94bdcc1",
+   "136c780b33811fe5e9cf2c5f88446f8ec3b0810324dcecfb6015e8c1ec0fe6a3",
+   "5944684b86edab3085f6fefbd6a0897f09a1fd63302e73d1b99ecc29e0c428a6",
+   "51200764c2779a501dc4368689d584e9a4f3f3d34971d2ed9e4f9cb474b31c40",
+   "ea241ea3ce833d6762a9c3ffcff802a8fac4dc958944974a6097c28210c7f52b",
+   "f3f2a7eab12439698aa507066f37e581d03be2358e7339e758b1d837e01d55ff",
+   "1eeca670926469ce766a9db5944c5ee8544491f8f3c2188c703fa2879dac54c6",
+   "d509b7139f690cb356445011f675195854d99390b40e81fcd7fe1d1717cc89f3",
+   "31fa87005d60f127e25f1b2c43e685a9e03201ba34e59a5c0e90f4c4aef33b44",
+   "ff8a90aa7eac0add8a67640a7d522235a269c1d6c04209221da8680ab46986a1",
+   "1fc6da9e59ca2e9b73a4747230f8ae06e482b58081b16fe144de99c8d736a6b3",
+   "c4c6203d58c94cd0668718e55d1c0cf618bf8f3dc812e8d87f4de48d6a4ade45",
+   "2560f8f730a2403f3282f9fa6415c5e45dd379b5f00bf5c88629401089d8bf4a",
+   "f80a5777a6f13f7829a5d0546b9ba7035bf34859eca1df8bfaecfed3e4cacd0a",
+   "85c1c47911c39418406a1d62a64ec5d47ece9305fde2dc98ea421531c8c88c49"
+  ]
+ }
+}

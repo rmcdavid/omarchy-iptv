@@ -3,7 +3,7 @@ import {
   ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE, SEP
 } from "./build.mjs"
 import {
-  str, asList, fnv1a32
+  str, asList, keyedMap, fnv1a32
 } from "./text.mjs"
 import {
   emptyState, stateBlockedHeader
@@ -1497,14 +1497,63 @@ function labelTaken(label, existing, selfId) {
 
 // Appends ` 2`, ` 3`, ... while the label is taken (case-insensitive);
 // derived labels only, a typed label is rejected with `label_taken` instead.
+// D-SINK-100 (2026-11-16, round 2 of the security review; the lead's call
+// under the owner's standing authority of 2026-11-09): taken also when it
+// READS as another source's label reads (labelSinkText), as validateLabel
+// has refused a typed label since D-SINK-98, so a label derived after a typed
+// `http://qqqqqq:zzzzzz@cdn.test/a.m3u` is `cdn.test 2`, not a second row
+// that reads `cdn.test`. The sets are built once (labelKeySets); the helper's
+// unique_label is the mirror, and the shared label-readings fixture (dev
+// branch) holds both.
 function uniqueLabel(label, existing, selfId) {
+  return uniqueLabelOver(label, labelKeySets(existing, selfId))
+}
+
+// The keys `existing` takes, built once: `raw`, each label's labelKey, and
+// `read`, the labelKey of each label as it reads (labelSinkText of the
+// sanitized label, labelReadTaken's reading). `existing` and `selfId` as
+// labelTaken takes them; an empty key takes nothing.
+function labelKeySets(existing, selfId) {
+  var sets = { raw: keyedMap(), read: keyedMap() }
+  var list = asList(existing)
+  var self = str(selfId)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (item === null || item === undefined) continue
+    var raw = typeof item === "object" ? item.label : item
+    var id = typeof item === "object" ? str(item.id !== undefined ? item.id : item.key) : ""
+    if (self !== "" && id === self) continue
+    labelKeySetsAdd(sets, raw)
+  }
+  return sets
+}
+
+function labelKeySetsAdd(sets, label) {
+  var key = labelKey(label)
+  if (key !== "") sets.raw[key] = true
+  var read = labelKey(labelSinkText(sanitizeInput(label)))
+  if (read !== "") sets.read[read] = true
+}
+
+// Whether `label` is taken in labelKeySets' sets: the same label
+// case-insensitively, or one that reads as it reads.
+function labelKeySetsTake(sets, label) {
+  var key = labelKey(label)
+  if (key !== "" && sets.raw[key] === true) return true
+  var read = labelKey(labelSinkText(sanitizeInput(label)))
+  return read !== "" && sets.read[read] === true
+}
+
+// uniqueLabel over sets built once (labelKeySets): parseState places a list
+// of derived labels with one reading each.
+function uniqueLabelOver(label, sets) {
   var base = capCodePoints(sanitizeInput(label), MAX_LABEL)
   if (base === "") base = "source"
-  if (!labelTaken(base, existing, selfId)) return base
+  if (!labelKeySetsTake(sets, base)) return base
   for (var n = 2; n < 1000; n++) {
     var suffix = " " + n
     var candidate = capCodePoints(base, MAX_LABEL - suffix.length) + suffix
-    if (!labelTaken(candidate, existing, selfId)) return candidate
+    if (!labelKeySetsTake(sets, candidate)) return candidate
   }
   return base
 }
@@ -1532,7 +1581,10 @@ function defaultSourceLabel(url, kind, existingLabels) {
 // until the user renamed it. NOT done here: uniqueLabel still compares raw
 // labels, so a derived label added after a custom one can read alike, and
 // the helper's mirrors (unique_label, check_custom_label) know no reading;
-// round 2 takes both with D-SINK-100.
+// round 2 takes both with D-SINK-100. [2026-11-16, D-SINK-100: uniqueLabel
+// avoids a label that reads alike too (labelKeySets), parseState places a
+// derived label after every typed one, and the helper reads labels through
+// its port of labelSinkText (label_sink_text) in both checks.]
 function validateLabel(label, existing, selfId) {
   var text = sanitizeInput(label)
   if (codePointLength(text) > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
@@ -2931,6 +2983,7 @@ export {
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
   cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  labelKeySets, labelKeySetsAdd, labelKeySetsTake, uniqueLabelOver,
   defaultSourceLabel, validateLabel, selfStoredLabel, labelReadTaken,
   maskQuery, maskUrl, accessibleStars, hasAddressLineTerminator,
   hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,

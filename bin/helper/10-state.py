@@ -369,11 +369,20 @@ def normalize_state(raw: Any) -> dict[str, Any]:
             # here rather than in normalize_source because uniqueness is a
             # property of the LIST: two sources on one host must not both come
             # back as that host.
-            if not record.get("labelCustom"):
-                record["label"] = unique_label(
-                    derive_label(record["url"], record["kind"]),
-                    [s2.get("label", "") for s2 in state["sources"]])
             state["sources"].append(record)
+        # D-SINK-100 (2026-11-16, round 2 of the security review; the lead's
+        # call under the owner's standing authority of 2026-11-09): placed in
+        # a second pass, against EVERY typed label in the list wherever it
+        # is listed and every label placed before it, raw and as it reads
+        # (label_keys), so a stored derived label listed before a typed one
+        # that reads alike becomes `<host> 2` once, at the next load, as
+        # Model.parseState places it. Two typed labels stored alike stay
+        # alike until one is edited. One reading a label, so O(n) a load.
+        keys = label_keys([item["label"] for item in state["sources"] if item.get("labelCustom")])
+        for record in state["sources"]:
+            if not record.get("labelCustom"):
+                record["label"] = unique_label_over(derive_label(record["url"], record["kind"]), keys)
+                label_keys_add(keys, record["label"])
     return state
 
 
@@ -413,15 +422,25 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def check_custom_label(cleaned: str, others: list[str]) -> str:
+def check_custom_label(cleaned: str, others: list[str], stored: str | None = None) -> str:
     """A label the user typed (Model.validateLabel): refused over MAX_LABEL
     code points (label_too_long, never cut, SR22) and when another source
-    has it case-insensitively (label_taken); never rewritten (UX 5.6)."""
+    has it case-insensitively (label_taken); never rewritten (UX 5.6).
+    D-SINK-100 (2026-11-16): also label_taken when it READS as another
+    source's label reads (label_sink_text), unless it is the record's own
+    `stored` label left unchanged on an edit (Model.selfStoredLabel's
+    exemption): two records may already read alike, stored before this or
+    by a 0.19 helper, and an edit that keeps its label is never refused.
+    The sentence quotes the label as the Sources list reads it
+    (D-SINK-108)."""
     custom = sanitize_input(cleaned, MAX_SOURCE_URL)
     if len(custom) > MAX_LABEL:
         raise HelperError("label_too_long", "label longer than %d characters" % MAX_LABEL, field="label")
-    if custom.lower() in {label_key(item) for item in others}:
-        raise HelperError("label_taken", "a source named '%s' already exists" % custom, field="label")
+    raw, read = label_keys(others)
+    reads = label_read_key(custom)
+    unchanged = stored is not None and custom == sanitize_input(stored, MAX_SOURCE_URL)
+    if custom.lower() in raw or (not unchanged and reads != "" and reads in read):
+        raise HelperError("label_taken", "a source named '%s' already exists" % label_sink_text(custom), field="label")
     return custom
 
 
@@ -441,7 +460,7 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
     sources = state["sources"]
     existing = find_source_by_url(sources, playlist["url"])
     if existing is not None:
-        raise HelperError("duplicate", "already in the source history as '%s'" % existing["label"], key=existing["key"])
+        raise HelperError("duplicate", "already in the source history as '%s'" % label_sink_text(existing["label"]), key=existing["key"])
     if len(sources) >= MAX_SOURCES:
         raise HelperError("too_many", "the source history holds at most %d sources" % MAX_SOURCES)
     labels = [record["label"] for record in sources]
@@ -564,7 +583,7 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
         if playlist["url"] != record["url"]:
             other = find_source_by_url(sources, playlist["url"])
             if other is not None:
-                raise HelperError("duplicate", "already in the source history as '%s'" % other["label"], key=other["key"])
+                raise HelperError("duplicate", "already in the source history as '%s'" % label_sink_text(other["label"]), key=other["key"])
             replaced = record["key"]
             record["url"] = playlist["url"]
             record["kind"] = playlist["kind"]
@@ -597,7 +616,7 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
             record["label"] = unique_label(derive_label(record["url"], record["kind"]), others)
             record["labelCustom"] = False
         else:
-            record["label"] = check_custom_label(cleaned, others)
+            record["label"] = check_custom_label(cleaned, others, record["label"])
             record["labelCustom"] = True
     return record["key"], replaced
 
