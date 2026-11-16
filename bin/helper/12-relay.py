@@ -21,11 +21,13 @@ from __future__ import annotations
 # (READ in FFmpeg n9.0.2's http.c and tls.c; MEASURED by the design's rigs
 # with literal targets). Each redirect hop and each nested HLS or DASH open
 # is a request of its own. The relay looks every target up itself (relay_lookup, through the
-# play-time lookup stream_resolve), judges EVERY answer by the rule a
-# channel's literal meets (stream_answer_refusal; StreamPolicy), and connects
-# only to an address it judged, through bounded_create_connection, the one
-# connector the helper's own fetches use. Check and use are one act, so a
-# name cannot answer the check one way and the use another.
+# play-time lookup stream_resolve), judges EVERY answer -- a playlist's load
+# by the rule a channel's literal meets (stream_answer_refusal), a typed
+# --url's by DestinationPolicy across all of its connections (StreamPolicy,
+# RelayTypedPolicy) -- and connects only to an address it judged, through
+# bounded_create_connection, the one connector the helper's own fetches
+# use. Check and use are one act, so a name cannot answer the check one way
+# and the use another.
 #
 # What it serves, and to whom:
 #   * fd 3, a TCP listener on 127.0.0.1 the helper bound (the proxy), and
@@ -49,7 +51,10 @@ from __future__ import annotations
 # the life of a request and writes them nowhere: it logs nothing, no reply
 # carries one, and it runs non-dumpable (the stub's shield) with RLIMIT_CORE
 # (0, 0). It reaps its children, the player first among them, and exits when
-# none is left, so every way the player ends ends the relay too.
+# none is left, so every way the player ends ends the relay too. Asked to
+# stop (SIGTERM), it kills a child still alive in its process group once
+# RELAY_TERM_GRACE_S has passed; only a process that left the group (a
+# wrapper that calls setsid) can outlive it.
 #
 # What stays outside it, stated in the design: the protocols that never ask
 # an HTTP proxy (the design pins rtmp, rtsp and srt to the judged literal
@@ -120,15 +125,74 @@ def relay_lookup(host: str, port: int, bound: Any = None) -> list[Any]:
     the name asked as the player would have asked it, D-SINK-101's reading:
     an ASCII name as its text, one that is not as its UTF-8 bytes, which
     resolve_within hands to the resolver with no idna codec. Raises
-    RelayLookupFailed for every way it can come back empty-handed."""
+    RelayLookupFailed for every way it can come back empty-handed, and
+    RelayReply 502 (RELAY_LOOKUP_FAILED) at once while RELAY_LOOKUPS_MAX
+    lookups are still running (stream_resolve's ResolveBusy): a RelayReply,
+    not an OSError, so no caller reads it as a name that cannot be resolved
+    (check_proxied lets such a name pass on a typed URL's first hop)."""
     name: str | bytes = host if host.isascii() else host.encode("utf-8")
     try:
         found = stream_resolve(name, port)
+    except ResolveBusy:
+        raise RelayReply(502, RELAY_LOOKUP_FAILED) from None
     except (OSError, ValueError, UnicodeError, HelperError):
         raise RelayLookupFailed(errno.EADDRNOTAVAIL, RELAY_LOOKUP_FAILED) from None
     if not found:
         raise RelayLookupFailed(errno.EADDRNOTAVAIL, RELAY_LOOKUP_FAILED)
     return list(found)
+
+
+def relay_proxy_lookup(host: Any, port: int, bound: Any) -> list[Any]:
+    """The lookup of the user's own proxy's name (relay_upstream_connect),
+    resolve_within under the connector's bound and RELAY_LOOKUPS_MAX, as
+    every lookup the relay makes is; RelayReply 502 past the cap, as
+    relay_lookup answers it."""
+    try:
+        return resolve_within(host, port, bound, limit=RELAY_LOOKUPS_MAX)
+    except ResolveBusy:
+        raise RelayReply(502, RELAY_LOOKUP_FAILED) from None
+
+
+def relay_start(thread: Any) -> None:
+    """Start one of the relay's own threads under RESOLVE_LOCK, so none
+    starts while a lookup's start has the process-wide stack size at
+    RESOLVE_STACK_BYTES (resolve_within): every one takes
+    RELAY_THREAD_STACK_BYTES."""
+    with RESOLVE_LOCK:
+        thread.start()
+
+
+class RelayTypedPolicy(DestinationPolicy):
+    """A typed --url's rule (origin `user`), DestinationPolicy's own, held
+    across ALL of the token's upstream connections (RelayToken), with one
+    thing more: the FIRST connection gets the first hop's freedom -- any
+    address -- only when it is to the URL's own host, `record`'s host_key,
+    and, where it connects to this machine (loopback), its own port
+    (own_host_match, D-SINK-57's reading of "the same host"). A first
+    connection to anything else is judged as a later hop, and the token's
+    first hop is spent on it. Nothing under the token is known to open
+    before the typed URL itself; this is so that nothing that does -- a URL
+    a user's --ytdl hook substitutes, say -- inherits the URL's freedom
+    (the lead's call under the owner's standing authority of 2026-11-09,
+    made on 2026-11-16)."""
+
+    def __init__(self, record: dict[str, Any]) -> None:
+        super().__init__("stream", ORIGIN_USER)
+        self.typed = {"host": record.get("host") or "", "port": record.get("port")}
+
+    def typed_first(self, host: str, kind: str, first: bool, port: int | None) -> bool:
+        return first and own_host_match(host, port, dict(self.typed, loopback=kind == "loopback"))
+
+    def permits(self, host: str, kind: str, first: bool, port: int | None = None) -> bool:
+        return super().permits(host, kind, self.typed_first(host, kind, first, port), port)
+
+    def connected(self, host: str, kind: str, first: bool, port: int | None = None) -> None:
+        super().connected(host, kind, self.typed_first(host, kind, first, port), port)
+
+    def check_proxied(self, host: str, port: int, timeout: float, first: bool, resolve: Any = None) -> None:
+        # Through the user's proxy a target that cannot be resolved passes
+        # on the first hop (`unresolved`); only the URL's own host may.
+        super().check_proxied(host, port, timeout, self.typed_first(host, "unresolved", first, port), resolve)
 
 
 class RelayToken:
@@ -139,7 +203,8 @@ class RelayToken:
     token's upstream connections, as DestinationPolicy keeps it across one
     fetch's hops (the lead's call under the owner's standing authority of
     2026-11-09, made on 2026-11-14): its first upstream
-    connect may reach any address, and later ones only a global address or
+    connect may reach any address when it is to the URL's own host
+    (RelayTypedPolicy), and later ones only a global address or
     that first connection's own host in the class it connected to. Which
     connection is the first is decided under the token's lock -- the first
     to reach the connect wins and holds `settle` until it has connected or
@@ -151,7 +216,7 @@ class RelayToken:
         self.token = token
         self.record = record
         self.user = record.get("origin") == ORIGIN_USER
-        self.destination = DestinationPolicy("stream", ORIGIN_USER) if self.user else None
+        self.destination = RelayTypedPolicy(record) if self.user else None
         self.lock = threading.Lock()
         self.settle = threading.Lock()
         self.claimed = False
@@ -260,9 +325,10 @@ def relay_policy_record(raw: Any) -> dict[str, Any] | None:
         (booleans), and `class` (one of ADDRESS_CLASSES, `unresolved`, or
         "" for a cache that records none) -- with `origin` "playlist" or
         absent;
-      * a typed --url's: {"origin": "user", "host": ..., "port": ...}. Its
-        host and port are kept for the record and are not compared: the
-        token's first upstream connection is the first hop, as for a fetch.
+      * a typed --url's: {"origin": "user", "host": ..., "port": ...}: the
+        URL's host and port (its scheme's default when it names none), which
+        the token's first upstream connection must be to for the first
+        hop's freedom (RelayTypedPolicy).
     Nothing else is accepted, so a record the relay cannot read the rule of
     is no rule at all."""
     if not isinstance(raw, dict):
@@ -619,7 +685,7 @@ def relay_upstream_connect(upstream: dict[str, Any]) -> Any:
     port = upstream.get("port")
     if not isinstance(port, int) or not 0 < port < 65536 or not upstream.get("host"):
         raise OSError(errno.EINVAL, RELAY_CONNECT_FAILED)
-    return bounded_create_connection((upstream["host"], port), RELAY_CONNECT_S,
+    return bounded_create_connection((upstream["host"], port), RELAY_CONNECT_S, resolve=relay_proxy_lookup,
                                      stagger=RELAY_ATTEMPT_STAGGER_S, in_flight=RELAY_ATTEMPTS_IN_FLIGHT)
 
 
@@ -825,7 +891,7 @@ class RelayServer:
             conn.close()
             return
         try:
-            threading.Thread(target=self.serve_proxy, args=(conn,), name="omarchy-iptv-relay", daemon=True).start()
+            relay_start(threading.Thread(target=self.serve_proxy, args=(conn,), name="omarchy-iptv-relay", daemon=True))
         except RuntimeError:
             with state.lock:
                 state.active -= 1
@@ -841,8 +907,8 @@ class RelayServer:
             conn.close()
             return
         try:
-            threading.Thread(target=self.serve_control, args=(conn,), name="omarchy-iptv-relay-control",
-                             daemon=True).start()
+            relay_start(threading.Thread(target=self.serve_control, args=(conn,), name="omarchy-iptv-relay-control",
+                                         daemon=True))
         except RuntimeError:
             with state.lock:
                 state.controls -= 1
@@ -902,8 +968,9 @@ class RelayServer:
                 sock.sendall(_relay_forward(request, upstream))
         except OSError:
             raise RelayReply(502) from None
-        pump = held["pump"] = threading.Thread(target=_relay_pump, args=(sock, conn), daemon=True)
-        pump.start()
+        pump = threading.Thread(target=_relay_pump, args=(sock, conn), daemon=True)
+        relay_start(pump)
+        held["pump"] = pump
         if request["connect"]:
             _relay_pump(conn, sock)
             return
@@ -1090,16 +1157,64 @@ def relay_prctl(option: int, value: int) -> bool:
 PR_SET_CHILD_SUBREAPER = 36
 
 
+def relay_child_pidfd(child: int) -> int:
+    """A pidfd for the relay's `--child`, taken at the relay's start, before
+    its reaper can reap anything, and held to be THIS process's child (a
+    waitid on it with WNOWAIT, which leaves a dead child to the reaper): the
+    only way the relay signals its child alone, so a pid the kernel has
+    reused once the child was reaped is never reached (a reaped child's
+    pidfd answers ESRCH). HelperError when it cannot be opened or is not
+    this process's child: a relay with no child of its own to answer for is
+    no relay a spawn started."""
+    try:
+        fd = os.pidfd_open(child)
+    except (OSError, AttributeError):
+        raise HelperError("relay_refused", RELAY_INHERITED_REFUSAL) from None
+    try:
+        os.waitid(os.P_PIDFD, fd, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except (OSError, AttributeError):
+        os.close(fd)
+        raise HelperError("relay_refused", RELAY_INHERITED_REFUSAL) from None
+    return fd
+
+
+def relay_group_child_alive() -> bool:
+    """Whether a child of this relay is still alive in the process group
+    the relay leads (its pid is the group's id); a dead one found on the way
+    is reaped. True as well when the kernel cannot say, so a doubt kills
+    rather than leaves a player behind."""
+    while True:
+        try:
+            pid, _ = os.waitpid(-os.getpid(), os.WNOHANG)
+        except ChildProcessError:
+            return False
+        except OSError:
+            return True
+        if pid == 0:
+            return True
+
+
 def player_relay(args: argparse.Namespace) -> int:
     """`player relay --child=<pid>`: the player's relay, started by the
     player's spawn (never by hand) with the two listeners at fds 3 and 4 and
-    the player as its child. Runs until it has no child left, then closes
-    both listeners, removes its control socket when that path is still the
-    file it was given, and exits. SIGTERM sends SIGTERM to its process group
-    (the player's spawn made it the group's leader) and then exits the same
-    way once the group is gone, or RELAY_TERM_GRACE_S later, whichever comes
-    first: the player gets its SIGTERM to quit on before its death signal
-    (PR_SET_PDEATHSIG, set by the spawn) kills whatever is left. Writes
+    the player as its child. Runs until it has no child left, then answers
+    its control socket RELAY_LINGER_S more, closes both listeners, removes
+    its control socket when that path is still the file it was given, and
+    exits.
+
+    SIGTERM sends SIGTERM to its process group (the player's spawn made it
+    the group's leader; a relay started any other way signals its own child
+    alone, through the pidfd relay_child_pidfd took) and then exits the same
+    way once its children are gone, or RELAY_TERM_GRACE_S later, whichever
+    comes first. On the second, a child still alive in the group it leads
+    (relay_group_child_alive) is killed with the whole group, SIGKILL to the
+    group whose id is the relay's own pid, after the socket is removed: so
+    the player and a user's wrapper's real player get their SIGTERM to quit
+    on, and none outlives the relay with a dead proxy unless it left the
+    group (a wrapper that calls setsid, which the spawn cannot see). The
+    relay dies of that SIGKILL itself. A SIGKILL of the relay leaves the
+    player to its death signal (PR_SET_PDEATHSIG, set by the spawn) and a
+    wrapper's real player to nothing (ARCHITECTURE-PLAYER 20.9). Writes
     nothing to stdout or stderr after its checks, ever."""
     import signal as signals
     import socket
@@ -1109,6 +1224,7 @@ def player_relay(args: argparse.Namespace) -> int:
         raise HelperError("relay_refused", RELAY_INHERITED_REFUSAL)
     proxy = relay_inherited(3, socket.AF_INET)
     control = relay_inherited(4, socket.AF_UNIX)
+    child_fd = relay_child_pidfd(child)
     # The control socket's SO_PEERCRED names the process that last called
     # listen(2) on it, and the spawn that bound it has exited; listening again
     # here makes it name this relay, which is what relay_request asks of it
@@ -1132,17 +1248,20 @@ def player_relay(args: argparse.Namespace) -> int:
         pass
     state = RelayState(proxy.getsockname()[1], player_build(), child)
     server = RelayServer(proxy, control, state)
-    reaped: set[int] = set()
+    terminated = threading.Event()
 
     def terminate(signum: int, frame: Any) -> None:
         signals.signal(signals.SIGTERM, signals.SIG_IGN)
+        terminated.set()
         try:
-            # The group only when this is its leader, as the spawn makes it:
-            # a relay started any other way signals its own child alone.
+            # The group only when this is its leader, as the spawn makes it,
+            # and only the group whose id is this relay's own pid: a relay
+            # started any other way signals its own child alone, through its
+            # pidfd, so a reaped child's reused pid is never reached.
             if os.getpgrp() == os.getpid():
-                os.killpg(os.getpgrp(), signals.SIGTERM)
-            elif child not in reaped:
-                os.kill(child, signals.SIGTERM)
+                os.killpg(os.getpid(), signals.SIGTERM)
+            else:
+                signals.pidfd_send_signal(child_fd, signals.SIGTERM)
         except OSError:
             pass
         grace = threading.Timer(RELAY_TERM_GRACE_S, server.stop)
@@ -1152,12 +1271,11 @@ def player_relay(args: argparse.Namespace) -> int:
     def reap() -> None:
         while True:
             try:
-                pid, _ = os.waitpid(-1, 0)
+                os.waitpid(-1, 0)
             except ChildProcessError:
                 break
             except OSError:
                 break
-            reaped.add(pid)
         # Still the port's holder, so nothing else can bind it, and still
         # answering a start's last count (RELAY_LINGER_S).
         time.sleep(RELAY_LINGER_S)
@@ -1178,6 +1296,13 @@ def player_relay(args: argparse.Namespace) -> int:
                 now = os.stat(path)
                 if (now.st_dev, now.st_ino) == identity:
                     os.unlink(path)
+            except OSError:
+                pass
+        # Asked to stop and the grace is over: nothing of the group it leads
+        # outlives it with a dead proxy (the docstring).
+        if terminated.is_set() and os.getpgrp() == os.getpid() and relay_group_child_alive():
+            try:
+                os.killpg(os.getpid(), signals.SIGKILL)
             except OSError:
                 pass
     return EXIT_OK

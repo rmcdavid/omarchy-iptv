@@ -262,6 +262,26 @@ RESOLVE_WAIT_SLICE_S = 0.05
 # would be the largest single anonymous mapping a fetch verb makes under
 # limit_memory's RLIMIT_DATA.
 RESOLVE_STACK_BYTES = 1024 * 1024
+# D-SINK-102 (the conformance review of the relay, 2026-11-16): the
+# relay asks lookups from many threads at once, and two things that were
+# safe in a fetch's single thread were not. The process-wide thread stack
+# size is saved, set, used and restored around each lookup's start, so two
+# lookups interleaving could leave it at RESOLVE_STACK_BYTES for good;
+# RESOLVE_LOCK makes the four one step (the relay's own thread starts take
+# it too, so none of them starts inside that window). And a lookup that
+# outlives its bound leaves its thread running on the resolver's own clock:
+# RESOLVE_WORKERS counts the threads whose lookup has not returned, and a
+# caller that passes `limit` (the play-time lookup, stream_resolve, which is
+# the relay's) is refused with ResolveBusy, before any thread, once that
+# many are outstanding. A fetch passes no limit and looks up as before.
+RESOLVE_LOCK = _thread.allocate_lock()
+RESOLVE_WORKERS = {"live": 0}
+RESOLVE_BUSY = "too many host-name lookups are still running; not looked up"
+
+
+class ResolveBusy(OSError):
+    """resolve_within's refusal past its `limit`: no thread was started and
+    nothing was asked of the resolver."""
 
 # D-SINK-86 (the owner, 2026-11-08): the refusal of a host name that holds
 # what no name may hold (host_name_refused, 02-sources.py), asked before any
@@ -281,7 +301,7 @@ def refuse_host_name(text: Any, with_port: bool = False) -> None:
         raise HelperError("bad_url", HOST_NAME_REFUSAL)
 
 
-def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
+def resolve_within(host: str | bytes, port: int, timeout: float, limit: int | None = None) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
 
@@ -303,7 +323,13 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
     D-SINK-101: a `bytes` host is the play-time lookup's
     (stream_lookup_name): a name that is not ASCII, handed to the resolver
     as the player will hand it, with no idna codec. The refusal reads it as
-    the text it encodes."""
+    the text it encodes.
+
+    D-SINK-102: the stack size's save, set, start and restore are one step
+    under RESOLVE_LOCK, and with `limit` the lookup is refused (ResolveBusy)
+    while that many lookups' threads are still running (RESOLVE_WORKERS),
+    counted and checked under the same lock, so concurrent callers cannot
+    pass it together."""
     refuse_host_name(host.decode("utf-8", "surrogateescape") if isinstance(host, bytes) else host)
     import socket
     import threading
@@ -311,36 +337,48 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
 
     def lookup() -> None:
         try:
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
-        except (OSError, ValueError, AttributeError):
-            pass
-        try:
-            result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
-        except BaseException as error:         # handed to the main thread whole
-            result.append(error)
+            try:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+            except (OSError, ValueError, AttributeError):
+                pass
+            try:
+                result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+            except BaseException as error:         # handed to the main thread whole
+                result.append(error)
+        finally:
+            with RESOLVE_LOCK:
+                RESOLVE_WORKERS["live"] -= 1
 
-    previous = threading.stack_size()
-    try:
-        threading.stack_size(RESOLVE_STACK_BYTES)
-    except (ValueError, RuntimeError):
-        pass
-    try:
-        worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+    unthreaded: RuntimeError | None = None
+    with RESOLVE_LOCK:
+        if limit is not None and RESOLVE_WORKERS["live"] >= limit:
+            raise ResolveBusy(errno.EAGAIN, RESOLVE_BUSY)
+        previous = threading.stack_size()
         try:
-            worker.start()
-        except RuntimeError as error:
-            # No thread to be had (a memory limit too low for one more
-            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
-            # ceiling): the lookup runs here, under the alarm alone, as it
-            # did before D-SRC-62, and says so once. A verb that is about to
-            # refuse for memory still refuses for memory, not for this.
-            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
-            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
-    finally:
-        try:
-            threading.stack_size(previous)
+            threading.stack_size(RESOLVE_STACK_BYTES)
         except (ValueError, RuntimeError):
             pass
+        try:
+            worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+            RESOLVE_WORKERS["live"] += 1
+            try:
+                worker.start()
+            except RuntimeError as error:
+                RESOLVE_WORKERS["live"] -= 1
+                unthreaded = error
+        finally:
+            try:
+                threading.stack_size(previous)
+            except (ValueError, RuntimeError):
+                pass
+    if unthreaded is not None:
+        # No thread to be had (a memory limit too low for one more
+        # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+        # ceiling): the lookup runs here, under the alarm alone, as it
+        # did before D-SRC-62, and says so once. A verb that is about to
+        # refuse for memory still refuses for memory, not for this.
+        log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(unthreaded).__name__)
+        return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     bound = max(0.0, float(timeout))
     until = time.monotonic() + bound
     while worker.is_alive():

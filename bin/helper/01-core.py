@@ -3,6 +3,7 @@
 # a part sees every name the parts before it define. Run the helper.
 from __future__ import annotations
 
+import _thread
 import argparse
 import array
 import bisect
@@ -270,11 +271,21 @@ GUIDE_RULES = 2
 # bounds the connect attempts to one target, all of them together, which
 # start RELAY_ATTEMPT_STAGGER_S apart, at most RELAY_ATTEMPTS_IN_FLIGHT at
 # once (FFmpeg's own shape, so a dead first answer does not hold up a live
-# second one). RELAY_HEAD_S and RELAY_HEAD_BYTES bound one request head,
-# from its first byte; an established connection has no idle timeout, so a
-# paused channel keeps it, and RELAY_CONNECTIONS_MAX bounds how many there
-# are. RELAY_TOKENS_MAX loads keep their token, the newest. A control line
-# is at most RELAY_CONTROL_BYTES, RELAY_CONTROL_MAX at once.
+# second one). RELAY_HEAD_S and RELAY_HEAD_BYTES bound one request head:
+# a connection's FIRST head from the moment it is served, so a connection
+# that sends nothing is answered 408, and every later one from its own
+# first byte, so a kept-alive connection has no idle timeout and a paused
+# channel keeps it (a later head over either bound closes the connection
+# with no reply, because the pump thread may be writing to the client).
+# RELAY_CONNECTIONS_MAX bounds how many connections there are, and
+# RELAY_LOOKUPS_MAX how many host-name lookups the process has outstanding
+# at once, a lookup that outlived its bound and still runs on the
+# resolver's own clock included (resolve_within's `limit`): past it a new
+# upstream connection is answered 502 and reaches no origin. It is
+# RELAY_CONNECTIONS_MAX, so the lookups' threads are bounded by the same
+# number as the connections that ask them. RELAY_TOKENS_MAX loads keep
+# their token, the newest. A control line is at most RELAY_CONTROL_BYTES,
+# RELAY_CONTROL_MAX at once.
 RELAY_IPC_S = 1.0
 RELAY_START_S = 5.0
 RELAY_CONNECT_S = 10.0
@@ -283,6 +294,7 @@ RELAY_ATTEMPTS_IN_FLIGHT = 3
 RELAY_HEAD_S = 10.0
 RELAY_HEAD_BYTES = 64 * 1024
 RELAY_CONNECTIONS_MAX = 64
+RELAY_LOOKUPS_MAX = RELAY_CONNECTIONS_MAX
 RELAY_TOKENS_MAX = 8
 RELAY_CONTROL_BYTES = 8 * 1024
 RELAY_CONTROL_MAX = 4
@@ -290,15 +302,20 @@ RELAY_CONTROL_MAX = 4
 # still sends is read and dropped for at most this long.
 RELAY_DRAIN_S = 0.25
 # On SIGTERM the relay passes the signal to its process group and waits at
-# most this long for the group to go before it exits.
+# most this long for its children to go before it exits; a child still alive
+# in the group it leads is then killed with the group (SIGKILL), after the
+# relay has removed its control socket.
 RELAY_TERM_GRACE_S = 2.0
 # Once its last child has gone the relay keeps answering its control socket
 # this long before it exits, so a start whose first load just failed can
 # still ask how many of that load's connections were refused (the player
 # under --idle=once exits on that failure, and the relay with it).
 RELAY_LINGER_S = 1.0
-# Each connection is served by at most two threads; this bounds their
-# address space, not what they use.
+# Each connection is served by at most two threads, and asks at most one
+# lookup's thread at a time (RELAY_LOOKUPS_MAX of those at once, in all);
+# this bounds the serving threads' address space, not what they use. A
+# lookup's thread has RESOLVE_STACK_BYTES, set and restored under
+# RESOLVE_LOCK, which the relay's own thread starts take too.
 RELAY_THREAD_STACK_BYTES = 512 * 1024
 # The Basic proxy user every token travels under, and the realm of the 407.
 RELAY_USER = "iptv"

@@ -79,16 +79,17 @@ def literal_lookups_only(real):
     is a test, or a tree, that would have asked a real resolver."""
     import ipaddress
 
-    def lookup(host, port, timeout):
+    def lookup(host, port, timeout, **limit):
         text = host.decode("utf-8", "replace") if isinstance(host, bytes) else str(host)
         try:
             ipaddress.ip_address(text.split("%", 1)[0])
         except ValueError:
             raise AssertionError("a name reached resolve_within: %r" % (host,)) from None
-        return real(host, port, timeout)
+        return real(host, port, timeout, **limit)
     return lookup
 
 
+REAL_RESOLVE_WITHIN = helper.resolve_within
 _GUARD = mock.patch.object(helper, "resolve_within", literal_lookups_only(helper.resolve_within))
 
 
@@ -272,6 +273,25 @@ class Relay:
 
     def ask(self, request):
         return self.control_line(json.dumps(request).encode("ascii") + b"\n")
+
+    def control_answer(self, raw, timeout=5):
+        """Every byte a control connection sending `raw` is answered with
+        before the relay ends it; b"" for none, a reset included (the relay
+        closing on a line it never read resets the connection)."""
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(self.path)
+            data = b""
+            try:
+                sock.sendall(raw)
+                while True:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+            except (ConnectionResetError, BrokenPipeError):
+                pass
+        return data
 
     def register(self, policy):
         reply = self.ask({"op": "load", "policy": policy})
@@ -732,6 +752,22 @@ class KeepAliveTest(Fixture):
             self.assertTrue(closed(sock))
         self.assertEqual([h.split(b" ")[1] for h in self.origin.heads], [b"/seg0", b"/seg0"])
 
+    def test_a_later_head_that_stalls_after_its_first_byte_closes_the_connection_at_its_bound(self):
+        """A kept-alive connection waits for a later head's first byte as long
+        as the peer keeps it, and then gives the rest RELAY_HEAD_S; over that
+        the connection is closed, with no reply, because the pump thread may
+        be writing to the client."""
+        with mock.patch.object(helper, "RELAY_HEAD_S", 0.4), self.relay.connect() as sock:
+            sock.sendall(get("http://a.qqqqqq.test:%d/seg0" % self.origin.port, self.token))
+            self.assertEqual(read_reply(sock)[0], 200)
+            time.sleep(0.6)
+            started = time.monotonic()
+            sock.sendall(b"GET http://a.qqqqqq.test")
+            self.assertTrue(closed(sock, 3.0), "a stalled later head held the connection past its bound")
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 2.5)
+        self.assertEqual([h.split(b" ")[1] for h in self.origin.heads], [b"/seg0"])
+
 
 # --------------------------------------------------------- rewriting
 
@@ -797,6 +833,51 @@ class TunnelTest(Fixture):
                     break
                 back += chunk
         self.assertEqual((status, back), (200, payload))
+
+    def test_a_tunnel_ends_both_sides_when_either_side_ends(self):
+        """An origin that closes inside a CONNECT tunnel closes the client's
+        side, and a client that ends closes the origin's: the relay keeps no
+        half of a tunnel open."""
+        self.classes({"127.0.0.1": "global"})
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(4)
+        self.addCleanup(listener.close)
+        port = listener.getsockname()[1]
+        seen = {}
+
+        def origin(case):
+            conn, _ = listener.accept()
+            with conn:
+                conn.settimeout(5)
+                if case == "origin":
+                    seen[case] = conn.recv(64)
+                    return
+                try:
+                    seen[case] = (conn.recv(64), conn.recv(64))
+                except OSError as error:
+                    seen[case] = error
+        self.resolving({"a.qqqqqq.test": ["127.0.0.1"]})
+        relay = Relay(self)
+        token = relay.register(REMOTE)
+        for case in ("origin", "client"):
+            with self.subTest(case=case):
+                thread = threading.Thread(target=origin, args=(case,), daemon=True)
+                thread.start()
+                sock = relay.connect()
+                try:
+                    sock.sendall(get("a.qqqqqq.test:%d" % port, token, method=b"CONNECT"))
+                    self.assertEqual(read_reply(sock)[0], 200)
+                    sock.sendall(b"x")
+                    if case == "origin":
+                        self.assertTrue(closed(sock, 3.0), "the client's side outlived the origin's")
+                    else:
+                        sock.shutdown(socket.SHUT_WR)
+                        thread.join(5)
+                        self.assertEqual(seen.get(case), (b"x", b""), "the origin's side outlived the client's")
+                finally:
+                    sock.close()
+                thread.join(5)
 
     @unittest.skipUnless(shutil.which("openssl"), "openssl is needed to make a certificate")
     def test_tls_through_the_tunnel_verifies_with_the_ca_and_fails_without_it(self):
@@ -932,6 +1013,59 @@ class UpstreamProxyTest(Fixture):
         self.assertEqual(len(resolver.asked), 2)
 
 
+# ------------------------------------------------------- connection bounds
+
+def wait_for(predicate, wait=5.0):
+    until = time.monotonic() + wait
+    while time.monotonic() < until:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+class ConnectionBoundsTest(Fixture):
+    """Past RELAY_CONNECTIONS_MAX a client gets 503 and reaches no origin,
+    and past RELAY_CONTROL_MAX a control connection is closed unanswered;
+    each frees once a held connection ends."""
+
+    def test_past_the_connection_cap_a_client_gets_503_and_reaches_no_origin(self):
+        self.classes({"127.0.0.1": "global"})
+        origin = Origin(self)
+        resolver = self.resolving({"127.0.0.1": ["127.0.0.1"]})
+        with mock.patch.object(helper, "RELAY_CONNECTIONS_MAX", 2):
+            relay = Relay(self)
+            token = relay.register(REMOTE)
+            held = [relay.connect() for _ in range(2)]
+            self.assertTrue(wait_for(lambda: relay.state.active == 2))
+            with relay.connect() as sock:
+                status, head, _ = read_reply(sock)
+                try:
+                    sock.sendall(get("http://127.0.0.1:%d/x" % origin.port, token))
+                except OSError:
+                    pass
+                self.assertTrue(closed(sock))
+            self.assertEqual((status, head.split(b"\r\n")[0]), (503, b"HTTP/1.1 503 Service Unavailable"))
+            self.assertEqual((origin.accepted, resolver.asked, relay.state.active), (0, [], 2))
+            for sock in held:
+                sock.close()
+            self.assertTrue(wait_for(lambda: relay.state.active == 0))
+            self.assertEqual(exchange(relay, get("http://127.0.0.1:%d/x" % origin.port, token))[0], 200)
+        self.assertEqual(origin.accepted, 1)
+
+    def test_past_the_control_cap_a_control_connection_is_closed_unanswered(self):
+        with mock.patch.object(helper, "RELAY_CONTROL_MAX", 1), mock.patch.object(helper, "RELAY_IPC_S", 5.0):
+            relay = Relay(self)
+            held = socket.socket(socket.AF_UNIX)
+            self.addCleanup(held.close)
+            held.connect(relay.path)
+            self.assertTrue(wait_for(lambda: relay.state.controls == 1))
+            self.assertEqual(relay.control_answer(b'{"op":"status"}\n'), b"")
+            held.close()
+            self.assertTrue(wait_for(lambda: relay.state.controls == 0))
+            self.assertTrue(relay.ask({"op": "status"})["ok"])
+
+
 # ---------------------------------------------------- the peer's uid
 
 class PeerUidTest(Fixture):
@@ -993,6 +1127,14 @@ class ControlTest(Fixture):
         self.assertEqual(relay.ask({"op": "load", "policy": {"host": 5}})["error"]["code"], "bad_policy")
         self.assertEqual(relay.ask({"op": "count", "token": "0" * 32})["error"]["code"], "unknown_token")
 
+    def test_a_control_peer_of_another_uid_gets_no_reply_and_registers_nothing(self):
+        relay = Relay(self)
+        with mock.patch.object(helper, "relay_control_peer_uid", lambda conn: os.getuid() + 1):
+            for raw in (b'{"op":"status"}\n', b'{"op":"load","policy":' + json.dumps(REMOTE).encode() + b'}\n'):
+                with self.subTest(raw=raw[:20]):
+                    self.assertEqual(relay.control_answer(raw), b"")
+        self.assertEqual(relay.ask({"op": "status"})["tokens"], 0)
+
     def test_an_oversized_line_is_refused(self):
         relay = Relay(self)
         got = relay.control_line(b'{"op":"status","pad":"' + b"a" * helper.RELAY_CONTROL_BYTES + b'"}\n')
@@ -1033,10 +1175,17 @@ class ControlTest(Fixture):
 
 # ------------------------------------------- a typed URL's first hop
 
+def typed(origin):
+    """The record of a typed --url naming `origin`'s own host and port."""
+    return {"origin": "user", "host": origin.address, "port": origin.port}
+
+
 class TypedUrlTest(Fixture):
     """A typed --url's token keeps its first-hop rule
     across ALL of its upstream connections, as DestinationPolicy keeps it
-    across one fetch's hops."""
+    across one fetch's hops, and the first hop's freedom goes only to a
+    first connection to the URL's own host (and, on this machine, its own
+    port)."""
 
     def test_the_first_connection_may_reach_the_lan_and_later_ones_only_its_host(self):
         self.classes({"127.0.0.3": "private", "127.0.0.4": "private"})
@@ -1044,7 +1193,7 @@ class TypedUrlTest(Fixture):
         second = Origin(self, "127.0.0.4")
         self.resolving({"127.0.0.3": ["127.0.0.3"], "127.0.0.4": ["127.0.0.4"]})
         relay = Relay(self)
-        token = relay.register(USER)
+        token = relay.register(typed(first))
         self.assertEqual(exchange(relay, get("http://127.0.0.3:%d/a" % first.port, token))[0], 200)
         self.assertEqual(exchange(relay, get("http://127.0.0.3:%d/b" % first.port, token))[0], 200)
         self.assertEqual(exchange(relay, get("http://127.0.0.4:%d/c" % second.port, token))[0], 403)
@@ -1064,7 +1213,7 @@ class TypedUrlTest(Fixture):
             return Resolver({name: [name]})(name, port)
         with mock.patch.object(helper, "stream_resolve", slow):
             relay = Relay(self)
-            token = relay.register(USER)
+            token = relay.register(typed(first))
             results = {}
 
             def fetch(host, port):
@@ -1083,6 +1232,89 @@ class TypedUrlTest(Fixture):
             two.join(10)
         self.assertEqual(results, {"127.0.0.3": 200, "127.0.0.4": 403})
         self.assertEqual(second.accepted, 0)
+
+    def test_a_later_connection_to_the_first_ones_host_waits_for_it_to_settle(self):
+        """The wait itself: a second connection to the FIRST one's own LAN
+        host, made while the first is still in its lookup, is judged
+        against what the first recorded once it has connected, and passes;
+        judged beside it, before anything was recorded, it would be a later
+        hop to a LAN host nobody had reached, and refused."""
+        self.classes({"127.0.0.3": "private"})
+        first = Origin(self, "127.0.0.3")
+        gate = threading.Event()
+        asked = []
+
+        def slow(name, port):
+            asked.append(name)
+            if len(asked) == 1:
+                gate.wait(5)
+            return Resolver({name: [name]})(name, port)
+        self.addCleanup(gate.set)
+        with mock.patch.object(helper, "stream_resolve", slow):
+            relay = Relay(self)
+            token = relay.register(typed(first))
+            results = []
+
+            def fetch(path):
+                results.append(exchange(relay, get("http://127.0.0.3:%d%s" % (first.port, path), token))[0])
+            one = threading.Thread(target=fetch, args=("/a",))
+            one.start()
+            for _ in range(100):
+                if asked:
+                    break
+                time.sleep(0.02)
+            two = threading.Thread(target=fetch, args=("/b",))
+            two.start()
+            time.sleep(0.3)
+            waited = len(asked)
+            gate.set()
+            one.join(10)
+            two.join(10)
+        self.assertEqual(waited, 1, "the second connection looked its target up before the first had settled")
+        self.assertEqual((results, first.accepted), ([200, 200], 2))
+
+    def test_a_first_connection_to_another_host_is_a_later_hop_and_spends_the_first(self):
+        self.classes({"127.0.0.3": "private", "127.0.0.4": "private"})
+        typed_host = Origin(self, "127.0.0.3")
+        other = Origin(self, "127.0.0.4")
+        self.resolving({"127.0.0.3": ["127.0.0.3"], "127.0.0.4": ["127.0.0.4"]})
+        relay = Relay(self)
+        token = relay.register(typed(typed_host))
+        self.assertEqual(exchange(relay, get("http://127.0.0.4:%d/a" % other.port, token))[0], 403)
+        self.assertEqual(exchange(relay, get("http://127.0.0.3:%d/b" % typed_host.port, token))[0], 403)
+        self.assertEqual((typed_host.accepted, other.accepted), (0, 0))
+        fresh = relay.register(typed(typed_host))
+        self.assertEqual(exchange(relay, get("http://127.0.0.3:%d/c" % typed_host.port, fresh))[0], 200)
+
+    def test_on_this_machine_the_first_hop_is_the_typed_hosts_own_port(self):
+        """Typed as a loopback literal, or as a name that answers loopback:
+        either way a first connection to the same host on another port of
+        this machine is another host (D-SINK-57), judged as a later hop."""
+        typed_port = Origin(self, "127.0.0.1")
+        other_port = Origin(self, "127.0.0.1")
+        self.resolving({"127.0.0.1": ["127.0.0.1"], "box.qqqqqq.test": ["127.0.0.1"]})
+        relay = Relay(self)
+        for host in ("127.0.0.1", "box.qqqqqq.test"):
+            with self.subTest(host=host):
+                record = {"origin": "user", "host": host, "port": typed_port.port}
+                token = relay.register(record)
+                self.assertEqual(exchange(relay, get("http://%s:%d/a" % (host, other_port.port), token))[0], 403)
+                fresh = relay.register(record)
+                self.assertEqual(exchange(relay, get("http://%s:%d/b" % (host, typed_port.port), fresh))[0], 200)
+        self.assertEqual((typed_port.accepted, other_port.accepted), (2, 0))
+
+    def test_through_the_users_proxy_only_the_typed_host_passes_unresolved_on_the_first_hop(self):
+        self.classes({"127.0.0.1": "global"})
+        proxy = Origin(self, "127.0.0.1")
+        self.resolving({"gone.qqqqqq.test": socket.gaierror(socket.EAI_NONAME, "nope"),
+                        "nas.qqqqqq.test": socket.gaierror(socket.EAI_NONAME, "nope")})
+        relay = Relay(self, {"http_proxy": "http://127.0.0.1:%d" % proxy.port})
+        token = relay.register({"origin": "user", "host": "nas.qqqqqq.test", "port": 80})
+        self.assertEqual(exchange(relay, get("http://gone.qqqqqq.test/x", token))[0], 502)
+        self.assertEqual(proxy.accepted, 0)
+        fresh = relay.register({"origin": "user", "host": "nas.qqqqqq.test", "port": 80})
+        self.assertEqual(exchange(relay, get("http://nas.qqqqqq.test/x", fresh))[0], 200)
+        self.assertEqual(proxy.accepted, 1)
 
 
 # ---------------------------------------------- a dead first address
@@ -1119,6 +1351,28 @@ class DeadFirstAddressTest(Fixture):
             probe.close()
         return sock.getsockname()[1]
 
+    def attempts(self):
+        """While entered, every socket the process creates that is not an
+        accepted connection is recorded in the list it yields, so a test can
+        ask, after a connect, which of the connect's attempts are still open:
+        a reference held here keeps one the connector forgot open, where
+        dropping its last reference would have closed it."""
+        made = []
+        real = socket.socket
+
+        class Recorded(real):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                if kwargs.get("fileno") is None and (len(args) < 4 or args[3] is None):
+                    made.append(self)
+
+        @contextlib.contextmanager
+        def recording():
+            with mock.patch.object(socket, "socket", Recorded):
+                yield made
+            self.addCleanup(lambda: [sock.close() for sock in made])
+        return recording()
+
     def test_the_relay_reaches_the_second_answer_within_one_stagger(self):
         hang = self.hanging()
         good = Origin(self, "127.0.0.1")
@@ -1139,11 +1393,16 @@ class DeadFirstAddressTest(Fixture):
         def lookup(host, port, bound):
             return answers(host, port)
         started = time.monotonic()
-        sock = helper.bounded_create_connection(("dual.qqqqqq.test", good.port), 2.0, resolve=lookup,
-                                                stagger=helper.RELAY_ATTEMPT_STAGGER_S,
-                                                in_flight=helper.RELAY_ATTEMPTS_IN_FLIGHT)
+        with self.attempts() as made:
+            sock = helper.bounded_create_connection(("dual.qqqqqq.test", good.port), 2.0, resolve=lookup,
+                                                    stagger=helper.RELAY_ATTEMPT_STAGGER_S,
+                                                    in_flight=helper.RELAY_ATTEMPTS_IN_FLIGHT)
         staggered = time.monotonic() - started
         self.assertEqual((sock.getpeername()[1], sock.gettimeout()), (good.port, 2.0))
+        # The losing attempt, still connecting to the dead answer when the
+        # second won, was closed: only the winner is open.
+        self.assertEqual(len(made), 2)
+        self.assertEqual([attempt for attempt in made if attempt.fileno() != -1], [sock])
         sock.close()
         started = time.monotonic()
         sock = helper.bounded_create_connection(("dual.qqqqqq.test", good.port), 1.0, resolve=lookup)
@@ -1156,10 +1415,113 @@ class DeadFirstAddressTest(Fixture):
         hang = self.hanging()
         answers = Resolver({"dead.qqqqqq.test": [("127.0.0.2", hang)] * 4})
         started = time.monotonic()
-        with self.assertRaises(OSError):
+        with self.attempts() as made, self.assertRaises(OSError):
             helper.bounded_create_connection(("dead.qqqqqq.test", hang), 0.6, resolve=lambda h, p, b: answers(h, p),
                                              stagger=0.05, in_flight=3)
         self.assertLess(time.monotonic() - started, 1.5)
+        # Three were in flight at the bound, the fourth never started, and
+        # every one that started was closed.
+        self.assertEqual(len(made), 3)
+        self.assertEqual([attempt for attempt in made if attempt.fileno() != -1], [])
+
+
+# ------------------------------------------------------ the lookups' threads
+
+def stated_getaddrinfo(blocked, release):
+    """socket.getaddrinfo for the tests below, which run the SHIPPING
+    resolve_within: a name in `blocked` waits for `release` and then answers
+    nothing; an IP literal is answered as getaddrinfo answers one, with no
+    query; any other name is an error, and never reaches a real resolver.
+    `asked` records (host, port) for every call, the test's own connects to
+    the relay included."""
+    import ipaddress
+    real = socket.getaddrinfo
+    asked = []
+
+    def lookup(host, port, *rest, **kwargs):
+        text = host.decode("utf-8", "replace") if isinstance(host, bytes) else str(host)
+        asked.append((text, port))
+        if text in blocked:
+            release.wait(10)
+            raise socket.gaierror(socket.EAI_NONAME, "stated: no answer")
+        try:
+            ipaddress.ip_address(text)
+        except ValueError:
+            raise socket.gaierror(socket.EAI_NONAME, "stated: a name nobody stated") from None
+        return real(host, port, *rest, **kwargs)
+    return lookup, asked
+
+
+class LookupThreadsTest(Fixture):
+    """The relay asks lookups from many threads at once. The process-wide
+    stack size each lookup's start sets is restored as it was found, however
+    the starts interleave; and once RELAY_LOOKUPS_MAX lookups are
+    outstanding -- a lookup that outlived its bound still runs on the
+    resolver's own clock -- a new upstream connection is answered 502 and
+    reaches no origin, until they end."""
+
+    def test_interleaved_lookups_leave_the_stack_size_as_they_found_it(self):
+        real_thread = threading.Thread
+
+        class SlowStart(real_thread):
+            """Holds a lookup's start open, so a second caller arrives while
+            the first has the stack size set and not yet restored."""
+            def start(self):
+                if self.name == "omarchy-iptv-resolve":
+                    time.sleep(0.2)
+                super().start()
+        original = threading.stack_size(helper.RELAY_THREAD_STACK_BYTES)
+        self.addCleanup(threading.stack_size, original)
+        release = threading.Event()
+        release.set()
+        lookup, _ = stated_getaddrinfo((), release)
+        errors = []
+
+        def ask():
+            try:
+                REAL_RESOLVE_WITHIN("127.0.0.1", 80, 2.0)
+            except BaseException as error:
+                errors.append(error)
+        callers = [real_thread(target=ask) for _ in range(2)]
+        with mock.patch.object(socket, "getaddrinfo", lookup), mock.patch.object(threading, "Thread", SlowStart):
+            callers[0].start()
+            time.sleep(0.1)
+            callers[1].start()
+            for caller in callers:
+                caller.join(10)
+        self.assertEqual(errors, [])
+        self.assertEqual(threading.stack_size(), helper.RELAY_THREAD_STACK_BYTES)
+
+    def test_past_the_outstanding_lookups_cap_a_connection_is_502_and_reaches_no_origin(self):
+        self.classes({"127.0.0.1": "global"})
+        origin = Origin(self)
+        release = threading.Event()
+        self.addCleanup(release.set)
+        lookup, asked = stated_getaddrinfo(("hang.qqqqqq.test",), release)
+        base = helper.RESOLVE_WORKERS["live"]
+        with mock.patch.object(helper, "resolve_within", REAL_RESOLVE_WITHIN), \
+                mock.patch.object(socket, "getaddrinfo", lookup), \
+                mock.patch.object(helper, "STREAM_LOOKUP_TIMEOUT_S", 0.3), \
+                mock.patch.object(helper, "RELAY_LOOKUPS_MAX", base + 2):
+            relay = Relay(self)
+            token = relay.register(REMOTE)
+            for _ in range(2):
+                status, head, _ = exchange(relay, get("http://hang.qqqqqq.test/x", token))
+                self.assertEqual(head.split(b"\r\n")[0], b"HTTP/1.1 502 " + helper.RELAY_LOOKUP_FAILED.encode())
+            self.assertEqual(helper.RESOLVE_WORKERS["live"], base + 2)
+            target = get("http://127.0.0.1:%d/x" % origin.port, token)
+            started = time.monotonic()
+            status, head, _ = exchange(relay, target)
+            elapsed = time.monotonic() - started
+            self.assertEqual(head.split(b"\r\n")[0], b"HTTP/1.1 502 " + helper.RELAY_LOOKUP_FAILED.encode())
+            self.assertLess(elapsed, 0.3, "the refusal waited for a lookup")
+            self.assertEqual((origin.accepted, asked.count(("127.0.0.1", origin.port))), (0, 0))
+            release.set()
+            self.assertTrue(wait_for(lambda: helper.RESOLVE_WORKERS["live"] == base))
+            self.assertEqual(exchange(relay, target)[0], 200)
+        self.assertEqual(origin.accepted, 1)
+        self.assertEqual([at for at in asked if at[0] == "hang.qqqqqq.test"], [("hang.qqqqqq.test", 80)] * 2)
+        self.assertEqual(asked.count(("127.0.0.1", origin.port)), 1)
 
 
 # ----------------------------------------------------- nothing named
@@ -1224,6 +1586,126 @@ if pid == 0:
     os.dup2(null, 2)
     os.execv(child_argv[0], child_argv)
 os.execv(sys.executable, [sys.executable, "-I", stub, "player", "relay", "--child=%d" % pid])
+"""
+
+
+# The relay OFF its group's lead, in a pid namespace of its own, so that a
+# reaped child's pid can be handed to another process on purpose
+# (ns_last_pid) and a signal sent by pid would reach it. Pid 1 here is this
+# script: it dies with the unshare that started it, and when it exits the
+# kernel kills everything left in the namespace. Every signal it sends goes
+# to the relay it forked itself, through a pidfd whose command line it read.
+NAMESPACE = r"""
+import ctypes, fcntl, json, os, signal, socket, sys, time
+work, stub, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+ctypes.CDLL(None, use_errno=True).prctl(1, 9, 0, 0, 0)   # PR_SET_PDEATHSIG, SIGKILL
+
+
+def bounded(predicate, wait):
+    until = time.monotonic() + wait
+    while time.monotonic() < until:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+proxy = socket.socket()
+proxy.bind(("127.0.0.1", 0))
+proxy.listen(8)
+path = os.path.join(work, "ns.sock.relay")
+control = socket.socket(socket.AF_UNIX)
+control.bind(path)
+control.listen(8)
+go, termed, ready = (os.path.join(work, name) for name in ("go", "termed", "ready"))
+relay = os.fork()
+if relay == 0:
+    high = [fcntl.fcntl(sock.fileno(), fcntl.F_DUPFD, 10) for sock in (proxy, control)]
+    proxy.close()
+    control.close()
+    for fd, at in zip(high, (3, 4)):
+        os.dup2(fd, at)
+        os.close(fd)
+    child = os.fork()
+    if child == 0:
+        os.close(3)
+        os.close(4)
+        if mode == "live":
+            def done(signum, frame):
+                open(termed, "w").write("term")
+                os._exit(0)
+            signal.signal(signal.SIGTERM, done)
+            time.sleep(20)
+            os._exit(0)
+        if os.fork() == 0:          # keeps the relay serving once the child has gone
+            time.sleep(20)
+            os._exit(0)
+        bounded(lambda: os.path.exists(go), 20)
+        os._exit(0)
+    os.execv(sys.executable, [sys.executable, "-I", stub, "player", "relay", "--child=%d" % child])
+proxy.close()
+control.close()
+
+
+def status():
+    try:
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.settimeout(2)
+            sock.connect(path)
+            sock.sendall(b'{"op":"status"}\n')
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        return json.loads(data) if data else None
+    except (OSError, ValueError):
+        return None
+
+
+found = {}
+
+
+def answered():
+    found["status"] = status()
+    return found["status"] is not None
+
+
+result = {"mode": mode}
+if not bounded(answered, 15):
+    result["error"] = "the relay never answered"
+else:
+    child = found["status"]["child"]
+    relay_fd = os.pidfd_open(relay)
+    if b"relay" not in open("/proc/%d/cmdline" % relay, "rb").read().split(b"\0"):
+        raise SystemExit("not the relay")
+    if mode == "reuse":
+        open(go, "w").write("1")
+        if not bounded(lambda: not os.path.exists("/proc/%d" % child), 10):
+            raise SystemExit("the child was never reaped")
+        with open("/proc/sys/kernel/ns_last_pid", "w") as handle:
+            handle.write(str(child - 1))
+        impostor = os.fork()
+        if impostor == 0:
+            def hit(signum, frame):
+                open(termed, "w").write("impostor")
+                os._exit(0)
+            signal.signal(signal.SIGTERM, hit)
+            open(ready, "w").write("1")
+            time.sleep(20)
+            os._exit(0)
+        result["reused"] = impostor == child
+        bounded(lambda: os.path.exists(ready), 10)
+    signal.pidfd_send_signal(relay_fd, signal.SIGTERM)
+
+    def ended():
+        pid, code = os.waitpid(relay, os.WNOHANG)
+        return pid != 0
+    result["relayEnded"] = bounded(ended, 10)
+    time.sleep(0.3)
+    result["termed"] = open(termed).read() if os.path.exists(termed) else ""
+print(json.dumps(result))
 """
 
 
@@ -1434,6 +1916,118 @@ class LifecycleTest(unittest.TestCase):
         process.send_signal(signal.SIGTERM)
         process.wait(10)
         self.assertEqual(pathlib.Path(self.dir, "stderr").read_bytes(), b"")
+
+    def test_a_socket_that_replaced_the_relays_own_at_its_path_survives_the_relays_exit(self):
+        """A newer relay binds the same path while an older one waits out its
+        linger (a restart, a replacement); the older one removes the path at
+        exit only while it is still the file it was given."""
+        done = os.path.join(self.dir, "done")
+        child = [sys.executable, "-I", "-c",
+                 "import os, sys, time\n"
+                 "for _ in range(1500):\n"
+                 "    if os.path.exists(sys.argv[1]):\n"
+                 "        break\n"
+                 "    time.sleep(0.02)\n", done]
+        process, path = self.start(child)
+        self.status(path)
+        os.unlink(path)
+        newer = socket.socket(socket.AF_UNIX)
+        self.addCleanup(newer.close)
+        newer.bind(path)
+        newer.listen(1)
+        held = os.stat(path)
+        pathlib.Path(done).write_text("1")
+        self.assertEqual(process.wait(15), 0)
+        self.assertTrue(os.path.exists(path), "the relay removed a socket it was not given")
+        now = os.stat(path)
+        self.assertEqual((now.st_dev, now.st_ino), (held.st_dev, held.st_ino))
+
+    def test_a_sigterm_kills_a_child_of_its_group_that_ignores_it_once_the_grace_is_over(self):
+        """A user's wrapper that ignores SIGTERM, and the real player it
+        forked, which has no death signal of its own: the relay passes the
+        SIGTERM on, waits RELAY_TERM_GRACE_S, removes its socket, and then
+        kills the group it leads, itself included, so neither outlives it
+        with a dead proxy."""
+        ready = os.path.join(self.dir, "grandchild")
+        wrapper = [sys.executable, "-I", "-c",
+                   "import os, signal, sys, time\n"
+                   "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                   "if os.fork() == 0:\n"
+                   "    open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+                   "    os.rename(sys.argv[1] + '.tmp', sys.argv[1])\n"
+                   "    time.sleep(60)\n"
+                   "    os._exit(0)\n"
+                   "time.sleep(60)\n", ready]
+        process, path = self.start(wrapper)
+        self.status(path)
+        until = time.monotonic() + 10
+        while not os.path.exists(ready) and time.monotonic() < until:
+            time.sleep(0.02)
+        grandchild = self.track(int(pathlib.Path(ready).read_text()))
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        code = process.wait(15)
+        elapsed = time.monotonic() - started
+        self.assertTrue(self.gone(grandchild, 3.0), "a child of the relay's group outlived it")
+        self.assertEqual(code, -signal.SIGKILL)
+        self.assertFalse(os.path.exists(path))
+        self.assertGreaterEqual(elapsed, helper.RELAY_TERM_GRACE_S - 0.2)
+
+    def test_it_refuses_a_child_that_is_not_its_own(self):
+        """--child must name this process's own child, pinned by a pidfd
+        before the reaper runs: a relay that is not a spawn's never starts."""
+        proxy = socket.socket()
+        proxy.bind(("127.0.0.1", 0))
+        proxy.listen(1)
+        self.addCleanup(proxy.close)
+        control = socket.socket(socket.AF_UNIX)
+        control.bind(os.path.join(self.dir, "c.relay"))
+        control.listen(1)
+        self.addCleanup(control.close)
+        launch = ("import fcntl, os, sys\n"
+                  "high = [fcntl.fcntl(int(fd), fcntl.F_DUPFD, 10) for fd in sys.argv[1:3]]\n"
+                  "for fd, at in zip(high, (3, 4)):\n"
+                  "    os.dup2(fd, at)\n"
+                  "os.execv(sys.executable, [sys.executable, '-I', sys.argv[3], 'player', 'relay', "
+                  "'--child=' + sys.argv[4]])\n")
+        done = subprocess.run([sys.executable, "-I", "-c", launch, str(proxy.fileno()), str(control.fileno()),
+                               str(HELPER), str(os.getpid())], pass_fds=(proxy.fileno(), control.fileno()),
+                              capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                              start_new_session=True)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["error"]["code"], "relay_refused")
+
+    def in_namespace(self, mode):
+        """NAMESPACE run as pid 1 of a new pid namespace; -> its result."""
+        if not shutil.which("unshare"):
+            self.skipTest("unshare is needed for a pid namespace")
+        script = os.path.join(self.dir, "ns.py")
+        pathlib.Path(script).write_text(NAMESPACE, encoding="ascii")
+        env = dict(os.environ)
+        env.pop("DISPLAY", None)
+        done = subprocess.run(["unshare", "-rpf", "--mount-proc", sys.executable, "-I", script, self.dir, str(HELPER),
+                               mode], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+                              start_new_session=True, env=env)
+        lines = [line for line in done.stdout.splitlines() if line.startswith('{"mode"')]
+        if not lines and "unshare failed" in done.stderr:
+            self.skipTest("no pid namespace here: %s" % done.stderr.strip()[:200])
+        self.assertTrue(lines, "no result: rc %d, stderr %r" % (done.returncode, done.stderr[-400:]))
+        return json.loads(lines[-1])
+
+    def test_off_its_groups_lead_a_sigterm_reaches_its_child_through_the_pidfd(self):
+        result = self.in_namespace("live")
+        self.assertNotIn("error", result)
+        self.assertEqual((result["relayEnded"], result["termed"]), (True, "term"))
+
+    def test_off_its_groups_lead_a_sigterm_never_reaches_a_reaped_childs_reused_pid(self):
+        """The child is reaped and its pid handed to an impostor that would
+        record a SIGTERM; the relay, asked to stop, signals its child through
+        the pidfd it took at its start, which answers ESRCH, and the
+        impostor hears nothing."""
+        result = self.in_namespace("reuse")
+        self.assertNotIn("error", result)
+        self.assertTrue(result["reused"], "the namespace did not hand the reaped child's pid on")
+        self.assertEqual((result["relayEnded"], result["termed"]), (True, ""))
 
     def test_it_refuses_to_run_without_its_two_listeners(self):
         done = subprocess.run([sys.executable, "-I", str(HELPER), "player", "relay", "--child=4242"],

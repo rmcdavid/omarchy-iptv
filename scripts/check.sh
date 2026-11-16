@@ -926,7 +926,19 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # answers stops that player too (red on 7c281d8), and the walk of `play`
 # (red on the one-question sum and under a third question); the suite runs
 # 2509.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2509}
+# 2026-11-16, dsink102 (the relay's own findings of the branch's conformance
+# review, lane-relay-internals): 2509 -> 2527 -- tests/test_relay.py's 16
+# (the settle wait, a typed URL's first hop bound to its own host and port,
+# directly and through the user's proxy, a later head's bound, a tunnel's
+# close of both sides, the control socket's uid check, the connection and
+# control caps, the lookups' stack size and their cap, the same-inode guard
+# on the socket, a SIGTERM's kill of a group child that ignores it, the
+# refusal of a --child that is not the relay's own, and the off-lead SIGTERM
+# through the child's pidfd in a pid namespace, a reused pid included) and
+# tests/test_relay_player.py's 2 (relay_request's pid comparison, the
+# control socket's mode under umask 022); 8 red on 26400dd's code and every
+# one red under a named single-decision mutant; the suite runs 2527.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2527}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

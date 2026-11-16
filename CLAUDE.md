@@ -1186,9 +1186,12 @@ requests and raise the batch.
      rule over the relay's control socket and carries it as the per-file
      `http-proxy`. The relay judges every request and every CONNECT -- the
      stream, each redirect hop, each HLS or DASH playlist, segment, key and
-     init section -- by `stream_answer_refusal`, the play-time lookup's own
-     per-answer rule (rule 12), through `bounded_create_connection` against
-     the address it connects to, so a redirect or a changed DNS answer
+     init section -- through `bounded_create_connection` against the
+     address it connects to: a playlist's load by `stream_answer_refusal`,
+     the play-time lookup's own per-answer rule (rule 12), and a typed
+     `--url`'s by `DestinationPolicy` across all of its connections, the
+     first hop's freedom only for a first connection to the URL's own host
+     (and, on loopback, its port). So a redirect or a changed DNS answer
      cannot reach this machine or the LAN. FFmpeg resolves no proxied
      target (read), and TLS stays end to end, checked against the name.
      The read-back holds mpv's `http-proxy` to the pin or the current
@@ -1211,7 +1214,10 @@ requests and raise the batch.
      by SO_PEERCRED), and exits with its player. A player of this build
      whose relay does not answer reads `older`: replaced, never fed. Open:
      a user's `mpv` wrapper whose CHILD is the real player survives a
-     SIGKILLed relay with a dead proxy until it is replaced, and an account
+     SIGKILLed relay with a dead proxy until it is replaced (a SIGTERMed
+     relay kills what is left of its process group once its grace is over,
+     so there only a real player that left the group, under a wrapper that
+     calls setsid, survives), and an account
      that binds the freed port meanwhile receives its plain-http requests,
      credentials and the load's token included; the ten-second health
      tick does not ask the relay, so with no zap that interval is

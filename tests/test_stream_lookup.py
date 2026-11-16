@@ -208,9 +208,12 @@ class PlayTargetTest(unittest.TestCase):
 
     def test_the_shipping_lookup_is_resolve_within_under_its_bound(self):
         calls = []
-        with mock.patch.object(helper, "resolve_within", lambda h, p, t: calls.append((h, p, t)) or [answer(GLOBAL)]):
+        with mock.patch.object(helper, "resolve_within",
+                               lambda h, p, t, limit=None: calls.append((h, p, t, limit)) or [answer(GLOBAL)]):
             self.assertEqual(helper.stream_resolve(NAME, 80), [answer(GLOBAL)])
-        self.assertEqual(calls, [(NAME, 80, helper.STREAM_LOOKUP_TIMEOUT_S)])
+        # D-SINK-102: and under the cap on the process's outstanding lookups,
+        # which only the relay, asking from every connection, ever nears.
+        self.assertEqual(calls, [(NAME, 80, helper.STREAM_LOOKUP_TIMEOUT_S, helper.RELAY_LOOKUPS_MAX)])
         # Under the shell's watchdog over one `play` (Service.qml,
         # controlTimeoutMs, Model.playerWatchdogMs("play")), read from the
         # bounds fixture both suites run rather than copied: the lookup, the

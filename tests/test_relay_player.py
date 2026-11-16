@@ -29,8 +29,10 @@ import base64
 import json
 import os
 import pathlib
+import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -59,13 +61,13 @@ def literal_lookups_only(real):
     no seam), that would have asked a real resolver."""
     import ipaddress
 
-    def lookup(host, port, timeout):
+    def lookup(host, port, timeout, **limit):
         text = host.decode("utf-8", "replace") if isinstance(host, bytes) else str(host)
         try:
             ipaddress.ip_address(text.split("%", 1)[0])
         except ValueError:
             raise AssertionError("a name reached resolve_within: %r" % (host,)) from None
-        return real(host, port, timeout)
+        return real(host, port, timeout, **limit)
     return lookup
 
 
@@ -288,6 +290,20 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         self.assertIsNotNone(status)
         self.assertEqual(status["child"], player)
         self.assertEqual(status["_pid"], relay)
+
+    def test_the_relays_control_socket_is_owner_only_whatever_the_umask(self):
+        """bind_relay_listeners binds the control socket under umask 077, so
+        the socket file reads srwx------ even under a shell's 022, beside
+        the 0700 runtime folder and the uid check on each connection."""
+        saved = os.umask(0o022)
+        try:
+            self.start_player()
+        finally:
+            os.umask(saved)
+        path = helper.relay_socket_path(self.sock)
+        mode = os.lstat(path).st_mode
+        self.assertTrue(stat.S_ISSOCK(mode))
+        self.assertEqual(stat.S_IMODE(mode), 0o700)
 
     def test_a_relay_killed_takes_its_player_with_it(self):
         _, player, relay = self.start_player()
@@ -637,6 +653,30 @@ class RefusedSchemeTest(unittest.TestCase):
         self.assertEqual(got[:2] + got[3:], [refusal] * 3 + self.URLS[4:])
         self.assertEqual(got[2][0], "unsupported_scheme")          # rtsps: no scheme the plugin plays
         self.assertEqual(resolver.asked, [("cdn.example.test", 443), ("cdn.example.test", 80)])
+
+
+# ---- whose answer relay_request trusts ---------------------------------------
+
+class RelayRequestIdentityTest(unittest.TestCase):
+    """relay_request asked for a relay by pid (relay_refused_count, after the
+    player has gone) answers only when the process listening on the control
+    socket IS that pid (SO_PEERCRED): the FakeRelay runs in this process, so
+    this process's pid is the one that answers, and any other pid -- only
+    compared here, never signalled -- gets nothing."""
+
+    def setUp(self):
+        root = tempfile.mkdtemp(prefix="omarchy-iptv-rr-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, root, True)
+        self.sock = os.path.join(root, "run", "mpv.sock")
+        relay = FakeRelay(helper, self.sock)
+        self.addCleanup(relay.close)
+
+    def test_a_relay_pid_that_is_not_the_answering_process_gets_no_answer(self):
+        ok = helper.relay_request(self.sock, {"op": "status"}, 0, relay_pid=os.getpid())
+        self.assertEqual((ok["ok"], ok["_pid"]), (True, os.getpid()))
+        for other in (os.getpid() + 1, 4242):
+            with self.subTest(other=other):
+                self.assertIsNone(helper.relay_request(self.sock, {"op": "status"}, 0, relay_pid=other))
 
 
 # ---- the first load the relay refused ---------------------------------------

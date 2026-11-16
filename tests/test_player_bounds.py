@@ -227,7 +227,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                                                       "local": False}) == ""
         return {"id": cid, "url": url, "name": "X", "headers": {"User-Agent": "u"}, "group": "G"}
 
-    def resolve(host, port, timeout):
+    def resolve(host, port, timeout, limit=None):
         clock.t += timeout - _JUST_INSIDE
         return [(2, 1, 6, "", ("93.184.216.34", port))]
 

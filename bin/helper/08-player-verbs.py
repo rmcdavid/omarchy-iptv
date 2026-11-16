@@ -143,8 +143,14 @@ def stream_lookup_name(netloc: str) -> str | bytes:
 def stream_resolve(name: str | bytes, port: int) -> list[Any]:
     """The play-time lookup: resolve_within under STREAM_LOOKUP_TIMEOUT_S.
     Its own function so the suite stands a resolver in for this lookup
-    alone (the suite's helper loader, dev branch) and never asks a real one."""
-    return resolve_within(name, port, STREAM_LOOKUP_TIMEOUT_S)
+    alone (the suite's helper loader, dev branch) and never asks a real one.
+
+    D-SINK-102: refused (ResolveBusy) while RELAY_LOOKUPS_MAX lookups of
+    this process are still running, a lookup that outlived its bound
+    included. Only the relay, which asks it from every connection it
+    serves, ever has more than one or two outstanding; `player play` asks
+    it once per channel."""
+    return resolve_within(name, port, STREAM_LOOKUP_TIMEOUT_S, limit=RELAY_LOOKUPS_MAX)
 
 
 def stream_lookup_refusal(url: str, source: dict[str, Any]) -> str:

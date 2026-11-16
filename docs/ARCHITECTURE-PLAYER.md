@@ -3861,7 +3861,16 @@ hop and judged against the address actually connected to:
   fetch's hops. The token keeps the first connection's host, class and
   port across ALL its connections, and which connection is the first is
   decided under the token's lock: the first to reach the connect wins, and
-  a later one waits for it to settle (`RelayToken.claim`).
+  a later one waits for it to settle (`RelayToken.claim`). The first
+  connection gets the first hop's freedom only when it is to the URL's own
+  host, and, where it connects to this machine (loopback), to the URL's own
+  port as well (`RelayTypedPolicy`, `own_host_match`'s reading of "the same
+  host", D-SINK-57); a first connection to anything else is judged as a
+  later hop and spends the first. Nothing under the token is known to open
+  before the typed URL itself; this is so that nothing that does -- a URL a
+  user's `--ytdl` hook substitutes, say -- inherits the URL's freedom (the
+  lead's call under the owner's standing authority of 2026-11-09, made on
+  2026-11-16).
 
 One function holds the per-answer half: `stream_answer_refusal(kind, host,
 port, scheme, source)`, lifted unchanged out of D-SINK-101's
@@ -3877,7 +3886,16 @@ every fetch of the helper uses, that judgment for a playlist's token and
 2. `relay_lookup`: the play-time lookup's own `stream_resolve`, so its
    bound is `STREAM_LOOKUP_TIMEOUT_S` (3 s) and the suite's stand-in answers
    it; a name that is not ASCII is asked as its UTF-8 bytes, as D-SINK-101
-   asks it. A literal takes the same path and makes no query.
+   asks it. A literal takes the same path and makes no query. A lookup that
+   outlives its bound leaves its thread running on the resolver's own
+   clock, so the lookups are capped: while `RELAY_LOOKUPS_MAX` (64, the
+   connection cap) of them are outstanding, a new upstream connection is
+   answered `502 Could not look up the stream's address` at once and
+   reaches no origin (`resolve_within`'s `limit`, `ResolveBusy`; the lookup
+   of the user's own proxy is counted and capped the same way). The
+   process-wide thread stack size each lookup's start sets and restores is
+   one step under `RESOLVE_LOCK`, which the relay's own thread starts take
+   too, so interleaved lookups cannot leave it at a lookup's 1 MiB.
 3. Every answer judged BEFORE anything is connected to; a refused answer is
    skipped (decision 13), none permitted is the refusal.
 4. The permitted answers connected as FFmpeg's own connect does
@@ -3969,9 +3987,20 @@ still the file it was given (device and inode compared), and exits. So
 stop, restart, the orphan check, the build gate's replacement, a crash and
 a user's quit all end the relay with no new stop path, and
 `still_the_player`, `stop_ladder` and `find_player` keep targeting mpv. On
-SIGTERM it sends SIGTERM to its process group, then exits once the group is
-gone or `RELAY_TERM_GRACE_S` (2 s) later. `player stop` removes a relay
-socket a killed relay left, under the lock and only when no player is left.
+SIGTERM (nothing the helper ships sends one) it sends SIGTERM to its
+process group, then exits the same way once its children are gone, or
+`RELAY_TERM_GRACE_S` (2 s) later, whichever comes first; on the second, a
+child still alive in the group it leads -- a user's wrapper that ignored
+the SIGTERM, or the real player under it, which has no death signal of its
+own -- is killed with the whole group, SIGKILL to the group whose id is the
+relay's own pid, after the relay has removed its socket, and the relay dies
+of it too (`relay_group_child_alive`). A relay that does not lead its group
+(none the spawn starts) signals its own child alone, through a pidfd it
+took at its start, before its reaper could reap anything, so a reaped
+child's reused pid is never reached; a relay whose `--child` is not its own
+child is refused at its start (`relay_child_pidfd`). `player stop` removes
+a relay socket a killed relay left, under the lock and only when no player
+is left.
 
 **Relay death.** The kernel sends the player SIGKILL (PDEATHSIG). A pinned
 proxy that is not listening fails closed, ECONNREFUSED with no fallback to
@@ -4104,10 +4133,17 @@ directly.
   - What the relay refuses: a method other than GET, HEAD and CONNECT
     (405); a body, userinfo in the authority, an `https://` absolute form,
     two Proxy-Authorization headers, or an authority the SR15 reader the
-    play-time gate uses refuses (400); a head over 64 KiB (431) or not
-    complete within 10 s of its first byte (408); a request with no live
-    token (407, asked after the head is read well-formed, so a peer
-    without a token learns nothing more); more than 64 connections (503).
+    play-time gate uses refuses (400); a connection's first head over
+    64 KiB (431) or not complete within 10 s of the connection's start
+    (408), so a connection that sends nothing is answered too; a request
+    with no live token (407, asked after the head is read well-formed, so a
+    peer without a token learns nothing more); more than 64 connections
+    (503); a lookup past the cap on outstanding lookups (502, 20.1). A later
+    head on a kept-alive connection waits for its first byte as long as the
+    connection lasts and then has the same 10 s and 64 KiB; over either, or
+    with anything the first head would have been refused for, the
+    connection is closed with no reply, because the pump thread may be
+    writing the previous response to the client.
 - **rtmps: relayed.** rtmp hands its stream options to tls, which tunnels
   through CONNECT: measured with the per-file option, a CONNECT carrying the
   load's token after one 407, TLS verified end to end against the rig's CA,
@@ -4201,14 +4237,15 @@ own host is refused, as D-SINK-101 already refuses it at play.
 | `STREAM_LOOKUP_TIMEOUT_S` | 3 s | the relay's lookup of one target (the play-time lookup's own) |
 | `RELAY_CONNECT_S` | 10 s | every connect attempt to one target, together |
 | `RELAY_ATTEMPT_STAGGER_S`, `RELAY_ATTEMPTS_IN_FLIGHT` | 0.2 s, 3 | the staggered connect |
-| `RELAY_HEAD_S`, `RELAY_HEAD_BYTES` | 10 s, 64 KiB | one request head, from its first byte; no idle timeout before it |
+| `RELAY_HEAD_S`, `RELAY_HEAD_BYTES` | 10 s, 64 KiB | one request head: a connection's first from the connection's start (408 or 431), each later one from its own first byte with no idle timeout before it (closed with no reply over either) |
 | `RELAY_CONNECTIONS_MAX` | 64 | client connections at once (503 past it) |
+| `RELAY_LOOKUPS_MAX` | 64 (`RELAY_CONNECTIONS_MAX`) | lookups outstanding at once, a lookup past its bound still on the resolver's clock included (502 past it) |
 | `RELAY_TOKENS_MAX` | 8 | loads whose token is kept, the newest |
 | `RELAY_CONTROL_BYTES`, `RELAY_CONTROL_MAX` | 8 KiB, 4 | one control line, control connections at once |
 | `RELAY_DRAIN_S` | 0.25 s | what a refused client still sends, read and dropped |
-| `RELAY_TERM_GRACE_S` | 2 s | SIGTERM to the group, then exit |
+| `RELAY_TERM_GRACE_S` | 2 s | SIGTERM to the group, then exit; a child left in the group is killed with it (SIGKILL) |
 | `RELAY_LINGER_S` | 1 s | answering after the last child has gone |
-| `RELAY_THREAD_STACK_BYTES` | 512 KiB | each serving thread's stack (address space, not use) |
+| `RELAY_THREAD_STACK_BYTES` | 512 KiB | each serving thread's stack (address space, not use); a lookup's thread has 1 MiB (`RESOLVE_STACK_BYTES`), set and restored under `RESOLVE_LOCK` |
 
 An established connection has no idle timeout, so a paused channel keeps
 its connection as it would without the relay (decision 14). The shell's
@@ -4233,7 +4270,8 @@ verb waits on.
 What it costs to run (decision 1): the branch's relay, idle with one child,
 held 22.3 MB resident and two threads (the main loop and the reaper),
 measured twice on 2026-11-16; each client connection adds a serving
-thread, and a second once it has an upstream. The design's bench, a stdlib
+thread, and a second once it has an upstream, and asks one lookup's thread
+at a time (at most 64 of those at once, in all). The design's bench, a stdlib
 relay of the same shape on a synthetic paced sink over a CONNECT tunnel,
 read 0.1-2.2% of one core at 5-20 Mbit/s and never above 4.4% (`os.splice`
 gained nothing), and a median time to first byte on loopback of 0.33 ms
@@ -4304,10 +4342,15 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   freed port receives that player's plain-http requests, which is
   credential disclosure: the absolute-form request line with any userinfo,
   the provider's Host header, any sign-in headers kept for own-host
-  channels, and the `Proxy-Authorization` carrying the load's token. Only
-  a SIGKILL of the relay leaves this state: it exits on its own only once
-  no child is left, and a SIGTERM it passes to its whole process group
-  first. Such a player reads `older` (decision 16) and is replaced at
+  channels, and the `Proxy-Authorization` carrying the load's token. A
+  SIGKILL of the relay leaves this state. A SIGTERM leaves it only for a
+  real player that has left the relay's process group (a wrapper that calls
+  setsid, which the spawn cannot see): the relay exits on its own only once
+  no child is left, and on a SIGTERM it passes the signal to its whole
+  process group and, once `RELAY_TERM_GRACE_S` has passed, kills what is
+  left of the group (SIGKILL) after removing its socket, so a player still
+  in the group cannot outlive it (20.2; until 2026-11-16 the relay exited
+  at the grace whatever was left). Such a player reads `older` (decision 16) and is replaced at
   the next zap, stopped by the orphan check at a shell's exit, and read
   unsafe by the probe at a shell start or after a lost player socket; the
   ten-second health tick's `status` does not ask the relay, so while the
