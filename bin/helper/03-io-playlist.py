@@ -1098,7 +1098,10 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
     `policy`'s, the environment's when none is given (D-SINK-40); the
     caller that passes one reads back what the hops connected to."""
     import urllib.request
-    host = source_host(url)
+    # D-SINK-109: the host every sentence below names (make_opener's, the
+    # response's, the deadline's, D-SINK-40's) is the shown one; nothing
+    # here decides by it.
+    host = shown_source_host(url)
     target, auth = split_userinfo(url)
     if policy is None:
         policy = DestinationPolicy.from_environment(label)
@@ -1824,12 +1827,15 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             text = None
             if not parsed["channels"]:
                 if not parsed["isPlaylist"]:
-                    raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
-                raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
+                    raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % shown_source_host(url))
+                raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % shown_source_host(url))
             now = int(time.time())
             document = {
                 "version": 1,
                 "generatedAt": now,
+                # Data, not a sentence: cached_source reads it at play time,
+                # so it keeps the RFC host (D-SINK-109 prints the shown one
+                # in the reply and the status file).
                 "sourceHost": source_host(url),
                 "epgUrlHint": parsed["epgUrlHint"],
                 # D-SINK-40: the class the user-typed URL's first hop connected
@@ -1876,14 +1882,14 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # opens the temporary file, and removes the file when a write fails,
         # so channels.json is the previous run's or absent.
         text = parsed = document = None
-        error = memory_refusal("playlist", source_host(url) if url else "", held)
+        error = memory_refusal("playlist", shown_source_host(url) if url else "", held)
     if error is None:
         assert parsed is not None
         groups = {channel["group"] for channel in parsed["channels"]}
         status = {
             "ok": True,
             "kind": "playlist",
-            "sourceHost": source_host(url),
+            "sourceHost": shown_source_host(url),
             "fetchedAt": now,
             "durationMs": int((time.monotonic() - started) * 1000),
             "channelCount": len(parsed["channels"]),
@@ -1938,7 +1944,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     stale = os.path.isfile(channels_path)
     status = error_payload(
         "playlist", error,
-        sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
+        sourceHost=shown_source_host(url) if url else "",   # no URL is not a "local file"
         # D-STATE-4's sibling: json.dumps wrote a previous 1e400 as `Infinity`.
         fetchedAt=(coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None,
         stale=stale,

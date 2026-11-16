@@ -268,7 +268,11 @@ fail=0
 # test_replyEscapesAndWithheldIdInV4, Model.ipcJson's escape set and
 # reconcileVerdict's withheld record in the engine that answers the IPC
 # verbs, red on cc4a798's model; the spec runs 101.
-QML_SPEC_MIN=${QML_SPEC_MIN:-101}
+# 2026-11-16, lane-r2b (round 2, D-SINK-109): 101 -> 102 --
+# test_sourceShownHostInV4, the withheld-host predicate, its printer and the
+# Sources list's fetching line in the engine that composes them, red on
+# b00bb39's model; the spec runs 102.
+QML_SPEC_MIN=${QML_SPEC_MIN:-102}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -593,7 +597,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-101}
 # cc4a798's model, each of the three red under a named single-decision
 # mutant (QA-RESULTS "Round 2 of the security review, lane-r2a"); the suite
 # runs 3738.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3738}
+# 2026-11-16, lane-r2b (round 2, D-SINK-109): 3738 -> 3743 -- the shared
+# source-host-withheld fixture through Model.sourceHostWithheld and both
+# arms, sourceShownHost, the Sources list's fetching line (sourcesProbeLine),
+# resolveEpgUrl's host, and Service.qml's sourceHost, statusHost, IPC
+# status, timeout statuses and probe host through the service harness; all
+# five red on b00bb39's model and under seven single-decision mutants
+# (QA-RESULTS "Round 2 of the security review, lane-r2b"); the suite runs
+# 3743.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3743}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1047,7 +1059,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3738}
 # red on cc4a798's helper, and every one of 38 single-decision mutants red
 # (QA-RESULTS "Round 2 of the security review, lane-r2a"); the suite runs
 # 2621, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2621}
+# 2026-11-16, lane-r2b (round 2, D-SINK-109): 2621 -> 2634 --
+# tests/test_shown_source_host.py's 13: the shared source-host-withheld
+# fixture, both arms and the printer, every fetch sentence and status that
+# names the host in both verbs against a local literal, a refused
+# connection to a dotless typo with nothing looked up, channels.json's
+# host kept, and D-SINK-83's rule on the real host. 12 red on b00bb39's
+# helper, each of 14 single-decision mutants red (QA-RESULTS "Round 2 of
+# the security review, lane-r2b"); the suite runs 2634, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2634}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

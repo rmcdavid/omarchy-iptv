@@ -10,9 +10,9 @@ import {
 } from "./mpv.mjs"
 import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sanitizeUrlInput,
-  sourceErrorMessage, HOST_WITHHELD, urlHostWithheld, validateSourceUrl,
-  normalizeSourceUrl, deriveLabel, validateLabel, addressAtAfterAuthority,
-  fetchingLine, probeFailureLine, CLIPBOARD_MAX_CHARS
+  sourceErrorMessage, HOST_WITHHELD, validateSourceUrl, normalizeSourceUrl,
+  deriveLabel, validateLabel, sourceHostWithheld, fetchingLine,
+  probeFailureLine, CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
   isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
@@ -326,7 +326,7 @@ function formHostWithheld(form) {
   var f = form || {}
   if (!f.values || typeof f.values !== "object") return false
   var text = sanitizeUrlInput(str(f.values[formProbeField(f)]), MAX_SOURCE_URL + 1)
-  return urlHostWithheld(text) || addressAtAfterAuthority(text)
+  return sourceHostWithheld(text)
 }
 
 // `host`, or HOST_WITHHELD while the form's probe field holds a withheld URL.

@@ -293,7 +293,10 @@ Item {
   readonly property bool epgConfigured: epgFetchUrl !== ""
   // scheme + host only; safe to render anywhere
   readonly property string sourceLabel: Model.sourceLabel(playlistUrl)
-  readonly property string sourceHost: Model.hostOf(playlistUrl)
+  // D-SINK-109: the host the guide's loading, empty and failure lines, the
+  // IPC status verb and a timed-out fetch's status name -- `[host withheld]`
+  // where the Sources form would withhold it (Model.sourceShownHost).
+  readonly property string sourceHost: Model.sourceShownHost(playlistUrl)
 
   // ---- sources (M2-01, ARCHITECTURE-SOURCES.md section 4, rulings SR1-SR9).
   // The active source is named by its KEY in state.json's `activeKey`
@@ -6023,11 +6026,14 @@ Item {
 
   // ------------------------------------------------------------ helpers
 
-  // Host for the probe signal (UX-SOURCES 5.5): Model.hostOf, never a path,
-  // query or userinfo; `local file` for a path (the guide's failure line
-  // drops the host for kind `file`, the `Added` transient shows it).
+  // Host for the probe signal (UX-SOURCES 5.5): never a path, query or
+  // userinfo; `local file` for a path (the guide's failure line drops the
+  // host for kind `file`, the `Added` transient shows it); `[host withheld]`
+  // where the Sources form would withhold it (D-SINK-109,
+  // Model.sourceShownHost), so the Sources list's probe failure line does
+  // not name a username. The form re-reads it through formLineHost.
   function hostForRecord(rec) {
-    return rec ? Model.hostOf(rec.url) : ""
+    return rec ? Model.sourceShownHost(rec.url) : ""
   }
 
   // The form field a failed action concerns (for the harness; the guide

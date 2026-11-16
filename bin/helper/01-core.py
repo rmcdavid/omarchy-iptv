@@ -2226,6 +2226,60 @@ def host_withheld(url: str) -> bool:
     return j != -1 and run_host_parts(url[j + 3:])[1]
 
 
+# `scheme://` at the start of a text, the scheme as typed in group 1
+# (Model.addressAuthoritySplit's pattern; the label reading in 02-sources.py
+# asks it too).
+_ADDRESS_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://")
+
+
+def at_after_authority(value: Any) -> bool:
+    """Mirror of Model.addressAtAfterAuthority: whether `scheme://` text
+    holds an `@` after its authority's closing `/`, `?` or `#` -- R32a's
+    typo signal, `http://qqqqqq:12/zz@cdn.test/x` being a userinfo that
+    holds a `/`. False when the text is not `scheme://` or its authority
+    is not closed."""
+    if not isinstance(value, str):
+        return False
+    scheme = _ADDRESS_SCHEME.match(value)
+    if scheme is None:
+        return False
+    body = value[scheme.end():]
+    cut = _AUTHORITY_END.search(body)
+    return cut is not None and "@" in body[cut.start():]
+
+
+def source_host_withheld(url: Any) -> bool:
+    """D-SINK-109 (2026-11-16): the Sources form's own predicate
+    (Model.formHostWithheld, D-SINK-99), as Model.sourceHostWithheld has
+    it: host_withheld (R32a': a dotless host or a non-numeric port with an
+    `@` after the authority) or an `@` after the authority at all
+    (at_after_authority), which also catches a DOTTED username before a
+    password that starts with digits (`http://qqqqqq.x:12/zz@cdn.test/x`).
+    Every line that names a source's host in a sentence or a status names
+    HOST_WITHHELD where this holds (shown_source_host); the stored record's
+    host and label keep the RFC host (R32a, the owner's ruling). One
+    fixture holds both mirrors to it (the shared source-host-withheld
+    fixture, dev branch). The cost, stated as the form states it: a valid
+    URL with an `@` in its path or query (an e-mail username in an Xtream
+    path) is withheld too."""
+    if not isinstance(url, str):
+        return False
+    return host_withheld(url) or at_after_authority(url)
+
+
+def shown_source_host(url: str) -> str:
+    """What a sentence or a status names as a source's host: source_host's
+    `local file` for anything that is not http(s), HOST_WITHHELD where
+    source_host_withheld holds, and otherwise source_host's RFC host
+    (D-SINK-109). Display only: nothing decides by it -- channels.json's
+    `sourceHost`, which play-time rules read (cached_source), and the host
+    D-SINK-83's rule judges keep source_host."""
+    host = source_host(url)
+    if host == "local file":
+        return host
+    return HOST_WITHHELD if source_host_withheld(url) else host
+
+
 def run_host(raw: str) -> str:
     """What redact_urls prints for one `scheme://...` run: the RFC host, or
     HOST_WITHHELD."""

@@ -1307,7 +1307,9 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
     meta = {
         "version": 1,
         "fetchedAt": now,
-        "sourceHost": source_host(url),
+        # D-SINK-109: read only by the guide's statuses and epg-now.json's
+        # head, which print it, so it is the shown host.
+        "sourceHost": shown_source_host(url),
         "sourceKey": source_key(url),
         "channelsMtime": mtime,
         # D-SINK-79: the version of the rules this window was written under.
@@ -1638,7 +1640,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
         # nothing, and `stale` says whether a previous window is there.
         window = None
         refresh_error = None
-        error = memory_refusal("EPG", source_host(url) if url else "", held)
+        error = memory_refusal("EPG", shown_source_host(url) if url else "", held)
         cached = os.path.isfile(window_path)
     if error is None:
         assert window is not None
@@ -1694,13 +1696,15 @@ def cmd_epg(args: argparse.Namespace) -> int:
             return EXIT_OK
     if refresh_error is not None:
         log("could not refresh %s: %s" % (EPG_NOW_FILE, refresh_error))
-    host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
+    host = shown_source_host(url) if url else (window.get("sourceHost", "") if window else "")
     # D-SINK-83: a one-label host the playlist chose was refused before any
     # lookup (DestinationPolicy.refuses_name), and the status -- the reply
     # and epg-status.json -- names it no more than the refusal does. Only a
     # shell loaded before the rule hands one over, and the name is the
-    # username of a URL its space cut (D-SINK-34's class).
-    if url and DestinationPolicy.from_environment("EPG").refuses_name(host):
+    # username of a URL its space cut (D-SINK-34's class). The rule judges
+    # the REAL host; only the host the status prints is the shown one
+    # (D-SINK-109).
+    if url and DestinationPolicy.from_environment("EPG").refuses_name(source_host(url)):
         host = ""
     status = error_payload(
         "epg", error,

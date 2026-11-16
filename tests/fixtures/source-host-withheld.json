@@ -1,0 +1,29 @@
+{
+  "about": "D-SINK-109 (2026-11-16, round 2 of the security review): the Sources form's withheld-host predicate over a source URL, shared by the helper's source_host_withheld and Model.sourceHostWithheld (Model.formHostWithheld asks it of the form's typed text). It is R32a's urlHostWithheld / host_withheld (a dotless host, or a non-numeric port, with an `@` after the authority) OR an `@` after the authority's closing `/`, `?` or `#` at all (addressAtAfterAuthority / at_after_authority). Every line that names a source's host in a sentence or a status names `[host withheld]` where it holds; the two printers (shown_source_host, sourceShownHost) differ in case and in an IPv6 literal's brackets, so only the decision is shared. `arms` says which arm holds, for the reader: `rfc` is urlHostWithheld, `at` is the at-after-authority test. Credentials are synthetic.",
+  "vectors": [
+    {"url": "http://qqqqqq:1234/zzzz@cdn.test/get.php", "withheld": true, "arms": "rfc at", "note": "R32a's typo: a password holding an unencoded `/` whose prefix is digits; the RFC host is the username"},
+    {"url": "http://qqqqqq:1234?zzzz@cdn.test/get.php", "withheld": true, "arms": "rfc at", "note": "the `?` form"},
+    {"url": "http://qqqqqq:1234#zzzz@cdn.test/get.php", "withheld": true, "arms": "rfc at", "note": "the `#` form, as typed (a stored URL has lost its fragment)"},
+    {"url": "http://qqqqqq.x:1234/zzzz@cdn.test/get.php", "withheld": true, "arms": "at", "note": "a DOTTED username before a digits-only password prefix: only the `@` test sees it (D-SINK-99's case)"},
+    {"url": "https://qqqqqq.x:12/zz@cdn.test/live/1.ts", "withheld": true, "arms": "at", "note": "the same over https"},
+    {"url": "http://user.name:pa/ss@h.test/x", "withheld": true, "arms": "rfc at", "note": "a non-numeric port behind a dotted username (D-SINK-35)"},
+    {"url": "HTTP://QQQQQQ:1234/zzzz@CDN.TEST/x", "withheld": true, "arms": "rfc at", "note": "an upper-case scheme"},
+    {"url": "http://127.0.0.1:8080/zzzz@cdn.test/get.php", "withheld": true, "arms": "at", "note": "an address literal with an `@` after it"},
+    {"url": "http://[::1]:8080/x@y.test/list.m3u", "withheld": true, "arms": "at", "note": "a bracketed literal is never withheld by the RFC arm; the `@` test still holds"},
+    {"url": "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "withheld": true, "arms": "at", "note": "the cost, stated: R32a's own working e-mail-username link"},
+    {"url": "http://cdn.test/get.php?username=me@mail.test&password=zzzzzz", "withheld": true, "arms": "at", "note": "the cost, an e-mail username in the query"},
+    {"url": "http://localhost/x@y.m3u", "withheld": true, "arms": "rfc at", "note": "a dotless intranet host with a path `@` (R32a's stated cost)"},
+    {"url": "http://cdn.test/a b@c.m3u", "withheld": true, "arms": "at", "note": "a space before the `@`: the RFC arm's run ends at it, the `@` test reads past it"},
+    {"url": "file:///home/x/a@b.m3u", "withheld": true, "arms": "at", "note": "the predicate holds over a file URL; both printers say `local file` first"},
+    {"url": "http://qqqqqq:zzzzzz@cdn.test/get.php", "withheld": false, "arms": "", "note": "a userinfo that parses: the host is cdn.test"},
+    {"url": "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz", "withheld": false, "arms": "", "note": "an Xtream link"},
+    {"url": "https://cdn.test:8443/list.m3u", "withheld": false, "arms": "", "note": "a port"},
+    {"url": "http://cdn.test", "withheld": false, "arms": "", "note": "an authority not closed"},
+    {"url": "http://qqqqqq:1234", "withheld": false, "arms": "", "note": "the `#` typo once the validator dropped the fragment: nothing is left to see, and the stored URL holds no more of the credential than the username and the digits"},
+    {"url": "http://[::1]:8080/list.m3u", "withheld": false, "arms": "", "note": "a bracketed literal"},
+    {"url": "http://intranet/list.m3u", "withheld": false, "arms": "", "note": "a dotless host with no `@` after it"},
+    {"url": "/home/x/list.m3u", "withheld": false, "arms": "", "note": "a path"},
+    {"url": "/home/x/a@b.m3u", "withheld": false, "arms": "", "note": "a path holding an `@`: no scheme"},
+    {"url": "", "withheld": false, "arms": "", "note": "nothing"}
+  ]
+}

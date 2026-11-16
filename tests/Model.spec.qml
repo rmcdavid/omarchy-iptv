@@ -1369,6 +1369,32 @@ TestCase {
     compare(Model.reconcileVerdict(record, { id: "t:news.us" }, "ka").state, "unknown")
   }
 
+  // D-SINK-109 (2026-11-16), in V4, the engine that composes the guide's
+  // loading, empty and failure lines and the Sources list's lines: the
+  // Sources form's withheld-host predicate over a source URL and its
+  // printer. A sample of the shared source-host-withheld fixture (node and
+  // the helper run all of it).
+  function test_sourceShownHostInV4() {
+    var W = "[host withheld]"
+    var cases = [
+      ["http://qqqqqq:1234/zzzz@cdn.test/get.php", true, W],
+      ["http://qqqqqq.x:1234/zzzz@cdn.test/get.php", true, W],
+      ["http://user.name:pa/ss@h.test/x", true, W],
+      ["http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", true, W],
+      ["file:///home/x/a@b.m3u", true, "local file"],
+      ["http://qqqqqq:zzzzzz@cdn.test/get.php", false, "cdn.test"],
+      ["http://cdn.test", false, "cdn.test"],
+      ["/home/x/a@b.m3u", false, "local file"]
+    ]
+    for (var i = 0; i < cases.length; i++) {
+      compare(Model.sourceHostWithheld(cases[i][0]), cases[i][1], "withheld " + i)
+      compare(Model.sourceShownHost(cases[i][0]), cases[i][2], "shown " + i)
+    }
+    var view = Model.sourceView({ key: "k1", url: cases[1][0], kind: "http", label: "x", origin: "cli" }, "", 100, "", false, null)
+    compare(view.host, "qqqqqq.x:1234")
+    compare(Model.sourcesProbeLine(view), "Fetching from " + W + Model.ELLIPSIS)
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.

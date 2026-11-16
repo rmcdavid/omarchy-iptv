@@ -624,7 +624,7 @@ Item {
     if (!root.inSources || !root.probing || root.formActive) return ""
     var id = root.serviceReady && root.service.probingId !== undefined ? String(root.service.probingId || "") : ""
     var view = root.findSourceView(id)
-    return view ? Model.fetchingLine(view.host, view.kind) : ""
+    return view ? Model.sourcesProbeLine(view) : ""
   }
   // D-SRC-06: a configured URL the validator refused (CLI, SR8) renders the
   // UX 5.4 sentence alone, no host and no `r` hint (nothing to retry).

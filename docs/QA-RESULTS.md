@@ -20339,3 +20339,56 @@ The controls that END a text are now deleted before the reading, in both mirrors
 **A test fix of this lane's own.** The first draft of tests/test_reply_shown.py ran `state init` in-process without disarming the verb's own SIGALRM. That is F-HARNESS-27's shape, which test_state's runner already guards. A batch that ran 30 s past it died with rc 142 and no summary, twice. The runner now disarms the alarm on the way out, as test_state's does.
 
 **The first-load mutant.** The first version of the first-load test survived the mutant that put the reason back on the plain redaction. Its log line was one both readings withhold. The line now holds a dotted username with a TAB in its port, which the plain reading prints, and an ESC outside the address, and the mutant is red. All 38 helper mutants are red.
+
+## Round 2 of the security review, lane-r2b, 2026-11-16: hosts and labels as the Sources list reads them
+
+Lane-r2b built round 2's steps 3 and 4 on the branch `r2-build`, after lane-r2a's two commits. Every call is the lead's under the owner's standing authority of 2026-11-09. "Red on the commit before" means the new tests were run against a `git archive` of that commit with only the new tests and their fixtures copied in. A mutant is one decision of the shipping code broken on a scratch copy of the tree (the helper resealed, the model relinked), with the new tests run. No cage, no live scenario, no player and no name lookup was run: every fetch in the new tests goes to tests/scripted_server.py on 127.0.0.1, a literal, and `socket.getaddrinfo` is replaced in them by a stand-in that answers that literal and refuses any name, recording every call.
+
+### D-SINK-109: the Sources form's withheld-host predicate for every line that names a source's host
+
+**What changed.**
+- Helper (bin/helper/01-core.py): `at_after_authority`, the mirror of `Model.addressAtAfterAuthority`; `source_host_withheld` = `host_withheld` or `at_after_authority`, the mirror of the new `Model.sourceHostWithheld`, which `formHostWithheld` now calls; and `shown_source_host`: `local file` for anything but http(s), `[host withheld]` where the predicate holds, else `source_host`.
+- Helper sites: `read_http_source`'s host, which every fetch sentence composes from (make_opener's redirect sentence, the HTTP status, network, timeout and too-large sentences, D-SINK-40's); the not-a-playlist and empty sentences; both memory refusals; the playlist status and its error status; the guide window's meta (epg-window.txt), which epg-now.json's head and every guide status copy; the guide's error status. channels.json's `sourceHost` keeps the RFC host (cached_source reads it at play time), and D-SINK-83's one-label rule judges `source_host(url)`, the real host, while the status prints the shown one.
+- Model: `sourceShownHost` (hostOf's `local file`, else `[host withheld]` where the predicate holds, else hostOf); `sourceView` gains `lineHost`; `sourcesProbeLine(view)` is the Sources list's fetching line, lifted out of Guide.qml (rule 12); `resolveEpgUrl`'s printed host is the shown one.
+- QML: `Service.sourceHost` and `Service.hostForRecord` read `Model.sourceShownHost`; Guide.qml's `sourcesProbeText` calls `Model.sourcesProbeLine`. qmllint's baseline and the model-member guard are the gate's.
+- The one new helper pattern, `([A-Za-z][A-Za-z0-9+.\-]*)://` at a text's start, has its row in the helper regex guard's table (scripts/check-helper-regex.py); the first gate run went red on it until it did. `at_after_authority` cuts at the reviewed `_AUTHORITY_END`.
+
+**The fixture.** tests/fixtures/source-host-withheld.json holds 24 vectors `{url, withheld, arms}`: the three typo forms, a dotted username before a digits-only password prefix (the `@` arm alone), a non-numeric port, an upper-case scheme, a literal and a bracketed literal with a later `@`, the two stated costs (R32a's e-mail-username Xtream link, an e-mail in the query), a dotless intranet host with a path `@`, a space before the `@`, a file URL; and ten that are not withheld (a userinfo that parses, an Xtream link, a port, an authority not closed, the `#` typo after the validator cut its fragment, a literal, a dotless host with no `@`, two paths, the empty string). `arms` says which arm holds; both suites assert it. Only the decision is shared: the helper's printer lower-cases and drops an IPv6 literal's brackets where hostOf keeps them.
+
+**Red first** (b00bb39, lane-r2a's last commit):
+
+| Suite | On b00bb39 | On this tree |
+|---|---|---|
+| tests/test_shown_source_host.py (new, 13 tests) | 12 of 13 red: 3 errors (no `source_host_withheld`, `at_after_authority`, `shown_source_host`); `HTTP 404 from 127.0.0.1` in both verbs' reply, status file and stderr; `could not reach qqqqqq: ConnectionRefusedError` for `http://qqqqqq:1234/zzzz@cdn.test/get.php`; the not-a-playlist, empty and memory sentences naming `127.0.0.1`; the ok statuses and the window meta `127.0.0.1`; the one-label rule's withheld literal named `127.0.0.1` | 13 of 13 green |
+| tests/Model.test.js (5 new checks, one existing shape check gains `lineHost`) | 6 of 3743 red: no `sourceHostWithheld`, `sourceShownHost`, `sourcesProbeLine`; `resolveEpgUrl` named `qqqqqq`; through Service.qml's own bindings, `sourceHost`, `statusHost`, the IPC status and both timeout statuses named `qqqqqq` and the probe failure line read `Network error from qqqqqq` | 0 of 3743 red |
+| tests/Model.spec.qml (`test_sourceShownHostInV4`) | 1 of 102 red | 102 of 102 green |
+
+The fixture-is-whole test passes on b00bb39; it guards the fixture.
+
+**Mutants (helper)**, against tests/test_shown_source_host.py, each red:
+
+| Mutant | Tests red |
+|---|---|
+| `shown_source_host` returns `source_host` | 10 |
+| the predicate without its `@` arm | 10 |
+| `at_after_authority` reads the whole body, not the text after the authority | 3 |
+| `read_http_source`'s host back on `source_host` | 3 |
+| the not-a-playlist sentence back on `source_host` | 1 |
+| the empty sentence back on `source_host` | 1 |
+| the playlist memory refusal back on `source_host` | 1 |
+| the playlist ok status back on `source_host` | 1 |
+| the playlist error status back on `source_host` | 5 |
+| channels.json takes the shown host | 1 |
+| the guide window meta back on `source_host` | 1 |
+| the guide memory refusal back on `source_host` | 1 |
+| the guide error status back on `source_host` | 4 |
+| D-SINK-83's rule judging the printed host (itself one label, so the withheld literal's status was emptied) | 1 |
+
+**Mutants (model and Service.qml)**, against the node suite, each red on the D-SINK-109 checks: `sourceShownHost` returns hostOf (3 red); the predicate without its `@` arm (4, and the D-SINK-99 form checks with them); `lineHost` back on hostPortOf (1); `sourcesProbeLine` reading `host` (1); `resolveEpgUrl`'s host back on hostOf (2); `Service.sourceHost` back on `Model.hostOf` (1); `Service.hostForRecord` back on `Model.hostOf` (1).
+
+**Rule 15.** I searched for every place that prints a source's host or decides by one, by shape: every `Model.hostOf(`, `hostPortOf(`, `sourceLabel(`, `.host` read off a view or a status in the model and the three QML files, and every helper `source_host(`, `url_host(` and `host_port_of(`.
+- `Model.hostOf(`: Service.qml's `sourceHost` and `hostForRecord`, and `resolveEpgUrl`'s two (changed); `epgHintVerdict`'s `shown`, the host the Sources row's hint-refusal sentence names for a guide URL the playlist chose (cleared: round 5 names no host in a refusal of a destination the provider chose).
+- The model's other host printers: `sourceView.host`, `sourceDetail`, `sourceAccessibleName`, the IPC `sources` and active-source summaries (source-records.mjs) are the row's RFC host, kept by R32a; `statusHost` reads the helper's status file, now shown at the source (stated: a file written before keeps its host until the next fetch); `formLineHost` and the form's lines are D-SINK-99's, unchanged; `activeSourceLabel`'s fallback to `sourceLabel` runs only with no record and so no URL; the logo consent's busiest host is round 5's.
+- Guide.qml: the loading line (`service.sourceHost`), the empty and failure lines (`service.statusHost`) and their accessible name, the fetching line (now `sourcesProbeLine`), the switch probe's failure line (`r.host`, now `hostForRecord`'s) -- all reached; the form's two lines re-read through `formLineHost`, unchanged.
+- Helper `source_host(`: the sites above (changed); channels.json (cleared, data); `public_source`, `public_state`'s `migrationPending` (cleared: `state source list` keeps R32a's RFC host). `url_host(`: the stream gates' and the relay's decisions (cleared, no print), `fetch_bytes`' `,` test (cleared), `pathHost` and the play-time local-address sentence (round 5's, not touched), and `fallback_channel_name`.
+- `fallback_channel_name` names a typed `play --url` with no name by its host unless `host_withheld` holds, so `http://qqqqqq.x:1234/zzzz@cdn.test/x.ts` typed on a person's own command line names the window `qqqqqq.x`. That is R32a's stated residual (a dotted username before a digits-only password prefix), and test_player pins the narrower predicate on purpose: `http://u:p@cdn.test/live/me@x/1.ts` names `cdn.test`, which the `@` arm would make `Stream`. Not changed here; recorded as an open question for the lead.

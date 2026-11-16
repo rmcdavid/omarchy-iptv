@@ -4906,6 +4906,68 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   }, [[0, M.groupScopeId("Sports"), "Sports"], [0, M.groupScopeId("Sports@HD"), "Sports@HD"], [0, "", "shown"]])
 })()
 
+// D-SINK-109 (2026-11-16): every line that names a source's host withholds
+// it where the Sources form does. The predicate is Model.sourceHostWithheld,
+// held to the helper's source_host_withheld by tests/fixtures/
+// source-host-withheld.json (tests/test_shown_source_host.py runs it), and
+// formHostWithheld asks it of the form's typed text. The printer is
+// sourceShownHost: the guide's loading, empty and failure lines and the IPC
+// status verb read it through Service.sourceHost, the Sources list's probe
+// failure line through Service.hostForRecord, a timed-out guide fetch
+// through resolveEpgUrl's host, and the Sources list's fetching line through
+// sourceView's lineHost (sourcesProbeLine). The row's host stays R32a's RFC
+// host. The Service.qml half runs through the service harness.
+;(function () {
+  const fs = require("fs"), path = require("path")
+  const H = require("./service-harness.js")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const F = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-host-withheld.json"), "utf8"))
+  const W = "[host withheld]"
+  checkCall("D-SINK-109: Model.sourceHostWithheld over the shared source-host-withheld fixture, and which arm holds (urlHostWithheld, addressAtAfterAuthority) as it says",
+    () => F.vectors.map(v => [v.url, M.sourceHostWithheld(v.url),
+      [M.urlHostWithheld(v.url) ? "rfc" : "", M.addressAtAfterAuthority(v.url) ? "at" : ""].filter(Boolean).join(" ")]),
+    F.vectors.map(v => [v.url, v.withheld, v.arms]))
+  checkCall("D-SINK-109: Model.sourceShownHost says `local file` for a path or a file URL, `[host withheld]` where the predicate holds, and hostOf otherwise; the form's own predicate reads the fixture's http vectors alike",
+    () => F.vectors.map(v => {
+      const host = M.hostOf(v.url)
+      const want = host === "local file" ? "local file" : (v.withheld ? W : host)
+      const form = /^https?:/i.test(v.url) ? M.formHostWithheld({ kind: "url", values: { playlist: v.url } }) === v.withheld : true
+      return [v.url, M.sourceShownHost(v.url) === want, form]
+    }), F.vectors.map(v => [v.url, true, true]))
+  const TYPO = "http://qqqqqq:1234/zzzz@cdn.test/get.php"
+  const DOTTED = "http://qqqqqq.x:1234/zzzz@cdn.test/get.php"
+  const PLAIN = "http://cdn.test:8080/get.php?username=qqqqqq&password=zzzzzz"
+  function record(url, extra) {
+    const key = M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+    return Object.assign({ key, url, epgUrl: "", kind: url.charAt(0) === "/" ? "file" : "http", label: "x", labelCustom: true, origin: "cli",
+                           addedAt: 10, lastUsed: 20, fetchedAt: 0, channelCount: 0, groupCount: 0 }, extra || {})
+  }
+  checkCall("D-SINK-109: the Sources list's fetching line names `[host withheld]` for a typo and a dotted-username source, and the host and port otherwise, while the row's host stays the RFC host",
+    () => [TYPO, DOTTED, PLAIN, "/home/x/list.m3u"].map(u => {
+      const view = M.sourceView(record(u), "", 100, "", false, null)
+      return [view.host, view.lineHost, M.sourcesProbeLine(view)]
+    }), [["qqqqqq:1234", W, "Fetching from " + W + M.ELLIPSIS], ["qqqqqq.x:1234", W, "Fetching from " + W + M.ELLIPSIS],
+         ["cdn.test:8080", "cdn.test:8080", "Fetching from cdn.test:8080" + M.ELLIPSIS], ["local file", "local file", "Reading the file" + M.ELLIPSIS]])
+  checkCall("D-SINK-109: the guide URL's printed host (resolveEpgUrl) is `[host withheld]` for a typo the user typed, and the host otherwise",
+    () => [M.resolveEpgUrl({ userUrl: TYPO }).host, M.resolveEpgUrl({ userUrl: "http://epg.test/g.xml" }).host],
+    [W, "epg.test"])
+  function boot(url, epgUrl) {
+    const rec = record(url, { epgUrl: epgUrl || "", labelCustom: false, label: "cdn.test" })
+    const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: rec.key, entryMigrated: true }) + "\n"
+    return { h: H.bootService(svcText, M, { entry: { sourceKey: rec.key, showLogos: false }, stateText: text, host: "lag" }), rec }
+  }
+  checkCall("D-SINK-109: through Service.qml's own bindings and functions -- sourceHost (the guide's loading, empty and failure lines and the IPC status), statusHost's fallback, a timed-out fetch's status for the playlist and the guide, and the probe signal's host (the Sources list's probe failure line) -- a typo and a dotted-username source read `[host withheld]`; an ordinary one names its host",
+    () => [[TYPO, TYPO], [DOTTED, ""], [PLAIN, "http://epg.test/g.xml"]].map(pair => {
+      const b = boot(pair[0], pair[1])
+      const r = b.h.root
+      return [b.h.compileErrors.length, r.sourceHost, r.statusHost, r.statusSummary().sourceHost,
+              JSON.parse(r.helperTimeoutStatus("playlist", false)).sourceHost, JSON.parse(r.helperTimeoutStatus("epg", false)).sourceHost,
+              M.probeFailureLine("Network error", r.hostForRecord(b.rec), "url", "network")]
+    }), [[0, W, W, W, W, W, "Network error from " + W], [0, W, W, W, W, "", "Network error from " + W],
+         [0, "cdn.test", "cdn.test", "cdn.test", "cdn.test", "epg.test", "Network error from cdn.test"]])
+})()
+
 // D-SINK-1, THE OTHER SPELLING. redactUrls got the authority rule in D-SINK-1
 // and sourceLabel did not, so `http://user:p@ss@host/x` labelled itself
 // `http://ss@host` -- the password TAIL in the host position, the exact defect
@@ -8669,7 +8731,9 @@ const recCli = { key: "d5977d8a", url: "https://iptv-org.github.io/iptv/countrie
 const recFile = { key: "b0eed9fb", url: "/srv/tv/channels.m3u", epgUrl: "", kind: "file", label: "channels.m3u", labelCustom: false, origin: "guide", addedAt: 10, lastUsed: local(2026, 9, 3, 12, 0), fetchedAt: 220, channelCount: 12, groupCount: 1 }
 const state4 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: [recFile, recNas, recProvider, recCli] }
 const viewProvider = Model.sourceView(recProvider, "d990c2e4", nowSep)
-check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "",
+check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080",
+  // D-SINK-109: the host the Sources list's fetching line names.
+  lineHost: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "",
   // D-SINK-40: the guide hint's refusal and plain-http state, hosts only.
   epgHintRefused: "", epgHintHost: "", epgHintPlainHttp: false })
 check("sourceView never fetched: channelCount -1, file host is 'local file'", [Model.sourceView(recCli, "", nowSep).channelCount, Model.sourceView(recCli, "", nowSep).cachedAt, Model.sourceView(recFile, "", nowSep).host, Model.sourceView(recFile, "", nowSep).kind, Model.sourceView(recNas, "", nowSep).kind], [-1, 0, "local file", "file", "url"])

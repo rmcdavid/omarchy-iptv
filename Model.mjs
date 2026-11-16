@@ -222,17 +222,17 @@ export {
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
   uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, labelHost,
-  addressAtAfterAuthority, labelSinkText, labelReadsAsAddress,
-  labelHoldsField, labelMayCarryCredential, labelCore, labelDecode,
-  encodeQueryValue, xtreamUrls, validateXtream, pluralGroups, countsLine,
-  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  addressAtAfterAuthority, sourceHostWithheld, sourceShownHost, labelSinkText,
+  labelReadsAsAddress, labelHoldsField, labelMayCarryCredential, labelCore,
+  labelDecode, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
+  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
   EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
   sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, failureFromHost, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
-  logoHaveLess
+  fetchingLine, sourcesProbeLine, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,

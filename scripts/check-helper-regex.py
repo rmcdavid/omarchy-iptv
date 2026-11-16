@@ -313,6 +313,10 @@ REVIEWED = [
      "across whitespace from a URL's own colon would take an `@`, at that value's end, which is where the "
      "walk's next _ATTR_BARE match reads the same runs (_ATTR_KEY_AHEAD, parse_attrs, the review of "
      "e038d58)"),
+    (r"([A-Za-z][A-Za-z0-9+.\-]*)://", "provider",
+     "linear: matched at the start only; the scheme run cannot hold ':' so it backs off at most once "
+     "over its length (_ADDRESS_SCHEME, D-SINK-109: at_after_authority over a source URL, and the "
+     "label reading's scheme clause and authority split over a stored label, D-SINK-100)"),
     (r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", "user",
      "linear: anchored; the scheme run cannot hold ':' and the authority run has nothing after it "
      "(host_port_of)"),

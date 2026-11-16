@@ -1271,10 +1271,12 @@ function epgHintUrl(meta, playlistUrl) {
 function resolveEpgUrl(opts) {
   var o = opts || {}
   var user = str(o.userUrl)
-  if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: hostOf(user), fromPlaylist: false }
+  // D-SINK-109: `host` is printed (the guide's status when the service
+  // stops a fetch at its time limit), so it is the shown host.
+  if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: sourceShownHost(user), fromPlaylist: false }
   var hint = epgHintUrl({ epgUrlHint: o.hint }, o.playlistUrl)
   if (hint === "") return { url: "", origin: EPG_ORIGIN_NONE, host: "", fromPlaylist: false }
-  return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: hostOf(hint), fromPlaylist: true }
+  return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: sourceShownHost(hint), fromPlaylist: true }
 }
 
 // D-SINK-40. What the active Sources row says about the playlist's guide
@@ -1764,6 +1766,34 @@ function addressAuthoritySplit(value) {
 function addressAtAfterAuthority(value) {
   var p = addressAuthoritySplit(value)
   return p !== null && p.after.indexOf("@") !== -1
+}
+
+// D-SINK-109 (2026-11-16, round 2 of the security review; the lead's call
+// under the owner's standing authority of 2026-11-09). The Sources form's
+// own predicate (formHostWithheld, D-SINK-99) over a URL: R32a's
+// urlHostWithheld, or an `@` after the authority at all
+// (addressAtAfterAuthority), which also catches a DOTTED username before a
+// password that starts with digits. The helper's source_host_withheld is the
+// mirror, and one fixture holds both to it (the shared source-host-withheld
+// fixture, dev branch). Every line that names a source's host in a
+// sentence or a status asks it (sourceShownHost); the Sources row's host and
+// the stored label keep the RFC host (R32a, the owner's ruling). The cost is
+// the form's: a valid URL with an `@` in its path or query, such as an
+// e-mail username in an Xtream path, is withheld too.
+function sourceHostWithheld(url) {
+  var s = str(url)
+  return urlHostWithheld(s) || addressAtAfterAuthority(s)
+}
+
+// What a sentence or a status names as a source's host (D-SINK-109):
+// hostOf's `local file` for a path or a `file:` URL, HOST_WITHHELD where
+// sourceHostWithheld holds, and otherwise hostOf. Display only. The helper's
+// shown_source_host is the mirror (its printer lower-cases and drops an IPv6
+// literal's brackets, so only the decision is shared).
+function sourceShownHost(url) {
+  var host = hostOf(url)
+  if (host === "local file") return host
+  return sourceHostWithheld(url) ? HOST_WITHHELD : host
 }
 
 // D-SINK-97 rule c, the parse alone: for a value that rule c publishes, its
@@ -2559,6 +2589,10 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epg
     label: str(s.label),
     kind: kind,
     host: kind === "file" ? "local file" : hostPortOf(s.url),
+    // D-SINK-109: the host the Sources list's fetching line names
+    // (sourcesProbeLine), HOST_WITHHELD where the form would withhold it;
+    // `host` above is the row's, R32a's RFC host.
+    lineHost: kind === "file" ? "local file" : (sourceHostWithheld(s.url) ? HOST_WITHHELD : hostPortOf(s.url)),
     hasEpg: ownEpg || hinted,
     epgFromPlaylist: hinted,
     channelCount: fetched ? Math.max(0, Math.floor(Number(s.channelCount) || 0)) : -1,
@@ -2704,6 +2738,16 @@ function confirmRemoveMessage(label, active) {
 function fetchingLine(host, kind) {
   if (kind === "file") return "Reading the file" + ELLIPSIS
   return "Fetching from " + str(host) + ELLIPSIS
+}
+
+// The Sources list's line while a probe of a stored source runs (D-SRC-04,
+// Guide.sourcesProbeText): fetchingLine over the view's lineHost, so a
+// source whose host the form withholds reads `Fetching from [host
+// withheld]...` where its row names the RFC host (D-SINK-109). Lifted out of
+// Guide.qml so the node suite calls it (rule 12).
+function sourcesProbeLine(view) {
+  var v = view && typeof view === "object" ? view : {}
+  return fetchingLine(v.lineHost !== undefined ? v.lineHost : v.host, v.kind)
 }
 
 // R28e (2026-10-20): `code`, when the result carries one, names a refusal
@@ -2891,8 +2935,9 @@ export {
   maskQuery, maskUrl, accessibleStars, hasAddressLineTerminator,
   hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,
   addressAccessibleHost, LABEL_NAME_RE, labelHost, isDottedQuad,
-  addressAuthoritySplit, addressAtAfterAuthority, addressAuthorityParts,
-  addressAccessibleValue, labelSinkText, labelReadsAsAddress, labelHoldsField,
+  addressAuthoritySplit, addressAtAfterAuthority, sourceHostWithheld,
+  sourceShownHost, addressAuthorityParts, addressAccessibleValue,
+  labelSinkText, labelReadsAsAddress, labelHoldsField,
   labelMayCarryCredential, labelCarriesDelimiter, LABEL_LEAD, LABEL_TRAIL,
   labelCore, labelTokenReadsAsAddress, LABEL_SCHEME_RE,
   labelShapeReadsAsAddress, labelSlashAuthority, labelSchemeSlash,
@@ -2904,8 +2949,8 @@ export {
   EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
   sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
-  logoFailedPath, logoBrokenMark, logoHaveLess
+  fetchingLine, sourcesProbeLine, PROBE_LOCAL_REFUSALS, failureFromHost,
+  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
 }
