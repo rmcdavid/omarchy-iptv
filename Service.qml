@@ -87,8 +87,9 @@ Item {
   // the single control slot: a helper that never exits blocks every later
   // zap and every health check for the rest of the session. Generous next to
   // a ~130 ms run and next to the helper's own --ipc-timeout, because this
-  // is the belt and braces, not the deadline. D-SINK-102: 8 s plus one
-  // question to the player's relay, which `play` now asks (Model says why).
+  // is the belt and braces, not the deadline. D-SINK-102: 8 s plus the two
+  // questions to the player's relay that `play` now asks, its status and the
+  // load's registration (Model says why).
   readonly property int controlTimeoutMs: Model.playerWatchdogMs("play")
   // M5-01 (2.3): the gap between a seek reply and the next seek run.
   readonly property int seekThrottleMs: 300

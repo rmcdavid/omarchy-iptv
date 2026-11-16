@@ -1603,9 +1603,21 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
     # socket reaches, which under a wrapper that backgrounds the real player
     # and exits is the only one left. Which process that is, is the build
     # gate's question.
-    if not wait_for_relay(sock_path, (launched["pid"], player_peer(client)), relay_port):
+    peer = player_peer(client)
+    if not wait_for_relay(sock_path, (launched["pid"], peer), relay_port):
         client.close()
-        stop_ladder(sock_path, [{"pid": launched["pid"], "startTime": proc_start_time(launched["pid"])}], "term", ipc_timeout)
+        # Both of them, from the SIGTERM rung and by pid: the launched pid, and
+        # the process the socket reached (SO_PEERCRED, never a parent read off
+        # /proc), which under a wrapper that backgrounds the real player and
+        # exits is the player itself -- laddering the launched pid alone left
+        # it idle on the socket after a start that answered spawn_failed. The
+        # quit rung is not used: it goes over the socket, to whatever answers
+        # it. still_the_player holds each record to this socket's token, its
+        # uid and the start time read here before any signal.
+        targets = [{"pid": launched["pid"], "startTime": proc_start_time(launched["pid"])}]
+        if peer > 0 and peer != launched["pid"]:
+            targets.append({"pid": peer, "startTime": proc_start_time(peer)})
+        stop_ladder(sock_path, targets, "term", ipc_timeout)
         settle_socket(sock_path)
         raise HelperError("spawn_failed", RELAY_SPAWN_FAILED)
     if carry:

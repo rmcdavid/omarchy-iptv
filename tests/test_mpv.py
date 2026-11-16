@@ -1242,11 +1242,13 @@ class TlsVerificationTest(MpvTestCase):
         self.assertEqual([c["safe"] for c in cases].count(True), 1)
 
     def test_the_relay_pins_forms_are_the_fixtures_read_off_the_player(self):
-        """D-SINK-102: the shared httpProxy vectors, through the
+        """D-SINK-102: the fixture's httpProxy vectors, through the
         shipping read_tls_state over a FakeMpv holding each value: a form
         relay_proxy_held does not hold counts one in `unpinned`, which makes
-        the player unsafe; tests/Model.test.js runs the same vectors through
-        Model.tlsPropertiesSafe. And the name is the fixture's (rule 13)."""
+        the player unsafe. Only the helper runs them: nothing in the model
+        reads `http-proxy`, so there is no JavaScript mirror to hold, and
+        what Model.tlsPropertiesSafe makes of the count is the main cases'.
+        And the name is the fixture's (rule 13)."""
         table = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
         self.assertEqual(helper.MPV_HTTP_PROXY_PROP, table["properties"]["httpProxy"])
         port = table["httpProxy"]["port"]

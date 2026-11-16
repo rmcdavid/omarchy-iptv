@@ -1231,7 +1231,16 @@ class LifecycleTest(unittest.TestCase):
     """The real `player relay` verb, as a subprocess, with a child
     started the way the design's spawn starts the player (a launcher that
     hands it the two listeners at fds 3 and 4, forks the child with
-    PR_SET_PDEATHSIG, and execs the relay in its own session)."""
+    PR_SET_PDEATHSIG, and execs the relay in its own session).
+
+    The LAUNCHER covers the `player relay` verb only, never the spawn: it is
+    a copy of spawn_player's shape, not a call of it, and it makes no
+    PR_SET_CHILD_SUBREAPER call of its own, so the wrapper case below
+    exercises the flag the relay sets at its own start, after its `go` file
+    waited for the relay to answer. The spawn's own call, made before the
+    player is forked, is held by tests/test_relay_player.py's
+    SpawnPlayerTest (a wrapper that backgrounds the player through the
+    shipping `player start`)."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="relay-life-")

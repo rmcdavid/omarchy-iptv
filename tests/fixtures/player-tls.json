@@ -293,7 +293,10 @@
       "player's own relay port, verbatim, or the current file's per-file value, the pin with that load's",
       "token as Basic credentials (measured on mpv 0.41.0: those two forms and nothing else). Any other",
       "value counts one in `unpinned`, which tests/test_mpv.py reads off a FakeMpv holding it through the",
-      "shipping read_tls_state, and which tests/Model.test.js runs through Model.tlsPropertiesSafe."
+      "shipping read_tls_state, beside relay_proxy_held's own answer. The helper alone runs these vectors: nothing",
+      "in the model reads `http-proxy`, so there is no JavaScript mirror, and Model.tlsPropertiesSafe takes only the",
+      "count, whose two answers the cases above state (the node check that ran these vectors computed its input",
+      "from `held` and could not go red; the review of 7c281d8)."
     ],
     "port": 48510,
     "cases": [

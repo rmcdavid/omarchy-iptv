@@ -140,6 +140,12 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
 #   probe   -- a found player that answers mpv-version just inside the bound
 #              and nothing after it (the next request ends the verb), and one
 #              that answers nothing at all.
+#   play    -- (D-SINK-102) the play-time lookup and both of the relay's
+#              questions, the gate's status and the load's registration, at
+#              their bounds, and a player that answers everything at once:
+#              `play`'s 8 s was never a sum of its bounds, so what this walk
+#              holds is what those bounds leave of its watchdog for mpv's
+#              round trips (PlayerWorstPathWalkTest says how much).
 # "Its last poll" is LEARNED from the code, never assumed: a first walk is
 # refused the lock throughout and records when the verb last asked for it, a
 # second is granted it then and refused the socket throughout, recording the
@@ -182,9 +188,11 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     adopting it. `spawned_slow`: how many requests after its handshake the
     new player answers just inside the bound (the carry's sets). Returns
     (virtual seconds, the reply, the signals the found player was sent, what
-    was learned)."""
+    was learned). `play` (D-SINK-102) reaches a running player of this
+    build at once, which answers everything at once, so the time it spends
+    is the lookup's and the relay's alone."""
     clock = _Clock()
-    state = {"phase": "found", "bind_at": None, "pipes": 0}
+    state = {"phase": "play" if verb == "play" else "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
     survivor = {"pid": 777, "startTime": "1"}
     signals = []
@@ -340,6 +348,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
 
     class Ipc(_REAL_IPC):
         def connect(self):
+            if state["phase"] == "play":
+                self.sock = Sock(None)
+                return
             if state["phase"] == "bind":
                 learned["bind_last"] = clock.t - state["bind_at"]
                 if bind_after is None or clock.t < state["bind_at"] + bind_after:
@@ -398,6 +409,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         session = ["--socket", sock, "--cache-dir", folder, "--id", "t:x", "--seq", "3"]
         if verb == "probe":
             helper.player_probe(parser.parse_args(["player", "probe", "--socket", sock]))
+        elif verb == "play":
+            helper.cmd_play(parser.parse_args(["play", "--socket", sock, "--cache-dir", folder, "--id", "t:x"]))
         else:
             extra = ["--from", "term"] if verb == "restart" else []
             helper.player_start(parser.parse_args(["player", verb] + session + extra), verb)
@@ -453,6 +466,27 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertEqual(signals, [15, 9, 15, 9])     # its own ladder, then adopt_or_spawn's
         self.assertGreater(spent, 40.0)
         self.assert_inside_its_watchdog("restart", spent)
+
+    def test_a_play_leaves_mpvs_round_trips_what_its_8_s_left_them(self):
+        """D-SINK-102: `play` asks the relay two questions, the gate's
+        status (feed_gate, player_verdict) and the load's registration
+        (relay_register), each bounded by RELAY_IPC_S, beside the play-time
+        lookup. Walked through the shipping cmd_play with those at their
+        bounds and the player answering at once, what the walk leaves of
+        Model.playerWatchdogMs("play") is what is left for mpv's round
+        trips, and it may not be less than the 8 s left them before the
+        relay (`controlMs` less the lookup, 5 s). Red when the watchdog
+        summed one question (9 s, 4 s left: the review of 7c281d8), and red
+        for a third question asked on the way."""
+        spent, reply, signals, _ = walk_player_verb("play")
+        self.assertTrue(reply and reply.get("ok"), reply)
+        self.assertEqual(signals, [])
+        h = BOUNDS["helper"]
+        self.assertGreater(spent, (h["lookupMs"] + 2 * h["relayIpcMs"]) / 1000.0 - 0.01)   # both questions were asked
+        left = BOUNDS["watchdogMs"]["play"] / 1000.0 - spent
+        self.assertGreaterEqual(left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0,
+                                "play's watchdog leaves mpv's round trips %.3f s, less than the %.3f s its 8 s left them"
+                                % (left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0))
 
     def test_a_probe_that_meets_a_player_gone_quiet_fits_its_watchdog(self):
         for answers, floor in ((1, 5.9), (0, 3.9)):

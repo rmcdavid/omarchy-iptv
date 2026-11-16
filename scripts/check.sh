@@ -541,6 +541,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-98}
 # probe's `relay` field, olderPlayerUnsafe, the destination rules' 5, and
 # the service stopping a relay-less player at the hold's end; 41 of them
 # red on 7c1784c's model and the rest under named mutants; the suite runs 3721.
+# 2026-11-16, dsink102 (the review of 7c281d8): one check dropped, the
+# httpProxy vectors' node half, which computed its input from each vector's
+# own answer and could not go red (a fixture with a vector's answer flipped
+# and another's value changed read 3721 / 0), and one added, `play`'s 8 s
+# pinned to the bounds fixture's controlMs beside its two relay questions
+# (red on the one-question sum); the suite runs 3721.
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
@@ -914,7 +920,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3721}
 # orphan check), the relay pin's shared vectors, the stagger bound and the
 # relay pin's read-back forms; 28 of the 29 red on 7c1784c and every one
 # under a named single-decision mutant; the suite runs 2506.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2506}
+# 2026-11-16, dsink102 (the review of 7c281d8): 2506 -> 2509 -- a
+# backgrounded player is its relay's child through the shipping start (red
+# under the spawn's subreaper call removed, 4 of 4), a relay that never
+# answers stops that player too (red on 7c281d8), and the walk of `play`
+# (red on the one-question sum and under a third question); the suite runs
+# 2509.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2509}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

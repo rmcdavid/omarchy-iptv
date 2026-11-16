@@ -6754,6 +6754,12 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
     [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + (typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : "none")),
      Model.PLAYER_WATCHDOG_MARGIN_MS, Model.PLAYER_BIRTH_EDGE_MS],
     [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + PB.watchdogMs[k]), PB.marginMs, PB.watchdogMs[""]])
+  // D-SINK-102: `play`'s fixed 8 s is the fixture's controlMs, which the
+  // python walk of `play` holds mpv's round trips to (tests/test_player_bounds.py);
+  // a name joined to a number only by a copy is checked here (rule 13).
+  checkCall("D-SINK-102: the control slot's fixed watchdog before the relay is the fixture's controlMs, and play's adds its two relay questions to it", () =>
+    [Model.CONTROL_WATCHDOG_MS, typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs("play") - Model.CONTROL_WATCHDOG_MS : "none"],
+    [PB.controlMs, 2 * PB.helper.relayIpcMs])
   checkCall("D-PLY-35: every verb's bound is past its own deadlines -- a start past lock + spawn + first load (the board's 14 s) plus a request, a restart past that plus its ladder from term, a probe past three requests -- and every one is past what the old 12 s let a start have", () => {
     const h = PB.helper, w = k => typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : PB.previousMs
     return [w("start") > PB.boardMs + h.ipcMs,
@@ -7291,12 +7297,13 @@ const tlsFixture = JSON.parse(require("fs").readFileSync(require("path").join(__
 checkCall("tlsPropertiesSafe: the shared fixture, every case, by name",
   () => tlsFixture.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(c.verify, c.optionCount, c.unpinned)),
   tlsFixture.cases.map(c => c.name + ": " + c.safe))
-// D-SINK-102: the relay pin's forms, read by the helper into `unpinned` (one
-// for a value it does not hold, tests/test_mpv.py over the same vectors), and
-// what that count makes of an otherwise safe player here.
-checkCall("tlsPropertiesSafe: the relay pin's forms, as the helper folds them into unpinned (the shared httpProxy vectors)",
-  () => tlsFixture.httpProxy.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(true, 0, c.held ? 0 : 1)),
-  tlsFixture.httpProxy.cases.map(c => c.name + ": " + c.held))
+// D-SINK-102: the fixture's `httpProxy` vectors are run by the helper alone
+// (tests/test_mpv.py, read_tls_state and relay_proxy_held): nothing in the
+// model reads `http-proxy`, so there is no mirror here to hold to them, and
+// what the helper's count makes of an otherwise safe player is the cases
+// above (unpinned 0 safe, 1 not). The check that stood here computed its
+// input from the fixture's own answer and could not go red (the review of
+// 7c281d8).
 // The fixture earns its keep only if it holds both answers and the readings that
 // cannot be taken at all.
 check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both absent readings",

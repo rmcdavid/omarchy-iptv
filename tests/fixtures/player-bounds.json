@@ -33,11 +33,16 @@
     "  (a restart's own ladder can leave a player in uninterruptible sleep, and adopt_or_spawn then meets it as a",
     "  start does: probed and laddered from quit. Corrected by the recheck from 35450, which left that path out.)",
     "  probe   = max(3i, settleLockMs + lockPollMs + settleConnectMs) + relayIpcMs + marginMs = max(6000, 750) + 1000 + 5000 = 12000",
-    "  play    = 8000 + relayIpcMs = 9000: the control slot's watchdog over one `play`, its fixed 8 s plus one relay question",
+    "  play    = controlMs + 2 relayIpcMs = 8000 + 2000 = 10000: the control slot's watchdog over one `play`, its fixed 8 s",
+    "  (controlMs, Model.CONTROL_WATCHDOG_MS) plus its two relay questions, the gate's status and the load's registration. So",
+    "  the lookup and the relay take 5 s of it and mpv's round trips keep the 5 s the 8 s left them before the relay; the walk",
+    "  of `play` holds that. It first summed one question, which left them 4 s (the review of 7c281d8).",
     "  (relayStaggerMs is in no sum: the relay starts its next connect attempt that long after one that has not answered,",
     "  inside the player's own load, which no verb waits on; a dead first answer costs a channel that much, not RELAY_CONNECT_S.)",
     "tests/test_player_bounds.py also WALKS the shipping verbs' worst paths under a virtual clock and holds each",
-    "inside its `watchdogMs` less `marginMs`, so the composition is checked against the code and not only the leaves.",
+    "inside its `watchdogMs` less `marginMs`, so the composition is checked against the code and not only the leaves;",
+    "`play`, whose 8 s was never a sum of its bounds, is walked with every bound of the helper's own at that bound and",
+    "held to leave mpv's round trips at least `controlMs` less `lookupMs`.",
     "`boardMs` is the sum the board row named (lock + spawn + first load), which the old 12 s was under;",
     "`previousMs` is that 12 s."
   ],
@@ -76,12 +81,13 @@
     "relayStaggerMs": ["RELAY_ATTEMPT_STAGGER_S", "s"]
   },
   "marginMs": 5000,
+  "controlMs": 8000,
   "watchdogMs": {
     "start": 58250,
     "restart": 57450,
     "probe": 12000,
     "": 12000,
-    "play": 9000
+    "play": 10000
   },
   "boardMs": 14000,
   "previousMs": 12000

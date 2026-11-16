@@ -636,11 +636,24 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
             os.environ[name] = old
 
     def reap(self):
+        # Only the holders of this test's own scratch socket token, each
+        # signalled through a pidfd opened and then checked against that token,
+        # so a pid that exits and is reused between the scan and the signal is
+        # never reached (the rule since 2026-11-15: never signal a pid without
+        # its command line checked through a pidfd).
+        token = os.fsencode("--input-ipc-server=%s" % self.sock)
         for record in helper.find_player(self.sock):
             try:
-                os.kill(record["pid"], signal.SIGKILL)
+                fd = os.pidfd_open(record["pid"])
+            except OSError:
+                continue
+            try:
+                if token in proc_items(record["pid"]):
+                    signal.pidfd_send_signal(fd, signal.SIGKILL)
             except OSError:
                 pass
+            finally:
+                os.close(fd)
 
     def sleeper(self, ignore_term=False, launch="current"):
         """A real process carrying a player's launch argv for this socket

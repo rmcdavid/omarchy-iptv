@@ -337,6 +337,60 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         self.assertGreaterEqual(time.monotonic() - started, helper.RELAY_START_S)
         self.assertEqual(helper.find_player(self.sock), [])
 
+    def background_wrapper(self):
+        """The stub mpv renamed `mpv-real`, behind a /bin/sh `mpv` on PATH that
+        starts it in the background and exits at once: D-PLY-55's second
+        wrapper shape, in which the pid the spawn launched is gone within
+        milliseconds and the player is the process the socket reaches."""
+        stub = os.path.join(self.bin, "mpv")
+        real = os.path.join(self.bin, "mpv-real")
+        os.rename(stub, real)
+        pathlib.Path(stub).write_text('#!/bin/sh\n%s %s "$@" </dev/null >/dev/null 2>&1 &\nexit 0\n'
+                                      % (sys.executable, real), encoding="utf-8")
+        os.chmod(stub, 0o755)
+
+    def test_a_wrapper_that_backgrounds_the_player_leaves_it_its_relays_child(self):
+        """The spawn makes the relay a child subreaper BEFORE it forks the
+        player, so a wrapper that backgrounds the real player and exits at
+        once -- before the relay's interpreter has started, which is when the
+        relay sets the flag again itself -- leaves the player the relay's
+        child, and the start answers ok. Without the spawn's own call the
+        player is reparented above the relay, which is then no ancestor of it,
+        and the start answers spawn_failed with the player left running
+        (measured by the review of 7c281d8). The parent is read off the
+        kernel, and only read."""
+        self.background_wrapper()
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        found = helper.find_player(self.sock)
+        self.assertEqual(len(found), 1, found)          # the wrapper has exited
+        # Asked even of a start that answered ok: a relay that happened to
+        # answer as the launched pid's ancestor before it reaped that pid
+        # would pass the spawn's own check with the player elsewhere.
+        parent = helper.proc_parent(found[0]["pid"])
+        argv = ([os.fsdecode(a) for a in pathlib.Path("/proc/%d/cmdline" % parent).read_bytes().split(b"\0") if a]
+                if parent > 1 else [])
+        self.assertEqual(argv[-3:], ["player", "relay", "--child=%d" % payload["pid"]],
+                         "the socket's player is not its relay's child")
+
+    def test_a_relay_that_never_answers_stops_a_backgrounded_player_too(self):
+        """The relay never answers (a process that only sleeps where it would
+        run) and a wrapper backgrounded the player: the launched pid is the
+        wrapper, gone when the spawn gives up, and the player is the process
+        the socket reaches. The spawn ladders both, so a start that answered
+        spawn_failed leaves no player on the socket; laddering the launched
+        pid alone left this one idle there (the review of 7c281d8). The
+        sleeper exits by itself; nothing signals it."""
+        self.background_wrapper()
+        with mock.patch.object(test_player.helper, "relay_argv",
+                               lambda: [sys.executable, "-I", "-c", "import time; time.sleep(%d)" % (
+                                   int(helper.RELAY_START_S) + 2)]):
+            code, payload, _, stderr = self.player_start()
+        self.assertEqual((code, payload["error"]["code"], payload["error"]["message"]),
+                         (1, "spawn_failed", helper.RELAY_SPAWN_FAILED), stderr)
+        self.assertEqual(len(self.spawned_launches()), 1, "the player never started")
+        self.assertEqual(helper.find_player(self.sock), [])
+
     def test_a_relay_socket_a_killed_relay_left_is_removed_by_a_stop(self):
         os.makedirs(self.runtime, 0o700, exist_ok=True)
         path = helper.relay_socket_path(self.sock)

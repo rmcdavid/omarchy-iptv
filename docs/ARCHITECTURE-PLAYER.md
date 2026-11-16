@@ -3935,7 +3935,14 @@ with literal targets only (20.9).
    of the pid the spawn reported, or of the process the socket reaches,
    which under a wrapper that backgrounds the real player is the only one
    left, on the pinned port, for this build). A relay that never answers is
-   `spawn_failed`, and the player is laddered down by its pid.
+   `spawn_failed`, and the player is laddered down from SIGTERM by pid: the
+   pid the spawn reported and the process the socket reaches (SO_PEERCRED,
+   never a parent read off `/proc`), each held to this socket's token, its
+   uid and its start time before any signal. Laddering the reported pid
+   alone left a wrapper's backgrounded player idle on the socket after the
+   start had answered `spawn_failed` (the review of 7c281d8, measured; the
+   suite's SpawnPlayerTest holds both this and the subreaper call of step
+   3 through the shipping `player start` and a backgrounding wrapper).
 
 The relay listens on its control socket AGAIN at its start, because
 SO_PEERCRED names the process that last called listen(2) on it, and the
@@ -4003,8 +4010,12 @@ set, so the string is the only reading). Anything else refuses the load
 before any channel line (`tls_unverified`). It is never SET at runtime: a
 change during a file would turn the stream's next segment away, and under
 `--idle=once` could end the player before the load arrived. The player-tls
-fixture's `httpProxy` vectors hold `relay_proxy_held` and
-`Model.tlsPropertiesSafe` together. `http-proxy` also joins
+fixture's `httpProxy` vectors are run by the helper's `read_tls_state` and
+`relay_proxy_held` only: nothing in the model reads `http-proxy`, so there
+is no JavaScript mirror, and `Model.tlsPropertiesSafe` takes only the count,
+whose two answers the fixture's main cases state. (A node check that ran
+these vectors computed its input from each vector's own answer and could
+not go red; it was dropped after the review of 7c281d8.) `http-proxy` also joins
 `PER_FILE_TLS_OPTIONS`, so on a player launched without the pin a per-file
 profile touching it counts as a threat.
 
@@ -4198,9 +4209,17 @@ walked by tests/test_player_bounds.py against the shipping verbs): a start
 and a restart add `relayStartMs + 3 * relayIpcMs` (the adopted player's
 status, the registration, the first-load count), 58,250 and 57,450 ms; a
 probe adds one `relayIpcMs`, 12,000 ms; `play`'s fixed 8 s control slot
-gains one, 9,000 ms (`Service.qml` `controlTimeoutMs` is now
-`Model.playerWatchdogMs("play")`). `relayStaggerMs` is in no sum: it delays
-a connection inside the player's own load, which no verb waits on.
+(`Model.CONTROL_WATCHDOG_MS`, the fixture's `controlMs`) gains two, the
+gate's status and the load's registration, 10,000 ms (`Service.qml`
+`controlTimeoutMs` is now `Model.playerWatchdogMs("play")`). That 8 s was
+never a sum of `play`'s bounds, so the walk of `play` (the lookup and both
+relay questions at their bounds, the player answering at once) holds a
+different thing: what they leave of the watchdog for mpv's round trips may
+not be less than the 5 s the 8 s left them before the relay. It first
+gained one question, 9,000 ms, which left them 4 s unstated (the review of
+7c281d8; red on that number, and red for a third question). `relayStaggerMs`
+is in no sum: it delays a connection inside the player's own load, which no
+verb waits on.
 
 What it costs to run (decision 1): the branch's relay, idle with one child,
 held 22.3 MB resident and two threads (the main loop and the reaper),

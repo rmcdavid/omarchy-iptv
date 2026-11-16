@@ -88,10 +88,14 @@ function healthTick(skips, busy) {
 //     up to relayStartMs, and a start or a restart asks a relay three more
 //     questions, each inside relayIpcMs: the adopted player's status
 //     (player_verdict), the load's registration and the first-load count. A
-//     probe asks one (the relay field). `play` registers its load and asks
-//     the gate's status, both inside one relayIpcMs each, and its fixed 8 s
-//     (CONTROL_WATCHDOG_MS, the control slot's) gains one of them: with the
-//     3 s lookup, 4 s of it are now bounds of the helper's own
+//     probe asks one (the relay field). `play` asks two, each inside one
+//     relayIpcMs: the gate's status (feed_gate, player_verdict) and the
+//     load's registration (relay_register). Its fixed 8 s
+//     (CONTROL_WATCHDOG_MS, the control slot's watchdog before the relay)
+//     gains both, so with the 3 s lookup 5 s of the 10 s are bounds of the
+//     helper's own and mpv's round trips keep the 5 s the 8 s left them
+//     (the player-bounds walk of `play`, dev branch, holds that; it first
+//     gained one, which left them 4 s, found by the review of 7c281d8)
 // What is NOT summed is every other request at its bound: a request that
 // reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
 // answering each of a start's twenty-odd requests just inside 2 s could run a
@@ -119,7 +123,7 @@ var PLAYER_BOUNDS = {
   relayStaggerMs: 200     // RELAY_ATTEMPT_STAGGER_S: a dead answer delays the relay's next by this (not summed)
 }
 // The control slot's watchdog over one `play` or `status` before D-SINK-102,
-// which `play` extends by one relay question (playerWatchdogMs("play")).
+// which `play` extends by its two relay questions (playerWatchdogMs("play")).
 var CONTROL_WATCHDOG_MS = 8000
 var PLAYER_WATCHDOG_MARGIN_MS = 5000
 var PLAYER_BIRTH_EDGE_MS = 12000
@@ -151,7 +155,7 @@ function playerWatchdogMs(kind) {
   if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "play") return CONTROL_WATCHDOG_MS + b.relayIpcMs
+  if (k === "play") return CONTROL_WATCHDOG_MS + 2 * b.relayIpcMs
   if (k === "") return PLAYER_BIRTH_EDGE_MS
   return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
 }
