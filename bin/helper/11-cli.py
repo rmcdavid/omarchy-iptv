@@ -372,9 +372,134 @@ def cmd_clipboard(args: argparse.Namespace) -> int:
 
 
 # -------------------------------------------------------------- parser
+#
+# D-SINK-106 (2026-11-16). argparse's own error() printed the message it was
+# handed, and that message quotes what did not parse: an unknown flag with
+# the value after it (`unrecognized arguments: --retired-flag g:...`), a
+# number it could not read (`invalid int value: '...'`), a choice, an
+# ambiguous prefix with its `=value`. The shell hands `player start` and
+# `player restart` their private arguments in OMARCHY_IPTV_ARGS (D-SINK-47,
+# -48) and writes the helper's stderr to the journal, so a usage error was a
+# way for a value the argv was kept free of to reach it whole. Every parser
+# of this helper is a HelperArgumentParser (add_subparsers builds each verb's
+# with the class of the parser it hangs off; the `parents` parsers only lend
+# their actions), and its error() names the kind of error from argparse's
+# own templates and at most USAGE_ERROR_MAX_NAMES option strings this
+# parser's tree DEFINES that the message holds as whole words -- never a
+# value, an unknown option-shaped token included. Exit 2 and no stdout reply,
+# as before.
+USAGE_ERROR_MAX_NAMES = 3
+# (how argparse's message starts once its `argument <name>: ` is cut, what
+# the line says). The phrase printed is always this table's, never the
+# message's, so a value cannot choose it.
+USAGE_ERROR_KINDS = (
+    ("unrecognized arguments:", "unrecognized arguments"),
+    ("invalid choice:", "invalid choice"),
+    ("the following arguments are required:", "the following arguments are required"),
+    ("one of the arguments ", "one of these arguments is required"),
+    ("ambiguous option:", "ambiguous option"),
+    ("not allowed with argument ", "these options cannot be given together"),
+    ("expected ", "an option is missing its value"),
+    ("ignored explicit argument ", "an option that takes no value was given one"),
+    ("unexpected option string:", "unexpected option string"),
+)
+USAGE_ERROR_DEFAULT_KIND = "the arguments did not parse"
+
+
+def defined_option_strings(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """Every option string `parser` and the verbs under it define."""
+    names: set[str] = set()
+    seen: set[int] = set()
+    pending = [parser]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        for action in current._actions:
+            names.update(action.option_strings)
+            if isinstance(action, argparse._SubParsersAction):
+                pending.extend(action.choices.values())
+    return frozenset(names)
+
+
+def usage_error_kind(message: str) -> str:
+    """What kind of usage error argparse's `message` reports, as one of
+    USAGE_ERROR_KINDS' fixed phrases. Read from where its template starts
+    (after `argument <name>: `, whose name is the action's own), so a value
+    later in the message cannot pick another phrase."""
+    text = message
+    if text.startswith("argument "):
+        cut = text.find(": ")
+        if cut >= 0:
+            text = text[cut + 2:]
+    for start, kind in USAGE_ERROR_KINDS:
+        if text.startswith(start):
+            return kind
+    if text.startswith("invalid ") and " value: " in text:
+        return "invalid value"
+    return USAGE_ERROR_DEFAULT_KIND
+
+
+def _option_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch in "_-"
+
+
+def usage_error_names(message: str, defined: frozenset[str]) -> list[str]:
+    """At most USAGE_ERROR_MAX_NAMES of `defined` that `message` holds as
+    whole words (no letter, digit, `_` or `-` on either side), in the order
+    the message first holds them. A string is named only because this helper
+    defines it, so a value can at most spell one of the helper's own
+    options, never be printed."""
+    found: list[tuple[int, str]] = []
+    for name in defined:
+        at = message.find(name)
+        while at >= 0:
+            end = at + len(name)
+            before = message[at - 1] if at > 0 else " "
+            after = message[end] if end < len(message) else " "
+            if not _option_word_char(before) and not _option_word_char(after):
+                found.append((at, name))
+                break
+            at = message.find(name, at + 1)
+    found.sort()
+    return [name for _, name in found[:USAGE_ERROR_MAX_NAMES]]
+
+
+def usage_error_line(prog: str, message: str, defined: frozenset[str]) -> str:
+    """The one line a usage error writes after the usage."""
+    names = usage_error_names(message, defined)
+    return "%s: error: %s%s; the values given are not shown\n" % (
+        prog, usage_error_kind(message), " (%s)" % ", ".join(names) if names else "")
+
+
+class HelperArgumentParser(argparse.ArgumentParser):
+    """argparse's parser with an error() that never prints a value
+    (D-SINK-106; the block above says why)."""
+
+    def error(self, message: str):  # never returns: it exits, as the base class does
+        self.print_usage(sys.stderr)
+        sys.stderr.write(usage_error_line(self.prog, message, defined_option_strings(self)))
+        sys.exit(EXIT_USAGE)
+
+
+def refused_verb(parser: argparse.ArgumentParser, argv: list[str]) -> str:
+    """The verb a refused argument list is answered as (its reply's `kind`
+    and its journal line): the first item that is not an option when it is
+    one of this helper's verbs, else "helper". D-SINK-106's sibling: this
+    used to be that item whatever it was, so `--socket <path> player ...` or
+    a value typed first printed the value."""
+    verbs: Any = {}
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            verbs = action.choices
+            break
+    item = next((item for item in argv if not item.startswith("-")), "")
+    return item if item in verbs else "helper"
+
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="omarchy-iptv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = HelperArgumentParser(prog="omarchy-iptv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -638,7 +763,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = helper_arguments(raw, os.environ)
     except HelperError as error:
-        verb = next((item for item in raw if not item.startswith("-")), "helper")
+        verb = refused_verb(parser, raw)
         log("%s: %s" % (verb, error.message))
         emit(error_payload(verb, error))
         return EXIT_USAGE

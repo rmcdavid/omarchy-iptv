@@ -17675,7 +17675,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const startReply = (kind, code, message) => JSON.stringify({ ok: false, kind: "player." + kind, error: { code, message }, id: "t:x", seq: 1 })
   const OTHER_LOCAL = [
     ["start", "no_cache", startReply("start", "no_cache", "This source has no channel list yet; refresh the playlist first.")],
-    ["start", "unknown_channel", startReply("start", "unknown_channel", "channel t:x is not in the playlist cache")],
+    ["start", "unknown_channel", startReply("start", "unknown_channel", "the channel asked for is not in the playlist cache")],
     ["start", "socket_path_blocked", startReply("start", "socket_path_blocked", "the socket path is not a socket")],
     ["start", "spawn_failed", startReply("start", "spawn_failed", "could not start mpv: Resource temporarily unavailable")],
     ["start", "tls_unverified", startReply("start", "tls_unverified", "the player would not verify the stream's certificate")],
@@ -23747,7 +23747,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       const bad = "0123456789ABCDEF0123456789ABCDEF"
       const refused = runSpawn({ command: M.helperArgv(HELPER, ["player", "orphan-check", "--socket", sock, "--owner-pid", "1", "--owner-token", bad, "--grace", "0.01"]), environment: {} })
       return { orphan: [orphan.status, orphan.reply && orphan.reply.reason], probe: [probe.status, probe.reply && probe.reply.ok, probe.reply && probe.reply.running],
-               refused: [refused.status, /not an owner token/.test(refused.stderr), refused.stderr.indexOf(bad) === -1] }
+               // D-SINK-106: a usage error names the option and never the
+               // value; the type's own sentence is not printed either.
+               refused: [refused.status, /\(--owner-token\);/.test(refused.stderr), refused.stderr.indexOf(bad) === -1] }
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true })
     }

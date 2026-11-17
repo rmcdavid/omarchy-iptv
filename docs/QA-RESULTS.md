@@ -20455,3 +20455,70 @@ The design expected the last to go red on `http://cdn.test`-shaped vectors. It d
 - Model comparisons: `uniqueLabel`'s four callers in source-records.mjs (add, edit, an edit's replacement record, the migration's record) and `defaultSourceLabel` take the read-aware check through `uniqueLabel` (changed with it); `parseState` (changed); `validateLabel` (read-aware since D-SINK-98, unchanged).
 - Helper comparisons: `unique_label`'s four callers in 10-state.py and `check_custom_label`'s two (changed with them); `normalize_state` (changed); `normalize_source`'s label cap (cleared: a cap, no comparison).
 - Printers: `public_source` through the reply boundary, the three sentences (changed); every other `label` in a helper sentence is the fetch's own word (`playlist`, `EPG`), cleared. The model's printers have read through `labelSinkText` since D-SINK-98.
+
+## Round 2 of the security review, lane-r2c, 2026-11-16: usage errors, journal ids and the record
+
+Lane-r2c built round 2's steps 5 and 6 on the branch `r2-build`, after lane-r2b's two commits. Every call is the lead's under the owner's standing authority of 2026-11-09. "Red on the commit before" means the new and changed tests were run against a `git archive` of that commit with only the test files copied in. A mutant is one decision of the shipping code broken on a scratch copy of the tree (the helper resealed), with the new and changed tests run. No cage, no live scenario, no player and no name lookup was run; every helper run in the new tests is a process with a scratch runtime folder and cache, and none gets as far as doing anything.
+
+### D-SINK-106 and D-SINK-107's journal half: a usage error names options, never values, and the journal names no channel id
+
+**What changed.**
+- bin/helper/11-cli.py: `HelperArgumentParser`, argparse's parser with its own `error()`, is the root parser's class, so every verb's parser is one too (`add_subparsers` builds a verb's parser with the class of the one it hangs off; the three `parents` parsers only lend their actions). `error()` prints the static usage and one line, `<prog>: error: <kind> (<names>); the values given are not shown`, and exits 2, as argparse's own did, with nothing on stdout. `<prog>` is built from the parsers' own names, never from argv. `usage_error_kind` returns one of `USAGE_ERROR_KINDS`' fixed phrases, matched where argparse's template starts (after its `argument <name>: `, whose name is the action's own), so a value later in the message cannot choose the phrase; `usage_error_names` returns at most three option strings the parser's tree defines (`defined_option_strings`) that the message holds as whole words, in the order it holds them.
+- The sibling, in the same file: when the private list is refused (`bad_arguments`, before any verb runs), the reply's `kind` and the journal line used to be the first argv item that is not an option, whatever it was. `refused_verb` names it only when it is one of the helper's verbs, else `helper`; the shell's own `player start --args-from-env` is still answered as `player`.
+- bin/helper/06-failed.py: `find_channel`'s refusal says `the channel asked for is not in the playlist cache`; the reply's `id` still names the channel.
+- bin/helper/08-player-verbs.py: `stand_down_note` compares the two channels as before and prints neither: `would have applied this start's channel` (or `an unnamed stream`), then `the player is on that same channel` or `on another channel`, with the writer and entry as before.
+- No new pattern: the names are found with `str.find` and a boundary test, so the helper regex guard's table is unchanged.
+
+**What the old helper printed** (3e78cc3, measured through the new tests):
+
+| Command line | stderr's last line |
+|---|---|
+| `player start --args-from-env`, the private list ending `--retired-flag g:qqqqqq:zzzzzz@cdn.test` | `omarchy-iptv: error: unrecognized arguments: --retired-flag g:qqqqqq:zzzzzz@cdn.test` |
+| `play --id t:a --since qqqqqq:zzzzzz` | `omarchy-iptv play: error: argument --since: invalid int value: 'qqqqqq:zzzzzz'` |
+| `state qqqqqq:zzzzzz` | `omarchy-iptv state: error: argument action: invalid choice: 'qqqqqq:zz...` |
+| `player probe --mpv-arg=--http-header-fields=Authorization: Bearer zzzzzz` | `omarchy-iptv: error: unrecognized arguments: --mpv-arg=--http-header-fields=Authorization: Bearer zzzzzz` |
+| `play --id t:a --zzzzzz-qqqqqq` | `omarchy-iptv: error: unrecognized arguments: --zzzzzz-qqqqqq` |
+| `qqqqqq:zzzzzz --args-from-env` (no list) | reply `kind` `qqqqqq:zzzzzz`, and the journal line `omarchy-iptv: qqqqqq:zzzzzz: ...` |
+| `play --id u:d4c55ad5x` against a cache without it | `channel u:d4c55ad5x is not in the playlist cache` |
+
+And now, for the same lines: `omarchy-iptv: error: unrecognized arguments; the values given are not shown`, `omarchy-iptv play: error: invalid value (--since); ...`, `omarchy-iptv state: error: invalid choice; ...`, `omarchy-iptv: error: unrecognized arguments (--mpv-arg); ...` (the option is start's, so it is the helper's own), `omarchy-iptv: error: unrecognized arguments; ...`, `kind` `helper`, and `the channel asked for is not in the playlist cache`.
+
+**Red first** (3e78cc3, lane-r2b's last commit):
+
+| Suite | On 3e78cc3 | On this tree |
+|---|---|---|
+| tests/test_usage_errors.py (new, 17 tests: 15 for D-SINK-106, 2 for D-SINK-107) | 17 of 17 red, 4 of them errors (no `defined_option_strings`, `usage_error_names`, `usage_error_kind`, `usage_error_line`, `HelperArgumentParser`); 13 failing with 19 failures across their subtests: every value above printed, the line not in the new form, the reply `kind` `qqqqqq:zzzzzz`, the refusal naming `u:d4c55ad5x`, the note naming both ids | 17 of 17 green |
+| tests/test_player.py, the changed checks (OwnerTokenTest's shared-fixture test, OrderingTest's two stand-down lines, StandDownNoteTest's six) | 7 of 9 red: the owner-token check asks for `(--owner-token)` where the old line printed the type's sentence; the two stand-down lines and four of the note's checks asserted the ids, and now assert their absence. The note's other two (a load with no stash, a zap that carried a URL) name no id on either tree | 9 of 9 green |
+| tests/test_mpv.py, `test_unknown_channel_never_touches_mpv` | red: it asserted `t:nope` on stderr, and now asserts its absence | green |
+
+The node suite changes two checks and adds none, so its count does not move. D-PLY-64's join-by-call check runs the shipping helper's orphan check with a bad token and asked for the type's sentence on stderr; it now asks for `(--owner-token);`, and is red on 3e78cc3 (1 of 3749) -- the rule-15 search of the tests for argparse's wording missed it, and the first gate run of this step went red on it. And a reply the shell's start-failure routing is fed (`OTHER_LOCAL`) carries the helper's new sentence; nothing reads the message.
+
+**Mutants**, against tests/test_usage_errors.py, test_player's OwnerTokenTest fixture test and StandDownNoteTest, and test_mpv's unknown-channel test (25 tests), each red:
+
+| Mutant | Tests red |
+|---|---|
+| `error()` prints argparse's message raw | 11 |
+| every dash token in the message named, not only the defined ones | 8 |
+| no whole-word test (`-h` is then named inside `--http-header-fields`) | 2 |
+| the kind found anywhere in the message, not where the template starts | 1 |
+| no bound on the names | 2 |
+| the root built by argparse's own parser | 12 |
+| the player's verbs built by argparse's own parser (`parser_class=`) | 5 |
+| `error()` exits 1 | 11 |
+| `error()` also writes a reply on stdout | 10 |
+| `refused_verb` takes the first item, whatever it is | 1 |
+| the refusal names its id again | 2 |
+| the note names the other channel's id again | 4 |
+| the note names its own id again | 3 |
+| the note no longer compares the pair (`same` never said) | 2 |
+
+**Measured beyond the design.**
+- *The line names the kind as well.* The design's line was `the arguments did not parse (<names>)`. It now carries one of a fixed set of phrases taken from argparse's own templates (`unrecognized arguments`, `invalid choice`, `invalid value`, `the following arguments are required`, `ambiguous option`, ...), matched where the template starts. A person reads what went wrong, and the two harness checks that read a usage error's words to tell an absent verb from a refusal (scripts/dev-harness/logo-scenario.sh V1 and config-mode-scenario.sh V1, which grep `invalid choice` or `unrecognized arguments`) read the same words they read before.
+- *A help request is not a usage error.* `-hqqqqqq` is argparse's `-h` with a joined value: it prints the help and exits 0, with nothing of the value in it. The first draft of the dash-value test counted it as a refusal and went red on this tree for that reason; the case is gone.
+- *The design's (e) is unrecognized, not a value error.* `player probe` defines no `--mpv-arg`, so the whole token is one unrecognized argument; `--mpv-arg` is named because `player start` and `player restart` define it.
+
+**Rule 15.** I searched every place that turns a command line into text, and every journal line or refusal that interpolates an id, by shape.
+- Parsers: every `argparse.ArgumentParser(` in bin/helper (the root, changed; the three `parents` parsers, which only lend actions, cleared), every `add_subparsers(` (six, none naming a `parser_class`, so each builds `HelperArgumentParser`s; a test walks the whole tree), every `parse_args` / `parse_known_args` (main's one), every `.error(` call (none), every `ArgumentTypeError` (`owner_token_arg`, a fixed sentence, now not printed either), `deprecated=` (none, so argparse's own warning path is never reached).
+- main()'s other refusal before a verb runs: the `helper_arguments` refusal (changed, `refused_verb`); its sentences are fixed text.
+- Ids in the helper's journal and refusals: every `log(` and `HelperError(` whose text is interpolated. `find_channel` and `stand_down_note` (changed); 10-state.py's three dropped-source lines name a source's key, by design (decision 6, stated in D-SINK-107's open half); the playlist's remap line names counts; the rest name hosts, codes, numbers or strerror text.
+- The shell's journal lines: Service.qml's start-failure line relays the reply's reason (now id-free from the helper); the cache job line names a job's arguments, a source's key among them (by design, stated); Guide.qml's logo-failure line names the logo's cache file, whose name is a hash of the logo's address (stated in D-SINK-107's open half, not changed: the re-derivation is that row's open half).

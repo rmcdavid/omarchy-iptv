@@ -1086,7 +1086,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3749}
 # 13 single-decision mutants red, the critique's two each on the sweep
 # (QA-RESULTS "Round 2 of the security review, lane-r2b"); the suite runs
 # 2646, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2646}
+# 2026-11-16, lane-r2c (round 2, D-SINK-106, D-SINK-107): 2646 -> 2663 --
+# tests/test_usage_errors.py's 17: every kind of usage error the helper's
+# verbs can raise, on the command line and in the private list, naming its
+# options and no value, the whole of stderr the same whatever the value,
+# the refused private list answered as a verb, every parser in the tree the
+# helper's, the names and the kind read directly, and the two journal lines
+# that named a channel id. All 17 red on 3e78cc3's helper, 14
+# single-decision mutants red (QA-RESULTS "Round 2 of the security review,
+# lane-r2c"); the suite runs 2663, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2663}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

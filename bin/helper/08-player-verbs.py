@@ -1207,8 +1207,16 @@ def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> 
     complaint ("I pressed one thing and got another") in the two fields the
     shell's own repair compares. The one intent number is kept, named once, as
     the handle that ties the line to the shell's `player.seq`.
+
+    D-SINK-107 (2026-11-16): the pair is still compared and no longer
+    printed. A `u:` id is an unkeyed 32-bit hash of the stream's address,
+    credentials and all, and this line goes to the journal; so it says
+    whether the player is on the SAME channel this start would have applied
+    or ANOTHER one, and who put it there. Which channels they are, the reply
+    says: its `id` and `playing.id`.
     """
-    mine = str(target.get("id") or "") or "an unnamed stream"
+    mine = str(target.get("id") or "")
+    applied = "this start's channel" if mine else "an unnamed stream"
     theirs = str(newer.get("id") or "")
     entry = newer.get("entryId")
     entry = entry if isinstance(entry, int) and not isinstance(entry, bool) and entry > 0 else None
@@ -1216,7 +1224,7 @@ def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> 
     if theirs and theirs == mine:
         where = "the player is on that same channel"
     elif theirs:
-        where = "the player is on %s" % theirs
+        where = "the player is on another channel"
     elif writer:
         where = "the player is on an unnamed stream"
     else:
@@ -1230,7 +1238,7 @@ def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> 
         where += ", written by %s" % writer
     elif entry is not None:
         where += ", entry %d" % entry
-    intent = "intent %d would have applied %s" % (seq, mine) if seq > 0 else "it would have applied %s" % mine
+    intent = "intent %d would have applied %s" % (seq, applied) if seq > 0 else "it would have applied %s" % applied
     return ("a newer channel change reached the player first (%s; %s); left it playing"
             % (intent, where))
 

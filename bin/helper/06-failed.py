@@ -760,10 +760,18 @@ def load_channels(directory: str) -> list[dict[str, Any]]:
 
 
 def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
+    """The cached channel whose id is `wanted`.
+
+    D-SINK-107 (2026-11-16): the refusal names no id. The sentence reaches
+    the journal (the verb's own log line, and the shell's `failed:` line
+    over the reply), and an id is not always a name: a `u:` id is an
+    unkeyed 32-bit hash of the stream's address, credentials and all, and a
+    `t:` id an older parse made can hold a credential whole (D-SINK-111).
+    The reply's own `id` field still says which channel was asked for."""
     for channel in channels:
         if isinstance(channel, dict) and channel.get("id") == wanted:
             return channel
-    raise HelperError("unknown_channel", "channel %s is not in the playlist cache" % wanted)
+    raise HelperError("unknown_channel", "the channel asked for is not in the playlist cache")
 
 
 def header_values(headers: dict[str, Any]) -> tuple[str, str, list[str]]:

@@ -892,7 +892,9 @@ class PlayTest(MpvTestCase):
         self.assertEqual(payload["kind"], "play")
         self.assertEqual(payload["error"]["code"], "unknown_channel")
         self.assertEqual(payload["id"], "t:nope")
-        self.assertIn("t:nope", stderr)
+        # D-SINK-107: the journal line names no id; the reply's `id` does.
+        self.assertNotIn("t:nope", stderr)
+        self.assertIn("the channel asked for is not in the playlist cache", stderr)
         time.sleep(0.05)
         self.assertEqual(server.commands, [])
 

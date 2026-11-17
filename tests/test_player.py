@@ -3217,7 +3217,9 @@ class OwnerTokenTest(PlayerTestCase):
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
             helper.main(["player", "orphan-check", "--socket", self.sock, "--owner-pid", "1", "--owner-token", bad])
         self.assertEqual(caught.exception.code, 2)
-        self.assertIn("not an owner token", err.getvalue())
+        # D-SINK-106: a usage error names the option and never the value;
+        # the type's own sentence is a message, so it is not printed either.
+        self.assertIn("(--owner-token)", err.getvalue())
         self.assertNotIn(bad, err.getvalue())
 
 
@@ -3437,26 +3439,27 @@ class OrderingTest(PlayerTestCase):
         self.assertFalse(payload["applied"], err)
         return payload, err
 
-    def test_the_stand_down_line_names_the_channel_given_up_and_the_one_left_playing(self):
+    def test_the_stand_down_line_says_the_player_is_on_another_channel_and_names_neither(self):
         # D-CL-1. The line used to end `(intent %d over %d)` and those two
         # numbers are equal by construction, so it could never say what it was
-        # added to say. THIS is the constructed case where the two values it
-        # reports now do differ: the start carries bbc1, the zap that beat it
-        # carries espn, and the line names both.
+        # added to say. THIS is the constructed case where the two channels
+        # differ: the start carries bbc1, the zap that beat it carries espn.
+        # D-SINK-107 (2026-11-16): the line compares the pair and names
+        # neither id (a `u:` id is a hash of the stream's address and this
+        # line is the journal's); the reply names both.
         payload, err = self.stand_down("t:espn.us")
         line = [text for text in err.splitlines()
                 if "a newer channel change reached the player first" in text]
         self.assertEqual(len(line), 1, err)
         line = line[0]
-        self.assertIn("intent 9 would have applied t:bbc1.uk", line)
-        self.assertIn("the player is on t:espn.us, written by play as entry 1", line)
+        self.assertIn("intent 9 would have applied this start's channel", line)
+        self.assertIn("the player is on another channel, written by play as entry 1", line)
         self.assertIn("left it playing", line)
-        # The half that makes it a diagnostic rather than decoration: the two
-        # channels it reports are different strings, in a line whose predecessor
-        # printed the same number twice.
+        # The two channels are different strings in the reply, and the line
+        # that compares them prints neither.
         self.assertNotEqual(payload["id"], payload["playing"]["id"])
-        self.assertIn(payload["id"], line)
-        self.assertIn(payload["playing"]["id"], line)
+        self.assertNotIn(payload["id"], line)
+        self.assertNotIn(payload["playing"]["id"], line)
         # And the number that could not vary is gone rather than relabelled.
         self.assertNotIn("over", line)
         self.assertEqual(len(re.findall(r"intent \d+", line)), 1, line)
@@ -3495,10 +3498,10 @@ class OrderingTest(PlayerTestCase):
         payload, err = self.stand_down("t:bbc1.uk")
         line = [text for text in err.splitlines()
                 if "a newer channel change reached the player first" in text][0]
-        self.assertIn("intent 9 would have applied t:bbc1.uk", line)
+        self.assertIn("intent 9 would have applied this start's channel", line)
         self.assertIn("the player is on that same channel, written by play as entry 1", line)
         self.assertEqual(payload["id"], payload["playing"]["id"])
-        self.assertEqual(line.count("t:bbc1.uk"), 1, line)
+        self.assertEqual(line.count("t:bbc1.uk"), 0, line)
 
 
 class StandDownNoteTest(unittest.TestCase):
@@ -3513,13 +3516,19 @@ class StandDownNoteTest(unittest.TestCase):
         record.update(newer)
         return helper.stand_down_note(seq, {"id": mine}, record)
 
-    def test_the_two_channels_are_what_varies(self):
+    def test_the_pair_is_compared_and_neither_id_is_printed(self):
+        # D-SINK-107: same or another, never which (the reply says which).
         first = self.note(id="t:espn.us", entryId=1, verb="play")
         second = self.note(id="t:news.uk", entryId=1, verb="play")
-        self.assertNotEqual(first, second)
-        self.assertIn("would have applied t:bbc1.uk", first)
-        self.assertIn("the player is on t:espn.us", first)
-        self.assertIn("the player is on t:news.uk", second)
+        same = self.note(id="t:bbc1.uk", entryId=1, verb="play")
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, same)
+        self.assertIn("would have applied this start's channel", first)
+        self.assertIn("the player is on another channel", first)
+        self.assertIn("the player is on that same channel", same)
+        for line in (first, second, same):
+            for channel in ("t:bbc1.uk", "t:espn.us", "t:news.uk"):
+                self.assertNotIn(channel, line)
 
     def test_a_load_with_no_stash_is_reported_as_unlabelled_not_as_an_empty_id(self):
         line = self.note(loaded=True)
@@ -3529,12 +3538,12 @@ class StandDownNoteTest(unittest.TestCase):
 
     def test_a_stash_with_no_entry_id_still_names_its_writer(self):
         line = self.note(id="t:espn.us", verb="play")
-        self.assertIn("the player is on t:espn.us, written by play)", line)
+        self.assertIn("the player is on another channel, written by play)", line)
         self.assertNotIn("as entry", line)
 
     def test_a_stash_from_an_older_schema_reports_the_entry_without_inventing_a_writer(self):
         line = self.note(id="t:espn.us", entryId=3)
-        self.assertIn("the player is on t:espn.us, entry 3)", line)
+        self.assertIn("the player is on another channel, entry 3)", line)
         self.assertNotIn("written by", line)
 
     def test_a_zap_that_carried_a_url_and_no_channel_id_is_named_as_such(self):
@@ -3545,7 +3554,7 @@ class StandDownNoteTest(unittest.TestCase):
         # `player start` without --seq writes 0 to the lock record. Printing
         # "intent 0" would be the same defect in a smaller font.
         line = self.note(seq=0, id="t:espn.us", entryId=1, verb="play")
-        self.assertIn("it would have applied t:bbc1.uk", line)
+        self.assertIn("it would have applied this start's channel", line)
         self.assertNotIn("intent", line)
 
 

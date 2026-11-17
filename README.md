@@ -324,7 +324,9 @@ URL by a one-way hash. It cannot be turned back into the URL; what it can do
 is confirm a guess — someone who can read the file and already holds a
 candidate URL can hash it and compare. That is far less than the URL itself
 and it is not nothing, which is why the permission change in the next
-paragraph stays. (Since 0.16.0 no key is on a command line any more.)
+paragraph stays. (Since 0.16.0 no key is on a command line any more.) To
+give a source added before 0.16.0 a random key, remove it in Sources and add
+it again; its channels and guide data are fetched again.
 
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
