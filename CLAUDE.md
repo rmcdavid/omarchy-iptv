@@ -325,7 +325,20 @@ requests and raise the batch.
 5. URLs are redacted to scheme and host at every sink: notifications,
    tooltips, guide text, console, IPC output, helper stdout and stderr, **and
    the accessibility bus**. Playlist URLs carry provider credentials.
-   `Model.redactUrls` exists; use it. The accessibility bus was missing from
+   `Model.redactUrls` exists; use it.
+   **[2026-11-16, round 2 of the security review (D-SINK-104 to -111): the
+   helper's stdout, status files and stderr have ONE boundary. Every reply
+   and both status files print provider and typed text as the guide shows
+   it -- the fields `REPLY_READINGS` lists (bin/helper/03-io-playlist.py),
+   read through `shown_text` by `emit` and both status writers, an old
+   `t:` id holding a credential as `[id withheld]` -- and write DEL, C1,
+   U+2028/9 and the text-direction controls as escapes, as
+   `Model.ipcJson` does; `log()` and the traceback read the same way; a
+   line naming a source's host withholds it where the Sources form does; a
+   usage error names options, never values; no journal line names a
+   channel id. A new reply field that can carry such text goes in the
+   table, or it prints raw.]**
+   The accessibility bus was missing from
    this list for the life of the project and D-A11Y-1 is the result. Two things
    publish there and both were missed:
    - The accessible **Value**, and the rule is narrower than it first looks.

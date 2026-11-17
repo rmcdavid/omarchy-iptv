@@ -602,7 +602,13 @@ acceptance rule, no control character ever types) and a paste through
    email's domain. THE COSTS, stated: a dotless intranet URL with a path `@`
    (`http://nas:8000/files/me@home/x`) and a `localhost` URL with one are
    withheld, in free text only; the Sources row, the label and validation
-   still show `nas` and `localhost`. One of the six DELIMITERS inside a
+   still show `nas` and `localhost`. [2026-11-16, D-SINK-109 (round 2 of the
+   security review): the lines that name a source's host in a sentence --
+   the download failures, both status files, the guide's loading, empty and
+   failure lines, the Sources list's fetching and probe failure lines, the
+   IPC `status` verb -- withhold it as the form does, an `@` after the
+   authority included (D-SINK-99's predicate), so an e-mail-username address
+   reads `[host withheld]` there while its row names the host.] One of the six DELIMITERS inside a
    password ends the run, so `http://myuser:pa ss@cdn.test/x` prints
    `myuser ss@cdn.test/x` in both mirrors -- the username and the
    password's tail -- and so does a tab, LF, CR, FF or VT in the same place

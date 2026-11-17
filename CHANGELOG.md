@@ -30,6 +30,27 @@ after the shell starts, and you start the channel again yourself.
   such a playlist, which never go through a proxy, are played at the
   address the plugin checked. Reported by the Omarchy plugin marketplace's
   maintainer against 0.19.1. (D-SINK-102)
+- **The helper's replies and its status files name a channel, its group
+  and the guide's saved names as the guide shows them**, an address as its
+  host, and write control and text-direction characters as `\uXXXX`
+  escapes. (D-SINK-104, D-SINK-105)
+- **A channel id an earlier version made from a playlist's `tvg-id` that
+  held a password prints as `[id withheld]`** in the helper's replies; the
+  id itself stays in `state.json`. (D-SINK-111)
+- **A mistyped command-line argument is reported by its option name, never
+  its value.** (D-SINK-106)
+- **The journal no longer names a channel id.** (D-SINK-107)
+- **Download failures, the status files, the guide's loading, empty and
+  failure lines, the Sources list's fetching and failure lines and the
+  `status` command's source host say `[host withheld]` where the source
+  form does**, so an address with an `@` after its host, such as an e-mail
+  username, reads that way there too while its row in Sources names the
+  host. (D-SINK-109)
+- **Source labels are unique as they read, and the command line prints
+  them that way**; a derived label that read like another source's is
+  renamed `<host> 2` once. (D-SINK-100, D-SINK-108)
+- **The player's window title and notifications read a channel name
+  holding a control character as the guide row does.** (D-SINK-110)
 
 ### Changed
 

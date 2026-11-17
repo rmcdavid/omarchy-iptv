@@ -1161,6 +1161,9 @@ itself unavailable rather than half working.
   `channels.json`, `playlist-status.json`, `epg-now.json`, `epg-status.json`
   (safe to delete; rebuilt on refresh). A 0.1.0 single cache is migrated on
   first start.
+  `playlist-status.json`, `epg-status.json` and the helper's replies name a
+  channel as the guide shows it: an address in a name appears as its host,
+  and control and text-direction characters appear as `\uXXXX` escapes.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, your saved searches, the groups you have hidden, the player
   session record, which source is active, the Sources history including

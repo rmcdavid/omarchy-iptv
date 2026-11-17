@@ -867,7 +867,19 @@ helper's environment as `OMARCHY_IPTV_URL` -- readable through
 non-dumpable first (D-SINK-9). They are not on the
 helper's argv: they were, for a few hundred milliseconds per fetch, until
 D-SINK-8 below. The helper never logs or prints a URL (errors carry the host
-only), `channels.json` stores `sourceHost` rather than the URL, but stream
+only). **[2026-11-16, round 2 of the security
+review: what it prints of everything else is held at one boundary too.
+Every reply and both status files read the fields that hold provider or
+typed text -- a channel's name and group, the warnings, the player's record
+and tracks, the state's names, hidden groups, saved searches and labels --
+through one table (`REPLY_READINGS`, D-SINK-104 and D-SINK-108), and write
+DEL, the C1 controls, U+2028, U+2029 and the text-direction controls as
+escapes (D-SINK-105); `log()` and the traceback read their text the same
+way (D-SINK-110); a line that names a source's host names `[host withheld]`
+where the Sources form withholds it (D-SINK-109); a usage error names the
+helper's options, never a value (D-SINK-106); and no journal line names a
+channel id (D-SINK-107, whose re-derivation of ids and keys is open).]**
+`channels.json` stores `sourceHost` rather than the URL, but stream
 URLs inside `channels.json` do contain the credentials (cache dir is 0700,
 files 0600). Documented in the README's settings section.
 

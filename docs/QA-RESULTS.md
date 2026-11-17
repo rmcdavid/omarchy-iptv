@@ -20522,3 +20522,30 @@ The node suite changes two checks and adds none, so its count does not move. D-P
 - main()'s other refusal before a verb runs: the `helper_arguments` refusal (changed, `refused_verb`); its sentences are fixed text.
 - Ids in the helper's journal and refusals: every `log(` and `HelperError(` whose text is interpolated. `find_channel` and `stand_down_note` (changed); 10-state.py's three dropped-source lines name a source's key, by design (decision 6, stated in D-SINK-107's open half); the playlist's remap line names counts; the rest name hosts, codes, numbers or strerror text.
 - The shell's journal lines: Service.qml's start-failure line relays the reply's reason (now id-free from the helper); the cache job line names a job's arguments, a source's key among them (by design, stated); Guide.qml's logo-failure line names the logo's cache file, whose name is a hash of the logo's address (stated in D-SINK-107's open half, not changed: the re-derivation is that row's open half).
+
+### Round 2, summarised: what was built, what stays open, what round 5 owns
+
+Round 2 of the security review asked one question of the helper: what does it print, and to whom? Its answers are six commits on `r2-build`, from `dev` 1118ffb, each gated green on exactly the tree it committed, every call the lead's under the owner's standing authority of 2026-11-09 (the decisions log, 2026-11-16).
+
+**What was built.**
+
+| Row | Sev | What prints differently | Commit |
+|---|---|---|---|
+| D-SINK-110 | P4 | the window and media title, the notification's name and reason, `log()` and the traceback read a control in a name as the guide row does, before the redaction | cc4a798 (lane-r2a) |
+| D-SINK-104 | P4 | every reply and both status files print a channel's name and group, the warnings, the player's record, tracks and the state's names, hidden groups and saved searches as the guide shows them, through one table, `REPLY_READINGS` | b00bb39 (lane-r2a) |
+| D-SINK-105 | P4 | DEL, the C1 controls, U+2028, U+2029 and the twelve text-direction controls as escapes, in the helper's replies and status files and in `Model.ipcJson` | b00bb39 (lane-r2a) |
+| D-SINK-111 | P4 | a `t:` id an older parse made from a credential prints as `[id withheld]` (open, partly: below) | b00bb39 (lane-r2a) |
+| D-SINK-109 | P3 | every line that names a source's host withholds it where the Sources form does | 47906bb (lane-r2b) |
+| D-SINK-100 | P3 | labels unique as they read, in both mirrors | 3e78cc3 (lane-r2b) |
+| D-SINK-108 | P4 | the state verbs and three sentences print a label as the Sources list reads it | 3e78cc3 (lane-r2b) |
+| D-SINK-106 | P3 | a usage error names options, never values | 7830524 (lane-r2c) |
+| D-SINK-107 | P4 | no helper journal line names a channel id (journal half; open: below) | 7830524 (lane-r2c) |
+
+Five new fixtures, each run by both suites, hold the two mirrors to one answer (shown-text, reply-escapes, withheld-ids, source-host-withheld, label-readings); five new Python test files (test_shown_text, test_reply_shown, test_shown_source_host, test_label_readings, test_usage_errors) and the node and V4 checks sit beside them. Every new test was seen red on the commit before it, and every named decision of the shipping code under a single-decision mutant (each lane's section above has the counts). The floors moved node 3732 -> 3749, python 2585 -> 2663, spec 99 -> 103. Nothing was pushed, and `main` and the tags were not touched: `main` stays held at 0.19.1 by the owner.
+
+**What stays open.**
+- *D-SINK-107's re-derivation.* `u:` channel ids and the keys of sources added before 0.16.0 are still unkeyed 32-bit hashes of a credentialed address, on stdout (the state replies, the IPC status reply, the player's record), in state.json and as cache folder names; a source's key stays in the journal lines that name one by design, and the guide's logo-failure line names a logo's cache file, the same kind of hash. Re-deriving them costs a channel id scheme 3 with every `u:` favorite and recent remapped once, a per-install secret the model reads too, and a re-key with a refetch for each older source. The README now states the remedy for one source: remove it and add it again.
+- *D-SINK-111's drop on load, waiting for the owner (asked 2026-11-16).* Whether `normalize_state` and `Model.parseState` drop a favorite or a played record whose `t:` id holds a credential is the owner's call, because it deletes user data; until then the ids stay in state.json and print withheld. Still printed, stated in the row: an ok `play` or `player start` reply's `id` and that start's `playing.id`, which the shell matches against the channel it asked for.
+- *Stated residuals the rows carry*: a TAB, LF or CR in a URL's scheme, mark or username (D-SINK-110); a scheme-less credential path in a warning (D-SINK-104, round 3's recognition residual); a status file or guide window written before the change keeps its host until the next fetch (D-SINK-109); NFKD past Unicode 16.0 (D-SINK-100); argparse's prefix matching (D-SINK-106).
+
+**What round 5 owns.** The split the lead set: round 2 does not touch the player status reply's `pathHost` (round 5 drops the field), the play-time local-address refusal (`local_address`, on a cached channel's literal) or the destination rules' sentences (`DestinationPolicy`), all of which round 5 makes name no host in a refusal of a destination the provider chose; nor the logo survey's busiest host or the guide-hint refusal's host (`epgHintVerdict`), which are its too.
