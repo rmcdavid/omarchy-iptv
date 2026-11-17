@@ -20639,3 +20639,30 @@ The test now writes 1,000 channels: about 4.5 MB and 28,000 programmes. That gui
 The new test is green 5 of 5 on this tree, and 5 of 5 on 7b99ad6's copy at the path where the old one was red. It is red 5 of 5 under a mutant where `limit_memory` sets no limit. The suite's count is unchanged.
 
 **What stays as it was.** No QML changed: the shell restores whatever id the probe reply carries, as it did on 1118ffb. Nothing of round 5's split was touched: `pathHost`, the `local_address` sentence and `DestinationPolicy`'s sentences are as they were. No cage, live scenario, player or name lookup ran. The crash journal read 87 before and after every heavy run. Nothing was pushed, and `main` and the tags were not touched.
+
+### Round 2's recheck, settled (the lead, 2026-11-16)
+
+The recheck of the settle commit 957099f found one Low and three Info points, none blocking. The lead settled them in one commit. Each call is the lead's under the owner's standing authority of 2026-11-09.
+
+**The two calls the settle round left for the lead: both confirmed.**
+- The `player probe` reply prints the player record's id as held (`REPLY_KEPT`). Settlement 2 had it withheld, and withholding it lost the playing channel at a shell restart.
+- main()'s traceback is read whole, with its line feeds kept (lane-r2a's change to settlement 3), because it withholds more.
+
+**The Low: the `status` reply's record id.** The health tick compares that id with the playing channel (`Model.reconcileVerdict`). Only on "agree" does it clear a stale failure mark on the playing channel (D-PLY-14) and reset its repair count. Withheld, the id read as nothing to compare, so a playing legacy channel kept its failure mark. The `status` reply now prints the record's id as held too: `REPLY_KEPT` names both `player.probe` and `status`. Every other kind of reply that carries a record still withholds it; today there is none, so that is the default for a kind added later.
+
+| Suite | On 957099f | On this tree |
+|---|---|---|
+| tests/test_reply_shown.py | 3 of 28 red (the boundary's probe-and-status case, `status` over an older record, and `player probe` then `status` against one player) | 28 of 28 green |
+
+The boundary table's own `stash.id` case now uses a kind `REPLY_KEPT` does not name, so the sweep over every path still sees the id withheld.
+
+**The Info points.**
+- The comment above `REPLY_KEPT` read "printed as held, never read". It now reads "through no reading", and it names each shell reader.
+- The D-SINK-111 row and the decisions-log row said dropping the ids waits for the owner. The owner decided on 2026-11-16 (their own decision, not the standing authority) that both state readers delete them on load. Round 5 builds that, and the row reads fixed then.
+- "Which the lead has yet to confirm" is gone from the decisions-log row; both calls read as confirmed.
+
+**The lanes' open questions, answered.**
+- lane-r2a's journal reading. `log()` and the traceback take the title's reading, which withholds more over most of the sweep and less where a TAB, LF, CR or a control sits in a URL's scheme or mark. The credential-reach review measured that half: 275 of 25,415 inputs, each the stated dotted-username residual and never a password. Kept as the D-SINK-110 row states it.
+- lane-r2c's logo journal line. The line names the logo's cache file, an unkeyed hash of the logo URL. It stays in D-SINK-107's open half rather than getting a row of its own.
+- The node timing check that failed once in a scratch run ("D-SINK-96: the credentials search ... under eight times its cost at 100,000") passed in every gate. It is not filed; if it fails in a gate, it gets an id that day.
+- The rows cite the branch's commits, and those stay true because the branch reaches `dev` as a fast-forward, never a rebase.

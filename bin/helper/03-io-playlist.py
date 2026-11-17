@@ -1630,21 +1630,25 @@ def reply_text(payload: Any, separators: tuple[str, str] | None = None) -> str:
 #   id     a channel id, ID_WITHHELD when channel_id_withheld refuses it
 #          (D-SINK-111): in the state verbs' replies and the `failed`
 #          verb's marks, which the shell does not read (it reads
-#          failed.json itself, Model.parseFailed), and in the record of the
-#          `status` reply, whose id only the shell's health tick compares
-#          (Model.reconcileVerdict reads ID_WITHHELD as nothing to compare).
+#          failed.json itself, Model.parseFailed), and in the player's
+#          record (`stash.id`) of any reply kind REPLY_KEPT does not name.
 #          An error reply's `id` is read in error_payload.
-# Printed as held, never read (REPLY_KEPT and the replies below): the record
-# id of the `player probe` reply, which the shell restores the playing
-# channel from at a reattach and looks up in its channel list (the
-# reconcile, the restart on adoption, D-SINK-16's owed reload, the relaunch
-# and the play retry), and the `id` of an ok `play` or `player start` reply
-# and that start's `playing.id`, which the shell matches against the
-# channel it asked for (Model.replyTarget, sessionIntentRepair). Withheld,
-# the probe's id lost the channel at every shell restart and stopped an
-# older player the shell would have restarted onto it (the settle round's
-# review, 2026-11-16). Each prints such an id only while a cache written
-# before 0.19.0 still holds the row.
+# Printed as held, through no reading (REPLY_KEPT and the replies below),
+# because the shell reads each of them: the record id of the `player probe`
+# reply, which the shell restores the playing channel from at a reattach
+# and looks up in its channel list (the reconcile, the restart on adoption,
+# D-SINK-16's owed reload, the relaunch and the play retry); the record id
+# of the `status` reply, which the health tick compares with the playing
+# channel, clearing a stale failure mark on it (D-PLY-14) and its repair
+# count only when they agree (Model.reconcileVerdict); and the `id` of an
+# ok `play` or `player start` reply and that start's `playing.id`, which
+# the shell matches against the channel it asked for (Model.replyTarget,
+# sessionIntentRepair). Withheld, the probe's id lost the channel at every
+# shell restart and stopped an older player the shell would have restarted
+# onto it (the settle round's review), and the status's kept a stale
+# failure mark on the playing channel (the settle round's recheck, both
+# 2026-11-16). Each prints such an id only while a cache written before
+# 0.19.0 still holds the row.
 # They were printed raw until then: the state verbs' hidden groups, saved
 # searches and recents, last-played and session names; the playlist and
 # guide warnings that name a channel; the play and start replies' name; and
@@ -1680,9 +1684,10 @@ REPLY_READINGS = (
     ("failed[].id", "id"),
 )
 
-# The paths a kind of reply prints as held (above): the probe reply's record
-# id, the one the shell restores the playing channel from.
-REPLY_KEPT = {"player.probe": ("stash.id",)}
+# The paths a kind of reply prints as held (above): the record id of the
+# probe reply, which the shell restores the playing channel from, and of the
+# status reply, which its health tick compares.
+REPLY_KEPT = {"player.probe": ("stash.id",), "status": ("stash.id",)}
 
 
 def scope_reading(value: str) -> str:

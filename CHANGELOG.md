@@ -37,9 +37,9 @@ after the shell starts, and you start the channel again yourself.
   controls wherever else they remain, as `\uXXXX` escapes. (D-SINK-104,
   D-SINK-105)
 - **A channel id an earlier version made from a playlist's `tvg-id` that
-  held a password prints as `[id withheld]`** in the helper's state replies,
-  its `failed` replies and the player status reply's record; the id itself
-  stays in `state.json`. (D-SINK-111)
+  held a password prints as `[id withheld]`** in the helper's state replies
+  and its `failed` replies; the id itself stays in `state.json`.
+  (D-SINK-111)
 - **A mistyped command-line argument is reported by its option name, never
   its value.** (D-SINK-106)
 - **The journal no longer names a channel id.** (D-SINK-107)

@@ -115,7 +115,7 @@ SHIELDED = shield_environment()
 HELPER_PARTS = (
     ("01-core.py", 190653, 0x168b84d7),
     ("02-sources.py", 157105, 0x17550fdd),
-    ("03-io-playlist.py", 101259, 0xd7f548db),
+    ("03-io-playlist.py", 101631, 0xe5ee3e03),
     ("04-epg.py", 89348, 0x28342811),
     ("05-ipc-logos.py", 60044, 0xc1da7923),
     ("06-failed.py", 51485, 0x9587080a),

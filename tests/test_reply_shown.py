@@ -19,16 +19,18 @@ Model.ipcJson over it).
 
 D-SINK-111. A `t:` id 0.18.0 made from a tvg-id holding a credential stays
 in state.json and in an older player's record, and every state reply printed
-it whole. Those replies, the `failed` verb's marks and the `status` reply's
-record print it as ID_WITHHELD (tests/fixtures/withheld-ids.json);
-state.json and failed.json keep it. The `player probe` reply prints the
-record's id as held (REPLY_KEPT), because the shell restores the playing
-channel from it (the settle round, 2026-11-16).
+it whole. Those replies and the `failed` verb's marks print it as
+ID_WITHHELD (tests/fixtures/withheld-ids.json); state.json and failed.json
+keep it. The `player probe` and `status` replies print the record's id as
+held (REPLY_KEPT), because the shell restores the playing channel from the
+first and its health tick compares the second (the settle round and its
+recheck, 2026-11-16).
 
 The assertion every verb here meets: no stdout line and no status file
 holds a piece of the synthetic credential (`qqqqqq`, `zzzzzz`) or a raw
 character of the escape set -- ids included, the exemption the first draft
-of these tests gave them narrowed away, but for the probe reply's record id.
+of these tests gave them narrowed away, but for the record id of the probe
+and status replies.
 """
 import contextlib
 import io
@@ -190,7 +192,9 @@ class BoundaryTest(unittest.TestCase):
             "state.hiddenGroups[]": {"ok": True, "kind": "state", "state": {"hiddenGroups": ["UK", p("Group")]}},
             "state.savedSearches[].query": {"ok": True, "kind": "state",
                                             "state": {"savedSearches": [{"query": p("find"), "at": 1}]}},
-            "stash.id": {"ok": True, "kind": "status", "stash": {"id": LEGACY_ID, "name": "News"}},
+            # A kind REPLY_KEPT does not name: every reply but the probe and
+            # the status reply withholds the record's id.
+            "stash.id": {"ok": True, "kind": "player.stop", "stash": {"id": LEGACY_ID, "name": "News"}},
             "state.favorites[]": {"ok": True, "kind": "state", "state": {"favorites": ["t:news.us", LEGACY_ID]}},
             "state.recents[].id": {"ok": True, "kind": "state", "state": {"recents": [{"id": LEGACY_ID, "name": "N"}]}},
             "state.lastPlayed.id": {"ok": True, "kind": "state", "state": {"lastPlayed": {"id": LEGACY_ID, "name": "N"}}},
@@ -244,17 +248,19 @@ class BoundaryTest(unittest.TestCase):
         self.assertEqual(json.loads(emitted(payload))["text"], CREDENTIAL)
 
     def test_the_probe_reply_prints_the_record_id_as_held_and_reads_the_rest(self):
-        """The settle round (D-SINK-111): the shell restores the playing
-        channel from the probe reply's record id and looks it up in its
-        channel list, so that reply prints it as held; the `status` reply,
-        whose id only the health tick compares, withholds it."""
+        """The settle round and its recheck (D-SINK-111): the shell restores
+        the playing channel from the probe reply's record id and looks it up
+        in its channel list, and its health tick compares the status reply's
+        with the playing channel, so both print it as held; a kind that
+        names neither withholds it."""
         record = {"id": LEGACY_ID, "name": poisoned("News"), "group": poisoned("Sports")}
-        probe = json.loads(emitted({"ok": True, "kind": "player.probe", "stash": dict(record)}))
-        self.assertEqual(probe["stash"]["id"], LEGACY_ID)
-        self.assertEqual((shows(probe["stash"]["name"]), shows(probe["stash"]["group"])), ([], []))
-        status = json.loads(emitted({"ok": True, "kind": "status", "stash": dict(record)}))
-        self.assertEqual(status["stash"]["id"], helper.ID_WITHHELD)
-        self.assertEqual(helper.REPLY_KEPT, {"player.probe": ("stash.id",)})
+        for kind in ("player.probe", "status"):
+            out = json.loads(emitted({"ok": True, "kind": kind, "stash": dict(record)}))
+            self.assertEqual(out["stash"]["id"], LEGACY_ID, kind)
+            self.assertEqual((shows(out["stash"]["name"]), shows(out["stash"]["group"])), ([], []), kind)
+        other = json.loads(emitted({"ok": True, "kind": "player.stop", "stash": dict(record)}))
+        self.assertEqual(other["stash"]["id"], helper.ID_WITHHELD)
+        self.assertEqual(helper.REPLY_KEPT, {"player.probe": ("stash.id",), "status": ("stash.id",)})
         table = {path for path, _ in helper.REPLY_READINGS}
         self.assertEqual([path for kept in helper.REPLY_KEPT.values() for path in kept if path not in table], [])
 
@@ -452,8 +458,10 @@ class PlayerTest(test_mpv.MpvTestCase):
         code, _, stdout, stderr = test_mpv.run("status", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         reply = json.loads(stdout)
-        self.assertEqual(leaks(stdout), [])
-        self.assertEqual(reply["stash"]["id"], helper.ID_WITHHELD)
+        # The record's id prints as held (REPLY_KEPT, the recheck): the
+        # health tick compares it with the playing channel.
+        self.assertEqual(reply["stash"]["id"], LEGACY_ID)
+        self.assertEqual(leaks(stdout.replace(json.dumps(LEGACY_ID), '""')), [])
         self.assertEqual(reply["stash"]["launchedFrom"], "")
         self.assertEqual(reply["mediaTitle"], helper.shown_text(poisoned("Watch")))
 
@@ -464,8 +472,10 @@ class ProbeRecordTest(test_player.PlayerTestCase):
     is what the shell's reattach restores and looks up; on 7b99ad6 it printed
     `[id withheld]`, and the shell then lost the channel at every shell
     restart and stopped an older player it would have restarted onto it.
-    The record's name and group still print as shown, and `status` against
-    the same player still withholds the id."""
+    The record's name and group still print as shown. `status` against the
+    same player prints the id as held too (the recheck, 2026-11-16): the
+    health tick compares it, and on 957099f it printed `[id withheld]`,
+    which kept a stale failure mark on the playing channel."""
 
     def test_the_probe_prints_the_record_id_the_reattach_restores(self):
         os.makedirs(self.runtime, 0o700)
@@ -482,8 +492,8 @@ class ProbeRecordTest(test_player.PlayerTestCase):
         self.assertEqual(leaks(stdout.replace(json.dumps(LEGACY_ID), '""') + stderr), [])
         code, status, stdout, stderr = test_player.run("status", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(status["stash"]["id"], helper.ID_WITHHELD)
-        self.assertEqual(leaks(stdout + stderr), [])
+        self.assertEqual(status["stash"]["id"], LEGACY_ID)
+        self.assertEqual(leaks(stdout.replace(json.dumps(LEGACY_ID), '""') + stderr), [])
 
 
 class WriteSideTest(unittest.TestCase):
