@@ -192,21 +192,37 @@ class StderrTest(unittest.TestCase):
         return code, json.loads(out.getvalue().strip().splitlines()[-1]), err.getvalue()
 
     def test_the_traceback_keeps_its_lines_and_loses_its_controls(self):
+        """Since D-SINK-115 (2026-11-16) the exception's text is withheld
+        whole, controls and address with it; the traceback is still read
+        through shown_lines."""
         code, payload, stderr = self.run_main("Ctl\x1b[2J News http://my.user:12\x0134/pw@cdn.test/x")
         self.assertEqual(code, 1)
-        self.assertEqual(payload["error"]["code"], "internal")
+        self.assertEqual(payload["error"], {"code": "internal", "message": "ValueError"})
         self.assertIn("Traceback (most recent call last):\n", stderr)
-        self.assertTrue(stderr.endswith("ValueError: Ctl[2J News http://[host withheld]\n"), ascii(stderr[-120:]))
+        self.assertTrue(stderr.endswith("ValueError (text withheld)\n"), ascii(stderr[-120:]))
         self.assertIsNone(re.search("[\x00-\x09\x0b-\x1f\x7f-\x9f]", stderr), ascii(stderr[-120:]))
         self.assertNotIn("my.user", stderr)
+        self.assertNotIn("News", stderr)
 
     def test_the_traceback_is_read_whole_so_a_token_across_a_line_is_withheld(self):
         """A credential token ends only at a space, so the old whole-text
         redaction withheld `qqqqqq:zz<LF>zz@cdn.test`; reading the traceback
-        one line at a time printed `qqqqqq:zz`."""
+        one line at a time printed `qqqqqq:zz`. Since D-SINK-115 the text is
+        not printed at all."""
         _, _, stderr = self.run_main("x qqqqqq:zz\nzz@cdn.test y\x7f")
-        self.assertTrue(stderr.endswith("ValueError: x [host withheld] y\n"), ascii(stderr[-120:]))
+        self.assertTrue(stderr.endswith("ValueError (text withheld)\n"), ascii(stderr[-120:]))
         self.assertNotIn("qqqqqq", stderr)
+
+    def test_the_trace_main_writes_is_read_through_shown_lines(self):
+        """The reading stays on the trace as a whole: a frame's own text
+        (here a stand-in for traceback.format_tb) is printed as shown_lines
+        prints it."""
+        frame = "  File \"x.py\", line 1, in f\n    see http://qqqqqq:zzzzzz@cdn.test/x\x1b[2J\n"
+        with mock.patch("traceback.format_tb", return_value=[frame]):
+            _, _, stderr = self.run_main("whatever")
+        self.assertIn("see http://cdn.test", stderr)
+        self.assertNotIn("qqqqqq", stderr)
+        self.assertNotIn("\x1b", stderr)
 
     def test_shown_lines_keeps_a_line_feed_and_drops_every_other_control(self):
         self.assertEqual(helper.shown_lines("a\x1b[1m\nb\tc\r\nd"), "a[1m\nbc\nd")

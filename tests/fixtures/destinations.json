@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite (a host of one DNS label off the playlist's host is no hint at all, not a refusal, since D-SINK-83: tests/fixtures/provider-hosts.json); the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address, a hinted guide on one, and a proxied target the playlist chose that cannot be resolved (tests/test_destinations.py composes each from a run of the shipping helper and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the playlist's or the guide's own host) -- both suites. Since D-SINK-113 (2026-11-16) each helper message names no host and no verb: the refused host is the provider's choice. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports. D-SINK-57's scope (the lead, 2026-10-29, after the owner's \"on this machine, only the relay's own port is the playlist's host\"): a LOOPBACK source is a local source, whose LAN channels pass, but its channel whose literal host is loopback must be on the source's own port (any loopback spelling); another port, or a source that records none, is refused at parse time (`reason` `port`, counted apart) and at play time. rc-p1c (2026-10-29): an unspecified literal (0.0.0.0, `::`) is this machine to a connect, so under a loopback source it is held to the source's port the same way. `remoteSchemes` (D-SINK-102, 2026-11-14): the schemes a playlist that is not local may not list, the parse's and play's fixed sentences for them, and vectors through stream_entry_refusal -- the python suite (tests/test_relay_player.py).",
+ "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite (a host of one DNS label off the playlist's host is no hint at all, not a refusal, since D-SINK-83: tests/fixtures/provider-hosts.json); the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address, a hinted guide on one, and a proxied target the playlist chose that cannot be resolved (tests/test_destinations.py composes each from a run of the shipping helper and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the playlist's or the guide's own host) -- both suites. Since D-SINK-113 (2026-11-16) each helper message names no host and no verb: the refused host is the provider's choice. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports. D-SINK-57's scope (the lead, 2026-10-29, after the owner's \"on this machine, only the relay's own port is the playlist's host\"): a LOOPBACK source is a local source, whose LAN channels pass, but its channel whose literal host is loopback must be on the source's own port (any loopback spelling); another port, or a source that records none, is refused at parse time (`reason` `port`, counted apart) and at play time. rc-p1c (2026-10-29): an unspecified literal (0.0.0.0, `::`) is this machine to a connect, so under a loopback source it is held to the source's port the same way. `remoteSchemes` (D-SINK-102, 2026-11-14): the schemes a playlist that is not local may not list, the parse's and play's fixed sentences for them, and vectors through stream_entry_refusal -- the python suite (tests/test_relay_player.py). `redirectPorts` (D-SINK-117, 2026-11-16, the critique's finding 2): Locations whose port is not one to five ASCII digits up to 65535, after a name or an IPv6 literal, which the redirect handler refuses before the next hop exists, and the controls it hands back -- the python suite (tests/test_destinations.py), in process, never connecting.",
  "classes": [
   "global",
   "loopback",
@@ -10,7 +10,7 @@
   "multicast",
   "reserved"
  ],
- "destinationRules": 5,
+ "destinationRules": 6,
  "env": {
   "url": "OMARCHY_IPTV_URL",
   "origin": "OMARCHY_IPTV_ORIGIN",
@@ -1929,4 +1929,52 @@
    }
   ]
  }
+,
+ "redirectPorts": [
+  {
+   "location": "http://[::1]:+443/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: the critique's finding 2: a sign before the port after a literal, which int() reads as 443"
+  },
+  {
+   "location": "http://[2606:4700::1]:4_43/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: an underscore int() reads, after a literal"
+  },
+  {
+   "location": "http://[2606:4700::1]:\u0664\u0664\u0663/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: Arabic-Indic digits after a literal"
+  },
+  {
+   "location": "http://cdn.test:99999/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: above 65535 after a name"
+  },
+  {
+   "location": "http://[::1]:65536/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: above 65535 after a literal"
+  },
+  {
+   "location": "http://cdn.test:+443/list.m3u",
+   "refused": true,
+   "note": "D-SINK-117: a sign before a name's port"
+  },
+  {
+   "location": "http://cdn.test:443/list.m3u",
+   "refused": false,
+   "note": "D-SINK-117: a port of digits"
+  },
+  {
+   "location": "http://[::1]:65535/list.m3u",
+   "refused": false,
+   "note": "D-SINK-117: the highest port after a literal"
+  },
+  {
+   "location": "http://cdn.test/list.m3u",
+   "refused": false,
+   "note": "D-SINK-117: no port"
+  }
+ ]
 }

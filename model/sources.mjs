@@ -247,6 +247,16 @@ function sourceErrorMessage(code, opts) {
     // (a username may hold one, encoded into the query), so the URL's
     // sentence names it and the names' do not.
     url_control: innerCharSentence("URL", true),
+    // D-SINK-115 (2026-11-16): an authority the helper's URL library cannot
+    // read (readAuthority), under the code `invalid` as url_control is. A
+    // character that reads as `/`, `?`, `#`, `@` or `:` cannot be part of a
+    // host name; in a user name or password it is written as its own UTF-8
+    // escape, since `%3A` would send a different password (the critique's
+    // finding 4: a fullwidth colon is %EF%BC%9A, which reaches the server as
+    // that character). A bracket in a user name or password is %5B or %5D.
+    url_fold_host: "The host holds a character that cannot be part of a host name",
+    url_fold_userinfo: "Write a character that reads as /, ?, #, @ or : in a user name or password percent-encoded as its UTF-8 bytes (a fullwidth colon is %EF%BC%9A)",
+    url_bracket: "Write [ and ] in a user name or password as %5B and %5D",
     user_control: innerCharSentence("username", false),
     pass_control: innerCharSentence("password", false),
     relative_path: "Use an absolute path (starts with /, not ~)",
@@ -405,6 +415,60 @@ function isHostFormatCode(code) {
   return false
 }
 
+// D-SINK-116 (2026-11-16): what a host name may not hold because it draws
+// as nothing: Cf, Unicode's Default_Ignorable_Code_Point and stringprep's
+// B.1 (what nameprep maps to nothing), as [first, last], 26 ranges and
+// 4,207 code points. Cf alone (HOST_FORMAT_RANGES, which the label's fold
+// still asks) let through the combining grapheme joiner, the variation
+// selectors, the Hangul fillers and the Mongolian free variation
+// selectors, several of which the helper's idna codec maps to nothing, so
+// `cdn<U+034F>.test` was looked up as `cdn.test`, and drawn like it, as a
+// second source. The helper's HOST_INVISIBLE_RANGES is the same table; the
+// node suite holds it to \p{Cf}, \p{Default_Ignorable_Code_Point} and the
+// shared host-grammar fixture's B.1, the python suite to unicodedata's Cf,
+// stringprep's B.1 and the fixture's Default_Ignorable list.
+var HOST_INVISIBLE_RANGES = [[0x00ad, 0x00ad], [0x034f, 0x034f], [0x0600, 0x0605], [0x061c, 0x061c],
+  [0x06dd, 0x06dd], [0x070f, 0x070f], [0x0890, 0x0891], [0x08e2, 0x08e2], [0x115f, 0x1160],
+  [0x17b4, 0x17b5], [0x1806, 0x1806], [0x180b, 0x180f], [0x200b, 0x200f], [0x202a, 0x202e],
+  [0x2060, 0x206f], [0x3164, 0x3164], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xffa0, 0xffa0],
+  [0xfff0, 0xfffb], [0x110bd, 0x110bd], [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a], [0xe0000, 0xe0fff]]
+
+function isHostInvisibleCode(code) {
+  for (var i = 0; i < HOST_INVISIBLE_RANGES.length; i++) {
+    if (code < HOST_INVISIBLE_RANGES[i][0]) return false
+    if (code <= HOST_INVISIBLE_RANGES[i][1]) return true
+  }
+  return false
+}
+
+// D-SINK-117 (2026-11-16): the ASCII a host NAME may hold -- a letter, a
+// digit, `-`, `.` or `_` -- an allowlist where the rule listed delimiters.
+// Both validators accepted, and the helper's connection layer handed on, a
+// name holding ! " $ ' ( ) * + , < > ^ ` { | } ~, which no DNS name holds,
+// written as itself or as a compatibility character the fold reads as one
+// (U+2474 reads `(1)`). The helper's HOST_NAME_ASCII is the same set; the
+// shared host-grammar fixture holds both over every ASCII character and
+// every code point that folds to one outside it (301).
+function isHostNameAscii(code) {
+  return (code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a) ||
+    code === 0x2d || code === 0x2e || code === 0x5f
+}
+
+// D-SINK-115 (2026-11-16): the code points whose compatibility form holds
+// `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD in node 26
+// (Unicode 17.0), Python 3.14 (16.0) and Qt 6.12's engine. The helper's URL
+// library (urlsplit's _checknetloc) refuses an authority holding one
+// anywhere, so readAuthority refuses one first. The helper's
+// DELIMITER_FOLDS is the same table, held to it by the shared host-grammar
+// fixture.
+var DELIMITER_FOLDS = [0x2047, 0x2048, 0x2049, 0x2100, 0x2101, 0x2105, 0x2106, 0x2a74, 0xfe13, 0xfe16,
+  0xfe55, 0xfe56, 0xfe5f, 0xfe6b, 0xff03, 0xff0f, 0xff1a, 0xff1f, 0xff20]
+
+// D-SINK-115: the sentence each of readAuthority's told refusals carries
+// (sourceErrorMessage), under the code `invalid` as R33b's url_control is.
+var AUTHORITY_MESSAGE_CODES = { fold_host: "url_fold_host", fold_userinfo: "url_fold_userinfo", bracket: "url_bracket" }
+
 // One index walk over the code units, a surrogate pair read as the one code
 // point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
 //
@@ -449,11 +513,16 @@ function hostNameRefused(host) {
   return folded !== s && hostNameRefusedAsWritten(folded)
 }
 
+// D-SINK-116 and D-SINK-117: an ASCII character outside isHostNameAscii
+// (the colon among them: this name never carries a port), the reader's
+// whitespace, or an invisible code point (isHostInvisibleCode).
 function hostNameRefusedAsWritten(s) {
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i)
-    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a || c === 0x5b || c === 0x5d ||
-      c === 0x5c) return true
+    if (c < 0x80) {
+      if (!isHostNameAscii(c)) return true
+      continue
+    }
     if (isUrlSpaceAt(s, i)) return true
     if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
       var d = s.charCodeAt(i + 1)
@@ -462,7 +531,7 @@ function hostNameRefusedAsWritten(s) {
         i++
       }
     }
-    if (isHostFormatCode(c)) return true
+    if (isHostInvisibleCode(c)) return true
   }
   return false
 }
@@ -754,44 +823,19 @@ function validateSourceUrl(text, opts) {
   // were already refused above), so a tab in a password is `invalid` here
   // and not the password `pass`.
   if (urlSpaceIndex(rest) !== -1) return innerChar()
-  var body = rest.substring(2)
-  var cut = body.search(/[\/?#]/)
-  var authority = cut === -1 ? body : body.substring(0, cut)
-  var tail = cut === -1 ? "" : body.substring(cut)
-  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return invalid()
-  var userinfo = ""
-  var hostport = authority
-  var at = authority.lastIndexOf("@")
-  if (at !== -1) {
-    userinfo = authority.substring(0, at)
-    hostport = authority.substring(at + 1)
-  }
-  var host = ""
-  var port = ""
-  if (hostport.charAt(0) === "[") {
-    var close = hostport.indexOf("]")
-    if (close === -1) return invalid()
-    host = hostport.substring(0, close + 1)
-    if (!isIpv6Literal(host)) return invalid()
-    var afterHost = hostport.substring(close + 1)
-    if (afterHost !== "") {
-      if (afterHost.charAt(0) !== ":") return invalid()
-      port = afterHost.substring(1)
+  var read = readAuthority(rest.substring(2))
+  if (!read.ok) {
+    if (read.why === "fold_host" || read.why === "fold_userinfo" || read.why === "bracket") {
+      var told = fail("invalid")
+      told.message = sourceErrorMessage(AUTHORITY_MESSAGE_CODES[read.why], { field: field })
+      return told
     }
-  } else {
-    var colon = hostport.lastIndexOf(":")
-    host = colon === -1 ? hostport : hostport.substring(0, colon)
-    port = colon === -1 ? "" : hostport.substring(colon + 1)
-    // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
-    if (/[:\[\]]/.test(host) || hostNameRefused(host)) return invalid()
+    return invalid()
   }
-  if (host === "") return invalid()
-  host = host.toLowerCase()
-  if (port !== "") {
-    if (!/^[0-9]+$/.test(port)) return invalid()
-    port = port.replace(/^0+(?=[0-9])/, "")
-    if (Number(port) > 65535) return invalid()
-  }
+  var userinfo = read.userinfo
+  var host = read.host
+  var port = read.port
+  var tail = read.tail
   if ((scheme === "http" && port === "80") || (scheme === "https" && port === "443")) port = ""
   var hash = tail.indexOf("#")
   if (hash !== -1) tail = tail.substring(0, hash)
@@ -800,7 +844,84 @@ function validateSourceUrl(text, opts) {
   var query = q === -1 ? "" : tail.substring(q + 1)
   if (path === "") path = "/"
   var url = scheme + "://" + (userinfo !== "" ? userinfo + "@" : "") + host + (port !== "" ? ":" + port : "") + path + (query !== "" ? "?" + query : "")
+  // D-SINK-115, the critique's finding 8: the cap is the STORED url's as
+  // well as the text's. Lowering lengthens a host (U+0130 lowers to `i` and
+  // U+0307), so a host of 1,100 of them was accepted at 1,113 units, stored
+  // at 2,213, and dropped as too long by both state readers at the next
+  // load. The helper's validate_source_url judges the same.
+  if (url.length > MAX_SOURCE_URL) return fail("too_long")
   return pass("http", url, host)
+}
+
+// D-SINK-115 (2026-11-16): the one reading of an http(s) URL's authority,
+// which validateSourceUrl asks (and the logo reading on the dev branch
+// after it): `body` is the text after `scheme://`, its whitespace and
+// controls already refused. -> { ok, why, userinfo, host, port, tail }:
+// `host` lower-cased (an IPv6 literal with its brackets), `port` without
+// its leading zeros ("" for none), `tail` from the first `/`, `?` or `#`
+// on; `why` one of "char", "fold_host", "fold_userinfo", "bracket",
+// "literal_open", "literal", "literal_after", "host", "empty", "port_text",
+// "port_range" when not ok. The helper's read_authority is the same
+// reading, held to it by the shared source-urls and host-grammar fixtures.
+// It refuses what the helper's URL library refuses to read, which both
+// validators accepted until then and every fetch then ended as an internal
+// error quoting the authority, user information included: a code point
+// whose compatibility form is `/`, `?`, `#`, `@` or `:` anywhere in the
+// authority (DELIMITER_FOLDS); a `[` or `]` in the user information unless
+// the host is a bracketed literal; and a bracketed host that is no IPv6
+// address (isIpv6Literal's characters and zone, then parseIpv6Groups of
+// the text before the zone). The authority ends at the first ASCII `/`,
+// `?` or `#`, and its user information at the LAST `@` within it (R32a).
+function readAuthority(body) {
+  var b = str(body)
+  var cut = -1
+  for (var k = 0; k < b.length; k++) {
+    var e = b.charCodeAt(k)
+    if (e === 0x2f || e === 0x3f || e === 0x23) { cut = k; break }
+  }
+  var authority = cut === -1 ? b : b.substring(0, cut)
+  var tail = cut === -1 ? "" : b.substring(cut)
+  function refused(why) {
+    return { ok: false, why: why, userinfo: "", host: "", port: "", tail: tail }
+  }
+  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return refused("char")
+  var at = authority.lastIndexOf("@")
+  for (var i = 0; i < authority.length; i++) {
+    if (DELIMITER_FOLDS.indexOf(authority.charCodeAt(i)) !== -1) return refused(i < at ? "fold_userinfo" : "fold_host")
+  }
+  var userinfo = at === -1 ? "" : authority.substring(0, at)
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  var host = ""
+  var port = ""
+  var bracketed = hostport.charAt(0) === "["
+  if (bracketed) {
+    var close = hostport.indexOf("]")
+    if (close === -1) return refused("literal_open")
+    host = hostport.substring(0, close + 1)
+    if (!isIpv6Literal(host) || parseIpv6Groups(host.substring(1, close).split("%")[0].toLowerCase()) === null) return refused("literal")
+    var afterHost = hostport.substring(close + 1)
+    if (afterHost !== "") {
+      if (afterHost.charAt(0) !== ":") return refused("literal_after")
+      port = afterHost.substring(1)
+    }
+  } else {
+    var colon = hostport.lastIndexOf(":")
+    host = colon === -1 ? hostport : hostport.substring(0, colon)
+    port = colon === -1 ? "" : hostport.substring(colon + 1)
+    // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
+    if (/[:\[\]]/.test(host) || hostNameRefused(host)) return refused("host")
+  }
+  if (!bracketed && (userinfo.indexOf("[") !== -1 || userinfo.indexOf("]") !== -1)) return refused("bracket")
+  if (host === "") return refused("empty")
+  if (port !== "") {
+    for (var j = 0; j < port.length; j++) {
+      var d = port.charCodeAt(j)
+      if (d < 0x30 || d > 0x39) return refused("port_text")
+    }
+    port = port.replace(/^0+(?=[0-9])/, "")
+    if (Number(port) > 65535) return refused("port_range")
+  }
+  return { ok: true, why: "", userinfo: userinfo, host: host.toLowerCase(), port: port, tail: tail }
 }
 
 // Normalized identity of an accepted URL, "" when it does not validate.
@@ -2975,14 +3096,16 @@ export {
   innerCharSentence, sourceErrorMessage, sourceReason,
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, SOURCE_URL_SCHEMES, IPV6_LITERAL_RE, isIpv6Literal,
-  HOST_FORMAT_RANGES, isHostFormatCode, NON_ASCII_RE, hostNameRefused,
+  HOST_FORMAT_RANGES, isHostFormatCode, HOST_INVISIBLE_RANGES,
+  isHostInvisibleCode, isHostNameAscii, DELIMITER_FOLDS,
+  AUTHORITY_MESSAGE_CODES, NON_ASCII_RE, hostNameRefused,
   hostNameRefusedAsWritten, cutQueryAndFragment, ENCODE_SENTENCE,
   WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
   sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, plainHttpLine,
-  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE,
-  IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class,
-  ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
+  formAdviceLine, looksLikeHost, validateSourceUrl, readAuthority,
+  normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
+  IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
+  ipv4Class, ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
   ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
   urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
   FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,

@@ -20713,3 +20713,68 @@ The shared fixture gains a third refusal (`proxied`, code `network`); both suite
 - Host-valued reply fields: `sourceHost` is round 2's (D-SINK-109); `state source list`'s `host` and `epgHost` are the typed host, kept by R32a; the logo survey's hosts are the logo step's; `pathHost` was the only one naming a host the provider chose.
 - Log lines: only `DestinationPolicy`'s sentences carried a verb; `11-cli.py`'s `%s: %s` and the `epg:` memory line add the verb once.
 - The docs that name `pathHost` or the old sentences (CLAUDE.md rule 5's round-2 bracket and its OSD paragraph, docs/ARCHITECTURE.md's round-2 bracket and the status contract, docs/M5-01-LIVE-REWIND.md, UX-SOURCES.md's hint table, README) are lane-r5c's.
+
+### D-SINK-115, D-SINK-116 and D-SINK-117: one reading of an authority, and a host name of letters, digits, `-`, `.` and `_`
+
+**What changed.**
+- One authority reader per mirror, `read_authority` (bin/helper/02-sources.py) and `Model.readAuthority` (model/sources.mjs), which both validators now call in place of their inline split. It refuses what CPython's URL library refuses to read: a code point whose compatibility form holds `/`, `?`, `#`, `@` or `:` anywhere in the authority (`DELIMITER_FOLDS`, 19 code points, the same under NFKC and NFKD in Python 3.14, node 26 and Qt 6.12's engine); a `[` or `]` in the user information unless the host is a bracketed literal; and a bracketed host that is no IPv6 address (the pattern, and then `ipaddress` or `parseIpv6Groups` on the text before the zone). The code stays `invalid`; the shell's sentence says where the character is: `url_fold_host` ("cannot be part of a host name"), `url_fold_userinfo` (write it as its own UTF-8 escape, a fullwidth colon is `%EF%BC%9A`; the critique's finding 4: `%3A` would send another password) and `url_bracket` (`%5B` and `%5D`).
+- The stored url is held to the 2,048-unit cap as well as the typed text (the critique's finding 8): a host of 1,100 U+0130 was accepted at 1,113 units and stored at 2,213, which both state readers then dropped.
+- `host_name_refused` and `Model.hostNameRefused` hold a name to an ASCII allowlist (`HOST_NAME_ASCII`: letters, digits, `-`, `.`, `_`; the colon by its count, as before) and to `HOST_INVISIBLE_RANGES` (Cf, Unicode's default-ignorable code points and stringprep's B.1: 26 ranges, 4,207 code points), as written and in the NFKD fold. `HOST_FORMAT_RANGES` (Cf) stays for the label's fold, round 2's reading, which removes a format character and nothing else.
+- With a port (`with_port`, the connection layer's form), the text after a leading literal's `]` or a name's one colon is empty or one to five ASCII digits up to 65535 (`port_digits`, an index walk), on every hop, before any lookup (the critique's finding 2).
+- Found by the stream gate's own shortcut tests and changed: `_PLAIN_HOST_CHARS`, the fast accept in front of the stream readings, held `~`, and its port took any run of digits, so the gate would have accepted what the readings now refuse. `~` is out and the port is `port_digits`'.
+- `read_http_source` answers a URL-library `ValueError` as `bad_url` (`<label> address cannot be read as a URL; not fetched`), and main()'s unexpected-error reply names the exception's class only; its stderr keeps the frames and the class and withholds the text (`<Class> (text withheld)`), still read through round 2's `shown_lines`. Chained exceptions are not printed.
+- A channel whose stream address the URL library cannot read is counted at the parse as `name` (it was `scheme`) and refused at play with `STREAM_HOST_NAME_REFUSAL` (it was the unsupported-scheme sentence).
+- `DESTINATION_RULES` 5 -> 6 in both mirrors, so a cache written before the rule is refetched once.
+- The owner's decision of 2026-11-16 needs no code of its own: both state readers validate every stored source, so a source whose address holds a newly refused shape is dropped on the first load, and a kept source's guide URL holding one is cleared, as D-SINK-86's were.
+
+**The shared fixture.** tests/fixtures/host-grammar.json (new): the tables as both mirrors hold them (`delimiterFolds`, `invisibleRanges`, `hostAscii`), two lists each held to the engine that can compute it (`defaultIgnorable`, node's property, for the python suite; `b1`, stringprep's table, for the node suite), `asciiFolds` (301 code points), 54 vectors with read_authority's `why`, 19 connection vectors (the critique's five among them), 14 stored sources for both state readers, and the differential's atoms and seeds. tests/fixtures/source-urls.json gains 70 vectors (D-SINK-115, -116 and -117: the folds, the brackets, the literals, both ends of every new invisible range and a control beside each, the 17 ASCII characters, U+2474, `_`, the U+0130 cap); eight of D-SINK-86's controls beside a format range are default-ignorable and are refused vectors now (D-SINK-116), so that rule's floor of controls is 32 in both suites, with the reason written beside it. tests/fixtures/destinations.json gains `redirectPorts` and `destinationRules` 6.
+
+**The differential** (tests/test_host_grammar.py, `DifferentialTest`): 19,999 addresses from the fixture's atoms (two seeds, an insert from 76 classes in the user information, the host, the port or the target) and every hand vector, through the helper in process, the model in node by one subprocess, and every tenth address and every hand vector (2,000) in Qt's engine through tests/test_proto_v4.run_qml. It holds the two validators equal (verdict, code, url and host, form and cli), every address both accept to urlsplit, split_userinfo, urllib.request.Request and the connection layer's rule, and every stored url to itself in both mirrors and in Qt's engine. The engine atoms (a final sigma, U+180E, an astral label) are not in its atoms: they are the engine step's, after this one. The whole module runs in 11.4 s on this machine under `nice` (both full-range table checks, the differential and the V4 subset).
+
+**Red first** (e04f339, the commit before this one):
+
+| Suite | On e04f339 | On this tree |
+|---|---|---|
+| tests/test_host_grammar.py (new, 20 tests) | 16 of 20 red; green are four guards (the fixture is whole, the two validators answer alike, the corpus size, no refusal names an address). Of the 19,999 addresses both validators accepted, 2,757 failed the URL library or the connection rule, and two (the U+0130 vector, in each mirror) did not read as themselves once stored | 20 of 20 green |
+| tests/test_host_names.py (vectors added to its name, request and Location lists; the counts re-taken) | 10 red: every connection function handed `evil!qqqqqq.test`, U+034F and the port shapes on; the predicate's survey and the codec's (238 folds where 74 were) | green |
+| tests/test_stream_host_names.py (three refused vectors added, `a%2Bb.test` among them, which was a control; one new test) | 11 red: the shortcut's counts, the moved vectors, and the new port test (`:99999` accepted by the gate and the readings) | green |
+| tests/test_source.py, test_destinations.py, test_reply_bounds.py, test_shown_text.py, test_local_refusals.py (one new test each in test_source, test_destinations and test_shown_text, two in test_reply_bounds for one whose subject is gone; the rest rewritten for the class-only bug report) | 12 red | green |
+| tests/test_network_sentences.py and test_logo_escapes.py (rewritten: a redirect's port `zzzzzz`, a password read as a port, and a logo's `:abc` are refused before any connection, as `bad_url`, where http.client's InvalidURL failed them; the logo is a policy refusal now, not a failure) | 3 red (5 subtests) | green |
+| tests/Model.test.js (70 fixture vectors and 8 checks added, 4 rewritten) | 66 of 3827 red: 54 fixture vectors, the tables against node's properties, the fold count, the allowlist, the authority sentences, the hint, the state reader, and the cache version in the model and through Service.qml | 0 of 3827 |
+| tests/Model.spec.qml (`test_hostGrammarInV4`) | 1 of 104 red (no `readAuthority`) | 104 of 104 |
+
+**Mutants**, each made on a scratch copy of this tree and sealed or relinked, each red:
+
+| Mutant | Red |
+|---|---|
+| helper: no fold walk in read_authority | 5 of test_host_grammar's 20 |
+| helper: brackets in the user information always allowed | 4 |
+| helper: a bracketed literal judged by the pattern alone | 4 |
+| helper: U+034F's range dropped from the invisible table | 6 |
+| helper: `~` added to the allowlist | 5 |
+| helper: no port rule after a name's colon | 1 |
+| helper: no port rule after a literal's `]` (the critique's mutant) | 1 |
+| helper: no cap on the stored url | 3 |
+| helper: read_http_source's ValueError not mapped | 1 of FetchPathTest's 2 |
+| helper: main()'s reply names the text again | 5 (test_reply_bounds, test_shown_text, test_local_refusals) |
+| helper: main()'s stderr names the text again | 6 |
+| helper: `DESTINATION_RULES` 5 | 1 |
+| helper: an unreadable stream counted `scheme` | 1 |
+| helper: play's unreadable-stream sentence back to the scheme one | 1 |
+| helper: `~` back in the stream shortcut | 12 of test_stream_host_names' 19 (before the port test) |
+| helper: the stream shortcut's port back to any run of digits | 1 (the new test; it survived the suite before it) |
+| model: no fold walk in readAuthority | 4 node checks |
+| model: U+034F's range dropped | 5 |
+| model: `~` allowed | 4 |
+| model: no cap on the stored url | 2 |
+| model: a bracketed literal not parsed as an address | 6 |
+| model: brackets in the user information allowed | 5 |
+| model: `DESTINATION_RULES` 5 | 3 |
+
+**Cost, measured.** The validators over the 19,999 addresses, best of three: the helper 273.6 ms on e04f339, 345.8 ms now (13.7 to 17.3 us an address); node 76.3 ms, 105.3 ms (3.8 to 5.3 us). Both run per typed or stored source, never per channel. User-visible: a user name or password holding a raw `[`, `]` or a character that reads as a delimiter must be typed percent-encoded (such a source failed every fetch until now); a host name holding ASCII other than a letter, a digit, `-`, `.` or `_`, an invisible character, or a compatibility character that folds to one is refused; a redirect to a port not written in one to five ASCII digits up to 65535 is refused, and a channel with such a port is skipped (six digits with leading zeros among them); and on the first load after the update a stored source holding one of these shapes is dropped, a guide URL holding one cleared, and each source's playlist downloaded once more.
+
+**Rule 15.** I searched by shape for every reader of an http(s) authority, every holder of the host-name character set, every place the model judges a host, and every place an exception's text reaches a reply or stderr.
+- Authority readers. Changed: `validate_source_url` and `validateSourceUrl` (through the new readers), `read_http_source` (its `split_userinfo` and `Request`, the only callers of either for a source), `stream_entry_refusal` and `player_target` (an unreadable stream). Cleared: `source_host`, `url_host`, `url_port` and `request_origin` catch `ValueError` and decide nothing printed from it; the proxied `connection_class` reads a request that passed `refuse_host_name`; `stream_lookup` and the pin reader stand behind `stream_host_name_refused`, which already refused an unreadable stream; the logo readers (05-ipc-logos.py) are the logo step's, after this one.
+- The host-name set. Changed: `host_name_refused`, `Model.hostNameRefused`, and the stream gate's `_PLAIN_HOST_CHARS` and `_plain_authority` (above). The logo fetch's connection and redirect handlers ask `refuse_host_name` with the port too, so a logo whose port is not digits is a policy refusal now (the full suite found it, tests/test_logo_escapes.py). Cleared: `_READING_REFUSED` holds characters the entries' judgment refuses anyway; the relay's `relay_authority` calls `host_name_refused` and holds its own port to five digits up to 65535, so it gets the allowlist and the invisible table unchanged (tests/test_relay.py and test_relay_player.py green); the label's fold keeps Cf alone, as round 2 left it, because it is a reading of a label and not a judgment of a host.
+- Model judges of a host: the Xtream server field, the form's fields, the guide hint and the state reader all go through `validateSourceUrl` and get the rule.
+- Exception text: main()'s catch-all (changed). Cleared: the parse and inflate refusals quote expat's and zlib's sentences (positions and kinds, not input), and the cache-write log line an OSError's path in the cache; none reads a URL.

@@ -221,7 +221,10 @@ class ValidateSourceUrlTest(unittest.TestCase):
         runs the same file (tests/Model.test.js)."""
         cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
                  if str(c.get("note", "")).startswith("D-SINK-86")]
-        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 45, sum(1 for c in cases if c["ok"]) >= 40),
+        # 32, not 40, since 2026-11-16: eight of the controls beside a format
+        # range are default-ignorable, refused by D-SINK-116, and moved to
+        # that id's vectors (test_d_sink_115_to_117_...).
+        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 45, sum(1 for c in cases if c["ok"]) >= 32),
                          (True, True), "the fixture cannot be trimmed to green")
         wrong = []
         for case in cases:
@@ -235,6 +238,26 @@ class ValidateSourceUrlTest(unittest.TestCase):
                     if leak in result["message"]:
                         wrong.append((ascii(case["input"]), "message names %r" % leak))
         self.assertEqual(wrong, [], "%d of %d D-SINK-86 vectors disagree" % (len(wrong), len(cases)))
+
+    def test_d_sink_115_to_117_an_authority_and_a_host_name_read_as_the_url_library_reads_them(self):
+        """D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16): the round's
+        vectors in the shared fixture, through the shipping validator, each
+        refusal naming no URL and no host; the controls beside every new
+        invisible range, and `_`, accepted. The model runs the same file."""
+        cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
+                 if str(c.get("note", "")).startswith(("D-SINK-115", "D-SINK-116", "D-SINK-117"))]
+        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 54, sum(1 for c in cases if c["ok"]) >= 20),
+                         (True, True), "the fixture cannot be trimmed to green")
+        wrong = []
+        for case in cases:
+            result = helper.validate_source_url(case["input"], origin=case.get("origin", "form"))
+            got = (result["ok"], result["code"] if not result["ok"] else result["url"])
+            if got != (case["ok"], case["code"] if not case["ok"] else case["url"]):
+                wrong.append((ascii(case["input"][:60]), got))
+            for leak in ("://", "qqqqqq", "zzzzzz", "cdn", "epg."):
+                if not result["ok"] and leak in result["message"]:
+                    wrong.append((ascii(case["input"][:60]), "message names %r" % leak))
+        self.assertEqual(wrong, [], "%d of %d vectors disagree" % (len(wrong), len(cases)))
 
     def test_tilde_depends_on_origin(self):
         # SR11: the CLI path keeps accepting ~ (verbatim; the reader expands

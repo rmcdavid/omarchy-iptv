@@ -76,11 +76,27 @@ from test_provider_hosts import Resolver, RedirectingServer, provenance
 helper = load_helper()
 
 FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "source-urls.json"
+GRAMMAR = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "host-grammar.json").read_text(encoding="ascii"))
 SECRET = "qqqqqq"
 FORMAT = frozenset(c for c in range(0x110000) if unicodedata.category(chr(c)) == "Cf")
 BACKSLASH = chr(0x5C)
-REFUSED_CHARS = (frozenset(map(ord, "@%;=&:[]" + BACKSLASH)) | frozenset(map(ord, helper.URL_SPACE_CHARS))
-                 | FORMAT)
+# D-SINK-116 and D-SINK-117 (2026-11-16): the rule's set is every ASCII
+# character but a letter, a digit, `-`, `.` and `_` (the colon among them,
+# counted apart), the reader's whitespace, and the invisible table -- Cf,
+# stringprep's B.1 and Unicode's default-ignorable code points, the last
+# from the shared host-grammar fixture (node's property; unicodedata lacks
+# it). Until then it was the eight characters D-SINK-86 and D-SINK-92 named,
+# the colon, the whitespace and Cf; DELIMITERS keeps that set, the one the
+# source-urls fixture's D-SINK-88 vectors were written for.
+HOST_ASCII = frozenset(GRAMMAR["tables"]["hostAscii"])
+DEFAULT_IGNORABLE = frozenset(code for first, last in GRAMMAR["tables"]["defaultIgnorable"]
+                              for code in range(int(first, 16), int(last, 16) + 1))
+B1 = frozenset(c for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF and stringprep.in_table_b1(chr(c)))
+INVISIBLE = FORMAT | B1 | DEFAULT_IGNORABLE
+DELIMITERS = (frozenset(map(ord, "@%;=&:[]" + BACKSLASH)) | frozenset(map(ord, helper.URL_SPACE_CHARS))
+              | FORMAT)
+REFUSED_CHARS = (frozenset(c for c in range(0x80) if chr(c) not in HOST_ASCII)
+                 | frozenset(map(ord, helper.URL_SPACE_CHARS)) | INVISIBLE)
 
 # Hosts as a connection is handed them (http.client has split the port off
 # at the last colon and taken a literal's brackets off), each holding one
@@ -116,6 +132,14 @@ NAMES = [
     # it, two to dotless_host), and U+FF3C, which the codec folds to one.
     "evil" + BACKSLASH + "058" + SECRET + ".test", "a" + BACKSLASH + "091" + SECRET + BACKSLASH + "093.evil.test",
     "u" + BACKSLASH + "064evil.test", "evil" + SECRET + BACKSLASH + ".x", "u" + chr(0xFF3C) + SECRET + ".evil.test",
+    # D-SINK-117: ASCII outside the allowlist, written and folded (U+2474
+    # reads `(1)`, U+FF01 `!`); D-SINK-116: an invisible character beyond
+    # Cf, which the codec maps to nothing (U+034F, U+FE0F, U+180B) or keeps
+    # (U+3164).
+    "evil!" + SECRET + ".test", "evil" + SECRET + "$.test", "evil(" + SECRET + ").test", "evil~" + SECRET + ".test",
+    "evil" + chr(0x2474) + SECRET + ".test", "evil" + chr(0xFF01) + SECRET + ".test",
+    "evil" + chr(0x034F) + SECRET + ".test", "evil" + chr(0xFE0F) + SECRET + ".test",
+    "evil" + chr(0x180B) + SECRET + ".test", "evil" + chr(0x3164) + SECRET + ".test",
 ]
 
 
@@ -200,6 +224,12 @@ def nameprep_map(ch):
     return stringprep.map_table_b2(ch)
 
 
+# The refused characters a canonical composition can take as its first half:
+# `=` (U+2260, with U+0338), and since D-SINK-117 refuses them, `<` and `>`
+# (U+226E and U+226F). PredicateTest holds that these three are all.
+COMPOSING_FIRSTS = "=<>"
+
+
 @functools.lru_cache(maxsize=None)
 def sequence_survey():
     """The class the review of 95f1bb9 found, widened: every code point the
@@ -221,7 +251,9 @@ def sequence_survey():
             continue
         ch = chr(c)
         mapped = nameprep_map(ch)
-        if "=" in u32.normalize("NFKC", mapped):
+        # D-SINK-117: `<` and `>` too, which the allowlist refuses and which
+        # U+0338 composes as it composes `=` (U+226E, U+226F).
+        if any(first in u32.normalize("NFKC", mapped) for first in COMPOSING_FIRSTS):
             equals.append(ch)
         if mapped != ch or unicodedata.combining(ch):
             marks.append(ch)
@@ -296,12 +328,16 @@ class PredicateTest(unittest.TestCase):
         D-SINK-92 adds the two brackets, and with them four folds: U+FF3B
         and U+FF3D, which the codec folds, and U+FE47 and U+FE48, which only
         the running Unicode does; and the backslash, and with it U+FF3C and
-        U+FE68, which both fold to one, 79."""
+        U+FE68, which both fold to one, 79. D-SINK-116 and D-SINK-117
+        (2026-11-16): the set is every ASCII character outside the allowlist,
+        the whitespace and the invisible table, so 286: every code point not
+        refused itself whose NFKD holds ASCII outside the allowlist (the
+        host-grammar fixture's 301 less the 15 spaces among them)."""
         predicate = getattr(helper, "host_name_refused", None)
         self.assertIsNotNone(predicate)
         folds = {c for c in range(0x80, 0x110000)
                  if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))}
-        self.assertEqual(len(folds - REFUSED_CHARS), 79)
+        self.assertEqual(len(folds - REFUSED_CHARS), 286)
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
                      if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds)]
@@ -341,7 +377,11 @@ class PredicateTest(unittest.TestCase):
                     composites.append(hex(c))
                 if len(parts) == 2 and parts[0] in REFUSED_CHARS:
                     pairs.append((hex(c), chr(parts[0])))
-        self.assertEqual((bad[:8], composites, sorted(set(pairs))), ([], [], [("0x2260", "=")]))
+        # D-SINK-117: `<` and `>` are refused now, and U+0338 composes each
+        # (U+226E, U+226F), so sequence_survey asks all three.
+        self.assertEqual((bad[:8], composites, sorted(set(pairs))),
+                         ([], [], [("0x2260", "="), ("0x226e", "<"), ("0x226f", ">")]))
+        self.assertEqual(sorted({first for _, first in pairs}), sorted(COMPOSING_FIRSTS))
 
     def test_no_one_code_point_name_it_lets_through_reaches_the_resolver_as_one_it_refuses(self):
         """D-SINK-88, against the codec itself: for every code point X, if
@@ -353,7 +393,9 @@ class PredicateTest(unittest.TestCase):
         D-SINK-92, U+FF3B and U+FF3D, which fold to a bracket, and U+FF3C
         and U+FE68, which fold to a backslash, 74."""
         folds, missed = codec_survey()
-        self.assertEqual(len(folds), 74, "the codec's folds were not found")
+        # 238 since D-SINK-116 and D-SINK-117 widened the set (the codec folds
+        # 164 more code points to a character the widened set refuses).
+        self.assertEqual(len(folds), 238, "the codec's folds were not found")
         self.assertEqual((len(missed), missed[:8]), (0, []))
 
     def test_no_sequence_of_the_reviews_class_reaches_the_resolver_holding_a_refused_character(self):
@@ -363,7 +405,9 @@ class PredicateTest(unittest.TestCase):
         `h<X><U+0345><U+0338>.test` the review found, and longer ones built on
         U+0345."""
         equals, marks, hidden, missed = sequence_survey()
-        self.assertEqual((equals, marks >= 2000), (7, True), "the survey's inputs were not found")
+        # 11 since D-SINK-117: the seven code points the codec reads as `=`,
+        # and the four it reads as `<` or `>`.
+        self.assertEqual((equals, marks >= 2000), (11, True), "the survey's inputs were not found")
         self.assertGreaterEqual(hidden, 4, "the class NFKC alone lets through was not found")
         self.assertEqual((len(missed), missed[:8]), (0, []))
 
@@ -376,7 +420,12 @@ class PredicateTest(unittest.TestCase):
         cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
                  if str(c.get("note", "")).startswith("D-SINK-88") and not c["ok"] and c["code"] == "invalid"]
         listed = set(c["input"] for c in cases)
-        targets = codec_survey()[0]
+        # D-SINK-117: a code point that folds to ASCII outside the allowlist
+        # is held by the host-grammar fixture's asciiFolds table, which both
+        # suites run through their validators, rather than by a vector each.
+        ascii_folds = {int(h, 16) for h in GRAMMAR["tables"]["asciiFolds"]}
+        targets = {c: v for c, v in codec_survey()[0].items()
+                   if not (c in ascii_folds and DELIMITERS.isdisjoint(map(ord, v[1])))}
         wanted = {c: "http://" + (form % chr(c)) + "/x" for c, (form, _) in targets.items()}
         accepted = [hex(c) for c, url in wanted.items() if urlsplit_accepts(url)]
         extra = ["http://user" + chr(0xFF1D) + chr(0x345) + chr(0x338) + "sid.test/x",
@@ -419,7 +468,17 @@ class PredicateTest(unittest.TestCase):
                    # stands, and folded.
                    ("h" + BACKSLASH + "058x.test", False), ("h" + BACKSLASH + "091x.test:80", True),
                    ("user" + BACKSLASH + ".x", False), ("[::1]" + BACKSLASH, True),
-                   ("h" + chr(0xFF3C) + "x.test", False), ("h" + chr(0xFE68) + "x.test:80", True)]
+                   ("h" + chr(0xFF3C) + "x.test", False), ("h" + chr(0xFE68) + "x.test:80", True),
+                   # D-SINK-117, the critique's finding 2: a port is one to
+                   # five ASCII digits up to 65535, after a literal's `]` too
+                   # (http.client's int() reads `+443`, `4_43` and
+                   # Arabic-Indic digits as 443).
+                   ("[::1]:+443", True), ("[2606:4700::1]:4_43", True),
+                   ("[2606:4700::1]:" + chr(0x664) * 2 + chr(0x663), True), ("h.test:99999", True),
+                   ("[::1]:65536", True), ("h.test:+443", True), ("h.test:000443", True),
+                   # And ASCII outside the allowlist; an invisible character.
+                   ("h!x.test", False), ("h+x.test:80", True), ("h" + chr(0x034F) + "x.test", False)]
+        allowed += [("[::1]:65535", True), ("h.test:00443", True), ("h_x.test", False)]
         self.assertEqual([(ascii(t), p, predicate(t, p)) for t, p in allowed + refused],
                          [(ascii(t), p, False) for t, p in allowed] + [(ascii(t), p, True) for t, p in refused])
 
@@ -486,7 +545,13 @@ class ConnectionTest(unittest.TestCase):
                               "evil.test%5B" + SECRET + "%5D", "evil%EF%BC%BB" + SECRET + ".test",
                               # And a backslash, decoded from `%5C`.
                               "evil%5C058" + SECRET + ".test", "evil" + SECRET + "%5C.x:8080",
-                              "evil%EF%BC%BC" + SECRET + ".test"):
+                              "evil%EF%BC%BC" + SECRET + ".test",
+                              # D-SINK-117: names only here (a refusal this
+                              # rule misses would be connected to): a port
+                              # int() reads, and ASCII outside the allowlist.
+                              "evil.test%3A%2B443", "evil.test%3A4_43", "evil%21" + SECRET + ".test",
+                              # D-SINK-116: an invisible character, decoded.
+                              "evil%CD%8F" + SECRET + ".test"):
                 request = urllib.request.Request("%s://%s/x" % (scheme, authority))
                 request.timeout = 1.0
                 opener = getattr(handler, scheme + "_open")
@@ -513,7 +578,14 @@ class ConnectionTest(unittest.TestCase):
                            "https://%5Bfe80::1%25" + SECRET + "%5Devil.test/x", "https://" + SECRET + "%5D.evil.test/x",
                            # The review of bf47cdc: a backslash the request
                            # holds decoded, an escape to the resolver.
-                           "https://evil%5C058" + SECRET + ".test/x", "https://u%5C064evil.test/x"):
+                           "https://evil%5C058" + SECRET + ".test/x", "https://u%5C064evil.test/x",
+                           # D-SINK-117: a port not written in ASCII digits
+                           # up to 65535, after a name or a literal (each
+                           # handed back to be opened until then), and ASCII
+                           # outside the allowlist.
+                           "https://evil.test:+443/x", "https://[2606:4700::1]:4_43/x",
+                           "https://[::1]:" + chr(0x664) * 2 + chr(0x663) + "/x", "https://evil.test:99999/x",
+                           "https://[::1]:65536/x", "https://evil!" + SECRET + ".test/x"):
                 request = urllib.request.Request("https://cdn.test/a.png")
                 with SocketResolver() as resolver:
                     code, message = attempt(lambda: handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, newurl))
@@ -574,6 +646,14 @@ class RedirectTest(unittest.TestCase):
         "http://a%5C091" + SECRET + "%5C093.evil.test/x",
         "http://evil" + SECRET + "%5C.x/x",
         "http://evil%EF%BC%BC" + SECRET + ".test/x",
+        # D-SINK-117: a port not written in ASCII digits, after a name (a
+        # literal here would be connected to on a tree without the rule),
+        # and ASCII outside the allowlist; D-SINK-116, an invisible
+        # character the codec maps to nothing.
+        "http://evil" + SECRET + ".test:%2B443/x",
+        "http://evil" + SECRET + ".test:4_43/x",
+        "http://evil%24" + SECRET + ".test/x",
+        "http://evil%CD%8F" + SECRET + ".test/x",
     ]
 
     def follow(self, location):

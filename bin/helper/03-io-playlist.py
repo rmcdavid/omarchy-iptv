@@ -291,8 +291,11 @@ class ResolveBusy(OSError):
 # `bad_url`, the code of a URL the validator refuses, so the shell's
 # sentence is "Invalid URL" and the logo run counts it with the policy's
 # refusals (06-failed.py).
-HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a backslash, a second colon, "
-                     "whitespace or an invisible format character; not looked up")
+# D-SINK-116 and D-SINK-117 (2026-11-16): the sentence says the rule as it
+# stands, an allowlist of ASCII, the port's digits and the invisible table.
+HOST_NAME_REFUSAL = ("refused a host name that holds a character no host name holds (in ASCII anything but a "
+                     "letter, a digit, -, . or _), a second colon, a port that is not digits, whitespace or an "
+                     "invisible character; not looked up")
 
 
 def refuse_host_name(text: Any, with_port: bool = False) -> None:
@@ -1117,7 +1120,17 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
     # response's, the deadline's, D-SINK-40's) is the shown one; nothing
     # here decides by it.
     host = shown_source_host(url)
-    target, auth = split_userinfo(url)
+    # D-SINK-115 (2026-11-16): an address the URL library refuses to read --
+    # a compatibility character for `/`, `?`, `#`, `@` or `:`, a bracket in
+    # the user information, a bracketed host that is no IPv6 address -- is
+    # `bad_url` with a sentence that names nothing. Both validators refuse
+    # it now; an older shell, a stored record or a hint can still hand one
+    # over, and its ValueError reached main() as an internal error whose
+    # text quoted the authority, user information included.
+    try:
+        target, auth = split_userinfo(url)
+    except ValueError:
+        raise HelperError("bad_url", "%s address cannot be read as a URL; not fetched" % label) from None
     if policy is None:
         policy = DestinationPolicy.from_environment(label)
     if auth and policy.origin == ORIGIN_PLAYLIST:
@@ -1131,7 +1144,10 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
     if auth:
         import base64
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(target, headers=headers)
+    try:
+        request = urllib.request.Request(target, headers=headers)
+    except ValueError:
+        raise HelperError("bad_url", "%s address cannot be read as a URL; not fetched" % label) from None
     opener = make_opener(label, host, policy)
     budget = http_deadline(timeout)
     deadline = time.monotonic() + budget

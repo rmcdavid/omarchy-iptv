@@ -570,9 +570,11 @@ class NoDescriptorTest(unittest.TestCase):
                 mock.patch.object(builtins, "__import__", side_effect=refuse_traceback):
             code, lines, err = self.run_main(["player", "pause", "--socket", "/nonexistent/mpv.sock"])
         self.assertEqual(len(lines), 1, (lines, err))
+        # D-SINK-115 (2026-11-16): the exception by its class alone.
         self.assertEqual((code, json.loads(lines[0])),
-                         (1, {"ok": False, "kind": "player", "error": {"code": "internal", "message": "RuntimeError: a bug"}}))
-        self.assertIn("RuntimeError: a bug", err)
+                         (1, {"ok": False, "kind": "player", "error": {"code": "internal", "message": "RuntimeError"}}))
+        self.assertIn("RuntimeError (no traceback: it could not be loaded)", err)
+        self.assertNotIn("a bug", err)
 
     def test_the_peer_cannot_be_read_when_struct_cannot_be_loaded(self):
         real_import = builtins.__import__

@@ -1,0 +1,1258 @@
+{
+ "about": "D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16, round 5 of the security review): how a source address's authority and host name are read, one file for both mirrors (CLAUDE.md: a rule in two languages gets one shared fixture). `tables` are the shipped tables as both mirrors must hold them: `delimiterFolds` (the code points whose compatibility form holds / ? # @ or :, which CPython's urlsplit refuses in an authority), `invisibleRanges` (Cf, Default_Ignorable_Code_Point and stringprep's B.1), `hostAscii` (the ASCII a host name may hold), and two lists each held to the engine that can compute them: `defaultIgnorable` (node's \\p{Default_Ignorable_Code_Point}, which Python's unicodedata lacks; the python suite builds the invisible table from it) and `b1` (stringprep's B.1, which node lacks; the node suite does the same), and `asciiFolds` (the code points whose NFKD holds ASCII outside hostAscii, each runtime's own fold held to it). `vectors` run through validate_source_url (tests/test_host_grammar.py) and Model.validateSourceUrl (tests/Model.test.js), `why` being read_authority's and Model.readAuthority's reason. `connection` runs through the helper's host_name_refused (the connection layer) only. `stateReaders` are stored sources through both state readers (normalize_state, Model.parseState): the owner's decision of 2026-11-16 drops a source whose address holds a newly refused shape and clears a guide URL holding one, and keeps every other source as stored. `atoms` and `seeds` are the differential's generator classes (tests/test_host_grammar.py): helper and model over the same corpus, with the invariants the URL library itself checks. Every value is hex or an escape: the file is ASCII.",
+ "tables": {
+  "delimiterFolds": [
+   "2047",
+   "2048",
+   "2049",
+   "2100",
+   "2101",
+   "2105",
+   "2106",
+   "2A74",
+   "FE13",
+   "FE16",
+   "FE55",
+   "FE56",
+   "FE5F",
+   "FE6B",
+   "FF03",
+   "FF0F",
+   "FF1A",
+   "FF1F",
+   "FF20"
+  ],
+  "invisibleRanges": [
+   [
+    "00AD",
+    "00AD"
+   ],
+   [
+    "034F",
+    "034F"
+   ],
+   [
+    "0600",
+    "0605"
+   ],
+   [
+    "061C",
+    "061C"
+   ],
+   [
+    "06DD",
+    "06DD"
+   ],
+   [
+    "070F",
+    "070F"
+   ],
+   [
+    "0890",
+    "0891"
+   ],
+   [
+    "08E2",
+    "08E2"
+   ],
+   [
+    "115F",
+    "1160"
+   ],
+   [
+    "17B4",
+    "17B5"
+   ],
+   [
+    "1806",
+    "1806"
+   ],
+   [
+    "180B",
+    "180F"
+   ],
+   [
+    "200B",
+    "200F"
+   ],
+   [
+    "202A",
+    "202E"
+   ],
+   [
+    "2060",
+    "206F"
+   ],
+   [
+    "3164",
+    "3164"
+   ],
+   [
+    "FE00",
+    "FE0F"
+   ],
+   [
+    "FEFF",
+    "FEFF"
+   ],
+   [
+    "FFA0",
+    "FFA0"
+   ],
+   [
+    "FFF0",
+    "FFFB"
+   ],
+   [
+    "110BD",
+    "110BD"
+   ],
+   [
+    "110CD",
+    "110CD"
+   ],
+   [
+    "13430",
+    "1343F"
+   ],
+   [
+    "1BCA0",
+    "1BCA3"
+   ],
+   [
+    "1D173",
+    "1D17A"
+   ],
+   [
+    "E0000",
+    "E0FFF"
+   ]
+  ],
+  "hostAscii": "-._0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  "defaultIgnorable": [
+   [
+    "00AD",
+    "00AD"
+   ],
+   [
+    "034F",
+    "034F"
+   ],
+   [
+    "061C",
+    "061C"
+   ],
+   [
+    "115F",
+    "1160"
+   ],
+   [
+    "17B4",
+    "17B5"
+   ],
+   [
+    "180B",
+    "180F"
+   ],
+   [
+    "200B",
+    "200F"
+   ],
+   [
+    "202A",
+    "202E"
+   ],
+   [
+    "2060",
+    "206F"
+   ],
+   [
+    "3164",
+    "3164"
+   ],
+   [
+    "FE00",
+    "FE0F"
+   ],
+   [
+    "FEFF",
+    "FEFF"
+   ],
+   [
+    "FFA0",
+    "FFA0"
+   ],
+   [
+    "FFF0",
+    "FFF8"
+   ],
+   [
+    "1BCA0",
+    "1BCA3"
+   ],
+   [
+    "1D173",
+    "1D17A"
+   ],
+   [
+    "E0000",
+    "E0FFF"
+   ]
+  ],
+  "b1": [
+   "00AD",
+   "034F",
+   "1806",
+   "180B",
+   "180C",
+   "180D",
+   "200B",
+   "200C",
+   "200D",
+   "2060",
+   "FE00",
+   "FE01",
+   "FE02",
+   "FE03",
+   "FE04",
+   "FE05",
+   "FE06",
+   "FE07",
+   "FE08",
+   "FE09",
+   "FE0A",
+   "FE0B",
+   "FE0C",
+   "FE0D",
+   "FE0E",
+   "FE0F",
+   "FEFF"
+  ],
+  "asciiFolds": [
+   "00A0",
+   "00A8",
+   "00AF",
+   "00B4",
+   "00B8",
+   "02D8",
+   "02D9",
+   "02DA",
+   "02DB",
+   "02DC",
+   "02DD",
+   "037A",
+   "037E",
+   "0384",
+   "0385",
+   "1FBD",
+   "1FBF",
+   "1FC0",
+   "1FC1",
+   "1FCD",
+   "1FCE",
+   "1FCF",
+   "1FDD",
+   "1FDE",
+   "1FDF",
+   "1FED",
+   "1FEE",
+   "1FEF",
+   "1FFD",
+   "1FFE",
+   "2000",
+   "2001",
+   "2002",
+   "2003",
+   "2004",
+   "2005",
+   "2006",
+   "2007",
+   "2008",
+   "2009",
+   "200A",
+   "2017",
+   "202F",
+   "203C",
+   "203E",
+   "2047",
+   "2048",
+   "2049",
+   "205F",
+   "207A",
+   "207C",
+   "207D",
+   "207E",
+   "208A",
+   "208C",
+   "208D",
+   "208E",
+   "2100",
+   "2101",
+   "2105",
+   "2106",
+   "2260",
+   "226E",
+   "226F",
+   "2474",
+   "2475",
+   "2476",
+   "2477",
+   "2478",
+   "2479",
+   "247A",
+   "247B",
+   "247C",
+   "247D",
+   "247E",
+   "247F",
+   "2480",
+   "2481",
+   "2482",
+   "2483",
+   "2484",
+   "2485",
+   "2486",
+   "2487",
+   "249C",
+   "249D",
+   "249E",
+   "249F",
+   "24A0",
+   "24A1",
+   "24A2",
+   "24A3",
+   "24A4",
+   "24A5",
+   "24A6",
+   "24A7",
+   "24A8",
+   "24A9",
+   "24AA",
+   "24AB",
+   "24AC",
+   "24AD",
+   "24AE",
+   "24AF",
+   "24B0",
+   "24B1",
+   "24B2",
+   "24B3",
+   "24B4",
+   "24B5",
+   "2A74",
+   "2A75",
+   "2A76",
+   "3000",
+   "309B",
+   "309C",
+   "3200",
+   "3201",
+   "3202",
+   "3203",
+   "3204",
+   "3205",
+   "3206",
+   "3207",
+   "3208",
+   "3209",
+   "320A",
+   "320B",
+   "320C",
+   "320D",
+   "320E",
+   "320F",
+   "3210",
+   "3211",
+   "3212",
+   "3213",
+   "3214",
+   "3215",
+   "3216",
+   "3217",
+   "3218",
+   "3219",
+   "321A",
+   "321B",
+   "321C",
+   "321D",
+   "321E",
+   "3220",
+   "3221",
+   "3222",
+   "3223",
+   "3224",
+   "3225",
+   "3226",
+   "3227",
+   "3228",
+   "3229",
+   "322A",
+   "322B",
+   "322C",
+   "322D",
+   "322E",
+   "322F",
+   "3230",
+   "3231",
+   "3232",
+   "3233",
+   "3234",
+   "3235",
+   "3236",
+   "3237",
+   "3238",
+   "3239",
+   "323A",
+   "323B",
+   "323C",
+   "323D",
+   "323E",
+   "323F",
+   "3240",
+   "3241",
+   "3242",
+   "3243",
+   "FB29",
+   "FC5E",
+   "FC5F",
+   "FC60",
+   "FC61",
+   "FC62",
+   "FC63",
+   "FDFA",
+   "FDFB",
+   "FE10",
+   "FE13",
+   "FE14",
+   "FE15",
+   "FE16",
+   "FE35",
+   "FE36",
+   "FE37",
+   "FE38",
+   "FE47",
+   "FE48",
+   "FE49",
+   "FE4A",
+   "FE4B",
+   "FE4C",
+   "FE50",
+   "FE54",
+   "FE55",
+   "FE56",
+   "FE57",
+   "FE59",
+   "FE5A",
+   "FE5B",
+   "FE5C",
+   "FE5F",
+   "FE60",
+   "FE61",
+   "FE62",
+   "FE64",
+   "FE65",
+   "FE66",
+   "FE68",
+   "FE69",
+   "FE6A",
+   "FE6B",
+   "FE70",
+   "FE72",
+   "FE74",
+   "FE76",
+   "FE78",
+   "FE7A",
+   "FE7C",
+   "FE7E",
+   "FF01",
+   "FF02",
+   "FF03",
+   "FF04",
+   "FF05",
+   "FF06",
+   "FF07",
+   "FF08",
+   "FF09",
+   "FF0A",
+   "FF0B",
+   "FF0C",
+   "FF0F",
+   "FF1A",
+   "FF1B",
+   "FF1C",
+   "FF1D",
+   "FF1E",
+   "FF1F",
+   "FF20",
+   "FF3B",
+   "FF3C",
+   "FF3D",
+   "FF3E",
+   "FF40",
+   "FF5B",
+   "FF5C",
+   "FF5D",
+   "FF5E",
+   "FFE3",
+   "1F101",
+   "1F102",
+   "1F103",
+   "1F104",
+   "1F105",
+   "1F106",
+   "1F107",
+   "1F108",
+   "1F109",
+   "1F10A",
+   "1F110",
+   "1F111",
+   "1F112",
+   "1F113",
+   "1F114",
+   "1F115",
+   "1F116",
+   "1F117",
+   "1F118",
+   "1F119",
+   "1F11A",
+   "1F11B",
+   "1F11C",
+   "1F11D",
+   "1F11E",
+   "1F11F",
+   "1F120",
+   "1F121",
+   "1F122",
+   "1F123",
+   "1F124",
+   "1F125",
+   "1F126",
+   "1F127",
+   "1F128",
+   "1F129"
+  ]
+ },
+ "vectors": [
+  {
+   "input": "http://qqqqqq\uff1azzzzzz@cdn.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_userinfo",
+   "note": "D-SINK-115: a fullwidth colon in the user information, which urlsplit refuses (NFKC)"
+  },
+  {
+   "input": "http://qqqqqq:zz\uff03zz@cdn.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_userinfo",
+   "note": "D-SINK-115: a fullwidth number sign in the password"
+  },
+  {
+   "input": "http://u:p%EF%BC%9Aw@cdn.test/get.php",
+   "ok": true,
+   "url": "http://u:p%EF%BC%9Aw@cdn.test/get.php",
+   "host": "cdn.test",
+   "note": "D-SINK-115, the critique's finding 4: the same fullwidth colon written as its UTF-8 escape is read, and sent as that character"
+  },
+  {
+   "input": "http://cdn\uff0f.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_host",
+   "note": "D-SINK-115: a fullwidth solidus in the host"
+  },
+  {
+   "input": "http://cdn\u2100.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_host",
+   "note": "D-SINK-115: U+2100 reads a/c"
+  },
+  {
+   "input": "http://epg\uff03.test/x.xml",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_host",
+   "note": "D-SINK-115: a guide address a playlist can hint"
+  },
+  {
+   "input": "http://cdn.test\uff1a8080/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "fold_host",
+   "note": "D-SINK-115: a fullwidth colon before the port is the host's"
+  },
+  {
+   "input": "http://qqqqqq:zz[zz]@cdn.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "bracket",
+   "note": "D-SINK-115: brackets in the password, the host no literal"
+  },
+  {
+   "input": "http://qqqqqq:zz]zz@cdn.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "bracket",
+   "note": "D-SINK-115: one bracket in the password"
+  },
+  {
+   "input": "http://qqqqqq:zz[zz@cdn.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "bracket",
+   "note": "D-SINK-115: the other one"
+  },
+  {
+   "input": "http://qqqqqq:zz[zz]@[::1]/get.php",
+   "ok": true,
+   "url": "http://qqqqqq:zz[zz]@[::1]/get.php",
+   "host": "[::1]",
+   "note": "D-SINK-115: brackets in the password before a bracketed literal, which urlsplit reads"
+  },
+  {
+   "input": "http://qqqqqq:zz%5Bzz%5D@cdn.test/get.php",
+   "ok": true,
+   "url": "http://qqqqqq:zz%5Bzz%5D@cdn.test/get.php",
+   "host": "cdn.test",
+   "note": "D-SINK-115: the brackets written %5B and %5D"
+  },
+  {
+   "input": "http://[::1:]/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: a bracketed text that is no IPv6 address"
+  },
+  {
+   "input": "http://[1:2]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: too few groups"
+  },
+  {
+   "input": "http://[:::]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: three colons"
+  },
+  {
+   "input": "http://[1::2::3]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: two `::`"
+  },
+  {
+   "input": "http://[12345::1]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: a group of five digits"
+  },
+  {
+   "input": "http://[::ffff:1.2.3.256]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "D-SINK-115: an IPv4 tail out of range"
+  },
+  {
+   "input": "http://[127.0.0.1]/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "literal",
+   "note": "IPv4 in brackets, refused before and still"
+  },
+  {
+   "input": "http://[fe80::1%25eth0]/x",
+   "ok": true,
+   "url": "http://[fe80::1%25eth0]/x",
+   "host": "[fe80::1%25eth0]",
+   "note": "a zone keeps reading"
+  },
+  {
+   "input": "http://[::ffff:1.2.3.4]:8080/x",
+   "ok": true,
+   "url": "http://[::ffff:1.2.3.4]:8080/x",
+   "host": "[::ffff:1.2.3.4]",
+   "note": "an IPv4 tail in range"
+  },
+  {
+   "input": "http://[2606:4700::1111]/x",
+   "ok": true,
+   "url": "http://[2606:4700::1111]/x",
+   "host": "[2606:4700::1111]",
+   "note": "a global literal"
+  },
+  {
+   "input": "http://cdn_x.test/get.php",
+   "ok": true,
+   "url": "http://cdn_x.test/get.php",
+   "host": "cdn_x.test",
+   "note": "D-SINK-117: `_` stays allowed"
+  },
+  {
+   "input": "http://a\u2474.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: U+2474 reads (1)"
+  },
+  {
+   "input": "http://a\uff01.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: a fullwidth exclamation mark reads !"
+  },
+  {
+   "input": "http://cdn\u034f.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-116: the combining grapheme joiner"
+  },
+  {
+   "input": "http://cdn\ufe0f.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-116: a variation selector"
+  },
+  {
+   "input": "http://cdn\u3164.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-116: the Hangul filler"
+  },
+  {
+   "input": "http://cdn\udb40\udd00.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-116: a supplementary variation selector"
+  },
+  {
+   "input": "http://cdn\u180b.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-116: a Mongolian free variation selector"
+  },
+  {
+   "input": "http://cdn.test/a\u034fb.m3u",
+   "ok": true,
+   "url": "http://cdn.test/a\u034fb.m3u",
+   "host": "cdn.test",
+   "note": "D-SINK-116: the path is not the host"
+  },
+  {
+   "input": "http://b\u00fccher.test/",
+   "ok": true,
+   "url": "http://b\u00fccher.test/",
+   "host": "b\u00fccher.test",
+   "note": "a name that is not ASCII still reads"
+  },
+  {
+   "input": "http://\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130.test/",
+   "ok": false,
+   "code": "too_long",
+   "note": "D-SINK-115, the critique's finding 8: 1,113 units typed, 2,213 lowered"
+  },
+  {
+   "input": "http://\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130.test/",
+   "ok": true,
+   "url": "http://i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307.test/",
+   "host": "i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307i\u0307.test",
+   "note": "the same host, short: lowered as both runtimes lower it"
+  },
+  {
+   "input": "http://cdn.test:0080/x",
+   "ok": true,
+   "url": "http://cdn.test/x",
+   "host": "cdn.test",
+   "note": "leading zeros in a port still read"
+  },
+  {
+   "input": "http://cdn.test:+443/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "port_text",
+   "note": "a port is digits"
+  },
+  {
+   "input": "http://cdn.test:65536/x",
+   "ok": false,
+   "code": "invalid",
+   "why": "port_range",
+   "note": "and at most 65535"
+  },
+  {
+   "input": "http://cdn!.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn\".test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn$.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn'.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn(.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn).test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn*.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn+.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn,.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn<.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn>.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn^.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn`.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn{.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn|.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn}.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  },
+  {
+   "input": "http://cdn~.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "host",
+   "note": "D-SINK-117: ASCII outside the allowlist"
+  }
+ ],
+ "connection": [
+  {
+   "host": "[::1]:+443",
+   "withPort": true,
+   "refused": true,
+   "note": "the critique's finding 2: a sign before the port"
+  },
+  {
+   "host": "[2606:4700::1]:4_43",
+   "withPort": true,
+   "refused": true,
+   "note": "an underscore int() reads"
+  },
+  {
+   "host": "[2606:4700::1]:\u0664\u0664\u0663",
+   "withPort": true,
+   "refused": true,
+   "note": "Arabic-Indic digits"
+  },
+  {
+   "host": "cdn.test:99999",
+   "withPort": true,
+   "refused": true,
+   "note": "above 65535"
+  },
+  {
+   "host": "[::1]:65536",
+   "withPort": true,
+   "refused": true,
+   "note": "above 65535 after a literal"
+  },
+  {
+   "host": "cdn.test:+443",
+   "withPort": true,
+   "refused": true,
+   "note": "a sign before a name's port"
+  },
+  {
+   "host": "cdn.test:4_43",
+   "withPort": true,
+   "refused": true,
+   "note": "an underscore"
+  },
+  {
+   "host": "cdn.test:\u0664\u0664\u0663",
+   "withPort": true,
+   "refused": true,
+   "note": "Arabic-Indic digits"
+  },
+  {
+   "host": "cdn.test: 443",
+   "withPort": true,
+   "refused": true,
+   "note": "a space int() strips"
+  },
+  {
+   "host": "cdn.test:000443",
+   "withPort": true,
+   "refused": true,
+   "note": "six digits"
+  },
+  {
+   "host": "cdn.test:\uff14\uff14\uff13",
+   "withPort": true,
+   "refused": true,
+   "note": "fullwidth digits"
+  },
+  {
+   "host": "cdn.test:443",
+   "withPort": true,
+   "refused": false,
+   "note": "a port"
+  },
+  {
+   "host": "cdn.test:",
+   "withPort": true,
+   "refused": false,
+   "note": "an empty port, as http.client reads it"
+  },
+  {
+   "host": "cdn.test:00443",
+   "withPort": true,
+   "refused": false,
+   "note": "five digits"
+  },
+  {
+   "host": "[::1]:65535",
+   "withPort": true,
+   "refused": false,
+   "note": "the highest port after a literal"
+  },
+  {
+   "host": "[::1]",
+   "withPort": true,
+   "refused": false,
+   "note": "a literal with no port"
+  },
+  {
+   "host": "cdn_x.test",
+   "withPort": false,
+   "refused": false,
+   "note": "an underscore"
+  },
+  {
+   "host": "cdn!.test",
+   "withPort": false,
+   "refused": true,
+   "note": "ASCII outside the allowlist"
+  },
+  {
+   "host": "cdn\u034f.test",
+   "withPort": false,
+   "refused": true,
+   "note": "an invisible character"
+  }
+ ],
+ "stateReaders": [
+  {
+   "url": "http://qqqqqq\uff1azzzzzz@cdn.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://qqqqqq:zz[zz]@cdn.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://[::1:]/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://cdn!.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://a\u2474.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://cdn\u034f.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://cdn\ufe0f.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://cdn.test/get.php",
+   "epgUrl": "http://epg\uff03.test/x.xml",
+   "kept": true,
+   "epgKept": false
+  },
+  {
+   "url": "http://cdn.test/live.m3u",
+   "epgUrl": "http://epg$.test/x.xml",
+   "kept": true,
+   "epgKept": false
+  },
+  {
+   "url": "http://qqqqqq:zz[zz]@[::1]/get.php",
+   "kept": true
+  },
+  {
+   "url": "http://u:p%EF%BC%9Aw@cdn.test/get.php",
+   "kept": true
+  },
+  {
+   "url": "https://b\u00fccher.test/x.m3u",
+   "kept": true
+  },
+  {
+   "url": "http://cdn_x.test/get.php",
+   "kept": true
+  },
+  {
+   "url": "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus",
+   "epgUrl": "http://provider.example.test:8080/xmltv.php?username=u&password=p",
+   "kept": true,
+   "epgKept": true
+  }
+ ],
+ "atoms": {
+  "schemes": [
+   "http",
+   "https",
+   "HTTP"
+  ],
+  "userinfo": [
+   "",
+   "qqqqqq@",
+   "qqqqqq:zzzzzz@",
+   "qqqqqq:zz[zz]@",
+   "qqqqqq:zz]zz@",
+   "q[q@",
+   "qqqqqq%3Azzzzzz@",
+   "qqqqqq:zz%EF%BC%9Azz@",
+   "my.user:pa@",
+   "q@q@"
+  ],
+  "labels": [
+   "cdn",
+   "a",
+   "cdn-1",
+   "cdn_x",
+   "1",
+   "123",
+   "xn--bcher-kva",
+   "b\u00fccher",
+   "\u0430b",
+   "\u4f8b",
+   "X\u0130",
+   "CDN"
+  ],
+  "tlds": [
+   "test",
+   "example.test",
+   "test."
+  ],
+  "literals": [
+   "[::1]",
+   "[2606:4700::1111]",
+   "[::ffff:1.2.3.4]",
+   "[fe80::1%25eth0]",
+   "[::1:]",
+   "[1:2]",
+   "[:::]",
+   "[v1.x]",
+   "[127.0.0.1]",
+   "[::1]x",
+   "127.0.0.1",
+   "10.0.0.1",
+   "2130706433",
+   "[::1",
+   "::1]"
+  ],
+  "ports": [
+   "",
+   ":",
+   ":80",
+   ":443",
+   ":8080",
+   ":0080",
+   ":+443",
+   ":4_43",
+   ":\u0664\u0664\u0663",
+   ":65535",
+   ":65536",
+   ":99999",
+   ":\uff18\uff10"
+  ],
+  "targets": [
+   "",
+   "/",
+   "/get.php?username=u&password=p",
+   "/a@b",
+   "/\u00d1.png",
+   "/x#frag",
+   "?q=1",
+   "#f",
+   "/a\u034fb"
+  ],
+  "inserts": [
+   "!",
+   "\"",
+   "$",
+   "%",
+   "&",
+   "'",
+   "(",
+   ")",
+   "*",
+   "+",
+   ",",
+   "-",
+   ".",
+   ":",
+   ";",
+   "<",
+   "=",
+   ">",
+   "@",
+   "[",
+   "\\",
+   "]",
+   "^",
+   "_",
+   "`",
+   "{",
+   "|",
+   "}",
+   "~",
+   "\u00ad",
+   "\u200b",
+   "\u202e",
+   "\ufeff",
+   "\udb40\udc41",
+   "\u034f",
+   "\u115f",
+   "\u1160",
+   "\u17b4",
+   "\u180b",
+   "\u1806",
+   "\u2065",
+   "\u3164",
+   "\ufe00",
+   "\ufe0f",
+   "\uffa0",
+   "\ufff0",
+   "\udb40\udd00",
+   "\u2474",
+   "\uff01",
+   "\ufe57",
+   "\u2488",
+   "\uff21",
+   "\uff0e",
+   "\u00fc",
+   "\u0130",
+   "\u2047",
+   "\u2048",
+   "\u2049",
+   "\u2100",
+   "\u2101",
+   "\u2105",
+   "\u2106",
+   "\u2a74",
+   "\ufe13",
+   "\ufe16",
+   "\ufe55",
+   "\ufe56",
+   "\ufe5f",
+   "\ufe6b",
+   "\uff03",
+   "\uff0f",
+   "\uff1a",
+   "\uff1f",
+   "\uff20",
+   "\u3000",
+   "\u00a0"
+  ]
+ },
+ "seeds": [
+  5,
+  11
+ ],
+ "corpusSize": 20000
+}

@@ -127,20 +127,65 @@ def looks_like_host(text: str) -> bool:
 # U+FF3C and U+FE68, which the idna codec and NFKD fold to one: 79 code
 # points fold in all.
 HOST_NAME_REFUSED_CHARS = "@%;=&[]\\"
+# D-SINK-117 (2026-11-16): what ASCII a host NAME may hold -- letters,
+# digits, `-`, `.` and `_` -- an allowlist rather than the list of
+# delimiters above, which stays to say why those first eight were refused.
+# Both validators accepted, and the connection layer handed on, a name
+# holding ! " $ ' ( ) * + , < > ^ ` { | } ~, which no DNS name holds, written
+# as itself or as a compatibility character the fold reads as one (U+2474
+# reads `(1)`). The colon keeps its own rule (a port's one colon, or an IPv6
+# literal's). Model.hostNameRefused asks the same allowlist; the shared
+# host-grammar fixture holds both to it over every ASCII character and
+# every code point that folds to one outside it (301).
+HOST_NAME_ASCII = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._")
 # Unicode category Cf, every code point of it, as (first, last): what Python
 # 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
 # Explicit rather than unicodedata.category, so both mirrors refuse one set
 # whatever either engine's Unicode version; each suite holds its table to its
 # engine's category over the whole range (test_host_names.py, Model.test.js)
-# and the fixture pins both ends of every range in both mirrors.
+# and the fixture pins both ends of every range in both mirrors. Since
+# D-SINK-116 the host rule asks HOST_INVISIBLE_RANGES, which holds these;
+# this table stays for the label's fold (label_fold_nfkd), which removes a
+# format character and nothing else.
 HOST_FORMAT_RANGES = ((0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD),
                       (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E),
                       (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064), (0x2066, 0x206F),
                       (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD), (0x110CD, 0x110CD),
                       (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0001, 0xE0001),
                       (0xE0020, 0xE007F))
-_HOST_NAME_REFUSED = frozenset(HOST_NAME_REFUSED_CHARS + URL_SPACE_CHARS).union(
-    chr(code) for first, last in HOST_FORMAT_RANGES for code in range(first, last + 1))
+# D-SINK-116 (2026-11-16): what a host name may not hold because it draws as
+# nothing: Unicode's Cf, its Default_Ignorable_Code_Point property and
+# stringprep's table B.1 (what nameprep maps to nothing), as (first, last),
+# 26 ranges and 4,207 code points. Cf alone, which this rule asked until
+# then, let through the combining grapheme joiner, the variation selectors,
+# the Hangul fillers and the Mongolian free variation selectors, several of
+# which the idna codec maps to nothing, so `cdn<U+034F>.test` was looked up
+# as `cdn.test`, and drawn like it, as a second source. Explicit, in both
+# mirrors: the python suite holds it to unicodedata's Cf, stringprep's B.1
+# and the shared host-grammar fixture's Default_Ignorable list (node's
+# property, which Python's unicodedata does not carry); the node suite holds
+# it to \p{Cf}, \p{Default_Ignorable_Code_Point} and the fixture's B.1.
+HOST_INVISIBLE_RANGES = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x0600, 0x0605), (0x061C, 0x061C),
+                         (0x06DD, 0x06DD), (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2),
+                         (0x115F, 0x1160), (0x17B4, 0x17B5), (0x1806, 0x1806), (0x180B, 0x180F),
+                         (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+                         (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFFB),
+                         (0x110BD, 0x110BD), (0x110CD, 0x110CD), (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3),
+                         (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+_HOST_NAME_REFUSED = frozenset(URL_SPACE_CHARS).union(
+    chr(code) for code in range(0x80) if chr(code) not in HOST_NAME_ASCII and code != 0x3A).union(
+    chr(code) for first, last in HOST_INVISIBLE_RANGES for code in range(first, last + 1))
+# D-SINK-115 (2026-11-16): the code points whose compatibility form holds
+# `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD, in Python 3.14
+# (Unicode 16.0), node 26 (17.0) and Qt 6.12's engine. CPython's urlsplit
+# refuses an authority holding one anywhere (urllib.parse._checknetloc,
+# which NFKC-normalizes the whole netloc), so read_authority refuses one
+# before the URL library is asked. Model.DELIMITER_FOLDS is the same table;
+# the shared host-grammar fixture holds both to it, and the python suite
+# holds it to urlsplit itself over every code point.
+DELIMITER_FOLDS = frozenset(chr(code) for code in (
+    0x2047, 0x2048, 0x2049, 0x2100, 0x2101, 0x2105, 0x2106, 0x2A74, 0xFE13, 0xFE16,
+    0xFE55, 0xFE56, 0xFE5F, 0xFE6B, 0xFF03, 0xFF0F, 0xFF1A, 0xFF1F, 0xFF20))
 # What an IPv6 literal's zone may hold: _IPV6_LITERAL's `%25[A-Za-z0-9._~-]+`.
 _ZONE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
 
@@ -207,7 +252,16 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     backslash, two more, 79: U+FF3C and U+FE68, which both fold to `\\`. A
     colon the fold adds is a colon in the name, never the port's.
     An ASCII name pays nothing, and the fold is asked only of a name the
-    first judgment let through. Model.hostNameRefused folds the same way."""
+    first judgment let through. Model.hostNameRefused folds the same way.
+
+    D-SINK-116 and D-SINK-117 (2026-11-16): the set the code points and the
+    fold are judged by is now every ASCII character but a letter, a digit,
+    `-`, `.` and `_` (HOST_NAME_ASCII; the colon by its count, as before),
+    the reader's whitespace, and HOST_INVISIBLE_RANGES (Cf, Unicode's
+    default-ignorable code points and stringprep's B.1) -- so 286 code
+    points that are not refused themselves fold to one that is, where 79
+    did -- and, with a port, the port is empty or one to five ASCII digits
+    up to 65535 (port_digits)."""
     name = str(text or "")
     if _host_name_refused_as_written(name, with_port):
         return True
@@ -219,18 +273,46 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
 
 
 def _host_name_refused_as_written(name: str, with_port: bool) -> bool:
-    """host_name_refused's judgment of the code points as they stand."""
+    """host_name_refused's judgment of the code points as they stand.
+
+    D-SINK-117 (2026-11-16): `with_port`, the text after a leading IPv6
+    literal's `]`, or after a name's one colon, is a port only when it is
+    empty or one to five ASCII digits of value at most 65535 (port_digits).
+    http.client reads the port with int(), which takes `+443`, `4_43`,
+    ` 443` and Arabic-Indic digits as 443, so a redirect to `cdn.test:+443`
+    or `[2606:4700::1]:4_43` was followed; the validators and the relay's
+    authority reader already refused such a port."""
     if with_port and name.startswith("["):
         close = name.find("]")
         if close != -1 and _ipv6_literal_text(name[1:close]):
-            name = name[close + 1:]
-            if name and not name.startswith(":"):
-                return True
+            rest = name[close + 1:]
+            if rest == "":
+                return False
+            return not rest.startswith(":") or not port_digits(rest[1:])
     elif not with_port and _ipv6_literal_text(name):
         return False
     if name.count(":") > (1 if with_port else 0):
         return True
+    if with_port:
+        name, _, port = name.partition(":")
+        if not port_digits(port):
+            return True
     return not _HOST_NAME_REFUSED.isdisjoint(name)
+
+
+def port_digits(text: str) -> bool:
+    """D-SINK-117: is `text` no port at all ("") or one to five ASCII digits
+    whose value is at most 65535? An index walk over the digits, never
+    str.isdigit (which takes a superscript) and never a `$`-anchored
+    pattern (which takes a trailing newline)."""
+    if text == "":
+        return True
+    if len(text) > 5:
+        return False
+    for ch in text:
+        if not "0" <= ch <= "9":
+            return False
+    return int(text) <= 65535
 
 
 def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
@@ -303,51 +385,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
         return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
     if _URL_SPACE.search(rest):
         return _validation(False, "invalid", "URL contains whitespace")
-    body = rest[2:]
-    cut = _AUTHORITY_END.search(body)
-    authority = body if cut is None else body[:cut.start()]
-    tail = "" if cut is None else body[cut.start():]
-    if "\\" in authority or _ZERO_WIDTH.search(authority):
-        return _validation(False, "invalid", "URL host contains an invalid character")
-    at = authority.rfind("@")
-    userinfo = authority[:at] if at != -1 else ""
-    hostport = authority[at + 1:] if at != -1 else authority
-    # R32a (D-SINK-27, 2026-10-21): the authority ends at the first "/", "?"
-    # or "#" and its userinfo at the LAST "@" within it; an "@" after the
-    # authority is path or query and refuses nothing. The round-2 refusal
-    # that stood here (the mirror of passwordReadAsPort) dropped a stored
-    # Xtream /playlist/<email>/<pass>/m3u_plus link on the first normalize
-    # after the upgrade, and is withdrawn. Mirrors Model.validateSourceUrl.
-    port = ""
-    if hostport.startswith("["):
-        close = hostport.find("]")
-        if close == -1:
-            return _validation(False, "invalid", "unterminated IPv6 literal")
-        host = hostport[:close + 1]
-        if not _IPV6_LITERAL.match(host):
-            return _validation(False, "invalid", "bracket literal is not an IPv6 address")
-        after_host = hostport[close + 1:]
-        if after_host:
-            if not after_host.startswith(":"):
-                return _validation(False, "invalid", "unexpected text after the IPv6 literal")
-            port = after_host[1:]
-    else:
-        colon = hostport.rfind(":")
-        host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
-        # D-SINK-86: and a name holding what no name may hold (`@`, `%`, `;`,
-        # `=`, `&`, a colon, whitespace, a format character); the bracketed
-        # literal above is judged by _IPV6_LITERAL instead.
-        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
-            return _validation(False, "invalid", "URL host contains an invalid character")
-    if host == "":
-        return _validation(False, "invalid", "URL has no host name")
-    host = host.lower()
-    if port != "":
-        if not _ASCII_DIGITS.match(port):
-            return _validation(False, "invalid", "URL port is not a number")
-        port = port.lstrip("0") or "0"
-        if int(port) > 65535:
-            return _validation(False, "invalid", "URL port is above 65535")
+    read = read_authority(rest[2:])
+    if not read["ok"]:
+        return _validation(False, "invalid", AUTHORITY_REFUSALS[read["why"]])
+    host, port, userinfo, tail = read["host"], read["port"], read["userinfo"], read["tail"]
     if port == ("80" if scheme == "http" else "443"):
         port = ""
     hash_at = tail.find("#")
@@ -359,7 +400,126 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     if path == "":
         path = "/"
     url = "%s://%s%s%s%s%s" % (scheme, userinfo + "@" if userinfo else "", host, ":" + port if port else "", path, "?" + query if query else "")
+    # D-SINK-115, the critique's finding 8: the cap is the STORED url's as
+    # well as the text's. Lowering lengthens a host (U+0130 lowers to `i`
+    # and U+0307), so a host of 1,100 of them was accepted at 1,113 units,
+    # stored at 2,213, and dropped as too long by both state readers at the
+    # next load. Model.validateSourceUrl judges the same.
+    if utf16_length(url) > MAX_SOURCE_URL:
+        return _validation(False, "too_long", "source URL longer than %d characters" % MAX_SOURCE_URL)
     return _validation(True, "ok", "", "http", url, host)
+
+
+# D-SINK-115: read_authority's refusals, by `why`, as validate_source_url
+# says them. None names the URL, its host or its user name.
+AUTHORITY_REFUSALS = {
+    "char": "URL host contains an invalid character",
+    "fold_host": "URL host holds a character that reads as /, ?, #, @ or :, which cannot be part of a host name",
+    "fold_userinfo": ("URL user name or password holds a character that reads as /, ?, #, @ or :; "
+                      "write that character percent-encoded as its UTF-8 bytes"),
+    "bracket": "URL user name or password holds [ or ]; write them as %5B and %5D",
+    "literal_open": "unterminated IPv6 literal",
+    "literal": "bracket literal is not an IPv6 address",
+    "literal_after": "unexpected text after the IPv6 literal",
+    "host": "URL host contains an invalid character",
+    "empty": "URL has no host name",
+    "port_text": "URL port is not a number",
+    "port_range": "URL port is above 65535",
+}
+
+
+def read_authority(body: str) -> dict[str, Any]:
+    """D-SINK-115 (2026-11-16): the one reading of an http(s) URL's
+    authority, which validate_source_url asks (and the logo reading on the
+    dev branch after it): `body` is the text after `scheme://`, its
+    whitespace and controls already refused. -> {ok, why, userinfo, host,
+    port, tail}: `host` lower-cased (an IPv6 literal with its brackets),
+    `port` without its leading zeros ("" for none), `tail` from the first
+    `/`, `?` or `#` on; `why` one of AUTHORITY_REFUSALS' keys when not ok.
+    Model.readAuthority is the same reading, held to it by the shared
+    source-urls and host-grammar fixtures.
+
+    It refuses what CPython's URL library refuses to read, which the
+    validators accepted until then and every fetch then ended as an
+    internal error quoting the authority, user information included:
+      * a code point whose compatibility form is `/`, `?`, `#`, `@` or `:`
+        anywhere in the authority (DELIMITER_FOLDS; urlsplit's
+        _checknetloc normalizes the whole netloc);
+      * a `[` or `]` in the user information, unless the host is a
+        bracketed literal (urlsplit's _check_bracketed_netloc reads the
+        brackets after the last `@` only then);
+      * a bracketed host that is no IPv6 address (`[::1:]`, `[1:2]`): the
+        pattern's characters and zone, and then ipaddress itself on the text
+        before the zone's `%25`.
+    Stricter than CPython where that is simpler: no IPvFuture literal and a
+    zone of the pattern's characters only, which no validator accepted
+    before either. The authority ends at the first ASCII `/`, `?` or `#`,
+    and its user information at the LAST `@` within it (R32a)."""
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    tail = "" if cut is None else body[cut.start():]
+
+    def refused(why: str) -> dict[str, Any]:
+        return {"ok": False, "why": why, "userinfo": "", "host": "", "port": "", "tail": tail}
+
+    if "\\" in authority or _ZERO_WIDTH.search(authority):
+        return refused("char")
+    at = authority.rfind("@")
+    if not authority.isascii():
+        for index, ch in enumerate(authority):
+            if ch in DELIMITER_FOLDS:
+                return refused("fold_userinfo" if index < at else "fold_host")
+    userinfo = authority[:at] if at != -1 else ""
+    hostport = authority[at + 1:] if at != -1 else authority
+    port = ""
+    bracketed = hostport.startswith("[")
+    if bracketed:
+        close = hostport.find("]")
+        if close == -1:
+            return refused("literal_open")
+        host = hostport[:close + 1]
+        if not _ipv6_url_literal(host):
+            return refused("literal")
+        after_host = hostport[close + 1:]
+        if after_host:
+            if not after_host.startswith(":"):
+                return refused("literal_after")
+            port = after_host[1:]
+    else:
+        colon = hostport.rfind(":")
+        host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
+        # D-SINK-86: and a name holding what no name may hold
+        # (host_name_refused); the bracketed literal above is judged by
+        # _ipv6_url_literal instead.
+        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
+            return refused("host")
+    if not bracketed and ("[" in userinfo or "]" in userinfo):
+        return refused("bracket")
+    if host == "":
+        return refused("empty")
+    if port != "":
+        for ch in port:
+            if not "0" <= ch <= "9":
+                return refused("port_text")
+        port = port.lstrip("0") or "0"
+        if int(port) > 65535:
+            return refused("port_range")
+    return {"ok": True, "why": "", "userinfo": userinfo, "host": host.lower(), "port": port, "tail": tail}
+
+
+def _ipv6_url_literal(host: str) -> bool:
+    """A URL's bracketed IPv6 literal, brackets included: _IPV6_LITERAL's
+    characters and `%25` zone, and an IPv6 address before the zone, as
+    ipaddress reads one (D-SINK-115: the pattern alone took `[::1:]`,
+    `[1:2]` and `[:::]`, which urlsplit refuses)."""
+    if not _IPV6_LITERAL.match(host):
+        return False
+    import ipaddress
+    try:
+        ipaddress.IPv6Address(host[1:-1].partition("%")[0])
+    except ValueError:
+        return False
+    return True
 
 
 def source_cache_key(url: str) -> str:
@@ -1608,8 +1768,11 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 # fold of D-SINK-88 is host_name_refused's own, so every reading has it.
 #
 # The cost (constraint 7, D-PERF-13): _stream_name_refused accepts at once an
-# authority whose host is only ASCII letters, digits and `_.-~` and whose
-# port is ASCII digits or nothing. No reading can refuse it: none of those
+# authority whose host is only ASCII letters, digits and `_.-` and whose
+# port is one to five ASCII digits up to 65535 or nothing (D-SINK-117,
+# 2026-11-16: `~` left the set and the port its any-length digits when the
+# host rule became an allowlist and the port's rule port_digits, which the
+# shortcut's own tests found). No reading can refuse it: none of those
 # characters is one host_name_refused refuses or folds, it holds no bracket
 # and at most one colon, its port is digits, and quote returns it unchanged.
 # It is a shortcut held equal to the readings over every code point
@@ -1647,7 +1810,7 @@ STREAM_QUERY_HOST_SCHEMES = {"udp": 1, "rtp": 2}
 STREAM_QUERY_HOST_PARAMS = frozenset({"sources", "block"})
 # av_get_token's WHITESPACES: what it skips before an entry and trims after.
 _TOKEN_SPACE = " \n\t\r"
-_PLAIN_HOST_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~"
+_PLAIN_HOST_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"
 # A reading of only these is accepted at once. Asked as bytes.translate's
 # deletion, which costs a 4,096-character reading about 4 us where str.strip
 # over the same set cost about 39.
@@ -1672,10 +1835,10 @@ def _stream_name_refused(url: str, netloc: str, scheme: str, params: list[tuple[
 
 def _plain_authority(netloc: str) -> bool:
     """The fast accept: is the host[:port] after the netloc's last `@` only
-    _PLAIN_HOST_CHARS, then at most one colon and ASCII digits? str.strip
-    over a set is quote's own idiom for "only these"."""
+    _PLAIN_HOST_CHARS, then at most one colon and a port port_digits
+    accepts? str.strip over a set is quote's own idiom for "only these"."""
     host, _, port = netloc.rpartition("@")[2].partition(":")
-    return not host.strip(_PLAIN_HOST_CHARS) and not port.strip(_PORT_DIGITS)
+    return not host.strip(_PLAIN_HOST_CHARS) and port_digits(port)
 
 
 def _stream_name_readings(url: str, netloc: str, scheme: str, params: list[tuple[str, str]] | None = None) -> bool:
@@ -1802,6 +1965,20 @@ def _query_entries_refused(reading: str, judged: set[str]) -> bool:
         judged.add(entry)
         if host_name_refused(entry):
             return True
+    return False
+
+
+def stream_url_unreadable(url: str) -> bool:
+    """D-SINK-115: is `url` a stream scheme's address (STREAM_SCHEMES, the
+    text before its first `:`) that urlsplit refuses to read? The parse
+    counts it as `name` and play time refuses it with
+    STREAM_HOST_NAME_REFUSAL, where both said it was no stream scheme."""
+    if url.partition(":")[0].lower() not in STREAM_SCHEMES:
+        return False
+    try:
+        urllib.parse.urlsplit(url)
+    except ValueError:
+        return True
     return False
 
 
@@ -1953,7 +2130,12 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname or ""
     except ValueError:
-        return "scheme", ""
+        # D-SINK-115: a stream scheme whose authority the URL library
+        # refuses to read -- a compatibility character for `/`, `?`, `#`,
+        # `@` or `:`, a bracket in the user information, a bracketed host
+        # that is no IPv6 address -- names a host in a form no host name may
+        # take (`name`), not an unsupported scheme, as it was counted.
+        return ("name" if stream_url_unreadable(url) else "scheme"), ""
     scheme = parts.scheme.lower()
     if scheme not in STREAM_SCHEMES or host == "":
         return "scheme", host

@@ -477,46 +477,66 @@ class FirstLoadReasonBoundTest(unittest.TestCase):
 
 
 class InternalErrorBoundTest(unittest.TestCase):
-    """main()'s answer to a bug is part of every verb's reply; the
-    exception's text is the one part of it no verb composes."""
+    """main()'s answer to a bug is part of every verb's reply. Since
+    D-SINK-115 (2026-11-16) it names the exception by its class alone, in the
+    reply and on stderr: the exception's text is the one part of it no verb
+    composes, and the URL library's quoted an authority, user information
+    included."""
 
     def test_the_message_and_the_traceback_are_cut_with_the_caps_lowered(self):
         text = "an exception that quotes its input: " + "q" * 200
         with mock.patch.object(helper, "cmd_clipboard", side_effect=ValueError(text)), \
-                mock.patch.object(helper, "INTERNAL_MESSAGE_MAX", 40), \
+                mock.patch.object(helper, "INTERNAL_MESSAGE_MAX", 6), \
                 mock.patch.object(helper, "INTERNAL_TRACE_MAX", 120):
             code, payload, _, stderr = run_main(["clipboard"])
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"]["code"], "internal")
-        self.assertEqual(payload["error"]["message"], ("ValueError: " + text)[:40])
+        self.assertEqual(payload["error"]["message"], "ValueError"[:6])
         self.assertLessEqual(len(stderr), 120 + len("\n[%d characters not shown]\n" % 10 ** 6))
         self.assertIn("characters not shown]", stderr)
         # The tail is kept: the last line of a traceback names the exception.
-        self.assertTrue(stderr.rstrip().endswith("q" * 10), stderr)
+        self.assertTrue(stderr.rstrip().endswith("ValueError (text withheld)"), stderr)
+        self.assertNotIn("qqqq", stderr)
 
     def test_an_ordinary_bug_report_is_whole(self):
         with mock.patch.object(helper, "cmd_clipboard", side_effect=ValueError("short")):
             code, payload, _, stderr = run_main(["clipboard"])
-        self.assertEqual(payload["error"]["message"], "ValueError: short")
+        self.assertEqual(payload["error"]["message"], "ValueError")
         self.assertIn("Traceback", stderr)
         self.assertNotIn("characters not shown", stderr)
+        self.assertNotIn("short", stderr)
 
-    def test_the_cut_comes_after_the_redaction(self):
-        """As the track test: 26 characters of `ValueError: http://user:...`
-        end inside the userinfo, so cutting first leaves `http://user` for
-        the redactor to publish as a host. The traceback is cut at a cap
-        inside the userinfo too. Seen red with both lines of main()
-        reversed to redact_urls(bounded_text(...))."""
-        text = "http://user:SECRETPW@h.test/" + "p" * 100
-        with mock.patch.object(helper, "cmd_clipboard", side_effect=ValueError(text)), \
-                mock.patch.object(helper, "INTERNAL_MESSAGE_MAX", 26), \
-                mock.patch.object(helper, "INTERNAL_TRACE_MAX", 52):
+    def test_the_exceptions_text_is_withheld_in_the_reply_and_the_traceback(self):
+        """D-SINK-115: the URL library's sentence for an authority it cannot
+        read, user information included, which the redactors withheld only
+        when an ASCII `:` parted the two. Red on 3101349: the reply and the
+        traceback quoted it."""
+        text = "netloc 'qqqqqq" + chr(0xFF1A) + "zzzzzz@cdn.test' contains invalid characters under NFKC normalization"
+        with mock.patch.object(helper, "cmd_clipboard", side_effect=ValueError(text)):
+            code, payload, _, stderr = run_main(["clipboard"])
+        self.assertEqual((code, payload["error"]), (1, {"code": "internal", "message": "ValueError"}))
+        for leak in ("qqqqqq", "zzzzzz", "cdn.test", "netloc"):
+            self.assertNotIn(leak, json.dumps(payload) + stderr)
+        self.assertTrue(stderr.rstrip().endswith("ValueError (text withheld)"), stderr[-200:])
+        self.assertIn("Traceback (most recent call last):", stderr)
+
+    def test_a_chained_exceptions_text_is_withheld_too(self):
+        # Composed at run time: a frame prints its source line, and the
+        # secret must not be in this file's text for the check to mean
+        # anything.
+        secret = "".join(["SEC", "RETPW"])
+
+        def raise_chained(_):
+            try:
+                raise KeyError("http://user:%s@h.test/" % secret)
+            except KeyError:
+                raise RuntimeError(secret + " again")
+        with mock.patch.object(helper, "cmd_clipboard", side_effect=raise_chained):
             _, payload, _, stderr = run_main(["clipboard"])
-        self.assertEqual(payload["error"]["message"], "ValueError: http://h.test")
-        self.assertNotIn("http://user", payload["error"]["message"] + stderr)
-        self.assertNotIn("SECRET", payload["error"]["message"] + stderr)
-        # The traceback's tail is the exception line, redacted whole.
-        self.assertTrue(stderr.rstrip().endswith("ValueError: http://h.test"), stderr)
+        self.assertEqual(payload["error"]["message"], "RuntimeError")
+        self.assertNotIn(secret, stderr)
+        self.assertNotIn("During handling", stderr)
+        self.assertTrue(stderr.rstrip().endswith("RuntimeError (text withheld)"), stderr[-200:])
 
     def test_the_counted_line_reads_right_for_one(self):
         """The round-1 recheck of lane-bounds-p: "[1 characters not shown]"."""

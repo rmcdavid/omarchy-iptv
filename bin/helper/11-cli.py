@@ -798,10 +798,22 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
-        message = bounded_text(shown_text("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        # D-SINK-115 (2026-11-16, the lead's call under the owner's standing
+        # authority of 2026-11-09): and it names the exception by its class
+        # alone, in the reply and on stderr, where its frames are kept. The
+        # text is the one part no verb composes, and the URL library's own
+        # sentence quoted an authority it could not read, user information
+        # included, which the redactors withheld only when an ASCII `:`
+        # parted the user name from the password. Chained exceptions are
+        # not printed: their text is the same kind of thing. Cost: a bug
+        # report loses the exception's text (a KeyError's key, a
+        # ValueError's value).
+        kind = type(error).__name__
+        message = bounded_text(shown_text(kind), INTERNAL_MESSAGE_MAX)
         try:
             import traceback
-            trace = traceback.format_exc()
+            trace = ("Traceback (most recent call last):\n" + "".join(traceback.format_tb(error.__traceback__))
+                     + "%s (text withheld)\n" % kind)
         except Exception:
             # D-PLY-38: with no descriptor left `traceback` cannot be read,
             # and that import's own failure used to replace the answer

@@ -1552,21 +1552,15 @@
  },
  {
   "input": "http://h\u180d.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u180d.test/x",
-  "host": "h\u180d.test",
-  "key": "8d468e20",
-  "note": "D-SINK-86: U+180D (Mn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+180D beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\u180f.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u180f.test/x",
-  "host": "h\u180f.test",
-  "key": "5bf5e0ee",
-  "note": "D-SINK-86: U+180F (Mn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+180F beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\u2010.test/x",
@@ -1579,12 +1573,9 @@
  },
  {
   "input": "http://h\u2065.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u2065.test/x",
-  "host": "h\u2065.test",
-  "key": "123ab9d0",
-  "note": "D-SINK-86: U+2065 (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+2065 beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\u2070.test/x",
@@ -1615,12 +1606,9 @@
  },
  {
   "input": "http://h\ufff8.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\ufff8.test/x",
-  "host": "h\ufff8.test",
-  "key": "2bf4dbc6",
-  "note": "D-SINK-86: U+FFF8 (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FFF8 beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\ufffc.test/x",
@@ -1723,39 +1711,27 @@
  },
  {
   "input": "http://h\udb40\udc00.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\udb40\udc00.test/x",
-  "host": "h\udb40\udc00.test",
-  "key": "bf034047",
-  "note": "D-SINK-86: U+E0000 (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0000 beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\udb40\udc02.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\udb40\udc02.test/x",
-  "host": "h\udb40\udc02.test",
-  "key": "1b9bf949",
-  "note": "D-SINK-86: U+E0002 (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0002 beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\udb40\udc1f.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\udb40\udc1f.test/x",
-  "host": "h\udb40\udc1f.test",
-  "key": "46bd53b4",
-  "note": "D-SINK-86: U+E001F (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E001F beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://h\udb40\udc80.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\udb40\udc80.test/x",
-  "host": "h\udb40\udc80.test",
-  "key": "4ed892dd",
-  "note": "D-SINK-86: U+E0080 (Cn) beside a format range is no format character"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0080 beside a format range is no format character, but default-ignorable, so refused since 2026-11-16 (it was D-SINK-86's control until then)"
  },
  {
   "input": "http://[fe80::1%25eth0]:8080/x",
@@ -2263,5 +2239,497 @@
   "ok": false,
   "code": "invalid",
   "note": "D-SINK-88's fold, D-SINK-92's backslash: U+FE68, which the resolver path reads as `\\`, an escape to systemd-resolved"
+ },
+ {
+  "input": "http://qqqqqq\uff1azzzzzz@cdn.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: a fullwidth colon in the password, which urlsplit refuses (its NFKC is `:`); the fetch ended internal quoting it"
+ },
+ {
+  "input": "http://u:p%EF%BC%9Aw@cdn.test/get.php",
+  "ok": true,
+  "kind": "http",
+  "url": "http://u:p%EF%BC%9Aw@cdn.test/get.php",
+  "host": "cdn.test",
+  "key": "2084594c",
+  "note": "D-SINK-115: the same character written as its UTF-8 escape reads, and is sent as that character (the critique's finding 4)"
+ },
+ {
+  "input": "http://cdn\uff0f.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: a fullwidth solidus in the host"
+ },
+ {
+  "input": "http://cdn\u2100.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: U+2100, whose compatibility form is a/c"
+ },
+ {
+  "input": "http://epg\uff03.test/x.xml",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: a fullwidth number sign, a guide address a playlist can hint"
+ },
+ {
+  "input": "http://qqqqqq:zz[zz]@cdn.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: brackets in the password, the host no bracketed literal"
+ },
+ {
+  "input": "http://qqqqqq:zz]zz@cdn.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: one bracket in the password"
+ },
+ {
+  "input": "http://qqqqqq:zz[zz]@[::1]/get.php",
+  "ok": true,
+  "kind": "http",
+  "url": "http://qqqqqq:zz[zz]@[::1]/get.php",
+  "host": "[::1]",
+  "key": "3479975f",
+  "note": "D-SINK-115: brackets in the password before a bracketed literal, which urlsplit reads"
+ },
+ {
+  "input": "http://[::1:]/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: a bracketed text that is no IPv6 address"
+ },
+ {
+  "input": "http://[1:2]/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: too few groups"
+ },
+ {
+  "input": "http://[:::]/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-115: three colons"
+ },
+ {
+  "input": "http://[fe80::1%25eth0]/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://[fe80::1%25eth0]/x",
+  "host": "[fe80::1%25eth0]",
+  "key": "ec3d7a8d",
+  "note": "D-SINK-115: a zone still reads"
+ },
+ {
+  "input": "http://\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130.test/",
+  "ok": false,
+  "code": "too_long",
+  "note": "D-SINK-115, the critique's finding 8: 1,113 units typed, 2,213 once lowered, which both state readers dropped at the next load"
+ },
+ {
+  "input": "http://cdn\u034f.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+034F, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u115f.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+115F, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u1160.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+1160, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u17b4.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+17B4, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u17b5.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+17B5, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u1806.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+1806, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u180b.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+180B, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u180f.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+180F, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u2065.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+2065, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\u3164.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+3164, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\ufe00.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FE00, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\ufe0f.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FE0F, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\uffa0.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FFA0, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\ufff0.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FFF0, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\ufff8.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+FFF8, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\udb40\udc00.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0000, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\udb40\udd00.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0100, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://cdn\udb43\udfff.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-116: U+E0FFF, an end of an invisible range beyond Cf"
+ },
+ {
+  "input": "http://h\u034e.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u034e.test/x",
+  "host": "h\u034e.test",
+  "key": "c11e1c93",
+  "note": "D-SINK-116: U+034E beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u0350.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u0350.test/x",
+  "host": "h\u0350.test",
+  "key": "04d1bc49",
+  "note": "D-SINK-116: U+0350 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u115e.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u115e.test/x",
+  "host": "h\u115e.test",
+  "key": "55ef9fbc",
+  "note": "D-SINK-116: U+115E beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u1161.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u1161.test/x",
+  "host": "h\u1161.test",
+  "key": "64afa1bf",
+  "note": "D-SINK-116: U+1161 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u17b3.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u17b3.test/x",
+  "host": "h\u17b3.test",
+  "key": "9a9c5af4",
+  "note": "D-SINK-116: U+17B3 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u17b6.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u17b6.test/x",
+  "host": "h\u17b6.test",
+  "key": "49135461",
+  "note": "D-SINK-116: U+17B6 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u1805.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u1805.test/x",
+  "host": "h\u1805.test",
+  "key": "4f39afd8",
+  "note": "D-SINK-116: U+1805 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u1807.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u1807.test/x",
+  "host": "h\u1807.test",
+  "key": "9510e1e6",
+  "note": "D-SINK-116: U+1807 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u180a.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u180a.test/x",
+  "host": "h\u180a.test",
+  "key": "af4a7c73",
+  "note": "D-SINK-116: U+180A beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u1810.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u1810.test/x",
+  "host": "h\u1810.test",
+  "key": "10a1829d",
+  "note": "D-SINK-116: U+1810 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u3163.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u3163.test/x",
+  "host": "h\u3163.test",
+  "key": "a62292d3",
+  "note": "D-SINK-116: U+3163 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u3165.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u3165.test/x",
+  "host": "h\u3165.test",
+  "key": "02d87b61",
+  "note": "D-SINK-116: U+3165 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\ufdff.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ufdff.test/x",
+  "host": "h\ufdff.test",
+  "key": "da6493f5",
+  "note": "D-SINK-116: U+FDFF beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\uff9f.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\uff9f.test/x",
+  "host": "h\uff9f.test",
+  "key": "8ac0f85a",
+  "note": "D-SINK-116: U+FF9F beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\uffa1.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\uffa1.test/x",
+  "host": "h\uffa1.test",
+  "key": "8b44c860",
+  "note": "D-SINK-116: U+FFA1 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\uffef.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\uffef.test/x",
+  "host": "h\uffef.test",
+  "key": "fd7d757d",
+  "note": "D-SINK-116: U+FFEF beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\ufffc.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\ufffc.test/x",
+  "host": "h\ufffc.test",
+  "key": "126d6b2a",
+  "note": "D-SINK-116: U+FFFC beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\udb3f\udfff.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb3f\udfff.test/x",
+  "host": "h\udb3f\udfff.test",
+  "key": "56c6c86a",
+  "note": "D-SINK-116: U+DFFFF beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\udb44\udc00.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\udb44\udc00.test/x",
+  "host": "h\udb44\udc00.test",
+  "key": "27462aae",
+  "note": "D-SINK-116: U+E1000 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://h\u2070.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h\u2070.test/x",
+  "host": "h\u2070.test",
+  "key": "9665acb5",
+  "note": "D-SINK-116: U+2070 beside an invisible range is not invisible"
+ },
+ {
+  "input": "http://cdn!.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `!`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn\".test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `\"`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn$.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `$`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn'.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `'`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn(.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `(`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn).test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `)`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn*.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `*`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn+.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `+`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn,.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `,`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn<.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `<`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn>.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `>`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn^.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `^`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn`.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: ```, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn{.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `{`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn|.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `|`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn}.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `}`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://cdn~.test/get.php",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: `~`, ASCII outside letters, digits, -, . and _"
+ },
+ {
+  "input": "http://a\u2474.test/",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-117: U+2474, which folds to (1)"
+ },
+ {
+  "input": "http://cdn_x.test/get.php",
+  "ok": true,
+  "kind": "http",
+  "url": "http://cdn_x.test/get.php",
+  "host": "cdn_x.test",
+  "key": "5e8c1c34",
+  "note": "D-SINK-117: `_` stays allowed"
  }
 ]

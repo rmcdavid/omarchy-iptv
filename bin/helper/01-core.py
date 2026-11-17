@@ -240,13 +240,17 @@ ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
 # each of which every sink then prints in part); 5 is D-SINK-102's
 # refusal of mms and mmsh from a playlist that is not local (a cache
 # before it can hold such a channel, which player_target then refuses at
-# every play). A cache written under an
+# every play); 6 is D-SINK-115, D-SINK-116 and D-SINK-117's host grammar (a
+# cache before it can hold a channel whose address the URL library cannot
+# read, or whose host holds ASCII other than a letter, a digit, `-`, `.` or
+# `_`, an invisible character, or a port not written in digits, which
+# player_target then refuses at every play). A cache written under an
 # older version, or carrying none, is refetched once, whatever its age, when
 # its source is the active one: the active source's at the next start, each other source's at
 # its next swap, and each shows its old cache until that refetch lands -- or,
 # if it fails, until a later one succeeds (Model.cacheBeforeDestinationRules,
 # read by Service.qml's applyFreshness for the active cache only).
-DESTINATION_RULES = 5
+DESTINATION_RULES = 6
 # The same for a guide window (its meta line's `guideRules`): 1 is the fold
 # that keeps a URL's run whole (D-SINK-79: a window written before it can hold
 # a title or a detail split inside a URL, which every sink prints as the

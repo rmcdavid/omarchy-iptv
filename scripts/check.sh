@@ -276,7 +276,12 @@ fail=0
 # test_labelsUniqueAsTheyReadInV4, the label reading, uniqueLabel and
 # parseState's placing of a derived label, with 50 sources timed, in the
 # engine that loads state.json, red on 47906bb's model; the spec runs 103.
-QML_SPEC_MIN=${QML_SPEC_MIN:-103}
+# 2026-11-16, lane-r5a (round 5 of the security review, D-SINK-115 to
+# D-SINK-117): 103 -> 104 -- test_hostGrammarInV4, the authority reader, the
+# host-name rule and the stored url's cap in the engine that runs the
+# Sources form and the state reader, red on e04f339's model; the spec runs
+# 104.
+QML_SPEC_MIN=${QML_SPEC_MIN:-104}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -616,7 +621,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-103}
 # the rest the model's own answers, and each red under a named
 # single-decision mutant (QA-RESULTS "Round 2 of the security review,
 # lane-r2b"); the suite runs 3749.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3749}
+# 2026-11-16, lane-r5a (round 5, D-SINK-115 to D-SINK-117): 3749 -> 3827 --
+# 70 vectors in the shared source-urls fixture (each its own check), and 8
+# checks of the shared host-grammar fixture (its tables against node's
+# Unicode properties, the allowlist, its vectors, the sentences, the hint,
+# the state reader); 66 red on e04f339's model, and 7 single-decision
+# mutants red (QA-RESULTS "Round 5 of the security review, lane-r5a"); the
+# suite runs 3827.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3827}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1113,7 +1125,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3749}
 # 3101349 with 7 rewritten tests, 8 single-decision mutants red (QA-RESULTS
 # "Round 5 of the security review, lane-r5a"); the suite runs 2679, 1
 # skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2679}
+# 2026-11-16, lane-r5a (round 5, D-SINK-115 to D-SINK-117): 2679 -> 2704 --
+# tests/test_host_grammar.py (20: the tables against unicodedata, stringprep
+# and urlsplit, the vectors, the state reader, the differential over 19,999
+# addresses in both mirrors and Qt's engine, the fetch path, the streams),
+# and one new test each in test_source, test_destinations, test_shown_text
+# and test_stream_host_names, and two in test_reply_bounds for one replaced.
+# 52 tests red on e04f339 (with three rewritten: test_network_sentences'
+# two and test_logo_escapes' one), 16 single-decision helper mutants red (QA-RESULTS
+# "Round 5 of the security review, lane-r5a"); the suite runs 2704, 1
+# skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2704}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

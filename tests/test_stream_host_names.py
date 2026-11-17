@@ -236,6 +236,12 @@ REFUSED = [
     "rtmp://evil" + chr(0xFE47) + "qqqqqq.test/live/1",
     "srt://evil" + chr(0xFE48) + "qqqqqq.test:9000?mode=caller",
     "srt://evil" + chr(0xFE68) + "qqqqqq.test:9000?mode=caller",
+    # D-SINK-117 (2026-11-16): a source entry holding `+`, which udp decodes
+    # once from `%2B` -- a control until the host rule became an allowlist of
+    # letters, digits, `-`, `.` and `_`. And ASCII outside it in a host.
+    "udp://@239.1.1.1:1234?sources=a%2Bb.test",
+    "http://evil~qqqqqq.test/live/1.ts",
+    "rtsp://evil!qqqqqq.test/stream",
 ]
 
 CONTROLS = [
@@ -266,8 +272,6 @@ CONTROLS = [
     "udp://@239.1.1.1:1234?sources=10.0.0.1,10.0.0.2",
     "rtp://239.1.1.1:5004?block=192.0.2.1,+192.0.2.2&ttl=4",
     "udp://@239.1.1.1:1234?sources=fe80::1",
-    # `+` escaped once is a `+` to udp, which decodes once.
-    "udp://@239.1.1.1:1234?sources=a%2Bb.test",
     # An http query names no host the player looks up.
     "http://stream.example.test/live/9.ts?sources=a@b%40c&block=x;y",
     # A host whose NFKC form is a full stop and a letter.
@@ -421,12 +425,12 @@ class FastPathTest(unittest.TestCase):
                         for scheme in ("http", "rtsp"):
                             if readings("%s://%s/x" % (scheme, netloc), netloc, scheme) is not False:
                                 wrong.append((scheme, ascii(netloc)))
-        # Each of the three host parts takes the 66 plain characters and an
+        # Each of the three host parts takes the 65 plain characters and an
         # `@` (which ends a userinfo, leaving a plain authority after it);
-        # each port part the ten digits and an `@`: 67 * 3 + 11 * 2. So a
+        # each port part the ten digits and an `@`: 66 * 3 + 11 * 2. So a
         # shortcut that trusted nothing would be red here too, while every
-        # answer stayed right.
-        self.assertEqual((accepted, wrong[:8]), (223, []))
+        # answer stayed right. (65 since D-SINK-117 took `~` out, 2026-11-16.)
+        self.assertEqual((accepted, wrong[:8]), (220, []))
 
     def test_the_gate_answers_the_readings_and_udp_and_rtp_never_take_the_shortcut(self):
         gate, readings = helper._stream_name_refused, helper._stream_name_readings
@@ -444,6 +448,22 @@ class FastPathTest(unittest.TestCase):
                 wrong.append((scheme, "the query hosts were skipped"))
         self.assertEqual(wrong[:8], [])
 
+
+    def test_a_port_the_rule_refuses_is_never_taken_by_the_shortcut(self):
+        """D-SINK-117 (2026-11-16): the readings refuse a port that is not
+        one to five ASCII digits up to 65535 (port_digits), so the shortcut
+        may not accept one; it took any run of digits until then, and the
+        gate's answer then differed from the readings for `:99999`."""
+        gate, readings, plain = helper._stream_name_refused, helper._stream_name_readings, helper._plain_authority
+        got, want = [], []
+        for port, refused in (("99999", True), ("65536", True), ("000443", True), ("00443", False),
+                              ("65535", False), ("", False)):
+            for scheme in ("http", "rtsp"):
+                netloc = "stream.example.test:" + port
+                url = "%s://%s/x" % (scheme, netloc)
+                got.append((scheme, port, gate(url, netloc, scheme), readings(url, netloc, scheme), plain(netloc)))
+                want.append((scheme, port, refused, refused, not refused))
+        self.assertEqual(got, want)
 
     def test_the_shortcut_is_taken_for_a_playlists_plain_addresses(self):
         """The shortcut is what the gate answers with, not only what it may
@@ -502,9 +522,9 @@ class ReadingShortcutTest(unittest.TestCase):
                     accepted += 1
                     if entries(reading, set()) is not False:
                         wrong.append(ascii(reading))
-        # The 66 plain characters and the comma, in each of the four places:
+        # The 65 plain characters and the comma, in each of the four places:
         # a shortcut that trusted nothing would be red here too.
-        self.assertEqual((accepted, wrong[:8]), (67 * 4, []))
+        self.assertEqual((accepted, wrong[:8]), (66 * 4, []))
 
     def test_the_reading_is_judged_as_with_the_shortcut_off(self):
         judge = helper._query_reading_refused
@@ -513,10 +533,12 @@ class ReadingShortcutTest(unittest.TestCase):
         with mock.patch.object(helper, "_plain_reading", lambda reading: False):
             off = [judge(reading) for reading in readings]
         wrong = [ascii(reading) for reading, a, b in zip(readings, on, off) if a != b]
-        # Both answers occur: 43 code points below U+0800 are refused in each
+        # Both answers occur: 85 code points below U+0800 are refused in each
         # place, and inside an entry also the four av_get_token trims at an
-        # edge (tab, LF, CR and the space).
-        self.assertEqual((wrong[:8], on.count(True)), ([], 43 * 4 + 4))
+        # edge (tab, LF, CR and the space). 85 since D-SINK-116 and D-SINK-117
+        # widened the set (2026-11-16) by ASCII outside the allowlist, U+034F
+        # and the code points that fold to one of them; 43 until then.
+        self.assertEqual((wrong[:8], on.count(True)), ([], 85 * 4 + 4))
 
 
 class CostTest(unittest.TestCase):

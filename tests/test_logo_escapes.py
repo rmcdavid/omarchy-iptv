@@ -133,13 +133,17 @@ class HttpClientErrorsTest(LogoEscapeCase):
         code, summary, announced, stdout, stderr = self.run_fetch()
         self.assertEqual(code, 0, stderr)
         self.assertTrue(summary["ok"], summary)
-        self.assertEqual((summary["fetched"], summary["failed"]), (1, 6), summary)
-        self.assertEqual(summary["reasons"], {"logo_fetch": 6}, summary)
+        # D-SINK-117 (2026-11-16): `:abc` is no port, refused before any
+        # connection by the connection layer's port rule (`bad_url`, a policy
+        # refusal), where http.client's InvalidURL failed it as logo_fetch.
+        self.assertEqual((summary["fetched"], summary["failed"], summary["refusedOnPolicy"]), (1, 5, 1), summary)
+        self.assertEqual(summary["reasons"], {"logo_fetch": 5, "bad_url": 1}, summary)
         self.assertEqual(announced, [helper.logo_filename(self.urls[-1])])
         self.assertEqual(self.server.paths, ["/garbage.png", "/long-status.png", "/headers.png",
                                              "/chunk.png", "/good.png"],
                          "the two malformed URLs open no connection; every other logo is tried once")
-        self.assertEqual(self.memo(), {helper.logo_filename(u): "logo_fetch" for u in self.urls[:-1]})
+        self.assertEqual(self.memo(), {helper.logo_filename(u): ("bad_url" if u == self.urls[1] else "logo_fetch")
+                                       for u in self.urls[:-1]})
         # Each is mapped where it arises (read_logo_response), not by the
         # run's backstop, which would say so on stderr.
         self.assertNotIn("ended in", stderr)

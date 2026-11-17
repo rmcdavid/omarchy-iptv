@@ -361,6 +361,10 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         group = ""
         source = None
     if not is_stream_url(url):
+        # D-SINK-115: an address of a stream scheme that the URL library
+        # cannot read gets the host-name sentence, as the parse counts it.
+        if not url.startswith("-") and not _CONTROL_CHARS.search(url) and stream_url_unreadable(url):
+            raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)
         raise HelperError("unsupported_scheme", "unsupported stream URL scheme%s" % scheme_phrase(stream_scheme(url)))
     if stream_host_name_refused(url):
         raise HelperError("unsupported_scheme", STREAM_HOST_NAME_REFUSAL)

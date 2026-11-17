@@ -8468,25 +8468,101 @@ checkCall("D-SINK-86: HOST_FORMAT_RANGES is exactly Unicode's Cf category, code 
   }
   return [ranges.length, wrong]
 }, [21, []])
-checkCall("D-SINK-86, D-SINK-88, D-SINK-92: hostNameRefused refuses a name holding @ % ; = & : [ ] or a backslash, a reader's whitespace or a format character, or one whose NFKD form does, and no other code point", () => {
+// D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16): the shared host-grammar
+// fixture's tables, held here to node's own Unicode properties as the python
+// suite holds them to unicodedata, stringprep and urlsplit
+// (tests/test_host_grammar.py).
+const GRAMMAR = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/host-grammar.json"), "utf8"))
+const grammarCodes = list => new Set(list.map(h => parseInt(h, 16)))
+const grammarRanges = list => { const out = new Set(); for (const [a, b] of list) for (let c = parseInt(a, 16); c <= parseInt(b, 16); c++) out.add(c); return out }
+const GRAMMAR_B1 = grammarCodes(GRAMMAR.tables.b1)
+const GRAMMAR_ASCII = GRAMMAR.tables.hostAscii
+checkCall("D-SINK-116: HOST_INVISIBLE_RANGES is \\p{Cf}, \\p{Default_Ignorable_Code_Point} and the fixture's B.1, code point by code point, and the fixture's default-ignorable list is node's", () => {
+  const ranges = Model.HOST_INVISIBLE_RANGES || []
+  const di = grammarRanges(GRAMMAR.tables.defaultIgnorable)
+  const wrong = [], diWrong = []
+  for (let c = 0; c < 0x110000; c++) {
+    if (c >= 0xd800 && c <= 0xdfff) continue
+    const ch = String.fromCodePoint(c)
+    const isDi = /\p{Default_Ignorable_Code_Point}/u.test(ch)
+    if (isDi !== di.has(c) && diWrong.length < 8) diWrong.push(c.toString(16))
+    const want = /\p{Cf}/u.test(ch) || isDi || GRAMMAR_B1.has(c)
+    if (ranges.some(r => c >= r[0] && c <= r[1]) !== want && wrong.length < 8) wrong.push(c.toString(16))
+  }
+  return [ranges.length, wrong, diWrong, JSON.stringify(ranges.map(r => [r[0].toString(16).toUpperCase().padStart(4, "0"), r[1].toString(16).toUpperCase().padStart(4, "0")])) === JSON.stringify(GRAMMAR.tables.invisibleRanges)]
+}, [26, [], [], true])
+checkCall("D-SINK-115: DELIMITER_FOLDS is the fixture's table, and the code points whose NFKC holds / ? # @ or : in node", () => {
+  const mine = []
+  for (let c = 0x80; c < 0x110000; c++) {
+    if (c >= 0xd800 && c <= 0xdfff) continue
+    if (/[\/?#@:]/.test(String.fromCodePoint(c).normalize("NFKC"))) mine.push(c)
+  }
+  const shipped = (Model.DELIMITER_FOLDS || []).slice().sort((a, b) => a - b)
+  return [JSON.stringify(shipped), JSON.stringify(mine)]
+}, [JSON.stringify([...grammarCodes(GRAMMAR.tables.delimiterFolds)].sort((a, b) => a - b)), JSON.stringify([...grammarCodes(GRAMMAR.tables.delimiterFolds)].sort((a, b) => a - b))])
+checkCall("D-SINK-86, D-SINK-88, D-SINK-92, D-SINK-116, D-SINK-117: hostNameRefused refuses a name holding ASCII other than a letter, a digit, -, . or _, a reader's whitespace or an invisible character, or one whose NFKD form does, and no other code point", () => {
   const space = new Set(Model.URL_SPACE_CODES)
-  const refusedChar = ch => ("@%;=&:[]" + String.fromCharCode(0x5c)).indexOf(ch) !== -1 || space.has(ch.codePointAt(0)) || /\p{Cf}/u.test(ch)
+  const refusedChar = ch => {
+    const c = ch.codePointAt(0)
+    return (c < 0x80 && GRAMMAR_ASCII.indexOf(ch) === -1) || space.has(c) || /\p{Cf}/u.test(ch) ||
+      /\p{Default_Ignorable_Code_Point}/u.test(ch) || GRAMMAR_B1.has(c)
+  }
   const wrong = []
+  const asciiFolds = []
   let folds = 0
   for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
+    if (c >= 0xd800 && c <= 0xdfff) continue
     const ch = String.fromCodePoint(c)
-    const folded = c >= 0x80 && Array.from(ch.normalize("NFKD")).some(refusedChar)
+    const decomposed = Array.from(ch.normalize("NFKD"))
+    const folded = c >= 0x80 && decomposed.some(refusedChar)
     if (folded && !refusedChar(ch)) folds++
+    if (c >= 0x80 && decomposed.some(d => d.codePointAt(0) < 0x80 && GRAMMAR_ASCII.indexOf(d) === -1)) asciiFolds.push(c)
     const want = refusedChar(ch) || folded
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
-  // 79: the 70 the helper's codec folds, U+FE13 and U+FE14, and U+2260,
-  // and since D-SINK-92 the four that fold to a bracket (U+FF3B and U+FF3D,
-  // which the codec folds too, and U+FE47 and U+FE48) and the two that fold
-  // to a backslash (U+FF3C and U+FE68, the review of bf47cdc), the same set
-  // test_host_names counts in Python's NFKD.
-  return [wrong, folds]
-}, [[], 79])
+  // 286, the count test_host_names takes in Python's NFKD: the code points
+  // that are not refused themselves and fold to one that is. Of them, the
+  // ones folding to ASCII outside the allowlist are the fixture's 301 less
+  // the 15 refused themselves (a no-break space folds to a space).
+  return [wrong, folds, JSON.stringify(asciiFolds) === JSON.stringify([...grammarCodes(GRAMMAR.tables.asciiFolds)])]
+}, [[], 286, true])
+checkCall("D-SINK-117: of the ASCII characters a host name holds only a letter, a digit, -, . and _, and every code point that folds to another is refused by the validator", () => {
+  const kept = []
+  for (let c = 0; c < 0x80; c++) if (!Model.hostNameRefused("a" + String.fromCharCode(c) + "b.test")) kept.push(String.fromCharCode(c))
+  const accepted = GRAMMAR.tables.asciiFolds.filter(h => Model.validateSourceUrl("http://a" + String.fromCodePoint(parseInt(h, 16)) + "b.test/").ok)
+  return [kept.join(""), accepted]
+}, [GRAMMAR_ASCII.split("").sort().join(""), []])
+checkCall("D-SINK-115, D-SINK-116, D-SINK-117: every vector of the shared host-grammar fixture reads as it says, and every refusal says why as the helper's read_authority does", () =>
+  GRAMMAR.vectors.map(c => {
+    const r = Model.validateSourceUrl(c.input, c.origin ? { origin: c.origin } : undefined)
+    const why = c.why ? modelFn("readAuthority")(c.input.split("://").slice(1).join("://")).why : undefined
+    return [c.input.slice(0, 60), c.ok ? [r.ok, r.url, r.host] : [r.ok, r.code], why]
+  }),
+  GRAMMAR.vectors.map(c => [c.input.slice(0, 60), c.ok ? [true, c.url, c.host] : [false, c.code], c.why]))
+checkCall("D-SINK-115: an authority the helper cannot read is refused with the sentence for where the character is, the EPG field's too, and no sentence names the address", () => {
+  const m = u => Model.validateSourceUrl(u).message
+  const fields = [m("http://qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz@cdn.test/get.php"),
+    m("http://cdn" + String.fromCharCode(0xff0f) + ".test/get.php"), m("http://qqqqqq:zz[zz]@cdn.test/get.php"),
+    Model.validateSourceUrl("http://qqqqqq:zz]zz@epg.test/x.xml", { kind: "epg" }).message, m("http://[::1:]/get.php")]
+  return [fields, fields.filter(t => /qqqqqq|zzzzzz|cdn|epg\.test|:\/\//.test(t)).length]
+}, [[Model.sourceErrorMessage("url_fold_userinfo"), Model.sourceErrorMessage("url_fold_host"), Model.sourceErrorMessage("url_bracket"),
+     Model.sourceErrorMessage("url_bracket", { field: "epg" }), Model.sourceErrorMessage("invalid")], 0])
+checkCall("D-SINK-115: the fold's advice is the character's own UTF-8 escape (a fullwidth colon is %EF%BC%9A), which reads, and a bracket's is %5B and %5D", () =>
+  [Model.sourceErrorMessage("url_fold_userinfo").indexOf("%EF%BC%9A") !== -1, Model.sourceErrorMessage("url_bracket").indexOf("%5B and %5D") !== -1,
+   Model.validateSourceUrl("http://u:p%EF%BC%9Aw@cdn.test/get.php").ok, Model.validateSourceUrl("http://u:p%5Bw%5D@cdn.test/get.php").ok],
+  [true, true, true, true])
+checkCall("D-SINK-115: a guide address from the playlist that the helper cannot read is no hint at all", () =>
+  ["http://epg" + String.fromCharCode(0xff03) + ".test/x.xml", "http://qqqqqq:zz[zz]@epg.test/x.xml", "http://[::1:]/x.xml", "http://epg!.test/x.xml"]
+    .map(h => Model.epgHintVerdict({ epgUrlHint: h }, "https://cdn.test/get.php").url),
+  ["", "", "", ""])
+checkCall("D-SINK-115, D-SINK-116, D-SINK-117 (the owner's decision of 2026-11-16): Model.parseState drops a stored source whose address holds a newly refused shape, clears a kept source's guide URL holding one, and keeps every other source as stored", () => {
+  const records = GRAMMAR.stateReaders.map((c, i) => ({ key: (0xa0000000 + i).toString(16), url: c.url, epgUrl: c.epgUrl || "", kind: "http",
+    label: "S" + i, labelCustom: true, origin: "cli", addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 }))
+  const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: "sources", favorites: [], recents: [], savedSearches: [], hiddenGroups: [], sources: records }))
+  const byKey = {}
+  for (const r of st.sources) byKey[r.key] = r
+  return GRAMMAR.stateReaders.map((c, i) => { const r = byKey[(0xa0000000 + i).toString(16)]; return [c.url.slice(0, 50), !!r, r ? r.url : "", r ? r.epgUrl !== "" : null] })
+}, GRAMMAR.stateReaders.map(c => [c.url.slice(0, 50), c.kept, c.kept ? c.url : "", c.kept ? (c.epgKept === true) : null]))
 checkCall("D-SINK-88 (the review of 95f1bb9): a name the codec hands on holding `=` because B.2 keeps it from composing with U+0338 is refused, though its NFKC holds no `=`", () => {
   const seq = String.fromCharCode(0x345, 0x338)
   const names = [0x207c, 0x208c, 0xfe66, 0xff1d].map(c => "h" + String.fromCharCode(c) + seq + ".test")
@@ -8504,7 +8580,10 @@ checkCall("D-SINK-86: the rule's vectors are in the fixture, so it cannot be tri
     const m = Model.validateSourceUrl(c.input, c.origin ? { origin: c.origin } : undefined).message
     return m.indexOf("://") !== -1 || /h\.test|evil|secret/i.test(m) || m.indexOf(c.input.slice(7)) !== -1
   }).map(c => c.input)
-  return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 40, named]
+  // 32 controls since D-SINK-116 (2026-11-16): eight of the code points
+  // beside a format range are default-ignorable, refused now, and moved to
+  // that id's vectors.
+  return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 32, named]
 }, [true, true, []])
 // JS-only vectors (kept out of the shared fixture until the Python mirror
 // agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and
@@ -22979,14 +23058,16 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: its host is a local address",
       "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1, -1])
 
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4) is refreshed once whatever its age; one written under them (5, D-SINK-102's refused schemes) or later is not", () =>
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102, D-SINK-115: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4, D-SINK-102's refused schemes' 5) is refreshed once whatever its age; one written under them (6, the host grammar of round 5) or later is not", () =>
     [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 3 }),
-     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 5 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
+     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 6 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
      Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null),
      Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
      Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 2 }), Model.DESTINATION_RULES,
-     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 4 })],
-    [true, true, false, true, false, false, true, true, 5, true])
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 4 }),
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 5 }),
+     Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 7 })],
+    [true, true, false, true, false, false, true, true, 6, true, true, false])
 
   // Service.qml's own functions (tests/service-harness.js): every URL-carrying
   // spawn says where its URL came from, through the one assignment, reset
@@ -23037,7 +23118,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
-  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4), and leaves one written under them", () => {
+  checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102, D-SINK-115 (service): applyFreshness refreshes a fresh cache written before the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4, D-SINK-102's 5), and leaves one written under them (6, round 5's host grammar)", () => {
     const runs = status => {
       const h = boot([rec(LAN)])
       h.root.playlistStatus = status
@@ -23051,8 +23132,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 2 }),
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 3 }),
             runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 4 }),
-            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 5 })]
-  }, [1, 1, 1, 1, 1, 0])
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 5 }),
+            runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 6 })]
+  }, [1, 1, 1, 1, 1, 1, 0])
 })()
 
 // ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----

@@ -81,13 +81,16 @@ class Fetches(unittest.TestCase):
 
 class RedirectSentenceTest(Fetches):
     # (Location, code, message after the verb's own words). The first two
-    # are D-SINK-93's: http.client refuses them while it builds the
-    # connection, before any lookup. The other three are D-SINK-86's,
-    # refused by the redirect handler before the hop is opened; they are
-    # here so the table holds every userinfo shape a Location can take.
+    # were D-SINK-93's: http.client refused them while it built the
+    # connection (InvalidURL), before any lookup. Since D-SINK-117
+    # (2026-11-16) the redirect handler refuses them first, the request's
+    # port being no ASCII digits (`zzzzzz`, the password read as a port).
+    # The other three are D-SINK-86's, refused by the redirect handler before
+    # the hop is opened; they are here so the table holds every userinfo
+    # shape a Location can take.
     SHAPES = (
-        ("http://qqqqqq:zzzzzz/x@cdn.test/list.m3u", "network", "could not reach 127.0.0.1: InvalidURL"),
-        ("http://cdn.test:zzzzzz/list.m3u", "network", "could not reach 127.0.0.1: InvalidURL"),
+        ("http://qqqqqq:zzzzzz/x@cdn.test/list.m3u", "bad_url", None),
+        ("http://cdn.test:zzzzzz/list.m3u", "bad_url", None),
         ("http://qqqqqq:zzzzzz@cdn.test/list.m3u", "bad_url", None),
         ("http://qqqqqq%3Azzzzzz%40cdn.test/list.m3u", "bad_url", None),
         ("http://qqqqqq:zzzzzz%40cdn.test:8080/list.m3u", "bad_url", None),

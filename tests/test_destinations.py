@@ -1087,3 +1087,26 @@ class ProviderChosenRefusalTest(unittest.TestCase):
         self.assertNotIn("playlist: playlist:", playlist_err)
         self.assertNotIn("epg: EPG:", epg_err)
 
+
+class RedirectPortTest(unittest.TestCase):
+    """D-SINK-117 (2026-11-16, the critique's finding 2): a redirect whose
+    port is not one to five ASCII digits up to 65535 -- after a name or a
+    bracketed literal -- is refused by the redirect handler before the next
+    hop's request is handed back; http.client's int() read `+443`, `4_43`
+    and Arabic-Indic digits as 443, so each was followed. In process: the
+    handler is called directly and nothing is connected to."""
+
+    def test_every_location_is_refused_or_handed_back_as_the_fixture_says(self):
+        import urllib.request
+        opener = helper.make_opener("playlist", "p.example.test", helper.DestinationPolicy("playlist", "user"))
+        handler = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)][0]
+        got = []
+        for row in FIXTURE["redirectPorts"]:
+            request = urllib.request.Request("http://p.example.test/start.m3u")
+            try:
+                new = handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, row["location"])
+                got.append((row["location"], False, new is not None))
+            except helper.HelperError as error:
+                got.append((row["location"], error.code == "bad_url", False))
+        self.assertEqual(got, [(r["location"], r["refused"], not r["refused"]) for r in FIXTURE["redirectPorts"]])
+

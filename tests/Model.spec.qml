@@ -3358,4 +3358,37 @@ TestCase {
     compare(Model.statePrivateEcho({ pending: true, result: { loaded: true, text: "{}" } }), false)
     compare(Model.statePrivateArgv("/p/bin/omarchy-iptv", "/s").join(" "), "python3 -I /p/bin/omarchy-iptv state --state-dir /s private")
   }
+
+  // D-SINK-115, D-SINK-116, D-SINK-117 in the shell's own engine: the
+  // authority reader and the host-name rule as the Sources form and the
+  // state reader run them (V4's String.prototype.normalize is Qt's, not
+  // node's ICU). A fold of a delimiter in the user information and in the
+  // host, a bracket in the password, a bracketed text that is no IPv6
+  // address, an invisible character beyond Cf, ASCII outside the allowlist
+  // written and folded, and the stored url held to the cap after lowering
+  // and read again as itself; and the controls.
+  function test_hostGrammarInV4() {
+    var why = function (body) { return Model.readAuthority(body).why }
+    compare([why("qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz@cdn.test/get.php"),
+             why("cdn" + String.fromCharCode(0xff0f) + ".test/x"), why("qqqqqq:zz[zz]@cdn.test/x"),
+             why("[::1:]/x"), why("cdn!.test/x"), why("cdn.test:+443/x"), why("qqqqqq:zz[zz]@[::1]/x")],
+            ["fold_userinfo", "fold_host", "bracket", "literal", "host", "port_text", ""])
+    compare([Model.hostNameRefused("cdn" + String.fromCharCode(0x34f) + ".test"),
+             Model.hostNameRefused("cdn" + String.fromCharCode(0xfe0f) + ".test"),
+             Model.hostNameRefused("cdn" + String.fromCharCode(0x3164) + ".test"),
+             Model.hostNameRefused("cdn" + String.fromCodePoint(0xe0100) + ".test"),
+             Model.hostNameRefused("cdn!.test"), Model.hostNameRefused("a" + String.fromCharCode(0x2474) + ".test"),
+             Model.hostNameRefused("a" + String.fromCharCode(0xff01) + ".test")],
+            [true, true, true, true, true, true, true])
+    compare([Model.hostNameRefused("cdn_x.test"), Model.hostNameRefused("b" + String.fromCharCode(0xfc) + "cher.test"),
+             Model.hostNameRefused("h" + String.fromCharCode(0x34e) + ".test")], [false, false, false])
+    compare(Model.validateSourceUrl("http://u:p%EF%BC%9Aw@cdn.test/get.php").ok, true)
+    compare(Model.validateSourceUrl("http://qqqqqq" + String.fromCharCode(0xff1a) + "zzzzzz@cdn.test/get.php").message,
+            Model.sourceErrorMessage("url_fold_userinfo"))
+    var dot = String.fromCharCode(0x130)
+    compare(Model.validateSourceUrl("http://" + dot.repeat(1100) + ".test/").code, "too_long")
+    var short = Model.validateSourceUrl("http://" + dot.repeat(10) + ".test/")
+    compare([short.ok, short.url === Model.validateSourceUrl(short.url).url, Model.validateSourceUrl(short.url).ok], [true, true, true])
+    compare(Model.DESTINATION_RULES, 6)
+  }
 }
