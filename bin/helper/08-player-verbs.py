@@ -199,7 +199,7 @@ def stream_lookup(url: str, source: dict[str, Any]) -> tuple[str, list[Any]]:
     channels; one that answers is judged like any other."""
     try:
         parts = urllib.parse.urlsplit(url)
-        host = parts.hostname or ""
+        host = split_hostname(parts)
     except ValueError:
         return "lookup", []
     if host == "" or host_class(host) != "":

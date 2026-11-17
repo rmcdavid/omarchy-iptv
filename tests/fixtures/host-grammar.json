@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16, round 5 of the security review): how a source address's authority and host name are read, one file for both mirrors (CLAUDE.md: a rule in two languages gets one shared fixture). `tables` are the shipped tables as both mirrors must hold them: `delimiterFolds` (the code points whose compatibility form holds / ? # @ or :, which CPython's urlsplit refuses in an authority), `invisibleRanges` (Cf, Default_Ignorable_Code_Point and stringprep's B.1), `hostAscii` (the ASCII a host name may hold), and two lists each held to the engine that can compute them: `defaultIgnorable` (node's \\p{Default_Ignorable_Code_Point}, which Python's unicodedata lacks; the python suite builds the invisible table from it) and `b1` (stringprep's B.1, which node lacks; the node suite does the same), and `asciiFolds` (the code points whose NFKD holds ASCII outside hostAscii, each runtime's own fold held to it). D-SINK-119 (2026-11-16): `nfkcRanges`, the code points whose NFKC form is not themselves, the union of node's (Unicode 17.0) and Python's (16.0), which differ only at `nfkcBeyondPython` (U+A7F1, unassigned in 16.0); the table is the rule, each suite holds it to its own engine, and Qt's engine is held to it in tests/test_host_grammar.py. `vectors` run through validate_source_url (tests/test_host_grammar.py) and Model.validateSourceUrl (tests/Model.test.js), `why` being read_authority's and Model.readAuthority's reason. `connection` runs through the helper's host_name_refused (the connection layer) only. `stateReaders` are stored sources through both state readers (normalize_state, Model.parseState): the owner's decision of 2026-11-16 drops a source whose address holds a newly refused shape and clears a guide URL holding one, and keeps every other source as stored. `atoms` and `seeds` are the differential's generator classes (tests/test_host_grammar.py): helper and model over the same corpus, with the invariants the URL library itself checks. Every value is hex or an escape: the file is ASCII.",
+ "about": "D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16, round 5 of the security review): how a source address's authority and host name are read, one file for both mirrors (CLAUDE.md: a rule in two languages gets one shared fixture). `tables` are the shipped tables as both mirrors must hold them: `delimiterFolds` (the code points whose compatibility form holds / ? # @ or :, which CPython's urlsplit refuses in an authority), `invisibleRanges` (Cf, Default_Ignorable_Code_Point and stringprep's B.1), `hostAscii` (the ASCII a host name may hold), and two lists each held to the engine that can compute them: `defaultIgnorable` (node's \\p{Default_Ignorable_Code_Point}, which Python's unicodedata lacks; the python suite builds the invisible table from it) and `b1` (stringprep's B.1, which node lacks; the node suite does the same), and `asciiFolds` (the code points whose NFKD holds ASCII outside hostAscii, each runtime's own fold held to it). D-SINK-119 (2026-11-16): `nfkcRanges`, the code points whose NFKC form is not themselves, the union of node's (Unicode 17.0) and Python's (16.0), which differ only at `nfkcBeyondPython` (U+A7F1, unassigned in 16.0); the table is the rule, each suite holds it to its own engine, and Qt's engine is held to it in tests/test_host_grammar.py. `vectors` run through validate_source_url (tests/test_host_grammar.py) and Model.validateSourceUrl (tests/Model.test.js), `why` being read_authority's and Model.readAuthority's reason. `connection` runs through the helper's host_name_refused (the connection layer) only. `stateReaders` are stored sources through both state readers (normalize_state, Model.parseState): the owner's decision of 2026-11-16 drops a source whose address holds a newly refused shape and clears a guide URL holding one, and keeps every other source as stored. `atoms` and `seeds` are the differential's generator classes (tests/test_host_grammar.py): helper and model over the same corpus, with the invariants the URL library itself checks. Every value is hex or an escape: the file is ASCII. D-SINK-118 (2026-11-16): `engine`, how a host is lowered and read in every engine, Qt's included: `lowerHost` pairs (lower_host, Model.lowerHost: a capital sigma is the small sigma wherever it stands, since Qt's engine applies no Final_Sigma rule), `hostKey` triples (host_key, Model.hostKey: whether two hosts are one; a final sigma written as one is not the small sigma), `labelKey` triples (label_key, and Model.labelTaken, which compares by labelKey), and `sourceHost` pairs (source_host over a stored url, Model.hostOf: the host a status names, a literal with its brackets); and four `vectors` that only Qt's engine read otherwise (a capital sigma, a written final sigma, U+180E in a path).",
  "tables": {
   "delimiterFolds": [
    "2047",
@@ -2022,6 +2022,35 @@
    "url": "http://xn--bcher-kva.test/get.php",
    "host": "xn--bcher-kva.test",
    "note": "D-SINK-119: an A-label is ASCII and kept"
+  },
+  {
+   "input": "http://\u0391\u03a3-1.test/get.php",
+   "ok": true,
+   "url": "http://\u03b1\u03c3-1.test/get.php",
+   "host": "\u03b1\u03c3-1.test",
+   "note": "D-SINK-118: a capital sigma at a label's end is the small sigma in every engine; node's and Python's str.lower gave the final sigma, Qt's engine the small one"
+  },
+  {
+   "input": "https://\u039f\u0394\u039f\u03a3.TEST/",
+   "ok": true,
+   "url": "https://\u03bf\u03b4\u03bf\u03c3.test/",
+   "host": "\u03bf\u03b4\u03bf\u03c3.test",
+   "note": "D-SINK-118: a whole upper-case Greek label ending in a capital sigma"
+  },
+  {
+   "input": "http://\u03b1\u03c2-1.test/",
+   "ok": true,
+   "url": "http://\u03b1\u03c2-1.test/",
+   "host": "\u03b1\u03c2-1.test",
+   "note": "D-SINK-118: a final sigma written as one stays one; it is other bytes to the player's lookup (the critique's finding 3)"
+  },
+  {
+   "input": "http://cdn.test/a\u180eb.m3u",
+   "ok": true,
+   "origin": "cli",
+   "url": "http://cdn.test/a\u180eb.m3u",
+   "host": "cdn.test",
+   "note": "D-SINK-118: U+180E in a path; Qt's engine matched no `[\\s\\S]` at it and refused the address as having no scheme"
   }
  ],
  "connection": [
@@ -2401,5 +2430,103 @@
   5,
   11
  ],
- "corpusSize": 20000
+ "corpusSize": 20000,
+ "engine": {
+  "lowerHost": [
+   [
+    "\u0391\u03a3-1.test",
+    "\u03b1\u03c3-1.test"
+   ],
+   [
+    "\u039f\u0394\u039f\u03a3",
+    "\u03bf\u03b4\u03bf\u03c3"
+   ],
+   [
+    "\u03a3\u0391\u03a3.\u03a3\u0391\u03a3",
+    "\u03c3\u03b1\u03c3.\u03c3\u03b1\u03c3"
+   ],
+   [
+    "\u03b1\u03c2-1.test",
+    "\u03b1\u03c2-1.test"
+   ],
+   [
+    "CDN.Test",
+    "cdn.test"
+   ],
+   [
+    "[FE80::1%25ETH0]",
+    "[fe80::1%25eth0]"
+   ]
+  ],
+  "hostKey": [
+   [
+    "\u0391\u03a3-1.test",
+    "\u03b1\u03c3-1.test",
+    true
+   ],
+   [
+    "\u0391\u03a3-1.TEST.",
+    "\u03b1\u03c3-1.test",
+    true
+   ],
+   [
+    "\u03b1\u03c2-1.test",
+    "\u03b1\u03c3-1.test",
+    false
+   ],
+   [
+    "\u03b1\u03c2-1.test",
+    "\u0391\u03a3-1.test",
+    false
+   ],
+   [
+    "[::1]",
+    "::1",
+    true
+   ]
+  ],
+  "labelKey": [
+   [
+    "\u039f\u0394\u039f\u03a3",
+    "\u03bf\u03b4\u03bf\u03c3",
+    true
+   ],
+   [
+    "\u039f\u0394\u039f\u03a3",
+    "\u03bf\u03b4\u03bf\u03c2",
+    false
+   ],
+   [
+    "My TV",
+    "my tv",
+    true
+   ]
+  ],
+  "sourceHost": [
+   [
+    "http://[::1]:8080/list.m3u",
+    "[::1]"
+   ],
+   [
+    "http://u:p@[2606:4700::1]/get.php",
+    "[2606:4700::1]"
+   ],
+   [
+    "http://[fe80::1%25eth0]:8080/x",
+    "[fe80::1%25eth0]"
+   ],
+   [
+    "https://cdn.test:8443/get.php?username=u&password=p",
+    "cdn.test"
+   ],
+   [
+    "http://u:p@\u03b1\u03c3-1.test/",
+    "\u03b1\u03c3-1.test"
+   ],
+   [
+    "/srv/tv/local.m3u",
+    "local file"
+   ]
+  ]
+ }
 }

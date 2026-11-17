@@ -281,7 +281,13 @@ fail=0
 # host-name rule and the stored url's cap in the engine that runs the
 # Sources form and the state reader, red on e04f339's model; the spec runs
 # 104.
-QML_SPEC_MIN=${QML_SPEC_MIN:-104}
+# 2026-11-16, lane-r5c (round 5, D-SINK-118): 104 -> 107 --
+# test_engineSigmaInV4, test_engineSchemeSplitInV4 and
+# test_engineCodePointsInV4, the three readings Qt's engine took otherwise
+# than node and the helper (no final-sigma rule, `[\s\S]` at U+180E,
+# Array.from by UTF-16 unit), each red on b44c7c6's model; the spec runs
+# 107.
+QML_SPEC_MIN=${QML_SPEC_MIN:-107}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -639,7 +645,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-104}
 # validator's refusals of a look-alike beside the IDN hosts it keeps; 14 red
 # on dde6a72's model (6 of them moved vectors), 4 single-decision model
 # mutants red; the suite runs 3831.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3831}
+# 2026-11-16, lane-r5c (round 5, D-SINK-118): 3831 -> 3835 -- two checks
+# of the shared host-grammar fixture's `engine` section (how a host is
+# lowered, compared and named; a final sigma is not the own host) and two
+# sigma vectors in the shared source-urls fixture; 6 of 3835 red on
+# b44c7c6's model (with the source-labels and host-grammar vectors), and
+# the single-decision model mutants red (QA-RESULTS "Round 5 of the
+# security review, lane-r5c"); the suite runs 3835.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3835}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1163,7 +1176,18 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3831}
 # tests/test_host_names.py's 1 (a look-alike never looked up). 27 tests red
 # on dde6a72, 8 single-decision helper mutants red (QA-RESULTS "Round 5 of
 # the security review, lane-r5b"); the suite runs 2718, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2718}
+# 2026-11-16, lane-r5c (round 5, D-SINK-118): 2718 -> 2724 -- tests/
+# test_host_grammar.py's EngineReadingTest (4: the shared fixture's
+# `engine` section through the helper, a final sigma is never the own
+# host, a channel typed as its playlist was is its own host at the parse
+# and at play, a status names a literal with its brackets),
+# EngineLoweringTest (Qt's lowering table against the fixture's node half,
+# and the `engine` section in Qt's engine) and the differential's status
+# host against Model.hostOf. 10 tests red on b44c7c6 (with test_source's
+# two fixture tests and the vectors), and the single-decision helper
+# mutants red (QA-RESULTS "Round 5 of the security review, lane-r5c"); the
+# suite runs 2724, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2724}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -180,9 +180,29 @@ function trimEdgeSpace(text) {
 }
 
 // Unicode code points, not UTF-16 units (SR22: the label cap counts code
-// points in both languages).
+// points in both languages). D-SINK-118 (2026-11-16): an index walk that
+// reads a surrogate pair as one code point and keeps a lone surrogate as
+// itself, which is what Array.from gives in node. Qt 6.12's engine, which
+// runs the Sources form and the state reader, walked Array.from by UTF-16
+// unit, so the shell counted a character outside the Basic Multilingual
+// Plane as two: it refused a 64-character label holding one, which the
+// helper takes, and could cut a derived label between the halves of a pair.
 function codePoints(text) {
-  return Array.from(str(text))
+  var s = str(text)
+  var out = []
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      var d = s.charCodeAt(i + 1)
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        out.push(s.substring(i, i + 2))
+        i++
+        continue
+      }
+    }
+    out.push(s.charAt(i))
+  }
+  return out
 }
 
 function codePointLength(text) {
@@ -827,6 +847,24 @@ function looksLikeHost(text) {
   return /[.:]/.test(str(text).split("/")[0])
 }
 
+// D-SINK-118 (2026-11-16, round 5 of the security review): a host is
+// lowered by lowerHost, which folds the capital sigma (U+03A3) to the small
+// one (U+03C3) before it lowers. Qt 6.12's engine, which runs the Sources
+// form and the state reader, applies no Final_Sigma rule, so it lowered a
+// capital sigma at a label's end to the small sigma, where node and the
+// helper's str.lower gave the final one (U+03C2): the form stored one
+// spelling and the command line the other, two sources for one address.
+// Folded first, every engine gives U+03C3. A final sigma WRITTEN as one
+// stays one, and no comparison folds it (hostKey included). The helper's
+// lower_host is the mirror; the shared host-grammar fixture holds both.
+var CAPITAL_SIGMA = String.fromCharCode(0x3a3)
+var SMALL_SIGMA = String.fromCharCode(0x3c3)
+
+function lowerHost(text) {
+  var s = str(text)
+  return (s.indexOf(CAPITAL_SIGMA) === -1 ? s : s.split(CAPITAL_SIGMA).join(SMALL_SIGMA)).toLowerCase()
+}
+
 function validateSourceUrl(text, opts) {
   var o = opts || {}
   var field = o.kind === "epg" ? "epg" : "playlist"
@@ -883,12 +921,20 @@ function validateSourceUrl(text, opts) {
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
   if (s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
-  // [\s\S] rather than `.`: a line separator (U+2028 / U+2029) inside an
-  // http URL is whitespace (`invalid`), not a missing scheme (D-SRC-06).
-  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):([\s\S]*)$/)
-  if (!m) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
-  var scheme = m[1].toLowerCase()
-  var rest = m[2]
+  // D-SINK-118 (2026-11-16): the scheme is the text before the first `:`,
+  // split by index and its name tested alone, which is the helper's
+  // _SOURCE_SCHEME_RE's set (the name's class holds no `:`). A pattern read
+  // the rest as `([\s\S]*)`, and Qt 6.12's engine does not match U+180E
+  // with that union (measured: `\s`, `\S`, `[^\s]` and `.` each read it as
+  // node does), so the Sources form refused an address holding one as
+  // having no scheme and the state reader dropped such a source, which the
+  // helper accepts. A line separator (U+2028 / U+2029) inside an http URL is
+  // still whitespace (`invalid`, D-SRC-06), refused below.
+  var colon = s.indexOf(":")
+  var head = colon === -1 ? "" : s.substring(0, colon)
+  if (colon === -1 || !/^[A-Za-z][A-Za-z0-9+.-]*$/.test(head)) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
+  var scheme = head.toLowerCase()
+  var rest = s.substring(colon + 1)
   if (scheme === "file") {
     if (rest.indexOf("//") !== 0) return invalid()
     var after = cutQueryAndFragment(rest.substring(2))
@@ -1007,7 +1053,9 @@ function readAuthority(body) {
     port = port.replace(/^0+(?=[0-9])/, "")
     if (Number(port) > 65535) return refused("port_range")
   }
-  return { ok: true, why: "", userinfo: userinfo, host: host.toLowerCase(), port: port, tail: tail }
+  // D-SINK-118: lowered as every host is (lowerHost), so this engine and
+  // the helper store one spelling.
+  return { ok: true, why: "", userinfo: userinfo, host: lowerHost(host), port: port, tail: tail }
 }
 
 // Normalized identity of an accepted URL, "" when it does not validate.
@@ -1170,10 +1218,12 @@ function hostClass(host) {
 }
 
 // host_key: what "the same host" compares -- IPv4 dotted, IPv6 exploded
-// (eight four-digit groups), a name case-folded with one trailing dot
-// dropped.
+// (eight four-digit groups), a name lowered by lowerHost with one trailing
+// dot dropped. D-SINK-118: a final sigma written as one is NOT folded to
+// the small sigma, as the helper's host_key does not fold it: the player
+// asks a name holding either as its own bytes (the critique's finding 3).
 function hostKey(host) {
-  var text = str(host).trim().toLowerCase()
+  var text = lowerHost(str(host).trim())
   var lit = ipLiteral(text)
   if (lit !== null) {
     if (lit.v === 4) return [Math.floor(lit.n / 16777216), Math.floor(lit.n / 65536) % 256, Math.floor(lit.n / 256) % 256, lit.n % 256].join(".")
@@ -1658,7 +1708,7 @@ function hostPortOf(url) {
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
-  return cutHostParams(hostport).toLowerCase()
+  return lowerHost(cutHostParams(hostport))
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
@@ -1677,8 +1727,10 @@ function deriveLabel(url, kind) {
   return capCodePoints(sanitizeInput(hostport.replace(/^www\./, "")), MAX_LABEL)
 }
 
+// The case-insensitive comparison form (SR21), lowered as a host is
+// (lowerHost, D-SINK-118), since a default label is one.
 function labelKey(text) {
-  return sanitizeInput(text).toLowerCase()
+  return lowerHost(sanitizeInput(text))
 }
 
 // `existing` is a list of labels or of records / views ({ label, id | key }).
@@ -3191,27 +3243,28 @@ export {
   hostNameRefused, hostNameRefusedAsWritten, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
-  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
-  readAuthority, normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4,
-  IPV4_PART_RE, IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal,
-  parseIpv6Groups, ipLiteral, ipv4Class, ipv6Class, hostClass, hostKey,
-  HINT_LIST_RE, hintFirstEntry, ABSORBED_URL_RE, absorbedAttribute,
-  dotlessHost, URL_DEFAULT_PORTS, urlPortOf, ownHostMatch, typedHttpHost,
-  FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV,
-  FETCH_HOME_PORT_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
-  EPG_HINT_HOST_MAX, epgHintVerdict, epgHintUrl, resolveEpgUrl,
-  epgHintRowState, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
-  randomSourceKey, sourceCacheDir, cutHostParams, hostPortOf, deriveLabel,
-  labelKey, labelTaken, uniqueLabel, labelKeySets, labelKeySetsAdd,
-  labelKeySetsTake, uniqueLabelOver, defaultSourceLabel, validateLabel,
-  selfStoredLabel, labelReadTaken, maskQuery, maskUrl, accessibleStars,
-  hasAddressLineTerminator, hostPortSplit, isZonelessIpv6Literal,
-  ADDRESS_NAME_RE, addressAccessibleHost, LABEL_NAME_RE, labelHost,
-  isDottedQuad, addressAuthoritySplit, addressAtAfterAuthority,
-  sourceHostWithheld, sourceShownHost, addressAuthorityParts,
-  addressAccessibleValue, labelSinkText, labelReadsAsAddress, labelHoldsField,
+  plainHttpLine, formAdviceLine, looksLikeHost, CAPITAL_SIGMA, SMALL_SIGMA,
+  lowerHost, validateSourceUrl, readAuthority, normalizeSourceUrl,
+  ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE,
+  IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class,
+  ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
+  ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
+  urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
+  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,
+  fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
+  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
+  cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  labelKeySets, labelKeySetsAdd, labelKeySetsTake, uniqueLabelOver,
+  defaultSourceLabel, validateLabel, selfStoredLabel, labelReadTaken,
+  maskQuery, maskUrl, accessibleStars, hasAddressLineTerminator,
+  hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,
+  addressAccessibleHost, LABEL_NAME_RE, labelHost, isDottedQuad,
+  addressAuthoritySplit, addressAtAfterAuthority, sourceHostWithheld,
+  sourceShownHost, addressAuthorityParts, addressAccessibleValue,
+  labelSinkText, labelReadsAsAddress, labelHoldsField,
   labelMayCarryCredential, labelCarriesDelimiter, LABEL_LEAD, LABEL_TRAIL,
   labelCore, labelTokenReadsAsAddress, LABEL_SCHEME_RE,
   labelShapeReadsAsAddress, labelSlashAuthority, labelSchemeSlash,

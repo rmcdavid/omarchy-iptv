@@ -2108,22 +2108,82 @@ def chmod_if_kind(path: str, mode: int, kind: Any) -> bool:
 
 # ------------------------------------------------------------- redaction
 
+# D-SINK-118 (2026-11-16, round 5 of the security review): a host is
+# lowered by lower_host, which folds the capital sigma (U+03A3) to the small
+# one (U+03C3) before it lowers. str.lower applies Unicode's Final_Sigma
+# rule, so a capital sigma at a label's end lowered to the FINAL sigma
+# (U+03C2) here and in node, while Qt's engine, which runs the Sources form
+# and the state reader, applies no such rule and gave the small one: the
+# form stored one spelling and the command line the other, two sources for
+# one address. Folded first, every engine lowers a capital sigma to U+03C3.
+# A final sigma WRITTEN as one stays one, and no comparison folds it
+# (host_key included): the player asks a name as its bytes, and the two are
+# other bytes (the critique's finding 3). Model.lowerHost is the mirror.
+_CAPITAL_SIGMA = chr(0x3A3)
+_SMALL_SIGMA = chr(0x3C3)
+_FINAL_SIGMA = chr(0x3C2)
+
+
+def lower_host(text: str) -> str:
+    """D-SINK-118: `text` lower-cased as a host is, with no Final_Sigma
+    rule: a capital sigma becomes the small sigma wherever it stands, and
+    the rest is str.lower (Model.lowerHost)."""
+    return text.replace(_CAPITAL_SIGMA, _SMALL_SIGMA).lower()
+
+
+def split_hostname(parts: Any) -> str:
+    """D-SINK-118: urlsplit's `hostname` for `parts`, as lower_host lowers
+    it. urllib lowers with str.lower, so where its hostname holds a final
+    sigma the netloc is read again with every capital sigma folded first; a
+    final sigma written as one reads the same both times. "" for none."""
+    host = parts.hostname or ""
+    if _FINAL_SIGMA not in host:
+        return host
+    return urllib.parse.urlsplit("//" + parts.netloc.replace(_CAPITAL_SIGMA, _SMALL_SIGMA)).hostname or ""
+
+
 def url_host(url: str) -> str:
-    """Host name of a URL, never the userinfo, path or query."""
+    """Host name of a URL, never the userinfo, path or query; lowered as
+    lower_host lowers (split_hostname, D-SINK-118), so a channel's host and
+    the validated playlist host it is compared with (host_key) are lowered
+    alike."""
     try:
-        return urllib.parse.urlsplit(url).hostname or ""
+        return split_hostname(urllib.parse.urlsplit(url))
     except ValueError:
         return ""
 
 
 def source_host(url: str) -> str:
+    """The host a status, a sentence or `state source list` names for a
+    source URL, and channels.json's `sourceHost`: `local file` for anything
+    that is not http(s), "" for what the URL library cannot read.
+
+    D-SINK-118 (2026-11-16): read as Model.hostOf reads it -- the authority
+    after its LAST `@`, a bracketed literal WITH its brackets, a name up to
+    its port's `:` (or a `;`, `=`, `&` or whitespace, which no validated
+    host holds) -- and lowered by lower_host. It was urllib's hostname,
+    which drops a literal's brackets, so the guide's status line read
+    `::1` where the Sources row reads `[::1]`, flipping after the first
+    fetch. Nothing that decides by it reads the brackets: host_key,
+    host_class and dotless_host take a literal with or without them
+    (cached_source, the guide status's one-label test)."""
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return ""
-    if parts.scheme in ("http", "https"):
-        return parts.hostname or ""
-    return "local file"
+    if parts.scheme not in ("http", "https"):
+        return "local file"
+    hostport = parts.netloc.rpartition("@")[2]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        literal = hostport[:close + 1] if close != -1 else ""
+        return "" if any(ch in URL_SPACE_CHARS for ch in literal) else lower_host(literal)
+    end = len(hostport)
+    for index, ch in enumerate(hostport):
+        if ch in ":[;=&" or ch in URL_SPACE_CHARS:
+            end = index
+            break
+    return lower_host(hostport[:end])
 
 
 def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
@@ -2185,7 +2245,7 @@ def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
     hostport = authority[authority.rfind("@") + 1:]
     if hostport.startswith("["):
         close = hostport.find("]")
-        return slash_alike_cut(hostport[:close + 1].lower() if close != -1 else ""), False
+        return slash_alike_cut(lower_host(hostport[:close + 1]) if close != -1 else ""), False
     end = _RUN_HOST_END.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
     port = ""
@@ -2206,8 +2266,8 @@ def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
     # with (host_withheld, Model.urlHostWithheld) does not move, nor does
     # the host a stored record shows.
     if printing and bad_port and "@" in authority:
-        return slash_alike_cut(host.lower()), True
-    return slash_alike_cut(host.lower()), later_at and (dotless or bad_port)
+        return slash_alike_cut(lower_host(host)), True
+    return slash_alike_cut(lower_host(host)), later_at and (dotless or bad_port)
 
 
 def slash_alike_cut(host: str) -> str:
@@ -3324,9 +3384,13 @@ def host_key(host: Any) -> str:
     four-digit hex groups composed here from the integer, because both of
     ipaddress's own spellings of an IPv4-mapped address (str() and
     .exploded) end in a dotted quad on CPython 3.14 and did not before 3.13;
-    Model.hostKey composes the same eight groups -- a name case-folded with
-    one trailing dot dropped. Never a port and never userinfo."""
-    text = str(host or "").strip().lower()
+    Model.hostKey composes the same eight groups -- a name lowered by
+    lower_host with one trailing dot dropped. Never a port and never
+    userinfo. D-SINK-118: a capital sigma is the small sigma here, as in
+    every engine, and a final sigma written as one is NOT folded to it: the
+    player asks a name holding either as its own bytes, so the two are not
+    one host for the own-host exceptions (the critique's finding 3)."""
+    text = lower_host(str(host or "").strip())
     address = parse_ip_literal(text)
     if address is not None:
         if address.version == 4:

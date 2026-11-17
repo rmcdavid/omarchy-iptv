@@ -572,7 +572,9 @@ def read_authority(body: str) -> dict[str, Any]:
         port = port.lstrip("0") or "0"
         if int(port) > 65535:
             return refused("port_range")
-    return {"ok": True, "why": "", "userinfo": userinfo, "host": host.lower(), "port": port, "tail": tail}
+    # D-SINK-118: lowered as every host is (lower_host), so the shell's
+    # engine, which has no Final_Sigma rule, stores what this stores.
+    return {"ok": True, "why": "", "userinfo": userinfo, "host": lower_host(host), "port": port, "tail": tail}
 
 
 def _ipv6_url_literal(host: str) -> bool:
@@ -671,7 +673,8 @@ def cut_host_params(hostport: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lower-cased; "" for paths.
+    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lowered by
+    lower_host (D-SINK-118); "" for paths.
 
     D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
     first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
@@ -696,7 +699,7 @@ def host_port_of(url: str) -> str:
     authority = match.group(1)
     at = authority.rfind("@")
     hostport = authority if at == -1 else authority[at + 1:]
-    return cut_host_params(hostport).lower()
+    return lower_host(cut_host_params(hostport))
 
 
 def derive_label(url: str, kind: str) -> str:
@@ -718,8 +721,9 @@ def derive_label(url: str, kind: str) -> str:
 
 
 def label_key(text: Any) -> str:
-    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21)."""
-    return sanitize_input(text, MAX_SOURCE_URL).lower()
+    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21),
+    lowered as a host is (lower_host, D-SINK-118), since a default label is one."""
+    return lower_host(sanitize_input(text, MAX_SOURCE_URL))
 
 
 # ------------------------------------------------------------- a label as it reads
@@ -2198,7 +2202,7 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         return "scheme", ""
     try:
         parts = urllib.parse.urlsplit(url)
-        host = parts.hostname or ""
+        host = split_hostname(parts)
     except ValueError:
         # D-SINK-115: a stream scheme whose authority the URL library
         # refuses to read -- a compatibility character for `/`, `?`, `#`,

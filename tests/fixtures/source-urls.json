@@ -2713,5 +2713,23 @@
   "host": "cdn_x.test",
   "key": "5e8c1c34",
   "note": "D-SINK-117: `_` stays allowed"
+ },
+ {
+  "input": "http://\u0391\u03a3-1.test/get.php?username=u&password=p",
+  "ok": true,
+  "kind": "http",
+  "url": "http://\u03b1\u03c3-1.test/get.php?username=u&password=p",
+  "host": "\u03b1\u03c3-1.test",
+  "key": "2051a302",
+  "note": "D-SINK-118: a capital sigma at a label's end is stored as the small sigma, as Qt's engine stores it"
+ },
+ {
+  "input": "http://\u03b1\u03c2-1.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://\u03b1\u03c2-1.test/x",
+  "host": "\u03b1\u03c2-1.test",
+  "key": "57b0caf6",
+  "note": "D-SINK-118: a final sigma written as one is kept"
  }
 ]

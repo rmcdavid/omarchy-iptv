@@ -3396,4 +3396,52 @@ TestCase {
     compare([short.ok, short.url === Model.validateSourceUrl(short.url).url, Model.validateSourceUrl(short.url).ok], [true, true, true])
     compare(Model.DESTINATION_RULES, 6)
   }
+
+  // D-SINK-118 (2026-11-16, round 5 of the security review): three things
+  // this engine read otherwise than node and the helper, which the node
+  // suite cannot see, one case each so each is seen red on its own.
+  // (a) It applies no Final_Sigma rule, so a capital sigma at a label's end
+  // lowered to the small sigma where node and the helper gave the final
+  // one; every lowerer folds it first now (Model.lowerHost), and a final
+  // sigma written as one is kept and is another host.
+  function test_engineSigmaInV4() {
+    var S = String.fromCharCode
+    compare(typeof Model.lowerHost === "function" ? Model.lowerHost(S(0x39f, 0x394, 0x39f, 0x3a3)) : "missing", S(0x3bf, 0x3b4, 0x3bf, 0x3c3))
+    var sigma = Model.validateSourceUrl("http://" + S(0x391, 0x3a3) + "-1.test/")
+    compare([sigma.url, sigma.host], ["http://" + S(0x3b1, 0x3c3) + "-1.test/", S(0x3b1, 0x3c3) + "-1.test"])
+    compare(Model.validateSourceUrl("http://" + S(0x3b1, 0x3c2) + "-1.test/").host, S(0x3b1, 0x3c2) + "-1.test")
+    var home = { host: Model.hostKey(S(0x3b1, 0x3c3) + "-1.test"), port: 554, loopback: false }
+    compare([Model.ownHostMatch(S(0x391, 0x3a3) + "-1.test", 554, home), Model.ownHostMatch(S(0x3b1, 0x3c2) + "-1.test", 554, home)],
+            [true, false])
+    compare([Model.labelTaken(S(0x39f, 0x394, 0x39f, 0x3a3), [S(0x3bf, 0x3b4, 0x3bf, 0x3c3)], ""),
+             Model.labelTaken(S(0x39f, 0x394, 0x39f, 0x3a3), [S(0x3bf, 0x3b4, 0x3bf, 0x3c2)], "")], [true, false])
+  }
+
+  // (b) Its `[\s\S]` matched no U+180E, so an address holding one read as
+  // having no scheme and the state reader dropped it; the scheme is split
+  // by index now.
+  function test_engineSchemeSplitInV4() {
+    var S = String.fromCharCode
+    var mvs = "http://cdn.test/a" + S(0x180e) + "b.m3u"
+    var v = Model.validateSourceUrl(mvs, { origin: "cli" })
+    compare([v.ok, v.code, v.url], [true, "ok", mvs])
+    verify(Model.normalizeSourceRecord({ key: "0a1b2c3d", url: mvs, label: "x", kind: "http" }) !== null)
+    compare(Model.validateSourceUrl("http://h.test/a" + S(0x2028) + "b").code, "invalid")
+    compare(Model.validateSourceUrl("h.test:80/x").code, "scheme")
+    compare(Model.validateSourceUrl("cdn.test/list.m3u").code, "scheme")
+  }
+
+  // (c) Its Array.from walked UTF-16 units, so the label cap counted a
+  // character beyond the Basic Multilingual Plane as two; codePoints walks
+  // pairs, keeping a lone surrogate as itself.
+  function test_engineCodePointsInV4() {
+    var S = String.fromCharCode
+    var astral = String.fromCodePoint(0x1f130)
+    compare(Model.codePointLength(astral), 1)
+    var derived = Model.deriveLabel("http://" + "q".repeat(63) + astral + "q.test/", "")
+    var last = derived.charCodeAt(derived.length - 1)
+    compare([Model.codePointLength(derived), last >= 0xdc00 && last <= 0xdfff], [64, true])
+    compare(Model.validateLabel("q".repeat(63) + astral, [], "").ok, true)
+    compare([Model.capCodePoints("ab" + astral + "c", 3), Model.capCodePoints("a" + S(0xd83c) + "b", 2)], ["ab" + astral, "a" + S(0xd83c)])
+  }
 }

@@ -8636,6 +8636,25 @@ checkCall("D-SINK-86: the rule's vectors are in the fixture, so it cannot be tri
   // look-alike, and the range has no neighbour whose NFKC form is itself.
   return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 31, named]
 }, [true, true, []])
+// D-SINK-118 (2026-11-16, round 5 of the security review): how a host is
+// lowered, compared and named, the shared host-grammar fixture's `engine`
+// section, which the python suite runs through the helper and through Qt's
+// engine (tests/test_host_grammar.py). node's toLowerCase applies Unicode's
+// Final_Sigma rule, as Python's str.lower does and Qt's engine does not, so
+// every lowerer folds a capital sigma to the small one first (lowerHost),
+// and no comparison folds a final sigma written as one (the critique's
+// finding 3: the player asks the two as other bytes).
+const ENGINE_FIXTURE = GRAMMAR.engine || { lowerHost: [], hostKey: [], labelKey: [], sourceHost: [] }
+const ENGINE_SIGMAS = [String.fromCharCode(0x391, 0x3a3), String.fromCharCode(0x3b1, 0x3c2), String.fromCharCode(0x3b1, 0x3c3)]
+checkCall("D-SINK-118: a host is lowered with no final sigma, compared and named as the shared fixture says, in node as in the helper and Qt's engine", () =>
+  [ENGINE_FIXTURE.lowerHost.map(p => modelFn("lowerHost")(p[0])), ENGINE_FIXTURE.hostKey.map(p => Model.hostKey(p[0]) === Model.hostKey(p[1])),
+   ENGINE_FIXTURE.labelKey.map(p => Model.labelTaken(p[0], [p[1]], "")), ENGINE_FIXTURE.sourceHost.map(p => Model.hostOf(p[0]))],
+  [ENGINE_FIXTURE.lowerHost.map(p => p[1]), ENGINE_FIXTURE.hostKey.map(p => p[2]), ENGINE_FIXTURE.labelKey.map(p => p[2]),
+   ENGINE_FIXTURE.sourceHost.map(p => p[1])])
+checkCall("D-SINK-118, the critique's finding 3: a capital sigma is the playlist's own host typed with the small one, and a final sigma written as one is not", () => {
+  const home = { host: Model.hostKey(ENGINE_SIGMAS[2] + "-1.test"), port: 554, loopback: false }
+  return ENGINE_SIGMAS.map(h => Model.ownHostMatch(h + "-1.test", 554, home))
+}, [true, false, true])
 // JS-only vectors (kept out of the shared fixture until the Python mirror
 // agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and
 // fragment are dropped like urlsplit().path, two ports are not a port, a

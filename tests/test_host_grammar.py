@@ -296,7 +296,7 @@ NODE_SCRIPT = (
     'const v=r=>[r.ok,r.code,r.url,r.host];'
     'process.stdout.write(JSON.stringify(urls.map(u=>{'
     'const f=M.validateSourceUrl(u),c=M.validateSourceUrl(u,{origin:"cli"});'
-    'return [v(f),v(c),f.ok?v(M.validateSourceUrl(f.url)):null]})))')
+    'return [v(f),v(c),f.ok?v(M.validateSourceUrl(f.url)):null,f.ok?M.hostOf(f.url):null]})))')
 
 
 def node_readings(urls):
@@ -418,6 +418,22 @@ class DifferentialTest(unittest.TestCase):
                 wrong.append((ascii(url[:70]), "helper", h[2][:2]))
             if n[0][0] and n[2] != n[0]:
                 wrong.append((ascii(url[:70]), "node", n[2][:2]))
+        self.assertEqual((len(wrong), wrong[:6]), (0, []))
+
+    def test_the_status_names_the_host_the_sources_row_names(self):
+        """D-SINK-118: for every address both validators accept, the host
+        the helper's statuses and sentences name (source_host over the
+        stored url) is the one Model.hostOf names: an IPv6 literal with its
+        brackets, the port and the user information gone."""
+        wrong, literals = [], 0
+        for url, h, n in zip(self.urls, self.helper, self.node):
+            if not (h[0][0] and n[0][0]) or lowering_differs(url):
+                continue
+            mine = helper.source_host(h[0][2])
+            literals += mine.startswith("[")
+            if mine != n[3]:
+                wrong.append((ascii(url[:70]), ascii(mine), ascii(n[3])))
+        self.assertGreater(literals, 100)
         self.assertEqual((len(wrong), wrong[:6]), (0, []))
 
     @unittest.skipUnless(os.access(proto_v4.QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
@@ -846,6 +862,135 @@ class StreamTest(unittest.TestCase):
                         got.append((error.code, error.message))
         refusal = (getattr(helper, "STREAM_HOST_NAME_REFUSAL", ""))
         self.assertEqual(got, [("unsupported_scheme", refusal)] * len(STREAMS) + [STREAM_CONTROL])
+
+
+# ------------------------------------------------------------- D-SINK-118
+
+ENGINE = FIXTURE.get("engine", {"lowerHost": [], "hostKey": [], "labelKey": [], "sourceHost": []})
+# A capital sigma at a label's end, a final sigma written as one, and the
+# small sigma, each after an alpha.
+SIGMAS = (chr(0x391) + chr(0x3A3), chr(0x3B1) + chr(0x3C2), chr(0x3B1) + chr(0x3C3))
+
+
+class EngineReadingTest(unittest.TestCase):
+    """D-SINK-118 (2026-11-16, round 5 of the security review): how a host is
+    lowered, compared and named. str.lower and node's toLowerCase apply
+    Unicode's Final_Sigma rule and Qt's engine, which runs the Sources form
+    and the state reader, does not; so every lowerer folds a capital sigma to
+    the small one first (lower_host, Model.lowerHost), and no comparison
+    folds a final sigma written as one (the critique's finding 3). The shared
+    fixture's `engine` section is run here through the helper, in
+    tests/Model.test.js through the model, and in EngineLoweringTest below
+    through Qt's engine."""
+
+    def test_each_host_is_lowered_compared_and_named_as_the_fixture_says(self):
+        lower = getattr(helper, "lower_host", lambda text: "MISSING lower_host")
+        got = ([lower(a) for a, _ in ENGINE["lowerHost"]],
+               [helper.host_key(a) == helper.host_key(b) for a, b, _ in ENGINE["hostKey"]],
+               [helper.label_key(a) == helper.label_key(b) for a, b, _ in ENGINE["labelKey"]],
+               [helper.source_host(url) for url, _ in ENGINE["sourceHost"]])
+        want = ([b for _, b in ENGINE["lowerHost"]], [same for _, _, same in ENGINE["hostKey"]],
+                [same for _, _, same in ENGINE["labelKey"]], [host for _, host in ENGINE["sourceHost"]])
+        self.assertEqual(got, want)
+        self.assertGreaterEqual((len(ENGINE["lowerHost"]), len(ENGINE["hostKey"]), len(ENGINE["labelKey"]),
+                                 len(ENGINE["sourceHost"])), (6, 5, 3, 6))
+
+    def test_a_final_sigma_written_as_one_is_never_the_playlists_own_host(self):
+        """The critique's finding 3: the own-host exceptions compare by
+        host_key, which lowers a capital sigma to the small one and leaves a
+        final sigma written as one alone, because the player asks the two as
+        other bytes."""
+        home = {"host": helper.host_key(SIGMAS[2] + "-1.test"), "port": 554, "loopback": False}
+        self.assertEqual([helper.own_host_match(h + "-1.test", 554, home) for h in SIGMAS], [True, False, True])
+
+    def test_a_channel_written_as_its_playlist_was_typed_is_its_own_host(self):
+        """A channel's host is lowered as the typed playlist's was, at the
+        parse (the one-label exception, stream_entry_refusal) and at play (a
+        proxied source's own host whose lookup answers nothing,
+        stream_lookup); a final sigma is another host there too. The lookup
+        itself asks each name as the player writes it."""
+        from unittest import mock
+        typed = helper.validate_source_url("http://" + SIGMAS[0] + ":554/get.php")["url"]
+        source = helper.playlist_source("http", typed, "global", "global")
+        parse = [helper.stream_entry_refusal("rtsp://%s:554/live" % h, source)[0] for h in SIGMAS]
+        typed = helper.validate_source_url("http://" + SIGMAS[0] + "-1.test:554/get.php")["url"]
+        cached = helper.cached_source({"sourceHost": helper.source_host(typed), "sourceClass": "unresolved",
+                                       "sourceLocal": False, "sourcePort": 554})
+        asked = []
+
+        def unanswered(name, port):
+            asked.append((name, port))
+            return []
+
+        with mock.patch.object(helper, "stream_resolve", unanswered):
+            play = [helper.stream_lookup("rtsp://%s-1.test:554/live" % h, cached)[0] for h in SIGMAS]
+        self.assertEqual((parse, play), (["", "label", ""], ["", "lookup", ""]))
+        self.assertEqual(asked, [((h + "-1.test").encode("utf-8"), 554) for h in SIGMAS])
+
+    def test_a_status_names_a_literal_with_its_brackets_and_decides_alike(self):
+        """The status line named `::1` where the Sources row names `[::1]`;
+        nothing that decides by channels.json's sourceHost reads the
+        brackets."""
+        url = "http://[::1]:8080/list.m3u"
+        self.assertEqual((helper.source_host(url), helper.shown_source_host(url)), ("[::1]", "[::1]"))
+        self.assertEqual(helper.cached_source({"sourceHost": "[::1]", "sourcePort": 8080}),
+                         helper.cached_source({"sourceHost": "::1", "sourcePort": 8080}))
+
+
+LOWER_V4_BODY = r"""
+    var name = function (cp) { var h = cp.toString(16).toUpperCase(); while (h.length < 4) h = "0" + h; return "U+" + h }
+    var table = {}
+    for (var cp = 0; cp < 0x110000; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue
+      var ch = cp > 0xffff ? String.fromCharCode(0xd800 + ((cp - 0x10000) >> 10), 0xdc00 + ((cp - 0x10000) & 0x3ff))
+                           : String.fromCharCode(cp)
+      var low = ch.toLowerCase()
+      if (low === ch) continue
+      var parts = []
+      for (var i = 0; i < low.length; i++) {
+        var c = low.charCodeAt(i)
+        if (c >= 0xd800 && c <= 0xdbff && i + 1 < low.length) {
+          c = 0x10000 + ((c - 0xd800) << 10) + (low.charCodeAt(i + 1) - 0xdc00)
+          i++
+        }
+        parts.push(name(c))
+      }
+      table[name(cp)] = parts.join(" ")
+    }
+    var S = String.fromCharCode
+    var lower = typeof Model.lowerHost === "function" ? Model.lowerHost : function () { return "MISSING lowerHost" }
+    console.log("RESULT " + JSON.stringify({ table: table, plain: (S(0x391) + S(0x3a3)).toLowerCase(),
+      lowerHost: ENGINE.lowerHost.map(function (p) { return lower(p[0]) }),
+      hostKey: ENGINE.hostKey.map(function (p) { return Model.hostKey(p[0]) === Model.hostKey(p[1]) }),
+      labelKey: ENGINE.labelKey.map(function (p) { return Model.labelTaken(p[0], [p[1]], "") }),
+      sourceHost: ENGINE.sourceHost.map(function (p) { return Model.hostOf(p[0]) }) }))
+"""
+
+
+class EngineLoweringTest(unittest.TestCase):
+    """D-SINK-118 in the shell's own engine. Its per-code-point lowering
+    table is node's, the half of tests/fixtures/casefold-diff.json that
+    D-SRC-12 pins (measured 2026-11-16 on Qt 6.12: 1,488 entries, none
+    different), so the 28 code points D-SRC-12 accepts split the shell from
+    the helper as they split node from it, and nothing more; a tripwire for
+    the next Qt. The engine applies no Final_Sigma rule (a capital sigma at a
+    label's end lowers to the small sigma, `plain`, recorded rather than
+    asserted: the fold makes the answer the same either way), and the
+    model's lowering, comparisons and named host read the shared fixture's
+    `engine` section as the helper and node do."""
+
+    @unittest.skipUnless(os.access(proto_v4.QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
+    def test_qts_engine_lowers_as_node_does_and_reads_each_host_as_the_fixture_says(self):
+        body = "    var ENGINE = %s\n%s" % (json.dumps(ENGINE, ensure_ascii=True), LOWER_V4_BODY)
+        result = proto_v4.run_qml(self, body)
+        self.assertNotIn("probeError", result)
+        node = CASEFOLD["node"]["lower"]
+        differs = sorted(set(node) ^ set(result["table"]) | {k for k in node if result["table"].get(k) != node[k]})
+        self.assertEqual((len(result["table"]), differs[:8]), (len(node), []), result.get("plain"))
+        got = (result["lowerHost"], result["hostKey"], result["labelKey"], result["sourceHost"])
+        want = ([b for _, b in ENGINE["lowerHost"]], [same for _, _, same in ENGINE["hostKey"]],
+                [same for _, _, same in ENGINE["labelKey"]], [host for _, host in ENGINE["sourceHost"]])
+        self.assertEqual(got, want)
 
 
 if __name__ == "__main__":
