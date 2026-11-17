@@ -3,7 +3,7 @@ import {
   SEP, GLYPHS
 } from "./build.mjs"
 import {
-  str, asList, keyedMap, fnv1a32
+  str, asList, keyedMap, hasOwnKey, fnv1a32
 } from "./text.mjs"
 import {
   formatCount, pluralChannels
@@ -161,41 +161,143 @@ function logoScheme(raw) {
 // `https://user%3Apass%40cdn.test/a.png` was counted and named
 // `user%3apass%40cdn.test`, `https://user.name:pa/ss@cdn.test/a.png` named
 // `user.name`, and the counts took in logos the fetch refused or could not
-// send. A logo is counted only when it absorbed no attribute
-// (absorbedAttribute), its scheme as written is https (logoScheme), the source
-// validator accepts it (validateSourceUrl, so readAuthority's reading), its
-// authority as written holds no `@` and no `%`, everything after its
-// authority -- the fragment included, which urllib cuts at the LAST `#` -- is
-// printable ASCII 0x21-0x7E, and its host is not one label (dotlessHost) and
-// not a literal or a name that is not global (hostClass). The port is never
+// send. A logo is counted only when its scheme as written is https
+// (logoScheme), everything after its authority -- the fragment included,
+// which urllib cuts at the LAST `#` -- is printable ASCII 0x21-0x7E, its
+// authority as written holds no `@` and no `%`, readAuthority reads that
+// authority, its port as written, if it has one, is what the helper's
+// connection layer takes (logoPortDigits: one to five ASCII digits up to
+// 65535 -- readAuthority takes any run of digits and strips the leading
+// zeros while the request carries the port as written, so
+// `https://cdn.test:000443/a.png` was counted as cdn.test and refused at the
+// connection before its lookup: the review of round 5's build, 2026-11-17),
+// its host is ASCII with labels the codec takes (logoLabelsRefused), not one
+// label (dotlessHost) and not a literal or a name that is not global
+// (hostClass), it absorbed no attribute (absorbedAttribute), and the source
+// validator accepts it with that host (validateSourceUrl). The port is never
 // part of the answer, and an IPv6 literal keeps its brackets. D-SINK-35's
 // accepted class stays: `https://qq.qq:12/zz@cdn.test/a.png` is fetched from
 // qq.qq on port 12, so it is counted and named `qq.qq`.
+//
+// The answer is the conjunction of those tests, asked in three halves in the
+// order of their cost (the same review): what the row's own text decides
+// (logoRowAuthority), what its authority alone decides (logoAuthorityHost)
+// and the whole address (logoAddressCounts). logoColumnShown asks the reading
+// of every row on screen until one counts, on every guide open and every
+// keystroke, and a list none of whose logos counted paid the whole source
+// validator for each row: 290 to 490 ms over 10,000 rows in Qt's engine. It
+// now asks the authority half once per authority. The helper keeps the same
+// three halves.
 function logoContactHost(raw) {
-  if (typeof raw !== "string" || raw === "" || absorbedAttribute(raw)) return ""
+  var authority = logoRowAuthority(raw)
+  if (authority === "") return ""
+  var host = logoAuthorityHost(authority)
+  if (host === "" || !logoAddressCounts(raw, host)) return ""
+  return host
+}
+
+// The first half of logoContactHost: a logo address's authority as written,
+// or "" when the address's own text refuses it -- a scheme that is not https,
+// no `//`, anything after the authority that is not printable ASCII, an `@`
+// or a `%` in the authority, or an authority with no `.` that is not a
+// bracketed literal (its host is then one label, or none, which
+// logoAuthorityHost refuses anyway). The authority ends at the first `/`,
+// `?` or `#`, as readAuthority's does. Index walks only. The mirror of the
+// helper's logo_row_authority.
+function logoRowAuthority(raw) {
+  if (typeof raw !== "string" || raw === "") return ""
   if (LOGO_SCHEMES.indexOf(logoScheme(raw)) === -1) return ""
-  var checked = validateSourceUrl(raw)
-  if (!checked.ok || checked.kind !== "http") return ""
-  var body = raw.substring(raw.indexOf(":") + 1)
-  if (body.indexOf("//") !== 0) return ""
-  var read = readAuthority(body.substring(2))
-  if (!read.ok) return ""
-  var authority = body.substring(2, body.length - read.tail.length)
-  if (authority.indexOf("@") !== -1 || authority.indexOf("%") !== -1) return ""
-  for (var i = 0; i < read.tail.length; i++) {
-    var c = read.tail.charCodeAt(i)
+  var colon = raw.indexOf(":")
+  if (raw.substring(colon + 1, colon + 3) !== "//") return ""
+  var start = colon + 3
+  var end = raw.length
+  for (var k = start; k < raw.length; k++) {
+    var e = raw.charCodeAt(k)
+    if (e === 0x2f || e === 0x3f || e === 0x23) { end = k; break }
+  }
+  for (var i = end; i < raw.length; i++) {
+    var c = raw.charCodeAt(i)
     if (c < 0x21 || c > 0x7e) return ""
   }
+  var authority = raw.substring(start, end)
+  if (authority === "" || authority.indexOf("@") !== -1 || authority.indexOf("%") !== -1) return ""
+  if (authority.charAt(0) !== "[" && authority.indexOf(".") === -1) return ""
+  return authority
+}
+
+// The second half: the host a logo authority names, or "" when the authority
+// alone refuses it -- readAuthority refuses it, it holds an `@` or a `%`, its
+// port as written is not logoPortDigits', or its host is not ASCII, has
+// labels the codec refuses, is one label, or is a literal or a name that is
+// not global. A pure function of the authority, so one answer serves every
+// logo on it (logoAuthorityHosts). The mirror of the helper's
+// logo_authority_host.
+function logoAuthorityHost(authority) {
+  if (typeof authority !== "string" || authority === "") return ""
+  for (var k = 0; k < authority.length; k++) {
+    var e = authority.charCodeAt(k)
+    if (e === 0x2f || e === 0x3f || e === 0x23 || e === 0x40 || e === 0x25) return ""
+  }
+  var read = readAuthority(authority)
+  if (!read.ok) return ""
+  var written = authority.charAt(0) === "[" ? authority.substring(authority.indexOf("]") + 1) : authority
+  var colon = written.lastIndexOf(":")
+  if (colon !== -1 && !logoPortDigits(written.substring(colon + 1))) return ""
   var host = read.host
-  if (host !== checked.host || dotlessHost(host)) return ""
-  var kind = hostClass(host)
-  if (kind !== "" && kind !== "global") return ""
   // D-SINK-119 (2026-11-16): an ASCII host with labels the helper's idna
-  // codec takes, as the helper's logo_contact_host asks: the fetch cannot
+  // codec takes, as the helper's logo_authority_host asks: the fetch cannot
   // send a host outside Latin-1 and sent a Latin-1 one as raw bytes, and
   // judging an IDN host by the codec would take its tables in both mirrors.
   for (var j = 0; j < host.length; j++) if (host.charCodeAt(j) > 0x7f) return ""
-  return logoLabelsRefused(host) ? "" : host
+  if (logoLabelsRefused(host) || dotlessHost(host)) return ""
+  var kind = hostClass(host)
+  if (kind !== "" && kind !== "global") return ""
+  return host
+}
+
+// The third half: the whole address absorbed no attribute and the source
+// validator accepts it, an http(s) URL whose host is `host`. The mirror of
+// the helper's logo_address_counts.
+function logoAddressCounts(raw, host) {
+  if (typeof raw !== "string" || absorbedAttribute(raw)) return false
+  var checked = validateSourceUrl(raw)
+  return checked.ok === true && checked.kind === "http" && checked.host === str(host)
+}
+
+// A port as written in a logo's authority, the text after its colon: "" (no
+// port written after the colon) or one to five ASCII digits whose value is at
+// most 65535, as the helper's port_digits reads the port its connection layer
+// is handed. An index walk.
+function logoPortDigits(text) {
+  var s = str(text)
+  if (s === "") return true
+  if (s.length > 5) return false
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 0x30 || c > 0x39) return false
+  }
+  return Number(s) <= 65535
+}
+
+// The authority half's answer for every distinct logo authority of a channel
+// list: a keyed map, authority -> host or "" (D-SINK-112, the review of round
+// 5's build, 2026-11-17). The service computes it once per channel list while
+// logos are on, and the guide hands it to logoColumnShown, so a guide
+// re-evaluating its column on a keystroke reads each row's authority and
+// looks it up rather than reading it again. Pure: each answer is
+// logoAuthorityHost's, a function of the authority alone, so a map built
+// from any list answers rightly for every other.
+function logoAuthorityHosts(channels) {
+  var rows = asList(channels)
+  var out = keyedMap()
+  for (var i = 0; i < rows.length; i++) {
+    var channel = rows[i]
+    if (!channel || typeof channel !== "object") continue
+    var authority = logoRowAuthority(channel.logo)
+    if (authority === "" || hasOwnKey(out, authority)) continue
+    out[authority] = logoAuthorityHost(authority)
+  }
+  return out
 }
 
 // D-SINK-119: would the helper's idna codec refuse this ASCII host's labels --
@@ -675,11 +777,35 @@ function logoFetchPlan(opts) {
 // placeholder in a column reads as a value, and the absence is the
 // information. At the 27 per cent coverage of the provider list that decision
 // is the difference between a list and a list of empty boxes.
-function logoColumnShown(rows, enabled, logoDir) {
-  if (enabled !== true) return false
+//
+// D-SINK-112 (the review of round 5's build, 2026-11-17): the answer is
+// logoFile's for some row, which since D-SINK-112 reads each logo by the whole
+// of logoContactHost. A list none of whose logos counts read every row in full
+// on every evaluation -- on every guide open and every keystroke -- so each
+// row's authority is now read once: from `hosts`, logoAuthorityHosts' map the
+// service holds for its channel list, or once per call for an authority it
+// does not hold; the whole address is asked only of a row whose authority
+// names a host, and the first such row that counts ends the scan.
+function logoColumnShown(rows, enabled, logoDir, hosts) {
+  if (enabled !== true || str(logoDir) === "") return false
   var list = asList(rows)
+  var seen = keyedMap()
   for (var i = 0; i < list.length; i++) {
-    if (logoFile(list[i], logoDir) !== "") return true
+    var channel = list[i]
+    if (!channel || typeof channel !== "object") continue
+    var raw = channel.logo
+    var authority = logoRowAuthority(raw)
+    if (authority === "") continue
+    var host
+    if (hasOwnKey(hosts, authority)) {
+      host = str(hosts[authority])
+    } else if (hasOwnKey(seen, authority)) {
+      host = seen[authority]
+    } else {
+      host = logoAuthorityHost(authority)
+      seen[authority] = host
+    }
+    if (host !== "" && logoAddressCounts(raw, host)) return true
   }
   return false
 }
@@ -791,12 +917,13 @@ function logoSummaryNotice(line) {
 }
 export {
   LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
-  logoScheme, logoContactHost, logoLabelsRefused, splitLogoUrl,
-  logoConsentLines, logoFile, logoSlot, WALL_KEY, FOOTER_DROP_ORDER,
-  footerHintWidth, fitFooterHints, footerHintMarkup, WALL_MAX_COLUMNS,
-  WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction, wallStep,
-  logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge, logoHaveCount,
-  logoFetchPlan, logoColumnShown, logoStreamName, logoNamesFrom,
-  logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
+  logoScheme, logoContactHost, logoRowAuthority, logoAuthorityHost,
+  logoAddressCounts, logoPortDigits, logoAuthorityHosts, logoLabelsRefused,
+  splitLogoUrl, logoConsentLines, logoFile, logoSlot, WALL_KEY,
+  FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints, footerHintMarkup,
+  WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction,
+  wallStep, logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge,
+  logoHaveCount, logoFetchPlan, logoColumnShown, logoStreamName,
+  logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
   LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

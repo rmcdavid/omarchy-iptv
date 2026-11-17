@@ -1038,12 +1038,30 @@ class ProviderChosenRefusalTest(unittest.TestCase):
         self.assert_names_none(caught.exception, "qqqqqq.x", "10.0.0.1")
 
     def test_a_hinted_address_holding_a_password_is_refused_naming_no_host(self):
+        # The review of round 5's build (2026-11-17): the resolver and the
+        # connection are stand-ins that record and refuse, so a tree that
+        # lost or moved the password refusal -- a red run, a mutant -- hands
+        # the name to neither, and the test says so rather than asking a
+        # real resolver.
+        looked_up, connected = [], []
+
+        def no_lookup(host, *args, **kwargs):
+            looked_up.append(host)
+            raise socket.gaierror(socket.EAI_NONAME, "refused by the test")
+
+        def no_connect(address, *args, **kwargs):
+            connected.append(tuple(address))
+            raise ConnectionRefusedError(111, "refused by the test")
+
         policy = helper.DestinationPolicy("EPG", "playlist")
-        with self.assertRaises(helper.HelperError) as caught:
-            helper.read_http_source("http://qqqqqq:zzzzzz@epg.test/guide.xml", 1, "EPG", policy)
+        with mock.patch.object(socket, "getaddrinfo", no_lookup), \
+                mock.patch.object(helper, "bounded_create_connection", no_connect):
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.read_http_source("http://qqqqqq:zzzzzz@epg.test/guide.xml", 1, "EPG", policy)
         self.assertEqual(caught.exception.code, "bad_url")
         for leak in ("epg.test", "qqqqqq", "zzzzzz"):
             self.assertNotIn(leak, caught.exception.message)
+        self.assertEqual((looked_up, connected), ([], []))
 
     def cache(self, document):
         tmp = tempfile.TemporaryDirectory()
@@ -1113,4 +1131,76 @@ class RedirectPortTest(unittest.TestCase):
             except helper.HelperError as error:
                 got.append((row["location"], error.code == "bad_url", False))
         self.assertEqual(got, [(r["location"], r["refused"], not r["refused"]) for r in FIXTURE["redirectPorts"]])
+
+
+class RedirectHostTest(unittest.TestCase):
+    """D-SINK-119 (the review of round 5's build, 2026-11-17): the first hop
+    of a fetch is sent as its host's A-label (a_label_target), but a
+    redirect's host is the one urllib percent-decodes from the Location:
+    `http://b%C3%BCcher.test/x` became the next request's host
+    `b<U+00FC>cher.test`, which the hop looked up through the idna codec and
+    wrote into its Host header as raw Latin-1, and a host outside Latin-1
+    failed before connecting. The connection layer, which every hop passes,
+    refuses a request host that is not ASCII, before any lookup, for the
+    playlist's opener and the logo's; the same hosts written as their
+    A-labels are followed. In process: the redirect handler is called, its
+    request opened by the same opener with the resolver, the connection and
+    http.client's header writer replaced by stand-ins that record and
+    refuse, and nothing is resolved or connected to."""
+
+    def follow(self, row):
+        import errno
+        import http.client
+        import urllib.request
+        helper.prepare_tls_context()
+        if row["opener"] == "logo":
+            opener, start = helper.logo_opener("cdn.test"), "https://cdn.test/a.png"
+        else:
+            opener = helper.make_opener("playlist", "p.example.test", helper.DestinationPolicy("playlist", "user"))
+            start = "http://p.example.test/start.m3u"
+        handler = [h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)][0]
+        looked_up, connected, hosts = [], [], []
+        real = http.client.HTTPConnection.putheader
+
+        def no_lookup(host, *args, **kwargs):
+            looked_up.append(host)
+            raise socket.gaierror(socket.EAI_NONAME, "refused by the test")
+
+        def no_connect(address, *args, **kwargs):
+            connected.append(tuple(address))
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "refused by the test")
+
+        def putheader(conn, header, *values):
+            if str(header).lower() == "host":
+                hosts.append(values[0] if len(values) == 1 else values)
+            return real(conn, header, *values)
+
+        message = ""
+        with mock.patch.object(socket, "getaddrinfo", no_lookup), \
+                mock.patch.object(helper, "bounded_create_connection", no_connect), \
+                mock.patch.object(http.client.HTTPConnection, "putheader", putheader), \
+                mock.patch.dict(os.environ, {}, clear=False):
+            for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
+                         "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+                os.environ.pop(name, None)
+            try:
+                new = handler.redirect_request(urllib.request.Request(start), io.BytesIO(), 302, "Found", {},
+                                               row["location"])
+                opener.open(new, timeout=1)
+                code = "ok"
+            except helper.HelperError as error:
+                code, message = error.code, error.message
+            except Exception as error:
+                code = type(error).__name__
+        return code, message, looked_up, connected, hosts
+
+    def test_every_location_is_refused_or_followed_as_the_fixture_says(self):
+        got, want = [], []
+        for row in FIXTURE["redirectHosts"]:
+            code, message, looked_up, connected, hosts = self.follow(row)
+            got.append((row["location"], code == "bad_url", looked_up, [h for h, _ in connected],
+                        [ascii(h) for h in hosts], "cher" in message or "xn--" in message))
+            ace = [] if row["refused"] else [row["host"]]
+            want.append((row["location"], row["refused"], [], ace, [ascii(h) for h in ace], False))
+        self.assertEqual(got, want)
 

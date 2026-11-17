@@ -20977,7 +20977,7 @@ Built on the branch `r5-build` after lane-r5a and lane-r5b (b44c7c6). Every call
 The suites on the record's tree: node 3,836 checks, python 2,727 tests (1 skipped), the QML spec 108 cases, each floor re-levelled in scripts/check.sh with its reason. Every row D-SINK-111 to D-SINK-119 reads fixed on dev, unreleased, and was read against the code as committed (this lane, 2026-11-16).
 
 **The owner's two decisions of 2026-11-16, and what they delete.**
-1. *The drop round 5 widens* (D-SINK-115, -116, -117). On the first load after the update, both state readers drop a stored source whose address holds an authority the helper's URL library cannot read, a host name holding ASCII other than letters, digits, `-`, `.` and `_` or a compatibility character folding to such ASCII, or an invisible character; a kept source's guide URL holding one is cleared; the parse skips such channels and play refuses them from an older cache until it is refetched (each source's playlist is downloaded once more, `DESTINATION_RULES` 6). Deleted: those source records and guide URLs, with no log line, as D-SINK-86's were. None of the authority shapes ever fetched (they ended as an internal error); no DNS name holds the ASCII characters; the twenty invisible characters the codec maps to nothing were looked up as the clean host but could not be fetched either, being outside Latin-1 (D-SINK-119's finding). Beside it, the lead's call to be told to the owner with the result: a host whose characters include a look-alike (a code point whose NFKC form is another) is dropped the same way.
+1. *The drop round 5 widens* (D-SINK-115, -116, -117). On the first load after the update, both state readers drop a stored source whose address holds an authority the helper's URL library cannot read, a host name holding ASCII other than letters, digits, `-`, `.` and `_` or a compatibility character folding to such ASCII, or an invisible character; a kept source's guide URL holding one is cleared; the parse skips such channels and play refuses them from an older cache until it is refetched (each source's playlist is downloaded once more, `DESTINATION_RULES` 6). Deleted: those source records and guide URLs, as D-SINK-86's were. [The review of round 5's build: the helper's state reader logs one line for each dropped source, naming its key only (`state: dropped source <key> (invalid url: invalid)`), and clears a guide URL with no line; this said neither logged.] None of the authority shapes ever fetched (they ended as an internal error); no DNS name holds the ASCII characters; the twenty invisible characters the codec maps to nothing were looked up as the clean host but could not be fetched either, being outside Latin-1 (D-SINK-119's finding). Beside it, the lead's call to be told to the owner with the result: a host whose characters include a look-alike (a code point whose NFKC form is another) is dropped the same way.
 2. *Credential-holding legacy ids deleted on load* (D-SINK-111). Both state readers drop a favorite, and a recents, last-played or session record, whose id is a `t:` id the tvg-id rule refuses, and nothing else. Deleted: those entries, which the guide never showed and the user could not remove; the file loses them at its next save. Nothing reachable is lost: the current parse gives every such channel an `n:` or `u:` id. What still prints `[id withheld]`: a player's record an older build wrote, failed.json's marks, and a reply about a row of a cache written before 0.19.0 (until the refetch `DESTINATION_RULES` 6 makes).
 
 **What stays open, or accepted, stated.**
@@ -21124,3 +21124,150 @@ kept off another source's stash by `Model.reconcileVerdict` (a guard added
 there for this row was unreachable and was taken out again).
 
 **Not observed** on a real player.
+
+## The reviews of round 5's build, settled (lane-r5settle, 2026-11-17)
+
+Two read-only reviews read `r5-build` at c1dd3d8: one for credential reach, grammar and contracts, one for claims and process. Every finding is settled here, on the branch, in two gated commits: the merge of `dev` (c32a936) and the fixes. Every call is the lead's under the owner's standing authority of 2026-11-09; the one fix that would delete more than the owner's two decisions of 2026-11-16 is not built and is asked of the owner. No cage, live scenario, player or name lookup ran. Every lookup and connection below is a stand-in that records and refuses. Qt's engine ran offscreen with a scratch home and `prlimit --core=0`. The crash journal read 87 before and after every heavy run. "Red on c32a936" means the old code run with the new tests and fixtures. A "mutant" is one decision of the new code broken on a scratch copy, sealed or relinked, and then restored.
+
+### The merge (the claims review's Info finding: `dev` had moved)
+
+`dev` moved three commits past 3101349 (8b42065 F-HARNESS-113, a259de9 D-PLY-67, e2ae4f4 D-PLY-58). It is merged into `r5-build` as c32a936.
+
+- **Conflicts.** The CHANGELOG and QA-RESULTS conflicts keep both sides, round 5's first. The helper's part table took this branch's side and was resealed over the merged parts, and the model was relinked.
+- **Floors.** `dev` added 7 node checks and 9 python tests without raising its floors, so the floors moved to the merged counts: node 3843, python 2736 (1 skipped), spec 108.
+- **Gate.** The gate ran green on exactly the merged tree: the hash of `git diff HEAD` and of `git status` were the same before and after.
+
+### A logo whose port is padded past five characters (credential review, Low, blocked the push): fixed, D-SINK-112
+
+**The finding.** `https://cdn.test:000443/a.png` was counted as `cdn.test` by both surveys, and then refused at the connection as `bad_url`. The reason: `read_authority` and `Model.readAuthority` take any run of digits and strip the leading zeros, while the request carries the port as written and `port_digits` refuses one longer than five characters. The logo path is the only fetch of a raw address. The sources and the guide hint fetch the validator's normalised url: `epgHintVerdict` hands on `http://epg.test/x.xml` for `http://epg.test:000080/x.xml` (probed).
+
+**The fix.** The reading asks the written port of `port_digits`: `logoPortDigits` in the model, an index walk. Such a logo is counted refused and fetched as `logo_host` before any lookup. Four characters (`:0443`) are still counted and fetched. `read_authority` itself is unchanged, so no stored source is dropped.
+
+**Fixtures and comment.** The shared fixtures carry the shape: four `logoHosts` rows in provider-hosts.json, one logo-survey case, and the host-grammar atoms `:000443` and `:00000000000080`. The comment over the logo run's `bad_url` (06-failed.py) now says no first hop answers it.
+
+**Old against new.** Over 30,119 generated logos plus every fixture logo, 155 answers changed between old and new `logo_contact_host`, and every one is a padded port. The helper and the model disagree on 0.
+
+**Red-first and mutants.**
+- Red on c32a936: node, `M2-04: every shared logo-survey case`, `D-SINK-112: every refused logo ...` and `D-SINK-83, F1: the logo host of every case`. Python, test_provider_hosts' two logoHosts tests, test_logos' fixture and run-against-survey tests, and the logo differential's connection invariant.
+- Mutant: the helper without the port check turns 7 python tests red, the differential's two equality tests among them.
+- Mutant: the model without it turns 5 node checks red.
+
+### The guide's column test costs (credential review, Low): fixed, D-SINK-112
+
+**The finding.** `Model.logoColumnShown` asks the reading of every row on screen until one counts, on every guide open and every keystroke. After D-SINK-112 the reading included the source validator, so a list none of whose logos counts paid it for every row.
+
+**Measured on c32a936 in Qt's engine** (10,000 rows, three evaluations each):
+
+| Shape | Time per evaluation |
+|---|---|
+| 250 LAN hosts | 469 to 473 ms |
+| One LAN host | 480 to 518 ms |
+| 10,000 LAN hosts | 463 to 473 ms |
+| One label | 297 to 336 ms |
+| A path holding an accent | 292 to 334 ms |
+| A path holding a space | 428 to 482 ms |
+
+**The fix.** The reading is asked in three halves, in the order of their cost. The answers are unchanged: 0 of 30,119 differ from the helper's.
+- the row's own text: `logo_row_authority` / `Model.logoRowAuthority`, which covers the scheme, `//`, the tail, `@`, `%` and an authority with no dot;
+- the authority alone: `logo_authority_host` / `Model.logoAuthorityHost`;
+- the whole address: `logo_address_counts` / `Model.logoAddressCounts`.
+
+The column test reads each row's authority from a map the service binds per channel list while logos are on (`logoAuthorityHosts: root.showLogos ? Model.logoAuthorityHosts(root.channels) : Model.keyedMap()`), or reads it once per call. The model holds no cache of its own: section 9 of ARCHITECTURE.md forbids shared mutable state.
+
+**Measured after the fix in Qt's engine:**
+- With the map: 20 to 51 ms per evaluation over the same shapes (the spec's run: 22 to 41 ms, against 148 to 340 ms for validating the addresses).
+- Without the map: 19 to 58 ms, except 10,000 distinct LAN hosts at 266 to 323 ms.
+- Building the map at a channel load with logos on: 22 to 297 ms.
+
+**Measured in node,** best of five:
+- Before the fix, the column test cost 1.17 to 2.77 times validating the addresses.
+- After the fix, 0.10 to 0.37 times.
+
+**The checks and their red runs.**
+- **Node.** `D-SINK-112: the column test answers as logoFile does ...`, over every fixture logo, with the map, without it and with another list's. `D-SINK-112: over 10,000 rows ... under half of validating`. `D-SINK-112: Service.qml's own binding holds the map ...`, through the service harness. All three are red on c32a936, where the names do not exist and the scan costs more.
+- **Spec.** `test_logoColumnScanInV4` is the same ratio in the engine the guide runs in. It is red on c32a936's model: 253 to 498 ms against 181 to 480 ms, and the padded shape showed a column.
+- **Mutant: the column test reads every row in full.** The node timing check and the spec case go red.
+- **Mutant: the service binding always empty.** The harness check goes red.
+
+**Not observed.** The Guide.qml line that hands the map over is read, not run: no cage ran.
+
+### A redirect to a host not written in ASCII (credential review, Low): fixed by refusal, D-SINK-119
+
+**The finding.** urllib percent-decodes a redirect's host, so `http://b%C3%BCcher.test/x` became the next request's host `b<U+00FC>cher.test`. It was looked up as its A-label and sent with a raw Latin-1 Host header. A host outside Latin-1 failed before connecting.
+
+**The fix.** `connection_class`, which every hop of every urllib fetch passes, refuses a request host that is not ASCII. The code is `bad_url` and the sentence (`HOST_NOT_ASCII_REFUSAL`) names no host. The first hops are A-labels already. Refusing rather than rewriting the hop is the conservative reading. Nothing refused this way was fetchable as a server reads it.
+
+**Tests and red runs.**
+- **New fixture section.** destinations.json gets a `redirectHosts` section. `RedirectHostTest` calls each opener's redirect handler and opens the hop with the resolver, the connection and http.client's header writer replaced by stand-ins. It checks four percent-encoded hosts (Latin-1 and Cyrillic, playlist and logo openers), which must be refused with nothing looked up, connected or written, and their A-labels, which must be handed to the connection and the Host header.
+- **The earlier test.** test_host_names' `..._a_label_are_still_followed` had asserted that the percent-encoded redirect was followed. It now asserts the A-label is followed and the encoded form is refused, against a real 127.0.0.1 server.
+- **Red runs.** Both are red on c32a936. The mutant without the check turns both red.
+
+### Nameprep's case folds (both reviews, Low / P3): stated, not refused; asked of the owner
+
+**Measured** by a local computation, with no lookup: every code point from U+0080 to U+10FFFF in `http://a<cp>b.test/`, through `validate_source_url` and `encodings.idna.nameprep`.
+
+**The class.** 67 accepted code points are written by nameprep as another name than the label's NFC form, all of them stringprep B.2 case folds:
+- U+00DF and U+1E9E;
+- U+0345 and U+03C2;
+- 63 Greek letters with a subscript or adscript iota, from U+1F80 to U+1FFC.
+
+Combining marks that compose are not in the class, since they draw as the composed name.
+
+**What the fetch does.** It looks such a name up under the folded A-label, as CPython's socket did before the round. Nothing leaks, but the Sources row shows the name as written.
+
+**Not refused.** Refusing them would drop stored sources beyond the owner's decision of 2026-11-16, so it is not built. It is stated in all of these:
+- D-SINK-119's row;
+- the CHANGELOG;
+- the README's limits;
+- CLAUDE.md's round 5 bracket, whose "a look-alike the idna codec would fetch as the plain name" read wider than the rule;
+- ARCHITECTURE.md.
+
+### A test that reached the fetch with no resolver stand-in (credential review, Low): fixed
+
+`test_a_hinted_address_holding_a_password_is_refused_naming_no_host` now patches `socket.getaddrinfo` and `bounded_create_connection` with recorders and asserts both recorded nothing. The mutant that drops the password refusal in `read_http_source` turns it red (`network` against `bad_url`, the connection stand-in handed `epg.test`), and nothing is resolved.
+
+### The status test's vacuous assertion (claims review, Info): fixed
+
+The path's password was `zzzz` while the test asked for `zzzzzz`. The path now holds `zzzzzz`, and `2024/` is asked as well.
+
+The mutant tested is a status reply that prints only the text between the path's first `/` and its `@`. Under it, the new test is red and the old test, run against the same mutant, is green.
+
+### Wording (Info)
+
+- **README, the logo dialog.** It said the dialog "never names a user name or password". It now says the dialog names none the address marks as one, and names D-SINK-35's accepted class, which reads as a host and a port.
+- **STATUS, the lead's round 5 row.** It pointed "below" to the owner's decision, which is the row above it.
+- **QA-RESULTS, round 5's drop.** It said the dropped sources were deleted "with no log line". Measured: the helper's reader logs `state: dropped source <key> (invalid url: invalid)` for each source it drops, naming the key only, and clears a guide URL with no line.
+
+### Rule 15: where else each job is done
+
+**The port as written against the port read** (searched: every fetch whose request is built from a URL a reader normalised, and every reader of a port).
+- Cleared:
+  - `read_http_source`, which fetches the stored, normalised url;
+  - the guide hint, whose verdict hands on `v.url`;
+  - the stream gate, which judges `host[:port]` with `port_digits` at the parse and at play;
+  - `url_port` / `urlPortOf`, which compare normalised urls.
+- Changed: the logo reading.
+
+**A host that is not ASCII at http.client** (searched: every Request the helper builds and every opener).
+- Cleared:
+  - `read_http_source` and `fetch_logo`, which send the A-label;
+  - the proxied hop, whose target `check_proxied` reads from the quoted url and refuses for its `%`;
+  - the relay, which forwards the player's own bytes and judges each target with `relay_authority`, not http.client.
+- Changed: both redirect handlers, through `connection_class`.
+
+**A full reading per row on a hot path** (searched: every QML call of a logo model function).
+- Cleared:
+  - `logoSlot` and `logoFile`, which run once per drawn delegate;
+  - the survey, which runs when the dialog opens.
+- Changed: the column test.
+
+**A test reaching the resolver** (searched: every new fetch test in round 5's build). The others patch the resolver; this one was the gap.
+
+### The gate and the scan
+
+The fix commit's gate ran on exactly its tree: node 3846, python 2737 (1 skipped), spec 109. The private-label scan over `git log --format=%B 3101349..HEAD`, `git diff 3101349` and each staged diff printed 0.
+
+### Open, for the owner
+
+- **The 67 case-fold code points.** Should they be refused, and stored sources holding one be dropped, as the NFKC look-alikes are?
+- **Redirects to IDN hosts.** Should a redirect to a host not written in ASCII be followed by its A-label instead of refused? The refusal costs a provider that redirects to an IDN host, and no such redirect could have been served as a server reads it.

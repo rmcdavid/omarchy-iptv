@@ -673,9 +673,13 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # is not global, an address the source validator refuses, a
             # request target that is not printable ASCII), `logo_url` and
             # `logo_userinfo`, which only an older helper answered, and
-            # `bad_url`, a redirect hop's host name holding what no name may
-            # hold, refused by the connection layer before its lookup
-            # (D-SINK-86; nothing else on a logo's path answers that code).
+            # `bad_url`, the connection layer's refusal of a redirect hop
+            # before its lookup: a host name holding what no name may hold
+            # or a port that is not one to five digits (D-SINK-86, -117), or
+            # a host not written in ASCII (D-SINK-119). No first hop answers
+            # it: since the review of round 5's build (2026-11-17) the
+            # reading refuses a port padded past five characters, the one
+            # shape a first hop was refused for there.
             if failure.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                                 "logo_type", "logo_bytes", "logo_too_large",
                                 "logo_dimensions", "logo_scans", "logo_chunks", "local_address",

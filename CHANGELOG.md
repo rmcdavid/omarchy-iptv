@@ -61,9 +61,9 @@ after the shell starts, and you start the channel again yourself.
   fetched from.** It could name a user name, or a percent-encoded user name
   and password, from an oddly written logo address, and it counted logos
   the fetch would refuse or could not send. A logo whose host is
-  percent-encoded, whose port is not written in digits, whose address is
-  on this computer or your local network, or whose host is not plain ASCII
-  now counts as one that cannot be used. (D-SINK-112)
+  percent-encoded, whose port is not written as at most five digits, whose
+  address is on this computer or your local network, or whose host is not
+  plain ASCII now counts as one that cannot be used. (D-SINK-112)
 - **A refused address that a playlist, a guide or a redirect chose is no
   longer named.** The helper's reply, status file and journal say what was
   refused without the host, and the Sources row says why a playlist's own
@@ -83,11 +83,17 @@ after the shell starts, and you start the channel again yourself.
   differently** (a fullwidth letter, a circled digit). A source, guide,
   redirect, logo or channel host holding anything else is refused before
   it is looked up, and a redirect to a port not written in ASCII digits is
-  not followed. (D-SINK-116, D-SINK-117, D-SINK-119)
+  not followed. The international-name rules also fold a few letters by
+  case (the German sharp s, the Greek final sigma and the Greek letters
+  with a subscript iota); a host holding one is still accepted and, as
+  before, fetched under the folded name (`strasse.test` for a host written
+  with the sharp s). (D-SINK-116, D-SINK-117, D-SINK-119)
 - **A source or guide on a host name written in another script is fetched
   by its ASCII form**, the name your system already looked up; one outside
   Latin-1 failed every fetch before. A name the international-name rules
-  cannot write in ASCII is refused when it is fetched. (D-SINK-119)
+  cannot write in ASCII is refused when it is fetched, and so is a redirect
+  to a host not written in ASCII (a redirect to its ASCII form is
+  followed). (D-SINK-119)
 - **The Sources form now reads three things the way the command line
   does**: an upper-case Greek host ending in `Σ`, an address holding
   U+180E, and a label holding an emoji near the 64-character limit; and the

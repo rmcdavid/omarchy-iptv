@@ -310,6 +310,17 @@ IDNA_DOTS = "\u3002\uff0e\uff61"
 # A fetch's refusal of a host the codec cannot write in ASCII, after the
 # verb's fixed word (`playlist`, `EPG`); it names no host.
 HOST_IDNA_REFUSAL = "address names a host the IDNA codec cannot write in ASCII; not looked up"
+# D-SINK-119 (the review of round 5's build, 2026-11-17): the connection
+# layer's refusal of a request host that is not ASCII. A first hop is sent as
+# its A-label (a_label_target), so only a later hop reaches it: urllib
+# percent-decodes a redirect's host, `http://b%C3%BCcher.test/x` became the
+# request host `b<U+00FC>cher.test`, and the hop was looked up through the
+# idna codec and sent its Host header as raw Latin-1, or failed before
+# connecting outside Latin-1. Refused rather than rewritten as its A-label,
+# the conservative reading of a design that sent the A-label on the first
+# hop only. `bad_url`, as HOST_NAME_REFUSAL is; it names no host.
+HOST_NOT_ASCII_REFUSAL = ("refused a host name not written in ASCII (a redirect's, which is not rewritten as its "
+                          "A-label); not looked up")
 
 
 def host_a_label(host: Any) -> str | None:
@@ -859,12 +870,19 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     connection object exists, so neither the resolver nor http.client's own
     host check, whose InvalidURL quotes the host (and, for `user:pass@host`,
     the password as a port), ever sees a host the rule refuses. Behind a
-    proxy that host is the proxy's, and check_proxied judges the target."""
+    proxy that host is the proxy's, and check_proxied judges the target.
+
+    D-SINK-119 (the review of round 5's build, 2026-11-17): and a host that
+    is not ASCII is refused (HOST_NOT_ASCII_REFUSAL). Every first hop is
+    sent as its A-label, so only a later hop, whose host urllib
+    percent-decoded from a redirect's Location, reaches it."""
     import http.client
     import urllib.request
 
     def connection_class(base: Any, req: Any) -> Any:
         refuse_host_name(req.host, with_port=True)
+        if not str(req.host).isascii():
+            raise HelperError("bad_url", HOST_NOT_ASCII_REFUSAL)
         if policy is None:
             create = bounded_create_connection
         else:

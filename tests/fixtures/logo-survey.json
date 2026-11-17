@@ -743,6 +743,42 @@
           "https": 6
         }
       }
+    },
+    {
+      "name": "D-SINK-112 (the review of round 5's build, 2026-11-17): a port as written is the connection layer's -- one to five ASCII digits up to 65535 -- so a port padded past five characters, after a name or a bracketed literal, is counted refused; five characters with leading zeros are counted",
+      "channels": [
+        {
+          "logo": "https://cdn.test:000443/a.png"
+        },
+        {
+          "logo": "https://cdn.test:00000000000080/b.png"
+        },
+        {
+          "logo": "https://[2606:4700::1]:000443/c.png"
+        },
+        {
+          "logo": "https://cdn.test:00443/d.png"
+        },
+        {
+          "logo": "https://cdn.test:0443/e.png"
+        }
+      ],
+      "expect": {
+        "channels": 5,
+        "withLogo": 5,
+        "wouldContact": 2,
+        "refused": 3,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "cdn.test",
+            "channels": 2
+          }
+        ],
+        "schemes": {
+          "https": 5
+        }
+      }
     }
   ]
 }

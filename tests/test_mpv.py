@@ -1922,11 +1922,14 @@ class StatusTest(MpvTestCase):
         whose RFC host is its user name, as a cached channel can hold one
         from a local playlist."""
         props = dict(STATUS_PROPS)
-        props["path"] = "http://qqqqqq:2024/zzzz@cdn.test/live/1.ts"
+        # The review of round 5's build (2026-11-17): the password is the
+        # one the secrets below name; it was `zzzz` while they asked for
+        # `zzzzzz`, so that half could not fail.
+        props["path"] = "http://qqqqqq:2024/zzzzzz@cdn.test/live/1.ts"
         self.start(props=props)
         code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
-        for secret in ("qqqqqq", "zzzzzz", "cdn.test"):
+        for secret in ("qqqqqq", "zzzzzz", "2024/", "cdn.test"):
             self.assertNotIn(secret, stdout + stderr)
         self.assertNotIn("pathHost", payload)
 

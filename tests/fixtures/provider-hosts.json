@@ -1250,6 +1250,44 @@
     ]
    },
    "why": "D-SINK-119: the A-label is a logo host"
+  },
+  {
+   "url": "https://cdn.test:000443/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of round 5's build (D-SINK-112, 2026-11-17): a port written in more than five characters, which the source validator reads with its leading zeros stripped and the connection layer refuses as written; counted refused and never looked up, where it was counted as the host and refused at the connection"
+  },
+  {
+   "url": "https://cdn.test:00000000000080/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of round 5's build (D-SINK-112, 2026-11-17): a port written in more than five characters, which the source validator reads with its leading zeros stripped and the connection layer refuses as written; counted refused and never looked up, where it was counted as the host and refused at the connection"
+  },
+  {
+   "url": "https://[2606:4700::1]:000443/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of round 5's build (D-SINK-112, 2026-11-17): a port written in more than five characters, which the source validator reads with its leading zeros stripped and the connection layer refuses as written; counted refused and never looked up, where it was counted as the host and refused at the connection; after a bracketed literal too"
+  },
+  {
+   "url": "https://cdn.test:0443/a.png",
+   "host": "cdn.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "cdn.test"
+    ]
+   },
+   "why": "the review of round 5's build (D-SINK-112): a port of four characters, leading zero included, is one the connection layer takes; counted and looked up"
   }
  ],
  "absorbed": [

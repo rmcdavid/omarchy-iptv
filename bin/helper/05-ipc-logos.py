@@ -298,52 +298,103 @@ def logo_contact_host(raw: Any) -> str:
     `user%3apass%40cdn.test` and `https://user.name:pa/ss@cdn.test/a.png`
     named `user.name`, and the counts took in logos the fetch refused or
     could not send. So a logo is counted, slotted and fetched only when:
-      * it absorbed no attribute of the playlist (absorbed_attribute);
       * its scheme as written is https (logo_scheme);
-      * the source validator accepts it (validate_source_url, so
-        read_authority's reading: no whitespace or control anywhere, at most
-        MAX_SOURCE_URL long, no delimiter fold, no bracket in user
-        information, a bracketed host only an IPv6 address, the host rule
-        and a port of digits up to 65535);
-      * its authority as written holds no `@` (a logo never carries user
-        information, and fetch_logo never sends one) and no `%` (no DNS
-        name holds one, and the request's host is then the authority as
-        written, with nothing percent-decoded between the two readings);
       * everything after its authority, the fragment included, is printable
         ASCII, 0x21 to 0x7E: http.client sends no other request line, and
         urllib cuts the fragment at the LAST `#` (the critique's finding 5:
         `https://cdn.test/a.png#<U+00D1>#` was counted and never sent);
-      * its host is not one DNS label (dotless_host, D-SINK-83) and not a
-        literal or a name that is not global (host_class: loopback, the
-        local networks, localhost), which DestinationPolicy.for_logos
-        refuses before connecting.
+      * its authority as written holds no `@` (a logo never carries user
+        information, and fetch_logo never sends one) and no `%` (no DNS
+        name holds one, and the request's host is then the authority as
+        written, with nothing percent-decoded between the two readings);
+      * read_authority reads the authority, and its port as written, if it
+        has one, is what the connection layer takes (port_digits: one to
+        five ASCII digits up to 65535). read_authority takes any run of
+        digits and strips the leading zeros while the request carries the
+        port as written, so `https://cdn.test:000443/a.png` was counted as
+        cdn.test and refused at the connection before its lookup (the
+        review of round 5's build, 2026-11-17);
+      * its host is ASCII with labels the idna codec takes
+        (logo_labels_refused, D-SINK-119), not one DNS label (dotless_host,
+        D-SINK-83) and not a literal or a name that is not global
+        (host_class: loopback, the local networks, localhost), which
+        DestinationPolicy.for_logos refuses before connecting;
+      * it absorbed no attribute of the playlist (absorbed_attribute);
+      * and the source validator accepts it with that host
+        (validate_source_url: no whitespace or control anywhere, at most
+        MAX_SOURCE_URL long, and read_authority's reading).
     The PORT is never part of the answer: `cdn.test` and `cdn.test:8443`
     are one party to the consent sentence. An IPv6 literal keeps its
     brackets. D-SINK-35's accepted class stays as it was:
     `https://qq.qq:12/zz@cdn.test/a.png` is fetched from qq.qq on port 12,
-    so it is counted and named `qq.qq`."""
-    if not isinstance(raw, str) or raw == "" or absorbed_attribute(raw):
+    so it is counted and named `qq.qq`.
+
+    The answer is the conjunction of those tests, asked in three halves in
+    the order of their cost (the review of round 5's build): what the row's
+    own text decides (logo_row_authority), what its authority alone decides
+    (logo_authority_host), and the whole address (logo_address_counts).
+    Model.logoColumnShown asks the reading of every row on screen until one
+    counts, on every guide open and every keystroke, and a list none of
+    whose logos counted paid the whole source validator for each row; the
+    model's guide asks the authority half once per authority. The model
+    keeps the same three halves."""
+    authority = logo_row_authority(raw)
+    if authority == "":
         return ""
-    if logo_scheme(raw) not in LOGO_SCHEMES:
+    host = logo_authority_host(authority)
+    if host == "" or not logo_address_counts(raw, host):
         return ""
-    checked = validate_source_url(raw)
-    if not checked["ok"] or checked["kind"] != "http":
+    return host
+
+
+def logo_row_authority(raw: Any) -> str:
+    """The first half of logo_contact_host: a logo address's authority as
+    written, or "" when the address's own text refuses it -- a scheme that
+    is not https, no `//`, anything after the authority that is not
+    printable ASCII, an `@` or a `%` in the authority, or an authority with
+    no `.` that is not a bracketed literal (its host is then one label, or
+    none, which logo_authority_host refuses anyway). The authority ends at
+    the first `/`, `?` or `#`, as read_authority's does. Mirrored by
+    Model.logoRowAuthority."""
+    if not isinstance(raw, str) or raw == "" or logo_scheme(raw) not in LOGO_SCHEMES:
         return ""
-    body = raw[raw.find(":") + 1:]
-    if not body.startswith("//"):
+    colon = raw.find(":")
+    if raw[colon + 1:colon + 3] != "//":
         return ""
-    read = read_authority(body[2:])
-    if not read["ok"]:
-        return ""
-    authority = body[2:len(body) - len(read["tail"])]
-    if "@" in authority or "%" in authority:
-        return ""
-    for ch in read["tail"]:
+    start = colon + 3
+    cut = _AUTHORITY_END.search(raw, start)
+    end = len(raw) if cut is None else cut.start()
+    for ch in raw[end:]:
         if not "\x21" <= ch <= "\x7e":
             return ""
-    host = read["host"]
-    if host != checked["host"] or dotless_host(host) or host_class(host) not in ("", "global"):
+    authority = raw[start:end]
+    if authority == "" or "@" in authority or "%" in authority:
         return ""
+    if not authority.startswith("[") and "." not in authority:
+        return ""
+    return authority
+
+
+def logo_authority_host(authority: Any) -> str:
+    """The second half: the host a logo authority names, or "" when the
+    authority alone refuses it -- read_authority refuses it, it holds an
+    `@` or a `%`, its port as written is not port_digits', or its host is
+    not ASCII, has labels the idna codec refuses, is one label, or is a
+    literal or a name that is not global. A pure function of the
+    authority, so one answer serves every logo on it. Mirrored by
+    Model.logoAuthorityHost."""
+    if not isinstance(authority, str) or authority == "" or "@" in authority or "%" in authority:
+        return ""
+    if _AUTHORITY_END.search(authority):
+        return ""
+    read = read_authority(authority)
+    if not read["ok"]:
+        return ""
+    written = authority[authority.find("]") + 1:] if authority.startswith("[") else authority
+    colon = written.rfind(":")
+    if colon != -1 and not port_digits(written[colon + 1:]):
+        return ""
+    host = read["host"]
     if not host.isascii() or logo_labels_refused(host):
         # D-SINK-119 (2026-11-16): a logo's host is ASCII, with labels the
         # idna codec takes. http.client cannot write a host outside Latin-1
@@ -352,7 +403,19 @@ def logo_contact_host(raw: Any) -> str:
         # server reads; and judging an IDN logo by the codec the fetch would
         # use takes the codec's tables in both mirrors.
         return ""
+    if dotless_host(host) or host_class(host) not in ("", "global"):
+        return ""
     return host
+
+
+def logo_address_counts(raw: Any, host: str) -> bool:
+    """The third half: the whole address absorbed no attribute and the
+    source validator accepts it, an http(s) URL whose host is `host`.
+    Mirrored by Model.logoAddressCounts."""
+    if not isinstance(raw, str) or absorbed_attribute(raw):
+        return False
+    checked = validate_source_url(raw)
+    return bool(checked["ok"]) and checked["kind"] == "http" and checked["host"] == host
 
 
 def logo_labels_refused(host: str) -> bool:

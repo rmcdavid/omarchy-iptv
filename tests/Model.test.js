@@ -2685,7 +2685,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [22, []])
+}, [23, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2736,6 +2736,79 @@ checkCall("D-SINK-112: the scheme as written, and code-point order", () => {
           Model.compareCodePoints("\ud800\udc00x", "\uff41x"), Model.compareCodePoints("\uff41x", "\ud800\udc00x"),
           Model.compareCodePoints("ab", "ab"), Model.compareCodePoints("ab", "a"), Model.compareCodePoints("\ud800", "\ud800\udc00")]
 }, [["https", "ftp", "svn+ssh", "", "", "", "", ""], 1, -1, 0, 1, -1])
+
+// D-SINK-112 (the review of round 5's build, 2026-11-17): the guide's column
+// test (logoColumnShown) asks the one reading of every row on screen until one
+// counts, on every guide open and every keystroke, and a list none of whose
+// logos counted paid the whole reading -- the source validator included -- for
+// each row. The reading is asked in three halves (logoRowAuthority,
+// logoAuthorityHost, logoAddressCounts), each row's authority once, from the
+// service's map (logoAuthorityHosts) or once per call. The answers stay
+// logoFile's for every row of the shared fixtures, with the map, without it
+// and with a map built from another list; and over 10,000 rows of each shape
+// none of which counts, the test costs under half of validating the addresses.
+checkCall("D-SINK-112: the column test answers as logoFile does for every logo of the shared fixtures, with the service's map, without it and with another list's", () => {
+  const P = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/provider-hosts.json"), "utf8"))
+  const logos = P.logoHosts.map(c => c.url)
+  logoFixture.cases.forEach(c => c.channels.forEach(r => { if (r && typeof r.logo === "string") logos.push(r.logo) }))
+  const dir = "/c/logos"
+  const other = Model.logoAuthorityHosts([{ logo: "https://cdn.test/a.png" }, { logo: "https://10.0.0.1/a.png" }])
+  const bad = []
+  logos.forEach(function (url) {
+    const rows = [{ name: "a" }, { name: "b", logo: url }]
+    const want = Model.logoFile(rows[1], dir) !== ""
+    const got = [Model.logoColumnShown(rows, true, dir, Model.logoAuthorityHosts(rows)), Model.logoColumnShown(rows, true, dir),
+                 Model.logoColumnShown(rows, true, dir, other), Model.logoColumnShown(rows, true, dir, null)]
+    if (got.some(g => g !== want)) bad.push([url, want, got])
+    const authority = Model.logoRowAuthority(url)
+    const host = authority === "" ? "" : Model.logoAuthorityHost(authority)
+    if ((host !== "" && Model.logoAddressCounts(url, host) ? host : "") !== Model.logoContactHost(url)) bad.push(["halves", url])
+  })
+  const all = logos.map(u => ({ logo: u }))
+  return [logos.length > 60, bad, Model.logoColumnShown(all, true, dir, Model.logoAuthorityHosts(all)), Model.logoColumnShown(all, false, dir, Model.logoAuthorityHosts(all)),
+          Model.logoColumnShown(all, true, "", Model.logoAuthorityHosts(all))]
+}, [true, [], true, false, false])
+checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address on the local network (one host, and 10,000), one label, a path holding a space or an accent, a port padded past five digits -- the column test costs under half of validating the addresses, given the service's map", () => {
+  const shapes = [i => "https://192.168.1.20/a" + i + ".png", i => "https://10." + (i >> 8) + "." + (i & 255) + ".9/a.png",
+                  i => "https://cdn" + i + "/a.png", i => "https://cdn.test/Channel " + i + ".png",
+                  i => "https://cdn.test/" + String.fromCharCode(0xd1) + i + ".png", i => "https://cdn.test:000443/a" + i + ".png"]
+  const best = f => {
+    let least = Infinity
+    for (let k = 0; k < 5; k++) {
+      const t0 = process.hrtime.bigint()
+      f()
+      least = Math.min(least, Number(process.hrtime.bigint() - t0) / 1e6)
+    }
+    return least
+  }
+  return shapes.map(make => {
+    const rows = [], urls = []
+    for (let i = 0; i < 10000; i++) {
+      const u = make(i)
+      urls.push(u)
+      rows.push({ name: "c" + i, logo: u })
+    }
+    const hosts = Model.logoAuthorityHosts(rows)
+    const scan = best(() => Model.logoColumnShown(rows, true, "/c/logos", hosts))
+    const validate = best(() => { for (const u of urls) Model.validateSourceUrl(u) })
+    return [Model.logoColumnShown(rows, true, "/c/logos", hosts), scan < validate / 2]
+  })
+}, [[false, true], [false, true], [false, true], [false, true], [false, true], [false, true]])
+checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel list's logo authorities while logos are on, and an empty one while they are off", () => {
+  const H = require("./service-harness.js")
+  const svcText = require("fs").readFileSync(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"), "utf8")
+  const channels = [{ id: "t:a", name: "A", url: "http://s.example.test/a.ts", logo: "https://cdn.test/a.png" },
+                    { id: "t:b", name: "B", url: "http://s.example.test/b.ts", logo: "https://10.0.0.1/b.png" },
+                    { id: "t:c", name: "C", url: "http://s.example.test/c.ts", logo: "https://cdn.test:000443/c.png" },
+                    { id: "t:d", name: "D", url: "http://s.example.test/d.ts" }]
+  const read = showLogos => {
+    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: showLogos }, stateText: "", host: "lag" })
+    h.root.channels = channels
+    const map = h.root.logoAuthorityHosts
+    return Object.keys(map).sort().map(k => [k, map[k]])
+  }
+  return [read(true), read(false)]
+}, [[["10.0.0.1", ""], ["cdn.test", "cdn.test"], ["cdn.test:000443", ""]], []])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let

@@ -490,8 +490,11 @@ Item {
   // the feature existed. Asked of the rows ON SCREEN, so a group holding no
   // logos does not reserve a column for them, and asked of the logo URL
   // rather than the fetched file, so the column does not appear and disappear
-  // underneath the user while the fetch runs.
-  readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir)
+  // underneath the user while the fetch runs. D-SINK-112 (the review of
+  // round 5's build, 2026-11-17): with the service's reading of each logo
+  // authority, so a keystroke reads none again.
+  readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir,
+                                                           root.serviceReady ? root.service.logoAuthorityHosts : null)
   readonly property int logoWidth: root.logoColumn ? Style.space(22) : 0
   // ---- channel wall (M2-13). The same rows, presented as tiles.
   //

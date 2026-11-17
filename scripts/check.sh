@@ -291,7 +291,13 @@ fail=0
 # day): 107 -> 108 -- test_legacyIdsDeletedOnLoadInV4, the state reader the
 # shell runs deleting a credential-holding legacy id on load, red on
 # 3101349's model; the spec runs 108.
-QML_SPEC_MIN=${QML_SPEC_MIN:-108}
+# 2026-11-17, lane-r5settle (the reviews of round 5's build, D-SINK-112):
+# 108 -> 109 -- test_logoColumnScanInV4, the guide's column test over 10,000
+# rows of six shapes none of whose logos counts, under half of validating
+# their addresses in the engine the guide runs in; red on c32a936's model
+# (250 to 500 ms against 180 to 480) and under the mutant that reads every
+# row in full; the spec runs 109.
+QML_SPEC_MIN=${QML_SPEC_MIN:-109}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -663,7 +669,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-108}
 # 2026-11-17, lane-r5settle (the merge of dev e2ae4f4 into r5-build): 3836
 # -> 3843. dev's D-PLY-67 and D-PLY-58 add 7 node checks without raising
 # the floor (dev's stayed 3749); the merged suite runs 3843, 0 failures.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3843}
+# 2026-11-17, lane-r5settle (the reviews of round 5's build, D-SINK-112):
+# 3843 -> 3846 -- the column test answering as logoFile does over the shared
+# logo fixtures with and without the service's map, its cost over 10,000
+# rows of six shapes against validating them, and Service.qml's own binding
+# of the map through the service harness; with the padded-port rows of the
+# shared logo fixtures, 6 checks red on c32a936's model and each new check
+# red under a named single-decision mutant (QA-RESULTS "The reviews of round
+# 5's build, settled"); the suite runs 3846.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3846}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1208,7 +1222,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3843}
 # 2026-11-17, lane-r5settle (the merge of dev e2ae4f4 into r5-build): 2727
 # -> 2736. dev's F-HARNESS-113 and D-PLY-67 add 9 python tests without
 # raising the floor (dev's stayed 2668); the merged suite counts 2736.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2736}
+# 2026-11-17, lane-r5settle (the reviews of round 5's build, D-SINK-112,
+# D-SINK-119): 2736 -> 2737 -- tests/test_destinations.py's
+# RedirectHostTest (a redirect to a host not written in ASCII refused at the
+# connection before any lookup, its A-label followed, both openers); with
+# the padded-port rows of the shared logo fixtures and the host-grammar
+# atoms, 7 tests red on c32a936 and 4 single-decision helper mutants red
+# (QA-RESULTS "The reviews of round 5's build, settled"); the suite runs
+# 2737, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2737}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

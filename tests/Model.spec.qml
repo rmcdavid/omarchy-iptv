@@ -3467,4 +3467,48 @@ TestCase {
     var withheld = typeof Model.channelIdWithheld === "function" ? Model.channelIdWithheld : function () { return "missing" }
     compare([gone.map(withheld), kept.map(withheld)], [gone.map(function () { return true }), kept.map(function () { return false })])
   }
+
+  // D-SINK-112 (the review of round 5's build, 2026-11-17): the guide's column
+  // test re-evaluates on every open and every keystroke, and since D-SINK-112
+  // it read each row's logo in full, the source validator included: a list of
+  // 10,000 rows none of whose logos counts cost 290 to 490 ms in this engine.
+  // With the service's map of authorities (Model.logoAuthorityHosts) it reads
+  // each row's own text and looks its authority up, so it costs under half of
+  // validating the rows' addresses, in the engine the guide runs in.
+  function test_logoColumnScanInV4() {
+    var S = String.fromCharCode
+    var shapes = [function (i) { return "https://192.168.1.20/a" + i + ".png" },
+                  function (i) { return "https://10." + (i >> 8) + "." + (i & 255) + ".9/a.png" },
+                  function (i) { return "https://cdn" + i + "/a.png" },
+                  function (i) { return "https://cdn.test/Channel " + i + ".png" },
+                  function (i) { return "https://cdn.test/" + S(0xd1) + i + ".png" },
+                  function (i) { return "https://cdn.test:000443/a" + i + ".png" }]
+    function best(f) {
+      var least = 1e9
+      for (var k = 0; k < 3; k++) {
+        var t0 = Date.now()
+        f()
+        least = Math.min(least, Date.now() - t0)
+      }
+      return least
+    }
+    var got = []
+    var want = []
+    for (var n = 0; n < shapes.length; n++) {
+      var rows = []
+      var urls = []
+      for (var i = 0; i < 10000; i++) {
+        var u = shapes[n](i)
+        urls.push(u)
+        rows.push({ name: "c" + i, logo: u })
+      }
+      var hosts = typeof Model.logoAuthorityHosts === "function" ? Model.logoAuthorityHosts(rows) : null
+      var scan = best(function () { Model.logoColumnShown(rows, true, "/c/logos", hosts) })
+      var validate = best(function () { for (var j = 0; j < urls.length; j++) Model.validateSourceUrl(urls[j]) })
+      console.log("D-SINK-112: the column test over 10,000 rows of shape " + n + " in V4: " + scan + " ms; validating them: " + validate + " ms")
+      got.push([Model.logoColumnShown(rows, true, "/c/logos", hosts), scan < validate / 2])
+      want.push([false, true])
+    }
+    compare(got, want)
+  }
 }

@@ -107,13 +107,14 @@ export {
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, compareCodePoints, logoScheme, logoContactHost,
-  logoLabelsRefused, splitLogoUrl, logoConsentLines, logoFile, logoSlot,
-  WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,
-  footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry,
-  wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet, logoHaveMerge,
-  logoHaveCount, logoFetchPlan, logoColumnShown, logoStreamName,
-  logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
-  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
+  logoRowAuthority, logoAuthorityHost, logoAddressCounts, logoPortDigits,
+  logoAuthorityHosts, logoLabelsRefused, splitLogoUrl, logoConsentLines,
+  logoFile, logoSlot, WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth,
+  fitFooterHints, footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT,
+  wallGeometry, wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet,
+  logoHaveMerge, logoHaveCount, logoFetchPlan, logoColumnShown,
+  logoStreamName, logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS,
+  LOGO_RUN_DEADLINE_MS, LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 } from "./model/logos.mjs"
 export {
   stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,

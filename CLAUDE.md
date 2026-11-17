@@ -1199,13 +1199,18 @@ requests and raise the batch.
      A host name holds, in ASCII, letters, digits, `-`, `.` and `_` and
      nothing else, as written and in its NFKD fold, no invisible character
      (Cf, Unicode's default-ignorables, stringprep's B.1) and no code point
-     whose NFKC form is another (a look-alike the idna codec would fetch as
-     the plain name); a port at the connection is one to five ASCII digits
+     whose NFKC form is another (a look-alike of the name it folds to; the
+     idna codec's case folds that NFKC leaves alone -- the sharp s, the
+     final sigma, U+0345, the Greek letters with a subscript iota -- are
+     accepted and fetched under the folded name, as before: D-SINK-119's
+     stated residual); a port at the connection is one to five ASCII digits
      up to 65535, after a name or a bracketed literal, on every hop before
      any lookup (D-SINK-116, -117, -119). The first hop of the playlist,
      guide and probe fetches sends the host's A-label -- the name CPython's
      socket already hands the resolver, so no new name reaches it -- and a
-     host the codec refuses is refused before any lookup (D-SINK-119). A
+     host the codec refuses is refused before any lookup; a later hop whose
+     host is not ASCII (a redirect's, which urllib percent-decodes) is
+     refused at the connection (D-SINK-119). A
      refusal of a destination the provider chose (a redirect hop, a guide
      hint's hop, a proxied target, a cached channel's literal) names no
      host, and the player's status reply names none of the playing address

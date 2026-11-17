@@ -695,15 +695,26 @@ class RedirectTest(unittest.TestCase):
             for leak in ("evil", SECRET):
                 self.assertNotIn(leak, message, location)
 
-    def test_one_port_an_ipv6_literal_and_a_name_that_is_not_ascii_are_still_followed(self):
+    def test_one_port_an_ipv6_literal_and_an_a_label_are_still_followed(self):
+        """A redirect to a host written as its A-label is followed and looked
+        up as written. The review of round 5's build (D-SINK-119,
+        2026-11-17): the same host percent-encoded, which urllib decodes into
+        the next request's host, was followed too -- looked up as its A-label
+        by the idna codec but sent its Host header as raw Latin-1, which no
+        server routes by -- and is now refused by the connection layer
+        before any lookup, naming no host."""
         cases = (("http://ctl.test:8080/x", "ctl.test", "network"),
                  ("http://[::1]:1/x", "::1", "local_address"),
-                 ("http://b%C3%BCcher.test/x", "xn--bcher-kva.test", "network"))
+                 ("http://xn--bcher-kva.test/x", "xn--bcher-kva.test", "network"))
         got = []
         for location, _, _ in cases:
             code, _, _, lookups = self.follow(location)
             got.append((location, code, lookups))
         self.assertEqual(got, [(location, code, ["127.0.0.1", lookup]) for location, lookup, code in cases])
+        code, message, seen, lookups = self.follow("http://b%C3%BCcher.test/x")
+        self.assertEqual((code, seen, lookups), ("bad_url", ["/list.m3u"], ["127.0.0.1"]))
+        for leak in ("cher", "xn--"):
+            self.assertNotIn(leak, message)
 
 
 class LogoTest(unittest.TestCase):
