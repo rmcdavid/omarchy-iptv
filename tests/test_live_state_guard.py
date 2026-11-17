@@ -82,16 +82,19 @@ class RedirectedHomeTest(unittest.TestCase):
 
     def test_the_users_own_state_file_is_byte_identical(self):
         # Fingerprinted by helper_loader at import, before a single test ran.
-        self.assertEqual(helper_loader.live_state_fingerprint(), helper_loader.LIVE_STATE_BEFORE,
-                         "the test suite modified %s" % helper_loader.REAL_STATE_FILE)
+        # F-HARNESS-113: "changed" is the only red. A fingerprint that moved
+        # while the kernel refused this suite every write to the file is the
+        # owner's own shell saving, which a gate used to read as its own.
+        self.assertNotEqual(helper_loader.live_state_verdict(), "changed",
+                            "the test suite modified %s" % helper_loader.REAL_STATE_FILE)
 
     def test_the_users_own_host_config_is_byte_and_mode_identical(self):
         # D-SINK-18. The bytes AND the mode: a chmod leaves mtime and the
         # digest alone, so the bytes-only fingerprint above cannot see the one
         # change the new verb makes. The lead's own file is 0600 and a suite
         # that moved it would have broken their desktop.
-        self.assertEqual(helper_loader.live_config_fingerprint(), helper_loader.LIVE_CONFIG_BEFORE,
-                         "the test suite modified %s" % helper_loader.REAL_CONFIG_FILE)
+        self.assertNotEqual(helper_loader.live_config_verdict(), "changed",
+                            "the test suite modified %s" % helper_loader.REAL_CONFIG_FILE)
 
     def test_the_mode_half_of_that_fingerprint_would_notice(self):
         # Rule 11 for the half that is new. Same comparison, over a file this
@@ -123,6 +126,100 @@ class RedirectedHomeTest(unittest.TestCase):
             self.assertNotEqual(helper_loader.fingerprint_of(path), before)
             path.unlink()
             self.assertIsNone(helper_loader.fingerprint_of(path))
+
+
+# What a child python does for OwnersSaveTest: it imports helper_loader with
+# XDG_STATE_HOME naming a scratch folder, so that folder's state.json is "the
+# user's real state file" to it, says it is ready, waits for the test to
+# rewrite the file from OUTSIDE, tries a write of its own, and prints what
+# the shipping verdict then reads.
+OWNERS_SAVE_CHILD = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import helper_loader
+print("ready", flush=True)
+sys.stdin.readline()
+try:
+    with open(str(helper_loader.REAL_STATE_FILE) + ".child", "w") as handle:
+        handle.write("x")
+    wrote = True
+except OSError:
+    wrote = False
+print(json.dumps({"verdict": helper_loader.live_state_verdict(),
+                  "readOnly": helper_loader.LIVE_STATE_READ_ONLY,
+                  "wrote": wrote}), flush=True)
+"""
+
+
+def bwrap_works():
+    import shutil
+    if not shutil.which("bwrap"):
+        return False
+    try:
+        return subprocess.run(["bwrap", "--dev-bind", "/", "/", "true"],
+                              capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+class LiveFileVerdictTest(unittest.TestCase):
+    """F-HARNESS-113: the decision itself, every arm."""
+
+    def test_an_unmoved_fingerprint_is_untouched_whatever_the_mount(self):
+        for before, after in ((True, True), (False, False), (True, False), (False, True)):
+            self.assertEqual(helper_loader.live_file_verdict("a", "a", before, after), "untouched")
+        self.assertEqual(helper_loader.live_file_verdict(None, None, False, False), "untouched")
+
+    def test_a_moved_fingerprint_is_the_suites_unless_both_ends_were_read_only(self):
+        self.assertEqual(helper_loader.live_file_verdict("a", "b", False, False), "changed")
+        self.assertEqual(helper_loader.live_file_verdict("a", "b", True, False), "changed")
+        self.assertEqual(helper_loader.live_file_verdict("a", "b", False, True), "changed")
+        self.assertEqual(helper_loader.live_file_verdict("a", None, False, False), "changed")
+        self.assertEqual(helper_loader.live_file_verdict("a", "b", True, True), "not_ours")
+
+    def test_a_writable_or_absent_path_is_not_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(helper_loader.mount_is_read_only(tmp))
+            self.assertFalse(helper_loader.mount_is_read_only(os.path.join(tmp, "absent")))
+
+
+class OwnersSaveTest(unittest.TestCase):
+    """F-HARNESS-113, observed: a save made from outside the suite while a
+    child python has the folder read-only reads "not_ours"; the same save
+    with the folder writable reads "changed"."""
+
+    def run_child(self, wrap):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = pathlib.Path(tmp) / "omarchy-iptv"
+            folder.mkdir()
+            state = folder / "state.json"
+            state.write_text(json.dumps({"version": 2, "favorites": []}), encoding="utf-8")
+            env = dict(os.environ, XDG_STATE_HOME=tmp)
+            argv = wrap(str(folder)) + [sys.executable, "-c", OWNERS_SAVE_CHILD,
+                                        str(pathlib.Path(__file__).resolve().parent)]
+            child = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(child.stdout.readline().strip(), "ready")
+                # The owner's shell, standing outside the child's namespace.
+                state.write_text(json.dumps({"version": 2, "favorites": ["u:1"]}), encoding="utf-8")
+                out, err = child.communicate("go\n", timeout=30)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+            self.assertEqual(child.returncode, 0, err)
+            return json.loads(out)
+
+    def test_with_the_folder_writable_the_save_reads_as_the_suites(self):
+        self.assertEqual(self.run_child(lambda folder: []),
+                         {"verdict": "changed", "readOnly": False, "wrote": True})
+
+    @unittest.skipUnless(bwrap_works(), "needs bwrap (a mount namespace without privilege)")
+    def test_with_the_folder_read_only_the_save_is_not_the_suites(self):
+        answer = self.run_child(lambda folder: ["bwrap", "--dev-bind", "/", "/",
+                                                "--ro-bind", folder, folder])
+        self.assertEqual(answer, {"verdict": "not_ours", "readOnly": True, "wrote": False})
 
 
 if __name__ == "__main__":

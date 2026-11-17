@@ -83,9 +83,61 @@ def live_config_fingerprint():
     return (fingerprint_of(REAL_CONFIG_FILE), mode_of(REAL_CONFIG_FILE))
 
 
-# What the files looked like before a single test ran.
+def mount_is_read_only(path):
+    """True when the kernel refuses this process every write on the mount
+    that holds `path`; False when it does not, or when the path is absent.
+
+    F-HARNESS-113. Asked of the kernel (statvfs's ST_RDONLY), never of an
+    environment variable: scripts/check.sh runs the suite inside a mount
+    namespace where the owner's state folder and settings folder are bound
+    read-only, every child of the suite inherits that namespace, and no
+    process without privilege can lift the flag. A symbolic link is
+    followed, so a state file linked out of the folder answers for the
+    mount it really lives on.
+    """
+    try:
+        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
+
+
+def live_file_verdict(before, after, read_only_before, read_only_after):
+    """Whether a live file's fingerprint says the SUITE changed it.
+
+    "untouched": the fingerprint did not move. "not_ours": it moved, and the
+    file was read-only to this process tree both when the suite started and
+    now, so the suite cannot have been the writer -- the owner's running
+    shell saves state.json on its own schedule (every refresh, six hours by
+    default), and that save used to read as five failures in a gate that had
+    written nothing (F-HARNESS-113). "changed": it moved and the suite could
+    have done it, which is the red the fingerprint exists for. Both ends are
+    asked, because a mount that was writable at either end proves nothing.
+    """
+    if after == before:
+        return "untouched"
+    if read_only_before and read_only_after:
+        return "not_ours"
+    return "changed"
+
+
+# What the files looked like before a single test ran, and whether the
+# kernel was refusing this process tree any write to them.
 LIVE_STATE_BEFORE = live_state_fingerprint()
 LIVE_CONFIG_BEFORE = live_config_fingerprint()
+LIVE_STATE_READ_ONLY = mount_is_read_only(REAL_STATE_FILE)
+LIVE_CONFIG_READ_ONLY = mount_is_read_only(REAL_CONFIG_FILE)
+
+
+def live_state_verdict():
+    """live_file_verdict for the user's real state file, as it is now."""
+    return live_file_verdict(LIVE_STATE_BEFORE, live_state_fingerprint(),
+                             LIVE_STATE_READ_ONLY, mount_is_read_only(REAL_STATE_FILE))
+
+
+def live_config_verdict():
+    """The same for the host's settings file, bytes and mode."""
+    return live_file_verdict(LIVE_CONFIG_BEFORE, live_config_fingerprint(),
+                             LIVE_CONFIG_READ_ONLY, mount_is_read_only(REAL_CONFIG_FILE))
 
 SANDBOX = pathlib.Path(tempfile.mkdtemp(prefix="omarchy-iptv-test-home-"))
 atexit.register(shutil.rmtree, str(SANDBOX), True)

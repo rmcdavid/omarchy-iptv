@@ -1591,7 +1591,28 @@ fi
 
 step "python3 -m unittest discover -s tests"
 py_log="$CHECK_TMP/python.log"
-if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
+# F-HARNESS-113. tests/helper_loader.py fingerprints the owner's real
+# state.json and shell.json and two test modules assert them unchanged, which
+# read the owner's own running shell saving its state (every refresh, six
+# hours by default) as five failures in a gate that wrote nothing. So where
+# bwrap can do it, the suite runs in a mount namespace in which those two
+# folders are read-only: nothing the suite starts can write them, the guard
+# asks the kernel whether that held (mount_is_read_only), and only then
+# takes a moved fingerprint as somebody else's. Without bwrap, or with a
+# folder absent, the guard is as strict as it was.
+py_wrap=()
+py_wrap_note="the owner's state and settings folders writable, so any change to them is red"
+if command -v bwrap >/dev/null 2>&1; then
+  live_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-iptv"
+  live_config_dir="$HOME/.config/omarchy"
+  py_try=(bwrap --dev-bind / / --ro-bind-try "$live_state_dir" "$live_state_dir"
+          --ro-bind-try "$live_config_dir" "$live_config_dir")
+  if "${py_try[@]}" true >/dev/null 2>&1; then
+    py_wrap=("${py_try[@]}")
+    py_wrap_note="the owner's state and settings folders read-only to them"
+  fi
+fi
+if (cd "$ROOT" && "${py_wrap[@]}" python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   cat "$py_log"
   # `Ran 0 tests ... OK` exits 0. A tests/ directory that stops being
   # discoverable is invisible without this.
@@ -1601,7 +1622,7 @@ if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   elif (( py_tests < PY_TESTS_MIN )); then
     bad "python ran $py_tests tests, expected at least $PY_TESTS_MIN"
   else
-    ok "python tests ($py_tests tests)"
+    ok "python tests ($py_tests tests; $py_wrap_note)"
   fi
 else
   cat "$py_log"; bad "python tests"

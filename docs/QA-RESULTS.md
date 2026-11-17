@@ -20666,3 +20666,51 @@ The boundary table's own `stash.id` case now uses a kind `REPLY_KEPT` does not n
 - lane-r2c's logo journal line. The line names the logo's cache file, an unkeyed hash of the logo URL. It stays in D-SINK-107's open half rather than getting a row of its own.
 - The node timing check that failed once in a scratch run ("D-SINK-96: the credentials search ... under eight times its cost at 100,000") passed in every gate. It is not filed; if it fails in a gate, it gets an id that day.
 - The rows cite the branch's commits, and those stay true because the branch reaches `dev` as a fast-forward, never a rebase.
+
+## F-HARNESS-113: the live-state guard and the owner's own save (the daily run, 2026-11-17)
+
+**The finding.** `tests/helper_loader.py` fingerprints the owner's real
+`state.json` and the host's `shell.json` at import, and two test modules
+assert them unchanged. The owner's running shell saves `state.json` on its
+own schedule, so a gate that overlapped a save read five failures while the
+suite had written nothing.
+
+**What can and cannot be known.** Nothing an unprivileged process can read
+says which process wrote a file, so the guard cannot tell the two writers
+apart after the fact. It can be made impossible for one of them. `bwrap
+--dev-bind / / --ro-bind-try <folder> <folder>` gives the suite a mount
+namespace in which the folder is read-only; every child inherits it.
+Measured on this machine (bubblewrap 0.13.1): inside, `statvfs` reports
+ST_RDONLY for the folder and for the file in it, a write is refused with
+EROFS (errno 30), the uid is unchanged and the process holds no
+capability; outside, the same folder reads writable. `unshare -rn` and
+`unshare -rpf --mount-proc`, which the suite's network and pid namespace
+tests use, and a nested `bwrap`, all still work inside it.
+
+**The change.** `scripts/check.sh` wraps the python step that way when
+`bwrap` is present and a trial run of it succeeds, for the state folder and
+`~/.config/omarchy`, and says which mode it ran in on its `ok` line.
+`helper_loader.mount_is_read_only` asks the kernel, at import and at the
+assertion; `live_file_verdict` answers "untouched", "not_ours" (the
+fingerprint moved and both ends were read-only) or "changed", and only
+"changed" is red. With no `bwrap`, a folder absent, the file linked onto a
+writable mount, or unittest run by hand, the answer for a moved fingerprint
+is "changed", as it always was.
+
+**Evidence.**
+- The whole python suite, same tree, same environment as the gate, load
+  about 1: inside the sandbox ran 2,668 tests, 1 skipped, OK (started before the five new tests were on the tree); outside it 2,673 tests, 1 skipped, OK (with them).
+- `tests/test_live_state_guard.py`, 13 tests (8 before). Two observe it: a
+  child python whose `XDG_STATE_HOME` names a scratch folder imports
+  `helper_loader`, the test rewrites that folder's `state.json` from
+  outside, and the child prints the shipping verdict -- "not_ours", with its
+  own write refused, when the folder is bound read-only; "changed", with its
+  own write made, when it is not.
+- Mutants, each run against that module: the verdict's `and` as `or` (1
+  red), always "not_ours" (2), never (2); `mount_is_read_only` always True
+  (2), always False (1); the state verdict's read-only inputs forced True
+  (1).
+
+**Not covered.** The node, QML and scenario steps run outside the sandbox;
+none of them fingerprints the owner's files. A lane that runs the python
+suite by hand keeps the strict guard and can still meet the owner's save.
