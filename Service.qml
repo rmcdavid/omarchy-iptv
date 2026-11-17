@@ -1247,6 +1247,10 @@ Item {
     root.playSeq += 1                       // every play is a new intent (4.10)
     root.previousPlaying = root.playerUp ? root.nowPlaying : null
     root.previousPlayingSeq = root.playSeq
+    // D-PLY-58: the channel is this source's from here on. The key was set
+    // only by an adoption (applyProbe) and outlived it, so every later play
+    // still read as the adopted stash's source.
+    root.playerSourceKey = root.activeSourceKey
     root.nowPlaying = {
       id: key,
       name: String(channel.name || ""),
@@ -1369,6 +1373,16 @@ Item {
   function restartPlayer() {
     if (!root.playerUp || root.stopping) return
     if (!root.nowPlaying) return
+    if (!Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey)) {
+      // D-PLY-58: the player was adopted on another source's channel, and a
+      // restart re-resolves the id against THIS source's cache, so it would
+      // come back on this source's channel of the same id under the old
+      // name. There is nothing here to relaunch it to: it ends, as a player
+      // whose one relaunch is spent does.
+      console.warn("omarchy-iptv: mpv unresponsive on another source's channel, stopping the player")
+      root.stop()
+      return
+    }
     var channel = root.channelIndex[root.nowPlaying.id]
     if (!channel) return
     if (root.relaunched) {
@@ -6895,7 +6909,10 @@ Item {
     onTriggered: {
       if (root.userStopped || root.stopping || !root.nowPlaying) return
       if (playerProc.running) { relaunchTimer.restart(); return }
-      var channel = root.channelIndex[String(root.nowPlaying.id)]
+      // D-PLY-58: and a channel adopted from ANOTHER source is not on this
+      // list whatever its id finds there (D-PLY-51's rule, for the relaunch).
+      var channel = Model.adoptedSourceMatches(root.playerSourceKey, root.activeSourceKey)
+        ? root.channelIndex[String(root.nowPlaying.id)] : null
       if (!channel) {
         // The channel left the playlist (a source swap, a refresh that
         // dropped it) while the relaunch was queued: the one automatic

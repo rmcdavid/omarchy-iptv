@@ -20758,3 +20758,44 @@ did not ask, so with no zap it played on for as long as the shell ran.
 killed; the harness's Socket never connects and its player is a reply text.
 The interval is therefore stated from the code: one health tick that runs,
 the status's relay question, the probe, then the replacement or the hold.
+
+## D-PLY-58: the health relaunch of a player adopted from another source (the daily run, 2026-11-17)
+
+**The defect.** A player adopted at a shell start on a channel of a source
+that is no longer the active one keeps its stash's id as `nowPlaying.id`. The
+two relaunch paths (`restartPlayer`, for a player that stops answering, and
+`relaunchTimer`, for one that died) looked that id up in the ACTIVE source's
+channel list and issued `player restart` or `player start` over the active
+source's cache, so where both sources hold the id (two lists of one provider
+share `t:` ids) the player came back on this source's channel under the old
+name. D-PLY-51 closed the same shape for the TLS reload and the restart on
+adoption; these two were left.
+
+**The change (Service.qml only).** Both paths ask
+`Model.adoptedSourceMatches(playerSourceKey, activeSourceKey)`:
+`restartPlayer` stops the player, `relaunchTimer` ends the record as for a
+channel the list lacks. `play()` sets `playerSourceKey` to the active source's
+key when it replaces `nowPlaying`, since the key was written only by
+`applyProbe` and never moved again.
+
+**Evidence, through Service.qml in the service harness** (restart-on-adoption
+block of tests/Model.test.js; X is `t:x` on both lists):
+- adopted on the other source's channel, two failed status replies: no
+  `player restart`, one detached `player stop`; adopted on this source's:
+  `player restart --id t:x`, no stop. Before the change: one restart, no stop.
+- adopted on the other source's, then the user plays `t:y`: the key reads the
+  active source's, the zap is one `play --id t:y`, and a later wedge is
+  `player restart --id t:y`. Before: the key stayed the other source's.
+- adopted on the other source's, the player gone with a relaunch queued, the
+  timer fired: nothing started, `nowPlaying` null; on this source's:
+  `player start --id t:x`. Before: `player start --id t:x` for both.
+- Mutants, one edit removed at a time: each turns exactly its own check red.
+
+**Sibling search.** Every call of `issuePlayerSession`, `startPlayer` and
+`playArgs`: the play retry, the pending-play drain and the start after a
+failed play follow a play of this shell's own; the older-restart delivery is
+decided by `olderRestartDisposition`'s `sourceMatches`; the intent repair is
+kept off another source's stash by `Model.reconcileVerdict` (a guard added
+there for this row was unreachable and was taken out again).
+
+**Not observed** on a real player.

@@ -54,6 +54,13 @@ after the shell starts, and you start the channel again yourself.
   renamed `<host> 2` once. (D-SINK-100, D-SINK-108)
 - **The player's window title and notifications read a channel name
   holding a control character as the guide row does.** (D-SINK-110)
+- **A player left running on another source's channel is no longer
+  restarted on a channel of the current source.** After you switch source
+  with the shell stopped, the player found at the next start may still be
+  on the old source's channel; if it then froze or died, the automatic
+  restart looked its channel up in the current source's list and could
+  bring back a different channel under the old name. It is now stopped
+  instead. (D-PLY-58)
 
 ### Changed
 
