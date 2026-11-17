@@ -2797,10 +2797,14 @@ checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address
 checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel list's logo authorities while logos are on, and an empty one while they are off", () => {
   const H = require("./service-harness.js")
   const svcText = require("fs").readFileSync(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"), "utf8")
+  // The recheck of round 5's settle (2026-11-17): and the authority of a
+  // logo whose tail is refused (`t:e`, a space in its path), because the
+  // column test looks a row's authority up before it reads the tail.
   const channels = [{ id: "t:a", name: "A", url: "http://s.example.test/a.ts", logo: "https://cdn.test/a.png" },
                     { id: "t:b", name: "B", url: "http://s.example.test/b.ts", logo: "https://10.0.0.1/b.png" },
                     { id: "t:c", name: "C", url: "http://s.example.test/c.ts", logo: "https://cdn.test:000443/c.png" },
-                    { id: "t:d", name: "D", url: "http://s.example.test/d.ts" }]
+                    { id: "t:d", name: "D", url: "http://s.example.test/d.ts" },
+                    { id: "t:e", name: "E", url: "http://s.example.test/e.ts", logo: "https://192.168.1.20/e f.png" }]
   const read = showLogos => {
     const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: showLogos }, stateText: "", host: "lag" })
     h.root.channels = channels
@@ -2808,7 +2812,128 @@ checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel li
     return Object.keys(map).sort().map(k => [k, map[k]])
   }
   return [read(true), read(false)]
-}, [[["10.0.0.1", ""], ["cdn.test", "cdn.test"], ["cdn.test:000443", ""]], []])
+}, [[["10.0.0.1", ""], ["192.168.1.20", ""], ["cdn.test", "cdn.test"], ["cdn.test:000443", ""]], []])
+
+// The recheck of round 5's settle (2026-11-17): the column test still walked
+// each row's tail before it looked the row's authority up, so a row whose
+// authority names no host -- a literal on the local network, one label --
+// paid for its whole path, and a long scheme or a long authority was walked
+// unit by unit too. It now asks each row's scheme, `//` and authority as
+// written (the engine's own searches), then the map, and the tail and the
+// whole address only of a row whose authority names a host: the same
+// conjunction, reordered. Its answer is logoFile's, row by row and over
+// lists, for every logo of the shared fixtures, a corpus built from the
+// host-grammar fixture's atoms as the python differential shapes its logos,
+// and a seeded set of the shapes the reorder touches; with the service's
+// map, an empty map, another list's and none. Green on 846dd43 too: it holds
+// the reorder to the old answers, and the timing check below is the one that
+// was red there.
+checkCall("D-SINK-112, the recheck of round 5's settle: the column test answers as logoFile does, row by row and over lists, for the shared logo fixtures, the host-grammar atoms and a seeded set of long, refused and literal shapes, with the service's map, an empty map, another list's and none", () => {
+  const read = name => JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures", name), "utf8"))
+  const S = String.fromCharCode
+  const logos = read("provider-hosts.json").logoHosts.map(c => c.url)
+  logoFixture.cases.forEach(c => c.channels.forEach(r => { if (r && typeof r.logo === "string") logos.push(r.logo) }))
+  let seed = 112
+  const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return (seed >>> 8) / 16777216 }
+  const pick = list => list[Math.floor(rnd() * list.length)]
+  const atoms = read("host-grammar.json").atoms
+  for (let n = 0; n < 12000; n++) {
+    const parts = { userinfo: rnd() < 0.8 ? "" : pick(atoms.userinfo), port: rnd() < 0.6 ? "" : pick(atoms.ports), target: pick(atoms.targets) }
+    parts.host = rnd() < 0.2 ? pick(atoms.literals) : [pick(atoms.labels), pick(atoms.labels)].slice(0, 1 + Math.floor(rnd() * 2)).join(".") + "." + pick(atoms.tlds)
+    if (rnd() < 0.35) {
+      const where = pick(["userinfo", "host", "host", "port", "target"])
+      const at = Math.floor(rnd() * (parts[where].length + 1))
+      parts[where] = parts[where].slice(0, at) + pick(atoms.inserts) + parts[where].slice(at)
+    }
+    logos.push((rnd() < 0.85 ? "https" : pick(atoms.schemes)) + "://" + parts.userinfo + parts.host + parts.port + parts.target)
+  }
+  const X = "x".repeat(2000)
+  const odd = [S(0), S(1), S(0x1f), S(0x20), S(0x7f), S(0x85), S(0xa0), S(0x180e), S(0xfeff), S(0x2028), S(0xd800), S(0xdc00), S(0xd83d, 0xde00), S(0xe9), "\"", "%", "@"]
+  const schemes = ["https", "HTTPS", "hTtPs", "http", "ftp", "httpsx", "xhttps", "h", "1https", "", X + "1"]
+  const seps = ["://", "://", "://", ":/", ":", ":///", "//"]
+  const hosts = ["cdn.test", "CDN.Test", "cdn.test.", "a..b.test", "cdn", "localhost", "10.0.0.1", "192.168.1.20", "127.0.0.1", "8.8.8.8",
+                 "[::1]", "[fe80::1]", "[2606:4700::1111]", "[2606:4700::1111]:8443", "cdn.test:443", "cdn.test:0443", "cdn.test:000443",
+                 "cdn.test:00000000000080", "cdn.test:99999", "cdn.test:", "u@cdn.test", "u:p@cdn.test", "u%40cdn.test", "cdn%2Etest",
+                 "q.q:12", "cdn_x.test", "x".repeat(70) + ".test", "abcdefgh.".repeat(200) + "test", X + ".test", X, ""]
+  const tails = ["/a.png", "", "/", "?x=1", "#f", "/a?b#c/d", "?/x", "#/x", "/a.png?u=x@y", "/a%20b.png", "/" + X + ".png",
+                 "/" + X + ".png" + S(0x7f), "/a.png,tvg-logo=https://e.test/a.png", "/" + X + ".png,tvg-logo=https://e.test/a.png",
+                 "/a.png\"", "/a.png,tvg-id=x"]
+  for (let n = 0; n < 12000; n++) {
+    let tail = pick(tails)
+    if (rnd() < 0.3) {
+      const at = rnd() < 0.5 ? (tail === "" ? 0 : 1) : tail.length
+      tail = tail.slice(0, at) + pick(odd) + tail.slice(at)
+    }
+    let host = pick(hosts)
+    if (rnd() < 0.1) {
+      const at = Math.floor(rnd() * (host.length + 1))
+      host = host.slice(0, at) + pick(odd) + host.slice(at)
+    }
+    logos.push(pick(schemes) + pick(seps) + host + tail)
+  }
+  logos.push("", "https", "https:", "https://", "https:///a.png", "https://?a", "https://#a", ":https://cdn.test/a.png", X + "1://cdn.test/a.png")
+  const dir = "/c/logos"
+  const full = Model.logoAuthorityHosts(logos.map(u => ({ logo: u })))
+  const other = Model.logoAuthorityHosts([{ logo: "https://cdn.test/a.png" }, { logo: "https://10.0.0.1/a.png" }])
+  const maps = [full, Model.keyedMap(), other, undefined]
+  const want = logos.map(u => Model.logoFile({ logo: u }, dir) !== "")
+  const bad = []
+  logos.forEach((url, n) => {
+    const rows = [{ name: "a" }, { name: "b", logo: url }]
+    const got = maps.map(m => Model.logoColumnShown(rows, true, dir, m)).concat([Model.logoColumnShown(rows, true, dir, Model.logoAuthorityHosts(rows))])
+    if (got.some(g => g !== want[n])) bad.push([url.slice(0, 80), want[n], got])
+  })
+  const odds = [null, 5, "https://cdn.test/a.png", [], { logo: 5 }, { logo: null }, { name: "n" }]
+  let lists = 0
+  for (let n = 0; n < 4000; n++) {
+    const rows = []
+    for (let k = 1 + Math.floor(rnd() * 6); k > 0; k--) rows.push(rnd() < 0.15 ? pick(odds) : { name: "c", logo: pick(logos) })
+    const expect = rows.some(r => !!r && typeof r === "object" && Model.logoFile(r, dir) !== "")
+    if (maps.some(m => Model.logoColumnShown(rows, true, dir, m) !== expect)) bad.push(["list", JSON.stringify(rows).slice(0, 120), expect])
+    lists++
+  }
+  const counted = want.filter(w => w).length
+  return [logos.length > 24000, counted > 1000, logos.length - counted > 10000, lists, bad.length, bad.slice(0, 4),
+          Model.logoColumnShown(logos.map(u => ({ logo: u })), false, dir, full), Model.logoColumnShown(logos.map(u => ({ logo: u })), true, "", full)]
+}, [true, true, true, 4000, 0, [], false, false])
+
+// And the cost: over 10,000 rows of 2,000-unit paths behind an authority that
+// names no host (a literal on the local network, one label, and the literal
+// with a refused tail, whose authority the service's map now holds), the
+// column test costs at most four times what it costs over 10,000 short rows
+// behind the same literal, and 25 ms; over 10,000 rows whose scheme or
+// authority is 2,000 units long, at most eight times and 25 ms (the
+// authority is still copied and looked up, in the engine's own code).
+// Measured in the same process, best of three, so the bound scales with the
+// machine's load. In node at 846dd43 the long rows cost 54 to 105 ms
+// against 4 ms for the short rows; on this tree 2 to 11 ms.
+checkCall("D-SINK-112, the recheck of round 5's settle: over 10,000 rows of 2,000-unit paths behind an authority that names no host, the column test costs at most four times the short rows' and 25 ms, and over 10,000 rows of a 2,000-unit scheme or authority at most eight times and 25 ms, given the service's map", () => {
+  const X = "x".repeat(2000)
+  const best = f => {
+    let least = Infinity
+    for (let k = 0; k < 3; k++) {
+      const t0 = process.hrtime.bigint()
+      f()
+      least = Math.min(least, Number(process.hrtime.bigint() - t0) / 1e6)
+    }
+    return least
+  }
+  const cost = make => {
+    const rows = []
+    for (let i = 0; i < 10000; i++) rows.push({ name: "c" + i, logo: make(i) })
+    const hosts = Model.logoAuthorityHosts(rows)
+    return [best(() => Model.logoColumnShown(rows, true, "/c/logos", hosts)), Model.logoColumnShown(rows, true, "/c/logos", hosts)]
+  }
+  const short = cost(i => "https://10.0.0.1/a" + i + ".png")
+  const shapes = [[4, i => "https://10.0.0.1/" + X + i + ".png"], [4, i => "https://cdn/" + X + i + ".png"],
+                  [4, i => "https://10.0.0.1/" + X + i + ".png" + String.fromCharCode(0x7f)],
+                  [8, i => "https://" + X + i + ".png"], [8, i => X + i + "://cdn.test/a.png"]]
+  return [short[1]].concat(shapes.map(([times, make]) => {
+    const [ms, answer] = cost(make)
+    const bound = times * short[0] + 25
+    return [answer, ms <= bound ? true : ms.toFixed(1) + " ms over " + bound.toFixed(1)]
+  }))
+}, [false, [false, true], [false, true], [false, true], [false, true], [false, true]])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let

@@ -297,7 +297,14 @@ fail=0
 # their addresses in the engine the guide runs in; red on c32a936's model
 # (250 to 500 ms against 180 to 480) and under the mutant that reads every
 # row in full; the spec runs 109.
-QML_SPEC_MIN=${QML_SPEC_MIN:-109}
+# 2026-11-17, lane-r5col (the recheck of round 5's settle, D-SINK-112): 109
+# -> 110 -- test_logoColumnTailAfterHostInV4, the column test over 10,000
+# rows of 2,000-unit paths behind an authority that names no host, and of a
+# 2,000-unit scheme or authority, held to a bound relative to 10,000 short
+# rows in the engine the guide runs in; red on 846dd43's model (1,088 to
+# 1,206 ms against bounds of 177 and 329) and under three single-decision
+# mutants; the spec runs 110.
+QML_SPEC_MIN=${QML_SPEC_MIN:-110}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -677,7 +684,16 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-109}
 # shared logo fixtures, 6 checks red on c32a936's model and each new check
 # red under a named single-decision mutant (QA-RESULTS "The reviews of round
 # 5's build, settled"); the suite runs 3846.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3846}
+# 2026-11-17, lane-r5col (the recheck of round 5's settle, D-SINK-112):
+# 3846 -> 3848 -- the column test answering as logoFile does, row by row and
+# over lists, for the shared logo fixtures, the host-grammar atoms and a
+# seeded set (green on 846dd43 too: it holds the reorder to the old
+# answers), and its cost over 10,000 long rows against 10,000 short ones;
+# with the service binding's check, which now holds the authority of a logo
+# whose tail is refused, 2 of 3848 red on 846dd43's model and each new
+# decision red under a named single-decision mutant (QA-RESULTS "The recheck
+# of round 5's settle, settled"); the suite runs 3848.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3848}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

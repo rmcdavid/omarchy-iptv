@@ -205,10 +205,12 @@ Item {
   // compares the two. The first D-LOGO-11 repair tagged with the cache
   // directory while this bound the logos directory, and every slot was blank.
   readonly property string logoDir: root.showLogos ? Model.logoDirFor(root.activeCacheDir) : ""
-  // D-SINK-112 (the review of round 5's build, 2026-11-17): what each logo
-  // authority of the channel list names, read once per list while logos are
-  // on, so the guide's column test looks a row's authority up rather than
-  // reading it again on every keystroke (Model.logoAuthorityHosts).
+  // D-SINK-112 (the review of round 5's build and its recheck, 2026-11-17):
+  // what each logo authority of the channel list names, read once per list
+  // while logos are on -- the authority of every logo whose scheme and
+  // authority as written could name a host, whatever follows them -- so the
+  // guide's column test looks a row's authority up rather than reading it
+  // again on every keystroke (Model.logoAuthorityHosts).
   readonly property var logoAuthorityHosts: root.showLogos ? Model.logoAuthorityHosts(root.channels) : Model.keyedMap()
   // What enabling logos would disclose, counted from the cache and contacting
   // nothing. The guide shows these numbers BEFORE the switch is thrown

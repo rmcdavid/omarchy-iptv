@@ -1190,7 +1190,9 @@ playlist, guide or probe fetch was followed to any http(s) host. The policy:
   (`logo_contact_host`, `Model.logoContactHost`, D-SINK-112), its written
   port held to `port_digits`, asked in three halves in the order of their
   cost so the guide's column test reads each authority once
-  (`Model.logoAuthorityHosts`, a service binding), and every
+  (`Model.logoAuthorityHosts`, a service binding) and the rest of a row's
+  address only where that authority names a host (the recheck of round 5's
+  settle, 2026-11-17), and every
   host is lowered with the capital sigma folded first (`lower_host`,
   `Model.lowerHost`, D-SINK-118). The owner's decision of 2026-11-16: a
   stored source holding a newly refused shape is dropped on load, a guide

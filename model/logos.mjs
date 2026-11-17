@@ -186,8 +186,9 @@ function logoScheme(raw) {
 // of every row on screen until one counts, on every guide open and every
 // keystroke, and a list none of whose logos counted paid the whole source
 // validator for each row: 290 to 490 ms over 10,000 rows in Qt's engine. It
-// now asks the authority half once per authority. The helper keeps the same
-// three halves.
+// now asks the authority half once per authority, and (the recheck of that
+// settle, 2026-11-17) the row's tail and the whole address only of a row
+// whose authority names a host. The helper keeps the same three halves.
 function logoContactHost(raw) {
   var authority = logoRowAuthority(raw)
   if (authority === "") return ""
@@ -202,27 +203,70 @@ function logoContactHost(raw) {
 // or a `%` in the authority, or an authority with no `.` that is not a
 // bracketed literal (its host is then one label, or none, which
 // logoAuthorityHost refuses anyway). The authority ends at the first `/`,
-// `?` or `#`, as readAuthority's does. Index walks only. The mirror of the
-// helper's logo_row_authority.
+// `?` or `#`, as readAuthority's does. The mirror of the helper's
+// logo_row_authority, which asks the same tests.
+//
+// Asked as two pieces (the recheck of round 5's settle, 2026-11-17): what
+// the text up to the authority's end decides (logoAuthorityWritten) and the
+// tail after it (logoTailPrintable), because the guide's column test asks the
+// first of every row on screen and the second only of a row whose authority
+// names a host (logoColumnShown).
 function logoRowAuthority(raw) {
+  var authority = logoAuthorityWritten(raw)
+  if (authority === "" || !logoTailPrintable(raw, raw.indexOf(":") + 3 + authority.length)) return ""
+  return authority
+}
+
+// logoRowAuthority without its tail: the authority as written when the text
+// up to the authority's end does not refuse it, else "". It reads the scheme,
+// the `//` and the authority and never the text after the authority, and it
+// reads them through the engine's own searches (indexOf, substring), so a
+// long scheme or a long authority is not walked unit by unit in the model.
+function logoAuthorityWritten(raw) {
   if (typeof raw !== "string" || raw === "") return ""
-  if (LOGO_SCHEMES.indexOf(logoScheme(raw)) === -1) return ""
   var colon = raw.indexOf(":")
+  // logoScheme answers "" or the `colon` units before the first `:`, so it
+  // can name one of LOGO_SCHEMES only when one of them is `colon` units long:
+  // a first `:` anywhere else refuses the address before logoScheme walks
+  // the text up to it.
+  if (!logoSchemeLengthTaken(colon) || LOGO_SCHEMES.indexOf(logoScheme(raw)) === -1) return ""
   if (raw.substring(colon + 1, colon + 3) !== "//") return ""
-  var start = colon + 3
-  var end = raw.length
-  for (var k = start; k < raw.length; k++) {
-    var e = raw.charCodeAt(k)
-    if (e === 0x2f || e === 0x3f || e === 0x23) { end = k; break }
-  }
-  for (var i = end; i < raw.length; i++) {
-    var c = raw.charCodeAt(i)
-    if (c < 0x21 || c > 0x7e) return ""
-  }
-  var authority = raw.substring(start, end)
+  var authority = logoAuthorityAt(raw, colon + 3)
   if (authority === "" || authority.indexOf("@") !== -1 || authority.indexOf("%") !== -1) return ""
   if (authority.charAt(0) !== "[" && authority.indexOf(".") === -1) return ""
   return authority
+}
+
+// Is some LOGO_SCHEMES member `length` units long?
+function logoSchemeLengthTaken(length) {
+  for (var i = 0; i < LOGO_SCHEMES.length; i++) if (LOGO_SCHEMES[i].length === length) return true
+  return false
+}
+
+// The authority of a logo address whose authority opens at `start`: the text
+// from there up to its first `/`, `?` or `#`, or to its end. One search from
+// `start` finds the first `/`, and the `?` and `#` are searched for only in
+// the text before it, so a short authority costs a short search whatever
+// follows it.
+function logoAuthorityAt(raw, start) {
+  var slash = raw.indexOf("/", start)
+  var head = raw.substring(start, slash === -1 ? raw.length : slash)
+  var query = head.indexOf("?")
+  var hash = head.indexOf("#")
+  var cut = query === -1 ? hash : (hash === -1 || query < hash ? query : hash)
+  return cut === -1 ? head : head.substring(0, cut)
+}
+
+// Is every unit of `raw` from `from` on printable ASCII 0x21-0x7E? The tail
+// test of logoRowAuthority, an index walk as the helper's is; true for an
+// empty tail.
+function logoTailPrintable(raw, from) {
+  var text = str(raw)
+  for (var i = from; i < text.length; i++) {
+    var c = text.charCodeAt(i)
+    if (c < 0x21 || c > 0x7e) return false
+  }
+  return true
 }
 
 // The second half: the host a logo authority names, or "" when the authority
@@ -286,14 +330,18 @@ function logoPortDigits(text) {
 // re-evaluating its column on a keystroke reads each row's authority and
 // looks it up rather than reading it again. Pure: each answer is
 // logoAuthorityHost's, a function of the authority alone, so a map built
-// from any list answers rightly for every other.
+// from any list answers rightly for every other. Since the recheck of round
+// 5's settle (2026-11-17) it holds the authority of every logo whose text up
+// to the authority's end passes (logoAuthorityWritten), whatever follows it,
+// because the column test now looks a row's authority up before it reads the
+// rest of the address.
 function logoAuthorityHosts(channels) {
   var rows = asList(channels)
   var out = keyedMap()
   for (var i = 0; i < rows.length; i++) {
     var channel = rows[i]
     if (!channel || typeof channel !== "object") continue
-    var authority = logoRowAuthority(channel.logo)
+    var authority = logoAuthorityWritten(channel.logo)
     if (authority === "" || hasOwnKey(out, authority)) continue
     out[authority] = logoAuthorityHost(authority)
   }
@@ -786,6 +834,23 @@ function logoFetchPlan(opts) {
 // service holds for its channel list, or once per call for an authority it
 // does not hold; the whole address is asked only of a row whose authority
 // names a host, and the first such row that counts ends the scan.
+//
+// The recheck of that settle (2026-11-17): the row's tail was still walked
+// before its authority was looked up, so a row whose authority names no host
+// (a literal on the local network, one label) paid for its whole path, about
+// a second over 10,000 rows of 2,000-unit paths in Qt's engine, and a long
+// scheme or a long authority was walked unit by unit as well. So a row is
+// asked, in this order: its scheme, `//` and authority as written
+// (logoAuthorityWritten, the engine's own searches, nothing after the
+// authority read), the host that authority names (the map, `seen`, or
+// logoAuthorityHost), and only for a row whose authority names a host, its
+// tail (logoTailPrintable) and the whole address (logoAddressCounts). For an
+// authority neither map holds, logoAuthorityHost is the dearest of these, so
+// there the tail is asked first, as it was before the map existed. The same
+// conjunction, reordered: the answer for every row and every `hosts` is what
+// it was. What a row whose authority names a host still costs is its tail
+// and, when the tail passes, the whole address, on every evaluation until a
+// row counts (D-SINK-112's row states it).
 function logoColumnShown(rows, enabled, logoDir, hosts) {
   if (enabled !== true || str(logoDir) === "") return false
   var list = asList(rows)
@@ -794,18 +859,23 @@ function logoColumnShown(rows, enabled, logoDir, hosts) {
     var channel = list[i]
     if (!channel || typeof channel !== "object") continue
     var raw = channel.logo
-    var authority = logoRowAuthority(raw)
+    var authority = logoAuthorityWritten(raw)
     if (authority === "") continue
+    var tail = raw.indexOf(":") + 3 + authority.length
+    var printable = false
     var host
     if (hasOwnKey(hosts, authority)) {
       host = str(hosts[authority])
     } else if (hasOwnKey(seen, authority)) {
       host = seen[authority]
     } else {
+      if (!logoTailPrintable(raw, tail)) continue
+      printable = true
       host = logoAuthorityHost(authority)
       seen[authority] = host
     }
-    if (host !== "" && logoAddressCounts(raw, host)) return true
+    if (host === "" || !(printable || logoTailPrintable(raw, tail))) continue
+    if (logoAddressCounts(raw, host)) return true
   }
   return false
 }
@@ -917,13 +987,14 @@ function logoSummaryNotice(line) {
 }
 export {
   LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
-  logoScheme, logoContactHost, logoRowAuthority, logoAuthorityHost,
-  logoAddressCounts, logoPortDigits, logoAuthorityHosts, logoLabelsRefused,
-  splitLogoUrl, logoConsentLines, logoFile, logoSlot, WALL_KEY,
-  FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints, footerHintMarkup,
-  WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction,
-  wallStep, logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge,
-  logoHaveCount, logoFetchPlan, logoColumnShown, logoStreamName,
-  logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
-  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
+  logoScheme, logoContactHost, logoRowAuthority, logoAuthorityWritten,
+  logoSchemeLengthTaken, logoAuthorityAt, logoTailPrintable,
+  logoAuthorityHost, logoAddressCounts, logoPortDigits, logoAuthorityHosts,
+  logoLabelsRefused, splitLogoUrl, logoConsentLines, logoFile, logoSlot,
+  WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,
+  footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry,
+  wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet, logoHaveIsSet,
+  logoHaveMerge, logoHaveCount, logoFetchPlan, logoColumnShown,
+  logoStreamName, logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS,
+  LOGO_RUN_DEADLINE_MS, LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

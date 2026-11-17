@@ -21271,3 +21271,133 @@ The fix commit's gate ran on exactly its tree: node 3846, python 2737 (1 skipped
 
 - **The 67 case-fold code points.** Should they be refused, and stored sources holding one be dropped, as the NFKC look-alikes are?
 - **Redirects to IDN hosts.** Should a redirect to a host not written in ASCII be followed by its A-label instead of refused? The refusal costs a provider that redirects to an IDN host, and no such redirect could have been served as a server reads it.
+
+## The recheck of round 5's settle, settled (lane-r5col, 2026-11-17)
+
+The recheck of the settle (846dd43) found one Low finding against constraint 7 (the guide opens under 150 ms with a 10,000-channel cache, and typing stays responsive) and one Info finding on a comment. Both are fixed on `r5-build` in one gated commit, the lead's call under the owner's standing authority of 2026-11-09. No cage, live scenario, player, Quickshell or name lookup ran. Qt's engine ran offscreen (`qml` and `qmltestrunner`) with a scratch home, a scratch runtime directory and `prlimit --core=0`. Every heavy run held the shared lock, and the crash journal read 87 before and after each. "Red on 846dd43" means 846dd43's model and Service.qml run with the new tests. A "mutant" is one decision of the new code broken on a scratch copy and relinked.
+
+### The column test walked the tail before the lookup (Low): fixed, D-SINK-112
+
+**The finding.** `Guide.qml` binds `logoColumn` to `Model.logoColumnShown(root.currentRows, ...)`, re-evaluated on every guide open, keystroke and group change. Per row it asked `logoRowAuthority` first, which walked every unit after the authority (the printable-ASCII test) before it returned, so before the service's map was asked. A row whose authority names no host still paid for its whole path. The parse keeps a logo address up to 2,048 units (`M3U_MAX_LOGO_URL`).
+
+**The fix.** Per row, in this order:
+- the scheme as written, the `//` and the authority's own tests (`logoAuthorityWritten` in model/logos.mjs): no `@`, no `%`, a `.` unless a bracketed literal; nothing after the authority is read;
+- the host that authority names: the service's map, the call's own `seen` map, or `logoAuthorityHost` once per call;
+- only when that host is not empty, the tail (`logoTailPrintable`, the same index walk) and then `logoAddressCounts`.
+
+For an authority neither map holds, `logoAuthorityHost` is the dearest test, so there the tail is asked first, as it was before the map existed. So no row is asked a test it was not asked at 846dd43, and a row whose authority names no host is asked fewer.
+
+**The answers are unchanged.** It is the same conjunction, reordered. `Model.logoRowAuthority` is now `logoAuthorityWritten` and then the tail. The helper's `logo_row_authority` is unchanged and nothing it mirrors changed its answer.
+- A scratch differential: 846dd43's model against this tree over 40,135 logos (the shared fixtures and a seeded corpus). It compared `logoRowAuthority`, `logoContactHost`, the column for one row under six maps, and 2,000 random lists. 0 differ.
+- The helper differential (`test_host_grammar`'s `LogoDifferentialTest`) is green, in node and in Qt's engine.
+
+**The service's map now holds more.** `Model.logoAuthorityHosts`, the map the service binds per channel list, holds the authority of every logo whose text up to the authority passes, a refused tail included. Before, a row whose authority names no host and whose tail is refused (`https://10.0.0.1/<2,000 units><DEL>`) was not in the map, and the column would read its tail on every evaluation.
+
+### Siblings in the same function, found by the rule-15 search: fixed
+
+The cheap half itself walked two things unit by unit in the model, each before a cheaper test could decide the row.
+- **The scheme.** `logoScheme` walks every unit before the first `:`. A 2,000-unit scheme cost 1,126 to 1,140 ms per 10,000 rows. `logoScheme` answers `""` or the `colon` units before the first `:`, so it can name a member of `LOGO_SCHEMES` only when one is `colon` units long. `logoSchemeLengthTaken` asks that first. `logoScheme` itself is unchanged.
+- **The authority's end.** A 2,000-unit authority cost 1,206 to 1,217 ms. `logoAuthorityAt` now finds the first `/` with one `indexOf`, and the `?` and `#` only in the text before it. The authority is still copied and looked up in the map, in the engine's own code: 82 to 89 ms, the bounded cost that remains.
+
+### Timings
+
+10,000 rows, best of three evaluations, the service's map supplied. Two runs each, at load 1.5 to 1.6, in the same session. "LAN" is `https://10.0.0.1/`, "X" is 2,000 `x`, and `<i>` is the row's index.
+
+| Shape | Units | Qt 846dd43 | Qt now | node 846dd43 | node now |
+|---|---|---|---|---|---|
+| short: LAN `a<i>.png` | 23 | 36, 36 ms | 30, 34 | 3.8, 4.4 | 4.4, 4.6 |
+| LAN + X | 2,022 | 1,112, 1,107 | 32, 33 | 75, 73 | 5.4, 5.4 |
+| one label `https://cdn/` + X | 2,017 | 1,098, 1,101 | 26, 27 | 76, 61 | 3.3, 3.7 |
+| LAN + X + a refused tail (DEL) | 2,023 | 1,091, 1,087 | 31, 33 | 66, 68 | 5.2, 5.4 |
+| a 2,000-unit authority | 2,013 | 1,217, 1,209 | 83, 84 | 94, 75 | 11.2, 11.3 |
+| a 2,000-unit scheme | 2,018 | 1,140, 1,138 | 7, 7 | 96, 100 | 1.9, 1.8 |
+| residual: global host + X + DEL | 2,023 | 1,090, 1,091 | 1,104, 1,106 | 66, 60 | 62, 83 |
+| residual: global host + X + an absorbed attribute | 2,052 | 1,155, 1,140 | 1,135, 1,130 | 84, 82 | 108, 95 |
+| residual: global host + 300 `x` + DEL | 323 | 185, 182 | 191, 195 | 13, 13 | 16, 16 |
+| residual: global host + 300 `x` + absorbed | 352 | 232, 225 | 216, 221 | 21, 21 | 18, 23 |
+
+The recheck itself measured 1,044 ms for the LAN shape at 846dd43, and 36 ms for the short one.
+
+Off the keystroke path:
+- **The service's map, built once per channel list** while logos are on: 25 to 30 ms now for the three 2,000-unit shapes measured (a LAN path, a global host with a refused tail, a global host that counts), against 1,095 to 1,113 ms at 846dd43.
+- **`logoSlot` for 40 drawn rows:** 4 to 24 ms, the same at both commits.
+
+### The residual, stated
+
+A row whose authority names a host and whose address then fails late still pays its tail walk on every evaluation until some row counts. Such a row has a character outside printable ASCII near the end of its path, or an absorbed attribute (which adds the absorbed-attribute test). In Qt's engine that is about 0.54 ms per unit per 10,000 rows, so 10,000 such rows pass 150 ms from about 250 units. That is as at 846dd43: this commit neither adds to it nor bounds it.
+
+No reordering bounds it. The row's answer needs its whole tail, and then the whole address, and caching an answer per row would be shared mutable state. Two options are left for the lead, neither taken here:
+- **The tail as one character-class search** (`/[^\x21-\x7e]/` on the tail) instead of an index walk. The answers are the same, and measured on a draft of this change it cut the residual DEL shape from about 1,100 to 80 ms in Qt's engine and from 66 to 23 ms in node. It also shrinks the reorder's own saving to a constant factor that a 4x timing bound cannot see, so the mutant below would go green, and the guard would need another form.
+- **A per-logo answer computed by the service per channel list**, as the authority map is. The column would then hash each row's whole address, natively.
+
+### The consent dialog's survey (found by the same search): stated, not changed
+
+`Guide.qml`'s `confirmMessage` calls `service.logoSurvey()` when the logo consent dialog opens. Since D-SINK-112 that reads every logo in full: `logoContactHost`, `logoAuthorityHost` per row and the source validator for each logo that counts. In Qt's engine, over 10,000 rows:
+- 547 ms for short logos that count, against 56 ms before round 5 (3101349);
+- 285 ms for short logos that do not count, against 46 ms;
+- 1,094 to 3,757 ms for 2,000-unit ones.
+
+It is not on the keystroke path, and the dialog is opened by the user, rarely. It is stated on D-SINK-112's row and asked of the lead below.
+
+### The comment (Info): fixed
+
+`Guide.qml` said the column test reads "none again" on a keystroke. It now says what a keystroke reads: of each row on screen until one counts, its scheme and authority as written, a lookup, and the rest of the address only where the authority names a host. `Service.qml`'s comment beside `logoAuthorityHosts` now says which logos' authorities the map holds. Neither the settle's QA text nor D-SINK-112's row claimed more than that, so they are not edited; the row gains this recheck's bracket.
+
+### The checks, red-first and mutants
+
+**Node: the equivalence check.** `D-SINK-112, the recheck of round 5's settle: the column test answers as logoFile does, row by row and over lists ...`.
+- It runs over every logo of provider-hosts.json and logo-survey.json, plus 12,000 logos built from host-grammar.json's atoms as the python differential shapes its logos, plus 12,000 from a seeded set. The seeded set holds 2,000-unit tails, refused units at the start and end of the tail, `@` and `%` in the authority, one label, local and global literals, padded ports, absorbed attributes, `?` and `#` ending the authority, and long schemes and authorities.
+- Each logo is asked as one row with the full map, an empty `keyedMap()`, another list's map, none, and its own map. 4,000 random lists of one to six rows check the column against `rows.some(...)`.
+- It is green on 846dd43, as it should be: it holds the reorder to the old answers.
+
+**Node: the timing check.** `D-SINK-112, the recheck of round 5's settle: over 10,000 rows of 2,000-unit paths ...`.
+- The LAN path, the one-label path and the LAN path with a refused tail are each bounded at 4 times the short rows plus 25 ms.
+- The 2,000-unit authority and the 2,000-unit scheme are bounded at 8 times plus 25 ms.
+
+**Node: the service binding's check** now holds a fifth channel, whose logo's tail is refused (`https://192.168.1.20/e f.png`), and expects its authority in the map.
+
+**Spec.** `test_logoColumnTailAfterHostInV4` has the same five shapes and bounds in the engine the guide runs in. It also checks that the scan still finds the one row that counts behind 10,000 that do not.
+
+**Why the bounds are what they are.**
+- 4 times is the lead's ratio. The paths now cost 0.8 to 1.1 times the short rows in Qt's engine, and 846dd43 cost 29 to 31 times.
+- 8 times covers the authority, which costs 2.5 to 3 times the short rows in Qt's engine and about 2.5 times in node, because it is still copied and hashed.
+- 25 ms is under one evaluation of the short rows in Qt's engine (28 to 38 ms). It absorbs `Date.now()`'s 1 ms grain and a collection pause. In node it is under half of what 846dd43 cost (54 to 105 ms), so node still goes red there.
+
+**Red on 846dd43.**
+- Node: 2 of 3,848 failed, the service binding's check (no `192.168.1.20` key) and the timing check (54.3 to 105.3 ms against bounds of 42.8 and 60.6). The equivalence check was green.
+- Qt's engine: `test_logoColumnTailAfterHostInV4` failed, with the five shapes at 1,088 to 1,206 ms against bounds of 177 and 329. `test_logoColumnScanInV4` was green.
+
+**Mutants.** Seven single decisions:
+
+| Mutant | node (of 3,848) | Qt's engine | Other |
+|---|---|---|---|
+| The tail walked before the map lookup (the one the lead named) | 1 red: the timing check, 57.2 against 46.5 ms | red: LAN 1,093 to 1,098 ms and the refused tail 1,089 ms, bounds 165 to 173 | |
+| The authority's end found by a unit walk | 1 red: the timing check (68.0 against 60.3 ms) | red: the authority 1,185 ms, bound 297 | |
+| The scheme-length test dropped | 1 red: the timing check (312 against 71 ms) | red: the scheme 1,174 ms, bound 249 | |
+| The map keyed by `logoRowAuthority` (no refused tails) | 2 red: the binding check and the timing check (58.9 against 44.0 ms) | red: the refused tail 1,080 ms, bound 141 | |
+| A map hit not asked for its tail | 3 red: both equivalence checks and the settle's timing check | | |
+| A `#` not ending the authority | 0: it changes the shared reading, which both sides of the equivalence call | | the helper differential: 2 of 6 red, 67 logos differ |
+| The scheme length off by one | 21 red | | |
+
+### Rule 15: where else a per-row or per-keystroke path reads a provider string in full before a cheaper test decides
+
+The search covered every Model call a Guide.qml binding or `rebuildDisplay` makes per keystroke, every Model call a row or tile delegate makes, and every Service.qml binding over the channel list.
+- **Changed:**
+  - `logoColumnShown`: the tail, the scheme walk and the authority walk, above.
+  - `logoAuthorityHosts`, the service's per-list binding: it walked every tail, and now reads only up to the authority.
+- **Cleared:**
+  - `filterChannels`, which matches each row's precomputed `searchKey` and `nameKey`. The matching is the search itself, and no cheaper test decides a match.
+  - `channelId` in `cursorFor`, `rowIndexOfId` and the favourites test. Every channel the helper writes carries `id`, so the `fnv1a32(url)` fallback is not taken.
+  - `browsableChannels`: with no hidden group it returns the list, and otherwise it does one keyed lookup per row of the row's group, which no cheaper test decides.
+  - `rebuildGroups`, which returns at once unless the channel set changed.
+  - `logoSlot` and `logoFile` in the row and tile delegates: the drawn rows only, 4 to 24 ms for 40 rows of 2,000-unit logos.
+- **Stated, not changed:** the consent dialog's survey, above.
+
+### The gate and the scan
+
+The gate ran on exactly this commit's tree: node 3,848, python 2,737 (1 skipped), spec 110, the floors levelled to them. The private-label scan over `git log --format=%B e2ae4f4..HEAD`, `git diff e2ae4f4` and the staged diff printed 0.
+
+### Open, for the lead
+
+- **The residual.** Should the tail become one character-class search, which needs a new guard for the reorder, or should the service compute a per-logo answer per list? Or does the residual stand as stated?
+- **The consent dialog's survey.** Should it read authorities through the service's map, as the column does? The source validator per counted logo is the part that would remain. Should it get its own id?

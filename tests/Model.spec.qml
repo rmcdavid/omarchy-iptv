@@ -3511,4 +3511,56 @@ TestCase {
     }
     compare(got, want)
   }
+
+  // The recheck of round 5's settle (2026-11-17): the column test still
+  // walked each row's tail before it looked the row's authority up, so a row
+  // whose authority names no host paid for its whole path in this engine --
+  // 1,087 to 1,112 ms over 10,000 rows of 2,000-unit paths at 846dd43 against
+  // 36 to 38 ms for short rows, a refused tail behind the literal included --
+  // and a 2,000-unit scheme or authority was walked unit by unit too (1,126 to
+  // 1,140 and 1,206 to 1,217 ms). It now reads the scheme and authority with
+  // the engine's own searches, and the tail only of a row whose authority
+  // names a host. Bounds relative to the short rows, measured in the same
+  // run, best of three, so they scale with the machine's load: four times
+  // and 25 ms for the paths (26 to 33 ms on this tree), eight times and 25 ms
+  // for the scheme and the authority, which are still copied and looked up (7
+  // and 82 to 89 ms). And the scan still finds the one row that counts behind
+  // 10,000 that do not.
+  function test_logoColumnTailAfterHostInV4() {
+    var X = new Array(2001).join("x")
+    function best(f) {
+      var least = 1e9
+      for (var k = 0; k < 3; k++) {
+        var t0 = Date.now()
+        f()
+        least = Math.min(least, Date.now() - t0)
+      }
+      return least
+    }
+    function cost(make, last) {
+      var rows = []
+      for (var i = 0; i < 10000; i++) rows.push({ name: "c" + i, logo: make(i) })
+      if (last) rows.push({ name: "last", logo: last })
+      var hosts = typeof Model.logoAuthorityHosts === "function" ? Model.logoAuthorityHosts(rows) : null
+      return [best(function () { Model.logoColumnShown(rows, true, "/c/logos", hosts) }), Model.logoColumnShown(rows, true, "/c/logos", hosts)]
+    }
+    var short = cost(function (i) { return "https://10.0.0.1/a" + i + ".png" })
+    var shapes = [[4, function (i) { return "https://10.0.0.1/" + X + i + ".png" }],
+                  [4, function (i) { return "https://cdn/" + X + i + ".png" }],
+                  [4, function (i) { return "https://10.0.0.1/" + X + i + ".png" + String.fromCharCode(0x7f) }],
+                  [8, function (i) { return "https://" + X + i + ".png" }],
+                  [8, function (i) { return X + i + "://cdn.test/a.png" }]]
+    var got = [short[1]]
+    var want = [false]
+    for (var n = 0; n < shapes.length; n++) {
+      var c = cost(shapes[n][1])
+      var bound = shapes[n][0] * short[0] + 25
+      console.log("D-SINK-112, the recheck: the column test over 10,000 rows of shape " + n + " in V4: " + c[0] + " ms; the short rows: " + short[0] + " ms; bound " + bound + " ms")
+      got.push([c[1], c[0] <= bound])
+      want.push([false, true])
+    }
+    got.push(cost(shapes[0][1], "https://cdn.test/a.png")[1])
+    want.push(true)
+    compare(got, want)
+  }
 }
