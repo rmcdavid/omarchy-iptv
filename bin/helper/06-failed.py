@@ -911,10 +911,12 @@ def cmd_status(args: argparse.Namespace) -> int:
                 log("status: removed stale socket file")
             raise
         values: dict[str, Any] = {}
-        for prop in ("media-title", "path", "pause", "idle-active", "mpv-version", USER_DATA_STASH):
+        # D-SINK-114: `path` is no longer asked. Its one use was `pathHost`
+        # (below), and asking it put the credentialed address in this
+        # process's reply buffer for nothing.
+        for prop in ("media-title", "pause", "idle-active", "mpv-version", USER_DATA_STASH):
             ok, data = client.try_command("get_property", prop)
             values[prop] = data if ok else None
-        path_value = values["path"]
         stash = values[USER_DATA_STASH] if isinstance(values[USER_DATA_STASH], dict) else None
         emit({
             "ok": True,
@@ -928,7 +930,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             # D-SINK-104: and since 2026-11-16 as shown_text reads it, the
             # reading the boundary gives every reply's provider text.
             "mediaTitle": shown_text(values["media-title"]) if isinstance(values["media-title"], str) else None,
-            "pathHost": (url_host(path_value) or ("local file" if path_value.startswith("/") else "")) if isinstance(path_value, str) and path_value else None,
+            # D-SINK-114 (2026-11-16): no `pathHost`. It printed the playing
+            # address's host with no withhold rule, so an address whose
+            # password holds an unencoded `/` printed its user name, and no
+            # shell code read it.
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
             "mpvVersion": values["mpv-version"] if isinstance(values["mpv-version"], str) else None,

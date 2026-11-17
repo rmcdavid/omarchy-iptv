@@ -413,7 +413,8 @@ class DestinationPolicy:
       * never for a logo (`logos`), on any hop.
     Everything else -- a hint's host, a redirect into the LAN from a public
     host, a second LAN host -- is refused before a byte is sent, `local_address`
-    naming the host only (rule 5). And a host of ONE DNS label that the
+    naming no host (rule 5; it named the host until D-SINK-113, 2026-11-16,
+    and a provider's host can be a user name). And a host of ONE DNS label that the
     provider chose is refused before it is even looked up, the playlist's
     own host excepted and a logo never (refuses_name,
     D-SINK-83), `local_address` naming no host.
@@ -499,14 +500,24 @@ class DestinationPolicy:
         self.last_class = kind
 
     def refusal(self, host: str, first: bool) -> HelperError:
-        where = "a logo" if self.logos else self.label
-        if first and self.origin == ORIGIN_PLAYLIST:
-            how = "is an address on this machine or a local network that the playlist chose"
+        """The refusal of an address permits() refused, naming NO host and
+        no verb (D-SINK-113, 2026-11-16). The host is one the provider
+        chose -- a redirect hop, a guide hint's first hop, a logo -- and for
+        an address whose password holds an unencoded `/` it is the user
+        name, which this sentence printed into the reply, the status file
+        and the journal. The verb's own log line names the verb (`playlist:
+        %s`, `epg: %s`), so a prefix here read twice. `host` stays in the
+        signature: the relay's StreamPolicy overrides this with its own
+        fixed sentence."""
+        if self.logos:
+            sentence = "a logo address is on this machine or a local network"
+        elif first and self.origin == ORIGIN_PLAYLIST:
+            sentence = "the playlist chose an address on this machine or a local network"
         elif first:
-            how = "is an address on this machine or a local network"
+            sentence = "the address is on this machine or a local network"
         else:
-            how = "is an address on this machine or a local network that a redirect chose"
-        return HelperError("local_address", "%s: %s %s; not contacted" % (where, host or "the host", how))
+            sentence = "a redirect chose an address on this machine or a local network"
+        return HelperError("local_address", "%s; not contacted" % sentence)
 
     def refuses_name(self, host: str) -> bool:
         """D-SINK-83 (the owner, 2026-11-05): is `host` one DNS
@@ -534,10 +545,9 @@ class DestinationPolicy:
         search list), so the shell's sentence ("Refused a local address")
         and the logo run's count of policy refusals take it as they take the
         address check's."""
-        where = "a logo" if self.logos else self.label
         who = "the playlist" if first else "a redirect"
-        return HelperError("local_address", "%s: a host name of one label that %s chose is not looked up; not contacted"
-                           % (where, who))
+        return HelperError("local_address", "a host name of one label that %s chose is not looked up; not contacted"
+                           % who)
 
     def check_proxied(self, host: str, port: int, timeout: float, first: bool, resolve: Any = None) -> None:
         """The TARGET of a proxied request, looked up here (see the class).
@@ -559,7 +569,12 @@ class DestinationPolicy:
                     (self.first_host != "" and host_key(host) == self.first_host and self.first_class == "unresolved"):
                 self.connected(host, "unresolved", first, port)
                 return
-            raise HelperError("network", "could not resolve %s to check where it leads through the proxy" % (host or "the host"))
+            # D-SINK-113: naming no host, the target being one the provider
+            # chose (a typed first hop never reaches this raise). The word
+            # `resolve` is what Model.statusReason reads as "Could not
+            # resolve host".
+            raise HelperError("network", "could not resolve the host %s chose, to check where it leads through the proxy"
+                              % ("the playlist" if first else "a redirect"))
         for kind in kinds:
             if not self.permits(host, kind, first, port):
                 raise self.refusal(host, first)
@@ -1109,7 +1124,9 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
         # D-SINK-40: a URL the PROVIDER chose never makes this machine send a
         # credential it also chose (the model refuses such a hint before it
         # is fetched; this is the same rule where the header is built).
-        raise HelperError("bad_url", "%s address %s carries a password the playlist chose; not used" % (label, host))
+        # D-SINK-113: naming no host, as fetch_bytes' refusals of a URL the
+        # playlist chose name none: the host is the provider's choice.
+        raise HelperError("bad_url", "%s address the playlist chose carries a password; not used" % label)
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
     if auth:
         import base64
@@ -1655,7 +1672,9 @@ def reply_text(payload: Any, separators: tuple[str, str] | None = None) -> str:
 # the player's record (its stash), which the status and probe replies print.
 # A `clipboard` reply is never read: its text is the user's paste, which
 # the reply hands back as it is. What is NOT here, stated: every host a
-# reply names (D-SINK-109's `sourceHost`, round 5's `pathHost`).
+# reply names (D-SINK-109's `sourceHost`). The player status reply's
+# `pathHost`, which named the playing address's host with no withhold rule,
+# was dropped on 2026-11-16 (D-SINK-114): no shell code read it.
 REPLY_READINGS = (
     ("error.message", "text"),
     ("warnings[]", "text"),

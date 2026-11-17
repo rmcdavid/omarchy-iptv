@@ -611,7 +611,11 @@ class ProxyTest(unittest.TestCase):
             with self.assertRaises(helper.HelperError) as caught:
                 helper.read_http_source("http://guide.example.test/epg.xml", 5, "EPG")
         self.assertEqual(caught.exception.code, "network")
-        self.assertIn("could not resolve guide.example.test", caught.exception.message)
+        # D-SINK-113: the shared fixture's sentence, which names no host --
+        # the target is the playlist's choice -- and keeps the word
+        # `resolve` that Model.statusReason reads (the node suite maps it).
+        self.assertEqual(caught.exception.message, FIXTURE["refusals"][2]["reply"]["error"]["message"])
+        self.assertNotIn("guide.example.test", caught.exception.message)
         self.assertEqual(proxy.seen, [])
 
     def test_every_address_a_proxied_target_answers_must_be_allowed(self):
@@ -930,3 +934,156 @@ class PlayTimeGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProviderChosenRefusalTest(unittest.TestCase):
+    """D-SINK-113 (2026-11-16): a refusal of a destination the PROVIDER chose
+    -- a redirect hop, a guide hint's first hop, a logo, a proxied target, a
+    cached channel's literal at play -- names no host, and DestinationPolicy's
+    sentences carry no verb prefix, which the verb's own log line adds. Each
+    printed the host as written into the reply, the status file and the
+    journal, and for an address whose password holds an unencoded `/` that
+    host is the user name. Called for real; the lookups are stand-ins that
+    answer literals or raise, and the hosts are synthetic."""
+
+    HOSTS = ("167772161", "qqqqqq", "qqqqqq.x", "10.0.0.1", "[::1]")
+
+    def policies(self):
+        return [helper.DestinationPolicy("playlist", "user"), helper.DestinationPolicy("playlist", "playlist"),
+                helper.DestinationPolicy("EPG", "playlist"), helper.DestinationPolicy("EPG", "user"),
+                helper.DestinationPolicy.for_logos()]
+
+    def assert_names_none(self, error, *hosts):
+        message = error.message
+        for host in hosts:
+            self.assertNotIn(host.strip("[]"), message)
+        # No `<verb>:` prefix: the verb's log line is `playlist: %s`.
+        head = message.split(" ", 1)[0]
+        self.assertFalse(head.endswith(":"), message)
+
+    def test_every_address_refusal_names_no_host_and_no_verb(self):
+        got = []
+        for policy in self.policies():
+            for host in self.HOSTS:
+                for first in (True, False):
+                    error = policy.refusal(host, first)
+                    got.append((policy.label, host, first, error.code))
+                    with self.subTest(label=policy.label, origin=policy.origin, host=host, first=first):
+                        self.assert_names_none(error, host)
+                        self.assertTrue(error.message.endswith("; not contacted"), error.message)
+        self.assertEqual({entry[3] for entry in got}, {"local_address"})
+
+    def test_every_one_label_refusal_names_no_host_and_no_verb(self):
+        for policy in self.policies():
+            for first in (True, False):
+                with self.subTest(label=policy.label, first=first):
+                    error = policy.name_refusal(first)
+                    self.assertEqual(error.code, "local_address")
+                    self.assert_names_none(error, "qqqqqq")
+
+    def test_the_four_branches_say_who_chose_the_address(self):
+        user, playlist = helper.DestinationPolicy("playlist", "user"), helper.DestinationPolicy("EPG", "playlist")
+        self.assertEqual([user.refusal("10.0.0.1", True).message, user.refusal("10.0.0.1", False).message,
+                          playlist.refusal("10.0.0.1", True).message,
+                          helper.DestinationPolicy.for_logos().refusal("10.0.0.1", True).message],
+                         ["the address is on this machine or a local network; not contacted",
+                          FIXTURE["refusals"][0]["reply"]["error"]["message"],
+                          FIXTURE["refusals"][1]["reply"]["error"]["message"],
+                          "a logo address is on this machine or a local network; not contacted"])
+
+    def test_a_proxied_target_that_cannot_be_resolved_is_named_by_no_host(self):
+        asked = []
+
+        def unresolvable(host, port, timeout):
+            asked.append((host, port))
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        hint = helper.DestinationPolicy("EPG", "playlist")
+        hop = helper.DestinationPolicy("playlist", "user")
+        hop.connected("p.example.test", "global", True)
+        got = []
+        for policy, first in ((hint, True), (hop, False)):
+            with self.assertRaises(helper.HelperError) as caught:
+                policy.check_proxied("qqqqqq.x", 2024, 1, first, resolve=unresolvable)
+            got.append(caught.exception.code)
+            self.assert_names_none(caught.exception, "qqqqqq.x")
+            self.assertIn("resolve", caught.exception.message)
+        self.assertEqual((got, asked), (["network", "network"], [("qqqqqq.x", 2024), ("qqqqqq.x", 2024)]))
+        self.assertEqual(caught.exception.message,
+                         "could not resolve the host a redirect chose, to check where it leads through the proxy")
+
+    def test_a_proxied_target_that_answers_a_local_address_is_named_by_no_host(self):
+        def loopback(host, port, timeout):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        policy = helper.DestinationPolicy("EPG", "playlist")
+        with self.assertRaises(helper.HelperError) as caught:
+            policy.check_proxied("qqqqqq.x", 2024, 1, True, resolve=loopback)
+        self.assertEqual(caught.exception.code, "local_address")
+        self.assert_names_none(caught.exception, "qqqqqq.x", "127.0.0.1")
+
+    def test_a_connection_refused_for_its_answer_is_named_by_no_host(self):
+        """bounded_create_connection, the one place every hop is judged,
+        with a lookup that answers a LAN literal for the provider's name."""
+        def lan(host, port, timeout):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", port))]
+        policy = helper.DestinationPolicy("playlist", "user")
+        policy.connected("p.example.test", "global", True)
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.bounded_create_connection(("qqqqqq.x", 2024), 1, policy=policy, first=False, resolve=lan)
+        self.assertEqual(caught.exception.code, "local_address")
+        self.assert_names_none(caught.exception, "qqqqqq.x", "10.0.0.1")
+
+    def test_a_hinted_address_holding_a_password_is_refused_naming_no_host(self):
+        policy = helper.DestinationPolicy("EPG", "playlist")
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.read_http_source("http://qqqqqq:zzzzzz@epg.test/guide.xml", 1, "EPG", policy)
+        self.assertEqual(caught.exception.code, "bad_url")
+        for leak in ("epg.test", "qqqqqq", "zzzzzz"):
+            self.assertNotIn(leak, caught.exception.message)
+
+    def cache(self, document):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cache = pathlib.Path(tmp.name) / "cache"
+        cache.mkdir(mode=0o700)
+        (cache / "channels.json").write_text(json.dumps(document), encoding="utf-8")
+        return str(cache)
+
+    def test_a_cached_literal_refused_at_play_names_no_host(self):
+        """A cache written before the rule: its literals were never judged
+        against the playlist, and the first one is the user name of an
+        address whose password holds an unencoded `/`."""
+        urls = {"t:user": ("http://2130706433:2024/zzzz@cdn.test/x.ts", "2130706433"),
+                "t:lan": ("http://10.0.0.1/live/1.ts", "10.0.0.1"),
+                "t:loop": ("http://[::1]:631/x", "::1")}
+        directory = self.cache({"version": 1, "sourceHost": "cdn.test",
+                                "channels": [{"id": cid, "name": cid, "url": url} for cid, (url, _) in urls.items()]})
+        got = []
+        with mock.patch.object(helper, "cache_dir", lambda d: d):
+            for cid, (_, host) in urls.items():
+                with self.assertRaises(helper.HelperError) as caught:
+                    helper.player_target(cid, "", directory)
+                got.append((caught.exception.code, caught.exception.message, host in caught.exception.message))
+        sentence = getattr(helper, "STREAM_LITERAL_REFUSAL", "<no STREAM_LITERAL_REFUSAL>")
+        self.assertEqual(got, [("local_address", sentence, False)] * 3)
+
+    def test_the_verb_line_names_its_verb_once(self):
+        """The journal line of a refused redirect and of a refused hint:
+        `playlist: playlist: ...` and `epg: EPG: ...` until 2026-11-16."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        b = LoggingServer({"/x.m3u": (200, (), PLAYLIST)}, host="127.0.0.2")
+        self.addCleanup(b.close)
+        a = LoggingServer({"/start.m3u": (302, (("Location", b.url("/x.m3u")),), b"")})
+        self.addCleanup(a.close)
+        _, status, playlist_err = run_helper(["playlist", "--cache-dir", tmp.name, "--timeout", "5"],
+                                             {helper.URL_ENV: a.url("/start.m3u"), helper.ORIGIN_ENV: "user"})
+        _, hint, epg_err = run_helper(["epg", "--cache-dir", tmp.name, "--timeout", "5"],
+                                      {helper.URL_ENV: a.url("/epg.xml"), helper.ORIGIN_ENV: "playlist"})
+        self.assertEqual((status["error"]["code"], hint["error"]["code"], b.seen, a.seen),
+                         ("local_address", "local_address", [], [("/start.m3u", None)]))
+        self.assertIn("omarchy-iptv: playlist: %s\n" % FIXTURE["refusals"][0]["reply"]["error"]["message"], playlist_err)
+        self.assertIn("omarchy-iptv: epg: %s\n" % FIXTURE["refusals"][1]["reply"]["error"]["message"], epg_err)
+        self.assertNotIn("playlist: playlist:", playlist_err)
+        self.assertNotIn("epg: EPG:", epg_err)
+

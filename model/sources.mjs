@@ -1224,8 +1224,8 @@ function epgHintVerdict(meta, playlistUrl) {
   // D-SINK-83: a host of one DNS label (dotlessHost) is no hint
   // at all unless it is the playlist's own host (hostKey equal; the port is
   // not compared here). NOT a refusal, and that is the choice: the refusal
-  // sentences print this host (epgHintRowText: "... not used: <host> is a
-  // local address", "... its address for <host> carries a password"), and
+  // sentences printed this host until D-SINK-113 (2026-11-16; epgHintRowText
+  // names none now), and
   // a one-label host is most likely the USERNAME of a URL cut at a space in
   // its userinfo, so the row says nothing of the hint rather than naming
   // it. First, before the userinfo test, for the same reason: a cut that
@@ -2656,7 +2656,8 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epg
     origin: str(s.origin),
     errorReason: str(errorReason),
     epgHintRefused: refusedHint ? str(hintState.refused) : "",
-    epgHintHost: refusedHint || (hinted && hintState.plainHttp === true) ? str(hintState.host) : "",
+    // D-SINK-113: no `epgHintHost`. Its one reader, epgHintRowText, names
+    // no host since 2026-11-16, so the view carries none.
     epgHintPlainHttp: hinted && hintState.plainHttp === true
   }
 }
@@ -2702,10 +2703,18 @@ var EPG_HINT_ROW_TEXT = "EPG from playlist"
 // Each names the hint's HOST and nothing else of it.
 var EPG_HINT_PLAIN_ROW_TEXT = "EPG from playlist over plain http"
 
+// D-SINK-113 (2026-11-16): a refused hint's sentence names no host. The
+// host is the one the playlist chose, and for an address whose password
+// holds an unencoded `/` it is the user name; these two sentences named it
+// on the row and in its accessible name. The helper's refusals of the same
+// hint name none either.
+var EPG_HINT_LOCAL_ROW_TEXT = "EPG from playlist not used: its host is a local address"
+var EPG_HINT_USERINFO_ROW_TEXT = "EPG from playlist not used: its address carries a password"
+
 function epgHintRowText(view) {
   var v = view || {}
-  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return "EPG from playlist not used: " + str(v.epgHintHost) + " is a local address"
-  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return "EPG from playlist not used: its address for " + str(v.epgHintHost) + " carries a password"
+  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return EPG_HINT_LOCAL_ROW_TEXT
+  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return EPG_HINT_USERINFO_ROW_TEXT
   if (v.hasEpg) return v.epgFromPlaylist === true ? (v.epgHintPlainHttp === true ? EPG_HINT_PLAIN_ROW_TEXT : EPG_HINT_ROW_TEXT) : "EPG"
   return ""
 }
@@ -2999,7 +3008,8 @@ export {
   labelHeadIsAuthority, labelLooseName, labelTokenAuthority, encodeQueryValue,
   xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
   formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, EPG_HINT_LOCAL_ROW_TEXT,
+  EPG_HINT_USERINFO_ROW_TEXT, epgHintRowText, sourceDetail,
   sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
   fetchingLine, sourcesProbeLine, PROBE_LOCAL_REFUSALS, failureFromHost,

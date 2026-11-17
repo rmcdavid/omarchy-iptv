@@ -8783,8 +8783,9 @@ const viewProvider = Model.sourceView(recProvider, "d990c2e4", nowSep)
 check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080",
   // D-SINK-109: the host the Sources list's fetching line names.
   lineHost: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "",
-  // D-SINK-40: the guide hint's refusal and plain-http state, hosts only.
-  epgHintRefused: "", epgHintHost: "", epgHintPlainHttp: false })
+  // D-SINK-40: the guide hint's refusal and plain-http state; D-SINK-113:
+  // no host, which the row no longer prints.
+  epgHintRefused: "", epgHintPlainHttp: false })
 check("sourceView never fetched: channelCount -1, file host is 'local file'", [Model.sourceView(recCli, "", nowSep).channelCount, Model.sourceView(recCli, "", nowSep).cachedAt, Model.sourceView(recFile, "", nowSep).host, Model.sourceView(recFile, "", nowSep).kind, Model.sourceView(recNas, "", nowSep).kind], [-1, 0, "local file", "file", "url"])
 check("sourceView null-safe", Model.sourceView(null, "", 0).id, "")
 check("sourceView attaches the session error", Model.sourceView(recCli, "", nowSep, "Connection refused").errorReason, "Connection refused")
@@ -22938,7 +22939,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
             Model.epgHintRowState({ userUrl: "https://mine.test/g.xml", hint: "http://127.0.0.1/x" }),
             Model.epgHintRowState({ userUrl: "", hint: "http://127.0.0.1/x", playlistUrl: "https://p.test/x" })]
   }, ["", "", { refused: "", host: "", plainHttp: false }, { refused: "local", host: "127.0.0.1", plainHttp: false }])
-  checkCall("D-SINK-40: the helper's refusal reply maps to its sentence and keeps `from <host>` (the provider's choice, not this machine's)", () =>
+  checkCall("D-SINK-40, D-SINK-113: the helper's refusal reply -- which names no host -- maps to its sentence (a proxied target that cannot be resolved still reads `Could not resolve host`) and keeps `from <host>`, the playlist's or the guide's own (the provider's choice, not this machine's)", () =>
     D.refusals.map(r => { const st = Model.parseHelperStatus(JSON.stringify(r.reply), r.reply.kind); const reason = Model.statusReason(st)
       return [reason, Model.failureFromHost(reason, Model.statusHost(st), Model.statusCode(st))] }),
     D.refusals.map(r => [r.reason, r.line]))
@@ -22959,7 +22960,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     ["playlist", "playlist", "playlist", "playlist", ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ORIGIN"], {}, {}, false])
 
   // The Sources row (UX-SOURCES 5.2).
-  checkCall("D-SINK-40: the active row says a hint was refused, naming only its host, says an adopted http hint under an https playlist travels in plain http, and a screen reader hears the same", () => {
+  checkCall("D-SINK-40, D-SINK-113: the active row says a hint was refused, naming no host (the playlist chose it), says an adopted http hint under an https playlist travels in plain http, and a screen reader hears the same", () => {
     const rec = { key: "bbbbbbbb", url: "https://b.example/p.m3u", epgUrl: "", label: "Bare", lastUsed: 90, fetchedAt: 90, channelCount: 20, groupCount: 3 }
     const local = Model.epgHintRowState({ userUrl: "", hint: "http://admin@192.168.1.1/x", playlistUrl: rec.url })
     const lan = Model.epgHintRowState({ userUrl: "", hint: "http://192.168.1.1/cgi-bin/luci?x=1", playlistUrl: rec.url })
@@ -22970,12 +22971,13 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const vOther = Model.sourceView(rec, "aaaaaaaa", 1000, "", false, lan)
     const vOwn = Model.sourceView(Object.assign({}, rec, { epgUrl: "http://mine.example/g.xml" }), "bbbbbbbb", 1000, "", false, lan)
     return [Model.sourceDetail(vUser, false), Model.sourceDetail(vLan, false), Model.sourceDetail(vPlain, false),
-            Model.sourceAccessibleName(vLan).indexOf("EPG from playlist not used: 192.168.1.1 is a local address") !== -1,
+            Model.sourceAccessibleName(vLan).indexOf("EPG from playlist not used: its host is a local address") !== -1,
             Model.sourceDetail(vOther, false).indexOf("EPG") === -1, Model.sourceDetail(vOwn, false).indexOf("not used") === -1,
-            [vUser, vLan, vPlain].map(v => JSON.stringify(v)).join("").search(/:\/\/|admin|T0K|luci/)]
-  }, ["active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: its address for 192.168.1.1 carries a password",
-      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
-      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
+            [vUser, vLan, vPlain].map(v => JSON.stringify(v)).join("").search(/:\/\/|admin|T0K|luci/),
+            [vUser, vLan, vPlain].map(v => JSON.stringify(v) + Model.sourceDetail(v, false) + Model.sourceAccessibleName(v)).join("").search(/192\.168|epg\.example/)]
+  }, ["active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: its address carries a password",
+      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: its host is a local address",
+      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1, -1])
 
   checkCall("D-SINK-41, D-SINK-80, D-SINK-87, D-SINK-95, D-SINK-102: a playlist cache whose status predates the current rules (none, the destination rules' 1, the attribute grammar's 2, the stream host-name rules' 3, the D-SINK-95 reading's 4) is refreshed once whatever its age; one written under them (5, D-SINK-102's refused schemes) or later is not", () =>
     [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 3 }),
@@ -23023,7 +23025,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     g.ids.epgProc.running = false
     g.root.runEpgHelper(false)
     return [refused, urlEnv(g.ids.epgProc.environment)]
-  }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: 192.168.1.6 is a local address"],
+  }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: its host is a local address"],
       { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
   checkCall("D-SINK-40 (service): the playlist fetch and the source probe carry origin user and no playlist host of their own", () => {
     const h = boot([rec(LAN)])

@@ -1890,13 +1890,15 @@ class StatusTest(MpvTestCase):
         for secret in ("s3cret", "user:", "/live/", "tok", "x.m3u8"):
             self.assertNotIn(secret, stdout + stderr)
 
-    def test_reports_host_never_path(self):
-        self.start(props=STATUS_PROPS)
+    def test_reports_no_host_and_never_the_path(self):
+        # D-SINK-114 (2026-11-16): no `pathHost`. It printed the playing
+        # address's host with no withhold rule, and no shell code read it.
+        server = self.start(props=STATUS_PROPS)
         code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {
             "ok": True, "kind": "status", "running": True, "mediaTitle": "BBC One HD",
-            "pathHost": "provider.example.test", "paused": False, "idle": False, "mpvVersion": "mpv 0.41.0",
+            "paused": False, "idle": False, "mpvVersion": "mpv 0.41.0",
             # D-PLY-11: the health tick's reconciliation input. A player that
             # carries no record of ours answers null rather than dropping the
             # key, so the shell can tell "nothing to compare" from "the
@@ -1906,9 +1908,24 @@ class StatusTest(MpvTestCase):
             # no time-pos, and "no position yet" is null, never zero.
             "rewind": None,
         })
-        self.assertNotIn("path\"", stdout.replace("pathHost", ""))
-        for secret in ("user:pw", "/live/", "1.m3u8"):
+        self.assertNotIn("path", stdout)
+        for secret in ("user:pw", "/live/", "1.m3u8", "provider.example.test"):
             self.assertNotIn(secret, stdout + stderr)
+        # And the address is not even asked for: its one use was pathHost.
+        self.assertNotIn(["get_property", "path"], [list(c) for c in server.commands])
+
+    def test_a_user_name_the_path_holds_is_printed_nowhere(self):
+        """D-SINK-114: an address whose password holds an unencoded `/`,
+        whose RFC host is its user name, as a cached channel can hold one
+        from a local playlist."""
+        props = dict(STATUS_PROPS)
+        props["path"] = "http://qqqqqq:2024/zzzz@cdn.test/live/1.ts"
+        self.start(props=props)
+        code, payload, stdout, stderr = run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        for secret in ("qqqqqq", "zzzzzz", "cdn.test"):
+            self.assertNotIn(secret, stdout + stderr)
+        self.assertNotIn("pathHost", payload)
 
     def test_status_carries_the_players_own_now_playing_record(self):
         # D-PLY-11, the plan's step 2. Without this the health tick asks the
@@ -1934,14 +1951,14 @@ class StatusTest(MpvTestCase):
         code, payload, _, _ = run("status", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0)
         self.assertIsNone(payload["mediaTitle"])
-        self.assertIsNone(payload["pathHost"])
+        self.assertNotIn("pathHost", payload)
         self.assertTrue(payload["paused"])
         self.assertIsNone(payload["idle"])
 
-    def test_local_path_reports_local_file(self):
+    def test_a_local_path_is_printed_nowhere(self):
         self.start(props={"path": "/home/user/video.mkv"})
         code, payload, stdout, _ = run("status", "--socket", self.sock, "--ipc-timeout", "1")
-        self.assertEqual(payload["pathHost"], "local file")
+        self.assertEqual((code, "pathHost" in payload), (0, False))
         self.assertNotIn("video.mkv", stdout)
 
     def test_stale_socket_file_is_unlinked(self):

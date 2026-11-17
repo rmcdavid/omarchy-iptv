@@ -20666,3 +20666,50 @@ The boundary table's own `stash.id` case now uses a kind `REPLY_KEPT` does not n
 - lane-r2c's logo journal line. The line names the logo's cache file, an unkeyed hash of the logo URL. It stays in D-SINK-107's open half rather than getting a row of its own.
 - The node timing check that failed once in a scratch run ("D-SINK-96: the credentials search ... under eight times its cost at 100,000") passed in every gate. It is not filed; if it fails in a gate, it gets an id that day.
 - The rows cite the branch's commits, and those stay true because the branch reaches `dev` as a fast-forward, never a rebase.
+
+## Round 5 of the security review, lane-r5a, 2026-11-16: what a refusal names, and how a host and an authority are read
+
+Built on the branch `r5-build` from `dev` 3101349 (round 2 merged). Every call is the lead's under the owner's standing authority of 2026-11-09, except the drop that the host-grammar step below widens, which is the owner's own decision of 2026-11-16. No cage, live scenario, player or name lookup ran; every lookup in the tests below is a stand-in that answers a literal or raises, and asserts what it was handed. The crash journal read 87 before and after every heavy run.
+
+### D-SINK-113 and D-SINK-114: a refusal of a destination the provider chose names no host, and the status reply names none
+
+**What changed.**
+- `DestinationPolicy.refusal` (bin/helper/03-io-playlist.py) names no host and no verb: `the playlist chose an address on this machine or a local network; not contacted` for a first hop the playlist chose (a guide hint), `a redirect chose an address ...` for a later hop, `a logo address is on this machine or a local network; not contacted` for a logo, and `the address is on this machine or a local network; not contacted` for a typed first hop (unreachable: `permits` passes it). Its `host` parameter stays, because the relay's `StreamPolicy` overrides the method with its own fixed sentence. `name_refusal` drops its `where` prefix.
+- `check_proxied`'s unresolvable target: `could not resolve the host the playlist chose, to check where it leads through the proxy` (or `a redirect chose`). It keeps `resolve`, which `Model.statusReason` reads as `Could not resolve host`; a typed first hop never reaches the raise.
+- `player_target` (bin/helper/08-player-verbs.py): a cached channel's literal refused at play is `local_address` with the new constant `STREAM_LITERAL_REFUSAL`, beside `STREAM_RESOLVED_REFUSAL`.
+- The verbs' own log lines are unchanged (`playlist: %s`, `epg: %s`), so `playlist: playlist: ...` and `epg: EPG: ...` read once.
+- Found by this lane's search by shape, and changed the same way: `read_http_source`'s refusal of a URL the playlist chose that carries a password named that URL's host (`EPG address epg.test carries a password the playlist chose; not used`). It now reads `EPG address the playlist chose carries a password; not used`, as `fetch_bytes`' two refusals of a hint already did.
+- The guide-hint refusal's host on the Sources row (the lead's instruction: if it names a host the provider chose, it names none). `epgHintRowText` (model/sources.mjs) said `EPG from playlist not used: <host> is a local address` and `... its address for <host> carries a password`, on the row and in its accessible name; the host is the hint's, which the playlist chose. They now read `EPG from playlist not used: its host is a local address` and `EPG from playlist not used: its address carries a password`, and `sourceView` no longer carries `epgHintHost`, whose one reader that was. `epgHintVerdict` and `epgHintRowState` keep their `host` field, which nothing prints. This changes two sentences UX-SOURCES.md's hint table and the README prescribe; the docs are lane-r5c's.
+- `cmd_status` (bin/helper/06-failed.py) drops `pathHost` and no longer asks the player for `path`, whose one use it was.
+
+**Red first** (3101349, the merged round 2):
+
+| Suite | On 3101349 | On this tree |
+|---|---|---|
+| tests/test_destinations.py `ProviderChosenRefusalTest` (new, 9 tests) | 9 of 9 red: every branch of `refusal` and `name_refusal` named the host or opened with the label (`playlist: 167772161 is an address ...`), `check_proxied` named `qqqqqq.x`, the cached literal's sentence named `2130706433`, the hint's password refusal named `epg.test`, and the journal read `playlist: playlist:` and `epg: EPG:` | 9 of 9 green |
+| tests/test_destinations.py, the three existing tests that read the shared fixture's sentences | 3 of 3 red (the fixture's messages now name no host) | 3 of 3 green |
+| tests/test_provider_hosts.py (one new test, one new hand-off vector) | 2 red: the looked-up `[::1]` hand-off's refusal named the literal; the hint holding a password named `epg.test` | green |
+| tests/test_mpv.py `StatusTest` (one new test, three rewritten) | 4 of 9 red: `pathHost` present, `provider.example.test` and `qqqqqq` printed, `path` asked | 9 of 9 green |
+| tests/Model.test.js (three checks rewritten) | 3 of 3749 red: the hint row and its accessible name named `192.168.1.1` and `192.168.1.6`, and the view carried `epgHintHost` | 0 of 3749 red |
+
+The shared fixture gains a third refusal (`proxied`, code `network`); both suites map it to `Could not resolve host from 127.0.0.1`, which on 3101349 already held in node (the shell reads the code and the word `resolve`), so the join is what is new.
+
+**Mutants**, each made on a scratch copy of this tree and sealed or relinked, each red:
+
+| Mutant | Red |
+|---|---|
+| the redirect branch of `refusal` names the host | 23 subtests of `ProviderChosenRefusalTest` |
+| `name_refusal` puts its label prefix back | 10 subtests |
+| `check_proxied`'s first-hop sentence names the host | 2 tests |
+| the cached literal's refusal prefixes the literal | 1 test |
+| `cmd_status` emits a `pathHost` | 4 tests |
+| the hint's password refusal names the host | 2 tests |
+| `epgHintRowText` appends the hint's host | 2 node checks |
+| `sourceView` carries `epgHintHost` again | 2 node checks |
+
+**Rule 15.** I searched for every helper sentence that interpolates a host (`HelperError(` with a `%` and `host`, `url_host` or `netloc`), every host-valued field a reply prints, and every model sentence built from a provider's host.
+- Changed: `DestinationPolicy.refusal`, `name_refusal` and `check_proxied` (03); `STREAM_LITERAL_REFUSAL` (08); the hint's password refusal in `read_http_source` (03); `epgHintRowText`'s two sentences and `sourceView.epgHintHost` (model); `pathHost` (06).
+- Cleared: the first hop's sentences in `read_http_source`, `read_http_response`, `download_timeout`, `memory_refusal` and `make_opener` (`could not reach`, `HTTP <n> from`, the timeout, too-large and unsafe-redirect sentences, the not-a-playlist and empty sentences) name `shown_source_host`, round 2's withheld host of the user's own source or of the guide address in force, kept as round 2 left it; `fetch_bytes`' two hint refusals already named none; the relay's sentences are fixed (`RELAY_REFUSED`, `RELAY_LOOKUP_FAILED`); `STREAM_LABEL_REFUSAL`, `STREAM_RESOLVED_REFUSAL`, `STREAM_LOOKUP_REFUSAL` and the stream gate's sentences were already fixed; the logo sentences (05-ipc-logos.py) are never printed, the run counts codes, and they are the logo step's.
+- Host-valued reply fields: `sourceHost` is round 2's (D-SINK-109); `state source list`'s `host` and `epgHost` are the typed host, kept by R32a; the logo survey's hosts are the logo step's; `pathHost` was the only one naming a host the provider chose.
+- Log lines: only `DestinationPolicy`'s sentences carried a verb; `11-cli.py`'s `%s: %s` and the `epg:` memory line add the verb once.
+- The docs that name `pathHost` or the old sentences (CLAUDE.md rule 5's round-2 bracket and its OSD paragraph, docs/ARCHITECTURE.md's round-2 bracket and the status contract, docs/M5-01-LIVE-REWIND.md, UX-SOURCES.md's hint table, README) are lane-r5c's.

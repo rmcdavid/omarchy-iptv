@@ -206,6 +206,19 @@ class HandOffTest(unittest.TestCase):
                 for leak in SECRETS + ("epg.test", "prov.test", "other", "tvbox", "2130706433", "://"):
                     self.assertNotIn(leak, message.lower(), message)
 
+    def test_a_refusal_after_the_lookup_names_no_host_either(self):
+        """D-SINK-113 (2026-11-16): the hand-offs the test above skips for
+        being looked up -- a literal, which the resolver parses and sends
+        nowhere -- are refused for where they lead, and that sentence named
+        the literal the playlist chose (`EPG: [::1] is an address ...`)."""
+        cases = [c for c in FIXTURE["handOffs"] if c["code"] == "local_address" and c["lookups"]]
+        got = []
+        for case in cases:
+            code, message, _ = self.hand_off(case)
+            got.append((case["url"], code, urllib.parse.urlsplit(case["url"]).hostname in message, message.split(" ", 1)[0]))
+        self.assertEqual(got, [(c["url"], "local_address", False, "the") for c in cases])
+        self.assertTrue(cases)
+
     def test_the_measured_list_is_refused_before_anything_and_the_users_is_not(self):
         """The critic's M3, at the helper: a shell loaded before the rule
         hands the whole list with origin `playlist`; the same text typed by

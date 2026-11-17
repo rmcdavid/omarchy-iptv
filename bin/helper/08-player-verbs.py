@@ -129,6 +129,13 @@ STREAM_LOOKUP_TIMEOUT_S = 3.0
 STREAM_LOOKUP_REFUSAL = ("could not look up the stream's host name to check where it leads; not played")
 STREAM_RESOLVED_REFUSAL = ("the stream's host name leads to an address on this machine or a local network that "
                            "the playlist chose; not played")
+# D-SINK-113 (2026-11-16): a cached channel's LITERAL refused at play for
+# where it leads (stream_host_refused), one fixed sentence beside its name's
+# (STREAM_RESOLVED_REFUSAL). It printed the literal as written, which for an
+# address whose password holds an unencoded `/` -- `http://2130706433:2024/
+# zz@cdn.test/` -- is the user name, into the reply and the journal.
+STREAM_LITERAL_REFUSAL = ("the stream's address is on this machine or a local network, and the playlist chose it; "
+                          "not played")
 
 
 def stream_lookup_name(netloc: str) -> str | bytes:
@@ -278,15 +285,18 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     of its playlist (cached_source) -- so a cache nothing checked cannot
     reach a LAN or loopback literal, or hand a sign-in header to another
     host, while the refresh that would replace it keeps failing. A `--url`
-    a human typed meets the listening rule only (it has no playlist).
+    a human typed meets the listening rule only (it has no playlist). The
+    host rule's refusal is `local_address` with STREAM_LITERAL_REFUSAL,
+    which names no host (D-SINK-113, 2026-11-16; it printed the literal as
+    written, which can be a user name).
 
     D-SINK-87 (the owner, 2026-11-08): and both, before anything is sent to
     the player, an address naming a host the player would read in a form
     host_name_refused refuses (stream_host_name_refused, every reading): a
     cache written before the rule can hold one (DESTINATION_RULES 3 has the
     shell refetch it once at the next start or swap), and `--url` is typed.
-    Refused as `unsupported_scheme` with one fixed sentence: unlike
-    `local_address` below, it names no host, which may be a userinfo. The
+    Refused as `unsupported_scheme` with one fixed sentence, which names
+    no host, the host being possibly a userinfo. The
     shell reads that code as the channel's own refusal
     (PLAYER_START_CHANNEL_REFUSALS: a card, and the channel marked failed,
     unless the user has stopped since) on a `player start` or `player
@@ -365,8 +375,7 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
         if not source.get("local") and scheme in STREAM_REMOTE_REFUSED_SCHEMES:
             raise HelperError("unsupported_scheme", STREAM_REMOTE_REFUSAL)
         if stream_host_refused(url, source):
-            raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
-                                               "chose; not played" % (url_host(url) or "the host"))
+            raise HelperError("local_address", STREAM_LITERAL_REFUSAL)
         if stream_label_refused(url, url_host(url), stream_scheme(url), source):
             raise HelperError("local_address", STREAM_LABEL_REFUSAL)
         # D-SINK-101: last, so a name every rule above refuses is never

@@ -379,8 +379,10 @@ function statusReason(status) {
     // D-SINK-40 (2026-10-29): the helper refused to connect to an address on
     // this machine or a local network that the PROVIDER chose -- a redirect
     // hop, the playlist's guide hint, a logo. About the provider's choice, so
-    // it keeps `from <host>` (off PROBE_LOCAL_REFUSALS); the helper's own
-    // message names the refused host and is the journal's.
+    // it keeps `from <host>` (off PROBE_LOCAL_REFUSALS), the playlist's or
+    // the guide's own host; the helper's own message, the journal's, names
+    // no host since D-SINK-113 (2026-11-16): the refused one is the
+    // provider's choice, and can be a user name.
     local_address: "Refused a local address",
     // D-SINK-101 (2026-11-13): player_target could not look a cached
     // channel's host name up within its bound, so it could not check where

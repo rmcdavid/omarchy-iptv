@@ -927,6 +927,16 @@
     "epg.test"
    ],
    "why": "the same text the user typed is theirs, and is looked up"
+  },
+  {
+   "url": "http://qqqqqq:zzzzzz@epg.test/guide.xml",
+   "origin": "playlist",
+   "playlistHost": "prov.test",
+   "listed": false,
+   "oneLabel": false,
+   "code": "bad_url",
+   "lookups": [],
+   "why": "D-SINK-40: a password the playlist chose is never sent, refused before any lookup; D-SINK-113: the refusal names no host, the host being the playlist's choice"
   }
  ],
  "logoHosts": [

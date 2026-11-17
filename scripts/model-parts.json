@@ -1050,6 +1050,8 @@
         "sourceRows",
         "EPG_HINT_ROW_TEXT",
         "EPG_HINT_PLAIN_ROW_TEXT",
+        "EPG_HINT_LOCAL_ROW_TEXT",
+        "EPG_HINT_USERINFO_ROW_TEXT",
         "epgHintRowText",
         "sourceDetail",
         "sourceAccessibleName",

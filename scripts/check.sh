@@ -1103,7 +1103,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3749}
 # (the loader writes no bytecode beside the stub). 8 of the 29 in the two
 # files red on 7b99ad6, and 6 single-decision mutants red (QA-RESULTS
 # "Round 2's reviews, settled"); the suite runs 2668, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2668}
+# 2026-11-16, lane-r5a (round 5 of the security review, D-SINK-113,
+# D-SINK-114): 2668 -> 2679 -- tests/test_destinations.py's
+# ProviderChosenRefusalTest (9: every refusal of a destination the provider
+# chose names no host and no verb, the proxied target, the cached literal at
+# play, the hint's password refusal, the journal line), tests/
+# test_provider_hosts.py's 1 (a refusal after the lookup) and tests/
+# test_mpv.py's 1 (no user name the path holds is printed). All 11 red on
+# 3101349 with 7 rewritten tests, 8 single-decision mutants red (QA-RESULTS
+# "Round 5 of the security review, lane-r5a"); the suite runs 2679, 1
+# skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2679}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
