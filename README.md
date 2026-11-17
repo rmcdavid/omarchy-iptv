@@ -1053,12 +1053,15 @@ carry channel ids — most do — are not affected at all.
   `?`, `#`, `@` or `:` (a fullwidth colon) is written as that character's
   UTF-8 escape (`%EF%BC%9A`). A host name in another script is fetched by
   its ASCII form, and a redirect to a host not written in ASCII is refused;
-  a logo's host must be plain ASCII. The international-name rules fold a
-  few letters by case that the plugin still accepts -- the German sharp s,
-  the Greek final sigma and the Greek letters with a subscript iota -- and
-  such a host is fetched under its folded name (`strasse.test` for a host
-  written with the sharp s), as it was before, while the Sources list shows
-  it as you wrote it.
+  a logo's host must be plain ASCII. A host may not hold a letter the
+  international-name rules fold into other letters by case -- the German
+  sharp s, the Greek final sigma and the Greek letters with a subscript
+  iota -- because it would be fetched under its folded name
+  (`strasse.test` for a host written with the sharp s) while the Sources
+  list showed it as you wrote it: write the folded name instead. A saved
+  source whose host holds one is dropped when the shell starts after the
+  update, a guide address holding one is cleared, and a channel whose host
+  holds one is skipped.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.

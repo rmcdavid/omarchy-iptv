@@ -342,12 +342,18 @@ class PlayTargetTest(unittest.TestCase):
         its text, case kept; a name that is not ASCII as its UTF-8 bytes,
         which resolve_within hands the resolver with no idna codec."""
         upper = "Svc.QQQQQQ.test"
-        wide = "Stra" + chr(0xDF) + "e.qqqqqq.test"
-        urls = ["rtsp://me:pw@%s:8554/s" % upper, "rtsp://%s/s" % wide]
-        got, resolver = self.outcomes(REMOTE, urls, {upper: [GLOBAL], wide.encode("utf-8"): ["127.0.0.1"]})
+        # D-SINK-119, the owner's decision of 2026-11-17: a u with diaeresis,
+        # which the idna codec keeps; the sharp s this test named until then
+        # is refused before any lookup now (the last url).
+        wide = "B" + chr(0xFC) + "cher.qqqqqq.test"
+        folded = "Stra" + chr(0xDF) + "e.qqqqqq.test"
+        urls = ["rtsp://me:pw@%s:8554/s" % upper, "rtsp://%s/s" % wide, "rtsp://%s/s" % folded]
+        got, resolver = self.outcomes(REMOTE, urls, {upper: [GLOBAL], wide.encode("utf-8"): ["127.0.0.1"],
+                                                     folded.encode("utf-8"): [GLOBAL]})
         # D-SINK-102: and played at the address it was judged by, the
         # userinfo and the port as written.
-        self.assertEqual(got, [("played", "rtsp://me:pw@%s:8554/s" % GLOBAL)] + self.refused())
+        self.assertEqual(got[:2], [("played", "rtsp://me:pw@%s:8554/s" % GLOBAL)] + self.refused())
+        self.assertEqual(got[2], ("unsupported_scheme", getattr(helper, "STREAM_HOST_NAME_REFUSAL", "<none>"), False))
         self.assertEqual(resolver.asked, [(upper, 8554), (wide.encode("utf-8"), 554)])
 
     def test_resolve_within_hands_a_bytes_name_to_the_resolver_as_bytes(self):
@@ -357,12 +363,15 @@ class PlayTargetTest(unittest.TestCase):
             asked.append(host)
             return [answer(GLOBAL)]
 
-        wide = ("Stra" + chr(0xDF) + "e.qqqqqq.test").encode("utf-8")
+        # D-SINK-119, the owner's decision of 2026-11-17: a name the codec
+        # keeps (a sharp s, this test's name until then, is refused now).
+        wide = ("B" + chr(0xFC) + "cher.qqqqqq.test").encode("utf-8")
         with mock.patch.object(socket, "getaddrinfo", getaddrinfo):
             self.assertEqual(helper.resolve_within(wide, 554, 1.0), [answer(GLOBAL)])
             # And a refused name is refused before the resolver, bytes or not.
-            with self.assertRaises(helper.HelperError):
-                helper.resolve_within("a;b.qqqqqq.test".encode("utf-8"), 554, 1.0)
+            for refused in ("a;b.qqqqqq.test", "Stra" + chr(0xDF) + "e.qqqqqq.test"):
+                with self.assertRaises(helper.HelperError):
+                    helper.resolve_within(refused.encode("utf-8"), 554, 1.0)
         self.assertEqual(asked, [wide])
 
 

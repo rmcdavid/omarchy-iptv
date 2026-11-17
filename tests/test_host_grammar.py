@@ -76,7 +76,10 @@ class TablesTest(unittest.TestCase):
         self.assertEqual((len(TABLES["delimiterFolds"]), len(TABLES["invisibleRanges"]), len(TABLES["asciiFolds"]),
                           len(TABLES["b1"])), (19, 26, 301, 27))
         kinds = {c.get("why") for c in FIXTURE["vectors"] if not c["ok"]}
-        self.assertTrue({"fold_host", "fold_userinfo", "bracket", "literal", "host", "port_text", "port_range"} <= kinds)
+        self.assertTrue({"fold_host", "fold_userinfo", "bracket", "literal", "host", "port_text", "port_range",
+                         "case_fold"} <= kinds)
+        self.assertEqual((len(TABLES["caseFoldRanges"]), len(expand(TABLES["caseFoldRanges"])), len(FIXTURE["streams"])),
+                         (14, 67, 6))
         self.assertGreaterEqual(sum(1 for c in FIXTURE["vectors"] if c["ok"]), 10)
         self.assertGreaterEqual(sum(1 for c in FIXTURE["stateReaders"] if c["kept"]), 5)
         self.assertGreaterEqual(sum(1 for c in FIXTURE["stateReaders"] if not c["kept"]), 5)
@@ -103,6 +106,63 @@ class TablesTest(unittest.TestCase):
         self.assertEqual(codes(TABLES["nfkcBeyondPython"]), {0xA7F1})
         refused = [hex(c) for c in sorted(shipped) if not helper.host_name_refused("a" + chr(c) + "b.test")]
         self.assertEqual(refused, [])
+
+    def test_the_case_fold_table_is_nameprep_recomputed_over_every_code_point(self):
+        """D-SINK-119, the owner's decision of 2026-11-17: HOST_CASE_FOLD_RANGES
+        is the fixture's table, and here it is recomputed from the codec
+        itself (encodings.idna.nameprep, a local computation; nothing is
+        looked up) over every code point: each one the other host rules
+        accept -- host_name_refused with this table emptied -- whose nameprep
+        form differs from its form as lower_host writes it. Compared as the
+        lowered form stands and as its NFC form, the same 67 either way, so
+        nameprep's composition adds none. A tripwire for a Python upgrade
+        that moves stringprep, its Unicode 3.2 tables or str.lower; and every
+        code point of it is refused."""
+        from encodings.idna import nameprep
+        from unittest import mock
+        shipped = helper_ranges(getattr(helper, "HOST_CASE_FOLD_RANGES", ()))
+        raw, composed = set(), set()
+        with mock.patch.object(helper, "_HOST_CASE_FOLDS", frozenset(), create=True):
+            for c in range(0x80, 0x110000):
+                if 0xD800 <= c <= 0xDFFF:
+                    continue
+                low = helper.lower_host(chr(c))
+                try:
+                    prepped = nameprep(low)
+                except UnicodeError:
+                    continue
+                as_nfc = unicodedata.normalize("NFC", low)
+                if prepped == low and prepped == as_nfc:
+                    continue
+                if helper.host_name_refused("a" + chr(c) + "b.test"):
+                    continue
+                if prepped != low:
+                    raw.add(c)
+                if prepped != as_nfc:
+                    composed.add(c)
+        self.assertEqual((sorted(hex(c) for c in raw ^ shipped), raw == composed, len(raw)), ([], True, 67))
+        self.assertEqual(shipped, expand(TABLES["caseFoldRanges"]))
+        self.assertEqual([hex(c) for c in sorted(shipped) if not helper.host_name_refused("a" + chr(c) + "b.test")], [])
+
+    def test_the_fold_makes_no_case_fold_code_point_of_one_no_table_refuses(self):
+        """D-SINK-119: host_name_refused asks HOST_CASE_FOLD_RANGES of the
+        name as written and not of its NFKD fold, because the fold produces
+        none of them from a code point neither table holds: U+0345 is in the
+        NFKD of the 63 iota letters, each in the table itself, and of U+037A;
+        the final sigma in that of U+03F2 and five mathematical letters; and
+        those seven are look-alikes (HOST_NFKC_RANGES). Over every code
+        point; a Unicode upgrade that adds another goes red."""
+        folds = helper_ranges(getattr(helper, "HOST_CASE_FOLD_RANGES", ()))
+        nfkc = helper_ranges(getattr(helper, "HOST_NFKC_RANGES", ()))
+        made = {}
+        for c in range(0x80, 0x110000):
+            if 0xD800 <= c <= 0xDFFF:
+                continue
+            hit = folds.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))
+            if hit and c not in folds:
+                made[c] = hit
+        self.assertEqual(sorted(hex(c) for c in made if c not in nfkc), [])
+        self.assertEqual(sorted(made), [0x37A, 0x3F2, 0x1D6D3, 0x1D70D, 0x1D747, 0x1D781, 0x1D7BB])
 
     def test_the_delimiter_folds_are_what_urlsplit_refuses(self):
         """Over every code point: urlsplit refuses `http://a<X>b.test/`
@@ -175,6 +235,94 @@ class EngineTableTest(unittest.TestCase):
         self.assertNotIn("probeError", result)
         self.assertEqual((result["ranges"], result["extra"], set(result["missing"]) <= {"a7f1"}, result["refused"]),
                          (256, ["16126", "16127", "16128"], True, [True, "invalid"]), result)
+
+
+CASE_FOLD_V4_BODY = r"""
+    var hex4 = function (n) { var h = n.toString(16).toUpperCase(); while (h.length < 4) h = "0" + h; return h }
+    var unit = function (c) {
+      return c > 0xffff ? String.fromCharCode(0xd800 + ((c - 0x10000) >> 10), 0xdc00 + ((c - 0x10000) & 0x3ff))
+                        : String.fromCharCode(c)
+    }
+    var ranges = Model.HOST_CASE_FOLD_RANGES || []
+    var listed = {}, nfkc = {}
+    for (var r = 0; r < ranges.length; r++) for (var c = ranges[r][0]; c <= ranges[r][1]; c++) listed[c] = true
+    var nr = Model.HOST_NFKC_RANGES
+    for (var q = 0; q < nr.length; q++) for (var k = nr[q][0]; k <= nr[q][1]; k++) nfkc[k] = true
+    var kept = []
+    for (var t = 0; t < FIXTURE_CODES.length; t++) {
+      if (!Model.hostNameRefused("a" + unit(FIXTURE_CODES[t]) + "b.test")) kept.push(hex4(FIXTURE_CODES[t]))
+    }
+    var made = []
+    for (var cp = 0x80; cp < 0x110000; cp++) {
+      if ((cp >= 0xd800 && cp <= 0xdfff) || listed[cp] === true || nfkc[cp] === true) continue
+      var s = unit(cp), d = s.normalize("NFKD")
+      if (d === s) continue
+      for (var i = 0; i < d.length; i++) if (FIXTURE_SET[d.charCodeAt(i)] === true) { made.push(hex4(cp)); break }
+    }
+    var fold = Model.sourceErrorMessage("url_fold_host")
+    var vectors = VECTORS.map(function (u) {
+      var f = Model.validateSourceUrl(u), e = Model.validateSourceUrl(u, { kind: "epg" })
+      return [f.ok, f.code, f.host, f.ok ? "" : (f.message === fold ? "fold" : f.message),
+              e.ok ? "" : (e.message === Model.sourceErrorMessage("url_fold_host", { field: "epg" }) ? "fold" : e.message)]
+    })
+    var records = STATE.map(function (c, n) {
+      return { key: (0xa0000000 + n).toString(16), url: c.url, epgUrl: c.epgUrl || "", kind: "http", label: "S" + n,
+               labelCustom: true, origin: "cli", addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    })
+    var st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: "sources", favorites: [], recents: [],
+                                               savedSearches: [], hiddenGroups: [], sources: records }))
+    var byKey = {}
+    for (var m = 0; m < st.sources.length; m++) byKey[st.sources[m].key] = st.sources[m]
+    var state = STATE.map(function (c, n) {
+      var x = byKey[(0xa0000000 + n).toString(16)]
+      return [x !== undefined, x ? x.url === c.url : null, x ? x.epgUrl !== "" : null]
+    })
+    console.log("RESULT " + JSON.stringify({ ranges: ranges.map(function (p) { return [hex4(p[0]), hex4(p[1])] }),
+      kept: kept, made: made.slice(0, 8), madeCount: made.length, vectors: vectors, state: state }))
+"""
+
+
+def case_fold_rows():
+    """The fixture's rows for the owner's decision of 2026-11-17: the
+    vectors whose reason is case_fold or whose note names the decision, and
+    the stateReaders rows whose url or guide url holds a code point of the
+    table or is the plain name the codec wrote."""
+    table = expand(TABLES["caseFoldRanges"])
+    vectors = [c for c in FIXTURE["vectors"] if c.get("why") == "case_fold" or "2026-11-17" in c.get("note", "")]
+    state = [c for c in FIXTURE["stateReaders"]
+             if any(ord(ch) in table for ch in c["url"] + c.get("epgUrl", "")) or "strasse" in c["url"]
+             or c["url"].startswith("http://" + chr(0x3C3))]
+    return vectors, state
+
+
+class CaseFoldEngineTest(unittest.TestCase):
+    """D-SINK-119, the owner's decision of 2026-11-17, in the shell's own
+    engine, where the Sources form and the state reader run: the model's
+    HOST_CASE_FOLD_RANGES is the fixture's table, hostNameRefused refuses
+    each of its 67 code points, the engine's own NFKD makes none of them
+    from a code point neither table holds (so asking the table as written is
+    enough there too), every vector of the decision reads as the fixture
+    says with fold_host's sentence on the playlist and the EPG field, and
+    Model.parseState drops, clears and keeps the decision's stored rows as
+    the fixture says."""
+
+    @unittest.skipUnless(os.access(proto_v4.QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
+    def test_qts_engine_holds_the_table_and_refuses_drops_and_keeps_as_the_fixture_says(self):
+        vectors, state = case_fold_rows()
+        codes_ = sorted(expand(TABLES["caseFoldRanges"]))
+        body = "    var FIXTURE_CODES = %s\n    var FIXTURE_SET = {}\n    FIXTURE_CODES.forEach(function (c) { FIXTURE_SET[c] = true })\n" \
+               "    var VECTORS = %s\n    var STATE = %s\n%s" % (
+                   json.dumps(codes_), json.dumps([c["input"] for c in vectors], ensure_ascii=True),
+                   json.dumps(state, ensure_ascii=True), CASE_FOLD_V4_BODY)
+        result = proto_v4.run_qml(self, body)
+        self.assertNotIn("probeError", result)
+        want_vectors = [[c["ok"], "ok" if c["ok"] else c["code"], c.get("host", ""), "" if c["ok"] else "fold",
+                         "" if c["ok"] else "fold"] for c in vectors]
+        want_state = [[c["kept"], True if c["kept"] else None, c.get("epgKept", False) if c["kept"] else None]
+                      for c in state]
+        self.assertEqual((result["ranges"], result["kept"], result["made"], result["vectors"], result["state"]),
+                         (TABLES["caseFoldRanges"], [], [], want_vectors, want_state))
+        self.assertGreaterEqual((len(vectors), len(state)), (10, 6))
 
 
 class VectorTest(unittest.TestCase):
@@ -733,6 +881,10 @@ STREAMS = [
     ("http://u" + chr(0xFF1A) + "p@cdn.test/1.ts", "D-SINK-115"),
     ("http://u:p[x]@cdn.test/1.ts", "D-SINK-115"),
 ]
+# D-SINK-119, the owner's decision of 2026-11-17: the shared fixture's
+# channel addresses whose host holds a code point the idna codec's case
+# folding writes as another name, a udp source entry among them.
+STREAMS += [(url, "D-SINK-119") for url in FIXTURE["streams"]]
 STREAM_CONTROL = "http://cdn_x.test/live/1.ts"
 
 
@@ -899,7 +1051,9 @@ class EngineReadingTest(unittest.TestCase):
         """The critique's finding 3: the own-host exceptions compare by
         host_key, which lowers a capital sigma to the small one and leaves a
         final sigma written as one alone, because the player asks the two as
-        other bytes."""
+        other bytes. Since the owner's decision of 2026-11-17 (D-SINK-119) no
+        host either validator accepts holds a final sigma, and no channel the
+        parse keeps; this holds the comparison itself."""
         home = {"host": helper.host_key(SIGMAS[2] + "-1.test"), "port": 554, "loopback": False}
         self.assertEqual([helper.own_host_match(h + "-1.test", 554, home) for h in SIGMAS], [True, False, True])
 
@@ -907,8 +1061,13 @@ class EngineReadingTest(unittest.TestCase):
         """A channel's host is lowered as the typed playlist's was, at the
         parse (the one-label exception, stream_entry_refusal) and at play (a
         proxied source's own host whose lookup answers nothing,
-        stream_lookup); a final sigma is another host there too. The lookup
-        itself asks each name as the player writes it."""
+        stream_lookup), and the lookup asks each name as the player writes
+        it. A final sigma written as one was another host there; since the
+        owner's decision of 2026-11-17 (D-SINK-119) it is refused at the
+        parse as a name no host may take (`name`, asked before the one-label
+        rule) and at play before anything is looked up
+        (stream_host_name_refused, which player_target asks first), since
+        the idna codec writes it as the small sigma."""
         from unittest import mock
         typed = helper.validate_source_url("http://" + SIGMAS[0] + ":554/get.php")["url"]
         source = helper.playlist_source("http", typed, "global", "global")
@@ -922,10 +1081,12 @@ class EngineReadingTest(unittest.TestCase):
             asked.append((name, port))
             return []
 
+        gate = [helper.stream_host_name_refused("rtsp://%s-1.test:554/live" % h) for h in SIGMAS]
+        looked = (SIGMAS[0], SIGMAS[2])
         with mock.patch.object(helper, "stream_resolve", unanswered):
-            play = [helper.stream_lookup("rtsp://%s-1.test:554/live" % h, cached)[0] for h in SIGMAS]
-        self.assertEqual((parse, play), (["", "label", ""], ["", "lookup", ""]))
-        self.assertEqual(asked, [((h + "-1.test").encode("utf-8"), 554) for h in SIGMAS])
+            play = [helper.stream_lookup("rtsp://%s-1.test:554/live" % h, cached)[0] for h in looked]
+        self.assertEqual((parse, gate, play), (["", "name", ""], [False, True, False], ["", ""]))
+        self.assertEqual(asked, [((h + "-1.test").encode("utf-8"), 554) for h in looked])
 
     def test_a_status_names_a_literal_with_its_brackets_and_decides_alike(self):
         """The status line named `::1` where the Sources row names `[::1]`;

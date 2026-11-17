@@ -21401,3 +21401,120 @@ The gate ran on exactly this commit's tree: node 3,848, python 2,737 (1 skipped)
 
 - **The residual.** Should the tail become one character-class search, which needs a new guard for the reorder, or should the service compute a per-logo answer per list? Or does the residual stand as stated?
 - **The consent dialog's survey.** Should it read authorities through the service's map, as the column does? The source validator per counted logo is the part that would remain. Should it get its own id?
+
+## The owner's case-fold decision, built (2026-11-17)
+
+The owner decided on 2026-11-17, in their own words asked and answered in chat and not under the standing authority, to "refuse and drop" the 67 code points round 5's settle left as a residual on D-SINK-119's row ("Nameprep's case folds" in the section above). The decision is built on `r5-build` by lane-r5fold in one gated commit on 9ced99c, which is lane-r5bound's tip: that lane committed nothing. No cage, live scenario, player, Quickshell or name lookup ran. Qt's engine ran offscreen (`qml` through `run_qml`, and `qmltestrunner`) with a scratch home, a scratch runtime directory and a core limit of 0. Every heavy run held the shared lock. The crash journal read 88 before and after each; it was 87 until lane-r5bound's own probe, which that lane reported. "Red on 9ced99c" means 9ced99c's helper and model run with this commit's tests and fixtures. A "mutant" is one decision of the new code broken on a scratch copy, then sealed or relinked.
+
+### What is refused, and how the table was found
+
+**Measured** by a local computation, with nothing looked up: every code point from U+0080 to U+10FFFF, through `host_name_refused` (in `a<cp>b.test`) and `encodings.idna.nameprep`.
+- **The table.** It holds every code point the other host rules accept whose nameprep form differs from its form as `lower_host` writes it: 67 code points in 14 ranges.
+  - U+00DF and U+1E9E become `ss`.
+  - U+0345 becomes U+03B9.
+  - U+03C2 becomes U+03C3.
+  - 63 Greek letters with a subscript or adscript iota, from U+1F80 to U+1FFC, become two letters each. The capitals are in the table because `lower_host` lowers them to the small letters.
+- **The lowered form, not the code point.** nameprep of the code point as written differs at 776 code points. Most are capitals Unicode 3.2 lacked (U+023A, Georgian, Cherokee), which nameprep leaves as they are and `lower_host` lowers. The validators store the lowered host and hand that to the codec, so the lowered form is the one compared. Over the validators' own stored label (`http://a<cp>b.test/`, nameprep against the NFC form) the answer is the same 67, which is the settle's measurement.
+- **Composition and the look-alike table.** None of the 67 is in `HOST_NFKC_RANGES`, which is asked first. Each is its own NFKC form. Compared as it stands or as its NFC form, the lowered form gives the same 67. So the table is per code point, as `HOST_NFKC_RANGES` is, and a sequence that nameprep composes (`e` then U+0301) is kept, because the composed form draws the same.
+- **The NFKD fold.** The fold makes a code point of the table from seven code points outside it: U+037A (U+0345), and U+03F2 and five mathematical final sigmas (U+03C2). All seven are look-alikes, refused before the fold. So the table is asked of the name as written only. The python suite and node hold this over every code point, and Qt's engine with its own NFKD.
+- **Kept.** A capital sigma: `lower_host` folds U+03A3 to U+03C3, and nameprep leaves U+03C3 alone (measured: `lower_host` of alpha and capital sigma is alpha and small sigma, and nameprep of that is the same). Also the plain name the codec wrote (`strasse.test`), and a u with diaeresis.
+
+### Where it is asked
+
+- `host_name_refused` (bin/helper/02-sources.py) and `Model.hostNameRefused` (model/sources.mjs) ask `HOST_CASE_FOLD_RANGES` after the look-alike table, for a name that is not ASCII. Both validators, the stream gate at the parse and at play, the connection layer, the relay's authority reader and both state readers reach them.
+- `read_authority` and `Model.readAuthority` give the reason `case_fold` first, before the other host rules, so a name that also holds another refused character gives the same reason in both mirrors.
+- **The sentence.** In the Sources form, `case_fold` takes the code `invalid` and the sentence of `fold_host` (`url_fold_host`): "The host holds a character that cannot be part of a host name". That is the delimiter look-alikes' sentence (D-SINK-115), reused because it fits. It reaches the playlist, EPG and Xtream server fields. The helper says "URL host holds a character that cannot be part of a host name".
+- `DESTINATION_RULES` stays 6. Round 5 is unreleased and already raised it once, and `player_target` refuses such a cached channel whatever the cache's number.
+
+### The shared fixture
+
+tests/fixtures/host-grammar.json gains:
+- **`tables.caseFoldRanges`.** The table. The python suite recomputes it from nameprep, and the node suite and Qt's engine hold the model's copy to it.
+- **Ten vectors.** Each runs through both validators, with its reason:
+  - a sharp s in a credentialed source;
+  - the folded name written plainly, which is kept;
+  - the capital sharp s;
+  - U+0345;
+  - the first iota letter and its capital;
+  - U+1FFC;
+  - a sharp s beside a `!`;
+  - a capital-sigma host, which is kept;
+  - the final-sigma vector, restated.
+- **Six `stateReaders` rows.** Each runs through `normalize_state` and `Model.parseState`. Three sources are dropped, one guide URL is cleared, and two sources are kept with their guide URLs.
+- **Six `streams`.** Each runs through the helper's parse, as `name`, and through play from an older cache: http, rtsp and a udp `sources` entry.
+
+tests/fixtures/source-urls.json's final-sigma vector is restated as refused.
+
+### D-SINK-118's tests, restated
+
+D-SINK-118 held a written final sigma as kept and as another host. Each test now keeps what it guarded:
+- **The vectors** (both fixtures) and Model.spec.qml's `test_engineSigmaInV4` hold the final sigma refused, with fold_host's sentence in the engine that runs the form.
+- **`test_a_channel_written_as_its_playlist_was_typed_is_its_own_host`** holds the parse's `name`, asked before the one-label rule, where it was `label`. It holds `stream_host_name_refused` at play, which `player_target` asks before any lookup. It still holds the capital and small sigma looked up as the player writes them.
+- **Unchanged:** the comparisons (`host_key`, `own_host_match`, the `engine` pairs), which never validated. Their docstrings now say no accepted host holds a final sigma.
+- **The relay and stream-lookup tests** used a sharp s as their sample of a name that is not ASCII (D-SINK-101, D-SINK-102). They now use a u with diaeresis, which the codec keeps, and a sharp s is asked as refused before any lookup.
+
+### Tests and red runs
+
+| Test | Red on 9ced99c |
+|---|---|
+| test_host_grammar: the table recomputed from nameprep over every code point (about 9 s) | red |
+| test_host_grammar: the NFKD fold's tripwire | red (no table: 0 found, 7 wanted) |
+| test_host_grammar: CaseFoldEngineTest, in Qt's engine (the table, the refusals, the engine's NFKD, the vectors with their sentence on two fields, parseState's drops) | red |
+| test_host_grammar: the vectors and their reasons (2 tests), the state readers, the stream parse and play (2), the restated D-SINK-118 channel test | 6 red |
+| test_host_names: the whole-range refusal, widened | red |
+| test_relay: the relay refuses such a name with nothing looked up | red |
+| test_stream_lookup: the folded name refused before the lookup (2 tests) | 2 red |
+| test_stream_host_names: the reading shortcut's count of refused readings, 150 to 153 code points below U+0800 in each place (U+00DF, U+0345, U+03C2) | red (604 against 616) |
+| node: the table, its refusals and node's NFKD; the reason and sentence on three fields | 2 red |
+| node: the vectors, Model.parseState over the stateReaders, the source-urls vector, the whole-range check | 4 red |
+| spec: `test_engineSigmaInV4` | red |
+
+In all, 14 python tests, 6 of 3,850 node checks and 1 of 110 spec cases are red on 9ced99c. All are green on this commit.
+
+**Single-decision mutants** (the four python modules; node and Qt's engine for the model):
+
+| Mutant | Red |
+|---|---|
+| (a) `host_name_refused` does not ask the table | 8 python tests: the recomputation's refusal, the stream parse and play, the D-SINK-118 channel test, the whole range, the relay, both stream-lookup tests. The validators still refuse through `read_authority`'s reason. |
+| (b) one range dropped from the helper's table (U+1F80 to U+1FAF) | 10 python tests, the recomputation and the fold's tripwire among them |
+| (c) `Model.hostNameRefused` does not ask the table | 2 node checks and the Qt-engine case |
+| (d) `Model.readAuthority` gives no `case_fold` | 2 node checks (the sentence, the reasons) and the Qt-engine case |
+| (e) `read_authority` gives no `case_fold` | 1 python test (the reasons) |
+
+### Rule 15: where else the job is done
+
+**Every place `HOST_NFKC_RANGES` is asked** (searched: `_HOST_NFKC_CHANGES` and `HOST_NFKC_RANGES` in every helper part, `isHostNfkcCode` and `hostHoldsNfkcChange` in every model part). The only places are `host_name_refused` and `Model.hostNameRefused`, and the case-fold table sits beside each.
+
+**Every reader of a host name that could reach the codec** (searched: `.encode("idna")`, `host_a_label`, `a_label_target`, `getaddrinfo`, `create_connection` and every caller of `validate_source_url` in the helper; every caller of `validateSourceUrl` and `readAuthority` in the model). Cleared:
+- **`a_label_target`** (the first hop of `read_http_source` and `fetch_logo`). It is handed a URL `resolve_source_url` validated, or a logo whose host must be ASCII.
+- **`host_a_label`** for the policy's home and the EPG status. These are the shell's validated playlist host, and a stored source holding a case fold is dropped on load.
+- **`resolve_within`, `bounded_create_connection`, the connection layer's request host and both redirect handlers.** Each asks `refuse_host_name`, which is `host_name_refused`. A redirect hop that is not ASCII is refused there too (`HOST_NOT_ASCII_REFUSAL`).
+- **The relay.** `relay_authority` asks `host_name_refused`, and its upstream connection asks `bounded_create_connection`.
+- **The stream gate.** `stream_entry_refusal` and `player_target` ask `stream_host_name_refused` in every reading, udp and rtp source entries included.
+- **The state readers and writers.** `normalize_state` validates every stored address (`normalize_source`), as do the CLI's `add_source_record` and `update_source_record`; `Model.parseState` does the same, and the form, the Xtream server and the guide hint (`epgHintVerdict`) go through `validateSourceUrl`.
+- **`derive_label`, `hostKey` and `labelHost`.** These name or compare; none reaches the codec.
+
+**Stated, not changed:**
+- The connection layer's `HOST_NAME_REFUSAL` sentence names neither look-alikes nor case folds, as it did not for D-SINK-119's table.
+- The NFKC look-alikes still read "Invalid URL" and "check the host" in the Sources form, under the reason `host`.
+
+**Every test that counts refused code points** (searched: each count asserted beside the D-SINK-116 to D-SINK-119 widenings, in the python and node suites). Changed:
+- test_stream_host_names' reading count, 150 to 153 below U+0800;
+- test_host_names' whole-range test and node's whole-range check, which now hold the table too.
+
+Cleared: the counts of the NFKC table (4,965), the folds (286) and the codec survey (238), which this table does not change.
+
+**Every test that used one of the 67 as a sample host** (searched: each code point, as a character or as an escape, in every file under tests/). Changed: the restated tests above. Cleared:
+- the `engine` pairs, which are comparisons;
+- label-readings.json's U+1F89, which is in a label, not a host;
+- url-mark.json's sharp s, which is redaction text;
+- the `normalizeText` checks, which are channel names;
+- test_host_names' and the spec's U+0345 sequences, which were already refused for their fullwidth `=`.
+
+### The gate and the scan
+
+The gate ran on exactly this commit's tree: node 3,850, python 2,741 (1 skipped), spec 110, with the floors levelled to them. The private-label scan over `git log --format=%B e2ae4f4..HEAD`, `git diff e2ae4f4` and the staged diff printed 0.
+
+### Open, for the lead
+
+- **The look-alike sentence.** Should the NFKC look-alikes say "cannot be part of a host name" too, as `case_fold` and the delimiter folds now do? Today they say "Invalid URL" and "check the host".

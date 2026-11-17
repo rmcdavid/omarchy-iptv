@@ -2725,11 +2725,8 @@
  },
  {
   "input": "http://\u03b1\u03c2-1.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://\u03b1\u03c2-1.test/x",
-  "host": "\u03b1\u03c2-1.test",
-  "key": "57b0caf6",
-  "note": "D-SINK-118: a final sigma written as one is kept"
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SINK-118, restated by the owner's decision of 2026-11-17 (D-SINK-119): a final sigma written as one is refused, since the idna codec writes it as the small sigma"
  }
 ]

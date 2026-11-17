@@ -554,8 +554,10 @@ class ReadingShortcutTest(unittest.TestCase):
         # widened the set (2026-11-16) by ASCII outside the allowlist, U+034F
         # and the code points that fold to one of them; 43 until then. 150
         # since D-SINK-119 (the same day): 65 more below U+0800 whose NFKC
-        # form is not themselves.
-        self.assertEqual((wrong[:8], on.count(True)), ([], 150 * 4 + 4))
+        # form is not themselves. 153 since the owner's decision of
+        # 2026-11-17: U+00DF, U+0345 and U+03C2, which the idna codec's case
+        # folding writes as other letters (HOST_CASE_FOLD_RANGES).
+        self.assertEqual((wrong[:8], on.count(True)), ([], 153 * 4 + 4))
 
 
 class CostTest(unittest.TestCase):

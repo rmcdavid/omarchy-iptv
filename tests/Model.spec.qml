@@ -3403,13 +3403,17 @@ TestCase {
   // (a) It applies no Final_Sigma rule, so a capital sigma at a label's end
   // lowered to the small sigma where node and the helper gave the final
   // one; every lowerer folds it first now (Model.lowerHost), and a final
-  // sigma written as one is kept and is another host.
+  // sigma written as one is another host. Since the owner's decision of
+  // 2026-11-17 (D-SINK-119) a final sigma in a host is refused with
+  // fold_host's sentence, since the idna codec writes it as the small one;
+  // the comparisons still keep the two apart.
   function test_engineSigmaInV4() {
     var S = String.fromCharCode
     compare(typeof Model.lowerHost === "function" ? Model.lowerHost(S(0x39f, 0x394, 0x39f, 0x3a3)) : "missing", S(0x3bf, 0x3b4, 0x3bf, 0x3c3))
     var sigma = Model.validateSourceUrl("http://" + S(0x391, 0x3a3) + "-1.test/")
     compare([sigma.url, sigma.host], ["http://" + S(0x3b1, 0x3c3) + "-1.test/", S(0x3b1, 0x3c3) + "-1.test"])
-    compare(Model.validateSourceUrl("http://" + S(0x3b1, 0x3c2) + "-1.test/").host, S(0x3b1, 0x3c2) + "-1.test")
+    var written = Model.validateSourceUrl("http://" + S(0x3b1, 0x3c2) + "-1.test/")
+    compare([written.ok, written.code, written.message], [false, "invalid", Model.sourceErrorMessage("url_fold_host")])
     var home = { host: Model.hostKey(S(0x3b1, 0x3c3) + "-1.test"), port: 554, loopback: false }
     compare([Model.ownHostMatch(S(0x391, 0x3a3) + "-1.test", 554, home), Model.ownHostMatch(S(0x3b1, 0x3c2) + "-1.test", 554, home)],
             [true, false])

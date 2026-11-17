@@ -304,6 +304,10 @@ fail=0
 # rows in the engine the guide runs in; red on 846dd43's model (1,088 to
 # 1,206 ms against bounds of 177 and 329) and under three single-decision
 # mutants; the spec runs 110.
+# 2026-11-17, lane-r5fold (D-SINK-119, the owner's decision of that day):
+# the floor stays 110 -- test_engineSigmaInV4 now holds a written final
+# sigma refused with fold_host's sentence rather than kept, red on
+# 9ced99c's model; no case is added, and the spec runs 110.
 QML_SPEC_MIN=${QML_SPEC_MIN:-110}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
@@ -693,7 +697,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-110}
 # whose tail is refused, 2 of 3848 red on 846dd43's model and each new
 # decision red under a named single-decision mutant (QA-RESULTS "The recheck
 # of round 5's settle, settled"); the suite runs 3848.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3848}
+# 2026-11-17, lane-r5fold (D-SINK-119, the owner's decision of that day):
+# 3848 -> 3850 -- HOST_CASE_FOLD_RANGES held to the shared host-grammar
+# fixture, refused in a host name and never made by node's NFKD fold, and
+# the case_fold reason with fold_host's sentence on the playlist, EPG and
+# Xtream server fields; with the fixture's new vectors and state rows and
+# the whole-range check widened, 6 checks red on 9ced99c's model and each
+# new decision red under a named single-decision mutant (QA-RESULTS "The
+# owner's case-fold decision, built (2026-11-17)"); the suite runs 3850.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3850}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1246,7 +1258,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3848}
 # atoms, 7 tests red on c32a936 and 4 single-decision helper mutants red
 # (QA-RESULTS "The reviews of round 5's build, settled"); the suite runs
 # 2737, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2737}
+# 2026-11-17, lane-r5fold (D-SINK-119, the owner's decision of that day):
+# 2737 -> 2741 -- tests/test_host_grammar.py's recomputation of
+# HOST_CASE_FOLD_RANGES from encodings.idna.nameprep over every code point,
+# the NFKD fold's tripwire and CaseFoldEngineTest (the table, the refusals,
+# the sentence and Model.parseState's drops in Qt's engine), and
+# tests/test_relay.py's refusal of such a name before any lookup; with
+# test_stream_host_names' reading count re-levelled, 14 tests red on
+# 9ced99c and 5 single-decision mutants red (QA-RESULTS "The owner's
+# case-fold decision, built (2026-11-17)"); the suite runs 2741, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2741}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

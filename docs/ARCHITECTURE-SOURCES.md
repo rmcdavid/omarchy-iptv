@@ -495,7 +495,11 @@ acceptance rule, no control character ever types) and a paste through
    literal (`url_bracket`: write them `%5B` and `%5D`); and a bracketed
    host that is no IPv6 address. A host name holds, in ASCII, letters,
    digits, `-`, `.` and `_`, written or folded, no invisible character and
-   no look-alike (D-SINK-116, -117, -119); the code stays `invalid`, so
+   no look-alike (D-SINK-116, -117, -119), nor, by the owner's decision of
+   2026-11-17, a code point the idna codec's case folding writes as
+   another name (`HOST_CASE_FOLD_RANGES`: the sharp s, the final sigma,
+   U+0345 and the Greek letters with a subscript iota), refused as
+   `case_fold` with `url_fold_host`'s sentence; the code stays `invalid`, so
    every caller that switches on it is unchanged. The stored url is held to
    the 2,048-unit cap as well as the typed text, because lowering lengthens
    a host. The host is lowered by `Model.lowerHost` (the helper's

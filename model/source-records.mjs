@@ -1143,7 +1143,10 @@ function entryWith(entry, patch, opts) {
 // cache before it can hold a channel whose address the helper's URL library
 // cannot read, or whose host holds ASCII other than a letter, a digit, `-`,
 // `.` or `_`, an invisible character, or a port not written in digits,
-// which the helper then refuses at every play. The
+// which the helper then refuses at every play; and, in the same unreleased
+// round, D-SINK-119's look-alikes and case folds (the owner's decision of
+// 2026-11-17 leaves the number at 6: no release wrote a 6, and the helper
+// refuses such a cached channel at play whatever the cache's number). The
 // service refetches a cache written under an older version, or carrying none, at the next start or swap, once, whatever
 // its age. The helper's DESTINATION_RULES; joined by the destinations
 // fixture.

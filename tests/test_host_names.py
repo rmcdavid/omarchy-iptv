@@ -345,9 +345,17 @@ class PredicateTest(unittest.TestCase):
         lookalikes = {c for c in range(0x80, 0x110000) if not 0xD800 <= c <= 0xDFFF
                       and unicodedata.normalize("NFKC", chr(c)) != chr(c)} | {0xA7F1}
         self.assertEqual((len(lookalikes), len(lookalikes - REFUSED_CHARS - folds)), (4965, 4665))
+        # D-SINK-119, the owner's decision of 2026-11-17: and the 67 code
+        # points the idna codec's case folding writes as another name (the
+        # shared fixture's table, which test_host_grammar recomputes from
+        # nameprep), none of them refused by the rules above.
+        case_folds = {code for first, last in GRAMMAR["tables"]["caseFoldRanges"]
+                      for code in range(int(first, 16), int(last, 16) + 1)}
+        self.assertEqual((len(case_folds), len(case_folds - REFUSED_CHARS - folds - lookalikes)), (67, 67))
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
-                     if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds or c in lookalikes)]
+                     if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds or c in lookalikes
+                                                                or c in case_folds)]
             self.assertEqual(wrong[:8], [], "with_port=%s" % with_port)
 
     def test_nameprep_adds_no_refused_character_the_decomposed_form_lacks(self):

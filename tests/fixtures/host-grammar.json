@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16, round 5 of the security review): how a source address's authority and host name are read, one file for both mirrors (CLAUDE.md: a rule in two languages gets one shared fixture). `tables` are the shipped tables as both mirrors must hold them: `delimiterFolds` (the code points whose compatibility form holds / ? # @ or :, which CPython's urlsplit refuses in an authority), `invisibleRanges` (Cf, Default_Ignorable_Code_Point and stringprep's B.1), `hostAscii` (the ASCII a host name may hold), and two lists each held to the engine that can compute them: `defaultIgnorable` (node's \\p{Default_Ignorable_Code_Point}, which Python's unicodedata lacks; the python suite builds the invisible table from it) and `b1` (stringprep's B.1, which node lacks; the node suite does the same), and `asciiFolds` (the code points whose NFKD holds ASCII outside hostAscii, each runtime's own fold held to it). D-SINK-119 (2026-11-16): `nfkcRanges`, the code points whose NFKC form is not themselves, the union of node's (Unicode 17.0) and Python's (16.0), which differ only at `nfkcBeyondPython` (U+A7F1, unassigned in 16.0); the table is the rule, each suite holds it to its own engine, and Qt's engine is held to it in tests/test_host_grammar.py. `vectors` run through validate_source_url (tests/test_host_grammar.py) and Model.validateSourceUrl (tests/Model.test.js), `why` being read_authority's and Model.readAuthority's reason. `connection` runs through the helper's host_name_refused (the connection layer) only. `stateReaders` are stored sources through both state readers (normalize_state, Model.parseState): the owner's decision of 2026-11-16 drops a source whose address holds a newly refused shape and clears a guide URL holding one, and keeps every other source as stored. `atoms` and `seeds` are the differential's generator classes (tests/test_host_grammar.py): helper and model over the same corpus, with the invariants the URL library itself checks. Every value is hex or an escape: the file is ASCII. D-SINK-118 (2026-11-16): `engine`, how a host is lowered and read in every engine, Qt's included: `lowerHost` pairs (lower_host, Model.lowerHost: a capital sigma is the small sigma wherever it stands, since Qt's engine applies no Final_Sigma rule), `hostKey` triples (host_key, Model.hostKey: whether two hosts are one; a final sigma written as one is not the small sigma), `labelKey` triples (label_key, and Model.labelTaken, which compares by labelKey), and `sourceHost` pairs (source_host over a stored url, Model.hostOf: the host a status names, a literal with its brackets); and four `vectors` that only Qt's engine read otherwise (a capital sigma, a written final sigma, U+180E in a path).",
+ "about": "D-SINK-115, D-SINK-116, D-SINK-117 (2026-11-16, round 5 of the security review): how a source address's authority and host name are read, one file for both mirrors (CLAUDE.md: a rule in two languages gets one shared fixture). `tables` are the shipped tables as both mirrors must hold them: `delimiterFolds` (the code points whose compatibility form holds / ? # @ or :, which CPython's urlsplit refuses in an authority), `invisibleRanges` (Cf, Default_Ignorable_Code_Point and stringprep's B.1), `hostAscii` (the ASCII a host name may hold), and two lists each held to the engine that can compute them: `defaultIgnorable` (node's \\p{Default_Ignorable_Code_Point}, which Python's unicodedata lacks; the python suite builds the invisible table from it) and `b1` (stringprep's B.1, which node lacks; the node suite does the same), and `asciiFolds` (the code points whose NFKD holds ASCII outside hostAscii, each runtime's own fold held to it). D-SINK-119 (2026-11-16): `nfkcRanges`, the code points whose NFKC form is not themselves, the union of node's (Unicode 17.0) and Python's (16.0), which differ only at `nfkcBeyondPython` (U+A7F1, unassigned in 16.0); the table is the rule, each suite holds it to its own engine, and Qt's engine is held to it in tests/test_host_grammar.py. `vectors` run through validate_source_url (tests/test_host_grammar.py) and Model.validateSourceUrl (tests/Model.test.js), `why` being read_authority's and Model.readAuthority's reason. `connection` runs through the helper's host_name_refused (the connection layer) only. `stateReaders` are stored sources through both state readers (normalize_state, Model.parseState): the owner's decision of 2026-11-16 drops a source whose address holds a newly refused shape and clears a guide URL holding one, and keeps every other source as stored. `atoms` and `seeds` are the differential's generator classes (tests/test_host_grammar.py): helper and model over the same corpus, with the invariants the URL library itself checks. Every value is hex or an escape: the file is ASCII. D-SINK-118 (2026-11-16): `engine`, how a host is lowered and read in every engine, Qt's included: `lowerHost` pairs (lower_host, Model.lowerHost: a capital sigma is the small sigma wherever it stands, since Qt's engine applies no Final_Sigma rule), `hostKey` triples (host_key, Model.hostKey: whether two hosts are one; a final sigma written as one is not the small sigma), `labelKey` triples (label_key, and Model.labelTaken, which compares by labelKey), and `sourceHost` pairs (source_host over a stored url, Model.hostOf: the host a status names, a literal with its brackets); and four `vectors` that only Qt's engine read otherwise (a capital sigma, a written final sigma, U+180E in a path). D-SINK-119, the owner's decision of 2026-11-17 (\"refuse and drop\"): `caseFoldRanges`, the 67 code points the idna codec's nameprep writes as another name than lower_host's (the sharp s, the capital sharp s, U+0345, the final sigma and the 63 Greek letters with a subscript or adscript iota), which both validators refuse with the reason `case_fold` and the Sources form says cannot be part of a host name; the python suite recomputes it from encodings.idna.nameprep over every code point, the node suite and Qt's engine hold the model's copy to it; its `vectors`, `stateReaders` rows (a source dropped, a guide URL cleared, a valid source kept) and `streams`, channel addresses the helper's parse skips as `name` and its play refuses from an older cache (the parse and play are the helper's alone).",
  "tables": {
   "delimiterFolds": [
    "2047",
@@ -1559,6 +1559,64 @@
   ],
   "nfkcBeyondPython": [
    "A7F1"
+  ],
+  "caseFoldRanges": [
+   [
+    "00DF",
+    "00DF"
+   ],
+   [
+    "0345",
+    "0345"
+   ],
+   [
+    "03C2",
+    "03C2"
+   ],
+   [
+    "1E9E",
+    "1E9E"
+   ],
+   [
+    "1F80",
+    "1FAF"
+   ],
+   [
+    "1FB2",
+    "1FB4"
+   ],
+   [
+    "1FB7",
+    "1FB7"
+   ],
+   [
+    "1FBC",
+    "1FBC"
+   ],
+   [
+    "1FC2",
+    "1FC4"
+   ],
+   [
+    "1FC7",
+    "1FC7"
+   ],
+   [
+    "1FCC",
+    "1FCC"
+   ],
+   [
+    "1FF2",
+    "1FF4"
+   ],
+   [
+    "1FF7",
+    "1FF7"
+   ],
+   [
+    "1FFC",
+    "1FFC"
+   ]
   ]
  },
  "vectors": [
@@ -2039,10 +2097,73 @@
   },
   {
    "input": "http://\u03b1\u03c2-1.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-118, restated by the owner's decision of 2026-11-17 (D-SINK-119): a final sigma written as one is refused, since the idna codec writes it as the small sigma; it is no longer kept as another host (a capital sigma is still kept as the small sigma, above)"
+  },
+  {
+   "input": "http://qqqqqq:zzzzzz@stra\u00dfe.test/get.php",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: a sharp s, which the idna codec writes as ss, so the row showed one name and the credentials went to the other"
+  },
+  {
+   "input": "http://qqqqqq:zzzzzz@strasse.test/get.php",
    "ok": true,
-   "url": "http://\u03b1\u03c2-1.test/",
-   "host": "\u03b1\u03c2-1.test",
-   "note": "D-SINK-118: a final sigma written as one stays one; it is other bytes to the player's lookup (the critique's finding 3)"
+   "url": "http://qqqqqq:zzzzzz@strasse.test/get.php",
+   "host": "strasse.test",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: the name the codec wrote, written plainly, is kept"
+  },
+  {
+   "input": "http://GRO\u1e9e.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: the capital sharp s, which lower_host lowers to the sharp s"
+  },
+  {
+   "input": "http://a\u0345b.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: U+0345, which the codec writes as the letter iota"
+  },
+  {
+   "input": "http://\u1f80x.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: the first Greek letter with a subscript iota, which the codec writes as two letters"
+  },
+  {
+   "input": "http://\u1f88X.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: its capital, with an adscript iota, which lower_host lowers to U+1F80"
+  },
+  {
+   "input": "http://x\u1ffc.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: the last of the table, U+1FFC"
+  },
+  {
+   "input": "http://stra\u00dfe!.test/",
+   "ok": false,
+   "code": "invalid",
+   "why": "case_fold",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: asked before the other host rules, so a name that also holds a refused character says the same in both mirrors"
+  },
+  {
+   "input": "https://\u03a3\u0391\u03a3.test/",
+   "ok": true,
+   "url": "https://\u03c3\u03b1\u03c3.test/",
+   "host": "\u03c3\u03b1\u03c3.test",
+   "note": "D-SINK-119, the owner's decision of 2026-11-17: a capital sigma is kept: lower_host folds it to the small sigma, which nameprep leaves as it is (measured)"
   },
   {
    "input": "http://cdn.test/a\u180eb.m3u",
@@ -2253,7 +2374,43 @@
    "epgUrl": "http://epg\ufe52test/x.xml",
    "kept": true,
    "epgKept": false
+  },
+  {
+   "url": "http://qqqqqq:zzzzzz@stra\u00dfe.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://\u1f80x.test/get.php",
+   "kept": false
+  },
+  {
+   "url": "http://a\u0345b.test/live.m3u",
+   "kept": false
+  },
+  {
+   "url": "http://cdn.test/get.php?u=6",
+   "epgUrl": "http://epg\u03c2.test/x.xml",
+   "kept": true,
+   "epgKept": false
+  },
+  {
+   "url": "http://qqqqqq:zzzzzz@strasse.test/get.php",
+   "epgUrl": "http://qqqqqq:zzzzzz@strasse.test/xmltv.php",
+   "kept": true,
+   "epgKept": true
+  },
+  {
+   "url": "http://\u03c3\u03b1\u03c3.test/get.php",
+   "kept": true
   }
+ ],
+ "streams": [
+  "http://stra\u00dfe.test/1.ts",
+  "http://cdn\u03c2.test/1.ts",
+  "rtsp://\u1f80x.test:554/live",
+  "http://qqqqqq:zzzzzz@GRO\u1e9e.test/1.ts",
+  "udp://239.0.0.1:1234?sources=stra\u00dfe.test",
+  "http://a\u0345b.test/1.ts"
  ],
  "atoms": {
   "schemes": [

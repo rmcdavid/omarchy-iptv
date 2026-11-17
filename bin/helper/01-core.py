@@ -244,7 +244,11 @@ ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
 # cache before it can hold a channel whose address the URL library cannot
 # read, or whose host holds ASCII other than a letter, a digit, `-`, `.` or
 # `_`, an invisible character, or a port not written in digits, which
-# player_target then refuses at every play). A cache written under an
+# player_target then refuses at every play), and, in the same unreleased
+# round, D-SINK-119's look-alikes and the code points the idna codec's case
+# folding writes as another name (the owner's decision of 2026-11-17, which
+# leaves the number at 6: no release wrote a 6, and player_target refuses
+# such a cached channel whatever the cache's number). A cache written under an
 # older version, or carrying none, is refetched once, whatever its age, when
 # its source is the active one: the active source's at the next start, each other source's at
 # its next swap, and each shows its old cache until that refetch lands -- or,

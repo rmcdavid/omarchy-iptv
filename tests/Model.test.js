@@ -8722,6 +8722,10 @@ const grammarRanges = list => { const out = new Set(); for (const [a, b] of list
 const GRAMMAR_B1 = grammarCodes(GRAMMAR.tables.b1)
 const GRAMMAR_ASCII = GRAMMAR.tables.hostAscii
 const GRAMMAR_NFKC = grammarRanges(GRAMMAR.tables.nfkcRanges)
+// D-SINK-119, the owner's decision of 2026-11-17: the code points the helper's
+// idna codec writes as another name by its case folding, which the python
+// suite recomputes from nameprep (node has none).
+const GRAMMAR_CASEFOLD = grammarRanges(GRAMMAR.tables.caseFoldRanges || [])
 checkCall("D-SINK-119: HOST_NFKC_RANGES is node's NFKC, code point by code point -- every code point whose NFKC form is not itself -- and the shared fixture's table, which holds U+A7F1 beyond Python's Unicode", () => {
   const ranges = Model.HOST_NFKC_RANGES || []
   const listed = new Set()
@@ -8742,6 +8746,29 @@ checkCall("D-SINK-119: a host name holding a code point of the table is refused 
   return [refused, kept]
 }, [["invalid", "invalid", "invalid", "invalid", "invalid", "invalid", "invalid"],
     ["b" + String.fromCharCode(0xfc) + "cher.test", String.fromCharCode(0x5d0) + "a.test", "cafe" + String.fromCharCode(0x301) + ".test"]])
+checkCall("D-SINK-119, the owner's decision of 2026-11-17: HOST_CASE_FOLD_RANGES is the shared fixture's table, 14 ranges and 67 code points, each refused in a host name, and node's NFKD makes none of them from a code point neither table holds", () => {
+  const ranges = Model.HOST_CASE_FOLD_RANGES || []
+  const hex4 = n => n.toString(16).toUpperCase().padStart(4, "0")
+  const shipped = JSON.stringify(ranges.map(r => [hex4(r[0]), hex4(r[1])])) === JSON.stringify(GRAMMAR.tables.caseFoldRanges)
+  const kept = [...GRAMMAR_CASEFOLD].filter(c => !Model.hostNameRefused("a" + String.fromCodePoint(c) + "b.test")).map(c => c.toString(16))
+  const made = []
+  for (let c = 0x80; c < 0x110000; c++) {
+    if ((c >= 0xd800 && c <= 0xdfff) || GRAMMAR_CASEFOLD.has(c) || GRAMMAR_NFKC.has(c)) continue
+    if (Array.from(String.fromCodePoint(c).normalize("NFKD")).some(d => GRAMMAR_CASEFOLD.has(d.codePointAt(0)))) made.push(c.toString(16))
+  }
+  return [ranges.length, GRAMMAR_CASEFOLD.size, shipped, kept, made]
+}, [14, 67, true, [], []])
+checkCall("D-SINK-119, the owner's decision of 2026-11-17: a host the codec writes as another is refused with fold_host's sentence on the playlist, EPG and Xtream server fields; the plain name it wrote and a capital sigma are kept", () => {
+  const S = (...c) => String.fromCodePoint(...c)
+  const hosts = ["stra" + S(0xdf) + "e.test", "GRO" + S(0x1e9e) + ".test", "a" + S(0x345) + "b.test", "cdn" + S(0x3c2) + ".test", S(0x1f88) + "x.test", "x" + S(0x1ffc) + ".test"]
+  const told = hosts.map(h => [Model.validateSourceUrl("http://qqqqqq:zzzzzz@" + h + "/get.php").message,
+    Model.validateSourceUrl("http://" + h + "/x.xml", { kind: "epg" }).message,
+    Model.validateXtream({ server: "http://" + h + ":8080", username: "qqqqqq", password: "zzzzzz" }).message,
+    modelFn("readAuthority")(h + "/get.php").why])
+  const kept = ["http://strasse.test/get.php", "https://" + S(0x3a3, 0x391, 0x3a3) + ".test/"].map(u => Model.validateSourceUrl(u).host)
+  return [told, kept]
+}, [["stra", "GRO", "a", "cdn", "x1f88", "x"].map(() => [Model.sourceErrorMessage("url_fold_host"), Model.sourceErrorMessage("url_fold_host", { field: "epg" }),
+     Model.sourceErrorMessage("url_fold_host"), "case_fold"]), ["strasse.test", String.fromCodePoint(0x3c3, 0x3b1, 0x3c3) + ".test"]])
 checkCall("D-SINK-116: HOST_INVISIBLE_RANGES is \\p{Cf}, \\p{Default_Ignorable_Code_Point} and the fixture's B.1, code point by code point, and the fixture's default-ignorable list is node's", () => {
   const ranges = Model.HOST_INVISIBLE_RANGES || []
   const di = grammarRanges(GRAMMAR.tables.defaultIgnorable)
@@ -8782,8 +8809,10 @@ checkCall("D-SINK-86, D-SINK-88, D-SINK-92, D-SINK-116, D-SINK-117: hostNameRefu
     const folded = c >= 0x80 && decomposed.some(refusedChar)
     if (folded && !refusedChar(ch)) folds++
     if (c >= 0x80 && decomposed.some(d => d.codePointAt(0) < 0x80 && GRAMMAR_ASCII.indexOf(d) === -1)) asciiFolds.push(c)
-    // D-SINK-119: and a code point of the NFKC table, a look-alike.
-    const want = refusedChar(ch) || folded || GRAMMAR_NFKC.has(c)
+    // D-SINK-119: and a code point of the NFKC table, a look-alike; and,
+    // the owner's decision of 2026-11-17, one the codec's case folding
+    // writes as another name.
+    const want = refusedChar(ch) || folded || GRAMMAR_NFKC.has(c) || GRAMMAR_CASEFOLD.has(c)
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
   // 286, the count test_host_names takes in Python's NFKD: the code points

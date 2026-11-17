@@ -3869,7 +3869,9 @@ hop and judged against the address actually connected to:
   resolver (`refuse_host_name`, D-SINK-86 and -92). [2026-11-16, round 5 of
   the security review: what no name may hold is, in ASCII, anything but a
   letter, a digit, `-`, `.` and `_`, an invisible character, or a
-  look-alike whose NFKC form is another name (D-SINK-116, -117, -119), and
+  look-alike whose NFKC form is another name (D-SINK-116, -117, -119) or,
+  by the owner's decision of 2026-11-17, a code point the idna codec's
+  case folding writes as another name (`HOST_CASE_FOLD_RANGES`), and
   a port that is not one to five ASCII digits up to 65535 is refused with
   it, after a name or a bracketed literal (D-SINK-117). A cached channel's
   literal refused at play is `local_address` with one fixed sentence that

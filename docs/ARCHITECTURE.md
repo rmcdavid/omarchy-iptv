@@ -1182,10 +1182,17 @@ playlist, guide or probe fetch was followed to any http(s) host. The policy:
   `bad_url` before any lookup (D-SINK-119); the policy's home is that
   A-label too. A later hop whose host is not ASCII -- a redirect's, which
   urllib percent-decodes -- is refused at the connection, not rewritten
-  (the review of round 5's build, 2026-11-17). Not refused, and stated on
-  D-SINK-119's row: the codec's case folds that NFKC leaves alone (67 code
-  points: U+00DF, U+1E9E, U+03C2, U+0345 and the Greek letters with a
-  subscript or adscript iota), fetched under the folded name as before. A
+  (the review of round 5's build, 2026-11-17). And, by the owner's
+  decision of 2026-11-17 (D-SINK-119), no code point the codec's case
+  folding writes as another name, which NFKC leaves alone
+  (`HOST_CASE_FOLD_RANGES`, `Model.HOST_CASE_FOLD_RANGES`: 67 code points,
+  U+00DF, U+1E9E, U+03C2, U+0345 and the Greek letters with a subscript or
+  adscript iota, recomputed from `encodings.idna.nameprep` by the suite),
+  which the first hop would fetch under the folded name while Sources
+  showed the name as written: refused by both validators (`case_fold`,
+  with `url_fold_host`'s sentence), the stream gate at the parse and at
+  play, the connection layer and the relay's authority reader, and a
+  stored source holding one is dropped on load and a guide URL cleared. A
   logo is counted, slotted and fetched by one reading
   (`logo_contact_host`, `Model.logoContactHost`, D-SINK-112), its written
   port held to `port_digits`, asked in three halves in the order of their

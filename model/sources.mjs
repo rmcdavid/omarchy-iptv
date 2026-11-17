@@ -559,6 +559,44 @@ function hostHoldsNfkcChange(s) {
   return false
 }
 
+// D-SINK-119, the owner's decision of 2026-11-17 ("refuse and drop"): the
+// code points the helper's idna codec writes as ANOTHER name, as
+// [first, last], 14 ranges and 67 code points: every code point the rules
+// above accept in a host name whose nameprep form (stringprep's B.2 case
+// folding, then NFKC under Unicode 3.2) differs from its form as lowerHost
+// writes it. All are case folds NFKC leaves alone: U+00DF and U+1E9E become
+// `ss`, U+0345 becomes U+03B9, U+03C2 becomes U+03C3, and the 63 Greek
+// letters with a subscript or adscript iota (U+1F80 to U+1FFC) become two
+// letters, so `stra<U+00DF>e.test` was shown in Sources while the first hop
+// sent its credentials to `strasse.test`. The capital sigma is not one
+// (lowerHost folds it to U+03C3, which nameprep leaves alone). Per code
+// point, as HOST_NFKC_RANGES is: a sequence that composes is kept. Node has
+// no nameprep, so the helper's suite recomputes the table from Python's;
+// the helper's HOST_CASE_FOLD_RANGES is the same table, held to it by the
+// shared host-grammar fixture here and in Qt's engine. Sorted.
+var HOST_CASE_FOLD_RANGES = [
+  [0x00df, 0x00df], [0x0345, 0x0345], [0x03c2, 0x03c2], [0x1e9e, 0x1e9e], [0x1f80, 0x1faf], [0x1fb2, 0x1fb4],
+  [0x1fb7, 0x1fb7], [0x1fbc, 0x1fbc], [0x1fc2, 0x1fc4], [0x1fc7, 0x1fc7], [0x1fcc, 0x1fcc], [0x1ff2, 0x1ff4],
+  [0x1ff7, 0x1ff7], [0x1ffc, 0x1ffc]]
+
+function isHostCaseFoldCode(code) {
+  if (code < 0xdf || code > 0x1ffc) return false
+  for (var i = 0; i < HOST_CASE_FOLD_RANGES.length; i++) {
+    if (code < HOST_CASE_FOLD_RANGES[i][0]) return false
+    if (code <= HOST_CASE_FOLD_RANGES[i][1]) return true
+  }
+  return false
+}
+
+// D-SINK-119: does `s` hold a code point of HOST_CASE_FOLD_RANGES? All of
+// them are in the BMP, so a code unit is the code point it would be read as.
+function hostHoldsCaseFold(s) {
+  for (var i = 0; i < s.length; i++) {
+    if (isHostCaseFoldCode(s.charCodeAt(i))) return true
+  }
+  return false
+}
+
 // D-SINK-115 (2026-11-16): the code points whose compatibility form holds
 // `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD in node 26
 // (Unicode 17.0), Python 3.14 (16.0) and Qt 6.12's engine. The helper's URL
@@ -571,7 +609,11 @@ var DELIMITER_FOLDS = [0x2047, 0x2048, 0x2049, 0x2100, 0x2101, 0x2105, 0x2106, 0
 
 // D-SINK-115: the sentence each of readAuthority's told refusals carries
 // (sourceErrorMessage), under the code `invalid` as R33b's url_control is.
-var AUTHORITY_MESSAGE_CODES = { fold_host: "url_fold_host", fold_userinfo: "url_fold_userinfo", bracket: "url_bracket" }
+// D-SINK-119, the owner's decision of 2026-11-17: `case_fold`, a host name
+// the helper's idna codec writes as another, shares fold_host's sentence --
+// the character cannot be part of a host name.
+var AUTHORITY_MESSAGE_CODES = { fold_host: "url_fold_host", fold_userinfo: "url_fold_userinfo", bracket: "url_bracket",
+  case_fold: "url_fold_host" }
 
 // One index walk over the code units, a surrogate pair read as the one code
 // point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
@@ -615,6 +657,10 @@ function hostNameRefused(host) {
   if (!NON_ASCII_RE.test(s)) return false
   // D-SINK-119: a look-alike of the name its NFKC form spells.
   if (hostHoldsNfkcChange(s)) return true
+  // D-SINK-119, the owner's decision of 2026-11-17: a name the helper's
+  // idna codec writes as another by its case folding. Asked as written: the
+  // fold produces none of them from a code point no table refuses.
+  if (hostHoldsCaseFold(s)) return true
   var folded = s.normalize("NFKD")
   return folded !== s && hostNameRefusedAsWritten(folded)
 }
@@ -957,7 +1003,7 @@ function validateSourceUrl(text, opts) {
   if (urlSpaceIndex(rest) !== -1) return innerChar()
   var read = readAuthority(rest.substring(2))
   if (!read.ok) {
-    if (read.why === "fold_host" || read.why === "fold_userinfo" || read.why === "bracket") {
+    if (read.why === "fold_host" || read.why === "fold_userinfo" || read.why === "bracket" || read.why === "case_fold") {
       var told = fail("invalid")
       told.message = sourceErrorMessage(AUTHORITY_MESSAGE_CODES[read.why], { field: field })
       return told
@@ -1040,6 +1086,11 @@ function readAuthority(body) {
     var colon = hostport.lastIndexOf(":")
     host = colon === -1 ? hostport : hostport.substring(0, colon)
     port = colon === -1 ? "" : hostport.substring(colon + 1)
+    // D-SINK-119, the owner's decision of 2026-11-17: a name the helper's
+    // idna codec writes as another says so (case_fold), as the helper's
+    // read_authority does; hostNameRefused refuses it too, so this decides
+    // the sentence, never the verdict.
+    if (NON_ASCII_RE.test(host) && hostHoldsCaseFold(host)) return refused("case_fold")
     // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
     if (/[:\[\]]/.test(host) || hostNameRefused(host)) return refused("host")
   }
@@ -3239,7 +3290,8 @@ export {
   ZERO_WIDTH_RE, SOURCE_URL_SCHEMES, IPV6_LITERAL_RE, isIpv6Literal,
   HOST_FORMAT_RANGES, isHostFormatCode, HOST_INVISIBLE_RANGES,
   isHostInvisibleCode, isHostNameAscii, HOST_NFKC_RANGES, isHostNfkcCode,
-  hostHoldsNfkcChange, DELIMITER_FOLDS, AUTHORITY_MESSAGE_CODES, NON_ASCII_RE,
+  hostHoldsNfkcChange, HOST_CASE_FOLD_RANGES, isHostCaseFoldCode,
+  hostHoldsCaseFold, DELIMITER_FOLDS, AUTHORITY_MESSAGE_CODES, NON_ASCII_RE,
   hostNameRefused, hostNameRefusedAsWritten, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,

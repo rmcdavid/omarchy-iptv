@@ -1199,11 +1199,15 @@ requests and raise the batch.
      A host name holds, in ASCII, letters, digits, `-`, `.` and `_` and
      nothing else, as written and in its NFKD fold, no invisible character
      (Cf, Unicode's default-ignorables, stringprep's B.1) and no code point
-     whose NFKC form is another (a look-alike of the name it folds to; the
-     idna codec's case folds that NFKC leaves alone -- the sharp s, the
-     final sigma, U+0345, the Greek letters with a subscript iota -- are
-     accepted and fetched under the folded name, as before: D-SINK-119's
-     stated residual); a port at the connection is one to five ASCII digits
+     whose NFKC form is another (a look-alike of the name it folds to), and,
+     by the owner's decision of 2026-11-17, no code point the idna codec's
+     case folding writes as another name -- the sharp s, the final sigma,
+     U+0345, the Greek letters with a subscript iota, 67 in all
+     (`HOST_CASE_FOLD_RANGES`, which the suite recomputes from nameprep):
+     `stra<U+00DF>e.test` was shown in Sources and fetched as
+     `strasse.test`; a stored source holding one is dropped on load, as
+     the decision of 2026-11-16 drops the other shapes; a port at the
+     connection is one to five ASCII digits
      up to 65535, after a name or a bracketed literal, on every hop before
      any lookup (D-SINK-116, -117, -119). The first hop of the playlist,
      guide and probe fetches sends the host's A-label -- the name CPython's

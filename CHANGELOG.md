@@ -83,11 +83,13 @@ after the shell starts, and you start the channel again yourself.
   differently** (a fullwidth letter, a circled digit). A source, guide,
   redirect, logo or channel host holding anything else is refused before
   it is looked up, and a redirect to a port not written in ASCII digits is
-  not followed. The international-name rules also fold a few letters by
-  case (the German sharp s, the Greek final sigma and the Greek letters
-  with a subscript iota); a host holding one is still accepted and, as
-  before, fetched under the folded name (`strasse.test` for a host written
-  with the sharp s). (D-SINK-116, D-SINK-117, D-SINK-119)
+  not followed. Nor may it hold a letter the international-name rules
+  fold into other letters by case -- the German sharp s, the Greek final
+  sigma and the Greek letters with a subscript iota -- because such a host
+  was fetched under the folded name (`strasse.test` for a host written
+  with the sharp s) while the Sources list showed it as written; the
+  Sources form says the character cannot be part of a host name, so write
+  the folded name instead. (D-SINK-116, D-SINK-117, D-SINK-119)
 - **A source or guide on a host name written in another script is fetched
   by its ASCII form**, the name your system already looked up; one outside
   Latin-1 failed every fetch before. A name the international-name rules

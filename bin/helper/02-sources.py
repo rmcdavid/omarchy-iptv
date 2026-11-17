@@ -246,6 +246,39 @@ HOST_NFKC_RANGES = (
     (0x1F110, 0x1F12E), (0x1F130, 0x1F14F), (0x1F16A, 0x1F16C), (0x1F190, 0x1F190), (0x1F200, 0x1F202), (0x1F210, 0x1F23B),
     (0x1F240, 0x1F248), (0x1F250, 0x1F251), (0x1FBF0, 0x1FBF9), (0x2F800, 0x2FA1D))
 _HOST_NFKC_CHANGES = frozenset(chr(code) for first, last in HOST_NFKC_RANGES for code in range(first, last + 1))
+# D-SINK-119, the owner's decision of 2026-11-17 ("refuse and drop"): the
+# code points the idna codec writes as ANOTHER name, as (first, last), 14
+# ranges and 67 code points. The table is every code point the rules above
+# accept in a host name (HOST_NFKC_RANGES and the NFKD fold included) whose
+# nameprep form (encodings.idna.nameprep: stringprep's B.1 removal and B.2
+# case folding, then NFKC under Unicode 3.2) differs from its form as
+# lower_host writes it -- the host as both validators store it and the
+# codec is handed it. All 67 are B.2 case folds that NFKC leaves alone:
+# U+00DF and U+1E9E become `ss`, U+0345 becomes U+03B9, U+03C2 becomes
+# U+03C3, and the 63 Greek letters with a subscript or adscript iota
+# (U+1F80 to U+1FFC, capitals included, which lower_host lowers to the
+# small ones) become two letters. Since the first hop sends the A-label
+# (a_label_target), `http://u:p@stra<U+00DF>e.example/` showed that name in
+# Sources while its credentials went to `strasse.example`, which under
+# IDNA2008 can be another registrant's domain; CPython's socket looked the
+# folded name up in every release. The capital sigma U+03A3 is not one:
+# lower_host folds it to U+03C3, which nameprep leaves alone. How NFC
+# composition and HOST_NFKC_RANGES meet it: none of the 67 is in
+# HOST_NFKC_RANGES (which is asked first), every one is its own NFKC form,
+# and the lowered form compared as it stands and compared as its NFC form
+# give the same 67, so the table is per code point as HOST_NFKC_RANGES is,
+# and a sequence nameprep composes (`e` then U+0301) is kept, since the
+# composed form draws the same. The NFKD fold produces none of the 67 from a
+# code point no table refuses (measured over every code point and held by
+# the suite), so the table is asked of the name as written. The python
+# suite recomputes it from nameprep over every code point, a tripwire for a
+# Python upgrade; Model.HOST_CASE_FOLD_RANGES is the same table, held to it
+# by the shared host-grammar fixture in node and in Qt's engine.
+HOST_CASE_FOLD_RANGES = ((0x00DF, 0x00DF), (0x0345, 0x0345), (0x03C2, 0x03C2), (0x1E9E, 0x1E9E),
+                         (0x1F80, 0x1FAF), (0x1FB2, 0x1FB4), (0x1FB7, 0x1FB7), (0x1FBC, 0x1FBC),
+                         (0x1FC2, 0x1FC4), (0x1FC7, 0x1FC7), (0x1FCC, 0x1FCC), (0x1FF2, 0x1FF4),
+                         (0x1FF7, 0x1FF7), (0x1FFC, 0x1FFC))
+_HOST_CASE_FOLDS = frozenset(chr(code) for first, last in HOST_CASE_FOLD_RANGES for code in range(first, last + 1))
 # What an IPv6 literal's zone may hold: _IPV6_LITERAL's `%25[A-Za-z0-9._~-]+`.
 _ZONE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
 
@@ -326,7 +359,15 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     D-SINK-119 (2026-11-16): and a name holding a code point whose NFKC
     form is not itself (HOST_NFKC_RANGES), a look-alike of the name the idna
     codec writes it as, which the first hop's A-label would now fetch from.
-    Asked of a name that is not ASCII only, before the fold."""
+    Asked of a name that is not ASCII only, before the fold.
+
+    D-SINK-119, the owner's decision of 2026-11-17: and a name holding a
+    code point the idna codec's case folding writes as another name
+    (HOST_CASE_FOLD_RANGES: the sharp s, the final sigma, U+0345 and the
+    Greek letters with a subscript iota), so `stra<U+00DF>e.test`, which the
+    codec writes as `strasse.test`, is refused where it stood as a
+    residual. Asked as written, after the look-alike table; the fold
+    produces none of them from a code point no table refuses."""
     name = str(text or "")
     if _host_name_refused_as_written(name, with_port):
         return True
@@ -334,6 +375,10 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
         return False
     if not _HOST_NFKC_CHANGES.isdisjoint(name):
         # D-SINK-119: a look-alike of the name its NFKC form spells.
+        return True
+    if not _HOST_CASE_FOLDS.isdisjoint(name):
+        # D-SINK-119, the owner's decision of 2026-11-17: a name the
+        # codec's case folding writes as another.
         return True
     import unicodedata
     folded = unicodedata.normalize("NFKD", name)
@@ -490,6 +535,9 @@ AUTHORITY_REFUSALS = {
     "literal": "bracket literal is not an IPv6 address",
     "literal_after": "unexpected text after the IPv6 literal",
     "host": "URL host contains an invalid character",
+    # D-SINK-119, the owner's decision of 2026-11-17: a code point of
+    # HOST_CASE_FOLD_RANGES, which the IDNA codec writes as another name.
+    "case_fold": "URL host holds a character that cannot be part of a host name",
     "empty": "URL has no host name",
     "port_text": "URL port is not a number",
     "port_range": "URL port is above 65535",
@@ -519,6 +567,9 @@ def read_authority(body: str) -> dict[str, Any]:
       * a bracketed host that is no IPv6 address (`[::1:]`, `[1:2]`): the
         pattern's characters and zone, and then ipaddress itself on the text
         before the zone's `%25`.
+    And, the owner's decision of 2026-11-17 (D-SINK-119), a host name the
+    idna codec's case folding writes as another name, `case_fold`, whose
+    sentence the Sources form shares with `fold_host`.
     Stricter than CPython where that is simpler: no IPvFuture literal and a
     zone of the pattern's characters only, which no validator accepted
     before either. The authority ends at the first ASCII `/`, `?` or `#`,
@@ -556,6 +607,13 @@ def read_authority(body: str) -> dict[str, Any]:
     else:
         colon = hostport.rfind(":")
         host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
+        # D-SINK-119, the owner's decision of 2026-11-17: a name the idna
+        # codec's case folding writes as another (HOST_CASE_FOLD_RANGES) says
+        # so, as the delimiter folds do; host_name_refused refuses it too, so
+        # this decides the sentence and never the verdict. Asked first so
+        # both mirrors give one reason for a name that holds more than one.
+        if not host.isascii() and not _HOST_CASE_FOLDS.isdisjoint(host):
+            return refused("case_fold")
         # D-SINK-86: and a name holding what no name may hold
         # (host_name_refused); the bracketed literal above is judged by
         # _ipv6_url_literal instead.

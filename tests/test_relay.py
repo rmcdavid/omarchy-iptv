@@ -598,13 +598,32 @@ class JudgementTest(Fixture):
                                  (502, b"HTTP/1.1 502 " + helper.RELAY_LOOKUP_FAILED.encode()))
 
     def test_a_name_that_is_not_ascii_is_asked_as_its_utf8_bytes(self):
-        name = "Stra" + chr(0xDF) + "e.qqqqqq.test"
+        # D-SINK-119, the owner's decision of 2026-11-17: the name was a sharp
+        # s until then, which the idna codec's case folding writes as `ss`
+        # and the relay now refuses (below); a u with diaeresis it keeps.
+        name = "B" + chr(0xFC) + "cher.qqqqqq.test"
         resolver = Resolver({name.encode("utf-8"): ["127.0.0.1"]})
         with mock.patch.object(helper, "stream_resolve", resolver):
             relay = Relay(self)
             token = relay.register(REMOTE)
             status = exchange(relay, get("http://%s:%d/x" % (name, self.public.port), token))[0]
         self.assertEqual((status, resolver.asked), (200, [(name.encode("utf-8"), self.public.port)]))
+
+    def test_a_name_the_codec_writes_as_another_is_refused_before_any_lookup(self):
+        """D-SINK-119, the owner's decision of 2026-11-17: the relay's
+        authority reader asks host_name_refused, so a host holding a code
+        point of HOST_CASE_FOLD_RANGES -- a sharp s, a final sigma, an iota
+        letter -- is a bad request, and nothing is looked up."""
+        names = ["Stra" + chr(0xDF) + "e.qqqqqq.test", "cdn" + chr(0x3C2) + ".qqqqqq.test",
+                 chr(0x1F80) + "x.qqqqqq.test"]
+        resolver = Resolver({name.encode("utf-8"): ["127.0.0.1"] for name in names})
+        got = []
+        with mock.patch.object(helper, "stream_resolve", resolver):
+            relay = Relay(self)
+            token = relay.register(REMOTE)
+            for name in names:
+                got.append(exchange(relay, get("http://%s:%d/x" % (name, self.public.port), token))[0])
+        self.assertEqual((got, resolver.asked), ([400] * len(names), []))
 
 
 class DestinationVectorsTest(Fixture):
