@@ -93,6 +93,13 @@ after the shell starts, and you start the channel again yourself.
   U+180E, and a label holding an emoji near the 64-character limit; and the
   guide's status line names an IPv6 host with its brackets, as the Sources
   row does. (D-SINK-118)
+- **A player left running on another source's channel is no longer
+  restarted on a channel of the current source.** After you switch source
+  with the shell stopped, the player found at the next start may still be
+  on the old source's channel; if it then froze or died, the automatic
+  restart looked its channel up in the current source's list and could
+  bring back a different channel under the old name. It is now stopped
+  instead. (D-PLY-58)
 
 ### Changed
 
@@ -149,10 +156,11 @@ after the shell starts, and you start the channel again yourself.
   playlist's own server is refused.
 - **If you start mpv through a wrapper script of your own that runs the
   real player as its child, and the relay is killed outright**, the player
-  plays on with nothing to connect through until it is replaced, at the
-  next change of channel or the next shell restart; until then another
-  account on this computer that took over the relay's port could receive
-  the player's plain-`http` requests.
+  plays on with nothing to connect through until the plugin's next
+  ten-second check notices and replaces it (or stops it about 15 seconds
+  later, when its channel cannot be put back); until then another account
+  on this computer that took over the relay's port could receive the
+  player's plain-`http` requests.
 - **The limitations listed under 0.19.1 still apply**, except the three
   this release closes for playlists on the internet: a name that changes
   its answer, a stream server's redirects, and the servers an HLS or DASH

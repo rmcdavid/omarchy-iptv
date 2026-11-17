@@ -213,8 +213,10 @@ class RotationRunTest(unittest.TestCase):
         }
 
     def assert_live_state_untouched(self):
-        self.assertEqual(helper_loader.live_state_fingerprint(), helper_loader.LIVE_STATE_BEFORE,
-                         "this test modified %s" % helper_loader.REAL_STATE_FILE)
+        # F-HARNESS-113: a save by the owner's own shell, made while the file
+        # was read-only to this suite, is not this test's doing.
+        self.assertNotEqual(helper_loader.live_state_verdict(), "changed",
+                            "this test modified %s" % helper_loader.REAL_STATE_FILE)
 
     def test_the_first_run_moves_every_seeded_reference(self):
         completed = self.playlist(LIST_V1)

@@ -43,6 +43,26 @@ function healthTick(skips, busy) {
   return { check: !busy, restart: restart, skips: restart ? 0 : n }
 }
 
+// D-PLY-67 (2026-11-17): what a healthy `status` reply's `relay` field asks
+// of the health tick. The helper answers `relay: false` only for a player
+// this build launched whose relay no longer answers as its own: its pin
+// names a port nothing of ours holds, and whatever binds that port next
+// receives the player's plain-http requests, credentials in them. The probe
+// already reads such a player as older and the shell then replaces or stops
+// it (Model.olderPlayerUnsafe), so the tick's whole act is to ask the probe:
+// "probe", or "none". None when the field is anything but false (true, or
+// the helper could not tell, or another build's player, which is the
+// reattach's to replace), while a replacement is already owed (the probe
+// has spoken), while the player slot is busy (a start, restart or probe is
+// in flight: the next tick asks again), and while the user's stop stands.
+function healthRelayAction(relay, ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  if (relay !== false) return "none"
+  if (c.restartOwed === true || c.slotBusy === true || c.stopping === true || c.userStopped === true) return "none"
+  return "probe"
+}
+var RELAY_GONE_LINE = "omarchy-iptv: the player's relay does not answer, checking the player"
+
 // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived ----
 //
 // The shell's playerWatchdog TERMs a `player start|restart|probe` that runs
@@ -1354,10 +1374,11 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
   return id === playerEntryId(currentEntryId)
 }
 export {
-  stopEscalation, healthTick, PLAYER_BOUNDS, CONTROL_WATCHDOG_MS,
-  PLAYER_WATCHDOG_MARGIN_MS, PLAYER_BIRTH_EDGE_MS, playerLadderMs,
-  playerWatchdogMs, playFork, playForkBlind, zapArgs, PLAY_UNREADABLE,
-  HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
+  stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,
+  PLAYER_BOUNDS, CONTROL_WATCHDOG_MS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
+  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
+  helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget, ID_WITHHELD,
   reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
   playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,

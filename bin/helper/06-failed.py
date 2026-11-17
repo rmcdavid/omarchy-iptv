@@ -904,6 +904,29 @@ def unlink_stale_socket(path: str) -> bool:
     return False
 
 
+def status_relay(client: MpvIpc, sock_path: str) -> bool | None:
+    """Whether the relay of the player this connection reaches answers as
+    its own (D-PLY-67): True or False for a player this build launched, None
+    for any other and when the player's identity cannot be read.
+
+    The health tick's question. A player of this build is pinned to its
+    relay's port; when the relay is gone (killed outright under a user's
+    `mpv` wrapper whose child is the real player, D-PLY-55) nothing of ours
+    holds that port, and whatever binds it next receives the player's
+    plain-http requests. The probe, the orphan check and a zap already read
+    such a player as older (player_verdict); until this field the tick's
+    `status` did not ask, so with no zap the interval had no bound. A read:
+    nothing is set and nothing is stopped here, and relay_status asks again
+    for RELAY_IPC_S before it answers None, so a relay still starting is
+    not read as gone. None is "cannot tell", never "gone": another build's
+    player is the reattach's to replace, not the tick's."""
+    peer = player_peer(client)
+    verdict, port = launch_reading(peer, sock_path)
+    if verdict != "current":
+        return None
+    return relay_status(sock_path, peer, port) is not None
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     path = socket_path(args.socket)
     client = MpvIpc(path, args.ipc_timeout)
@@ -951,6 +974,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             # runs, so "behind live" re-syncs every ten seconds with no new
             # process. Null until the player has a position (design 2.2).
             "rewind": read_rewind(client, stash, paused=bool(values["pause"]) if values["pause"] is not None else None),
+            # D-PLY-67, additive and asked last, after every question to the
+            # player: whether this build's player still has its relay. true,
+            # false, or null when that cannot be said (status_relay).
+            "relay": status_relay(client, path),
         })
         return EXIT_OK
     except HelperError as error:

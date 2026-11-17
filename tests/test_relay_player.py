@@ -1128,6 +1128,54 @@ class FirstLoadRefusalTest(MpvTestCase):
 
 # ---- the probe and the orphan check -----------------------------------------
 
+class StatusRelayTest(test_player.PlayerTestCase):
+    """D-PLY-67: the health tick's `status` says whether this build's player
+    still has its relay -- true, false once the relay is gone, and null for
+    a player another build launched, which is the reattach's to replace. It
+    stays a read: the reply is a healthy status either way."""
+
+    def player(self, launch="current"):
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        idle = self.sleeper(launch=launch)
+        if launch == "current":
+            self.start_current(props={"idle-active": False}, user_data={"omarchy-iptv": {"id": "t:x", "playing": True}})
+        else:
+            self.start(props={"idle-active": False, "mpv-version": "mpv 0.41.0"},
+                       user_data={"omarchy-iptv": {"id": "t:x", "playing": True}})
+        return idle
+
+    def status(self):
+        code, payload, _, stderr = test_player.run("status", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["ok"], payload["running"], payload["idle"]), (True, True, False))
+        return payload
+
+    def test_a_current_player_whose_relay_answers_reports_true(self):
+        idle = self.player()
+        self.assertIs(self.status()["relay"], True)
+        self.assertIsNone(idle.poll())
+
+    def test_a_current_player_whose_relay_is_gone_reports_false_and_is_left_running(self):
+        idle = self.player()
+        self.relay_for(self.sock).close()
+        started = time.monotonic()
+        self.assertIs(self.status()["relay"], False)
+        # One relay question, asked again inside RELAY_IPC_S and no longer.
+        self.assertLess(time.monotonic() - started, helper.RELAY_IPC_S + 2.0)
+        self.assertIsNone(idle.poll(), "status stopped the player; it is a read")
+
+    def test_a_player_another_build_launched_reports_null(self):
+        self.player(launch="older")
+        self.assertIsNone(self.status()["relay"])
+
+    def test_a_listener_with_no_launch_argv_reports_null(self):
+        # No sleeper registered: the kernel names this test process, which
+        # carries no socket token ("unknown").
+        os.makedirs(self.runtime, 0o700, exist_ok=True)
+        self.start(props={"idle-active": False})
+        self.assertIsNone(self.status()["relay"])
+
+
 class ProbeAndOrphanRelayTest(test_player.PlayerTestCase):
     """The probe says whether the relay answered; a player of this build
     whose relay is gone reads `older` there (the shell then replaces it, or

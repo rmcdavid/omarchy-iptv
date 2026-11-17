@@ -19187,6 +19187,117 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.drain()
       return [h.root.olderRestartOwed === true, h.root.channelRepairs, zaps.map(verbOf)]
     }, [true, 1, []])
+
+    // ---- D-PLY-67 (2026-11-17): the health tick asks about the relay ----
+    //
+    // The helper's `status` says `relay: false` for a player this build
+    // launched whose relay no longer answers. The tick's act is to ask the
+    // probe, which reads that player older, and what follows is the
+    // reattach's own path: replaced when its channel can be put back.
+    checkCall("D-PLY-67: healthRelayAction asks the probe only for `relay: false`, and not while a replacement is owed, the player slot is busy, a stop is settling or the user's stop stands", () =>
+      [[false, true, null, undefined, "false", 0].map(r => M.healthRelayAction(r, {})),
+       M.healthRelayAction(false), M.healthRelayAction(false, null),
+       ["restartOwed", "slotBusy", "stopping", "userStopped"].map(k => M.healthRelayAction(false, { [k]: true })),
+       ["restartOwed", "slotBusy", "stopping", "userStopped"].map(k => M.healthRelayAction(false, { [k]: false }))],
+      [["probe", "none", "none", "none", "none", "none"], "probe", "probe",
+       ["none", "none", "none", "none"], ["probe", "probe", "probe", "probe"]])
+
+    const statusOf = o => JSON.stringify(Object.assign({ ok: true, kind: "status", running: true, paused: false, idle: false,
+                                                         mpvVersion: "mpv 0.41.0", stash: STASH(), rewind: null }, o || {})) + "\n"
+    const tick = (h, reply) => { h.root.controlKind = "status"; h.root.handleControlResult(reply); h.drain() }
+    const probes = slots => slots.filter(c => verbOf(c) === "player probe").length
+    const goneLines = h => h.warnings.filter(w => w === M.RELAY_GONE_LINE).length
+    const current = () => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ launch: "current", relay: true }))
+      attach(h)
+      land(h)
+      return { h, slots, zaps, base: probes(slots) }
+    }
+
+    checkCall("D-PLY-67: through Service.qml, a healthy status whose relay is gone sends ONE `player probe` on the player slot and one console line naming no channel; the probe's answer (older, no relay) is then the reattach's own: one `player start` of the same channel replaces the player, and no zap is sent into it", () => {
+      const { h, slots, zaps, base } = current()
+      tick(h, statusOf({ relay: false }))
+      const asked = [probes(slots) - base, goneLines(h), h.root.healthFailures, h.warnings.some(w => w.indexOf("t:x") !== -1)]
+      exit(h, probeOf({ launch: "older", relay: false }))
+      const starts = startArgs(slots)
+      return [asked, starts.length, starts.length ? idOf(starts[0]) : null, zaps.length]
+    }, [[1, 1, 0, false], 1, "t:x", 0])
+
+    checkCall("D-PLY-67: a status that says the relay answers, cannot say, or comes from a helper too old to say sends no probe and logs nothing", () =>
+      [{ relay: true }, { relay: null }, {}].map(o => {
+        const { h, slots, base } = current()
+        tick(h, statusOf(o))
+        return [probes(slots) - base, goneLines(h)]
+      }), [[0, 0], [0, 0], [0, 0]])
+
+    checkCall("D-PLY-67: while the probe it asked for is still running, and once the replacement is owed, a further relay-less status asks nothing again; an unhealthy reply never asks; nor does one while the user's stop stands", () => {
+      const a = current()
+      tick(a.h, statusOf({ relay: false }))
+      tick(a.h, statusOf({ relay: false }))                 // the slot is busy with the probe
+      const busy = [probes(a.slots) - a.base, goneLines(a.h)]
+      const b = boot()
+      reattach(b.h, probeOf({ relay: false }))              // another build's: owed, list not landed
+      attach(b.h)
+      const owedBase = probes(b.slots)
+      tick(b.h, statusOf({ relay: false }))
+      const owed = [b.h.root.olderRestartOwed === true, probes(b.slots) - owedBase, goneLines(b.h)]
+      const c = current()
+      tick(c.h, JSON.stringify({ ok: false, kind: "status", running: false, relay: false, error: { code: "ipc_error", message: "x" } }) + "\n")
+      const unhealthy = [probes(c.slots) - c.base, goneLines(c.h)]
+      const d = current()
+      d.h.root.userStopped = true
+      tick(d.h, statusOf({ relay: false }))
+      return [busy, owed, unhealthy, [probes(d.slots) - d.base, goneLines(d.h)]]
+    }, [[1, 1], [true, 0, 0], [0, 0], [0, 0]])
+
+    // ---- D-PLY-58 (2026-11-17): the health relaunch of another source's player ----
+    //
+    // A player adopted on ANOTHER source's channel was relaunched with
+    // `player restart --id <stash id>` over the active source's cache, so
+    // it came back on this source's channel of the same id under the old
+    // name. X is on both lists under one id here, which is the case.
+    const restartArgs = slots => slots.filter(c => verbOf(c) === "player restart")
+    const wedge = h => { for (let i = 0; i < h.root.healthFailuresBeforeRestart; i++)
+      tick(h, JSON.stringify({ ok: false, kind: "status", running: false, error: { code: "ipc_error", message: "x" } }) + "\n") }
+    const adopted = stash => {
+      const { h, slots, zaps } = boot()
+      reattach(h, probeOf({ launch: "current", relay: true, stash }))
+      attach(h)
+      land(h)
+      return { h, slots, zaps }
+    }
+
+    checkCall("D-PLY-58: an adopted player on ANOTHER source's channel that stops answering is stopped, never restarted on this source's channel of the same id; one adopted on this source's channel is restarted on it as ever", () => {
+      const other = adopted(STASH({ sourceKey: KB }))
+      wedge(other.h)
+      const same = adopted(STASH())
+      wedge(same.h)
+      return [[restartArgs(other.slots).length, stops(other.h)],
+              [restartArgs(same.slots).map(idOf), stops(same.h)]]
+    }, [[0, 1], [["t:x"], 0]])
+
+    checkCall("D-PLY-58: once the user plays a channel of THIS source into that player, the player is this source's: a later wedge restarts it on the channel they chose", () => {
+      const { h, slots, zaps } = adopted(STASH({ sourceKey: KB }))
+      h.root.play("t:y", true, "")
+      h.drain()
+      const keyed = h.root.playerSourceKey === h.root.activeSourceKey
+      h.ids.controlProc.running = false
+      wedge(h)
+      return [keyed, zaps.map(c => verbOf(c) + ":" + idOf(c)), restartArgs(slots).map(idOf), stops(h)]
+    }, [true, ["play:t:y"], ["t:y"], 0])
+
+    checkCall("D-PLY-58: the queued relaunch of a player that died on another source's channel starts nothing here and ends the record; on this source's channel it starts that channel", () => {
+      const run = stash => {
+        const { h, slots } = adopted(stash)
+        h.root.relaunchPending = true
+        eof(h)
+        h.fireTimer("relaunchTimer")
+        h.drain()
+        return [startArgs(slots).map(idOf), h.root.nowPlaying === null]
+      }
+      return [run(STASH({ sourceKey: KB })), run(STASH())]
+    }, [[[], true], [["t:x"], false]])
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----

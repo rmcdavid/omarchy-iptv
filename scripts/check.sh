@@ -660,7 +660,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-108}
 # day): 3835 -> 3836 -- Model.parseState over the shared withheld-ids
 # fixture, deleting each withheld id and keeping each other, red on
 # 3101349's model; the suite runs 3836.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3836}
+# 2026-11-17, lane-r5settle (the merge of dev e2ae4f4 into r5-build): 3836
+# -> 3843. dev's D-PLY-67 and D-PLY-58 add 7 node checks without raising
+# the floor (dev's stayed 3749); the merged suite runs 3843, 0 failures.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3843}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1202,7 +1205,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3836}
 # deletes being the ids a reply withholds), with round 2's state-verb test
 # rewritten for the deletion; red on 3101349 (QA-RESULTS "Round 5 of the
 # security review, lane-r5c"); the suite runs 2727, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2727}
+# 2026-11-17, lane-r5settle (the merge of dev e2ae4f4 into r5-build): 2727
+# -> 2736. dev's F-HARNESS-113 and D-PLY-67 add 9 python tests without
+# raising the floor (dev's stayed 2668); the merged suite counts 2736.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2736}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1690,7 +1696,28 @@ fi
 
 step "python3 -m unittest discover -s tests"
 py_log="$CHECK_TMP/python.log"
-if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
+# F-HARNESS-113. tests/helper_loader.py fingerprints the owner's real
+# state.json and shell.json and two test modules assert them unchanged, which
+# read the owner's own running shell saving its state (every refresh, six
+# hours by default) as five failures in a gate that wrote nothing. So where
+# bwrap can do it, the suite runs in a mount namespace in which those two
+# folders are read-only: nothing the suite starts can write them, the guard
+# asks the kernel whether that held (mount_is_read_only), and only then
+# takes a moved fingerprint as somebody else's. Without bwrap, or with a
+# folder absent, the guard is as strict as it was.
+py_wrap=()
+py_wrap_note="the owner's state and settings folders writable, so any change to them is red"
+if command -v bwrap >/dev/null 2>&1; then
+  live_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-iptv"
+  live_config_dir="$HOME/.config/omarchy"
+  py_try=(bwrap --dev-bind / / --ro-bind-try "$live_state_dir" "$live_state_dir"
+          --ro-bind-try "$live_config_dir" "$live_config_dir")
+  if "${py_try[@]}" true >/dev/null 2>&1; then
+    py_wrap=("${py_try[@]}")
+    py_wrap_note="the owner's state and settings folders read-only to them"
+  fi
+fi
+if (cd "$ROOT" && "${py_wrap[@]}" python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   cat "$py_log"
   # `Ran 0 tests ... OK` exits 0. A tests/ directory that stops being
   # discoverable is invisible without this.
@@ -1700,7 +1727,7 @@ if (cd "$ROOT" && python3 -m unittest discover -s tests) >"$py_log" 2>&1; then
   elif (( py_tests < PY_TESTS_MIN )); then
     bad "python ran $py_tests tests, expected at least $PY_TESTS_MIN"
   else
-    ok "python tests ($py_tests tests)"
+    ok "python tests ($py_tests tests; $py_wrap_note)"
   fi
 else
   cat "$py_log"; bad "python tests"

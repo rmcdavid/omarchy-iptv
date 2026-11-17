@@ -20991,3 +20991,136 @@ The suites on the record's tree: node 3,836 checks, python 2,727 tests (1 skippe
 - The Sources row's two guide-hint sentences changed by the lead's instruction (D-SINK-113); UX-SOURCES.md records them in a dated bracket, for the lead to confirm the wording.
 
 **The private-label scan** over `git log --format=%B 3101349..HEAD` and `git diff 3101349`, and over each staged diff, printed 0 before every commit of this lane.
+
+## F-HARNESS-113: the live-state guard and the owner's own save (the daily run, 2026-11-17)
+
+**The finding.** `tests/helper_loader.py` fingerprints the owner's real
+`state.json` and the host's `shell.json` at import, and two test modules
+assert them unchanged. The owner's running shell saves `state.json` on its
+own schedule, so a gate that overlapped a save read five failures while the
+suite had written nothing.
+
+**What can and cannot be known.** Nothing an unprivileged process can read
+says which process wrote a file, so the guard cannot tell the two writers
+apart after the fact. It can be made impossible for one of them. `bwrap
+--dev-bind / / --ro-bind-try <folder> <folder>` gives the suite a mount
+namespace in which the folder is read-only; every child inherits it.
+Measured on this machine (bubblewrap 0.13.1): inside, `statvfs` reports
+ST_RDONLY for the folder and for the file in it, a write is refused with
+EROFS (errno 30), the uid is unchanged and the process holds no
+capability; outside, the same folder reads writable. `unshare -rn` and
+`unshare -rpf --mount-proc`, which the suite's network and pid namespace
+tests use, and a nested `bwrap`, all still work inside it.
+
+**The change.** `scripts/check.sh` wraps the python step that way when
+`bwrap` is present and a trial run of it succeeds, for the state folder and
+`~/.config/omarchy`, and says which mode it ran in on its `ok` line.
+`helper_loader.mount_is_read_only` asks the kernel, at import and at the
+assertion; `live_file_verdict` answers "untouched", "not_ours" (the
+fingerprint moved and both ends were read-only) or "changed", and only
+"changed" is red. With no `bwrap`, a folder absent, the file linked onto a
+writable mount, or unittest run by hand, the answer for a moved fingerprint
+is "changed", as it always was.
+
+**Evidence.**
+- The whole python suite, same tree, same environment as the gate, load
+  about 1: inside the sandbox ran 2,668 tests, 1 skipped, OK (started before the five new tests were on the tree); outside it 2,673 tests, 1 skipped, OK (with them).
+- `tests/test_live_state_guard.py`, 13 tests (8 before). Two observe it: a
+  child python whose `XDG_STATE_HOME` names a scratch folder imports
+  `helper_loader`, the test rewrites that folder's `state.json` from
+  outside, and the child prints the shipping verdict -- "not_ours", with its
+  own write refused, when the folder is bound read-only; "changed", with its
+  own write made, when it is not.
+- Mutants, each run against that module: the verdict's `and` as `or` (1
+  red), always "not_ours" (2), never (2); `mount_is_read_only` always True
+  (2), always False (1); the state verdict's read-only inputs forced True
+  (1).
+
+**Not covered.** The node, QML and scenario steps run outside the sandbox;
+none of them fingerprints the owner's files. A lane that runs the python
+suite by hand keeps the strict guard and can still meet the owner's save.
+
+## D-PLY-67: the health tick asks about the relay (the daily run, 2026-11-17)
+
+**The gap.** A player this build launched is pinned to its relay's port. Under
+a user's `mpv` wrapper whose child is the real player, a relay killed outright
+leaves that player running with a port nothing of ours holds. The probe, the
+orphan check and a zap read it as older; the ten-second health tick's `status`
+did not ask, so with no zap it played on for as long as the shell ran.
+
+**The change.**
+- Helper: `status` answers `relay` beside its other fields, through
+  `status_relay`: `launch_reading` on the process the connection reaches
+  (SO_PEERCRED), and for "current" the relay's own answer (`relay_status`,
+  asked again inside `RELAY_IPC_S`, so a relay still starting is not read as
+  gone). null for any other verdict. It is the last question of the verb.
+- Model: `healthRelayAction(relay, ctx)` answers "probe" only for
+  `relay === false` with no replacement owed, the player slot free, no stop
+  settling and no user stop; "none" otherwise.
+- Shell: in the status branch's healthy arm, after the rewind re-sync, "probe"
+  logs `Model.RELAY_GONE_LINE` (fixed words, no channel) and runs
+  `runPlayerProbe()`. Everything after that is the reattach's path, unchanged.
+
+**Evidence.**
+- `StatusRelayTest`, 4 tests: a current player with its relay reads true; with
+  the relay closed, false, inside `RELAY_IPC_S` + 2 s, the player left
+  running; another build's player and a listener with no launch argv read
+  null. Mutants of `status_relay`: always None (2 red), always True (1 red),
+  the verdict test removed (2 red).
+- `test_mpv.StatusTest.test_reports_host_never_path` pins the whole reply and
+  was red until it named the new field (null there).
+- Node, four checks. The decision's table; and through Service.qml in the
+  service harness: a relay-less healthy status sends one `player probe` and
+  one line, and the probe's answer (older, no relay) is followed by one
+  `player start` of the same channel and no zap; true, null and an absent
+  field send nothing; a second relay-less status while the probe runs, one
+  while a replacement is owed, an unhealthy reply and one under the user's
+  stop send nothing. On the Service.qml before the change 2 of the 4 are red;
+  four model mutants (anything but true asks; owed, slot-busy and user-stop
+  each ignored) turn 2 red each.
+
+**Not observed.** No real player was run under a wrapper with its relay
+killed; the harness's Socket never connects and its player is a reply text.
+The interval is therefore stated from the code: one health tick that runs,
+the status's relay question, the probe, then the replacement or the hold.
+
+## D-PLY-58: the health relaunch of a player adopted from another source (the daily run, 2026-11-17)
+
+**The defect.** A player adopted at a shell start on a channel of a source
+that is no longer the active one keeps its stash's id as `nowPlaying.id`. The
+two relaunch paths (`restartPlayer`, for a player that stops answering, and
+`relaunchTimer`, for one that died) looked that id up in the ACTIVE source's
+channel list and issued `player restart` or `player start` over the active
+source's cache, so where both sources hold the id (two lists of one provider
+share `t:` ids) the player came back on this source's channel under the old
+name. D-PLY-51 closed the same shape for the TLS reload and the restart on
+adoption; these two were left.
+
+**The change (Service.qml only).** Both paths ask
+`Model.adoptedSourceMatches(playerSourceKey, activeSourceKey)`:
+`restartPlayer` stops the player, `relaunchTimer` ends the record as for a
+channel the list lacks. `play()` sets `playerSourceKey` to the active source's
+key when it replaces `nowPlaying`, since the key was written only by
+`applyProbe` and never moved again.
+
+**Evidence, through Service.qml in the service harness** (restart-on-adoption
+block of tests/Model.test.js; X is `t:x` on both lists):
+- adopted on the other source's channel, two failed status replies: no
+  `player restart`, one detached `player stop`; adopted on this source's:
+  `player restart --id t:x`, no stop. Before the change: one restart, no stop.
+- adopted on the other source's, then the user plays `t:y`: the key reads the
+  active source's, the zap is one `play --id t:y`, and a later wedge is
+  `player restart --id t:y`. Before: the key stayed the other source's.
+- adopted on the other source's, the player gone with a relaunch queued, the
+  timer fired: nothing started, `nowPlaying` null; on this source's:
+  `player start --id t:x`. Before: `player start --id t:x` for both.
+- Mutants, one edit removed at a time: each turns exactly its own check red.
+
+**Sibling search.** Every call of `issuePlayerSession`, `startPlayer` and
+`playArgs`: the play retry, the pending-play drain and the start after a
+failed play follow a play of this shell's own; the older-restart delivery is
+decided by `olderRestartDisposition`'s `sourceMatches`; the intent repair is
+kept off another source's stash by `Model.reconcileVerdict` (a guard added
+there for this row was unreachable and was taken out again).
+
+**Not observed** on a real player.
