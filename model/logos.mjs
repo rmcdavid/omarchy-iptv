@@ -6,13 +6,10 @@ import {
   str, asList, keyedMap, fnv1a32
 } from "./text.mjs"
 import {
-  stripSpace
-} from "./privacy.mjs"
-import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  absorbedAttribute, dotlessHost, cutHostParams
+  validateSourceUrl, readAuthority, hostClass, absorbedAttribute, dotlessHost
 } from "./sources.mjs"
 
 // ------------------------------------------------------------ logos (M2-04)
@@ -64,14 +61,15 @@ function logoSurvey(channels) {
     withLogo++
     var parsed = splitLogoUrl(raw)
     schemes[parsed.scheme] = (schemes[parsed.scheme] || 0) + 1
-    if (LOGO_SCHEMES.indexOf(parsed.scheme) === -1 || parsed.host === "") {
-      // Counted, never contacted. Three ways to land here: a scheme that is
-      // not https (rule 3), no host at all, and userinfo -- fetch_logo
-      // refuses a URL carrying userinfo rather than stripping it, so a survey
-      // that counted one as contactable would promise a fetch that cannot
-      // happen AND would print `user:pass@provider.test` into the consent
-      // text the user is reading. The credential-sink rule (engineering rule 5): every sink redacts to
-      // scheme and host, and the consent dialog is a sink.
+    if (parsed.host === "") {
+      // Counted, never contacted: fetch_logo refuses every logo the one
+      // reading (logoContactHost) gives no host -- a scheme that is not
+      // https (rule 3), user information, one label, a literal that is not
+      // global, and the rest -- so a survey that counted one as contactable
+      // would promise a fetch that cannot happen AND, for user information,
+      // print `user:pass@provider.test` into the consent text the user is
+      // reading. The credential-sink rule (engineering rule 5): every sink
+      // redacts to scheme and host, and the consent dialog is a sink.
       refused++
       continue
     }
@@ -79,9 +77,13 @@ function logoSurvey(channels) {
   }
   var names = []
   for (var host in hosts) if (Object.prototype.hasOwnProperty.call(hosts, host)) names.push(host)
+  // D-SINK-112: a tie is ordered by CODE POINT, as the helper's sorted()
+  // orders it; `<` compares UTF-16 units, which put a host opening with a
+  // character outside the Basic Multilingual Plane before one opening with
+  // a fullwidth letter, where the helper put it after.
   names.sort(function (a, b) {
     if (hosts[b] !== hosts[a]) return hosts[b] - hosts[a]
-    return a < b ? -1 : (a > b ? 1 : 0)
+    return compareCodePoints(a, b)
   })
   var ordered = []
   var wouldContact = 0
@@ -100,71 +102,102 @@ function logoSurvey(channels) {
   }
 }
 
-// scheme and host of a logo URL, lowercased, without pulling in a URL parser.
-// Deliberately narrow: anything it cannot read confidently comes back with an
-// empty host, which logoSurvey counts as refused and logoFile declines to
-// name. Being wrong in the direction of "do not fetch this" is free.
-function splitLogoUrl(raw) {
-  var text = str(raw)
-  var mark = text.indexOf("://")
-  if (mark <= 0) return { scheme: "", host: "" }
-  var scheme = text.substring(0, mark).toLowerCase()
-  // The review's F1: a logo that absorbed another attribute is no host,
-  // as the helper's logo_survey reads it and fetch_logo refuses it.
-  if (absorbedAttribute(text)) return { scheme: scheme, host: "" }
-  var rest = text.substring(mark + 3)
-  var cut = rest.length
-  var stops = ["/", "?", "#"]
-  for (var i = 0; i < stops.length; i++) {
-    var at = rest.indexOf(stops[i])
-    if (at !== -1 && at < cut) cut = at
+// UTF-16 strings compared by code point, -1, 0 or 1: the order Python's
+// sorted() gives the same text. A surrogate pair is read as the code point it
+// encodes and a lone surrogate as its own value, as Python holds one; an
+// index walk over charCodeAt, which every engine reads alike.
+function compareCodePoints(a, b) {
+  var x = str(a)
+  var y = str(b)
+  var i = 0
+  var j = 0
+  while (i < x.length && j < y.length) {
+    var p = codePointAtIndex(x, i)
+    var q = codePointAtIndex(y, j)
+    if (p !== q) return p < q ? -1 : 1
+    i += p > 0xffff ? 2 : 1
+    j += q > 0xffff ? 2 : 1
   }
-  return { scheme: scheme, host: logoHost(rest.substring(0, cut)) }
+  if (i < x.length) return 1
+  if (j < y.length) return -1
+  return 0
 }
 
-// The host a logo URL would disclose to, or "" when it discloses to none.
-// The mirror of the helper's `logo_host`.
-//
-// The PORT is not part of the answer: the question the survey exists to
-// answer is how many parties learn which channels this user has, and
-// `cdn.test` and `cdn.test:8443` are one party. Counting them separately
-// inflates the only number in the consent sentence.
-//
-// Userinfo makes the answer "". fetch_logo refuses such a URL outright, so
-// the host is never contacted, and naming it would print the credentials.
-//
-// D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
-// through the same cutHostParams the Sources row's host goes through: a
-// playlist's `https://cdn.test;sid=SECRET/a.png` is a valid URL whose
-// authority is a credential, and this stopped at `:` alone, so the consent
-// dialog the HOST renders (confirmLogosMessage) named the busiest host as
-// `cdn.test;sid=secret`. Found by the recheck's rule-15 search over the
-// shape "a printed host that stops at `:` only", which the fix's own search
-// (over "authority after its last `@`") did not see. The `@` test runs over
-// the WHOLE netloc first: `cdn.test;u=p@evil` is refused by fetch_logo, so
-// a cut that hid its `@` would count a host that is never contacted.
-//
-// D-SINK-83 (owner, 2026-11-05): and "" for a host of ONE DNS
-// label (dotlessHost), which fetch_logo refuses before any lookup. A logo
-// URL cut at a space in its userinfo (D-SINK-34's class) leaves
-// `https://USER:...`, whose host is the username: the survey counted it as
-// a host to contact and the consent dialog named it the busiest. A logo is
-// never excepted for the playlist's own host, as a guide hint is.
-function logoHost(netloc) {
-  // D-STATE-2: the reader's class (stripSpace), not the engine's trim, so the
-  // survey counts the hosts logo_host counts.
-  var text = stripSpace(netloc).toLowerCase()
-  if (text.indexOf("@") !== -1) return ""
-  text = cutHostParams(text)
-  var host
-  if (text.charAt(0) === "[") {
-    var close = text.indexOf("]")
-    host = close === -1 ? "" : text.substring(0, close + 1)
-  } else {
-    var colon = text.indexOf(":")
-    host = colon === -1 ? text : text.substring(0, colon)
+function codePointAtIndex(text, i) {
+  var hi = text.charCodeAt(i)
+  if (hi >= 0xd800 && hi <= 0xdbff && i + 1 < text.length) {
+    var lo = text.charCodeAt(i + 1)
+    if (lo >= 0xdc00 && lo <= 0xdfff) return (hi - 0xd800) * 0x400 + (lo - 0xdc00) + 0x10000
   }
-  return dotlessHost(host) ? "" : host
+  return hi
+}
+
+// A logo URL's scheme as written: the text before its first `:`, lower-cased,
+// when that text is an RFC 3986 scheme (an ASCII letter, then ASCII letters,
+// digits, `+`, `-` or `.`), else "". Nothing is stripped first. The mirror of
+// the helper's logo_scheme (D-SINK-112), an index walk as it is.
+function logoScheme(raw) {
+  var text = str(raw)
+  var colon = text.indexOf(":")
+  if (colon <= 0) return ""
+  for (var i = 0; i < colon; i++) {
+    var c = text.charCodeAt(i)
+    var letter = (c >= 0x61 && c <= 0x7a) || (c >= 0x41 && c <= 0x5a)
+    if (i === 0 ? !letter : !(letter || (c >= 0x30 && c <= 0x39) || c === 0x2b || c === 0x2d || c === 0x2e)) return ""
+  }
+  return text.substring(0, colon).toLowerCase()
+}
+
+// The host a logo would be fetched from, or "" when it would be fetched from
+// none: the ONE reading of a logo's address that the survey counts, the slot
+// and the file name follow (splitLogoUrl, logoFile) and the helper's
+// fetch_logo fetches by (D-SINK-112, 2026-11-16). The mirror of the helper's
+// logo_contact_host, held to it by the shared logo-survey and provider-hosts
+// fixtures and by the host-grammar suite's differential on the dev branch,
+// in node and in Qt's engine.
+//
+// The survey used to read the host from the raw address, cut at its first
+// `:` (logoHost), while the fetch read it as urllib's request holds it, so
+// `https://user%3Apass%40cdn.test/a.png` was counted and named
+// `user%3apass%40cdn.test`, `https://user.name:pa/ss@cdn.test/a.png` named
+// `user.name`, and the counts took in logos the fetch refused or could not
+// send. A logo is counted only when it absorbed no attribute
+// (absorbedAttribute), its scheme as written is https (logoScheme), the source
+// validator accepts it (validateSourceUrl, so readAuthority's reading), its
+// authority as written holds no `@` and no `%`, everything after its
+// authority -- the fragment included, which urllib cuts at the LAST `#` -- is
+// printable ASCII 0x21-0x7E, and its host is not one label (dotlessHost) and
+// not a literal or a name that is not global (hostClass). The port is never
+// part of the answer, and an IPv6 literal keeps its brackets. D-SINK-35's
+// accepted class stays: `https://qq.qq:12/zz@cdn.test/a.png` is fetched from
+// qq.qq on port 12, so it is counted and named `qq.qq`.
+function logoContactHost(raw) {
+  if (typeof raw !== "string" || raw === "" || absorbedAttribute(raw)) return ""
+  if (LOGO_SCHEMES.indexOf(logoScheme(raw)) === -1) return ""
+  var checked = validateSourceUrl(raw)
+  if (!checked.ok || checked.kind !== "http") return ""
+  var body = raw.substring(raw.indexOf(":") + 1)
+  if (body.indexOf("//") !== 0) return ""
+  var read = readAuthority(body.substring(2))
+  if (!read.ok) return ""
+  var authority = body.substring(2, body.length - read.tail.length)
+  if (authority.indexOf("@") !== -1 || authority.indexOf("%") !== -1) return ""
+  for (var i = 0; i < read.tail.length; i++) {
+    var c = read.tail.charCodeAt(i)
+    if (c < 0x21 || c > 0x7e) return ""
+  }
+  var host = read.host
+  if (host !== checked.host || dotlessHost(host)) return ""
+  var kind = hostClass(host)
+  return kind === "" || kind === "global" ? host : ""
+}
+
+// Scheme and contact host of a logo URL, both by the one reading above:
+// anything it cannot read confidently comes back with an empty host, which
+// logoSurvey counts as refused and logoFile declines to name. Being wrong in
+// the direction of "do not fetch this" is free.
+function splitLogoUrl(raw) {
+  return { scheme: logoScheme(raw), host: logoContactHost(raw) }
 }
 
 // The sentence the user consents to (ruling rule 6). A generic "logos may
@@ -736,12 +769,12 @@ function logoSummaryNotice(line) {
   return parts.length === 0 ? "" : "[iptv] logo fetch: " + parts.join("; ")
 }
 export {
-  LOGO_SCHEMES, optInSetting, logoSurvey, splitLogoUrl, logoHost,
-  logoConsentLines, logoFile, logoSlot, WALL_KEY, FOOTER_DROP_ORDER,
-  footerHintWidth, fitFooterHints, footerHintMarkup, WALL_MAX_COLUMNS,
-  WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction, wallStep,
-  logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge, logoHaveCount,
-  logoFetchPlan, logoColumnShown, logoStreamName, logoNamesFrom,
-  logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
-  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
+  LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
+  logoScheme, logoContactHost, splitLogoUrl, logoConsentLines, logoFile,
+  logoSlot, WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,
+  footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry,
+  wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet, logoHaveIsSet,
+  logoHaveMerge, logoHaveCount, logoFetchPlan, logoColumnShown,
+  logoStreamName, logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS,
+  LOGO_RUN_DEADLINE_MS, LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

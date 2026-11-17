@@ -586,10 +586,12 @@ def cut_host_params(hostport: str) -> str:
     alone prints the parameter wherever it prints the host. ONE copy of the
     rule in the helper, shared by every reader that derives a printable host
     from an authority -- `host_port_of` (the Sources row and its default
-    label) and `logo_host` (the consent survey and the logo refusal lines) --
-    mirrored by Model.cutHostParams. The `:` port is NOT cut here: each
-    caller keeps or drops it on its own line, and a bracketed literal is
-    unaffected because none of the three can appear inside the brackets.
+    label) -- mirrored by Model.cutHostParams. The `:` port is NOT cut here,
+    and a bracketed literal is unaffected because none of the three can
+    appear inside the brackets. The consent survey and the logo refusal
+    lines read through `logo_host` and this cut until D-SINK-112
+    (2026-11-16); a logo is now read by logo_contact_host, which counts no
+    host holding one of the three, as no host name may since D-SINK-86.
     A `find` per character rather than a pattern: the helper's regex guard
     holds every compiled pattern to a reviewed table.
     """

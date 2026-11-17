@@ -711,7 +711,11 @@ class LogoTest(unittest.TestCase):
             finally:
                 patch.stop()
             got.append((url, code, message, resolver.lookups))
-        want = [(url, "bad_url", refusal(), []) for url, *_ in got]
+        # D-SINK-112 (2026-11-16): refused before any lookup by the one
+        # reading of a logo's address, which the survey counts by
+        # (`logo_host`, its fixed sentence), before the opener's connection
+        # layer could refuse it (`bad_url`).
+        want = [(url, "logo_host", getattr(helper, "LOGO_HOST_REFUSAL", "<none>"), []) for url, *_ in got]
         self.assertEqual(got, want, "%d of %d differ" % (sum(1 for g, w in zip(got, want) if g != w), len(got)))
 
 

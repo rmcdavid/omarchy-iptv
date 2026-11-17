@@ -350,6 +350,196 @@ class DifferentialTest(unittest.TestCase):
         self.assertEqual((len(chosen) >= 1000, len(wrong), wrong[:6]), (True, 0, []))
 
 
+PROVIDER = json.loads((ROOT / "tests" / "fixtures" / "provider-hosts.json").read_text(encoding="ascii"))
+LOGO_SURVEY = json.loads((ROOT / "tests" / "fixtures" / "logo-survey.json").read_text(encoding="ascii"))
+
+
+def fixture_logos():
+    """Every logo of the shared logo fixtures (provider-hosts' logoHosts and
+    the logo-survey cases)."""
+    out = [case["url"] for case in PROVIDER["logoHosts"]]
+    for case in LOGO_SURVEY["cases"]:
+        out += [row["logo"] for row in case["channels"]
+                if isinstance(row, dict) and isinstance(row.get("logo"), str) and row["logo"]]
+    return out
+
+
+def logo_corpus():
+    """The differential's logos (D-SINK-112), from host-grammar.json's atoms
+    and seeds as corpus() builds addresses, but shaped as logos are: most are
+    https, most carry no user information and no port, and one insert in
+    three; then every fixture logo. Deterministic."""
+    atoms = FIXTURE["atoms"]
+    out = []
+    for seed in FIXTURE["seeds"]:
+        rnd = random.Random(seed * 1000 + 112)
+        for _ in range(FIXTURE["corpusSize"] // len(FIXTURE["seeds"]) // 2):
+            parts = {"userinfo": "" if rnd.random() < 0.8 else rnd.choice(atoms["userinfo"]),
+                     "port": "" if rnd.random() < 0.6 else rnd.choice(atoms["ports"]),
+                     "target": rnd.choice(atoms["targets"])}
+            if rnd.random() < 0.2:
+                parts["host"] = rnd.choice(atoms["literals"])
+            else:
+                labels = [rnd.choice(atoms["labels"]) for _ in range(rnd.randint(1, 2))]
+                parts["host"] = ".".join(labels) + "." + rnd.choice(atoms["tlds"])
+            if rnd.random() < 0.35:
+                where = rnd.choice(("userinfo", "host", "host", "port", "target"))
+                text = parts[where]
+                at = rnd.randint(0, len(text))
+                parts[where] = text[:at] + rnd.choice(atoms["inserts"]) + text[at:]
+            scheme = "https" if rnd.random() < 0.85 else rnd.choice(atoms["schemes"])
+            out.append(scheme + "://" + parts["userinfo"] + parts["host"] + parts["port"] + parts["target"])
+    out += fixture_logos()
+    return list(dict.fromkeys(out))
+
+
+LOGO_NODE_SCRIPT = (
+    'const M=require(process.env.HOST_GRAMMAR_MODEL);'
+    'const req=JSON.parse(require("fs").readFileSync(0,"utf8"));'
+    'process.stdout.write(JSON.stringify({each:req.urls.map(u=>{const s=M.splitLogoUrl(u);return [s.scheme,s.host]}),'
+    'survey:M.logoSurvey(req.surveyed.map(u=>({logo:u})))}))')
+
+LOGO_V4_BODY = r"""
+    var out = []
+    for (var i = 0; i < URLS.length; i++) {
+      var s = Model.splitLogoUrl(URLS[i])
+      out.push([s.scheme, s.host])
+    }
+    console.log("RESULT " + JSON.stringify(out))
+"""
+
+
+class ConnectRecorder:
+    """bounded_create_connection's stand-in for the logo fetch: records the
+    (host, port) http.client asks for and refuses the connection, so no
+    socket is opened and nothing is looked up."""
+
+    def __init__(self):
+        self.asked = []
+
+    def __call__(self, address, *args, **kwargs):
+        import errno
+        self.asked.append(tuple(address))
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "refused by the test")
+
+
+def fetch_asks(url):
+    """-> (code, [(host, port)] the connection was asked for, [names
+    looked up]) of one fetch_logo, with the connection and the resolver
+    replaced by stand-ins that record and refuse."""
+    import socket
+    from unittest import mock
+    connect, lookup = ConnectRecorder(), NoLookup()
+    with mock.patch.object(helper, "bounded_create_connection", connect), \
+            mock.patch.object(socket, "getaddrinfo", lookup), \
+            mock.patch.dict(os.environ, {}, clear=False):
+        for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
+                     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+            os.environ.pop(name, None)
+        try:
+            helper.fetch_logo(url, 1.0, 2.0)
+            code = "ok"
+        except helper.HelperError as error:
+            code = error.code
+    return code, connect.asked, lookup.asked
+
+
+class LogoDifferentialTest(unittest.TestCase):
+    """D-SINK-112: the one reading of a logo's address, in the helper
+    (logo_contact_host, logo_scheme, logo_survey), in node and in Qt's
+    engine (Model.splitLogoUrl, Model.logoSurvey), held equal over the
+    corpus; and every logo the survey counts held to what the fetch then
+    asks the connection for."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.urls = logo_corpus()
+        cls.helper = [[helper.logo_scheme(u), helper.logo_contact_host(u)] for u in cls.urls]
+        cls.surveyed = [u for u in cls.urls if not lowering_differs(u)]
+        model = os.environ.get("HOST_GRAMMAR_MODEL") or str(ROOT / "Model.mjs")
+        done = subprocess.run(["node", "-e", LOGO_NODE_SCRIPT],
+                              input=json.dumps({"urls": cls.urls, "surveyed": cls.surveyed}),
+                              capture_output=True, text=True, cwd=ROOT, timeout=300,
+                              env=dict(os.environ, HOST_GRAMMAR_MODEL=model))
+        if done.returncode != 0:
+            raise AssertionError(done.stderr[-800:])
+        cls.node = json.loads(done.stdout)
+
+    def test_the_logo_corpus_counts_some_and_refuses_some(self):
+        counted = sum(1 for _, host in self.helper if host)
+        self.assertTrue(len(self.urls) // 5 < counted < len(self.urls) * 4 // 5, (counted, len(self.urls)))
+
+    def test_both_readings_answer_alike_for_every_logo(self):
+        wrong = []
+        for url, mine, theirs in zip(self.urls, self.helper, self.node["each"]):
+            if lowering_differs(url):
+                mine, theirs = [mine[0], mine[1] == ""], [theirs[0], theirs[1] == ""]
+            if mine != theirs:
+                wrong.append((ascii(url[:70]), mine, theirs))
+        self.assertEqual((len(wrong), wrong[:6]), (0, []))
+
+    def test_both_surveys_answer_alike_over_the_whole_corpus(self):
+        mine = helper.logo_survey([{"logo": u} for u in self.surveyed])
+        for key in ("allowedSchemes", "allowedTypes"):
+            mine.pop(key)
+        theirs = self.node["survey"]
+        self.assertEqual(sorted(mine), sorted(theirs))
+        for key in sorted(mine):
+            self.assertEqual(mine[key], theirs[key], key)
+
+    def test_every_logo_the_survey_counts_is_asked_of_the_connection_at_its_host_and_port(self):
+        """Invariant (b): fetch_logo hands each counted logo to the opener,
+        and its connection is asked for the survey's host (an IPv6 literal
+        without its brackets, as http.client hands it over) on http.client's
+        port, and nothing is looked up. Every second counted logo and every
+        fixture logo. A host that is not Latin-1 is D-SINK-119's: http.client
+        cannot write its Host header, and the next commit sends its A-label."""
+        helper.prepare_tls_context()
+        fixture = set(fixture_logos())
+        counted = [(u, h) for u, (_, h) in zip(self.urls, self.helper) if h]
+        chosen = [(u, h) for i, (u, h) in enumerate(counted) if i % 2 == 0 or u in fixture]
+        wrong, skipped = [], 0
+        for url, host in chosen:
+            try:
+                host.encode("latin-1")
+            except UnicodeEncodeError:
+                skipped += 1
+                continue
+            code, asked, looked_up = fetch_asks(url)
+            want = [(host[1:-1] if host.startswith("[") else host, urllib.parse.urlsplit(url).port or 443)]
+            got = [(h.lower(), p) for h, p in asked]
+            if (code, got, looked_up) != ("logo_fetch", want, []):
+                wrong.append((ascii(url[:70]), code, got, looked_up))
+        self.assertGreater(len(chosen) - skipped, 500)
+        self.assertEqual((len(wrong), wrong[:6]), (0, []))
+
+    def test_every_logo_the_survey_refuses_is_refused_before_the_connection(self):
+        """And the other half: each logo the survey counts refused is refused
+        by fetch_logo as a policy refusal, with the connection never asked
+        and nothing looked up (every fourth, and every fixture logo)."""
+        fixture = set(fixture_logos())
+        refused = [u for i, (u, (_, h)) in enumerate(zip(self.urls, self.helper)) if not h and (i % 4 == 0 or u in fixture)]
+        wrong = []
+        for url in refused:
+            code, asked, looked_up = fetch_asks(url)
+            if code not in ("logo_scheme", "logo_host") or asked or looked_up:
+                wrong.append((ascii(url[:70]), code, asked, looked_up))
+        self.assertGreater(len(refused), 500)
+        self.assertEqual((len(wrong), wrong[:6]), (0, []))
+
+    @unittest.skipUnless(os.access(proto_v4.QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
+    def test_qts_engine_reads_every_chosen_logo_as_node_does(self):
+        fixture = set(fixture_logos())
+        chosen = [i for i, url in enumerate(self.urls) if i % 4 == 0 or url in fixture][-2000:]
+        urls = [self.urls[i] for i in chosen]
+        body = "    var URLS = %s\n%s" % (json.dumps(urls, ensure_ascii=True), LOGO_V4_BODY)
+        result = proto_v4.run_qml(self, body)
+        self.assertNotIn("probeError", result if isinstance(result, dict) else {})
+        wrong = [(ascii(self.urls[i][:70]), got, self.node["each"][i]) for i, got in zip(chosen, result)
+                 if got != self.node["each"][i] and not lowering_differs(self.urls[i])]
+        self.assertEqual((len(chosen) >= 1000, len(wrong), wrong[:6]), (True, 0, []))
+
+
 UNREADABLE = ["http://qqqqqq" + chr(0xFF1A) + "zzzzzz@cdn.test/get.php", "http://qqqqqq:zz[zz]@cdn.test/get.php",
               "http://[::1:]/get.php", "http://cdn" + chr(0xFF0F) + ".test/get.php"]
 

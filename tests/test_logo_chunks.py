@@ -591,9 +591,11 @@ class LogoCachedFileCanonicalTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(logo_dir)), [names["good"]])
         # Swept files fall through to the fetch, which D-SINK-40 refuses
         # before any connect: the dead host is 127.0.0.1, and a logo never
-        # reaches an address on this machine.
+        # reaches an address on this machine -- refused since D-SINK-112
+        # (2026-11-16) by the one reading of its address before the opener
+        # (`logo_host`), where the connection refused it (`local_address`).
         self.assertEqual((summary["failed"], summary["refusedOnPolicy"], summary["reasons"]),
-                         (0, 3, {"local_address": 3}), summary)
+                         (0, 3, {"logo_host": 3}), summary)
 
     def test_a_cached_png_longer_than_the_byte_cap_is_swept_as_the_gate_would_refuse_it(self):
         """An ordinary 300x300 picture stored WITHOUT compression (zlib level

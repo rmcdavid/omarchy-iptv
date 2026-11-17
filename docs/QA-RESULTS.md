@@ -20778,3 +20778,57 @@ The shared fixture gains a third refusal (`proxied`, code `network`); both suite
 - The host-name set. Changed: `host_name_refused`, `Model.hostNameRefused`, and the stream gate's `_PLAIN_HOST_CHARS` and `_plain_authority` (above). The logo fetch's connection and redirect handlers ask `refuse_host_name` with the port too, so a logo whose port is not digits is a policy refusal now (the full suite found it, tests/test_logo_escapes.py). Cleared: `_READING_REFUSED` holds characters the entries' judgment refuses anyway; the relay's `relay_authority` calls `host_name_refused` and holds its own port to five digits up to 65535, so it gets the allowlist and the invisible table unchanged (tests/test_relay.py and test_relay_player.py green); the label's fold keeps Cf alone, as round 2 left it, because it is a reading of a label and not a judgment of a host.
 - Model judges of a host: the Xtream server field, the form's fields, the guide hint and the state reader all go through `validateSourceUrl` and get the rule.
 - Exception text: main()'s catch-all (changed). Cleared: the parse and inflate refusals quote expat's and zlib's sentences (positions and kinds, not input), and the cache-write log line an OSError's path in the cache; none reads a URL.
+
+## Round 5 of the security review, lane-r5b, 2026-11-16: one reading of a logo's address, and IDN hosts
+
+No name was resolved in this lane. Every fetch-path test hands the connection to a stand-in that records the `(host, port)` it is asked for and refuses, and replaces `socket.getaddrinfo` with one that records and raises (the provider-hosts suite's stand-in answers a numeric literal by parsing it, as it always has). The Qt-engine runs went through `tests/test_proto_v4.run_qml` (offscreen, a decoy HOME, `prlimit --core=0`). Every heavy run went through the shared lock under `nice -n 10`; the crash journal read 87 before and after each.
+
+### D-SINK-112: the survey, the slot and the fetch read a logo's address one way
+
+**What changed.**
+- One reading per mirror, `logo_contact_host` (bin/helper/05-ipc-logos.py) and `Model.logoContactHost` (model/logos.mjs): a logo has a host only when it absorbed no attribute, its scheme as written is https (`logo_scheme`, `Model.logoScheme`, an index walk; nothing stripped first), the source validator accepts it, its authority (read by `read_authority`, as the validator reads it) holds no `@` and no `%`, everything after the authority, the fragment included, is printable ASCII 0x21 to 0x7E (the critique's finding 5: urllib cuts the fragment at the LAST `#`), and its host is not one label and not a literal or a name that is not global. The port is never part of the answer; an IPv6 literal keeps its brackets.
+- `logo_survey` and `Model.logoSurvey` count by it; `Model.splitLogoUrl`, and so `logoFile` and `logoSlot`, follow it; the refusal lines (`logo_dimension_refusal`, the scan and chunk refusals) name its host or "an unnamed host". `logo_host`, `logo_survey_host`, `logo_host_part` and `unsplit_scheme` (helper) and `logoHost` (model) are withdrawn.
+- `fetch_logo` asks the scheme as written and then the reading BEFORE any URL parser (the critique's finding 6): every address the reading refuses is `logo_host`, with one fixed sentence naming no host, before the opener. `logo_userinfo`, `logo_url` and, for a literal that is not global, `local_address` were answered for some of them until now; a logo that is not https keeps `logo_scheme`, and a redirect hop into a local address is still the connection's `local_address`.
+- Ties are ordered by code point in both mirrors (`Model.compareCodePoints`, an index walk over the UTF-16 units that reads a surrogate pair as its code point and a lone surrogate as its value, as Python holds one).
+
+**The fixtures.** tests/fixtures/logo-survey.json gains five cases (21 in all): user information written or percent-encoded, a password a `/` or `#` cut into a port, a port not in ASCII digits, a literal or a name that is not global; what the URL library cannot read, a tab, a non-ASCII target or fragment (`https://cdn.test/a.png#<U+00D1>#`), a host no host name may take; D-SINK-35's accepted class (`https://qq.qq:12/zz@cdn.test/a.png` counted and named `qq.qq`); the code-point tie; and what only the validator or the `%` rule refuses (a C1 control in the host, an address over 2,048 characters, a zone on a global IPv6 literal). Three cases change: D-SINK-30's parameter logos are counted refused, not under their prefix, and the two D-STATE-2 edge-whitespace cases count the logo refused, since the fetch strips nothing. tests/fixtures/provider-hosts.json's `logoHosts` gains eleven entries, and five change (`10.0.0.1` and `[::1]:8443` are no host, refused before any lookup; user information and the two absorbed logos answer `logo_host`; `[qqqqqq]` is refused by the reading where the fetch's own parser raised).
+
+**The differential's logo half** (tests/test_host_grammar.py, `LogoDifferentialTest`): 8,386 logos from host-grammar.json's atoms and seeds, shaped as logos are (most https, most with no user information and no port, an insert in one of three), plus every fixture logo. Held: the helper's reading equals node's per logo (a D-SRC-12 code point compared by verdict only); the two surveys are equal as whole objects; invariant (b), every second counted logo and every fixture logo, is handed to the opener with the connection asked for the survey's host on http.client's port and nothing looked up; every fourth refused logo and every fixture logo is refused (`logo_scheme` or `logo_host`) with the connection never asked; and 2,000 logos in Qt's engine read as node reads them. On this tree 1,870 of the 8,386 are counted. A counted host outside Latin-1 is set aside in (b) here: http.client cannot write its Host header, which is D-SINK-119, the next commit.
+
+**Red first** (7329b96, the commit before this one, with this commit's tests and fixtures):
+
+| Suite | On 7329b96 | On this tree |
+|---|---|---|
+| tests/test_logos.py, test_provider_hosts.py, test_logo_run.py, test_logo_dimensions.py, test_logo_escapes.py, test_logo_chunks.py, test_host_names.py, test_destinations.py, test_state.py (one new test, 16 changed for the new reading and codes) | 19 tests red (7 subtests of one) | green |
+| tests/test_fetch_bounds.py (a logo's lookup under its deadline: the loopback seam added, since a loopback logo is refused before the opener now) | green (the seam changes nothing there) | green |
+| tests/test_host_grammar.py `LogoDifferentialTest` (new, 6 tests) | all 6 error at setUpClass (no `logo_scheme`). Measured with the old functions instead: the helper's survey host and the shell's differ on 1,373 of the 8,386 logos; the helper's survey counted 4,628, and of the 1,354 counted Latin-1 logos checked, 765 were not asked of the connection as counted | green |
+| tests/Model.test.js (2 new checks, 4 changed) | 6 of 3,829 red | 0 of 3,829 |
+| scripts/dev-harness/logo-scenario.sh check-tree (R2 changed: the logo on 127.0.0.1 is `logo_host`, refused before the opener, where it was the connection's `local_address`; the count, the GETs and the announcement unchanged) | R2 red (`reasons.logo_host` absent) | 35 of 35 |
+
+**Mutants**, each a single decision on a scratch copy of this tree, sealed or relinked; counts are red tests of test_logos, test_provider_hosts, test_logo_run and the logo differential (helper), or node checks and differential tests (model):
+
+| Mutant | Red |
+|---|---|
+| helper: no `%` test | 7 (the zoned global literal; without that case it survived, so the case was added) |
+| helper: no `@` test | 7 |
+| helper: no target test | 7 |
+| helper: the target judged up to the first `#` (finding 5's reading) | 7 |
+| helper: no class test | 7 |
+| helper: no one-label test | 8 |
+| helper: no validator (its result and the host's identity with it) | 6 |
+| helper: urlsplit asked before the reading in fetch_logo (finding 6) | 7 |
+| helper: fetch_logo fetches without the reading | 12 |
+| model: tie ordered by `<` | 1 node check, 1 differential |
+| model: no `%` test | 3, 2 |
+| model: target test without its upper bound | 3, 2 |
+| model: no class test | 3, 2 |
+| model: no validator | 3, 2 |
+| model: no one-label test | 6, 2 |
+
+One mutant was equivalent and is recorded, not counted: dropping only the validator's `ok` test leaves the host's identity with the validator's host (`""` when it refuses), which refuses the same addresses.
+
+**Cost, measured.** Over the 8,386 logos, best of three: the helper's survey 195.7 ms, node's 51.3 ms (best of five), one validator call per logo. The shell computes the survey only when the logo dialog opens, never on guide open; the fetch asks the reading once per logo it would fetch.
+
+**Rule 15.** I searched by shape for every reader of a logo's address and every printer of a logo's host.
+- Changed: the survey and the fetch (helper); `splitLogoUrl`, `logoFile`, `logoSlot` through it (model; `Guide.qml`'s slot and `Service.qml`'s survey call those); the three refusal lines that named `logo_host`; the comments in 01-core.py, 06-failed.py, 02-sources.py's `cut_host_params` and the model's `cutHostParams`, `dotlessHost` and `absorbedAttribute` that named the withdrawn readers.
+- Cleared: the logo redirect handler reads each hop with urlsplit, refuses a scheme that is not https and an `@` in the hop's netloc, and asks `refuse_host_name` of the request's host before the hop opens, and the connect-time policy refuses a one-label or local hop, so a hop names nothing and reaches nothing the first hop could not; `present_logo_names` and the ceiling's sweep read file names, never hosts; the parse stores logos (`own_value`, the length cap) and judges no host; the consent lines and `confirmLogosMessage` compose from the survey only.

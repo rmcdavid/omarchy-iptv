@@ -377,25 +377,29 @@ class LogoFolderLockTest(LogoRunCase):
 
     def test_a_logo_that_ran_into_another_attribute_is_a_policy_refusal(self):
         # The review's F1: a logo whose run took a glued attribute holding a
-        # credentialed URL is refused before any lookup (`logo_url`), and
-        # counted with the policy's refusals.
+        # credentialed URL is refused before any lookup, and counted with the
+        # policy's refusals: `logo_url` until D-SINK-112 (2026-11-16), and
+        # since then `logo_host`, the survey's own reading's one code.
         self.write_channels(['https://logos.test/a.png"catchup-source="http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts', ""])
         with Resolver() as resolver:
             code, summary, _, _ = self.run_fetch()
         self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
-                         (0, 1, 0, {"logo_url": 1}, []), summary)
+                         (0, 1, 0, {"logo_host": 1}, []), summary)
 
     def test_a_host_name_holding_what_no_name_holds_is_a_policy_refusal(self):
-        # D-SINK-86: the connection layer refuses a host name that holds a
-        # `;` (here D-SINK-30's session parameter) before any lookup, and the
-        # run counts that with the policy's refusals, not as a failure of the
-        # address. A tree without the rule asked the resolver for
-        # `cdn.test;sid=qqqqqq` and counted a `logo_fetch` failure.
+        # D-SINK-86: a host name that holds a `;` (here D-SINK-30's session
+        # parameter) is refused before any lookup, and the run counts that
+        # with the policy's refusals, not as a failure of the address. A tree
+        # without the rule asked the resolver for `cdn.test;sid=qqqqqq` and
+        # counted a `logo_fetch` failure. The connection layer refused it
+        # (`bad_url`) until D-SINK-112 (2026-11-16); the survey's own reading
+        # now refuses it first, before the opener (`logo_host`), as the
+        # survey counts it.
         self.write_channels(["https://cdn.test;sid=qqqqqq/a.png", ""])
         with Resolver() as resolver:
             code, summary, _, _ = self.run_fetch()
         self.assertEqual((code, summary["refusedOnPolicy"], summary["failed"], summary["reasons"], resolver.lookups),
-                         (0, 1, 0, {"bad_url": 1}, []), summary)
+                         (0, 1, 0, {"logo_host": 1}, []), summary)
 
 
 class CeilingSweepTest(LogoRunCase):

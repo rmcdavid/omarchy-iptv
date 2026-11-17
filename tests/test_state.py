@@ -769,9 +769,10 @@ class SessionKeyTest(unittest.TestCase):
                 self.assertEqual(helper.normalize_state({"hiddenGroups": [case["storedBefore"]]})["hiddenGroups"], [case["stored"]])
 
     def test_every_helper_strip_takes_the_union_at_every_bmp_code_point(self):
-        """D-STATE-2: normalize_hidden_groups, normalize_active_key, logo_host
-        and mpv_arg_opens_ports each take a code point off a value's edges
-        exactly when url-whitespace.json lists it, and nothing else. Model.test.js
+        """D-STATE-2: normalize_hidden_groups, normalize_active_key and
+        mpv_arg_opens_ports each take a code point off a value's edges
+        exactly when url-whitespace.json lists it, and nothing else; and a
+        logo's host (logo_contact_host, D-SINK-112) is refused by one. Model.test.js
         holds each mirror to the same list in the same shapes, so the two
         runtimes cannot strip apart again with every fixture row green."""
         with open(ROOT / "tests" / "fixtures" / "url-whitespace.json", encoding="utf-8") as fh:
@@ -783,7 +784,10 @@ class SessionKeyTest(unittest.TestCase):
                 wrong["hidden"].append(cp)
             if (helper.normalize_active_key(ch + "d990c2e4" + ch) == "d990c2e4") != member:
                 wrong["active"].append(cp)
-            if (helper.logo_host(ch + "b.test" + ch) == "b.test") != member:
+            # D-SINK-112 (2026-11-16): a logo's host is read as the fetch
+            # reads it, so a member of the union around it is no longer
+            # taken off but refuses the logo, as the fetch refuses it.
+            if member and helper.logo_contact_host("https://" + ch + "b.test" + ch + "/x.png") != "":
                 wrong["host"].append(cp)
             if (helper.mpv_arg_opens_ports("--rtsp-transport=" + ch + "tcp" + ch) == "") != member:
                 wrong["mpv"].append(cp)

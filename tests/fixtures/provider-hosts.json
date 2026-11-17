@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-82 and D-SINK-83 (the owner, 2026-11-05): two rules about the host a playlist chose, held in both mirrors by this one file (tests/test_provider_hosts.py runs the helper, tests/Model.test.js the model; neither is the oracle, this file is, and every expected value was written by hand). `firstEntry`: a guide hint that is a comma-joined list is read as its first entry, cut at the first `,` that is followed, after any run of the six ASCII delimiters, by a scheme and a URL's `://` (hint_first_entry / Model.hintFirstEntry). `noDot`: a host of one DNS label -- lower-cased, one trailing dot removed, no dot, not empty, not an IPv6 literal -- (dotless_host / Model.dotlessHost). `hintVerdicts`: Model.epgHintVerdict end to end, with what the helper's policy says of the same host when the shell sends `playlistHost` (DestinationPolicy.refuses_name; null when the first entry is not an http URL). `handOffs`: what the helper's guide fetch does with a URL a shell hands it (code, and every host it asked the resolver for); `listed` and `oneLabel` are the two predicates over it, which both mirrors answer. `absorbed` (the review's F1, 2026-11-06): an address the playlist chose that holds a raw `\"` or a `,` opening an attribute holding a URL, which no fetch sends (absorbed_attribute / Model.absorbedAttribute). `logoHosts`: the logo host the survey counts (logo_survey_host / Model.splitLogoUrl; \"\" is refused, never named) and what fetch_logo does with the URL.",
+ "about": "D-SINK-82 and D-SINK-83 (the owner, 2026-11-05): two rules about the host a playlist chose, held in both mirrors by this one file (tests/test_provider_hosts.py runs the helper, tests/Model.test.js the model; neither is the oracle, this file is, and every expected value was written by hand). `firstEntry`: a guide hint that is a comma-joined list is read as its first entry, cut at the first `,` that is followed, after any run of the six ASCII delimiters, by a scheme and a URL's `://` (hint_first_entry / Model.hintFirstEntry). `noDot`: a host of one DNS label -- lower-cased, one trailing dot removed, no dot, not empty, not an IPv6 literal -- (dotless_host / Model.dotlessHost). `hintVerdicts`: Model.epgHintVerdict end to end, with what the helper's policy says of the same host when the shell sends `playlistHost` (DestinationPolicy.refuses_name; null when the first entry is not an http URL). `handOffs`: what the helper's guide fetch does with a URL a shell hands it (code, and every host it asked the resolver for); `listed` and `oneLabel` are the two predicates over it, which both mirrors answer. `absorbed` (the review's F1, 2026-11-06): an address the playlist chose that holds a raw `\"` or a `,` opening an attribute holding a URL, which no fetch sends (absorbed_attribute / Model.absorbedAttribute). `logoHosts`: the logo host the survey counts (logo_contact_host / Model.logoContactHost, the one reading since D-SINK-112; \"\" is refused, never named) and what fetch_logo does with the URL.",
  "firstEntry": [
   {
    "hint": "https://epg.test/guide.xml.gz,http://prov.test/xmltv.php?username=qqqqqq&password=zzzzzz",
@@ -1007,16 +1007,19 @@
    "url": "https://user:pass@qqqqqq/a.png",
    "host": "",
    "fetch": {
-    "code": "logo_userinfo",
+    "code": "logo_host",
     "lookups": []
    },
-   "why": "userinfo is refused first, as before"
+   "why": "user information is refused before anything else, by the one reading since D-SINK-112 (`logo_host`; it was `logo_userinfo`)"
   },
   {
    "url": "https://[qqqqqq]/a.png",
    "host": "",
-   "fetch": null,
-   "why": "brackets around a name exempt nothing (the fetch's own URL parser refuses this one)"
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "brackets around a name exempt nothing: the source validator refuses a bracketed host that is no IPv6 address, and since D-SINK-112 the fetch asks the one reading before its URL parser (which raised on it)"
   },
   {
    "url": "https://cdn.test/a.png",
@@ -1053,43 +1056,39 @@
   },
   {
    "url": "https://10.0.0.1/a.png",
-   "host": "10.0.0.1",
+   "host": "",
    "fetch": {
-    "code": "local_address",
-    "lookups": [
-     "10.0.0.1"
-    ]
+    "code": "logo_host",
+    "lookups": []
    },
-   "why": "a dotted literal is counted and refused at connect by its class, as before"
+   "why": "D-SINK-112: a literal that is not global is no host, refused before any lookup; it was counted and refused at connect by its class"
   },
   {
    "url": "https://[::1]:8443/a.png",
-   "host": "[::1]",
+   "host": "",
    "fetch": {
-    "code": "local_address",
-    "lookups": [
-     "::1"
-    ]
+    "code": "logo_host",
+    "lookups": []
    },
-   "why": "an IPv6 literal is not one label"
+   "why": "D-SINK-112: an IPv6 literal is not one label, and a loopback one is no host either"
   },
   {
    "url": "https://logos.test/news.png\"catchup-source=\"http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
    "host": "",
    "fetch": {
-    "code": "logo_url",
+    "code": "logo_host",
     "lookups": []
    },
-   "why": "the review's F1: a logo that absorbed a credentialed catchup-source is no host and is refused before any lookup"
+   "why": "the review's F1: a logo that absorbed a credentialed catchup-source is no host and is refused before any lookup (`logo_host` since D-SINK-112; it was `logo_url`)"
   },
   {
    "url": "https://logos.test/news.png,catchup-source=http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts",
    "host": "",
    "fetch": {
-    "code": "logo_url",
+    "code": "logo_host",
     "lookups": []
    },
-   "why": "a bare logo that absorbed a bare catchup-source by a comma"
+   "why": "a bare logo that absorbed a bare catchup-source by a comma (`logo_host` since D-SINK-112; it was `logo_url`)"
   },
   {
    "url": "https://images.test/?url=https://cdn.test/logo.png",
@@ -1112,6 +1111,107 @@
     ]
    },
    "why": "an image service's comma path is a logo as before"
+  },
+  {
+   "url": "https://qqqqqq%3azzzzzz%40cdn.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: a percent-encoded user name and password in the host; the survey named `qqqqqq%3azzzzzz%40cdn.test`"
+  },
+  {
+   "url": "https://qqqqqq.x:zz/zzzz@cdn.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: a dotted user name whose password a slash cut, read as a port that is not a number; the survey named the user name"
+  },
+  {
+   "url": "https://my.user:pa#ss@cdn.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: the same cut by a `#`"
+  },
+  {
+   "url": "https://cdn.test:+443/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: a port that is not ASCII digits; the fetch looked up cdn.test, as http.client reads `+443` as 443"
+  },
+  {
+   "url": "https://cdn\uff0f.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the critique's finding 6: a fullwidth slash the URL library refuses to read; the run counted it a failed fetch"
+  },
+  {
+   "url": "https://qqqqqq:zz[zz]@cdn.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the critique's finding 6: a bracket in the user information"
+  },
+  {
+   "url": "https://[::1:]/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the critique's finding 6: a bracketed host that is no IPv6 address"
+  },
+  {
+   "url": "https://cdn.test/a.png#\u00d1#",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the critique's finding 5: urllib cuts the fragment at the LAST `#`, so the request line would carry a character http.client cannot send"
+  },
+  {
+   "url": "https://qq.qq:12/zz@cdn.test/a.png",
+   "host": "qq.qq",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "qq.qq"
+    ]
+   },
+   "why": "D-SINK-35's accepted class: fetched from qq.qq on port 12, so counted and named as the fetch contacts it"
+  },
+  {
+   "url": "https://[2606:4700::1%25eth0]/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: a logo's authority holds no `%`, so a zone on a global IPv6 literal is no host"
+  },
+  {
+   "url": "https://cdn\u0081.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-112: a C1 control in the host, which only the source validator refuses"
   }
  ],
  "absorbed": [

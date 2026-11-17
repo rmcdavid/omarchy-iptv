@@ -628,7 +628,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-104}
 # the state reader); 66 red on e04f339's model, and 7 single-decision
 # mutants red (QA-RESULTS "Round 5 of the security review, lane-r5a"); the
 # suite runs 3827.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3827}
+# 2026-11-16, lane-r5b (round 5, D-SINK-112): 3827 -> 3829 -- two checks
+# of the one reading of a logo's address (every refused logo of the shared
+# logo fixtures named by no consent line and given no file; the scheme as
+# written and code-point order); 6 of 3829 red on 7329b96's model, and 6
+# single-decision model mutants red (QA-RESULTS "Round 5 of the security
+# review, lane-r5b"); the suite runs 3829.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3829}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1135,7 +1141,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3827}
 # two and test_logo_escapes' one), 16 single-decision helper mutants red (QA-RESULTS
 # "Round 5 of the security review, lane-r5a"); the suite runs 2704, 1
 # skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2704}
+# 2026-11-16, lane-r5b (round 5, D-SINK-112): 2704 -> 2711 -- tests/
+# test_host_grammar.py's LogoDifferentialTest (6: both readings and both
+# surveys equal over 8,386 logos, every counted logo asked of the
+# connection at its host and port, every refused one refused before it,
+# and Qt's engine) and tests/test_logos.py's 1 (the three unreadable
+# addresses refused as logo_host, and the run's refusals the survey's).
+# 19 tests red on 7329b96 with the differential erroring, 9 single-decision
+# helper mutants red (QA-RESULTS "Round 5 of the security review,
+# lane-r5b"); the suite runs 2711, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2711}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

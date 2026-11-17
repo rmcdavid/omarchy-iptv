@@ -1,5 +1,5 @@
 {
-  "note": "Shared by tests/Model.test.js (Model.logoSurvey) and tests/test_logos.py (logo_survey). `expect` is the agreed answer, reviewed by hand: both implementations are checked against it, never against each other, so they cannot drift together. Case 7 is the one that matters most -- a logo URL carrying userinfo is REFUSED and its host is not named, because fetch_logo refuses it and because the consent text is a sink under CLAUDE.md rule 5.",
+  "note": "Shared by tests/Model.test.js (Model.logoSurvey) and tests/test_logos.py (logo_survey). `expect` is the agreed answer, reviewed by hand: both implementations are checked against it, never against each other, so they cannot drift together. Case 7 is the one that matters most -- a logo URL carrying userinfo is REFUSED and its host is not named, because fetch_logo refuses it and because the consent text is a sink under CLAUDE.md rule 5. Since D-SINK-112 (2026-11-16) both implementations read a logo by one reading, the one the fetch fetches by (logo_contact_host, Model.logoContactHost): a logo is counted only when it would be contacted, and under the host it would be contacted at.",
   "cases": [
     {
       "name": "empty list",
@@ -297,7 +297,7 @@
       }
     },
     {
-      "name": "D-SINK-30: a reg-name parameter is not the host, and the port is still not either",
+      "name": "D-SINK-30, as D-SINK-112 leaves it: a reg-name parameter (`;`, `=`, `&`) in a logo's authority makes no host -- no host name may hold one since D-SINK-86, and the fetch refuses such a logo before any lookup -- so each is counted refused and none is named; the port, the literal and the `@` after a parameter change nothing",
       "channels": [
         {
           "logo": "https://cdn.test;sid=SECRET/a.png"
@@ -324,19 +324,10 @@
       "expect": {
         "channels": 7,
         "withLogo": 7,
-        "wouldContact": 6,
-        "refused": 1,
-        "hostCount": 2,
-        "hosts": [
-          {
-            "host": "cdn.test",
-            "channels": 5
-          },
-          {
-            "host": "[::1]",
-            "channels": 1
-          }
-        ],
+        "wouldContact": 0,
+        "refused": 7,
+        "hostCount": 0,
+        "hosts": [],
         "schemes": {
           "https": 7
         }
@@ -381,7 +372,7 @@
       }
     },
     {
-      "name": "D-STATE-2: the reader's whitespace at an authority's edge is stripped, so the survey counts b.test with a U+001C after it or a U+0085 before it as b.test, the busiest host (logo_host's answer; the fetch strips nothing and reaches neither, D-LOGO-26)",
+      "name": "D-STATE-2, as D-SINK-112 leaves it: the reader's whitespace at an authority's edge -- a U+001C after the host, a U+0085 before it -- is no longer taken off: the fetch strips nothing and reaches neither (D-LOGO-26), so the survey, which reads a logo as the fetch does, counts both refused and a.test as the one host",
       "channels": [
         {
           "logo": "https://b.test\u001c/1.png"
@@ -396,14 +387,10 @@
       "expect": {
         "channels": 3,
         "withLogo": 3,
-        "wouldContact": 3,
-        "refused": 0,
-        "hostCount": 2,
+        "wouldContact": 1,
+        "refused": 2,
+        "hostCount": 1,
         "hosts": [
-          {
-            "host": "b.test",
-            "channels": 2
-          },
           {
             "host": "a.test",
             "channels": 1
@@ -415,7 +402,7 @@
       }
     },
     {
-      "name": "D-STATE-2: so is a U+FEFF, which only the shell's trim took until D-STATE-2, so the survey counts a host behind one as the host",
+      "name": "D-STATE-2, as D-SINK-112 leaves it: a U+FEFF before the host is whitespace the source validator refuses inside an address, so the logo behind it is counted refused and c.test once",
       "channels": [
         {
           "logo": "https://\ufeffc.test/1.png"
@@ -427,13 +414,13 @@
       "expect": {
         "channels": 2,
         "withLogo": 2,
-        "wouldContact": 2,
-        "refused": 0,
+        "wouldContact": 1,
+        "refused": 1,
         "hostCount": 1,
         "hosts": [
           {
             "host": "c.test",
-            "channels": 2
+            "channels": 1
           }
         ],
         "schemes": {
@@ -526,6 +513,200 @@
         ],
         "schemes": {
           "https": 3
+        }
+      }
+    },
+    {
+      "name": "D-SINK-112: user information written or percent-encoded, a password a slash or a `#` cut into a port, a port that is not ASCII digits, and a literal or a name that is not global are each counted refused and never named; the fetch refuses every one before any lookup",
+      "channels": [
+        {
+          "logo": "https://qqqqqq%3azzzzzz%40cdn.test/a.png"
+        },
+        {
+          "logo": "https://qqqqqq.x:zz/zzzz@cdn.test/a.png"
+        },
+        {
+          "logo": "https://my.user:pa#ss@cdn.test/a.png"
+        },
+        {
+          "logo": "https://cdn.test:abc/a.png"
+        },
+        {
+          "logo": "https://cdn.test:+443/a.png"
+        },
+        {
+          "logo": "https://10.0.0.1/a.png"
+        },
+        {
+          "logo": "https://[::1]:8443/a.png"
+        },
+        {
+          "logo": "https://a.localhost/a.png"
+        },
+        {
+          "logo": "https://cdn.test/a.png"
+        }
+      ],
+      "expect": {
+        "channels": 9,
+        "withLogo": 9,
+        "wouldContact": 1,
+        "refused": 8,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "cdn.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 9
+        }
+      }
+    },
+    {
+      "name": "D-SINK-112: an authority the URL library cannot read (a fullwidth slash, a bracket in the user information or after a literal, a bracketed host that is no address), a tab in the host, a request target or a fragment that is not printable ASCII, and a host no host name may take are each counted refused; the helper's survey refused the first four and the shell's counted them",
+      "channels": [
+        {
+          "logo": "https://cdn\uff0f.test/a.png"
+        },
+        {
+          "logo": "https://[::1]x/a.png"
+        },
+        {
+          "logo": "https://qqqqqq:zz[zz]@cdn.test/a.png"
+        },
+        {
+          "logo": "https://[::1:]/a.png"
+        },
+        {
+          "logo": "https://cdn\t.test/a.png"
+        },
+        {
+          "logo": "https://cdn.test/\u00d1.png"
+        },
+        {
+          "logo": "https://cdn.test/a.png#\u00d1#"
+        },
+        {
+          "logo": "https://cdn!.test/a.png"
+        },
+        {
+          "logo": "https://cdn\u034f.test/a.png"
+        },
+        {
+          "logo": "https://ok.test/a.png"
+        }
+      ],
+      "expect": {
+        "channels": 10,
+        "withLogo": 10,
+        "wouldContact": 1,
+        "refused": 9,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "ok.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 10
+        }
+      }
+    },
+    {
+      "name": "D-SINK-35's accepted class under D-SINK-112: a dotted user name and a password of digits read as a port is fetched from the host it names, on that port, so it is counted and named; a fragment of printable ASCII is no part of the host",
+      "channels": [
+        {
+          "logo": "https://qq.qq:12/zz@cdn.test/a.png"
+        },
+        {
+          "logo": "https://cdn.test/a.png#frag"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 2,
+        "refused": 0,
+        "hostCount": 2,
+        "hosts": [
+          {
+            "host": "cdn.test",
+            "channels": 1
+          },
+          {
+            "host": "qq.qq",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 2
+        }
+      }
+    },
+    {
+      "name": "D-SINK-112: hosts with the same count are ordered by code point, as the helper orders them; the shell ordered them by UTF-16 unit, which put a host opening outside the Basic Multilingual Plane first",
+      "channels": [
+        {
+          "logo": "https://\ud800\udc00x.test/a.png"
+        },
+        {
+          "logo": "https://\uff41x.test/a.png"
+        }
+      ],
+      "expect": {
+        "channels": 2,
+        "withLogo": 2,
+        "wouldContact": 2,
+        "refused": 0,
+        "hostCount": 2,
+        "hosts": [
+          {
+            "host": "\uff41x.test",
+            "channels": 1
+          },
+          {
+            "host": "\ud800\udc00x.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 2
+        }
+      }
+    },
+    {
+      "name": "D-SINK-112: what only the source validator or the `%` rule refuses -- a C1 control in the host, an address over 2,048 characters, and a zone on a global IPv6 literal (`%25`, which no logo carries) -- is counted refused",
+      "channels": [
+        {
+          "logo": "https://cdn\u0081.test/a.png"
+        },
+        {
+          "logo": "https://cdn.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
+        },
+        {
+          "logo": "https://[2606:4700::1%25eth0]/a.png"
+        },
+        {
+          "logo": "https://[2606:4700::1]/a.png"
+        }
+      ],
+      "expect": {
+        "channels": 4,
+        "withLogo": 4,
+        "wouldContact": 1,
+        "refused": 3,
+        "hostCount": 1,
+        "hosts": [
+          {
+            "host": "[2606:4700::1]",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 4
         }
       }
     }

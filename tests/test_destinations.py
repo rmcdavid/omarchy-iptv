@@ -535,7 +535,11 @@ class LogoDestinationTest(unittest.TestCase):
         self.addCleanup(target.close)
         with self.assertRaises(helper.HelperError) as caught:
             helper.fetch_logo("https://127.0.0.1:%d/logo.png" % target.port, 5)
-        self.assertEqual((caught.exception.code, target.accepted), ("local_address", 0))
+        # D-SINK-112 (2026-11-16): refused by the survey's own reading before
+        # the opener (`logo_host`), as the survey counts it; the connection
+        # layer refused it (`local_address`) until then, and still refuses a
+        # logo whose hop leads there (the redirect test below).
+        self.assertEqual((caught.exception.code, target.accepted), ("logo_host", 0))
 
     @unittest.skipUnless(shutil.which("openssl"), "openssl is needed to make a certificate")
     def test_a_logo_redirect_into_loopback_is_refused_before_any_connection(self):

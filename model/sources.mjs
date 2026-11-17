@@ -1165,7 +1165,7 @@ function absorbedAttribute(text) {
 // `http://USER:...`, whose host is the USERNAME; a dotted username reads as
 // a dotted host and is looked up and named as before (the review's F12). A guide hint on such a host is no hint at all (epgHintVerdict,
 // the playlist's own host excepted) and a logo on one is no host
-// (logoHost), so the username reaches neither the resolver nor the Sources
+// (logoContactHost), so the username reaches neither the resolver nor the Sources
 // row nor the consent dialog. The cost, stated: a single-label guide host
 // off the playlist's host and every single-label logo host are refused,
 // `localhost` and an all-digit or `0x` host (`2130706433`) among them.
@@ -1552,11 +1552,14 @@ function sourceCacheDir(cacheDir, key) {
 // reader that stops at `:` alone prints the parameter wherever it prints the
 // host. One function, shared by every reader that derives a printable host
 // from a URL's authority -- hostPortOf (the Sources row and its default
-// label) and logoHost in model/logos.mjs (the consent dialog) -- so the rule
-// has one copy per mirror; the helper's is `cut_host_params`. The `:` port
-// is NOT cut here: hostPortOf keeps it and logoHost drops it, each in its
-// own line, and a bracketed literal is unaffected because none of the three
-// can appear inside the brackets. Validation is unchanged (D-SINK-27).
+// label) -- so the rule has one copy per mirror; the helper's is
+// `cut_host_params`. The `:` port is NOT cut here: hostPortOf keeps it, and
+// a bracketed literal is unaffected because none of the three can appear
+// inside the brackets. Validation is unchanged (D-SINK-27). The consent
+// dialog's reader (logoHost in model/logos.mjs) cut here too until
+// D-SINK-112 (2026-11-16): a logo is now read by logoContactHost, which
+// counts no host holding one of the three, as no host name may since
+// D-SINK-86.
 function cutHostParams(hostport) {
   var s = str(hostport)
   var end = s.search(/[;=&]/)

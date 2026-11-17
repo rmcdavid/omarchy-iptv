@@ -3408,9 +3408,9 @@ def absorbed_attribute(text: Any) -> bool:
     URL's run absorbed from beyond its own attribute -- a raw `"`, or a `,`
     that opens an attribute holding a URL (_ABSORBED_URL)? Such an address
     is never fetched: the guide fetch refuses it (fetch_bytes, origin
-    `playlist`), a logo with it has no host (logo_survey_host) and is
-    refused (fetch_logo, `logo_url`), and the shell adopts no such hint and
-    counts no such logo (Model.absorbedAttribute, both held to the
+    `playlist`), a logo with it has no host (logo_contact_host) and is
+    refused (fetch_logo, `logo_host` since D-SINK-112), and the shell
+    adopts no such hint and counts no such logo (Model.absorbedAttribute, both held to the
     provider-hosts fixture). The backstop behind the parse's own rule
     (own_value), for a cache or a shell from before it; never asked of
     a URL the user typed. The cost, stated: a quoted hint or logo holding
@@ -3438,7 +3438,7 @@ def dotless_host(host: Any) -> bool:
     away from the resolver (and through it the search domains' servers) and
     out of the Sources row and the logo consent dialog. Applied to a guide
     hint (Model.epgHintVerdict: no hint at all, the playlist's own host
-    excepted), to a logo (logo_host, fetch_logo: never excepted), and on
+    excepted), to a logo (logo_contact_host, fetch_logo: never excepted), and on
     every hop of a fetch whose URL the provider chose
     (DestinationPolicy.refuses_name). Never to a URL the user typed.
 

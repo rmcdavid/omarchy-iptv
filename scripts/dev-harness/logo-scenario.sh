@@ -108,10 +108,14 @@
 #   F2  the logo directory holds exactly the six legitimate names
 #   R1  reasons.logo_dimensions == 13   (10 bombs + 2 edges + the unreadable)
 #   R2  the policy refusals, four numbers in one line: refusedOnPolicy == 14
-#       (the 13 above and the logo on 127.0.0.1), reasons.local_address == 1,
+#       (the 13 above and the logo on 127.0.0.1), reasons.logo_host == 1,
 #       no GET reached the 127.0.0.1 server, and its name is not announced --
 #       the destination policy observed live inside the namespace, folded
-#       into R2 so the floor (and check.sh's join to it) does not move
+#       into R2 so the floor (and check.sh's join to it) does not move.
+#       Since D-SINK-112 (2026-11-16) a loopback literal is refused by the
+#       one reading of a logo's address before the opener (`logo_host`, as
+#       the survey counts it); the connection refused it as `local_address`
+#       until then, and still refuses a hop that leads there
 #   R3  fetched == 4, cached == 2 (C5 is the fourth fetch, C6 the second
 #       cached file)
 #   E1  side over, pixels under (5000x800): not announced
@@ -538,8 +542,8 @@ ck "F2 the logo directory holds exactly the six legitimate names" "$have_disk" "
 ck "R1 reasons.logo_dimensions" "$(field 'd["reasons"].get("logo_dimensions")')" "13"
 lb_name=$(grep -a "^RIG name-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{ print $4 }')
 lb_gets=$(grep -a "^RIG get-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{ print $4 }')
-ck "R2 refusedOnPolicy, reasons.local_address, GETs at 127.0.0.1, the 127.0.0.1 logo announced" \
-   "$(field 'd["refusedOnPolicy"]') $(field 'd["reasons"].get("local_address")') ${lb_gets:-NA} $(announced "${lb_name:-NA}")" "14 1 0 false"
+ck "R2 refusedOnPolicy, reasons.logo_host, GETs at 127.0.0.1, the 127.0.0.1 logo announced" \
+   "$(field 'd["refusedOnPolicy"]') $(field 'd["reasons"].get("logo_host")') ${lb_gets:-NA} $(announced "${lb_name:-NA}")" "14 1 0 false"
 ck "R3 fetched cached" "$(field 'd["fetched"]') $(field 'd["cached"]')" "4 2"
 
 # ---- E1..E3: the two bounds driven apart, and the unreadable header.

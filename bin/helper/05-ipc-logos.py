@@ -262,80 +262,105 @@ LOGO_SCHEMES = ("https",)
 LOGO_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
-def logo_host(netloc: str) -> str:
-    """The host a logo URL would disclose to, or "" when it discloses to none.
-
-    The PORT is not part of the answer. The question the survey exists to
-    answer is how many parties learn which channels this user has, and
-    `cdn.test` and `cdn.test:8443` are one party; counting them separately
-    inflates the only number in the consent sentence.
-
-    Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
-    the host is never contacted, and naming it would print the credentials in
-    the consent text. Mirrored by Model.splitLogoUrl.
-
-    D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
-    through the same `cut_host_params` the Sources row's host goes through:
-    `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
-    credential, urllib hands it over whole in `netloc`, and this stopped at
-    `:` alone -- so the survey the consent dialog is composed from and the
-    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks; since
-    D-LOGO-25 logo_scans too) named
-    `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
-    `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
-    would count a host that is never contacted.
-
-    D-SINK-83 (the owner, 2026-11-05): and "" for a host of ONE
-    DNS label (dotless_host), which fetch_logo refuses before any lookup.
-    A logo URL cut at a space in its userinfo (D-SINK-34's class) leaves
-    `https://USER:...`, whose host is the username: the survey counted it
-    as a host to contact and the consent dialog named it as the busiest.
-    Never excepted for the playlist's own host, as a guide hint is.
-    """
-    host = logo_host_part(netloc)
-    return "" if dotless_host(host) else host
-
-
-def logo_survey_host(raw: str, netloc: str) -> str:
-    """The host logo_survey counts for the logo URL `raw`, whose authority
-    is `netloc`: logo_host's, or "" for a URL whose run took a glued
-    attribute holding another URL (absorbed_attribute, the review's F1),
-    which fetch_logo refuses, so the consent text counts it refused and
-    names nothing. Mirrored by Model.splitLogoUrl."""
-    return "" if absorbed_attribute(raw) else logo_host(netloc)
-
-
-def logo_host_part(netloc: str) -> str:
-    """logo_host's host before the one-label rule: the authority after its
-    whitespace, lower-cased, "" for userinfo, cut at the parameter
-    delimiters, without its port (see logo_host)."""
-    text = (netloc or "").strip(URL_SPACE_CHARS).lower()  # D-STATE-2: Model.stripSpace's class
-    if "@" in text:
+def logo_scheme(raw: str) -> str:
+    """A logo URL's scheme as written: the text before its first `:`,
+    lower-cased, when that text is an RFC 3986 scheme (an ASCII letter, then
+    ASCII letters, digits, `+`, `-` or `.`), else "". Nothing is stripped
+    first, so a URL with whitespace before its scheme has none. The
+    survey's `schemes` count and fetch_logo's scheme refusal read it; the
+    fetch asks it before anything else and before any URL parser
+    (D-SINK-112). Mirrored by Model.logoScheme, index for index."""
+    colon = raw.find(":")
+    if colon <= 0:
         return ""
-    text = cut_host_params(text)
-    if text.startswith("["):
-        # IPv6 literal: the bracketed half is the host, any :port follows it.
-        close = text.find("]")
-        return text[: close + 1] if close != -1 else ""
-    return text.split(":", 1)[0]
+    head = raw[:colon]
+    first = head[0]
+    if not ("a" <= first <= "z" or "A" <= first <= "Z"):
+        return ""
+    for ch in head:
+        if not ("a" <= ch <= "z" or "A" <= ch <= "Z" or "0" <= ch <= "9" or ch in "+-."):
+            return ""
+    return head.lower()
 
 
-def unsplit_scheme(raw: str) -> str:
-    """The scheme of a URL urlsplit refused, lower-cased, or "" when the
-    text before its first `:` is not one (RFC 3986: a letter, then letters,
-    digits, `+`, `-` or `.`). For the survey's `schemes` count alone."""
-    head = raw.partition(":")[0].strip(URL_SPACE_CHARS)
-    if (head and head.isascii() and head[0].isalpha()
-            and all(c.isalnum() or c in "+-." for c in head)):
-        return head.lower()
-    return ""
+def logo_contact_host(raw: Any) -> str:
+    """The host a logo would be fetched from, or "" when it would be
+    fetched from none -- the ONE reading of a logo's address that the
+    survey counts, fetch_logo fetches by, and the refusal lines name
+    (D-SINK-112, 2026-11-16). Model.logoContactHost is the same reading,
+    held to it by the shared logo-survey and provider-hosts fixtures and by
+    the host-grammar suite's differential on the dev branch, in node and in
+    Qt's engine.
+
+    The survey used to read the host from the raw address, cut at its first
+    `:` (logo_host), while the fetch read it as urllib's request holds it:
+    `https://user%3Apass%40cdn.test/a.png` was counted and named
+    `user%3apass%40cdn.test` and `https://user.name:pa/ss@cdn.test/a.png`
+    named `user.name`, and the counts took in logos the fetch refused or
+    could not send. So a logo is counted, slotted and fetched only when:
+      * it absorbed no attribute of the playlist (absorbed_attribute);
+      * its scheme as written is https (logo_scheme);
+      * the source validator accepts it (validate_source_url, so
+        read_authority's reading: no whitespace or control anywhere, at most
+        MAX_SOURCE_URL long, no delimiter fold, no bracket in user
+        information, a bracketed host only an IPv6 address, the host rule
+        and a port of digits up to 65535);
+      * its authority as written holds no `@` (a logo never carries user
+        information, and fetch_logo never sends one) and no `%` (no DNS
+        name holds one, and the request's host is then the authority as
+        written, with nothing percent-decoded between the two readings);
+      * everything after its authority, the fragment included, is printable
+        ASCII, 0x21 to 0x7E: http.client sends no other request line, and
+        urllib cuts the fragment at the LAST `#` (the critique's finding 5:
+        `https://cdn.test/a.png#<U+00D1>#` was counted and never sent);
+      * its host is not one DNS label (dotless_host, D-SINK-83) and not a
+        literal or a name that is not global (host_class: loopback, the
+        local networks, localhost), which DestinationPolicy.for_logos
+        refuses before connecting.
+    The PORT is never part of the answer: `cdn.test` and `cdn.test:8443`
+    are one party to the consent sentence. An IPv6 literal keeps its
+    brackets. D-SINK-35's accepted class stays as it was:
+    `https://qq.qq:12/zz@cdn.test/a.png` is fetched from qq.qq on port 12,
+    so it is counted and named `qq.qq`."""
+    if not isinstance(raw, str) or raw == "" or absorbed_attribute(raw):
+        return ""
+    if logo_scheme(raw) not in LOGO_SCHEMES:
+        return ""
+    checked = validate_source_url(raw)
+    if not checked["ok"] or checked["kind"] != "http":
+        return ""
+    body = raw[raw.find(":") + 1:]
+    if not body.startswith("//"):
+        return ""
+    read = read_authority(body[2:])
+    if not read["ok"]:
+        return ""
+    authority = body[2:len(body) - len(read["tail"])]
+    if "@" in authority or "%" in authority:
+        return ""
+    for ch in read["tail"]:
+        if not "\x21" <= ch <= "\x7e":
+            return ""
+    host = read["host"]
+    if host != checked["host"] or dotless_host(host) or host_class(host) not in ("", "global"):
+        return ""
+    return host
 
 
 def logo_survey(channels: Any) -> dict[str, Any]:
     """Who enabling logos would contact, counted from the cache.
 
     Pure: no network, no filesystem beyond what the caller already read.
-    """
+
+    A logo is counted under the host fetch_logo would contact
+    (logo_contact_host), and every other logo is counted `refused`:
+    fetch_logo refuses it before any lookup, so a survey that counted one as
+    contactable would promise a fetch that cannot happen -- and, for a URL
+    carrying user information, print it into the consent text the user is
+    reading (the credential-sink rule, engineering rule 5: the consent
+    dialog is a sink). Hosts with the same count are ordered by code point,
+    as Model.logoSurvey orders them (D-SINK-112: the shell's survey ordered
+    them by UTF-16 unit)."""
     rows = channels if isinstance(channels, list) else []
     hosts: dict[str, int] = {}
     schemes: dict[str, int] = {}
@@ -348,36 +373,10 @@ def logo_survey(channels: Any) -> dict[str, Any]:
         if not isinstance(raw, str) or not raw:
             continue
         with_logo += 1
-        try:
-            parsed = urllib.parse.urlsplit(raw)
-        except ValueError:
-            # D-LOGO-26: urlsplit REFUSES some URLs outright -- a `[` or `]`
-            # in the authority that is not one well-formed address literal,
-            # a character whose NFKC form is a delimiter -- and this raised
-            # out of the verb as `internal`, on the survey and, because
-            # cmd_logos surveys first, on every `--fetch` run over such a
-            # cache. The parse drops such a logo, so only a cache another
-            # writer made holds one. Counted as a logo, never contacted, and
-            # no host is named for it: the fetch cannot reach it either.
-            scheme = unsplit_scheme(raw)
-            schemes[scheme] = schemes.get(scheme, 0) + 1
-            refused += 1
-            continue
-        scheme = (parsed.scheme or "").lower()
+        scheme = logo_scheme(raw)
         schemes[scheme] = schemes.get(scheme, 0) + 1
-        if scheme not in LOGO_SCHEMES:
-            # Counted, never contacted: rule 3 of the ruling is https only.
-            refused += 1
-            continue
-        host = logo_survey_host(raw, parsed.netloc or "")
+        host = logo_contact_host(raw)
         if not host:
-            # No host at all, userinfo, or an absorbed attribute. fetch_logo refuses a URL carrying
-            # userinfo rather than stripping it, so a survey that counted one
-            # as contactable would promise a fetch that cannot happen -- and
-            # would print `user:pass@provider.test` into the consent text the
-            # user is reading. The credential-sink rule (engineering rule 5): every sink redacts to scheme
-            # and host, and the consent dialog is a sink. Caught by
-            # the shared logo-survey fixture (dev branch) before it was ever drawn.
             refused += 1
             continue
         hosts[host] = hosts.get(host, 0) + 1
@@ -578,6 +577,10 @@ def logo_opener(host: str, policy: Any = None) -> Any:
 # and a logo is never given more than what is left of it. Mirrored by
 # Model.LOGO_DEADLINE_MS through the shared logo-deadlines fixture.
 LOGO_DEADLINE = 30.0
+# D-SINK-112: fetch_logo's refusal of an address logo_contact_host reads as
+# no host, the one sentence for every such address; it names no host, since
+# the host may be a user name. Never printed by the run, which counts codes.
+LOGO_HOST_REFUSAL = "refused a logo whose address cannot be fetched as written; not looked up"
 
 
 def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[bytes, str]:
@@ -596,25 +599,24 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
     `logo_timeout` when it passes.
     """
     import urllib.request
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme.lower() not in LOGO_SCHEMES:
+    # D-SINK-112 (2026-11-16): the address is judged by the survey's own
+    # reading (logo_contact_host) BEFORE any URL parser is asked, so every
+    # logo the survey counts refused is refused here, as `logo_host`, and
+    # counted refused by the run. urlsplit was asked first, and raised on
+    # `https://cdn<U+FF0F>.test/a.png`, a bracket in the user information
+    # and `https://[::1:]/a.png`, which the run's backstop then counted as a
+    # failed fetch (the critique's finding 6). The scheme is read as written
+    # first, so a logo that is not https keeps its own code; every other
+    # refusal of the reading is `logo_host` -- user information, an absorbed
+    # attribute (`logo_userinfo` and `logo_url` until then), one label, a
+    # literal or a name that is not global (`local_address` at connect until
+    # then), a request target that is not printable ASCII -- with one fixed
+    # sentence naming no host, before the opener and so before any lookup.
+    if logo_scheme(url) not in LOGO_SCHEMES:
         raise HelperError("logo_scheme", "refused a non-https logo host")
-    if "@" in parsed.netloc:
-        raise HelperError("logo_userinfo", "refused a logo URL carrying userinfo")
-    if dotless_host(logo_host_part(parsed.netloc)):
-        # D-SINK-83: a host of one DNS label (logo_host's ""),
-        # refused before the opener runs, so nothing looks it up; the
-        # message names no host, because the host may be a username. The
-        # connect-time policy refuses the same on every redirect hop
-        # (DestinationPolicy.refuses_name).
-        raise HelperError("logo_host", "refused a logo whose host is a name of one label, which is not looked up")
-    if absorbed_attribute(url):
-        # The review's F1 (2026-11-06): a logo URL whose run took a glued
-        # attribute holding another URL (D-SINK-80's cost) would carry that
-        # URL's credential in this request's path. Refused before the
-        # opener runs, naming no host and no URL.
-        raise HelperError("logo_url", "refused a logo URL that runs into another attribute of the playlist")
-    host = parsed.netloc.lower()
+    host = logo_contact_host(url)
+    if not host:
+        raise HelperError("logo_host", LOGO_HOST_REFUSAL)
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:
         with FetchDeadline(LOGO_DEADLINE if budget is None else budget):
@@ -990,7 +992,7 @@ def logo_scans_within_bound(data: bytes, ctype: str) -> bool:
 
 def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
     """The refusal text: a HOST and numbers, never a URL (rule 5, R6)."""
-    host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+    host = logo_contact_host(url) or "an unnamed host"
     dims = logo_dimensions(data, ctype)
     if dims is None:
         return "refused a logo from %s: its header could not be read" % host
@@ -1196,7 +1198,7 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
         raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
     if not logo_scans_within_bound(data, ctype):
         # D-LOGO-25: the same place, the same reason, the decoder's CPU.
-        host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+        host = logo_contact_host(url) or "an unnamed host"
         raise HelperError("logo_scans", "refused a logo from %s: its JPEG carries %d scans, over the %d scan bound"
                           % (host, jpeg_scan_count(data), MAX_JPEG_SCANS))
     if ctype == "image/png":
@@ -1205,7 +1207,7 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
         # reason: a refusal still creates nothing on disk.
         canon = canonical_png(data)
         if canon is None:
-            host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+            host = logo_contact_host(url) or "an unnamed host"
             raise HelperError("logo_chunks", "refused a logo from %s: its PNG chunks are malformed" % host)
         data = canon
     name = logo_filename(url)

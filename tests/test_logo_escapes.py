@@ -136,13 +136,17 @@ class HttpClientErrorsTest(LogoEscapeCase):
         # D-SINK-117 (2026-11-16): `:abc` is no port, refused before any
         # connection by the connection layer's port rule (`bad_url`, a policy
         # refusal), where http.client's InvalidURL failed it as logo_fetch.
-        self.assertEqual((summary["fetched"], summary["failed"], summary["refusedOnPolicy"]), (1, 5, 1), summary)
-        self.assertEqual(summary["reasons"], {"logo_fetch": 5, "bad_url": 1}, summary)
+        # D-SINK-112 (2026-11-16): both malformed URLs -- that one, and the
+        # space in the first one's path -- are refused before the opener by
+        # the survey's own reading (`logo_host`, a policy refusal), as the
+        # survey counts them; the space was http.client's InvalidURL.
+        self.assertEqual((summary["fetched"], summary["failed"], summary["refusedOnPolicy"]), (1, 4, 2), summary)
+        self.assertEqual(summary["reasons"], {"logo_fetch": 4, "logo_host": 2}, summary)
         self.assertEqual(announced, [helper.logo_filename(self.urls[-1])])
         self.assertEqual(self.server.paths, ["/garbage.png", "/long-status.png", "/headers.png",
                                              "/chunk.png", "/good.png"],
                          "the two malformed URLs open no connection; every other logo is tried once")
-        self.assertEqual(self.memo(), {helper.logo_filename(u): ("bad_url" if u == self.urls[1] else "logo_fetch")
+        self.assertEqual(self.memo(), {helper.logo_filename(u): ("logo_host" if u in self.urls[:2] else "logo_fetch")
                                        for u in self.urls[:-1]})
         # Each is mapped where it arises (read_logo_response), not by the
         # run's backstop, which would say so on stderr.

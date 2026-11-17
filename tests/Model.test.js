@@ -374,7 +374,9 @@ checkCall("D-STATE-2: each model mirror takes a code point off a value's edges e
   // site on either side that strips a member less, or anything more (a dash,
   // a `;`), goes red here or there. primaryGroup and hiddenGroupList are the
   // group a row lists under and the name hiding it stores; activeKeyText the
-  // stored key; the survey's host is logoHost's; the warning is mpvListenName's.
+  // stored key; the warning is mpvListenName's. The survey's host is
+  // logoContactHost's since D-SINK-112 (2026-11-16): a member around the host
+  // is no longer taken off, it refuses the logo, as the fetch refuses it.
   // toggleHiddenGroup is the name hiding a group stores, and channelsForScope
   // the group a stashed scope names (both strip with stripSpace themselves).
   const wrong = { group: [], hidden: [], active: [], host: [], mpv: [], toggle: [], scope: [] }
@@ -386,7 +388,7 @@ checkCall("D-STATE-2: each model mirror takes a code point off a value's edges e
     if ((JSON.stringify(Model.hiddenGroupList([ch + "x" + ch])) === '["x"]') !== m) wrong.hidden.push(cp)
     if ((Model.activeKeyText(ch + "d990c2e4" + ch) === "d990c2e4") !== m) wrong.active.push(cp)
     const survey = Model.logoSurvey([{ logo: "https://" + ch + "b.test" + ch + "/x.png" }])
-    if ((survey.hostCount === 1 && survey.hosts[0].host === "b.test") !== m) wrong.host.push(cp)
+    if (m && !(survey.hostCount === 0 && survey.refused === 1)) wrong.host.push(cp)
     if ((Model.mpvArgWarnings(["--rtsp-transport=" + ch + "tcp" + ch]).length === 0) !== m) wrong.mpv.push(cp)
     if ((JSON.stringify(Model.toggleHiddenGroup(Model.emptyState(), ch + "x" + ch).hiddenGroups) === '["x"]') !== m) wrong.toggle.push(cp)
     if ((Model.channelsForScope(scopeRows, "g:" + ch + "G" + ch, Model.emptyState()).length === 1) !== m) wrong.scope.push(cp)
@@ -2683,7 +2685,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [16, []])
+}, [21, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2694,21 +2696,46 @@ checkCall("M2-04: userinfo never reaches the consent text", function () {
           /pass|user@|provider\.test/.test(text)]
 }, [0, 1, 0, false])
 
-// D-SINK-30 (2026-10-24), the recheck's rule-15 finding: a reg-name
-// parameter is a valid authority (`https://cdn.test;sid=SECRET/a.png`) and
-// splitLogoUrl stopped at `:` alone, so the consent dialog the HOST renders
-// named the busiest host as `cdn.test;sid=secret`. The cut is the Sources
-// row's own (Model.cutHostParams, one copy), reached here through the
-// shipping composer: survey -> consent lines -> confirmLogosMessage.
-checkCall("D-SINK-30: the consent dialog's host ends at the first `;`, `=` or `&`, as the Sources row's does -- through confirmLogosMessage, the string the host draws", () => {
+// D-SINK-30 (2026-10-24), the recheck's rule-15 finding, as D-SINK-112
+// (2026-11-16) leaves it: a reg-name parameter is a valid authority
+// (`https://cdn.test;sid=SECRET/a.png`), and the consent dialog the HOST
+// renders named `cdn.test;sid=secret` until D-SINK-30 cut it. No host name may
+// hold one since D-SINK-86 and the fetch refuses such a logo, so the one
+// reading (logoContactHost) gives it no host: counted refused, never named,
+// through the shipping composer: survey -> consent lines -> confirmLogosMessage.
+checkCall("D-SINK-30, D-SINK-112: a logo whose authority holds `;`, `=` or `&` is counted refused and the dialog the host draws names none of it", () => {
   const survey = Model.logoSurvey([{ logo: "https://cdn.test;sid=SECRET/a.png" }, { logo: "https://cdn.test:8443;sid=SECRET/b.png" },
-                                   { logo: "https://other.test=SECRET/c.png" }, { logo: "https://other.test&k=SECRET/d.png" }])
+                                   { logo: "https://other.test=SECRET/c.png" }, { logo: "https://other.test&k=SECRET/d.png" },
+                                   { logo: "https://ok.test/e.png" }])
   const message = Model.confirmLogosMessage(survey)
-  return [survey.hosts, Model.splitLogoUrl("https://cdn.test;sid=SECRET/a.png"), Model.splitLogoUrl("https://[::1]:8443;sid=SECRET/x"),
+  return [survey.hosts, survey.refused, Model.splitLogoUrl("https://cdn.test;sid=SECRET/a.png"), Model.splitLogoUrl("https://[::1]:8443;sid=SECRET/x"),
           Model.splitLogoUrl("https://cdn.test;u=p@evil.test/g.png").host,
-          message.indexOf("cdn.test (2 channels)") !== -1, /secret|sid|;|=|&/i.test(message)]
-}, [[{ host: "cdn.test", channels: 2 }, { host: "other.test", channels: 2 }], { scheme: "https", host: "cdn.test" }, { scheme: "https", host: "[::1]" },
-    "", true, false])
+          message.indexOf("ok.test (1 channel)") !== -1, /secret|sid|;|=|&|cdn\.test|other\.test/i.test(message)]
+}, [[{ host: "ok.test", channels: 1 }], 4, { scheme: "https", host: "" }, { scheme: "https", host: "" }, "", true, false])
+
+// D-SINK-112 (2026-11-16): one reading of a logo's address for the count, the
+// slot and the fetch (logoContactHost, the helper's logo_contact_host). Every
+// address the survey counts refused is named by no line the dialog draws and
+// gets no file name, so the slot stays blank; the tie between two hosts with
+// one channel each is ordered by code point, as the helper orders it.
+checkCall("D-SINK-112: every refused logo of the shared fixtures is named by neither the consent lines nor the dialog, and gets no file", () => {
+  const P = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/provider-hosts.json"), "utf8"))
+  const refused = P.logoHosts.filter(c => c.host === "").map(c => c.url)
+  logoFixture.cases.forEach(c => c.channels.forEach(r => { if (r && typeof r.logo === "string" && r.logo !== "" && Model.logoContactHost(r.logo) === "") refused.push(r.logo) }))
+  const bad = []
+  refused.forEach(function (url) {
+    const survey = Model.logoSurvey([{ logo: url }, { logo: "https://ok.test/a.png" }])
+    const text = Model.logoConsentLines(survey).join(" ") + " | " + Model.confirmLogosMessage(survey)
+    if (survey.refused !== 1 || survey.hostCount !== 1 || /qq|zz|cdn|evil|logos\.test|prov\.test|localhost|10\.0\.0\.1|::1/i.test(text)) bad.push(url)
+    if (Model.logoFile({ logo: url }, "/c/logos") !== "") bad.push("file " + url)
+  })
+  return [refused.length > 40, bad]
+}, [true, []])
+checkCall("D-SINK-112: the scheme as written, and code-point order", () => {
+  return [["HTTPS://[bad/1.png", "ftp://[x/1.png", "svn+ssh://[x", "1x://[y", "[x", "ht tp://[y", "://[y", " https://x.test/"].map(Model.logoScheme),
+          Model.compareCodePoints("\ud800\udc00x", "\uff41x"), Model.compareCodePoints("\uff41x", "\ud800\udc00x"),
+          Model.compareCodePoints("ab", "ab"), Model.compareCodePoints("ab", "a"), Model.compareCodePoints("\ud800", "\ud800\udc00")]
+}, [["https", "ftp", "svn+ssh", "", "", "", "", ""], 1, -1, 0, 1, -1])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let
@@ -23989,7 +24016,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   checkCall("F1 (the review, 2026-11-06): every address the playlist chose absorbed another attribute or not, as the shared fixture says", () =>
     P.absorbed.map(c => [c.text, Model.absorbedAttribute(c.text)]), P.absorbed.map(c => [c.text, c.absorbed]))
   checkCall("F1: a logo that absorbed a credentialed attribute is counted refused, and neither the consent lines nor the message the host draws names its host or the credential", () => {
-    const survey = Model.logoSurvey(P.logoHosts.filter(c => c.fetch && c.fetch.code === "logo_url").map(c => ({ logo: c.url })).concat([{ logo: "https://cdn.test/a.png" }]))
+    const survey = Model.logoSurvey(P.logoHosts.filter(c => c.fetch && c.url.indexOf("catchup-source") !== -1).map(c => ({ logo: c.url })).concat([{ logo: "https://cdn.test/a.png" }]))
     const text = Model.logoConsentLines(survey).join(" ") + " | " + Model.confirmLogosMessage(survey)
     return [survey.refused, survey.wouldContact, survey.hosts, SECRET.test(text), /logos\.test|prov\.test/.test(text)]
   }, [2, 1, [{ host: "cdn.test", channels: 1 }], false, false])

@@ -319,6 +319,13 @@ class LookupBoundTest(LoweredDeadline):
     def test_a_logo_s_lookup_is_under_its_own_deadline(self):
         # The logo opener (05-ipc-logos.py) is the other opener; its fetch
         # runs under fetch_logo's budget, lowered here to the same 0.5 s.
+        # D-SINK-112 (2026-11-16): a loopback logo is refused before the
+        # opener now, so the seam reads 127.0.0.1 as public for the logo's
+        # one reading too; the lookup stays a literal's, which sends nothing.
+        from helper_loader import loopback_reads_public
+        seam = loopback_reads_public(helper)
+        seam.start()
+        self.addCleanup(seam.stop)
         self.slow_lookup()
         started = time.monotonic()
         with self.assertRaises(helper.HelperError) as caught:

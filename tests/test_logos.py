@@ -178,9 +178,14 @@ class LogoFetchGuardsTest(unittest.TestCase):
         # its playlist would be handed the subscription credentials for a
         # picture. fetch_logo refuses rather than stripping, because a URL with
         # credentials in it is not a URL we were meant to fetch.
+        # D-SINK-112 (2026-11-16): refused by the survey's own reading
+        # (logo_contact_host) as `logo_host`, before any URL parser and any
+        # lookup, with a sentence naming neither the host nor the user.
         with self.assertRaises(Exception) as caught:
             helper.fetch_logo("https://user:pass@provider.test/logo.png", 1)
-        self.assertEqual(caught.exception.code, "logo_userinfo")
+        self.assertEqual(caught.exception.code, "logo_host")
+        for leak in ("user", "pass", "provider"):
+            self.assertNotIn(leak, caught.exception.message)
 
     def test_the_fetch_sends_no_authorization_header(self):
         import ast, inspect
@@ -367,39 +372,37 @@ class LogoSurveyFixtureTest(unittest.TestCase):
         self.assertEqual(survey["hosts"], [{"host": "cdn.test", "channels": 2}])
 
     def test_an_ipv6_literal_keeps_its_brackets_and_loses_its_port(self):
-        self.assertEqual(helper.logo_host("[2001:db8::1]:8443"), "[2001:db8::1]")
-        self.assertEqual(helper.logo_host("[2001:db8::1]"), "[2001:db8::1]")
+        self.assertEqual(helper.logo_contact_host("https://[2606:4700::1111]:8443/a.png"), "[2606:4700::1111]")
+        self.assertEqual(helper.logo_contact_host("https://[2606:4700::1111]/a.png"), "[2606:4700::1111]")
+        # D-SINK-112: a literal that is not global -- here the documentation
+        # range -- is refused at connect by DestinationPolicy.for_logos, so
+        # the survey counts it refused rather than as a host to contact.
+        self.assertEqual(helper.logo_contact_host("https://[2001:db8::1]:8443/a.png"), "")
 
-    def test_a_reg_name_parameter_is_not_the_host_in_the_survey_or_the_refusal_lines(self):
-        """D-SINK-30 (2026-10-24), the recheck's rule-15 finding. RFC 3986's
-        reg-name admits `;`, `=` and `&`, so `https://cdn.test;sid=SECRET/a.png`
-        is a valid URL whose authority is a credential; urllib hands it over
-        whole in `netloc`, and `logo_host` stopped at `:` alone -- so the
-        survey the consent dialog is composed from and the `refused a logo
-        from %s` lines named `cdn.test;sid=secret`. The cut is the Sources
-        row's own (`cut_host_params`, one copy in the helper), and the shared
-        logo-survey fixture carries the case for both mirrors; this pins the
-        two sinks by calling them."""
-        self.assertEqual(helper.logo_host("cdn.test;sid=SECRET"), "cdn.test")
-        self.assertEqual(helper.logo_host("cdn.test:8443;sid=SECRET"), "cdn.test")
-        self.assertEqual(helper.logo_host("cdn.test;sid=SECRET:8443"), "cdn.test")
-        self.assertEqual(helper.logo_host("cdn.test=SECRET"), "cdn.test")
-        self.assertEqual(helper.logo_host("cdn.test&k=SECRET"), "cdn.test")
-        self.assertEqual(helper.logo_host("[::1]:8443;sid=SECRET"), "[::1]")
-        # The `@` test sees the WHOLE netloc: fetch_logo refuses this one, so
-        # a cut that hid the `@` would count a host that is never contacted.
-        self.assertEqual(helper.logo_host("cdn.test;u=p@evil.test"), "")
-        # The same cut the Sources row uses: host_port_of keeps the port on
-        # its own line, logo_host drops it, the parameter cut is one function.
+    def test_a_reg_name_parameter_makes_no_host_in_the_survey_or_the_refusal_lines(self):
+        """D-SINK-30 (2026-10-24), the recheck's rule-15 finding, as D-SINK-112
+        (2026-11-16) leaves it. RFC 3986's reg-name admits `;`, `=` and `&`,
+        so `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority
+        is a credential, and the survey named `cdn.test;sid=secret` until
+        D-SINK-30 cut it at the first of them. Since D-SINK-86 no host name
+        may hold one, the fetch refuses such a logo before any lookup, and
+        since D-SINK-112 the survey reads a logo as the fetch does: no host
+        at all, counted refused, and the refusal lines name no host. The
+        Sources row keeps the cut (host_port_of, cut_host_params)."""
+        for raw in ("https://cdn.test;sid=SECRET/a.png", "https://cdn.test:8443;sid=SECRET/b.png",
+                    "https://cdn.test;sid=SECRET:8443/e.png", "https://cdn.test=SECRET/c.png",
+                    "https://cdn.test&k=SECRET/d.png", "https://[::1]:8443;sid=SECRET/f.png",
+                    "https://cdn.test;u=p@evil.test/g.png"):
+            self.assertEqual(helper.logo_contact_host(raw), "", raw)
         self.assertEqual(helper.host_port_of("https://cdn.test:8443;sid=SECRET/x"), "cdn.test:8443")
         self.assertEqual(helper.cut_host_params("cdn.test:8443;sid=SECRET"), "cdn.test:8443")
         survey = helper.logo_survey([{"logo": "https://cdn.test;sid=SECRET/a.png"},
                                      {"logo": "https://cdn.test:8443&k=SECRET/b.png"}])
-        self.assertEqual(survey["hosts"], [{"host": "cdn.test", "channels": 2}])
+        self.assertEqual((survey["hosts"], survey["refused"]), ([], 2))
         for url in ("https://cdn.test;sid=SECRET/a.png", "https://cdn.test:8443=SECRET/b.png"):
             text = helper.logo_dimension_refusal(url, b"\xff\xd8", "image/jpeg")
-            self.assertIn("from cdn.test:", text, text)
-            for leak in ("secret", "SECRET", "sid", ";", "=", "&", "8443"):
+            self.assertIn("from an unnamed host:", text, text)
+            for leak in ("secret", "SECRET", "sid", ";", "=", "&", "8443", "cdn"):
                 self.assertNotIn(leak, text, "%s leaked %r: %s" % (url, leak, text))
 
     def test_the_survey_contacts_nothing(self):
@@ -906,7 +909,7 @@ class LogoSurveyRefusedUrlTest(unittest.TestCase):
                           ("svn+ssh://[x", "svn+ssh"), ("1x://[y", ""), ("[x", ""),
                           ("ht tp://[y", ""), ("://[y", "")):
             with self.subTest(raw=raw):
-                self.assertEqual(helper.unsplit_scheme(raw), want)
+                self.assertEqual(helper.logo_scheme(raw), want)
                 self.assertEqual(helper.logo_survey([{"logo": raw}])["schemes"], {want: 1})
 
     def run_verb(self, urls, fetch):
@@ -924,6 +927,55 @@ class LogoSurveyRefusedUrlTest(unittest.TestCase):
             lines = [line for line in out.getvalue().splitlines() if line.strip()]
             return code, json.loads(lines[-1]), os.path.isdir(os.path.join(cache, "logos"))
 
+    THREE = ("https://cdn" + chr(0xFF0F) + ".test/a.png", "https://qqqqqq:zz[zz]@cdn.test/a.png",
+             "https://[::1:]/a.png")
+
+    def test_the_three_are_refused_as_logo_host_and_the_run_refuses_what_the_survey_refuses(self):
+        """The critique's finding 6 (D-SINK-112, 2026-11-16): fetch_logo
+        asked urlsplit before anything else, which raised on a fullwidth
+        slash, a bracket in the user information and a bracketed host that
+        is no address, and the run's backstop counted each a FAILED fetch
+        while the survey counted it refused. The fetch now asks the
+        survey's own reading first: each is `logo_host`, naming nothing,
+        before any lookup -- and over every refused logo of the two shared
+        logo fixtures, the run's policy refusals are the survey's refusals,
+        and the one logo it counts is the one the resolver is asked for."""
+        import pathlib
+        import socket
+        from unittest import mock
+        asked = []
+
+        def no_lookup(host, *args, **kwargs):
+            asked.append(host)
+            raise socket.gaierror(socket.EAI_NONAME, "refused by the test")
+
+        root = pathlib.Path(__file__).resolve().parent / "fixtures"
+        logos = list(self.THREE)
+        for case in json.loads((root / "provider-hosts.json").read_text(encoding="ascii"))["logoHosts"]:
+            if case["host"] == "":
+                logos.append(case["url"])
+        for case in json.loads((root / "logo-survey.json").read_text(encoding="ascii"))["cases"]:
+            for row in case["channels"]:
+                if isinstance(row, dict) and isinstance(row.get("logo"), str) and row["logo"]:
+                    if helper.logo_contact_host(row["logo"]) == "":
+                        logos.append(row["logo"])
+        logos = list(dict.fromkeys(logos)) + ["https://cdn.test/a.png"]
+        with mock.patch.object(socket, "getaddrinfo", no_lookup):
+            for url in self.THREE:
+                with self.subTest(url=ascii(url)):
+                    with self.assertRaises(helper.HelperError) as caught:
+                        helper.fetch_logo(url, 1)
+                    self.assertEqual(caught.exception.code, "logo_host")
+                    for leak in ("qq", "zz", "cdn", "::1"):
+                        self.assertNotIn(leak, caught.exception.message)
+            self.assertEqual(asked, [])
+            _, survey, _ = self.run_verb(logos, fetch=False)
+            _, reply, _ = self.run_verb(logos, fetch=True)
+        self.assertGreater(len(logos), 40)
+        self.assertEqual((survey["withLogo"], survey["wouldContact"], survey["refused"]), (len(logos), 1, len(logos) - 1))
+        self.assertEqual((reply["refusedOnPolicy"], reply["failed"], reply["fetched"]), (survey["refused"], 1, 0))
+        self.assertEqual(asked, ["cdn.test"])
+
     def test_the_survey_verb_answers_over_a_cache_holding_one(self):
         code, reply, _ = self.run_verb(self.REFUSED, fetch=False)
         self.assertEqual(code, 0)
@@ -931,13 +983,17 @@ class LogoSurveyRefusedUrlTest(unittest.TestCase):
         self.assertEqual((reply["withLogo"], reply["refused"], reply["wouldContact"]), (3, 3, 0))
 
     def test_the_fetch_verb_answers_too_and_contacts_nobody(self):
-        # Every URL here is refused before a connection is made (urlsplit
-        # raises inside fetch_logo as well, and the run counts that as the
-        # logo's own failure, D-LOGO-24), so the real fetcher runs.
+        # Every URL here is refused before a connection is made, so the
+        # real fetcher runs. Since D-SINK-112 fetch_logo reads the address
+        # as the survey does before any URL parser, so each is a policy
+        # refusal (`logo_host`), counted as the survey counts it; urlsplit
+        # raised inside fetch_logo first, and the run counted that as the
+        # logo's own failure (the critique's finding 6).
         code, reply, made_folder = self.run_verb(self.REFUSED, fetch=True)
         self.assertEqual(code, 0)
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["action"], "fetch")
         self.assertEqual(reply["fetched"], 0)
+        self.assertEqual((reply["refusedOnPolicy"], reply["failed"], reply["reasons"]), (3, 0, {"logo_host": 3}))
         self.assertEqual(reply["names"], [])
         self.assertFalse(made_folder, "a cache whose logos cannot be contacted gets no logo folder")

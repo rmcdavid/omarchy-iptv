@@ -728,10 +728,11 @@ class LogoCacheSweepTest(unittest.TestCase):
         self.assertEqual(summary["cached"], 0,
                          "a swept file is not on disk any more, so it is not cached")
         self.assertEqual(summary["fetched"], 0)
-        # The refetch could not reach the host, so this run counts it as a
-        # failure rather than a policy refusal -- which is the dead-host path.
-        # Either way it is counted and named by code only.
+        # The refetch is refused, and counted and named by code only. Since
+        # D-SINK-112 (2026-11-16) a loopback logo is refused by the survey's
+        # own reading before the opener, so it is a policy refusal.
         self.assertTrue(summary["reasons"], summary)
+        self.assertEqual((summary["refusedOnPolicy"], summary["reasons"]), (1, {"logo_host": 1}), summary)
         # The summary is a sink. Rule 5 redacts to scheme and HOST, and the
         # survey reports hosts on purpose -- that count is the consent
         # sentence. What may never appear is the rest of the URL: the path can
@@ -742,8 +743,9 @@ class LogoCacheSweepTest(unittest.TestCase):
         self.assertNotIn("jpeg-bomb-progressive-20000.png", blob,
                          "the logo PATH reached the summary")
         self.assertNotIn(".png", blob, blob)
-        self.assertEqual(summary["hosts"], [{"host": "127.0.0.1", "channels": 1}],
-                         "the host is reported, and only the host")
+        # And no host: the survey counts a loopback logo refused (D-SINK-112),
+        # as the fetch refuses it.
+        self.assertEqual((summary["hosts"], summary["refused"]), ([], 1), summary)
 
     def test_a_legitimate_cached_logo_is_still_announced_and_not_refetched(self):
         """The positive control for the sweep. A sweep that unlinked the
@@ -996,8 +998,11 @@ class LogoFetchCapTest(unittest.TestCase):
         # D-SINK-40: "fail" is now the destination policy's refusal -- a logo
         # never reaches an address on this machine, so the five go nowhere
         # and are counted with the policy refusals, in a real helper process.
+        # Since D-SINK-112 (2026-11-16) the survey's own reading refuses a
+        # loopback literal before the opener (`logo_host`), where the
+        # connection refused it (`local_address`).
         self.assertEqual((again["failed"], again["refusedOnPolicy"], again["reasons"]),
-                         (0, 5, {"local_address": 5}), "the three held-back new URLs and the two late ones")
+                         (0, 5, {"logo_host": 5}), "the three held-back new URLs and the two late ones")
         self.assertEqual(sorted(again["names"]), sorted(summary["names"]))
         self.assertEqual(sorted(l["name"] for l in announced_again), sorted(summary["names"]))
 

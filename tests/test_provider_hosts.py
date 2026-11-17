@@ -113,15 +113,6 @@ def run(fn):
     return "ok", ""
 
 
-def netloc_of(url):
-    """A logo URL's authority as Model.splitLogoUrl reads it: after `://` up
-    to the first `/`, `?` or `#`. Not urlsplit, which raises on a bracketed
-    name (`https://[qqqqqq]/`, the fixture's one such case)."""
-    rest = url[url.find("://") + 3:]
-    ends = [i for i in (rest.find("/"), rest.find("?"), rest.find("#")) if i != -1]
-    return rest[:min(ends)] if ends else rest
-
-
 class FixtureTest(unittest.TestCase):
     """The shared fixture, helper side. Every expected value in it was written
     by hand; the model answers the same file in tests/Model.test.js."""
@@ -172,7 +163,8 @@ class FixtureTest(unittest.TestCase):
         self.assertEqual([c["hint"] for c in FIXTURE["hintVerdicts"] if c["helperRefusesName"] and c["expected"] != none], [])
 
     def test_the_logo_host_of_every_case(self):
-        got = [(c["url"], helper.logo_survey_host(c["url"], netloc_of(c["url"]))) for c in FIXTURE["logoHosts"]]
+        # D-SINK-112: the one reading the survey counts and the fetch fetches by.
+        got = [(c["url"], helper.logo_contact_host(c["url"])) for c in FIXTURE["logoHosts"]]
         self.assertEqual(got, [(c["url"], c["host"]) for c in FIXTURE["logoHosts"]])
 
 
@@ -634,12 +626,13 @@ class AbsorbedTest(unittest.TestCase):
         self.assertEqual([c.get("logo") for c in channels], [None] * 4)
         self.assertEqual(helper.logo_survey(channels)["withLogo"], 0)
         # The backstop, for a logo stored before the rule: refused before
-        # any lookup, naming no host and no credential.
+        # any lookup, naming no host and no credential -- since D-SINK-112
+        # by the survey's own reading, as `logo_host` (it was `logo_url`).
         for logo in ('https://logos.test/news.png"catchup-source="http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts',
                      "https://logos.test/a.png,catchup-source=http://prov.test/timeshift/qqqqqq/zzzzzz/1.ts"):
             with Resolver() as resolver:
                 code, message = run(lambda: helper.fetch_logo(logo, 1.0, 2.0))
-            self.assertEqual((code, resolver.lookups), ("logo_url", []))
+            self.assertEqual((code, resolver.lookups), ("logo_host", []))
             for leak in SECRETS + ("logos.test", "prov.test", "://"):
                 self.assertNotIn(leak, message)
         # A later clean value of the same key is the logo.
