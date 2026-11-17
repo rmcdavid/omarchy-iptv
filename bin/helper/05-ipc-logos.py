@@ -344,7 +344,27 @@ def logo_contact_host(raw: Any) -> str:
     host = read["host"]
     if host != checked["host"] or dotless_host(host) or host_class(host) not in ("", "global"):
         return ""
+    if not host.isascii() or logo_labels_refused(host):
+        # D-SINK-119 (2026-11-16): a logo's host is ASCII, with labels the
+        # idna codec takes. http.client cannot write a host outside Latin-1
+        # in the Host header and wrote a Latin-1 one as raw bytes, so such a
+        # logo was counted and never fetched, or fetched with a header no
+        # server reads; and judging an IDN logo by the codec the fetch would
+        # use takes the codec's tables in both mirrors.
+        return ""
     return host
+
+
+def logo_labels_refused(host: str) -> bool:
+    """D-SINK-119: would the idna codec refuse this ASCII host's labels --
+    an empty one but the last (a trailing dot), or one of 64 characters or
+    more? encodings.idna's own test for an ASCII name, the one CPython's
+    socket applies before it looks the name up. An IPv6 literal has none.
+    Mirrored by Model.logoLabelsRefused."""
+    if host.startswith("["):
+        return False
+    labels = host.split(".")
+    return any(label == "" for label in labels[:-1]) or any(len(label) >= 64 for label in labels)
 
 
 def logo_survey(channels: Any) -> dict[str, Any]:
@@ -617,7 +637,16 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
     host = logo_contact_host(url)
     if not host:
         raise HelperError("logo_host", LOGO_HOST_REFUSAL)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
+    # D-SINK-119: the target as the playlist and guide fetches write it, its
+    # host the A-label; the reading above leaves only hosts that are their
+    # own, so this is the target as written.
+    try:
+        target = a_label_target(url)
+    except ValueError:
+        target = None
+    if target is None:
+        raise HelperError("logo_host", LOGO_HOST_REFUSAL)
+    request = urllib.request.Request(target, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:
         with FetchDeadline(LOGO_DEADLINE if budget is None else budget):
             data, ctype = read_logo_response(logo_opener(host), request, timeout, host)

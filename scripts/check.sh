@@ -634,7 +634,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-104}
 # written and code-point order); 6 of 3829 red on 7329b96's model, and 6
 # single-decision model mutants red (QA-RESULTS "Round 5 of the security
 # review, lane-r5b"); the suite runs 3829.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3829}
+# 2026-11-16, lane-r5b (round 5, D-SINK-119): 3829 -> 3831 -- the NFKC
+# table against node's NFKC over every code point and the fixture, and the
+# validator's refusals of a look-alike beside the IDN hosts it keeps; 14 red
+# on dde6a72's model (6 of them moved vectors), 4 single-decision model
+# mutants red; the suite runs 3831.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3831}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1150,7 +1155,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3829}
 # 19 tests red on 7329b96 with the differential erroring, 9 single-decision
 # helper mutants red (QA-RESULTS "Round 5 of the security review,
 # lane-r5b"); the suite runs 2711, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2711}
+# 2026-11-16, lane-r5b (round 5, D-SINK-119): 2711 -> 2718 -- tests/
+# test_host_grammar.py's 6 (the NFKC table against unicodedata, the A-label
+# invariant over the corpus, IdnFetchTest's 3 -- the connection and the Host
+# header handed the A-label, a host the codec refuses refused before any
+# lookup, the policy's home -- and Qt's engine against the table) and
+# tests/test_host_names.py's 1 (a look-alike never looked up). 27 tests red
+# on dde6a72, 8 single-decision helper mutants red (QA-RESULTS "Round 5 of
+# the security review, lane-r5b"); the suite runs 2718, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2718}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

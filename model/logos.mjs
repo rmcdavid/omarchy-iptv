@@ -189,7 +189,28 @@ function logoContactHost(raw) {
   var host = read.host
   if (host !== checked.host || dotlessHost(host)) return ""
   var kind = hostClass(host)
-  return kind === "" || kind === "global" ? host : ""
+  if (kind !== "" && kind !== "global") return ""
+  // D-SINK-119 (2026-11-16): an ASCII host with labels the helper's idna
+  // codec takes, as the helper's logo_contact_host asks: the fetch cannot
+  // send a host outside Latin-1 and sent a Latin-1 one as raw bytes, and
+  // judging an IDN host by the codec would take its tables in both mirrors.
+  for (var j = 0; j < host.length; j++) if (host.charCodeAt(j) > 0x7f) return ""
+  return logoLabelsRefused(host) ? "" : host
+}
+
+// D-SINK-119: would the helper's idna codec refuse this ASCII host's labels --
+// an empty one but the last (a trailing dot), or one of 64 characters or
+// more? An IPv6 literal has none. The mirror of the helper's
+// logo_labels_refused.
+function logoLabelsRefused(host) {
+  var s = str(host)
+  if (s.charAt(0) === "[") return false
+  var labels = s.split(".")
+  for (var i = 0; i < labels.length; i++) {
+    if (labels[i] === "" && i < labels.length - 1) return true
+    if (labels[i].length >= 64) return true
+  }
+  return false
 }
 
 // Scheme and contact host of a logo URL, both by the one reading above:
@@ -770,11 +791,12 @@ function logoSummaryNotice(line) {
 }
 export {
   LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
-  logoScheme, logoContactHost, splitLogoUrl, logoConsentLines, logoFile,
-  logoSlot, WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,
-  footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry,
-  wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet, logoHaveIsSet,
-  logoHaveMerge, logoHaveCount, logoFetchPlan, logoColumnShown,
-  logoStreamName, logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS,
-  LOGO_RUN_DEADLINE_MS, LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
+  logoScheme, logoContactHost, logoLabelsRefused, splitLogoUrl,
+  logoConsentLines, logoFile, logoSlot, WALL_KEY, FOOTER_DROP_ORDER,
+  footerHintWidth, fitFooterHints, footerHintMarkup, WALL_MAX_COLUMNS,
+  WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction, wallStep,
+  logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge, logoHaveCount,
+  logoFetchPlan, logoColumnShown, logoStreamName, logoNamesFrom,
+  logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
+  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

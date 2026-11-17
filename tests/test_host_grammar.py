@@ -90,6 +90,20 @@ class TablesTest(unittest.TestCase):
         self.assertEqual(([hex(c) for c in sorted(shipped ^ want)][:8], len(want)), ([], 4207))
         self.assertEqual(shipped, expand(TABLES["invisibleRanges"]))
 
+    def test_the_nfkc_table_is_unicodedatas_and_the_one_code_point_beyond_it(self):
+        """D-SINK-119: HOST_NFKC_RANGES is the fixture's table, every code
+        point whose NFKC form is not itself in Python's Unicode, and U+A7F1
+        beyond it (node's Unicode 17 folds it to `S`; the node suite holds
+        the table to node's NFKC exactly). The table is the rule."""
+        py = {c for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF
+              and unicodedata.normalize("NFKC", chr(c)) != chr(c)}
+        shipped = helper_ranges(getattr(helper, "HOST_NFKC_RANGES", ()))
+        self.assertEqual(shipped, expand(TABLES["nfkcRanges"]))
+        self.assertEqual((sorted(hex(c) for c in shipped - py), sorted(hex(c) for c in py - shipped)), (["0xa7f1"], []))
+        self.assertEqual(codes(TABLES["nfkcBeyondPython"]), {0xA7F1})
+        refused = [hex(c) for c in sorted(shipped) if not helper.host_name_refused("a" + chr(c) + "b.test")]
+        self.assertEqual(refused, [])
+
     def test_the_delimiter_folds_are_what_urlsplit_refuses(self):
         """Over every code point: urlsplit refuses `http://a<X>b.test/`
         exactly when X is one of the fixture's folds or a bracket, and the
@@ -123,6 +137,44 @@ class TablesTest(unittest.TestCase):
         self.assertEqual(mine, codes(TABLES["asciiFolds"]))
         accepted = [hex(c) for c in sorted(mine) if helper.validate_source_url("http://a%sb.test/" % chr(c))["ok"]]
         self.assertEqual(accepted, [])
+
+
+NFKC_V4_BODY = r"""
+    var listed = {}
+    var ranges = Model.HOST_NFKC_RANGES
+    for (var r = 0; r < ranges.length; r++) for (var c = ranges[r][0]; c <= ranges[r][1]; c++) listed[c] = true
+    var extra = [], missing = []
+    for (var cp = 0; cp < 0x110000; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue
+      var s = cp > 0xffff ? String.fromCharCode(0xd800 + ((cp - 0x10000) >> 10), 0xdc00 + ((cp - 0x10000) & 0x3ff))
+                          : String.fromCharCode(cp)
+      var changes = s.normalize("NFKC") !== s
+      if (changes && listed[cp] !== true) extra.push(cp.toString(16))
+      if (!changes && listed[cp] === true) missing.push(cp.toString(16))
+    }
+    var odd = String.fromCharCode(0xa7f1)
+    console.log("RESULT " + JSON.stringify({ ranges: ranges.length, extra: extra.slice(0, 20), missing: missing,
+      refused: [Model.hostNameRefused("a" + odd + ".test"), Model.validateSourceUrl("http://a" + odd + ".test/").code] }))
+"""
+
+
+class EngineTableTest(unittest.TestCase):
+    """D-SINK-119 in the shell's own engine: the table, not the engine, is
+    the rule. Measured on Qt 6.12: its NFKC leaves alone every code point the
+    table leaves out but three, U+16126, U+16127 and U+16128 (Gurung Khema
+    vowel signs, Unicode 16, whose decompositions nest two deep and which
+    Qt does not compose back; node and Python do), so Qt's normalize would
+    read them as look-alikes where neither of the other engines does. Pinned
+    here as a tripwire. A code point the table lists and the engine leaves
+    alone (U+A7F1 when the engine's Unicode is older than 17) is refused all
+    the same."""
+
+    @unittest.skipUnless(os.access(proto_v4.QML_BIN, os.X_OK), "Qt's qml runtime is not installed")
+    def test_qts_engine_folds_nothing_the_table_leaves_out(self):
+        result = proto_v4.run_qml(self, NFKC_V4_BODY)
+        self.assertNotIn("probeError", result)
+        self.assertEqual((result["ranges"], result["extra"], set(result["missing"]) <= {"a7f1"}, result["refused"]),
+                         (256, ["16126", "16127", "16128"], True, [True, "invalid"]), result)
 
 
 class VectorTest(unittest.TestCase):
@@ -317,6 +369,46 @@ class DifferentialTest(unittest.TestCase):
                 wrong.append((ascii(url[:70]), "host_name_refused"))
         self.assertEqual((len(wrong), wrong[:6]), (0, []))
 
+    def test_every_address_both_accept_is_sent_as_its_a_label_or_refused(self):
+        """D-SINK-119, invariant (a) with the codec: for every address both
+        validators accept, the target the fetch builds (a_label_target over
+        split_userinfo's) writes the host as the idna codec writes it -- the
+        name CPython's socket hands the resolver -- so the request's host,
+        and its Host header, are ASCII; or the fetch refuses it, exactly
+        where the codec refuses the host or it holds a dot the codec reads
+        that is not `.`. The oracle is the codec, called."""
+        dots = (chr(0x3002), chr(0xFF0E), chr(0xFF61))
+        wrong, refused, rewritten = [], 0, 0
+        for url, h, n in zip(self.urls, self.helper, self.node):
+            if not (h[0][0] and n[0][0]):
+                continue
+            target, _ = helper.split_userinfo(h[0][2])
+            netloc = urllib.parse.urlsplit(target).netloc
+            written = netloc if netloc.startswith("[") else (netloc.rpartition(":")[0] if ":" in netloc else netloc)
+            if written.startswith("["):
+                oracle = written
+            elif any(dot in written for dot in dots):
+                oracle = None
+            else:
+                try:
+                    oracle = written.encode("idna").decode("ascii")
+                except UnicodeError:
+                    oracle = None
+            got = helper.a_label_target(target)
+            if oracle is None or got is None:
+                refused += got is None
+                if got is not oracle:
+                    wrong.append((ascii(url[:70]), oracle, got and ascii(got[:70])))
+                continue
+            rewritten += got != target
+            request = urllib.request.Request(got)
+            # The request's host is percent-decoded by urllib (a zone's `%25`).
+            if request.host != urllib.parse.unquote(oracle + netloc[len(written):]) or not request.host.isascii():
+                wrong.append((ascii(url[:70]), ascii(request.host)))
+        self.assertGreater(refused, 10)
+        self.assertGreater(rewritten, 100)
+        self.assertEqual((len(wrong), wrong[:6]), (0, []))
+
     def test_a_stored_url_reads_as_itself_in_both_mirrors(self):
         """The critique's finding 8: validate(validate(x).url) is
         validate(x), so nothing stored is dropped at the next load."""
@@ -423,15 +515,26 @@ class ConnectRecorder:
         raise ConnectionRefusedError(errno.ECONNREFUSED, "refused by the test")
 
 
-def fetch_asks(url):
+def fetch_asks(url, hosts=None):
     """-> (code, [(host, port)] the connection was asked for, [names
     looked up]) of one fetch_logo, with the connection and the resolver
-    replaced by stand-ins that record and refuse."""
+    replaced by stand-ins that record and refuse; the Host header's values
+    are appended to `hosts` when one is given."""
+    import http.client
     import socket
     from unittest import mock
     connect, lookup = ConnectRecorder(), NoLookup()
+    seen = [] if hosts is None else hosts
+    real = http.client.HTTPConnection.putheader
+
+    def putheader(self, header, *values):
+        if str(header).lower() == "host":
+            seen.append(values[0] if len(values) == 1 else values)
+        return real(self, header, *values)
+
     with mock.patch.object(helper, "bounded_create_connection", connect), \
             mock.patch.object(socket, "getaddrinfo", lookup), \
+            mock.patch.object(http.client.HTTPConnection, "putheader", putheader), \
             mock.patch.dict(os.environ, {}, clear=False):
         for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
                      "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
@@ -467,7 +570,7 @@ class LogoDifferentialTest(unittest.TestCase):
 
     def test_the_logo_corpus_counts_some_and_refuses_some(self):
         counted = sum(1 for _, host in self.helper if host)
-        self.assertTrue(len(self.urls) // 5 < counted < len(self.urls) * 4 // 5, (counted, len(self.urls)))
+        self.assertTrue(len(self.urls) // 25 < counted < len(self.urls) * 4 // 5, (counted, len(self.urls)))
 
     def test_both_readings_answer_alike_for_every_logo(self):
         wrong = []
@@ -491,26 +594,24 @@ class LogoDifferentialTest(unittest.TestCase):
         """Invariant (b): fetch_logo hands each counted logo to the opener,
         and its connection is asked for the survey's host (an IPv6 literal
         without its brackets, as http.client hands it over) on http.client's
-        port, and nothing is looked up. Every second counted logo and every
-        fixture logo. A host that is not Latin-1 is D-SINK-119's: http.client
-        cannot write its Host header, and the next commit sends its A-label."""
+        port, its Host header is that host as written, in ASCII (D-SINK-119:
+        a host outside Latin-1 could not be written there and a Latin-1 one
+        was written as raw bytes), and nothing is looked up. Every counted
+        logo."""
         helper.prepare_tls_context()
         fixture = set(fixture_logos())
         counted = [(u, h) for u, (_, h) in zip(self.urls, self.helper) if h]
-        chosen = [(u, h) for i, (u, h) in enumerate(counted) if i % 2 == 0 or u in fixture]
-        wrong, skipped = [], 0
+        chosen = [(u, h) for u, h in counted]
+        wrong = []
         for url, host in chosen:
-            try:
-                host.encode("latin-1")
-            except UnicodeEncodeError:
-                skipped += 1
-                continue
-            code, asked, looked_up = fetch_asks(url)
+            hosts = []
+            code, asked, looked_up = fetch_asks(url, hosts)
             want = [(host[1:-1] if host.startswith("[") else host, urllib.parse.urlsplit(url).port or 443)]
             got = [(h.lower(), p) for h, p in asked]
-            if (code, got, looked_up) != ("logo_fetch", want, []):
-                wrong.append((ascii(url[:70]), code, got, looked_up))
-        self.assertGreater(len(chosen) - skipped, 500)
+            header = [h.lower()[:h.index("]") + 1] if h.startswith("[") else h.lower().partition(":")[0] for h in hosts]
+            if (code, got, looked_up, header) != ("logo_fetch", want, [], [host]) or not all(h.isascii() for h in hosts):
+                wrong.append((ascii(url[:70]), code, got, looked_up, ascii(hosts)))
+        self.assertGreater(len(chosen), 400)
         self.assertEqual((len(wrong), wrong[:6]), (0, []))
 
     def test_every_logo_the_survey_refuses_is_refused_before_the_connection(self):
@@ -617,6 +718,98 @@ STREAMS = [
     ("http://u:p[x]@cdn.test/1.ts", "D-SINK-115"),
 ]
 STREAM_CONTROL = "http://cdn_x.test/live/1.ts"
+
+
+CYRILLIC = "".join(chr(c) for c in (0x43F, 0x440, 0x438, 0x43C, 0x435, 0x440)) + "." + chr(0x440) + chr(0x444)
+IDN_FETCHED = ["http://b" + chr(0xFC) + "cher.test/get.php", "http://" + CYRILLIC + "/get.php?username=a&password=b",
+               "https://" + chr(0x4F8B) + chr(0x3048) + ".test/get.php", "http://qqqqqq:zzzzzz@b" + chr(0xFC) + "cher.test:8080/get.php",
+               "http://CDN.test/get.php", "http://xn--bcher-kva.test/x", "https://[2606:4700::1111]:8443/x"]
+IDN_REFUSED = ["http://" + chr(0x5D0) + "a.test/get.php", "http://" + chr(0xE000) + "x.test/get.php",
+               "http://" + chr(0xFDD0) + "x.test/get.php", "http://" + chr(0xE9) * 60 + ".test/get.php",
+               "http://" + "q" * 64 + ".test/get.php", "http://a.cdn" + chr(0x3002) + "test/get.php",
+               "http://cdn..test/get.php", "http://" + chr(0xFFFC) + "x.test/get.php"]
+
+
+def fetch_handed(url, label="playlist"):
+    """-> (code, message, [(host, port)] the connection was asked for,
+    [names looked up], [Host header values]) of one read_http_source, with
+    the connection, the resolver and http.client's header writer replaced
+    by stand-ins that record (the first two refuse), and no proxy."""
+    import http.client
+    import socket
+    from unittest import mock
+    connect, lookup, hosts = ConnectRecorder(), NoLookup(), []
+    real = http.client.HTTPConnection.putheader
+
+    def putheader(self, header, *values):
+        if str(header).lower() == "host":
+            hosts.append(values[0] if len(values) == 1 else values)
+        return real(self, header, *values)
+
+    helper.prepare_tls_context()
+    with mock.patch.object(helper, "bounded_create_connection", connect), \
+            mock.patch.object(socket, "getaddrinfo", lookup), \
+            mock.patch.object(http.client.HTTPConnection, "putheader", putheader), \
+            mock.patch.dict(os.environ, {}, clear=False):
+        for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy",
+                     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+            os.environ.pop(name, None)
+        try:
+            helper.read_http_source(url, 1.0, label, helper.DestinationPolicy(label, "user"))
+            code, message = "ok", ""
+        except helper.HelperError as error:
+            code, message = error.code, error.message
+    return code, message, connect.asked, lookup.asked, hosts
+
+
+def written_host(url):
+    netloc = urllib.parse.urlsplit(url).netloc.rpartition("@")[2]
+    if netloc.startswith("["):
+        return netloc[:netloc.index("]") + 1], netloc[netloc.index("]") + 1:]
+    host, sep, port = netloc.partition(":")
+    return host, sep + port
+
+
+class IdnFetchTest(unittest.TestCase):
+    """D-SINK-119 (2026-11-16): the first hop of the playlist, guide and
+    probe fetches sends the host's A-label, the name the idna codec writes
+    it as and CPython's socket already hands the resolver, so the request's
+    host and its Host header are ASCII; a host the codec refuses is refused
+    before any lookup with one fixed sentence. Nothing resolves: the
+    connection and the resolver are stand-ins that record what they are
+    handed."""
+
+    def test_each_is_handed_to_the_connection_and_the_host_header_as_its_a_label(self):
+        got, want = [], []
+        for url in IDN_FETCHED:
+            code, _, asked, looked_up, hosts = fetch_handed(url)
+            host, port_text = written_host(url)
+            ace = host if host.startswith("[") else host.encode("idna").decode("ascii")
+            port = int(port_text[1:]) if port_text else (443 if url.startswith("https") else 80)
+            got.append((ascii(url), code, asked, looked_up, hosts))
+            want.append((ascii(url), "network", [(ace.strip("[]"), port)], [], [ace + port_text]))
+        self.assertEqual(got, want)
+
+    def test_a_host_the_codec_refuses_is_refused_before_any_lookup_naming_nothing(self):
+        got = []
+        for url in IDN_REFUSED:
+            self.assertTrue(helper.validate_source_url(url)["ok"], ascii(url))
+            code, message, asked, looked_up, hosts = fetch_handed(url, "EPG")
+            got.append((ascii(url), code, message, asked, looked_up, hosts))
+        sentence = "EPG " + getattr(helper, "HOST_IDNA_REFUSAL", "<none>")
+        self.assertEqual(got, [(ascii(url), "bad_url", sentence, [], [], []) for url in IDN_REFUSED])
+
+    def test_the_playlists_own_host_is_its_a_label_on_both_sides(self):
+        """The policy's home, the playlist's host the shell sets, is written
+        as its A-label too, so a hop the connection is asked for by its
+        A-label is still the playlist's own host: a one-label IDN home is
+        not refused as a name the provider chose, and another is."""
+        from unittest import mock
+        env = {helper.ORIGIN_ENV: "playlist", helper.HOME_HOST_ENV: chr(0xFC)}
+        with mock.patch.dict(os.environ, env):
+            policy = helper.DestinationPolicy.from_environment("EPG")
+        self.assertEqual((policy.home, policy.refuses_name("xn--tda"), policy.refuses_name("xn--other")),
+                         ("xn--tda", False, True))
 
 
 class StreamTest(unittest.TestCase):

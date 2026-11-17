@@ -223,8 +223,11 @@ class ValidateSourceUrlTest(unittest.TestCase):
                  if str(c.get("note", "")).startswith("D-SINK-86")]
         # 32, not 40, since 2026-11-16: eight of the controls beside a format
         # range are default-ignorable, refused by D-SINK-116, and moved to
-        # that id's vectors (test_d_sink_115_to_117_...).
-        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 45, sum(1 for c in cases if c["ok"]) >= 32),
+        # that id's vectors (test_d_sink_115_to_117_...). 31 since D-SINK-119
+        # (the same day): U+2070, beside U+206F, is a superscript whose NFKC
+        # form is `0`, refused as a look-alike, and the range has no neighbour
+        # whose NFKC form is itself to take its place.
+        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 45, sum(1 for c in cases if c["ok"]) >= 31),
                          (True, True), "the fixture cannot be trimmed to green")
         wrong = []
         for case in cases:
@@ -246,7 +249,12 @@ class ValidateSourceUrlTest(unittest.TestCase):
         invisible range, and `_`, accepted. The model runs the same file."""
         cases = [c for c in json.loads(FIXTURE.read_text(encoding="utf-8"))
                  if str(c.get("note", "")).startswith(("D-SINK-115", "D-SINK-116", "D-SINK-117"))]
-        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 54, sum(1 for c in cases if c["ok"]) >= 20),
+        # 19 controls, not 24, since D-SINK-119 (2026-11-16): U+3163 and
+        # U+3165 beside U+3164, U+FF9F and U+FFA1 beside U+FFA0 and U+2070
+        # beside U+206F are compatibility characters whose NFKC form is not
+        # themselves, refused as look-alikes; none of those ranges has a
+        # neighbour whose NFKC form is itself.
+        self.assertEqual((sum(1 for c in cases if not c["ok"]) >= 54, sum(1 for c in cases if c["ok"]) >= 19),
                          (True, True), "the fixture cannot be trimmed to green")
         wrong = []
         for case in cases:

@@ -1704,7 +1704,10 @@ def cmd_epg(args: argparse.Namespace) -> int:
     # username of a URL its space cut (D-SINK-34's class). The rule judges
     # the REAL host; only the host the status prints is the shown one
     # (D-SINK-109).
-    if url and DestinationPolicy.from_environment("EPG").refuses_name(source_host(url)):
+    # D-SINK-119: asked of the host's A-label, the name the fetch asked the
+    # connection for and the policy's home is written as.
+    named = source_host(url) if url else ""
+    if url and DestinationPolicy.from_environment("EPG").refuses_name(host_a_label(named) or named):
         host = ""
     status = error_payload(
         "epg", error,

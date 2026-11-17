@@ -274,9 +274,10 @@ CONTROLS = [
     "udp://@239.1.1.1:1234?sources=fe80::1",
     # An http query names no host the player looks up.
     "http://stream.example.test/live/9.ts?sources=a@b%40c&block=x;y",
-    # A host whose NFKC form is a full stop and a letter.
-    "rtsp://stream" + chr(0xFF0E) + "example.test/stream",
 ]
+# D-SINK-119 (2026-11-16): a host whose NFKC form is a full stop and a letter
+# was a control here, and is a look-alike of `stream.example.test`, refused.
+REFUSED.append("rtsp://stream" + chr(0xFF0E) + "example.test/stream")
 
 PLURAL = "%d entries skipped: their addresses name hosts the player would read in forms no host name or port may take"
 SINGULAR = "1 entry skipped: its address names a host the player would read in a form no host name or port may take"
@@ -355,10 +356,24 @@ class SubsumptionTest(unittest.TestCase):
                 "http://[2001:db8::1]:8080/x", "rtsp://[v7.a:b:c]/x"]
 
     def test_lower_casing_changes_no_code_points_verdict(self):
+        """Lower-casing never turns a host the gate accepts into one it
+        refuses, so the lower-cased reading the gate leaves out could only
+        refuse what the written one does. Since D-SINK-119 (2026-11-16) the
+        other direction has four members, exactly: U+03F4, U+2126, U+212A
+        and U+212B are refused as look-alikes (their NFKC forms are other
+        letters) and lower-case to letters that are not, which the written
+        reading's refusal covers."""
         predicate = getattr(helper, "host_name_refused")
-        wrong = [hex(c) for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF
-                 and predicate("h%s.test" % chr(c)) != predicate(("h%s.test" % chr(c)).lower())]
-        self.assertEqual(wrong[:8], [])
+        stricter, looser = [], []
+        for c in range(0x110000):
+            if 0xD800 <= c <= 0xDFFF:
+                continue
+            written, lowered = predicate("h%s.test" % chr(c)), predicate(("h%s.test" % chr(c)).lower())
+            if lowered and not written:
+                stricter.append(hex(c))
+            elif written and not lowered:
+                looser.append(hex(c))
+        self.assertEqual((stricter[:8], looser), ([], ["0x3f4", "0x2126", "0x212a", "0x212b"]))
 
     def test_every_vector_urlsplit_refuses_the_gate_refuses(self):
         gate = getattr(helper, "stream_host_name_refused", lambda url: "<missing>")
@@ -537,8 +552,10 @@ class ReadingShortcutTest(unittest.TestCase):
         # place, and inside an entry also the four av_get_token trims at an
         # edge (tab, LF, CR and the space). 85 since D-SINK-116 and D-SINK-117
         # widened the set (2026-11-16) by ASCII outside the allowlist, U+034F
-        # and the code points that fold to one of them; 43 until then.
-        self.assertEqual((wrong[:8], on.count(True)), ([], 85 * 4 + 4))
+        # and the code points that fold to one of them; 43 until then. 150
+        # since D-SINK-119 (the same day): 65 more below U+0800 whose NFKC
+        # form is not themselves.
+        self.assertEqual((wrong[:8], on.count(True)), ([], 150 * 4 + 4))
 
 
 class CostTest(unittest.TestCase):

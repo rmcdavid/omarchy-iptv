@@ -2685,7 +2685,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [21, []])
+}, [22, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -8504,6 +8504,27 @@ const grammarCodes = list => new Set(list.map(h => parseInt(h, 16)))
 const grammarRanges = list => { const out = new Set(); for (const [a, b] of list) for (let c = parseInt(a, 16); c <= parseInt(b, 16); c++) out.add(c); return out }
 const GRAMMAR_B1 = grammarCodes(GRAMMAR.tables.b1)
 const GRAMMAR_ASCII = GRAMMAR.tables.hostAscii
+const GRAMMAR_NFKC = grammarRanges(GRAMMAR.tables.nfkcRanges)
+checkCall("D-SINK-119: HOST_NFKC_RANGES is node's NFKC, code point by code point -- every code point whose NFKC form is not itself -- and the shared fixture's table, which holds U+A7F1 beyond Python's Unicode", () => {
+  const ranges = Model.HOST_NFKC_RANGES || []
+  const listed = new Set()
+  for (const [a, b] of ranges) for (let c = a; c <= b; c++) listed.add(c)
+  const wrong = []
+  for (let c = 0; c < 0x110000 && wrong.length < 8; c++) {
+    if (c >= 0xd800 && c <= 0xdfff) continue
+    const ch = String.fromCodePoint(c)
+    if ((ch.normalize("NFKC") !== ch) !== listed.has(c)) wrong.push(c.toString(16))
+  }
+  const fixtureSame = listed.size === GRAMMAR_NFKC.size && [...listed].every(c => GRAMMAR_NFKC.has(c))
+  return [ranges.length, listed.size, wrong, fixtureSame, GRAMMAR.tables.nfkcBeyondPython, listed.has(0xa7f1)]
+}, [256, 4965, [], true, ["A7F1"], true])
+checkCall("D-SINK-119: a host name holding a code point of the table is refused by the validator, U+A7F1 among them; an IDN host whose NFKC form is itself is kept", () => {
+  const refused = [0xff43, 0x2024, 0xfe52, 0x1d41c, 0xa7f1, 0x2070, 0x212a].map(c => Model.validateSourceUrl("http://a" + String.fromCodePoint(c) + "b.test/").code)
+  const kept = ["b" + String.fromCharCode(0xfc) + "cher.test", String.fromCharCode(0x5d0) + "a.test", "cafe" + String.fromCharCode(0x301) + ".test"]
+    .map(h => Model.validateSourceUrl("http://" + h + "/x").host)
+  return [refused, kept]
+}, [["invalid", "invalid", "invalid", "invalid", "invalid", "invalid", "invalid"],
+    ["b" + String.fromCharCode(0xfc) + "cher.test", String.fromCharCode(0x5d0) + "a.test", "cafe" + String.fromCharCode(0x301) + ".test"]])
 checkCall("D-SINK-116: HOST_INVISIBLE_RANGES is \\p{Cf}, \\p{Default_Ignorable_Code_Point} and the fixture's B.1, code point by code point, and the fixture's default-ignorable list is node's", () => {
   const ranges = Model.HOST_INVISIBLE_RANGES || []
   const di = grammarRanges(GRAMMAR.tables.defaultIgnorable)
@@ -8544,7 +8565,8 @@ checkCall("D-SINK-86, D-SINK-88, D-SINK-92, D-SINK-116, D-SINK-117: hostNameRefu
     const folded = c >= 0x80 && decomposed.some(refusedChar)
     if (folded && !refusedChar(ch)) folds++
     if (c >= 0x80 && decomposed.some(d => d.codePointAt(0) < 0x80 && GRAMMAR_ASCII.indexOf(d) === -1)) asciiFolds.push(c)
-    const want = refusedChar(ch) || folded
+    // D-SINK-119: and a code point of the NFKC table, a look-alike.
+    const want = refusedChar(ch) || folded || GRAMMAR_NFKC.has(c)
     if (Model.hostNameRefused("h" + ch + ".test") !== want) wrong.push(c.toString(16))
   }
   // 286, the count test_host_names takes in Python's NFKD: the code points
@@ -8609,8 +8631,10 @@ checkCall("D-SINK-86: the rule's vectors are in the fixture, so it cannot be tri
   }).map(c => c.input)
   // 32 controls since D-SINK-116 (2026-11-16): eight of the code points
   // beside a format range are default-ignorable, refused now, and moved to
-  // that id's vectors.
-  return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 32, named]
+  // that id's vectors. 31 since D-SINK-119 (the same day): U+2070, beside
+  // U+206F, is a superscript whose NFKC form is `0`, refused as a
+  // look-alike, and the range has no neighbour whose NFKC form is itself.
+  return [rule.filter(c => !c.ok).length >= 45, rule.filter(c => c.ok).length >= 31, named]
 }, [true, true, []])
 // JS-only vectors (kept out of the shared fixture until the Python mirror
 // agrees; ARCHITECTURE-SOURCES 3.1 steps 4 and 5): a file URL's query and

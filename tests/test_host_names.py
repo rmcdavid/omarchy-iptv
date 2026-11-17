@@ -338,9 +338,16 @@ class PredicateTest(unittest.TestCase):
         folds = {c for c in range(0x80, 0x110000)
                  if REFUSED_CHARS.intersection(map(ord, unicodedata.normalize("NFKD", chr(c))))}
         self.assertEqual(len(folds - REFUSED_CHARS), 286)
+        # D-SINK-119 (2026-11-16): and every code point whose NFKC form is not
+        # itself (the shared host-grammar fixture's table, Python's set and
+        # U+A7F1), a look-alike: 4,965, of which 4,665 the rules above did not
+        # refuse.
+        lookalikes = {c for c in range(0x80, 0x110000) if not 0xD800 <= c <= 0xDFFF
+                      and unicodedata.normalize("NFKC", chr(c)) != chr(c)} | {0xA7F1}
+        self.assertEqual((len(lookalikes), len(lookalikes - REFUSED_CHARS - folds)), (4965, 4665))
         for with_port, form in ((False, "h%s.test"), (True, "h%s.test:8080")):
             wrong = [hex(c) for c in range(0x110000)
-                     if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds)]
+                     if predicate(form % chr(c), with_port) != (c in REFUSED_CHARS or c in folds or c in lookalikes)]
             self.assertEqual(wrong[:8], [], "with_port=%s" % with_port)
 
     def test_nameprep_adds_no_refused_character_the_decomposed_form_lacks(self):
@@ -594,13 +601,15 @@ class ConnectionTest(unittest.TestCase):
 
     def test_the_controls_are_still_looked_up(self):
         """A dotted name, a name that is not ASCII (looked up as its `xn--`
-        form, which is what the socket hands on), one whose fold is a full
-        stop and a letter, a numeric IPv4 and IPv6 literal, and a scoped
-        one: each reaches the resolver as before (the stand-in answers the
-        numeric ones and refuses the names)."""
+        form, which is what the socket hands on), a numeric IPv4 and IPv6
+        literal, and a scoped one: each reaches the resolver as before (the
+        stand-in answers the numeric ones and refuses the names). Two
+        controls left on 2026-11-16 (D-SINK-119): a name holding a fullwidth
+        full stop or a fullwidth letter, whose NFKC form is not itself, is a
+        look-alike of `h.test` and `ha.test`, and is refused before the
+        lookup (test_a_lookalike_is_refused_before_the_lookup)."""
         cases = (("h.test", "h.test"), ("b" + chr(0xFC) + "cher.test", "xn--bcher-kva.test"),
-                 ("xn--bcher-kva.test", "xn--bcher-kva.test"), ("h" + chr(0xFF0E) + "test", "h.test"),
-                 ("h" + chr(0xFF21) + ".test", "ha.test"), ("127.0.0.1", "127.0.0.1"), ("::1", "::1"),
+                 ("xn--bcher-kva.test", "xn--bcher-kva.test"), ("127.0.0.1", "127.0.0.1"), ("::1", "::1"),
                  ("fe80::1%1", "fe80::1%1"))
         got = []
         for name, _ in cases:
@@ -608,6 +617,17 @@ class ConnectionTest(unittest.TestCase):
                 code, _ = attempt(lambda: helper.resolve_within(name, 80, 1.0))
             got.append((ascii(name), code != "bad_url", resolver.lookups))
         self.assertEqual(got, [(ascii(n), True, [sent]) for n, sent in cases])
+
+    def test_a_lookalike_is_refused_before_the_lookup(self):
+        """D-SINK-119: the two former controls, and a superscript and
+        U+A7F1, never reach the resolver."""
+        got = []
+        for name in ("h" + chr(0xFF0E) + "test", "h" + chr(0xFF21) + ".test", "h" + chr(0x2070) + ".test",
+                     "a" + chr(0xA7F1) + ".test"):
+            with SocketResolver() as resolver:
+                code, _ = attempt(lambda: helper.resolve_within(name, 80, 1.0))
+            got.append((ascii(name), code, resolver.lookups))
+        self.assertEqual([g[1:] for g in got], [("bad_url", [])] * 4, got)
 
 
 class RedirectTest(unittest.TestCase):

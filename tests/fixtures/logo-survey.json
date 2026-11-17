@@ -647,7 +647,7 @@
       }
     },
     {
-      "name": "D-SINK-112: hosts with the same count are ordered by code point, as the helper orders them; the shell ordered them by UTF-16 unit, which put a host opening outside the Basic Multilingual Plane first",
+      "name": "D-SINK-112 and D-SINK-119: hosts with the same count are ordered by code point in both mirrors; the shell ordered them by UTF-16 unit. Since D-SINK-119 a logo's host is ASCII, where the two orders agree, so the two hosts that told them apart are now refused, one a look-alike and both outside ASCII",
       "channels": [
         {
           "logo": "https://\ud800\udc00x.test/a.png"
@@ -659,19 +659,10 @@
       "expect": {
         "channels": 2,
         "withLogo": 2,
-        "wouldContact": 2,
-        "refused": 0,
-        "hostCount": 2,
-        "hosts": [
-          {
-            "host": "\uff41x.test",
-            "channels": 1
-          },
-          {
-            "host": "\ud800\udc00x.test",
-            "channels": 1
-          }
-        ],
+        "wouldContact": 0,
+        "refused": 2,
+        "hostCount": 0,
+        "hosts": [],
         "schemes": {
           "https": 2
         }
@@ -707,6 +698,49 @@
         ],
         "schemes": {
           "https": 4
+        }
+      }
+    },
+    {
+      "name": "D-SINK-119: a logo's host is ASCII, with labels the idna codec takes -- an IDN host (Latin-1, Cyrillic) is counted refused, as is a label of 64 characters or an empty one; its A-label is counted, as is a host with a trailing dot",
+      "channels": [
+        {
+          "logo": "https://b\u00fccher.test/a.png"
+        },
+        {
+          "logo": "https://\u043f\u0440\u0438.test/a.png"
+        },
+        {
+          "logo": "https://qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.test/a.png"
+        },
+        {
+          "logo": "https://cdn..test/a.png"
+        },
+        {
+          "logo": "https://xn--bcher-kva.test/a.png"
+        },
+        {
+          "logo": "https://cdn.test./a.png"
+        }
+      ],
+      "expect": {
+        "channels": 6,
+        "withLogo": 6,
+        "wouldContact": 2,
+        "refused": 4,
+        "hostCount": 2,
+        "hosts": [
+          {
+            "host": "cdn.test.",
+            "channels": 1
+          },
+          {
+            "host": "xn--bcher-kva.test",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 6
         }
       }
     }

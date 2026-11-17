@@ -272,8 +272,13 @@ TestCase {
              Model.hostNameRefused("user" + String.fromCharCode(0xff3c) + "sid.test"),
              Model.hostNameRefused("user" + String.fromCharCode(0xfe68) + "sid.test")], [true, true, true])
     compare(Model.validateSourceUrl("http://user;sid.test/x").code, "invalid")
+    // D-SINK-119 (2026-11-16): a fullwidth full stop or letter, whose NFKC
+    // form is not itself, is a look-alike of h.test and ha.test, refused by
+    // the table in this engine as in node; so is U+A7F1, which Qt's own
+    // NFKC may leave alone. An IDN host whose NFKC form is itself is kept.
     compare([Model.hostNameRefused("bücher.test"), Model.hostNameRefused("h．test"),
-             Model.hostNameRefused("hＡ.test"), Model.hostNameRefused("h.test")], [false, false, false, false])
+             Model.hostNameRefused("hＡ.test"), Model.hostNameRefused("h.test"),
+             Model.hostNameRefused("a" + String.fromCharCode(0xa7f1) + ".test")], [false, true, true, false, true])
   }
 
   function test_displayNameNeverUrl() {

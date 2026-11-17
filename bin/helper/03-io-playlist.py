@@ -304,6 +304,63 @@ def refuse_host_name(text: Any, with_port: bool = False) -> None:
         raise HelperError("bad_url", HOST_NAME_REFUSAL)
 
 
+# D-SINK-119 (2026-11-16): the dots other than `.` that the idna codec reads
+# in a host name (encodings.idna's `dots`).
+IDNA_DOTS = "\u3002\uff0e\uff61"
+# A fetch's refusal of a host the codec cannot write in ASCII, after the
+# verb's fixed word (`playlist`, `EPG`); it names no host.
+HOST_IDNA_REFUSAL = "address names a host the IDNA codec cannot write in ASCII; not looked up"
+
+
+def host_a_label(host: Any) -> str | None:
+    """D-SINK-119 (2026-11-16): a host name's A-label -- what the idna
+    codec writes it as, which is what CPython's socket hands the resolver
+    for a str host -- or None when the codec refuses it (a label too long or
+    empty, a bidi rule broken, a private-use character or a noncharacter
+    after nameprep) or the name holds a dot the codec reads that is not `.`
+    (IDNA_DOTS: a look-alike of a dot, which would be fetched from the name
+    it spells). An IPv6 literal, bracketed or not, and "" are returned as
+    they are. An ASCII name is its own A-label when the codec takes it."""
+    text = str(host or "")
+    if text == "" or ":" in text or text.startswith("["):
+        return text
+    for dot in IDNA_DOTS:
+        if dot in text:
+            return None
+    try:
+        return text.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+
+
+def a_label_target(target: str) -> str | None:
+    """D-SINK-119: `target`, an http(s) URL with no user information
+    (split_userinfo's), with its host written as its A-label (host_a_label),
+    so the request's host and its `Host` header are ASCII and name what the
+    lookup asks. urllib hands http.client the host as the header's text,
+    which http.client writes as Latin-1 before it connects: a host outside
+    Latin-1 failed every fetch with no lookup, and a Latin-1 one was looked
+    up as its A-label and sent its raw bytes in the header. None when
+    host_a_label refuses the host; the target unchanged when the host is its
+    own A-label or an IPv6 literal. A ValueError where urlsplit raises one,
+    or where the port is not a number."""
+    parts = urllib.parse.urlsplit(target)
+    netloc = parts.netloc
+    parts.port
+    if "@" in netloc or netloc.startswith("["):
+        return target
+    written = netloc.rpartition(":")[0] if ":" in netloc else netloc
+    ace = host_a_label(written)
+    if ace is None:
+        return None
+    if ace == written:
+        return target
+    start = target.find("//") + 2
+    if start < 2 or target[start:start + len(netloc)] != netloc:
+        raise ValueError("the authority is not where the URL library read it")
+    return target[:start] + ace + netloc[len(written):] + target[start + len(netloc):]
+
+
 def resolve_within(host: str | bytes, port: int, timeout: float, limit: int | None = None) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
@@ -469,8 +526,12 @@ class DestinationPolicy:
         # validated, so no provider reaches it; the shape is closed anyway.
         port = (int(port_text) if port_text.isascii() and port_text.isdigit() and len(port_text) <= 5
                 and 0 < int(port_text) < 65536 else None)
-        return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
-                   (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
+        # D-SINK-119: the playlist's host as its A-label, as a fetch's first
+        # hop now asks the connection for it (a_label_target), so "the
+        # playlist's own host" is the same name on both sides of the test.
+        home = (os.environ.get(HOME_HOST_ENV) or "").strip()
+        home = host_a_label(home) or home
+        return cls(label, origin, home, (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
 
     @classmethod
     def for_logos(cls) -> "DestinationPolicy":
@@ -1129,8 +1190,14 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
     # text quoted the authority, user information included.
     try:
         target, auth = split_userinfo(url)
+        # D-SINK-119 (2026-11-16): the host as its A-label, the name the
+        # lookup asks, so the request's host and its Host header are ASCII.
+        aced = a_label_target(target)
     except ValueError:
         raise HelperError("bad_url", "%s address cannot be read as a URL; not fetched" % label) from None
+    if aced is None:
+        raise HelperError("bad_url", "%s %s" % (label, HOST_IDNA_REFUSAL))
+    target = aced
     if policy is None:
         policy = DestinationPolicy.from_environment(label)
     if auth and policy.origin == ORIGIN_PLAYLIST:

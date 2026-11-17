@@ -455,6 +455,90 @@ function isHostNameAscii(code) {
     code === 0x2d || code === 0x2e || code === 0x5f
 }
 
+// D-SINK-119 (2026-11-16): the code points whose NFKC form is not themselves,
+// as [first, last], 256 ranges and 4,965 code points: node 26 (Unicode 17.0)
+// and Python 3.14 (16.0) answer the same set but for U+A7F1, which Unicode 17
+// assigned and folds to `S`, so the table is their union, and the TABLE is the
+// rule, never the engine's normalize (Qt's engine is held to it by the
+// host-grammar suite on the dev branch). A host name holding one is a
+// look-alike of the name it folds to, which the helper's idna codec writes it
+// as and, since D-SINK-119, fetches from. The helper's HOST_NFKC_RANGES is the
+// same table, held to it by the shared host-grammar fixture. Sorted.
+var HOST_NFKC_RANGES = [
+  [0x00a0, 0x00a0], [0x00a8, 0x00a8], [0x00aa, 0x00aa], [0x00af, 0x00af], [0x00b2, 0x00b5], [0x00b8, 0x00ba],
+  [0x00bc, 0x00be], [0x0132, 0x0133], [0x013f, 0x0140], [0x0149, 0x0149], [0x017f, 0x017f], [0x01c4, 0x01cc],
+  [0x01f1, 0x01f3], [0x02b0, 0x02b8], [0x02d8, 0x02dd], [0x02e0, 0x02e4], [0x0340, 0x0341], [0x0343, 0x0344],
+  [0x0374, 0x0374], [0x037a, 0x037a], [0x037e, 0x037e], [0x0384, 0x0385], [0x0387, 0x0387], [0x03d0, 0x03d6],
+  [0x03f0, 0x03f2], [0x03f4, 0x03f5], [0x03f9, 0x03f9], [0x0587, 0x0587], [0x0675, 0x0678], [0x0958, 0x095f],
+  [0x09dc, 0x09dd], [0x09df, 0x09df], [0x0a33, 0x0a33], [0x0a36, 0x0a36], [0x0a59, 0x0a5b], [0x0a5e, 0x0a5e],
+  [0x0b5c, 0x0b5d], [0x0e33, 0x0e33], [0x0eb3, 0x0eb3], [0x0edc, 0x0edd], [0x0f0c, 0x0f0c], [0x0f43, 0x0f43],
+  [0x0f4d, 0x0f4d], [0x0f52, 0x0f52], [0x0f57, 0x0f57], [0x0f5c, 0x0f5c], [0x0f69, 0x0f69], [0x0f73, 0x0f73],
+  [0x0f75, 0x0f79], [0x0f81, 0x0f81], [0x0f93, 0x0f93], [0x0f9d, 0x0f9d], [0x0fa2, 0x0fa2], [0x0fa7, 0x0fa7],
+  [0x0fac, 0x0fac], [0x0fb9, 0x0fb9], [0x10fc, 0x10fc], [0x1d2c, 0x1d2e], [0x1d30, 0x1d3a], [0x1d3c, 0x1d4d],
+  [0x1d4f, 0x1d6a], [0x1d78, 0x1d78], [0x1d9b, 0x1dbf], [0x1e9a, 0x1e9b], [0x1f71, 0x1f71], [0x1f73, 0x1f73],
+  [0x1f75, 0x1f75], [0x1f77, 0x1f77], [0x1f79, 0x1f79], [0x1f7b, 0x1f7b], [0x1f7d, 0x1f7d], [0x1fbb, 0x1fbb],
+  [0x1fbd, 0x1fc1], [0x1fc9, 0x1fc9], [0x1fcb, 0x1fcb], [0x1fcd, 0x1fcf], [0x1fd3, 0x1fd3], [0x1fdb, 0x1fdb],
+  [0x1fdd, 0x1fdf], [0x1fe3, 0x1fe3], [0x1feb, 0x1feb], [0x1fed, 0x1fef], [0x1ff9, 0x1ff9], [0x1ffb, 0x1ffb],
+  [0x1ffd, 0x1ffe], [0x2000, 0x200a], [0x2011, 0x2011], [0x2017, 0x2017], [0x2024, 0x2026], [0x202f, 0x202f],
+  [0x2033, 0x2034], [0x2036, 0x2037], [0x203c, 0x203c], [0x203e, 0x203e], [0x2047, 0x2049], [0x2057, 0x2057],
+  [0x205f, 0x205f], [0x2070, 0x2071], [0x2074, 0x208e], [0x2090, 0x209c], [0x20a8, 0x20a8], [0x2100, 0x2103],
+  [0x2105, 0x2107], [0x2109, 0x2113], [0x2115, 0x2116], [0x2119, 0x211d], [0x2120, 0x2122], [0x2124, 0x2124],
+  [0x2126, 0x2126], [0x2128, 0x2128], [0x212a, 0x212d], [0x212f, 0x2131], [0x2133, 0x2139], [0x213b, 0x2140],
+  [0x2145, 0x2149], [0x2150, 0x217f], [0x2189, 0x2189], [0x222c, 0x222d], [0x222f, 0x2230], [0x2329, 0x232a],
+  [0x2460, 0x24ea], [0x2a0c, 0x2a0c], [0x2a74, 0x2a76], [0x2adc, 0x2adc], [0x2c7c, 0x2c7d], [0x2d6f, 0x2d6f],
+  [0x2e9f, 0x2e9f], [0x2ef3, 0x2ef3], [0x2f00, 0x2fd5], [0x3000, 0x3000], [0x3036, 0x3036], [0x3038, 0x303a],
+  [0x309b, 0x309c], [0x309f, 0x309f], [0x30ff, 0x30ff], [0x3131, 0x318e], [0x3192, 0x319f], [0x3200, 0x321e],
+  [0x3220, 0x3247], [0x3250, 0x327e], [0x3280, 0x33ff], [0xa69c, 0xa69d], [0xa770, 0xa770], [0xa7f1, 0xa7f4],
+  [0xa7f8, 0xa7f9], [0xab5c, 0xab5f], [0xab69, 0xab69], [0xf900, 0xfa0d], [0xfa10, 0xfa10], [0xfa12, 0xfa12],
+  [0xfa15, 0xfa1e], [0xfa20, 0xfa20], [0xfa22, 0xfa22], [0xfa25, 0xfa26], [0xfa2a, 0xfa6d], [0xfa70, 0xfad9],
+  [0xfb00, 0xfb06], [0xfb13, 0xfb17], [0xfb1d, 0xfb1d], [0xfb1f, 0xfb36], [0xfb38, 0xfb3c], [0xfb3e, 0xfb3e],
+  [0xfb40, 0xfb41], [0xfb43, 0xfb44], [0xfb46, 0xfbb1], [0xfbd3, 0xfd3d], [0xfd50, 0xfd8f], [0xfd92, 0xfdc7],
+  [0xfdf0, 0xfdfc], [0xfe10, 0xfe19], [0xfe30, 0xfe44], [0xfe47, 0xfe52], [0xfe54, 0xfe66], [0xfe68, 0xfe6b],
+  [0xfe70, 0xfe72], [0xfe74, 0xfe74], [0xfe76, 0xfefc], [0xff01, 0xffbe], [0xffc2, 0xffc7], [0xffca, 0xffcf],
+  [0xffd2, 0xffd7], [0xffda, 0xffdc], [0xffe0, 0xffe6], [0xffe8, 0xffee], [0x10781, 0x10785], [0x10787, 0x107b0],
+  [0x107b2, 0x107ba], [0x1ccd6, 0x1ccf9], [0x1d15e, 0x1d164], [0x1d1bb, 0x1d1c0], [0x1d400, 0x1d454], [0x1d456, 0x1d49c],
+  [0x1d49e, 0x1d49f], [0x1d4a2, 0x1d4a2], [0x1d4a5, 0x1d4a6], [0x1d4a9, 0x1d4ac], [0x1d4ae, 0x1d4b9], [0x1d4bb, 0x1d4bb],
+  [0x1d4bd, 0x1d4c3], [0x1d4c5, 0x1d505], [0x1d507, 0x1d50a], [0x1d50d, 0x1d514], [0x1d516, 0x1d51c], [0x1d51e, 0x1d539],
+  [0x1d53b, 0x1d53e], [0x1d540, 0x1d544], [0x1d546, 0x1d546], [0x1d54a, 0x1d550], [0x1d552, 0x1d6a5], [0x1d6a8, 0x1d7cb],
+  [0x1d7ce, 0x1d7ff], [0x1e030, 0x1e06d], [0x1ee00, 0x1ee03], [0x1ee05, 0x1ee1f], [0x1ee21, 0x1ee22], [0x1ee24, 0x1ee24],
+  [0x1ee27, 0x1ee27], [0x1ee29, 0x1ee32], [0x1ee34, 0x1ee37], [0x1ee39, 0x1ee39], [0x1ee3b, 0x1ee3b], [0x1ee42, 0x1ee42],
+  [0x1ee47, 0x1ee47], [0x1ee49, 0x1ee49], [0x1ee4b, 0x1ee4b], [0x1ee4d, 0x1ee4f], [0x1ee51, 0x1ee52], [0x1ee54, 0x1ee54],
+  [0x1ee57, 0x1ee57], [0x1ee59, 0x1ee59], [0x1ee5b, 0x1ee5b], [0x1ee5d, 0x1ee5d], [0x1ee5f, 0x1ee5f], [0x1ee61, 0x1ee62],
+  [0x1ee64, 0x1ee64], [0x1ee67, 0x1ee6a], [0x1ee6c, 0x1ee72], [0x1ee74, 0x1ee77], [0x1ee79, 0x1ee7c], [0x1ee7e, 0x1ee7e],
+  [0x1ee80, 0x1ee89], [0x1ee8b, 0x1ee9b], [0x1eea1, 0x1eea3], [0x1eea5, 0x1eea9], [0x1eeab, 0x1eebb], [0x1f100, 0x1f10a],
+  [0x1f110, 0x1f12e], [0x1f130, 0x1f14f], [0x1f16a, 0x1f16c], [0x1f190, 0x1f190], [0x1f200, 0x1f202], [0x1f210, 0x1f23b],
+  [0x1f240, 0x1f248], [0x1f250, 0x1f251], [0x1fbf0, 0x1fbf9], [0x2f800, 0x2fa1d]]
+
+function isHostNfkcCode(code) {
+  var lo = 0
+  var hi = HOST_NFKC_RANGES.length - 1
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1
+    if (code < HOST_NFKC_RANGES[mid][0]) hi = mid - 1
+    else if (code > HOST_NFKC_RANGES[mid][1]) lo = mid + 1
+    else return true
+  }
+  return false
+}
+
+// D-SINK-119: does `s` hold a code point of HOST_NFKC_RANGES? A surrogate pair
+// is read as the code point it encodes.
+function hostHoldsNfkcChange(s) {
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 0x80) continue
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      var d = s.charCodeAt(i + 1)
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        c = 0x10000 + (c - 0xd800) * 0x400 + (d - 0xdc00)
+        i++
+      }
+    }
+    if (isHostNfkcCode(c)) return true
+  }
+  return false
+}
+
 // D-SINK-115 (2026-11-16): the code points whose compatibility form holds
 // `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD in node 26
 // (Unicode 17.0), Python 3.14 (16.0) and Qt 6.12's engine. The helper's URL
@@ -509,6 +593,8 @@ function hostNameRefused(host) {
   var s = str(host)
   if (hostNameRefusedAsWritten(s)) return true
   if (!NON_ASCII_RE.test(s)) return false
+  // D-SINK-119: a look-alike of the name its NFKC form spells.
+  if (hostHoldsNfkcChange(s)) return true
   var folded = s.normalize("NFKD")
   return folded !== s && hostNameRefusedAsWritten(folded)
 }
@@ -3100,32 +3186,32 @@ export {
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, SOURCE_URL_SCHEMES, IPV6_LITERAL_RE, isIpv6Literal,
   HOST_FORMAT_RANGES, isHostFormatCode, HOST_INVISIBLE_RANGES,
-  isHostInvisibleCode, isHostNameAscii, DELIMITER_FOLDS,
-  AUTHORITY_MESSAGE_CODES, NON_ASCII_RE, hostNameRefused,
-  hostNameRefusedAsWritten, cutQueryAndFragment, ENCODE_SENTENCE,
-  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
-  sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, plainHttpLine,
-  formAdviceLine, looksLikeHost, validateSourceUrl, readAuthority,
-  normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
-  IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
-  ipv4Class, ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
-  ABSORBED_URL_RE, absorbedAttribute, dotlessHost, URL_DEFAULT_PORTS,
-  urlPortOf, ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV,
-  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV,
-  fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
-  EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
-  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
-  cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
-  labelKeySets, labelKeySetsAdd, labelKeySetsTake, uniqueLabelOver,
-  defaultSourceLabel, validateLabel, selfStoredLabel, labelReadTaken,
-  maskQuery, maskUrl, accessibleStars, hasAddressLineTerminator,
-  hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,
-  addressAccessibleHost, LABEL_NAME_RE, labelHost, isDottedQuad,
-  addressAuthoritySplit, addressAtAfterAuthority, sourceHostWithheld,
-  sourceShownHost, addressAuthorityParts, addressAccessibleValue,
-  labelSinkText, labelReadsAsAddress, labelHoldsField,
+  isHostInvisibleCode, isHostNameAscii, HOST_NFKC_RANGES, isHostNfkcCode,
+  hostHoldsNfkcChange, DELIMITER_FOLDS, AUTHORITY_MESSAGE_CODES, NON_ASCII_RE,
+  hostNameRefused, hostNameRefusedAsWritten, cutQueryAndFragment,
+  ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
+  readAuthority, normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4,
+  IPV4_PART_RE, IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal,
+  parseIpv6Groups, ipLiteral, ipv4Class, ipv6Class, hostClass, hostKey,
+  HINT_LIST_RE, hintFirstEntry, ABSORBED_URL_RE, absorbedAttribute,
+  dotlessHost, URL_DEFAULT_PORTS, urlPortOf, ownHostMatch, typedHttpHost,
+  FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV,
+  FETCH_HOME_PORT_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
+  EPG_HINT_HOST_MAX, epgHintVerdict, epgHintUrl, resolveEpgUrl,
+  epgHintRowState, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
+  randomSourceKey, sourceCacheDir, cutHostParams, hostPortOf, deriveLabel,
+  labelKey, labelTaken, uniqueLabel, labelKeySets, labelKeySetsAdd,
+  labelKeySetsTake, uniqueLabelOver, defaultSourceLabel, validateLabel,
+  selfStoredLabel, labelReadTaken, maskQuery, maskUrl, accessibleStars,
+  hasAddressLineTerminator, hostPortSplit, isZonelessIpv6Literal,
+  ADDRESS_NAME_RE, addressAccessibleHost, LABEL_NAME_RE, labelHost,
+  isDottedQuad, addressAuthoritySplit, addressAtAfterAuthority,
+  sourceHostWithheld, sourceShownHost, addressAuthorityParts,
+  addressAccessibleValue, labelSinkText, labelReadsAsAddress, labelHoldsField,
   labelMayCarryCredential, labelCarriesDelimiter, LABEL_LEAD, LABEL_TRAIL,
   labelCore, labelTokenReadsAsAddress, LABEL_SCHEME_RE,
   labelShapeReadsAsAddress, labelSlashAuthority, labelSchemeSlash,

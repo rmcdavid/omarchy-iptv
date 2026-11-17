@@ -1579,12 +1579,9 @@
  },
  {
   "input": "http://h\u2070.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u2070.test/x",
-  "host": "h\u2070.test",
-  "key": "9665acb5",
-  "note": "D-SINK-86: U+2070 (No) beside a format range is no format character"
+  "ok": false,
+  "note": "D-SINK-86: U+2070 (No) beside a format range is no format character -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://h\ufefe.test/x",
@@ -2527,21 +2524,15 @@
  },
  {
   "input": "http://h\u3163.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u3163.test/x",
-  "host": "h\u3163.test",
-  "key": "a62292d3",
-  "note": "D-SINK-116: U+3163 beside an invisible range is not invisible"
+  "ok": false,
+  "note": "D-SINK-116: U+3163 beside an invisible range is not invisible -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://h\u3165.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u3165.test/x",
-  "host": "h\u3165.test",
-  "key": "02d87b61",
-  "note": "D-SINK-116: U+3165 beside an invisible range is not invisible"
+  "ok": false,
+  "note": "D-SINK-116: U+3165 beside an invisible range is not invisible -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://h\ufdff.test/x",
@@ -2554,21 +2545,15 @@
  },
  {
   "input": "http://h\uff9f.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\uff9f.test/x",
-  "host": "h\uff9f.test",
-  "key": "8ac0f85a",
-  "note": "D-SINK-116: U+FF9F beside an invisible range is not invisible"
+  "ok": false,
+  "note": "D-SINK-116: U+FF9F beside an invisible range is not invisible -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://h\uffa1.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\uffa1.test/x",
-  "host": "h\uffa1.test",
-  "key": "8b44c860",
-  "note": "D-SINK-116: U+FFA1 beside an invisible range is not invisible"
+  "ok": false,
+  "note": "D-SINK-116: U+FFA1 beside an invisible range is not invisible -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://h\uffef.test/x",
@@ -2608,12 +2593,9 @@
  },
  {
   "input": "http://h\u2070.test/x",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h\u2070.test/x",
-  "host": "h\u2070.test",
-  "key": "9665acb5",
-  "note": "D-SINK-116: U+2070 beside an invisible range is not invisible"
+  "ok": false,
+  "note": "D-SINK-116: U+2070 beside an invisible range is not invisible -- D-SINK-119 (2026-11-16): its host holds a code point whose NFKC form is not itself, a look-alike, refused",
+  "code": "invalid"
  },
  {
   "input": "http://cdn!.test/get.php",

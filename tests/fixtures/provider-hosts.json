@@ -1212,6 +1212,44 @@
     "lookups": []
    },
    "why": "D-SINK-112: a C1 control in the host, which only the source validator refuses"
+  },
+  {
+   "url": "https://b\u00fccher.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-119: an IDN logo host is refused before any lookup; it was counted, looked up as its A-label and sent a raw Latin-1 Host header"
+  },
+  {
+   "url": "https://\u4f8b\u3048.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-119: a CJK logo host, which http.client could not write in the Host header (no lookup either way)"
+  },
+  {
+   "url": "https://qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "D-SINK-119: a label of 64 characters, which the idna codec refuses"
+  },
+  {
+   "url": "https://xn--bcher-kva.test/a.png",
+   "host": "xn--bcher-kva.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "xn--bcher-kva.test"
+    ]
+   },
+   "why": "D-SINK-119: the A-label is a logo host"
   }
  ],
  "absorbed": [
