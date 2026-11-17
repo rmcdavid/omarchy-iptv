@@ -28,6 +28,7 @@ import os
 import pathlib
 import shutil
 import stat as stat_module
+import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -139,11 +140,25 @@ def suite_stream_resolve(name, port):
     return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (SUITE_STREAM_ADDRESS, int(port or 0)))]
 
 
-def load_helper(stream_lookup=suite_stream_resolve):
-    loader = importlib.machinery.SourceFileLoader("omarchy_iptv", str(HELPER))
+def load_helper(stream_lookup=suite_stream_resolve, path=None):
+    """The helper at `path` (default: this tree's stub) as a module.
+
+    F-HARNESS-116 (2026-11-16): loaded with `sys.dont_write_bytecode` set,
+    so the import writes no `bin/__pycache__/` beside the stub it loads. It
+    used to write one into whatever tree it loaded from, and `python3 -I`
+    does not stop that: `-I` implies `-E`, which ignores
+    PYTHONDONTWRITEBYTECODE. Pointed at the live install, that is the
+    2026-09-27 write CLAUDE.md's never-touch list records. The previous
+    value is put back, so the rest of the suite is unchanged."""
+    loader = importlib.machinery.SourceFileLoader("omarchy_iptv", str(path or HELPER))
     spec = importlib.util.spec_from_loader("omarchy_iptv", loader)
     module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     # D-SINK-101: a tree before the lookup (a --baseline run) has no seam.
     if stream_lookup is not None and hasattr(module, "stream_resolve"):
         module.stream_resolve = stream_lookup

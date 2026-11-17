@@ -876,8 +876,12 @@ through one table (`REPLY_READINGS`, D-SINK-104 and D-SINK-108), and write
 DEL, the C1 controls, U+2028, U+2029 and the text-direction controls as
 escapes (D-SINK-105); `log()` and the traceback read their text the same
 way (D-SINK-110); a line that names a source's host names `[host withheld]`
-where the Sources form withholds it (D-SINK-109); a usage error names the
-helper's options, never a value (D-SINK-106); and no journal line names a
+where the Sources form withholds it (D-SINK-109; round 5 owns the player
+status reply's `pathHost`, the play-time local-address refusal, the
+destination rules' sentences and the guide-hint refusal's host); a channel id
+an older parse made from a credential prints as `[id withheld]` except in the
+replies whose ids the shell matches or restores (D-SINK-111); a usage error
+names the helper's options, never a value (D-SINK-106); and no journal line names a
 channel id (D-SINK-107, whose re-derivation of ids and keys is open).]**
 `channels.json` stores `sourceHost` rather than the URL, but stream
 URLs inside `channels.json` do contain the credentials (cache dir is 0700,

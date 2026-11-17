@@ -310,14 +310,23 @@ class MemoryLimitTest(unittest.TestCase):
         # change to the limit. 50 channels of 28 half-hour programmes around
         # the run's own clock, about 220 KB, are refused under 8 MiB and
         # parse whole without the limit.
+        # F-GATE-25 (2026-11-16): and those 50 channels were still at the
+        # boundary, which moves with the helper's size and with the path it
+        # runs from, as F-GATE-23's playlist twin did: the same bytes of
+        # 7b99ad6 parsed under the limit 5 of 5 from one scratch path and
+        # were refused 5 of 5 from another. 50 channels parsed there, 100
+        # to 800 were refused every time; 1,000 channels, about 4.5 MB, were
+        # refused 48 of 48 at three paths and four glibc mmap thresholds,
+        # and parse whole in about a second without the limit.
         import time
         now = int(time.time()) // 1800 * 1800
         stamp = lambda t: time.strftime("%Y%m%d%H%M%S +0000", time.gmtime(t))
         lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv generator-info-name="omarchy-iptv test">']
-        lines += ['  <channel id="c%d.test"><display-name>Channel %d</display-name></channel>' % (c, c) for c in range(50)]
+        channels = 1000
+        lines += ['  <channel id="c%d.test"><display-name>Channel %d</display-name></channel>' % (c, c) for c in range(channels)]
         lines += ['  <programme start="%s" stop="%s" channel="c%d.test"><title>Show %d</title>'
                   '<desc>An ordinary programme.</desc></programme>' % (stamp(now + k * 1800), stamp(now + k * 1800 + 1800), c, k)
-                  for c in range(50) for k in range(-4, 24)]
+                  for c in range(channels) for k in range(-4, 24)]
         guide = pathlib.Path(self.cache, "ordinary.xml")
         guide.write_text("\n".join(lines + ["</tv>"]) + "\n", encoding="utf-8")
         cache = os.path.join(self.cache, "c")
@@ -327,7 +336,7 @@ class MemoryLimitTest(unittest.TestCase):
         # And the default admits it, every programme in the window kept.
         code, status, stdout, stderr = run_helper("epg", "--url", str(guide), "--cache-dir", cache, "--force")
         self.assertEqual(code, 0, stdout + stderr)
-        self.assertEqual(status["programmeCount"], 50 * 28)
+        self.assertEqual(status["programmeCount"], channels * 28)
 
     def test_the_verb_holds_the_limit_while_it_parses_and_lifts_it_after(self):
         # Run as the program (runpy, run_name __main__). The limit is read

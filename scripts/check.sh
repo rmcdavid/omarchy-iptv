@@ -1095,7 +1095,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3749}
 # that named a channel id. All 17 red on 3e78cc3's helper, 14
 # single-decision mutants red (QA-RESULTS "Round 2 of the security review,
 # lane-r2c"); the suite runs 2663, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2663}
+# 2026-11-16, lane-r2settle (round 2's two reviews, D-SINK-111 and
+# F-HARNESS-116): 2663 -> 2668 -- tests/test_reply_shown.py's 4 (the probe
+# reply prints its record's id as held and reads the rest, in the boundary
+# and through `player probe`; the `failed` reply withholds a legacy mark,
+# with no channel list and with one) and tests/test_helper_loader.py's 1
+# (the loader writes no bytecode beside the stub). 8 of the 29 in the two
+# files red on 7b99ad6, and 6 single-decision mutants red (QA-RESULTS
+# "Round 2's reviews, settled"); the suite runs 2668, 1 skipped.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2668}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

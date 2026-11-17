@@ -330,11 +330,15 @@ requests and raise the batch.
    helper's stdout, status files and stderr have ONE boundary. Every reply
    and both status files print provider and typed text as the guide shows
    it -- the fields `REPLY_READINGS` lists (bin/helper/03-io-playlist.py),
-   read through `shown_text` by `emit` and both status writers, an old
-   `t:` id holding a credential as `[id withheld]` -- and write DEL, C1,
-   U+2028/9 and the text-direction controls as escapes, as
+   read through the readings it names (`shown_text`, the label reading, the
+   scope and id readings) by `emit` and both status writers, an old `t:` id
+   holding a credential as `[id withheld]` except in the replies
+   D-SINK-111's row lists (the shell matches or restores those ids) -- and
+   write DEL, C1, U+2028/9 and the text-direction controls as escapes, as
    `Model.ipcJson` does; `log()` and the traceback read the same way; a
-   line naming a source's host withholds it where the Sources form does; a
+   line naming a source's host withholds it where the Sources form does
+   (round 5 owns `pathHost`, the play-time local-address refusal, the
+   destination rules' sentences and the guide-hint refusal's host); a
    usage error names options, never values; no journal line names a
    channel id. A new reply field that can carry such text goes in the
    table, or it prints raw.]**

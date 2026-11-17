@@ -405,12 +405,15 @@ function replyTarget(status, nowPlaying) {
 //             so an old helper or a foreign player raises nothing
 //   diverged  they name different channels. `repair` is the id to re-apply
 //
-// D-SINK-111 (2026-11-16): the helper's replies print a record's id as
-// ID_WITHHELD when it is a `t:` id whose tvg-id part the parse refuses (one
-// stored by 0.18.0 or earlier, holding a credential), and a cache written
-// before 0.19.0 can still hold that row, so the shell may be playing it. The
-// token names no channel, so it is nothing to compare: read as "diverged",
-// the health tick would re-apply a channel the player is already on.
+// D-SINK-111 (2026-11-16): the helper's `status` reply prints a record's id
+// as ID_WITHHELD when it is a `t:` id whose tvg-id part the parse refuses
+// (one stored by 0.18.0 or earlier, holding a credential), and a cache
+// written before 0.19.0 can still hold that row, so the shell may be playing
+// it. The token names no channel, so it is nothing to compare: read as
+// "diverged", the health tick would re-apply a channel the player is already
+// on. Cost, stated: the tick re-applies nothing to such a player when
+// another client moved it. The `player probe` reply prints the id as the
+// record holds it, because the reattach restores the playing channel from it.
 var ID_WITHHELD = "[id withheld]"
 
 function reconcileVerdict(stash, nowPlaying, sourceKey) {

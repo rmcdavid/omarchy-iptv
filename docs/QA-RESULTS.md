@@ -20240,7 +20240,7 @@ Nothing runs the reading per row.
 | `warnings[]` | the playlist reply and its file, epg-status.json, the start reply | `Model.statusWarnings` | Redacted again there. |
 | `name`, `playing.name` | play and start replies | `Model.replyTarget` | Names a card only, through `notifyNameText` again. |
 | `firstLoad.reason`, `firstLoad.fileError` | start reply | `deathReport` | Matches `fileError` exactly after a trim against mpv's fixed strings, which `shown_text` leaves unchanged. |
-| the stash's `name`, `group`, `launchedFrom`, `id` | status and probe replies | the probe restore (all four), `reconcileVerdict` (`id`), `reconcileNowPlaying` (an empty scope falls back to the channel's first group) | Covered by the node checks below. |
+| the stash's `name`, `group`, `launchedFrom`, `id` | status and probe replies | the probe restore (all four), `reconcileVerdict` (`id`), `reconcileNowPlaying` (an empty scope falls back to the channel's first group) | Covered by the node checks below. [The settle round: not for the `id`, which the restore then looks up in the channel list; the probe reply prints it as held since then.] |
 | `mediaTitle` | status reply | none | -- |
 | `tracks[]`'s `lang`, `title`, `codec` | tracks reply | `Model.parseTracks` | Redacted again there. |
 | the state replies' fields | state replies | only `found` from `init`; `mode` and `private` are fixed words | -- |
@@ -20316,6 +20316,7 @@ No reply carries channel rows, and the parse does no new work per row.
 - *Every printer of a channel id:*
   - Withheld: the state replies, the player's record and the error replies.
   - Left as stated in D-SINK-111's row: the ok `play` and `player start` replies and `playing.id`, which the shell matches; the `failed` replies, whose marks are pruned to ids the current cache holds; and the shell's own IPC status and channel replies, which print what the shell holds. Each can print such an id only while a cache written before 0.19.0 holds the row.
+  - [Corrected by the settle round, 2026-11-16: the row did not list the `failed` replies, and the prune does not hold them to the cache when the folder has no channels.json, where it skips its known-id filter, so a legacy mark printed whole there too. They print the mark withheld since the settle round (`failed[].id` in the table). And the probe reply's record id is read by the shell after all, at the reattach's restore, so it prints as held since then: "Round 2's reviews, settled" below.]
 - *Every JSON writer of the shell:* every IPC verb answers through `Model.ipcJson` (Service.qml's `IpcHandler`). The other `JSON.stringify` calls write state.json, a status the shell keeps itself, and mpv commands.
 
 **Measured beyond the design.** A raw U+2028 in a reply splits it for any reader that splits lines the way Python's `str.splitlines` does (the play test's error on cc4a798). The escapes close that too.
@@ -20541,11 +20542,100 @@ Round 2 of the security review asked one question of the helper: what does it pr
 | D-SINK-106 | P3 | a usage error names options, never values | 7830524 (lane-r2c) |
 | D-SINK-107 | P4 | no helper journal line names a channel id (journal half; open: below) | 7830524 (lane-r2c) |
 
-Five new fixtures, each run by both suites, hold the two mirrors to one answer (shown-text, reply-escapes, withheld-ids, source-host-withheld, label-readings); five new Python test files (test_shown_text, test_reply_shown, test_shown_source_host, test_label_readings, test_usage_errors) and the node and V4 checks sit beside them. Every new test was seen red on the commit before it, and every named decision of the shipping code under a single-decision mutant (each lane's section above has the counts). The floors moved node 3732 -> 3749, python 2585 -> 2663, spec 99 -> 103. Nothing was pushed, and `main` and the tags were not touched: `main` stays held at 0.19.1 by the owner.
+Five new fixtures, each run by both suites, hold the two mirrors to one answer (shown-text, reply-escapes, withheld-ids, source-host-withheld, label-readings); five new Python test files (test_shown_text, test_reply_shown, test_shown_source_host, test_label_readings, test_usage_errors) and the node and V4 checks sit beside them. Every new behaviour test was seen red on the commit before it, and every named decision of the shipping code under a single-decision mutant (each lane's section above has the counts). Three guards were not, and are not meant to be: the two fixture-is-whole tests (tests/test_shown_source_host.py, tests/test_label_readings.py), which hold a fixture's shape, and the label load's cost test, which bounds a time. The settle round showed each red under a mutant of its own ("Round 2's reviews, settled" below). The floors moved node 3732 -> 3749, python 2585 -> 2663, spec 99 -> 103. Nothing was pushed, and `main` and the tags were not touched: `main` stays held at 0.19.1 by the owner.
 
 **What stays open.**
 - *D-SINK-107's re-derivation.* `u:` channel ids and the keys of sources added before 0.16.0 are still unkeyed 32-bit hashes of a credentialed address, on stdout (the state replies, the IPC status reply, the player's record), in state.json and as cache folder names; a source's key stays in the journal lines that name one by design, and the guide's logo-failure line names a logo's cache file, the same kind of hash. Re-deriving them costs a channel id scheme 3 with every `u:` favorite and recent remapped once, a per-install secret the model reads too, and a re-key with a refetch for each older source. The README now states the remedy for one source: remove it and add it again.
-- *D-SINK-111's drop on load, waiting for the owner (asked 2026-11-16).* Whether `normalize_state` and `Model.parseState` drop a favorite or a played record whose `t:` id holds a credential is the owner's call, because it deletes user data; until then the ids stay in state.json and print withheld. Still printed, stated in the row: an ok `play` or `player start` reply's `id` and that start's `playing.id`, which the shell matches against the channel it asked for.
+- *D-SINK-111's drop on load, waiting for the owner (asked 2026-11-16).* Whether `normalize_state` and `Model.parseState` drop a favorite or a played record whose `t:` id holds a credential is the owner's call, because it deletes user data; until then the ids stay in state.json and print withheld. Still printed, stated in the row: an ok `play` or `player start` reply's `id` and that start's `playing.id`, which the shell matches against the channel it asked for, and (since the settle round) the `player probe` reply's record id, which it restores the playing channel from.
 - *Stated residuals the rows carry*: a TAB, LF or CR in a URL's scheme, mark or username (D-SINK-110); a scheme-less credential path in a warning (D-SINK-104, round 3's recognition residual); a status file or guide window written before the change keeps its host until the next fetch (D-SINK-109); NFKD past Unicode 16.0 (D-SINK-100); argparse's prefix matching (D-SINK-106).
 
 **What round 5 owns.** The split the lead set: round 2 does not touch the player status reply's `pathHost` (round 5 drops the field), the play-time local-address refusal (`local_address`, on a cached channel's literal) or the destination rules' sentences (`DestinationPolicy`), all of which round 5 makes name no host in a refusal of a destination the provider chose; nor the logo survey's busiest host or the guide-hint refusal's host (`epgHintVerdict`), which are its too.
+
+## Round 2's reviews, settled (lane-r2settle, 2026-11-16)
+
+Two read-only reviews read `r2-build` at 7b99ad6: one for credential reach and contracts, one for claims and process. Both found it ready to push, with nothing at P2 or P3. Their Low and Info findings are settled in one commit on the same branch. Every call is the lead's under the owner's standing authority of 2026-11-09. The one that departs from a settlement is marked, and waits for the lead to confirm it.
+
+**The findings and what was done.** Several were raised by both reviews and are listed once.
+
+| Finding (severity) | Row | Done |
+|---|---|---|
+| The probe reply printed the player record's id as `[id withheld]`. The shell restores the playing channel from that id at a reattach, so after a shell restart it could not find the channel. Measured by the review through `Model.olderRestartDisposition`: an older player the shell would have restarted onto its channel ("restart") was stopped ("stop"), since every player through 0.19.x reads unsafe for want of a relay pin. An owed TLS reload was cleared as gone, and a relaunch or restart by id answered `unknown_channel`. (Low, both reviews) | D-SINK-111 | The `player probe` reply prints the record's id as the record holds it (`REPLY_KEPT`, bin/helper/03-io-playlist.py). The `status` reply still withholds it, since its only reader is the health tick, which reads the token as nothing to compare. The settlement had the probe withhold it too. This is the most conservative reading of that settlement: an id prints whole only where a shell reader needs it, by the rule that already printed an ok `play` reply's id. It restores 1118ffb's reattach exactly. It is listed for the lead to confirm. |
+| The `failed` replies printed a legacy mark whole. The row did not list them, and the QA record said their marks were pruned to the cache's ids, which is false where the folder has no channels.json: the prune then skips its known-id filter. (Low, both reviews) | D-SINK-111 | `failed[].id` is in the table. The shell never reads this reply (it reads failed.json itself), and failed.json keeps the id. The QA record's sentence is corrected in place, and the CHANGELOG line is narrowed to the replies that withhold. |
+| The decisions-log row kept the zap-ring cost sentence that settlement 4 replaced, and the two comments in bin/helper/03-io-playlist.py kept the old framing. (Low) | D-SINK-104 | The settled sentence is in all three now: the readings legend, `scope_reading`'s docstring and the decisions-log row. |
+| README and CHANGELOG said a name's control characters appear as `\uXXXX` escapes. `shown_text` removes them; the separators and direction controls are the ones escaped. (Info) | D-SINK-105 | Both say that now: controls removed, the line and paragraph separators and the direction controls escaped, and DEL and C1 escaped wherever else a reply holds them. |
+| The brackets in CLAUDE.md and docs/ARCHITECTURE.md said every reply withholds such an id, and every line naming a source's host withholds it. (Info) | D-SINK-109, D-SINK-111 | The id clause now excepts the replies D-SINK-111's row lists. The host clause names what round 5 owns: `pathHost`, the play-time local-address refusal, the destination rules' sentences and the guide-hint refusal's host. CLAUDE.md names the readings (`shown_text`, the label, scope and id readings) instead of `shown_text` alone. |
+| The comment above `REPLY_READINGS` said labels were not in the table, and its legend named no label reading. (Info, both reviews) | D-SINK-108 | The legend gains `label` (label_sink_text). "Not here" now names only the hosts a reply names. |
+| The round's summary said every new test was seen red on its parent, while lane-r2b's sections named three that were not. (Info) | (the record) | Reworded: every new behaviour test was red on its parent, and three guards were not meant to be. Each guard is shown red under a mutant below. |
+| Settlement 3 said the traceback is read line by line. Lane-r2a reads it whole, with its line feeds kept, and the decisions log recorded that as the lead's call. (Info) | D-SINK-110 | The row now says lane-r2a changed it, with its measurement (`test_the_traceback_is_read_whole_so_a_token_across_a_line_is_withheld`). The settle round keeps it, because it withholds more. The row says the lead has yet to confirm it. |
+| `python3 -I` with `PYTHONDONTWRITEBYTECODE=1` still wrote bytecode through tests/helper_loader.py, because `-I` implies `-E`. (Info) | F-HARNESS-116 (new) | `load_helper` sets `sys.dont_write_bytecode` around the import and restores the previous value afterwards. It also takes a `path`, so a test can ask a scratch copy of the helper. |
+
+**Red first, on 7b99ad6.** The two new or changed test files were copied into a `git archive` of 7b99ad6 and run there.
+
+| Suite | On 7b99ad6 | On this tree |
+|---|---|---|
+| tests/test_reply_shown.py (28, 4 new) and tests/test_helper_loader.py (1, new) | 8 of 29 red: 7 failures and 1 error | 0 of 29 red |
+
+The red cases on 7b99ad6:
+- The probe reply's record id read `[id withheld]`, both through the boundary and through `player probe` against a sleeper and a FakeMpv.
+- Both shapes of `failed` printed `t:qqqqqq:zzzzzz@cdn.test`:
+  - `list`, with no channels.json in the folder;
+  - `mark`, with channels.json holding the row.
+- BoundaryTest's three table tests went red on the new `failed[].id` case.
+- The loader test errored, because the loader there takes no `path`. That error is the seam's absence, not the assertion, so the assertion's red comes from the mutants below.
+
+BoundaryTest's `stash.id` case now uses the `status` kind, which still withholds the id. It passes on both trees.
+
+**Mutants.** Each mutant was applied to a scratch copy of this tree (resealed for the helper ones) and run against the named tests. Every one is red.
+
+| Mutant | Tests | Red |
+|---|---|---|
+| `REPLY_KEPT` empty | test_reply_shown | 2 (both probe tests) |
+| the `failed[].id` row dropped | test_reply_shown | 5 (the three table tests, both `failed` tests) |
+| `shown_reply` ignores the kind's tree | test_reply_shown | 2 |
+| a kind's tree reads nothing, not "all but the kept path" | test_reply_shown | 4 (the emit and status-file tests on the probe's `stash.group` case, both probe tests) |
+| the loader does not set `dont_write_bytecode` | test_helper_loader | 1 (`__pycache__` written beside the copy's stub) |
+| the loader does not restore the previous value | test_helper_loader | 1 |
+| guard: the label-readings fixture cut to 150 vectors | test_label_readings's fixture-is-whole test | 1 |
+| guard: the source-host-withheld fixture reduced to its withheld vectors | test_shown_source_host's fixture-is-whole test | 1 |
+| guard: `normalize_state` takes 0.3 s | test_label_readings's cost test | 1 |
+
+**Rule 15. What was searched, and what was cleared.**
+- *Every reply that prints a channel id.* I read every `emit(` caller in the helper parts:
+  - In the table: the state replies, the `status` reply's record, and now `failed[].id`.
+  - Read in `error_payload`: an error reply's `id`.
+  - Kept and stated: the probe reply's record id, an ok `play` or `player start` reply's `id`, and `playing.id`.
+  - Not channel ids: `tracks[].id`, which is mpv's integer, and the logo replies' `name`, which is a cache file's name.
+  - Not a reply: epg-now.json's keys, which are data at 0600, as lane-r2a's record left them.
+- *Every shell reader of a record's id.* The probe restore (`applyProbe`) reads `stash.id` from the probe reply into `nowPlaying.id`. Five places then look `nowPlaying.id` up: `reconcileNowPlaying`, `reestablishAdopted`, `reestablishForTls`, `relaunchTimer` and `playRetryTimer`. `reconcileVerdict` reads the `status` reply's id. No other reply's record id reaches the shell.
+- *Every loader of the stub.* tests/helper_loader.py is changed. The others were already clear:
+  - tls-scenario and player-scenario run `python3 -I -B`;
+  - tests/test_state.py runs `-I -B` or sets the switch;
+  - test_epg_parse_bounds, test_epg_retention, test_harness_cage_player, the logo spike and helper_redact.py set the switch;
+  - test_split_helper loads a scratch tree.
+- *Every sentence that said the probe's record id is withheld.* All changed:
+  - the CHANGELOG, CLAUDE.md and docs/ARCHITECTURE.md;
+  - the D-SINK-111 row, the decisions-log row and the round's summary;
+  - lane-r2a's field table, corrected in place;
+  - the comment above `REPLY_READINGS`, the comment above `Model.reconcileVerdict`, and test_reply_shown's docstring.
+
+**A gate finding the reviews did not cover: F-GATE-25.** The settle round's first gate run went red on one test, `test_very_low_limit_refuses_an_ordinary_epg` (tests/test_m3u_bounds.py), with 2,667 of 2,668 green. The crash journal read 87 before and after. Under the 8 MiB limit the helper parsed the guide and answered ok, where the test expects a refusal.
+
+The test's refusal is the allocator's chance, the shape F-GATE-23 fixed in its playlist twin. The guide is 50 channels, about 220 KB. Whether the helper can parse it inside the heap its start-up freed moves with the helper's size and with the path it runs from. The test run alone, five times on each scratch copy:
+
+| Tree (scratch copy) | Green |
+|---|---|
+| 1118ffb, cc4a798, b00bb39, 3e78cc3, 7830524 | 5 of 5 each |
+| 47906bb | 0 of 5 |
+| 7b99ad6 | 0 of 5 |
+| this tree, from the worktree | 0 of 5 |
+| 7b99ad6 again, moved to a name as long as the others | 5 of 5 |
+
+7b99ad6 changed no helper file after 7830524, so its two readings are the same bytes from two paths.
+
+Run by hand over a guide written to one scratch folder, the 50-channel guide parsed 4 of 4 under the limit with this tree's helper. It was refused 4 of 4 with the copies of 1118ffb and 47906bb. 100, 200, 400 and 800 channels were refused 4 of 4 with all three.
+
+The test now writes 1,000 channels: about 4.5 MB and 28,000 programmes. That guide was refused 48 of 48 across three paths (a short one, the worktree's, and one about 100 characters longer). Each path was tried under glibc's default mmap threshold and at 128 KiB, 1 MiB and 32 MiB. Without the limit it parses whole in about 1.1 s, which the test still asserts.
+
+The new test is green 5 of 5 on this tree, and 5 of 5 on 7b99ad6's copy at the path where the old one was red. It is red 5 of 5 under a mutant where `limit_memory` sets no limit. The suite's count is unchanged.
+
+**What stays as it was.** No QML changed: the shell restores whatever id the probe reply carries, as it did on 1118ffb. Nothing of round 5's split was touched: `pathHost`, the `local_address` sentence and `DestinationPolicy`'s sentences are as they were. No cage, live scenario, player or name lookup ran. The crash journal read 87 before and after every heavy run. Nothing was pushed, and `main` and the tags were not touched.

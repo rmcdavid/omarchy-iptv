@@ -1619,25 +1619,39 @@ def reply_text(payload: Any, separators: tuple[str, str] | None = None) -> str:
 #   text   shown_text: as the guide shows it, an address as its host,
 #          a credential withheld, no control left (D-SINK-110);
 #   scope  the zap ring's scope, kept only when shown_text leaves it
-#          unchanged, else "" (a reattached shell then scopes the ring to
-#          the channel's first group, Service.reconcileNowPlaying);
+#          unchanged, else "": a reattach scopes the ring exactly as before
+#          (Service.reconcileNowPlaying falls back to the channel's first
+#          group, which is that scope), except when the playing channel is
+#          no longer in the playlist and its group's name reads as an
+#          address, holds a credential or a control: then zapping does
+#          nothing until another channel is chosen;
+#   label  label_sink_text: a source's label as the Sources list reads it
+#          (D-SINK-108);
 #   id     a channel id, ID_WITHHELD when channel_id_withheld refuses it
-#          (D-SINK-111): in the state verbs' replies, which the shell does
-#          not read, and in the player's record, whose id the shell's
-#          health tick compares (Model.reconcileVerdict reads ID_WITHHELD as
-#          nothing to compare). An error reply's `id` is read in
-#          error_payload. The `id` of an ok `play` or `player start` reply
-#          and that start's `playing.id` are NOT read: the shell matches
-#          both against the channel it asked for (Model.replyTarget,
-#          sessionIntentRepair), and a cache holding such a row is one
-#          written before 0.19.0.
+#          (D-SINK-111): in the state verbs' replies and the `failed`
+#          verb's marks, which the shell does not read (it reads
+#          failed.json itself, Model.parseFailed), and in the record of the
+#          `status` reply, whose id only the shell's health tick compares
+#          (Model.reconcileVerdict reads ID_WITHHELD as nothing to compare).
+#          An error reply's `id` is read in error_payload.
+# Printed as held, never read (REPLY_KEPT and the replies below): the record
+# id of the `player probe` reply, which the shell restores the playing
+# channel from at a reattach and looks up in its channel list (the
+# reconcile, the restart on adoption, D-SINK-16's owed reload, the relaunch
+# and the play retry), and the `id` of an ok `play` or `player start` reply
+# and that start's `playing.id`, which the shell matches against the
+# channel it asked for (Model.replyTarget, sessionIntentRepair). Withheld,
+# the probe's id lost the channel at every shell restart and stopped an
+# older player the shell would have restarted onto it (the settle round's
+# review, 2026-11-16). Each prints such an id only while a cache written
+# before 0.19.0 still holds the row.
 # They were printed raw until then: the state verbs' hidden groups, saved
 # searches and recents, last-played and session names; the playlist and
 # guide warnings that name a channel; the play and start replies' name; and
 # the player's record (its stash), which the status and probe replies print.
 # A `clipboard` reply is never read: its text is the user's paste, which
-# the reply hands back as it is. What is NOT here, stated: a source's
-# label (`state.sources[].label`), and every host a reply names.
+# the reply hands back as it is. What is NOT here, stated: every host a
+# reply names (D-SINK-109's `sourceHost`, round 5's `pathHost`).
 REPLY_READINGS = (
     ("error.message", "text"),
     ("warnings[]", "text"),
@@ -1663,15 +1677,23 @@ REPLY_READINGS = (
     ("state.recents[].id", "id"),
     ("state.lastPlayed.id", "id"),
     ("state.session.id", "id"),
+    ("failed[].id", "id"),
 )
+
+# The paths a kind of reply prints as held (above): the probe reply's record
+# id, the one the shell restores the playing channel from.
+REPLY_KEPT = {"player.probe": ("stash.id",)}
 
 
 def scope_reading(value: str) -> str:
     """The `scope` reading: the zap ring's scope as it is when shown_text
     leaves it unchanged, else "" (D-SINK-104). `g:Sports@HD` reads as a
-    credential token, so it is "" too: a reattach then falls back to the
-    channel's first group, which is that same scope when the channel is
-    found."""
+    credential token, so it is "" too. A reattach scopes the ring exactly as
+    before, because it falls back to the channel's first group, which is
+    that same scope; except when the playing channel is no longer in the
+    playlist and its group's name reads as an address, holds a credential
+    or a control: then zapping does nothing until another channel is
+    chosen."""
     return value if shown_text(value) == value else ""
 
 
@@ -1711,15 +1733,19 @@ def _read_reply(value: Any, tree: Any) -> Any:
 
 
 _REPLY_TREE = _reading_tree(REPLY_READINGS)
+_REPLY_KIND_TREES = {kind: _reading_tree(tuple(entry for entry in REPLY_READINGS if entry[0] not in kept))
+                     for kind, kept in REPLY_KEPT.items()}
 
 
 def shown_reply(payload: Any) -> Any:
     """`payload` with every REPLY_READINGS field read as the table says,
     copying only the containers on a listed path that the payload holds; a
-    `clipboard` reply is returned as it is (D-SINK-104)."""
+    `clipboard` reply is returned as it is (D-SINK-104), and a path its kind
+    keeps (REPLY_KEPT) is printed as held."""
     if not isinstance(payload, dict) or payload.get("kind") == "clipboard":
         return payload
-    return _read_reply(payload, _REPLY_TREE)
+    kind = payload.get("kind")
+    return _read_reply(payload, _REPLY_KIND_TREES.get(kind, _REPLY_TREE) if isinstance(kind, str) else _REPLY_TREE)
 
 
 def emit(payload: Any) -> None:
