@@ -1905,6 +1905,9 @@ class StatusTest(MpvTestCase):
             # M5-01: the same for the rewind readout -- STATUS_PROPS carries
             # no time-pos, and "no position yet" is null, never zero.
             "rewind": None,
+            # D-PLY-67: whether this build's player still has its relay. The
+            # double here carries no launch argv, so the helper cannot say.
+            "relay": None,
         })
         self.assertNotIn("path\"", stdout.replace("pathHost", ""))
         for secret in ("user:pw", "/live/", "1.m3u8"):

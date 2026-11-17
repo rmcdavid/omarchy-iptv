@@ -4412,6 +4412,14 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   ten-second health tick's `status` does not ask the relay, so while the
   shell runs and nobody changes channel the interval is unbounded
   (D-PLY-67, with the recommended bound: `status` asks the relay).
+  **[2026-11-17, D-PLY-67 built: `status` answers `relay` (true, false, or
+  null when it cannot say or the player is another build's), and on a
+  healthy status with `relay: false` the shell runs the reattach's probe
+  (`Model.healthRelayAction`), unless a replacement is already owed, the
+  player slot is busy, or a stop stands. The probe reads the player older
+  and unsafe, so it is replaced at once or stopped at the hold's end. The
+  interval is one health tick that runs, the status's relay question
+  (`RELAY_IPC_S`) and the probe. Not observed on a real player.]**
 - **Sign-in headers FFmpeg copies to a GLOBAL redirect or segment host**
   the provider chose: the relay judges where a request goes, not what it
   carries, and a global host is not this machine or the LAN (19.2's

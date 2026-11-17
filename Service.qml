@@ -3252,6 +3252,15 @@ Item {
         // as a proxy for "it sits in the healthy branch", and a block
         // inserted ahead of it is what turns the proxy red.
         root.applyRewind(status)
+        // D-PLY-67: a player of this build whose relay no longer answers is
+        // pinned to a port nothing of ours holds. The probe reads it as
+        // older and what follows replaces or stops it, as at a shell start;
+        // until this the tick did not ask, so with no zap it played on.
+        if (Model.healthRelayAction(status.relay, { restartOwed: root.olderRestartOwed, slotBusy: playerProc.running,
+                                                    stopping: root.stopping, userStopped: root.userStopped }) === "probe") {
+          console.warn(Model.RELAY_GONE_LINE)
+          root.runPlayerProbe()
+        }
       } else if (Model.helperCannotTell(code)) {
         // The helper cannot tell (stub, crash, or a damaged part the stub
         // refused, D-REL-7): neither healthy nor a strike, so a missing

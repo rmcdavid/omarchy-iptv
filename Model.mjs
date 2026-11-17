@@ -114,22 +114,23 @@ export {
   LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 } from "./model/logos.mjs"
 export {
-  stopEscalation, healthTick, PLAYER_BOUNDS, CONTROL_WATCHDOG_MS,
-  PLAYER_WATCHDOG_MARGIN_MS, PLAYER_BIRTH_EDGE_MS, playerWatchdogMs, playFork,
-  playForkBlind, zapArgs, helperCannotTell, playFailureVerdict,
-  playerStartFailure, replyTarget, ID_WITHHELD, reconcileVerdict,
-  sessionIntentRepair, isOwnerToken, playerOwnerToken, ownerTokenArgv,
-  playerOrphanCheckArgv, playerStash, tlsPropertiesSafe, playerTls,
-  tlsReloadDisposition, OLDER_RESTART_LINE, OLDER_RESTART_AGAIN_LINE,
-  OLDER_RESTART_HOLD_MS, probeLaunchOlder, adoptedSourceMatches,
-  adoptedChannelReach, olderRestartDisposition, olderRestartKeepsPause,
-  olderRestartWith, olderRestartOpen, playerTlsVerdict, PLAYER_LAUNCH_WORDS,
-  playerLaunch, parsePlayerProbe, olderPlayerUnsafe, parsePlayerEvent,
-  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
-  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport, playerLogWarning, playerTailReason,
-  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
-  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
+  stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,
+  PLAYER_BOUNDS, CONTROL_WATCHDOG_MS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerWatchdogMs, playFork, playForkBlind, zapArgs,
+  helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
+  ID_WITHHELD, reconcileVerdict, sessionIntentRepair, isOwnerToken,
+  playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
+  tlsPropertiesSafe, playerTls, tlsReloadDisposition, OLDER_RESTART_LINE,
+  OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS, probeLaunchOlder,
+  adoptedSourceMatches, adoptedChannelReach, olderRestartDisposition,
+  olderRestartKeepsPause, olderRestartWith, olderRestartOpen,
+  playerTlsVerdict, PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe,
+  olderPlayerUnsafe, parsePlayerEvent, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
+  PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
+  outputFailure, outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,

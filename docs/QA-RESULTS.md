@@ -20714,3 +20714,47 @@ is "changed", as it always was.
 **Not covered.** The node, QML and scenario steps run outside the sandbox;
 none of them fingerprints the owner's files. A lane that runs the python
 suite by hand keeps the strict guard and can still meet the owner's save.
+
+## D-PLY-67: the health tick asks about the relay (the daily run, 2026-11-17)
+
+**The gap.** A player this build launched is pinned to its relay's port. Under
+a user's `mpv` wrapper whose child is the real player, a relay killed outright
+leaves that player running with a port nothing of ours holds. The probe, the
+orphan check and a zap read it as older; the ten-second health tick's `status`
+did not ask, so with no zap it played on for as long as the shell ran.
+
+**The change.**
+- Helper: `status` answers `relay` beside its other fields, through
+  `status_relay`: `launch_reading` on the process the connection reaches
+  (SO_PEERCRED), and for "current" the relay's own answer (`relay_status`,
+  asked again inside `RELAY_IPC_S`, so a relay still starting is not read as
+  gone). null for any other verdict. It is the last question of the verb.
+- Model: `healthRelayAction(relay, ctx)` answers "probe" only for
+  `relay === false` with no replacement owed, the player slot free, no stop
+  settling and no user stop; "none" otherwise.
+- Shell: in the status branch's healthy arm, after the rewind re-sync, "probe"
+  logs `Model.RELAY_GONE_LINE` (fixed words, no channel) and runs
+  `runPlayerProbe()`. Everything after that is the reattach's path, unchanged.
+
+**Evidence.**
+- `StatusRelayTest`, 4 tests: a current player with its relay reads true; with
+  the relay closed, false, inside `RELAY_IPC_S` + 2 s, the player left
+  running; another build's player and a listener with no launch argv read
+  null. Mutants of `status_relay`: always None (2 red), always True (1 red),
+  the verdict test removed (2 red).
+- `test_mpv.StatusTest.test_reports_host_never_path` pins the whole reply and
+  was red until it named the new field (null there).
+- Node, four checks. The decision's table; and through Service.qml in the
+  service harness: a relay-less healthy status sends one `player probe` and
+  one line, and the probe's answer (older, no relay) is followed by one
+  `player start` of the same channel and no zap; true, null and an absent
+  field send nothing; a second relay-less status while the probe runs, one
+  while a replacement is owed, an unhealthy reply and one under the user's
+  stop send nothing. On the Service.qml before the change 2 of the 4 are red;
+  four model mutants (anything but true asks; owed, slot-busy and user-stop
+  each ignored) turn 2 red each.
+
+**Not observed.** No real player was run under a wrapper with its relay
+killed; the harness's Socket never connects and its player is a reply text.
+The interval is therefore stated from the code: one health tick that runs,
+the status's relay question, the probe, then the replacement or the hold.

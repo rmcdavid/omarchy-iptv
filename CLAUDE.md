@@ -1267,7 +1267,12 @@ requests and raise the batch.
      that binds the freed port meanwhile receives its plain-http requests,
      credentials and the load's token included; the ten-second health
      tick does not ask the relay, so with no zap that interval is
-     unbounded. And the rebinding half is READ in FFmpeg's source and
+     unbounded. **[2026-11-17, D-PLY-67: the tick's `status` now says
+     whether the relay answers, and a relay-less player of this build is
+     probed, then replaced or stopped as at a shell start, so with no zap
+     the interval is one tick and the probe, and the hold's 15 s more when
+     its channel cannot be put back; held by the service harness and the
+     helper's tests, not watched on a real player.]** And the rebinding half is READ in FFmpeg's source and
      measured with literal targets only, never with a name resolved live.
      docs/ARCHITECTURE-PLAYER.md section 20 is the specification. The
      lesson: a check-then-use on a name is a residual the moment someone
