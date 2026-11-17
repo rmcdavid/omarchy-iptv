@@ -2650,8 +2650,11 @@ def channel_id_withheld(channel_id: Any) -> bool:
     `t:http://...` too), and nothing re-derives a stored favorite, recent,
     session or player record (remap_state_file maps id scheme 1 alone). A
     `#n` suffix (suffix_ids) is part of the tail it asks. Every other id is
-    a hash and is never withheld. The record itself is unchanged: dropping
-    such ids from state.json waits for the owner's word."""
+    a hash and is never withheld. Since the owner's decision of 2026-11-16
+    both state readers DELETE such an id on load (normalize_state,
+    Model.parseState), so no state reply holds one; what still prints the
+    token is a player's record an older build wrote, a failed.json mark and
+    a reply about a row of a cache written before 0.19.0."""
     text = channel_id if isinstance(channel_id, str) else ""
     return text.startswith("t:") and tvg_id_refused(text[2:])
 

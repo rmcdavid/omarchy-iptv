@@ -3444,4 +3444,27 @@ TestCase {
     compare(Model.validateLabel("q".repeat(63) + astral, [], "").ok, true)
     compare([Model.capCodePoints("ab" + astral + "c", 3), Model.capCodePoints("a" + S(0xd83c) + "b", 2)], ["ab" + astral, "a" + S(0xd83c)])
   }
+
+  // D-SINK-111, the owner's decision of 2026-11-16 (the owner's own, not the
+  // standing authority): the state reader the shell runs deletes on load a
+  // favorite, and a recents, last-played or session record, whose id is a
+  // `t:` id 0.18.0 or earlier made from a tvg-id holding a credential, and
+  // nothing else. In this engine because it is the one that loads state.json.
+  function test_legacyIdsDeletedOnLoadInV4() {
+    var S = String.fromCharCode
+    // A credential token, a URL, a URL behind a zero-width or control
+    // filler, a URL whose slashes are look-alikes (only urlAt's reading
+    // finds it), and a mark with no scheme (only the narrow reading does).
+    var gone = ["t:qqqqqq:zzzzzz@cdn.test", "t:http://qqqqqq:zzzzzz@cdn.test/x", "t:a:b@c",
+                "t:qqqqqq:" + S(0x200b) + "//zzzzzz@cdn.test", "t:http:" + S(0x1) + "//cdn.test/live/qqqqqq",
+                "t:http:" + S(0x2215, 0x2215) + "cdn.test/live/qqqqqq", "t:://cdn.test/live/qqqqqq"]
+    var kept = ["t:news.us", "t:CNN.us@HD", "t:x:y", "t:a@b:c", "n:bf6daa9c", "u:d4c55ad5#2", "t:news" + S(0x2215) + "us", "t:a:/b/c"]
+    var all = gone.concat(kept)
+    var recs = all.map(function (i, n) { return { id: i, name: "N" + n, at: n } })
+    var st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: all, recents: recs,
+      lastPlayed: { id: gone[0], name: "N", at: 1 }, session: { id: gone[3], name: "N", at: 1 }, sources: [] }))
+    compare([st.favorites, st.recents.map(function (r) { return r.id }), st.lastPlayed, st.session], [kept, kept, null, null])
+    var withheld = typeof Model.channelIdWithheld === "function" ? Model.channelIdWithheld : function () { return "missing" }
+    compare([gone.map(withheld), kept.map(withheld)], [gone.map(function () { return true }), kept.map(function () { return false })])
+  }
 }

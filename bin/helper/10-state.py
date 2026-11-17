@@ -104,8 +104,20 @@ def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
     return {"query": query, "at": coerce_int(entry.get("at"))}
 
 
+# D-SINK-111 (the owner's decision of 2026-11-16, the owner's own and not the
+# standing authority): a channel id 0.18.0 or earlier made from a tvg-id
+# holding a credential -- `t:qqqqqq:zzzzzz@cdn.test`, 0.17.0's `t:http://...`
+# -- is DELETED on load from favorites and from the recents, last-played and
+# session records, by both state readers (Model.parseState is the mirror,
+# held to the shared withheld-ids fixture): channel_id_withheld, the tvg-id
+# rule over the id's tail, and nothing else. No current parse makes such an
+# id (the row takes an `n:` or `u:` id), so the guide never named it and the
+# user could not remove it; nothing reachable is lost. The file loses it at
+# the next save, which every state verb that writes makes.
 def normalize_played(entry: Any) -> dict[str, Any] | None:
     if not isinstance(entry, dict) or not entry.get("id"):
+        return None
+    if channel_id_withheld(str(entry["id"])):
         return None
     return {"id": str(entry["id"]), "name": str(entry.get("name") or ""),
             "at": coerce_int(entry.get("at"))}
@@ -290,7 +302,7 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     if isinstance(favorites, list):
         for item in favorites:
             key = str(item or "")
-            if key and key not in state["favorites"]:
+            if key and key not in state["favorites"] and not channel_id_withheld(key):
                 state["favorites"].append(key)
     recents = raw.get("recents")
     if isinstance(recents, list):

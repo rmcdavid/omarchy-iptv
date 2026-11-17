@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-111 (2026-11-16): the channel ids a helper reply prints as `token` -- a `t:` id whose tvg-id part the parse reads as absent (tvg_id_refused: a mark the redactors' reading finds, or a `:` with an `@` after it), which 0.18.0 and earlier stored in favorites, recents, the last-played and session records and the player's record. state.json keeps them. tests/test_reply_shown.py runs the helper's channel_id_withheld over both lists and the parse over every unsuffixed `t:` tail; tests/Model.test.js holds Model.ID_WITHHELD to `token`, which the shell's health tick reads as nothing to compare (Model.reconcileVerdict).",
+ "about": "D-SINK-111 (2026-11-16): the channel ids a helper reply prints as `token` -- a `t:` id whose tvg-id part the parse reads as absent (tvg_id_refused: a mark the redactors' reading finds, or a `:` with an `@` after it), which 0.18.0 and earlier stored in favorites, recents, the last-played and session records and the player's record. Since the owner's decision of 2026-11-16 both state readers DELETE such an id on load and keep every other: tests/test_reply_shown.py runs normalize_state, and tests/Model.test.js and tests/Model.spec.qml Model.parseState, over both lists (`withheld` deleted, `kept` kept); the player's record and failed.json are not state.json and keep theirs, printed as `token`. tests/test_reply_shown.py runs the helper's channel_id_withheld over both lists and the parse over every unsuffixed `t:` tail; tests/Model.test.js holds Model.ID_WITHHELD to `token`, which the shell's health tick reads as nothing to compare (Model.reconcileVerdict).",
  "credentialsAreFake": "Every credential here is synthetic (qqqqqq / zzzzzz) on hosts under the reserved .test TLD.",
  "token": "[id withheld]",
  "withheld": [
@@ -10,7 +10,10 @@
   "t:a:b@c",
   "t:qqqqqq:\u200b//zzzzzz@cdn.test",
   "t:http:\u0001//cdn.test/live/qqqqqq",
-  "t:cdn.test:8080:qqqqqq@zzzzzz"
+  "t:cdn.test:8080:qqqqqq@zzzzzz",
+  "t:http:\u2215\u2215cdn.test/live/qqqqqq",
+  "t:://cdn.test/live/qqqqqq",
+  "t::\u0001//cdn.test/live/qqqqqq"
  ],
  "kept": [
   "t:news.us",
@@ -25,6 +28,8 @@
   "n:qqqqqq:zzzzzz@cdn.test",
   "favorites",
   "",
-  "t:"
+  "t:",
+  "t:news\u2215us",
+  "t:a:/b/c"
  ]
 }

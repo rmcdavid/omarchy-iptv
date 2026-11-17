@@ -4898,6 +4898,25 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
             Model.reconcileVerdict(record("t:other.us"), { id: legacy }, "ka").state,
             Model.reconcileVerdict(record(legacy), { id: legacy }, "ka").state]
   }, [true, "unknown", "unknown", "diverged", "agree"])
+  // The owner's decision of 2026-11-16 (the owner's own, not the standing
+  // authority): both state readers DELETE such an id on load -- a favorite,
+  // and a recents, last-played or session record -- and nothing else; the
+  // helper's normalize_state runs the same two lists (tests/test_reply_shown.py).
+  checkCall("D-SINK-111, the owner's decision of 2026-11-16: Model.parseState deletes a favorite, and a recents, last-played or session record, whose id is a withheld `t:` id, and keeps every other id, as the helper's normalize_state does over the same fixture", function () {
+    const fn = typeof Model.channelIdWithheld === "function" ? Model.channelIdWithheld : function () { return "missing" }
+    const kept = IDS.kept.filter(function (i) { return i !== "" })
+    const all = IDS.withheld.concat(IDS.kept)
+    const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: all,
+      recents: all.map(function (i, n) { return { id: i, name: "N" + n, at: n } }), sources: [] }))
+    const records = IDS.withheld.map(function (i) {
+      const s = Model.parseState(JSON.stringify({ version: 2, lastPlayed: { id: i, name: "N", at: 1 }, session: { id: i, name: "N", at: 1 } }))
+      return s.lastPlayed === null && s.session === null
+    })
+    const plain = Model.parseState(JSON.stringify({ version: 2, lastPlayed: { id: "t:news.us", name: "N", at: 1 }, session: { id: "u:d4c55ad5", name: "N", at: 2 } }))
+    return [st.favorites, st.recents.map(function (r) { return r.id }), records.indexOf(false), plain.lastPlayed.id, plain.session.id,
+            IDS.withheld.map(fn), IDS.kept.map(fn)]
+  }, [IDS.kept.filter(function (i) { return i !== "" }), IDS.kept.filter(function (i) { return i !== "" }), -1, "t:news.us", "u:d4c55ad5",
+      IDS.withheld.map(function () { return true }), IDS.kept.map(function () { return false })])
 })()
 
 // D-SINK-104 (2026-11-16): the record the player carries keeps the zap ring's

@@ -20926,3 +20926,36 @@ Built on the branch `r5-build` after lane-r5a and lane-r5b (b44c7c6). Every call
 **Rule 15.** I searched for every place a host is lowered (`.lower()`, `.toLowerCase()`, urllib's `hostname`), every scheme reader with a class union, and every code-point walk in the model.
 - Changed: the authority readers, `host_port_of` / `hostPortOf`, `label_key` / `labelKey`, `host_key` / `hostKey`, `run_host_parts`, `source_host`, `url_host` and the stream gate's two hostname readings (above); `validateSourceUrl`'s scheme; `codePoints`.
 - Cleared: `parse_ip_literal`, `host_class`, `dotless_host` and the model's `hostClass`, `dotlessHost` and `ipLiteral` lower only to compare ASCII (`localhost`, a literal, a dot); `request_origin`, `split_userinfo` and `check_proxied` read urllib's hostname on the fetch path, where the first hop is the A-label since D-SINK-119 (the idna codec maps both sigmas to one name) and a redirect to a host that is not ASCII arrives percent-escaped and is refused; the model's `runHostParts` prints a host as written and never lowered, so it has nothing to fold (the redactors' case differs between the mirrors as it did before, outside this row); `Model.hostOf` does not lower and reads stored urls, which are lowered already; the logo reading lowers through the validator; the relay's policies and `stream_lookup_name` keep a name as the player writes it. `[\s\S]` and `Array.from` appear nowhere else in model/*.mjs or the shipped QML (a comment excepted); the other scheme readers (`sourceLabel`, `hostPortOf`, `logoScheme`, the redactors) use `.`-free classes or index walks, which Qt's engine reads as node does (the design's measurement: `\s`, `\S`, `[^\s]` and `.` consistent at U+180E).
+
+### D-SINK-111: the legacy ids deleted on load, the owner's decision
+
+**What changed** (the owner's own decision of 2026-11-16, not the standing authority).
+- `normalize_state` (bin/helper/10-state.py) and `Model.parseState` (model/state.mjs) delete a favorite, and a recents, last-played or session record (`normalize_played`; the model's `loadedPlayedRecord`, which only the reader calls, `playedRecord` staying what every writer builds with), whose id is a `t:` id the parse's tvg-id rule refuses, and nothing else: `channel_id_withheld`, round 2's predicate, in the helper, and its new mirror `Model.channelIdWithheld` over `Model.tvgIdRefused` -- a `:` with an `@` after it, a `:` and two `/` with only controls between them (an index walk), or a URL `urlAt` reads (the redactors' reading, D-SINK-95). The file loses such an id at its next save, which every state verb that writes makes.
+- tests/fixtures/withheld-ids.json is the one fixture of ids deleted (`withheld`) and kept (`kept`). It gains a look-alike-slash id that only the wide reading (`urlAt`) finds (`t:http:<U+2215><U+2215>cdn.test/live/qqqqqq`, deleted), two marks with no scheme that only the narrow reading finds (`t:://cdn.test/live/qqqqqq`, and the same with a control between the colon and the slashes, deleted), and two kept (`t:news<U+2215>us`, one look-alike; `t:a:/b/c`, a colon and two slashes apart). The first mutant batch found the narrow reading unobserved (removing it left every check green), which is why the last three were added; tests/Model.spec.qml carries the same shapes inline.
+- Round 2's state-verb test that pinned the id staying in the file now pins its deletion: the reply holds neither the id nor the token, and the file is written without it.
+
+**What it leaves, on round 2's withheld printing.** No state reply holds such an id after a load. The token is still printed for a player's record an older build wrote (the `stash.id` of a stop or error reply; the `probe` and `status` replies print the record's id as held, D-SINK-111's row says why), for failed.json's marks (`failed` replies), and for an error reply echoing such an id, which a row of a cache written before 0.19.0 can still carry until the refetch `DESTINATION_RULES` 6 makes; a favorite or play of such a row made meanwhile is deleted at the next load. Nothing reachable is lost: the current parse gives every such channel an `n:` or `u:` id, so the guide never named the legacy one and no row can match it.
+
+**Red first** (3101349, round 2 merged, with this commit's tests and fixture; the commit before this one gives the same, since nothing between touches the readers):
+
+| Suite | On 3101349 | On this tree |
+|---|---|---|
+| tests/test_reply_shown.py and tests/test_state.py (LegacyIdsDeletedOnLoadTest's 3 new tests; round 2's state-verb test rewritten) | 4 of 144 red: the three new tests (normalize_state kept every withheld id, in favorites, recents, the last-played and the session record) and the rewritten one (`state favorite add` printed the token and wrote the id back) | 0 of 144 |
+| tests/Model.test.js (1 new check) | red: no `Model.channelIdWithheld`, and `parseState` kept every id | 0 of 3836 |
+| tests/Model.spec.qml (`test_legacyIdsDeletedOnLoadInV4`) | red (the other five red cases of that run are this branch's earlier ones, which 3101349 predates) | 108 of 108 |
+
+**Mutants**, each a single decision on a scratch copy of this tree, sealed or relinked:
+
+| Mutant | Red |
+|---|---|
+| helper: `normalize_played` keeps a withheld id | 3 python tests |
+| helper: the favorites loop keeps a withheld id | 3 |
+| model: the favorites loop keeps a withheld id | 1 node check, 1 Qt-engine case |
+| model: `loadedPlayedRecord` keeps a withheld id | 1, 1 |
+| model: `tvgIdRefused` without `urlAt`'s reading | 1, 1 (the look-alike-slash id) |
+| model: `tvgIdRefused` without the narrow mark | 1, 1 (the marks with no scheme; on the first fixture this mutant stayed green, and those ids were added) |
+| model: `tvgIdRefused` without the `:`-then-`@` rule | 1, 1 |
+
+**Rule 15.** I searched for every reader of state.json's favorites and played records, every writer that builds a played record, and every other place a legacy id is read.
+- Changed: `normalize_state` and `normalize_played` (helper), `Model.parseState` (model).
+- Cleared: `playedRecord` stays unfiltered, because `pushPlayedRecord` builds the record of a play the user just made, and no current parse makes such an id; the helper's `state` verbs all read through `normalize_state`; `remap_state_file` edits the raw document and moves only the ids its remap names, so a legacy id is left for the next load to delete; the model's `stateOnLoad` and `stateSession` read records `parseState` has already filtered; the player's record and failed.json are not state.json and keep their ids, printed withheld (round 2); the reply boundary's withholding (`REPLY_READINGS`) stays as the second layer.

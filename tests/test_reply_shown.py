@@ -330,16 +330,60 @@ class StateVerbsTest(unittest.TestCase):
                 leaking[" ".join(verb)] = found
         self.assertEqual(leaking, {})
 
-    def test_the_legacy_id_prints_withheld_and_stays_in_the_file(self):
+    def test_the_legacy_id_is_deleted_on_load_and_leaves_the_file_at_the_next_save(self):
+        """D-SINK-111, the owner's decision of 2026-11-16: the state reader
+        deletes the legacy id from favorites, the recents, the last-played
+        and the session records, so no state reply holds it (it printed
+        `[id withheld]` until then, and the file kept it), and the next save
+        writes the file without it. Everything else stays as stored."""
         code, out, err = run("state", "--state-dir", self.dir, "favorite", "add", "t:espn.us")
         self.assertEqual(code, 0, err)
         state = json.loads(out)["state"]
-        self.assertEqual(state["favorites"], [helper.ID_WITHHELD, "t:news.us", "t:espn.us"])
-        self.assertEqual(state["lastPlayed"]["id"], helper.ID_WITHHELD)
+        self.assertEqual((state["favorites"], [r["id"] for r in state["recents"]], state["lastPlayed"], state["session"]),
+                         (["t:news.us", "t:espn.us"], ["t:news.us"], None, None))
+        self.assertNotIn(helper.ID_WITHHELD, out)
         stored = json.loads(pathlib.Path(self.path).read_text(encoding="utf-8"))
-        self.assertEqual(stored["favorites"], [LEGACY_ID, "t:news.us", "t:espn.us"])
-        self.assertEqual(stored["session"]["id"], LEGACY_ID)
+        self.assertEqual((stored["favorites"], [r["id"] for r in stored["recents"]], stored["lastPlayed"], stored["session"]),
+                         (["t:news.us", "t:espn.us"], ["t:news.us"], None, None))
+        self.assertNotIn(LEGACY_ID, pathlib.Path(self.path).read_text(encoding="utf-8"))
         self.assertEqual(stored["hiddenGroups"][0], poisoned("Group"))
+
+
+class LegacyIdsDeletedOnLoadTest(unittest.TestCase):
+    """D-SINK-111, the owner's decision of 2026-11-16 (the owner's own, not
+    the standing authority): normalize_state deletes a favorite, and a
+    recents, last-played or session record, whose id is a `t:` id the
+    tvg-id rule refuses, and nothing else. The shared withheld-ids fixture's
+    two lists are the ids deleted and the ids kept; tests/Model.test.js and
+    tests/Model.spec.qml run Model.parseState over the same lists."""
+
+    def raw(self, ids):
+        played = [{"id": i, "name": "N%d" % n, "at": n} for n, i in enumerate(ids)]
+        return {"version": 2, "cacheLayout": 2, "favorites": list(ids), "recents": played,
+                "sources": [], "activeKey": ""}
+
+    def test_each_withheld_id_is_deleted_and_each_kept_id_kept(self):
+        kept = [i for i in IDS["kept"] if i]
+        state = helper.normalize_state(self.raw(IDS["withheld"] + IDS["kept"]))
+        self.assertEqual((state["favorites"], [r["id"] for r in state["recents"]]), (kept, kept))
+        self.assertGreaterEqual((len(IDS["withheld"]), len(kept)), (8, 12))
+
+    def test_a_last_played_or_session_record_holding_one_is_deleted(self):
+        for legacy in IDS["withheld"]:
+            raw = {"version": 2, "lastPlayed": {"id": legacy, "name": "N", "at": 1},
+                   "session": {"id": legacy, "name": "N", "at": 1}}
+            state = helper.normalize_state(raw)
+            self.assertEqual((state["lastPlayed"], state["session"]), (None, None), ascii(legacy))
+        state = helper.normalize_state({"version": 2, "lastPlayed": {"id": "t:news.us", "name": "N", "at": 1},
+                                        "session": {"id": "u:d4c55ad5", "name": "N", "at": 2}})
+        self.assertEqual((state["lastPlayed"]["id"], state["session"]["id"]), ("t:news.us", "u:d4c55ad5"))
+
+    def test_what_the_readers_delete_is_what_the_replies_withhold(self):
+        """One rule: the ids the readers delete are exactly the ids a reply
+        prints withheld, so after a load no state reply holds the token."""
+        for legacy in IDS["withheld"] + IDS["kept"]:
+            state = helper.normalize_state(self.raw([legacy]))
+            self.assertEqual(state["favorites"] == [] and legacy != "", helper.channel_id_withheld(legacy), ascii(legacy))
 
 
 class FailedVerbTest(unittest.TestCase):

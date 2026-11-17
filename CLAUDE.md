@@ -333,7 +333,9 @@ requests and raise the batch.
    read through the readings it names (`shown_text`, the label reading, the
    scope and id readings) by `emit` and both status writers, an old `t:` id
    holding a credential as `[id withheld]` except in the replies
-   D-SINK-111's row lists (the shell matches, restores or compares those ids) -- and
+   D-SINK-111's row lists (the shell matches, restores or compares those ids;
+   both state readers delete one on load since the owner's decision of
+   2026-11-16) -- and
    write DEL, C1, U+2028/9 and the text-direction controls as escapes, as
    `Model.ipcJson` does; `log()` and the traceback read the same way; a
    line naming a source's host withholds it where the Sources form does

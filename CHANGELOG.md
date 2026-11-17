@@ -37,9 +37,12 @@ after the shell starts, and you start the channel again yourself.
   controls wherever else they remain, as `\uXXXX` escapes. (D-SINK-104,
   D-SINK-105)
 - **A channel id an earlier version made from a playlist's `tvg-id` that
-  held a password prints as `[id withheld]`** in the helper's state replies
-  and its `failed` replies; the id itself stays in `state.json`.
-  (D-SINK-111)
+  held a password is deleted when the state file is loaded**: from your
+  favourites, your recents and the last-played and session records, so it
+  leaves `state.json` at the next save. Nothing in the guide showed it, and
+  the channel it was made for has had another id since 0.19.0. Where the
+  helper still meets one -- a player an earlier version started, a failed
+  mark -- it prints `[id withheld]`. (D-SINK-111)
 - **A mistyped command-line argument is reported by its option name, never
   its value.** (D-SINK-106)
 - **The journal no longer names a channel id.** (D-SINK-107)

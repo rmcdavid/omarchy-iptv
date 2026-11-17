@@ -880,7 +880,9 @@ where the Sources form withholds it (D-SINK-109; round 5 owns the player
 status reply's `pathHost`, the play-time local-address refusal, the
 destination rules' sentences and the guide-hint refusal's host); a channel id
 an older parse made from a credential prints as `[id withheld]` except in the
-replies whose ids the shell matches, restores or compares (D-SINK-111); a usage error
+replies whose ids the shell matches, restores or compares (D-SINK-111; both
+state readers delete one from state.json on load since the owner's decision of
+2026-11-16); a usage error
 names the helper's options, never a value (D-SINK-106); and no journal line names a
 channel id (D-SINK-107, whose re-derivation of ids and keys is open).]**
 `channels.json` stores `sourceHost` rather than the URL, but stream

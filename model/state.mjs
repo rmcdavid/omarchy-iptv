@@ -22,7 +22,7 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  stripSpace, scrubUrls, sinkText
+  stripSpace, urlAt, scrubUrls, sinkText, isControlCode
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
@@ -489,6 +489,50 @@ function withMigrationPending(state, pending) {
 // and `session` all share (python mirror: `normalize_played`). A value
 // without an `id` is dropped, which is also how a state file written
 // before the key existed reads its missing `session` as null.
+// D-SINK-111 (the owner's decision of 2026-11-16, the owner's own and not
+// the standing authority): a channel id 0.18.0 or earlier made from a tvg-id
+// holding a credential -- `t:qqqqqq:zzzzzz@cdn.test`, 0.17.0's
+// `t:http://...` -- is DELETED on load from favorites and from the recents,
+// last-played and session records, by both state readers (the helper's
+// normalize_state is the mirror; the shared withheld-ids fixture holds both).
+// channelIdWithheld is the helper's channel_id_withheld: a `t:` id whose tail
+// the parse's tvg-id rule refuses (tvgIdRefused), and nothing else. No
+// current parse makes such an id (the row takes an `n:` or `u:` id), so the
+// guide never named it and the user could not remove it.
+//
+// tvgIdRefused is the helper's tvg_id_refused: a mark the redactors' reading
+// finds (url_mark_any: a `:` and two `/` with only controls between them,
+// or a URL urlAt reads), or a `:` with an `@` after it. Index walks: one
+// pass for the narrow mark (no control is a `:`, so the runs a colon scans
+// do not overlap), and urlAt's own linear reading.
+function tvgIdRefused(text) {
+  var s = str(text)
+  var colon = s.indexOf(":")
+  if (colon !== -1 && s.indexOf("@", colon + 1) !== -1) return true
+  for (var i = colon; i !== -1; i = s.indexOf(":", i + 1)) {
+    var j = i + 1
+    while (j < s.length && isControlCode(s.charCodeAt(j))) j++
+    if (j >= s.length || s.charCodeAt(j) !== 47) continue
+    j++
+    while (j < s.length && isControlCode(s.charCodeAt(j))) j++
+    if (j < s.length && s.charCodeAt(j) === 47) return true
+  }
+  return urlAt(s, 0) !== null
+}
+
+function channelIdWithheld(id) {
+  var s = typeof id === "string" ? id : ""
+  return s.substring(0, 2) === "t:" && tvgIdRefused(s.substring(2))
+}
+
+// The reader's played record: playedRecord's, unless its id is one
+// channelIdWithheld deletes on load (D-SINK-111). playedRecord itself is what
+// every writer builds with, and is unchanged.
+function loadedPlayedRecord(entry) {
+  var rec = playedRecord(entry)
+  return rec !== null && channelIdWithheld(rec.id) ? null : rec
+}
+
 function playedRecord(entry) {
   if (!entry || typeof entry !== "object" || !entry.id) return null
   // storedInt truncates toward zero, as python's int() does, and the shared
@@ -623,7 +667,7 @@ function parseState(text) {
   if (favs.length > 0) {
     for (var i = 0; i < favs.length; i++) {
       var id = str(favs[i])
-      if (id !== "" && state.favorites.indexOf(id) === -1) state.favorites.push(id)
+      if (id !== "" && !channelIdWithheld(id) && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
   // M3-01. Additive and optional like savedSearches below: a file without
@@ -645,10 +689,10 @@ function parseState(text) {
   if (pending !== null) state.migrationPending = pending
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
-    var entry = playedRecord(recs[r])
+    var entry = loadedPlayedRecord(recs[r])
     if (entry) state.recents.push(entry)
   }
-  state.lastPlayed = playedRecord(parsed.lastPlayed)
+  state.lastPlayed = loadedPlayedRecord(parsed.lastPlayed)
   // Saved searches. Additive and optional, on the same precedent as `session`
   // below: both readers whitelist the keys they know, so a file without this
   // reads as [] and an older build drops it rather than failing. De-duplicated
@@ -670,7 +714,7 @@ function parseState(text) {
   // section 8): optional, nullable, and no version bump - STATE_VERSION
   // stays 2 because both readers whitelist the keys they know, so a file
   // without it reads as null and a v0.2.0 build simply drops it.
-  state.session = playedRecord(parsed.session)
+  state.session = loadedPlayedRecord(parsed.session)
   return state
 }
 
@@ -2175,15 +2219,16 @@ export {
   savedSearchDepartures, savedSearchFooter, withSavedSearch,
   withoutSavedSearch, STORED_DECIMAL, STORED_TEXT_MAX, storedInt,
   savedSearchRecord, emptyState, entryMigratedOf, withEntryMigrated,
-  migrationPendingOf, withMigrationPending, playedRecord, cloneState,
-  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
-  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
-  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  migrationPendingOf, withMigrationPending, tvgIdRefused, channelIdWithheld,
+  loadedPlayedRecord, playedRecord, cloneState, withCacheLayout, parseState,
+  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
+  recordPlayed, clearSession, stateSession, deadSessionVerdict,
+  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
   MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,
