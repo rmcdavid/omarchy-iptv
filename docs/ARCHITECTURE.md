@@ -763,6 +763,13 @@ before write:
 Not running: `{ "ok": false, "kind": "status", "running": false, "error": { "code": "not_running", "message": "mpv socket not reachable" } }`
 (the helper also unlinks a stale socket file in that case).
 
+**[2026-11-16, D-SINK-114 (round 5 of the security review): the reply
+names nothing of the playing address.** It carried `pathHost`, the address's
+host read by urllib with no withhold rule, so a channel address whose
+password holds an unencoded `/` printed its user name there; no shell code
+read the field, and `cmd_status` no longer asks the player for `path` at
+all. The `path` in the example above is the M1 target, which never shipped.]
+
 ### `play` / `stop` stdout
 
 `{ "ok": true, "kind": "play", "id": "t:bbc1.uk", "name": "BBC One HD" }` or the
@@ -876,9 +883,10 @@ through one table (`REPLY_READINGS`, D-SINK-104 and D-SINK-108), and write
 DEL, the C1 controls, U+2028, U+2029 and the text-direction controls as
 escapes (D-SINK-105); `log()` and the traceback read their text the same
 way (D-SINK-110); a line that names a source's host names `[host withheld]`
-where the Sources form withholds it (D-SINK-109; round 5 owns the player
-status reply's `pathHost`, the play-time local-address refusal, the
-destination rules' sentences and the guide-hint refusal's host); a channel id
+where the Sources form withholds it (D-SINK-109; since round 5 the
+play-time local-address refusal, the destination rules' sentences and the
+guide-hint refusal name no host, D-SINK-113, and the player status reply
+prints no `pathHost`, D-SINK-114); a channel id
 an older parse made from a credential prints as `[id withheld]` except in the
 replies whose ids the shell matches, restores or compares (D-SINK-111; both
 state readers delete one from state.json on load since the owner's decision of
@@ -1129,7 +1137,9 @@ playlist, guide or probe fetch was followed to any http(s) host. The policy:
   `host_key`, the port not compared; for a logo, never excepted. A URL the
   user typed is never affected. In the shell such a hint is no hint at all
   rather than a refusal, because both refusal sentences print the host, and
-  such a logo has no host (`logoHost` in model/logos.mjs answers ""). Why: a URL holding
+  such a logo has no host (`logoHost` in model/logos.mjs answers ""; since
+  D-SINK-112, 2026-11-16, `Model.logoContactHost`, the one reading of a
+  logo's address the survey, the slot and the fetch share). Why: a URL holding
   an ASCII space or tab in its userinfo is cut there by every redactor
   (D-SINK-34's class), and the piece left is `http://USER:...`, whose host
   is the username; looking it up hands it to the resolver and through it to
@@ -1154,6 +1164,30 @@ playlist, guide or probe fetch was followed to any http(s) host. The policy:
   off the playlist's own host, which the Sources row used to name as local
   addresses and now does not mention. Both rules are held in both mirrors
   by one fixture, `tests/fixtures/provider-hosts.json`.
+- **[2026-11-16, round 5 of the security review (D-SINK-112 to -119).]**
+  What a host NAME may hold is judged before any lookup, on every hop and
+  by both validators: in ASCII, letters, digits, `-`, `.` and `_` only (the
+  colon by its count, a bracketed literal by `ipaddress` or
+  `parseIpv6Groups` in model/sources.mjs), as written and in its NFKD fold; no invisible
+  character (Cf, Unicode's default-ignorables, stringprep's B.1,
+  `HOST_INVISIBLE_RANGES`); no code point whose NFKC form is another
+  (`HOST_NFKC_RANGES`, a look-alike); and at the connection a port of one
+  to five ASCII digits up to 65535 (`port_digits`), after a name or a
+  bracketed literal. Both validators read the authority with one reader
+  (`read_authority`, `Model.readAuthority`) and refuse what urllib cannot
+  read, which ended every fetch as an internal error quoting the authority
+  (D-SINK-115). The first hop of the playlist, guide and probe fetches is
+  built from the host's A-label (`a_label_target`), the name CPython's
+  socket already hands the resolver, and a host the idna codec refuses is
+  `bad_url` before any lookup (D-SINK-119); the policy's home is that
+  A-label too. A logo is counted, slotted and fetched by one reading
+  (`logo_contact_host`, `Model.logoContactHost`, D-SINK-112), and every
+  host is lowered with the capital sigma folded first (`lower_host`,
+  `Model.lowerHost`, D-SINK-118). The owner's decision of 2026-11-16: a
+  stored source holding a newly refused shape is dropped on load, a guide
+  URL holding one cleared, such a channel skipped at the parse and refused
+  at play from an older cache (`DESTINATION_RULES` 6). One fixture,
+  `tests/fixtures/host-grammar.json`, holds both mirrors and Qt's engine.
 - Non-global is `address_class` (bin/helper/01-core.py) over an EXPLICIT
   table, mirrored by `Model.hostClass` and run with it over
   `tests/fixtures/destinations.json`: loopback, private (RFC 1918, ULA,
@@ -1176,6 +1210,16 @@ and counts its hops: each request is one (urllib opens one connection per
 request). A refusal is `local_address`, its sentence naming the refused
 host only (rule 5), `Refused a local address` in the shell
 (`Model.statusReason`; it keeps `from <host>`, being the provider's choice).
+**[2026-11-16, D-SINK-113 (round 5 of the security review): the sentence
+names no host and no verb -- `a redirect chose an address on this machine or
+a local network; not contacted`, `the playlist chose ...` for a guide hint's
+first hop, `a logo address is ...`, and the one-label refusal likewise --
+because a host the provider chose can be a user name, which the journal and
+the status file printed. `check_proxied`'s unresolvable target reads `could
+not resolve the host the playlist chose (a redirect chose), to check where it
+leads through the proxy`, keeping the word `Model.statusReason` reads. The
+shell's `from <host>` is the user's own source's host, withheld where
+D-SINK-109 has it.]**
 
 The PROVENANCE rides beside the URL in the one assignment rule 5 asks for,
 `<proc>.environment = Model.fetchEnvironmentFor(<url>, <provenance>)`, which

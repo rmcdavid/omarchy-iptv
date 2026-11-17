@@ -111,7 +111,8 @@ numbers without a new process:
 
 Numbers and booleans only. Nothing in this reply is a string from the stream,
 and `path` is never echoed; the existing status reply emits `pathHost` and
-this one emits nothing of the kind at all. The field set of
+this one emits nothing of the kind at all. [2026-11-16, D-SINK-114: the status
+reply emits no `pathHost` either.] The field set of
 `demuxer-cache-state` is enumerated on the real player before the first
 commit (section 10) so the allowlist the helper forwards is built from an
 observed reply.
@@ -437,7 +438,8 @@ Recorded so the next reader does not inherit them.
 - "A seek lands 1-2 s above its target" was a read-gap artefact; absolute
   seeks are exact by mpv's default, and the 15 s step argument built on it
   fell with it.
-- "The status reply echoes `path`" is false; it emits `pathHost`.
+- "The status reply echoes `path`" is false; it emits `pathHost`. [2026-11-16:
+  since D-SINK-114 it emits no host of the playing address at all.]
 - "Four shipping files say rewind is impossible" is seven sites in five.
 - Two lanes minted the same id for different findings; the lead assigns ids.
 - A proposed zero-point path nested under the existing stash contradicted

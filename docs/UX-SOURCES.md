@@ -1391,6 +1391,15 @@ cut at 253 characters:
 | refused: its literal host is on this machine or a local network (loopback, private, link-local, CGNAT, unspecified, reserved, multicast, `localhost`, in any spelling) and is not the playlist's own -- **[2026-10-29, D-SINK-57: on loopback, "the playlist's own" is its host AND port, so a hint to another port of a relay's 127.0.0.1 reads this way too; the sentence is unchanged and names the host only]** | `EPG from playlist not used: <host> is a local address` |
 | refused: it carries a user name or password | `EPG from playlist not used: its address for <host> carries a password` |
 
+**[2026-11-16, D-SINK-113 (round 5 of the security review; the lead's
+instruction that a refusal naming a host the provider chose names none,
+under the owner's standing authority of 2026-11-09).]** The two refused
+rows read `EPG from playlist not used: its host is a local address` and
+`EPG from playlist not used: its address carries a password`, on the row
+and in its accessible name: the host is the hint's, which the playlist
+chose, and can be a user name. The row no longer says which host a refused
+hint named; typing the URL into the source's EPG field still shows it.
+
 Not an error (SR26 stands: rows carry no failure text) but a fact about the
 row, like `EPG from playlist`: nothing was fetched, and typing the URL into
 the source's EPG field is the way to use it, which the user's own value

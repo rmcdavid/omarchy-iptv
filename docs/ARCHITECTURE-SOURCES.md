@@ -482,6 +482,35 @@ acceptance rule, no control character ever types) and a paste through
    here. Either way a tab, a line break, an information separator or
    U+0085 inside a password is `bad_url` and not a rewritten password.
    `url = scheme://[userinfo@]host[:port]path[?query]`, `host` as computed.
+   **[2026-11-16, round 5 of the security review.]** The authority is read
+   by ONE reader per mirror (`Model.readAuthority`, the helper's
+   `read_authority`), which refuses, besides the rules above, what the
+   helper's URL library refuses to read (D-SINK-115): a character whose
+   compatibility form is `/`, `?`, `#`, `@` or `:` anywhere in the
+   authority (`DELIMITER_FOLDS`, 19 code points; the message says where:
+   `url_fold_host`, "cannot be part of a host name", or `url_fold_userinfo`,
+   "write that character percent-encoded as its UTF-8 bytes", a fullwidth
+   colon being `%EF%BC%9A`, because `%3A` would send another password); a
+   `[` or `]` in the user information unless the host is a bracketed
+   literal (`url_bracket`: write them `%5B` and `%5D`); and a bracketed
+   host that is no IPv6 address. A host name holds, in ASCII, letters,
+   digits, `-`, `.` and `_`, written or folded, no invisible character and
+   no look-alike (D-SINK-116, -117, -119); the code stays `invalid`, so
+   every caller that switches on it is unchanged. The stored url is held to
+   the 2,048-unit cap as well as the typed text, because lowering lengthens
+   a host. The host is lowered by `Model.lowerHost` (the helper's
+   `lower_host`), which folds a capital sigma to the small one first:
+   Qt's engine, which runs this validator in the shell, applies no
+   final-sigma rule, and node and the helper did (D-SINK-118). Step 3's
+   scheme is the text before the first `:`, split by index, its name
+   tested alone; the pattern's `(.*)` was `([\s\S]*)` in the model, which
+   Qt's engine does not match at U+180E (D-SINK-118). The costs, the
+   owner's decision of 2026-11-16: a stored source holding a newly refused
+   shape is dropped on load and a guide URL holding one cleared; a user
+   name or password holding a raw `[`, `]` or a delimiter look-alike is
+   typed percent-encoded. The accepted classes stay: the typed host in
+   structured fields (R32a), D-SINK-35's dotted user name before a
+   digits-only password prefix, D-SRC-12's 28 code points.]
    **D-SINK-25 / D-SINK-27, ruling R32a (2026-10-21, round 3).** No URL is
    refused for an `@` after its authority, in either mirror. A password
    holding an unencoded `/`, `?` or `#` ends the authority early, and the

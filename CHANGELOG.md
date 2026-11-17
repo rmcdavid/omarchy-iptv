@@ -57,6 +57,42 @@ after the shell starts, and you start the channel again yourself.
   renamed `<host> 2` once. (D-SINK-100, D-SINK-108)
 - **The player's window title and notifications read a channel name
   holding a control character as the guide row does.** (D-SINK-110)
+- **The logo consent dialog names only hosts a logo would actually be
+  fetched from.** It could name a user name, or a percent-encoded user name
+  and password, from an oddly written logo address, and it counted logos
+  the fetch would refuse or could not send. A logo whose host is
+  percent-encoded, whose port is not written in digits, whose address is
+  on this computer or your local network, or whose host is not plain ASCII
+  now counts as one that cannot be used. (D-SINK-112)
+- **A refused address that a playlist, a guide or a redirect chose is no
+  longer named.** The helper's reply, status file and journal say what was
+  refused without the host, and the Sources row says why a playlist's own
+  guide was not used without naming its host. The playlist and guide
+  journal lines name their verb once. (D-SINK-113)
+- **`player status` no longer prints the host of the playing address.**
+  (D-SINK-114)
+- **A source or guide address the plugin cannot read is refused when you
+  add it**, instead of failing every refresh with "Helper failed
+  unexpectedly". This covers a character that reads as `/`, `?`, `#`, `@`
+  or `:` (such as a fullwidth colon; in a password, write it as its UTF-8
+  escape, `%EF%BC%9A` for the fullwidth colon), a `[` or `]` in the user
+  name or password (write them `%5B` and `%5D`), and a bracketed host that
+  is not an IPv6 address. (D-SINK-115)
+- **A host name may hold only letters, digits, `-`, `.` and `_` in ASCII,
+  no invisible character, and no character that is another one written
+  differently** (a fullwidth letter, a circled digit). A source, guide,
+  redirect, logo or channel host holding anything else is refused before
+  it is looked up, and a redirect to a port not written in ASCII digits is
+  not followed. (D-SINK-116, D-SINK-117, D-SINK-119)
+- **A source or guide on a host name written in another script is fetched
+  by its ASCII form**, the name your system already looked up; one outside
+  Latin-1 failed every fetch before. A name the international-name rules
+  cannot write in ASCII is refused when it is fetched. (D-SINK-119)
+- **The Sources form now reads three things the way the command line
+  does**: an upper-case Greek host ending in `Σ`, an address holding
+  U+180E, and a label holding an emoji near the 64-character limit; and the
+  guide's status line names an IPv6 host with its brackets, as the Sources
+  row does. (D-SINK-118)
 
 ### Changed
 
@@ -75,6 +111,8 @@ after the shell starts, and you start the channel again yourself.
   other source's when you next switch to it. (D-SINK-102)
 - **An `rtsp` channel from a playlist on the internet is always played
   over TCP**, whatever `--rtsp-transport` says. (D-SINK-102)
+- **An unexpected helper error names only its kind** in the reply and the
+  journal, not its text. (D-SINK-115)
 
 ### Worth knowing
 
@@ -94,6 +132,13 @@ after the shell starts, and you start the channel again yourself.
   checks.
 - **The relay is one more small program per player**, about 22 MB of
   memory while idle, and it stops with the player.
+- **A saved source whose address holds one of the characters refused
+  above is dropped when the shell starts**, as one holding `@` or `%` in
+  its host has been since 0.19.0, and a guide address holding one is
+  cleared. Add it again, written plainly or percent-encoded. A channel
+  whose host holds one is skipped, and each source's playlist is
+  downloaded once more after the update. (D-SINK-115, D-SINK-116,
+  D-SINK-117, D-SINK-119)
 
 ### Known limitations
 

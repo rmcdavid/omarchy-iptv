@@ -20959,3 +20959,35 @@ Built on the branch `r5-build` after lane-r5a and lane-r5b (b44c7c6). Every call
 **Rule 15.** I searched for every reader of state.json's favorites and played records, every writer that builds a played record, and every other place a legacy id is read.
 - Changed: `normalize_state` and `normalize_played` (helper), `Model.parseState` (model).
 - Cleared: `playedRecord` stays unfiltered, because `pushPlayedRecord` builds the record of a play the user just made, and no current parse makes such an id; the helper's `state` verbs all read through `normalize_state`; `remap_state_file` edits the raw document and moves only the ids its remap names, so a legacy id is left for the next load to delete; the model's `stateOnLoad` and `stateSession` read records `parseState` has already filtered; the player's record and failed.json are not state.json and keep their ids, printed withheld (round 2); the reply boundary's withholding (`REPLY_READINGS`) stays as the second layer.
+
+### Round 5, summarised: what was built, the owner's two decisions, what stays open
+
+**What was built**, on the branch `r5-build` from `dev` 3101349 in seven gated commits, none pushed, `main` and the tags untouched (held at 0.19.1 by the owner):
+
+| Commit | Ids | What |
+|---|---|---|
+| e04f339 (lane-r5a) | D-SINK-113, D-SINK-114 | A refusal of a destination the provider chose names no host and no verb; the guide-hint refusal and the Sources row's two hint sentences name none; the player status reply drops `pathHost` |
+| 7329b96 (lane-r5a) | D-SINK-115, D-SINK-116, D-SINK-117 | One authority reader per mirror; the delimiter folds, the brackets and the literals the URL library refuses; the ASCII allowlist, the invisible table and the port digits; an unexpected error by its kind; `DESTINATION_RULES` 6 |
+| dde6a72 (lane-r5b) | D-SINK-112 | One reading of a logo's address for the survey, the slot and the fetch |
+| b44c7c6 (lane-r5b) | D-SINK-119 | The A-label on every first hop; a codec failure refused before any lookup; look-alike host names refused |
+| 18ecffa (lane-r5c) | D-SINK-118 | The capital sigma folded before lowering, no final-sigma fold in comparisons; the scheme split by index; the code-point walk; `source_host` keeps a literal's brackets |
+| 712be32 (lane-r5c) | D-SINK-111 | Credential-holding legacy `t:` ids deleted on load by both state readers |
+| this record (lane-r5c) | all | The decisions log, the rows, the docs, the README and CHANGELOG lines |
+
+The suites on the record's tree: node 3,836 checks, python 2,727 tests (1 skipped), the QML spec 108 cases, each floor re-levelled in scripts/check.sh with its reason. Every row D-SINK-111 to D-SINK-119 reads fixed on dev, unreleased, and was read against the code as committed (this lane, 2026-11-16).
+
+**The owner's two decisions of 2026-11-16, and what they delete.**
+1. *The drop round 5 widens* (D-SINK-115, -116, -117). On the first load after the update, both state readers drop a stored source whose address holds an authority the helper's URL library cannot read, a host name holding ASCII other than letters, digits, `-`, `.` and `_` or a compatibility character folding to such ASCII, or an invisible character; a kept source's guide URL holding one is cleared; the parse skips such channels and play refuses them from an older cache until it is refetched (each source's playlist is downloaded once more, `DESTINATION_RULES` 6). Deleted: those source records and guide URLs, with no log line, as D-SINK-86's were. None of the authority shapes ever fetched (they ended as an internal error); no DNS name holds the ASCII characters; the twenty invisible characters the codec maps to nothing were looked up as the clean host but could not be fetched either, being outside Latin-1 (D-SINK-119's finding). Beside it, the lead's call to be told to the owner with the result: a host whose characters include a look-alike (a code point whose NFKC form is another) is dropped the same way.
+2. *Credential-holding legacy ids deleted on load* (D-SINK-111). Both state readers drop a favorite, and a recents, last-played or session record, whose id is a `t:` id the tvg-id rule refuses, and nothing else. Deleted: those entries, which the guide never showed and the user could not remove; the file loses them at its next save. Nothing reachable is lost: the current parse gives every such channel an `n:` or `u:` id. What still prints `[id withheld]`: a player's record an older build wrote, failed.json's marks, and a reply about a row of a cache written before 0.19.0 (until the refetch `DESTINATION_RULES` 6 makes).
+
+**What stays open, or accepted, stated.**
+- D-SINK-35's accepted class: a dotted user name before a digits-only password prefix (`https://user.name:2024/ab@cdn.test/x.png`) reads as host and port, and the logo survey counts and names it, because the fetch contacts it.
+- R32a's typed host in structured fields (`state source list`'s `host` and `epgHost`, the Sources row), the user's own text.
+- D-SRC-12's 28 code points, which node and Qt's engine lower one way and the helper another (measured in Qt's engine this round: its table is node's).
+- An IDN logo host is refused, not fetched by its A-label: the shell's survey would need the codec's tables to count what the fetch would contact (D-SINK-119's cost).
+- A host whose characters compose (`e` then U+0301) is kept and fetched as its composed name's A-label, since the look-alike table is per code point; the codec's B.2 mapping makes `stra<U+00DF>e.test` and `strasse.test` one name, as CPython's socket already did.
+- A record stored before D-SINK-118 with a final sigma keeps its spelling (no migration); a channel written in capitals under it is no longer the playlist's own host for the one-label and proxied-lookup exceptions.
+- D-LOGO-26's empty logo folder; D-SINK-107's re-derivation of ids and keys (round 2's, open); FFmpeg's own lookup-failure text, which the resolver writes.
+- The Sources row's two guide-hint sentences changed by the lead's instruction (D-SINK-113); UX-SOURCES.md records them in a dated bracket, for the lead to confirm the wording.
+
+**The private-label scan** over `git log --format=%B 3101349..HEAD` and `git diff 3101349`, and over each staged diff, printed 0 before every commit of this lane.

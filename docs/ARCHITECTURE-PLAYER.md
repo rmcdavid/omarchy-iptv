@@ -3866,7 +3866,15 @@ hop and judged against the address actually connected to:
   fetch connected to (`sourceClass`: global for a remote playlist).
 - A host of one label that is not the playlist's own is never looked up
   (D-SINK-89); a name holding what no name may hold never reaches the
-  resolver (`refuse_host_name`, D-SINK-86 and -92).
+  resolver (`refuse_host_name`, D-SINK-86 and -92). [2026-11-16, round 5 of
+  the security review: what no name may hold is, in ASCII, anything but a
+  letter, a digit, `-`, `.` and `_`, an invisible character, or a
+  look-alike whose NFKC form is another name (D-SINK-116, -117, -119), and
+  a port that is not one to five ASCII digits up to 65535 is refused with
+  it, after a name or a bracketed literal (D-SINK-117). A cached channel's
+  literal refused at play is `local_address` with one fixed sentence that
+  names no host (`STREAM_LITERAL_REFUSAL`, D-SINK-113), and the `status`
+  reply names nothing of the playing address (D-SINK-114).]
 - From a LOCAL playlist the LAN is allowed, a loopback relay's channels are
   held to its own port (D-SINK-57), and a local file may name any address.
 - A typed `--url` may reach any address on its FIRST upstream connection;

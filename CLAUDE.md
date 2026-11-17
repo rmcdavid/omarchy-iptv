@@ -339,8 +339,9 @@ requests and raise the batch.
    write DEL, C1, U+2028/9 and the text-direction controls as escapes, as
    `Model.ipcJson` does; `log()` and the traceback read the same way; a
    line naming a source's host withholds it where the Sources form does
-   (round 5 owns `pathHost`, the play-time local-address refusal, the
-   destination rules' sentences and the guide-hint refusal's host); a
+   (since round 5 the play-time local-address refusal, the destination
+   rules' sentences and the guide-hint refusal name no host, D-SINK-113,
+   and the player status reply prints no `pathHost`, D-SINK-114); a
    usage error names options, never values; no journal line names a
    channel id. A new reply field that can carry such text goes in the
    table, or it prints raw.]**
@@ -633,8 +634,9 @@ requests and raise the batch.
      `rewind_osd_text` in the helper, with ONE shared fixture,
      `tests/fixtures/rewind-osd.json`, that both run, asserting equal output
      and that no output contains `$` anywhere. The helper's seek reply is
-     numbers and booleans alone and never echoes `path`; the existing
-     status reply emits `pathHost` and this one emits nothing of the kind.
+     numbers and booleans alone and never echoes `path`; the status reply
+     names nothing of it either since D-SINK-114 (2026-11-16; it emitted
+     `pathHost` until then), and this one emits nothing of the kind.
      The user's own `--osd-level=0` turns the line off. On the same day
      `--demuxer-cache-unlink-files` joins `MPV_RESERVED` in both mirrors
      (D3; design 2.6): the privacy-relevant switch is not whether mpv
@@ -1185,6 +1187,36 @@ requests and raise the batch.
      every connection against the address it connects to; see "The
      relay" below. What stays open of them is the user's own proxy, which
      resolves a target on its own side.]**
+     **[2026-11-16, round 5 of the security review (D-SINK-112 to -119):
+     what an address may HOLD, read once. Both validators read an http(s)
+     authority with one reader per mirror (`read_authority`,
+     `Model.readAuthority`) and refuse what the helper's URL library
+     cannot read -- a character whose compatibility form is `/`, `?`, `#`,
+     `@` or `:` anywhere in it, a `[` or `]` in the user information
+     unless the host is a bracketed literal, a bracketed host that is no
+     IPv6 address -- where every fetch of one had ended as an internal
+     error quoting the authority, user information included (D-SINK-115).
+     A host name holds, in ASCII, letters, digits, `-`, `.` and `_` and
+     nothing else, as written and in its NFKD fold, no invisible character
+     (Cf, Unicode's default-ignorables, stringprep's B.1) and no code point
+     whose NFKC form is another (a look-alike the idna codec would fetch as
+     the plain name); a port at the connection is one to five ASCII digits
+     up to 65535, after a name or a bracketed literal, on every hop before
+     any lookup (D-SINK-116, -117, -119). The first hop of the playlist,
+     guide and probe fetches sends the host's A-label -- the name CPython's
+     socket already hands the resolver, so no new name reaches it -- and a
+     host the codec refuses is refused before any lookup (D-SINK-119). A
+     refusal of a destination the provider chose (a redirect hop, a guide
+     hint's hop, a proxied target, a cached channel's literal) names no
+     host, and the player's status reply names none of the playing address
+     (D-SINK-113, -114). The logo survey, its slot and its fetch read a
+     logo's address one way (D-SINK-112), and every host is lowered with
+     the capital sigma folded first, because the shell's engine applies no
+     final-sigma rule (D-SINK-118). A stored source holding a newly refused
+     shape is dropped on load, as D-SINK-86's were: the owner's own
+     decision of 2026-11-16 (the look-alikes the lead's call beside it).
+     The lesson: a validator that accepts what the next reader cannot read
+     is a second grammar, and that reader's refusal sentence is a sink.]**
      The lesson of the whole entry: a
      scheme allowlist answers "what kind of thing is this", never "where
      does it go", and the second question is the one a provider abuses.
