@@ -1284,7 +1284,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3851}
 # floor stays 2741 -- the bound adds fixture rows and corpus logos to
 # existing tests, 4 of them red on 456fbd6, and no test; the suite runs
 # 2741, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2741}
+# 2026-11-18, lane-p73 (F-HARNESS-73): 2741 -> 2765. The floor trailed the
+# suite on dev fdba6be, which counts 2752 (D-PLY-66 and F-HARNESS-87 added
+# tests without raising it); tests/test_parse_margin.py adds 13 (the logo
+# scheme shortcut held to urlsplit's reading, the parse's authority and group
+# memos held to no memo, their keys, bounds and taking), 13 red on fdba6be and
+# each of 16 single-decision helper mutants red (QA-RESULTS "F-HARNESS-73: the
+# parse margin (2026-11-18)"); the suite counts 2765.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2765}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

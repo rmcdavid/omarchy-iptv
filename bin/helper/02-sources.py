@@ -1718,6 +1718,29 @@ def stream_scheme(url: str) -> str:
         return ""
 
 
+def logo_is_web(logo: str) -> bool:
+    """make_channel's logo test, `stream_scheme(logo) in ("http", "https")`,
+    with no urlsplit where it cannot answer otherwise (F-HARNESS-73, the
+    10,000-channel budget: the split cost about 42 ms of 730). For a
+    `logo` that is ASCII, opens with a character above U+0020 (urlsplit
+    first strips C0 controls and spaces off the front) and holds no TAB,
+    CR, LF, `[` or `]`, urlsplit deletes nothing, raises nothing, and reads
+    the scheme as the text before the first `:` when that is a letter and
+    then scheme characters, lower-cased; `http` and `https` are such text,
+    so the answer is whether the text opens with `http:` or `https:` in any
+    case. Every other logo takes stream_scheme. LogoSchemeShortcutTest holds
+    the two equal over every ASCII character at every place the reading
+    turns on and every BMP code point in the authority. (What the shortcut may not see is asked as five substring tests, not
+    a pattern: urlsplit deletes a TAB, CR and LF anywhere before it reads a
+    scheme, and raises only over a bracket in the netloc or a netloc that is
+    not ASCII.)"""
+    if (logo.isascii() and logo[:1] > " " and "\t" not in logo and "\n" not in logo and "\r" not in logo
+            and "[" not in logo and "]" not in logo):
+        head = logo[:6].lower()
+        return head[:5] == "http:" or head == "https:"
+    return stream_scheme(logo) in ("http", "https")
+
+
 def is_stream_url(url: str) -> bool:
     """Allow-listed scheme with a non-empty host; never option-looking (D-QA-07);
     never a form that makes the player LISTEN (D-SINK-42, stream_listen_refusal).
@@ -2238,7 +2261,8 @@ def stream_label_refused(url: str, host: str, scheme: str, source: dict[str, Any
     return False
 
 
-def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
+def stream_entry_refusal(url: str, source: dict[str, Any],
+                         memo: dict[tuple[str, str], str] | None = None) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
@@ -2276,6 +2300,35 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     params = stream_params(url)
     if _listen_refusal(url, scheme, host, params) != "":
         return "listener", host
+    # F-HARNESS-73: what follows reads the line's scheme, its netloc and the
+    # playlist, and for udp and rtp its query too (reading 3 and their source
+    # entries); so for every other scheme its answer is remembered within
+    # one parse by (scheme, netloc) -- `memo`, parse_m3u's, never a module's
+    # -- and a list naming one host pays for it once (EntryMemoTest).
+    if memo is None or scheme in STREAM_QUERY_HOST_SCHEMES:
+        return _authority_refusal(url, parts, host, scheme, source, params), host
+    key = (scheme, parts.netloc)
+    refusal = memo.get(key)
+    if refusal is None:
+        refusal = _authority_refusal(url, parts, host, scheme, source, params)
+        if len(memo) < PARSE_MEMO_ENTRIES:
+            memo[key] = refusal
+    return refusal, host
+
+
+# F-HARNESS-73: how many answers each of parse_m3u's memos keeps (the
+# authority's, by scheme and netloc, and the group text's): a list of more
+# distinct ones is asked again past them, so a memo's size is bounded
+# whatever the list holds.
+PARSE_MEMO_ENTRIES = 1024
+
+
+def _authority_refusal(url: str, parts: Any, host: str, scheme: str, source: dict[str, Any],
+                       params: list[tuple[str, str]]) -> str:
+    """stream_entry_refusal's rules after the listening one, for `url`, its
+    urlsplit `parts`, `host` (split_hostname's), `scheme` (lower-cased) and
+    `params` (stream_params'): `local`, `port`, `name`, `zone`, `label` or
+    "". Only udp's and rtp's answers read `url` or `params`."""
     # url_port's reading, from the one urlsplit: the scheme's default stands
     # only for a port the URL does not name. A port that does not parse is no
     # port, never the default -- `http://127.0.0.1:631:80/` is 631 to FFmpeg
@@ -2289,17 +2342,17 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         port = None
     refusal = _host_refusal(host, scheme, source, port)
     if refusal:
-        return refusal, host
+        return refusal
     if _stream_name_refused(url, parts.netloc, scheme, params):
-        return "name", host
+        return "name"
     # Each asked only where it can answer, so a plain line of a local list,
     # the 10,000-channel case, pays two tests and no call: a netloc with no
     # `[` holds no literal, and a local playlist keeps every label.
     if "[" in parts.netloc and stream_zone_refused(parts.netloc):
-        return "zone", host
+        return "zone"
     if not source.get("local") and stream_label_refused(url, host, scheme, source, params):
-        return "label", host
-    return "", host
+        return "label"
+    return ""
 
 
 # D-SINK-41 (2026-10-29). The sign-in headers a playlist may attach only to
@@ -2660,6 +2713,19 @@ def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
     return out
 
 
+def group_reading(group_text: str) -> tuple[tuple[str, ...], dict[str, int], str]:
+    """make_channel's reading of a group text (`group_text`: the cut
+    group-title, or the #EXTGRP it inherits): (its groups, split_groups' and
+    then bound_groups' list; what bound_groups counted, by kind, for the
+    caller's `bounds`; the search fold of the groups joined by a space, or
+    of UNGROUPED when there are none, which search_key_of joins to the
+    name's). A function of the text alone, so parse_m3u keeps it by text
+    (F-HARNESS-73); make_channel adds the counts each time it reads one."""
+    counted: dict[str, int] = {}
+    groups = bound_groups(split_groups(group_text), counted) if group_text else []
+    return tuple(groups), counted, normalize_text(" ".join(groups) if groups else UNGROUPED)
+
+
 def channel_warning(warnings: list[str], bounds: dict[str, int] | None, text: str) -> None:
     """A per-channel warning: kept while fewer than M3U_MAX_CHANNEL_WARNINGS
     have been, counted after that (D-M3U-1's sibling, lane A's OQ-6)."""
@@ -2720,11 +2786,13 @@ def channel_id_withheld(channel_id: Any) -> bool:
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str], index: int = 1,
-                 bounds: dict[str, int] | None = None) -> dict[str, Any]:
+                 bounds: dict[str, int] | None = None,
+                 memo: dict[str, tuple[tuple[str, ...], dict[str, int], str]] | None = None) -> dict[str, Any]:
     """One channels.json row. Every provider-controlled text it keeps is
     held to its D-M3U-1 cap (01-core.py); `bounds` counts what was cut or
     dropped, for parse_m3u's warnings. Without `bounds` the caps still
-    apply and only the counting is skipped."""
+    apply and only the counting is skipped. `memo` is parse_m3u's memo of
+    group_reading by group text (F-HARNESS-73), or None."""
     tvg_id = attrs.get("tvg-id", "").strip()
     if len(tvg_id) > M3U_MAX_TVG_ID:
         bound_count(bounds, "tvgId")
@@ -2754,7 +2822,18 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # counts it there); a group-title is this entry's own and is cut here.
     group_title = attrs.get("group-title", "").strip()
     group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR) if group_title else extgrp
-    groups = bound_groups(split_groups(group_text), bounds) if group_text else []
+    # F-HARNESS-73: the groups, what bound_groups counted for them, and their
+    # search fold are one function of the group text (group_reading), so a
+    # list whose channels share a few group texts reads each once a parse.
+    reading = memo.get(group_text) if memo is not None else None
+    if reading is None:
+        reading = group_reading(group_text)
+        if memo is not None and len(memo) < PARSE_MEMO_ENTRIES:
+            memo[group_text] = reading
+    groups = list(reading[0])
+    if bounds is not None:
+        for kind, count in reading[1].items():
+            bounds[kind] = bounds.get(kind, 0) + count
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
     # group string stays searchable through searchKey and `groups`.
@@ -2772,7 +2851,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     if tvg_name and tvg_name != name:
         channel["tvgName"] = tvg_name
     logo = attrs.get("tvg-logo", "").strip()
-    if logo and stream_scheme(logo) in ("http", "https"):
+    if logo and logo_is_web(logo):
         if len(logo) > M3U_MAX_LOGO_URL:
             bound_count(bounds, "logo")
         else:
@@ -2819,7 +2898,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["options"] = options
     # The name is folded once, for searchKey and nameKey alike (search_key_of).
     name_key = normalize_text(name)
-    channel["searchKey"] = search_key_of(name_key, " ".join(groups) if groups else group)
+    channel["searchKey"] = join_search_key(name_key, reading[2])
     # F-PERF-1. `searchKey` has been precomputed since M0 precisely so the
     # guide's filter does not fold 10,000 strings on every keystroke. The
     # ranker needs a SECOND fold -- the name alone, to rank a name match above
@@ -2908,6 +2987,12 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     skipped_local = 0
     skipped_port = 0
     dropped_sign_in = 0
+    # F-HARNESS-73: this parse's memos, of the authority's rules by scheme
+    # and netloc (stream_entry_refusal) and of the group text's reading
+    # (make_channel), each a function of its key and this parse's `source`,
+    # so neither outlives the parse.
+    entry_memo: dict[tuple[str, str], str] = {}
+    group_memo: dict[str, tuple[tuple[str, ...], dict[str, int], str]] = {}
 
     if isinstance(text, str):
         if text.startswith("\ufeff"):
@@ -2975,7 +3060,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             vlcopt, kodiprop = {}, {}
             continue
         url = line
-        refusal, host = ("", "") if len(url) > M3U_MAX_URL else stream_entry_refusal(url, playlist)
+        refusal, host = ("", "") if len(url) > M3U_MAX_URL else stream_entry_refusal(url, playlist, entry_memo)
         if len(url) > M3U_MAX_URL:
             bound_count(bounds, "url")
         elif refusal == "scheme":
@@ -2998,7 +3083,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             over_cap += 1
         else:
             attrs, title = pending
-            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds)
+            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds, group_memo)
             dropped_sign_in += drop_sign_in_headers(channel, playlist, host)
             group = channel["group"]
             if group not in seen_groups:

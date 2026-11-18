@@ -3132,7 +3132,13 @@ def search_key_of(key: str, group: Any) -> str:
     """search_key for a name already folded by normalize_text. make_channel
     stores that fold as `nameKey` as well, and folds it once for both
     (D-PERF-13): the second fold read the same name with the same class."""
-    grp = normalize_text(group)
+    return join_search_key(key, normalize_text(group))
+
+
+def join_search_key(key: str, grp: str) -> str:
+    """search_key_of's join of a folded name and a folded group text, which
+    make_channel takes with the group's fold kept by text (group_reading,
+    F-HARNESS-73)."""
     if grp:
         key = grp if not key else key + " " + grp
     return key

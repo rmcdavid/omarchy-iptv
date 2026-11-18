@@ -708,7 +708,19 @@ class PerformanceTest(unittest.TestCase):
     five busy loops), so a tree within a quarter of the budget can still read
     red while the machine is saturated. That is the code's margin, not the
     load's queue, and the message below prints all three numbers per attempt
-    so a reader can tell which it was."""
+    so a reader can tell which it was.
+
+    [2026-11-18, F-HARNESS-73: the margin recovered, no answer moved. The
+    logo's scheme read without a urlsplit where none can answer otherwise
+    (logo_is_web), and the authority's rules and the group text's reading
+    kept within one parse (stream_entry_refusal's and make_channel's memos,
+    tests/test_parse_margin.py). By this measure, one attempt in a fresh
+    process, ABAB against fdba6be at a load of 1.7 to 1.9, 10 runs an arm:
+    531 ms median (502 to 547) against 742 (698 to 762), and over 10,000
+    channels that each name another host 638 (600 to 696) against 764 (727
+    to 784). Under four busy loops, 8 runs an arm: 712 (693 to 717) against
+    964 (956 to 988), and 832 (828 to 855) against 1,002 (979 to 1,022). The
+    1.35 above holds; the saturated budget list now reads about 0.71 s.]"""
 
     BUDGET_S = 1.0
     ATTEMPTS = 3
