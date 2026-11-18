@@ -177,7 +177,8 @@ _CARRY_ANSWERS = {("get_property", "volume"): 37.0, ("get_property", "mute"): Tr
 _REAL_IPC = helper.MpvIpc
 
 
-def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, older=False, spawned_slow=0):
+def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, older=False, spawned_slow=0,
+                     vanish_at=None):
     """Run `player <verb>` through the shipping code, every wait on the path
     at its bound. `survivor_answers`: how many requests the found player
     answers (just inside the bound) before it goes quiet. `lock_at` /
@@ -190,7 +191,11 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     (virtual seconds, the reply, the signals the found player was sent, what
     was learned). `play` (D-SINK-102) reaches a running player of this
     build at once, which answers everything at once, so the time it spends
-    is the lookup's and the relay's alone."""
+    is the lookup's and the relay's alone. `vanish_at` (D-PLY-40, `stop`):
+    the moment the found player's process is gone -- the finder and the
+    re-verification before each signal no longer see it -- while its socket
+    still accepts a connect, just inside the bound, which is how a killed
+    player leaves it (D-PLY-8); None for never."""
     clock = _Clock()
     state = {"phase": "play" if verb == "play" else "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
@@ -206,8 +211,23 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         if lock_at is None or clock.t < lock_at:
             raise BlockingIOError(11, "held")
 
+    def gone():
+        if vanish_at is not None and clock.t >= vanish_at and state["phase"] == "found":
+            state["phase"] = "gone"
+        return state["phase"] != "found"
+
     def find_player(_sock):
-        return [dict(survivor)] if state["phase"] == "found" else []
+        return [] if gone() else [dict(survivor)]
+
+    def still_the_player(record, _sock):
+        return not gone() and record.get("pid") == survivor["pid"]
+
+    real_ladder = helper.stop_ladder
+
+    def stop_ladder(*args, **kwargs):
+        result = real_ladder(*args, **kwargs)
+        learned["ladder_end"] = clock.t
+        return result
 
     def read_pipe(fd, timeout):
         state["pipes"] += 1
@@ -363,7 +383,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                     self.refused = True
                     raise helper.HelperError("not_running", "refused")
             clock.t += self.timeout - _JUST_INSIDE
-            if state["phase"] == "found":
+            if state["phase"] in ("found", "gone"):
                 self.sock = Sock(survivor_answers)
             else:
                 # The new player: answers its handshake just inside the
@@ -376,7 +396,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         mock.patch.object(helper, "time", types.SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep, time=clock.time)),
         mock.patch.object(helper, "fcntl", types.SimpleNamespace(flock=flock, LOCK_EX=2, LOCK_NB=4)),
         mock.patch.object(helper, "find_player", find_player),
-        mock.patch.object(helper, "still_the_player", lambda record, _sock: record.get("pid") == survivor["pid"]),
+        mock.patch.object(helper, "still_the_player", still_the_player),
+        mock.patch.object(helper, "stop_ladder", stop_ladder),
         mock.patch.object(helper, "proc_start_time", lambda pid: "1"),
         mock.patch.object(helper, "limit_core_of", lambda pid: True),
 
@@ -417,6 +438,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             helper.player_probe(parser.parse_args(["player", "probe", "--socket", sock]))
         elif verb == "play":
             helper.cmd_play(parser.parse_args(["play", "--socket", sock, "--cache-dir", folder, "--id", "t:x"]))
+        elif verb == "stop":
+            helper.player_stop(parser.parse_args(["player", "stop", "--socket", sock, "--seq", "3"]))
         else:
             extra = ["--from", "term"] if verb == "restart" else []
             helper.player_start(parser.parse_args(["player", verb] + session + extra), verb)
@@ -435,6 +458,24 @@ def walk_long_path(verb, **more):
     _, unbound, _, learned = walk_player_verb(verb, lock_at=lock_at, **more)
     assert (unbound or {}).get("error", {}).get("code") == "no_socket", unbound
     return walk_player_verb(verb, lock_at=lock_at, bind_after=learned["bind_last"], **more)
+
+
+def walk_stop_long_path():
+    """D-PLY-40: the stop's three walks. The first is refused the lock
+    throughout and learns its last poll; the second is granted it then and
+    meets a player that accepts the quit rung's connect just inside the bound,
+    never answers the quit, and outlives SIGTERM and SIGKILL, learning when
+    the ladder ends; the third is the same with the player's process gone at
+    that moment, its socket still accepting -- so the settle after the ladder
+    makes its one connect too, at its bound. That is the longest path through
+    player_stop: a player that stays is answered at once (the finder sees
+    it), and one gone earlier is settled inside the rung that saw it go."""
+    _, refused, _, learned = walk_player_verb("stop")
+    assert (refused or {}).get("error", {}).get("code") == "busy", refused
+    lock_at = learned["lock_last"]
+    _, stayed, signals, learned = walk_player_verb("stop", lock_at=lock_at)
+    assert stayed and stayed.get("ok") and stayed.get("running") is True and signals == [15, 9], (stayed, signals)
+    return walk_player_verb("stop", lock_at=lock_at, vanish_at=learned["ladder_end"])
 
 
 class PlayerWorstPathWalkTest(unittest.TestCase):
@@ -506,6 +547,20 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertGreaterEqual(left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0,
                                 "play's watchdog leaves mpv's round trips %.3f s, less than the %.3f s its 8 s left them"
                                 % (left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0))
+
+    def test_a_stop_that_waits_out_the_lock_and_the_whole_ladder_fits_its_backstop(self):
+        """D-PLY-40: Service.qml's stopSettleTimer waits out the detached
+        stop's own worst path (Model.playerWatchdogMs("stop"), the fixture's
+        `stop`) before it reads the stop as one that did not take. Walked
+        through the shipping player_stop: 13.25 s -- the lock's 6.05, the
+        ladder's 7 and the settle's one connect -- inside 18.25 s less the
+        margin, and past the 5 s the backstop was, which is the row."""
+        spent, reply, signals, _ = walk_stop_long_path()
+        self.assertTrue(reply and reply.get("ok") and reply.get("running") is False, reply)
+        self.assertEqual(signals, [15, 9])            # one ladder, from quit
+        self.assertGreater(spent, 13.2)               # the long path really was walked
+        self.assertGreater(spent, 5.0)                # past the old backstop
+        self.assert_inside_its_watchdog("stop", spent)
 
     def test_a_probe_that_meets_a_player_gone_quiet_fits_its_watchdog(self):
         for answers, floor in ((1, 5.9), (0, 3.9)):

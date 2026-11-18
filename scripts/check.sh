@@ -727,7 +727,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # relay question after a failed open and the card it tells) did not raise it:
 # 3851 on 8337100, 666e522 and 1fd76a2, 3858 on 061601f. F-HARNESS-73
 # changes no model and no node test; the suite runs 3858.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3858}
+# 2026-11-18, lane-plyb (D-PLY-40, the lead's call under the owner's
+# standing authority of 2026-11-09): 3858 -> 3861 -- the stop's backstop
+# armed with the shared fixture's `stop` and firing there, a newer start's
+# ok reply ending the stop's settle, and a start issued before the stop
+# leaving it standing; 3 of 3861 red on 71700f4 and six single-decision
+# mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
+# (2026-11-18)"); the suite runs 3861.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3861}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1314,7 +1321,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3858}
 # keeps its 5. 7 of the two files' 20 tests red on 103ed5f and seven
 # single-decision helper mutants red (QA-RESULTS "D-LOGO-30: one reading of
 # a logo's scheme (2026-11-18)"); the suite counts 2772.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2772}
+# 2026-11-18, lane-plyb (D-PLY-40): 2772 -> 2773 -- the walk of the shipping
+# player_stop under the player-bounds virtual clock (13.25 s, held inside the
+# fixture's `stop` less the margin), red under a fixture mutant and a helper
+# mutant (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
+# (2026-11-18)"); the suite counts 2773.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2773}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

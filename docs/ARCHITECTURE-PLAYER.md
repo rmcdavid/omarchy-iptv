@@ -1638,6 +1638,21 @@ property real stopAt: 0
 readonly property bool stopping: stopAt > 0        // cleared on socket EOF, or by stopSettleTimer (5 s)
 ```
 
+**[Amended 2026-11-18, D-PLY-40: stopSettleTimer's 5 s was shorter than the
+detached stop's own worst case -- the lock granted on its last poll, the whole
+ladder from quit and the settle's one connect, 13.25 s walked through the
+shipping `player_stop` under the player-bounds walk's virtual clock -- so a
+stop still laddering drew the "outlived a stop" probe and a second `player
+stop`. Its interval is now `Model.playerWatchdogMs("stop")`, that path with the
+5 s margin, 18.25 s. And a `player start` of an intent issued after the stop
+(its reply's `seq` past the stop's, `stopSeq`) that answers ok ends `stopping`
+there: under the lock it ran after the stop's ladder, or before the stop, which
+the seq rule then refuses as superseded, so the stop cannot touch the player it
+reports. Without that, a play made after a stop with no EOF coming (nothing
+attached, or the start superseded the stop) held `stopping` for the whole
+backstop, and through it a burst's last intent was dropped, the repair and
+rewind presses refused and the new player's death read as the stop's.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket. That
 preserves the documented behaviour ("Playing a channel while the old player is

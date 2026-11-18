@@ -1137,6 +1137,17 @@ function bootService(serviceText, Model, o) {
   // QML's Timer reads it; h.elapse fires its own onTriggered, which TERMs a
   // running helper (recorded in playerProc.signals) and flags the exit.
   for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "statePrivateWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog", "olderRestartTimer"]) h.timed.push(treeTimer(id))
+  // D-PLY-40: a Timer the clock does not drive by default, put on it by a
+  // test that asks -- its interval and onTriggered from its own block, as
+  // above, from the moment of the call (a restart() made before it is not
+  // seen). stopSettleTimer is the first: every earlier check that stops
+  // keeps `stopping` held, as it was written against, and one that asks for
+  // the backstop gets the tree's own. -> the Timer double.
+  h.driveTimer = (id) => {
+    const pair = treeTimer(id)
+    h.timed.push(pair)
+    return pair[0]
+  }
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),

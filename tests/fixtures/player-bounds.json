@@ -39,6 +39,11 @@
     "  of `play` holds that. It first summed one question, which left them 4 s (the review of 7c281d8).",
     "  (relayStaggerMs is in no sum: the relay starts its next connect attempt that long after one that has not answered,",
     "  inside the player's own load, which no verb waits on; a dead first answer costs a channel that much, not RELAY_CONNECT_S.)",
+    "  stop    = lockMs + lockPollMs + ladder(\"\") + settleConnectMs + marginMs = 6050 + 7000 + 200 + 5000 = 18250",
+    "  (D-PLY-40, 2026-11-18: no slot's watchdog. The detached `player stop` is watched by nothing, so this is the bound",
+    "  Service.qml's stopSettleTimer waits out (stopSettleMs) before it reads a stop as one that did not take. Its 5 s",
+    "  was shorter than the stop's own 13.25 s, so a stop still laddering drew the \"outlived a stop\" probe and a second",
+    "  `player stop`. player_stop waits for no relay and meets an older build's player with the same ladder.)",
     "tests/test_player_bounds.py also WALKS the shipping verbs' worst paths under a virtual clock and holds each",
     "inside its `watchdogMs` less `marginMs`, so the composition is checked against the code and not only the leaves;",
     "`play`, whose 8 s was never a sum of its bounds, is walked with every bound of the helper's own at that bound and",
@@ -87,7 +92,8 @@
     "restart": 57450,
     "probe": 12000,
     "": 12000,
-    "play": 10000
+    "play": 10000,
+    "stop": 18250
   },
   "boardMs": 14000,
   "previousMs": 12000

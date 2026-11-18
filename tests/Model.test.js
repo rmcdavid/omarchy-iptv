@@ -18808,7 +18808,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the refusal tail's gate, `!userStopped && !stopping`, so the same play
     // made while a stop settles, whose start the watchdog then ended with
     // nothing left behind, was dropped untold too. In time this needs the
-    // stop to settle slower than a start's 43 s bound, which the 5 s backstop
+    // stop to settle slower than a start's 43 s bound, which the backstop
     // forbids; the harness holds `stopping`, so the gate is what is pinned.
     checkCall("D-PLY-41 (sibling): a play made while an earlier stop is still settling, whose start the watchdog ended and the probe found nothing of, is told once as Could not start playback / Helper timed out, marking nothing", () => {
       const h = bootPlayer()
@@ -18825,6 +18825,74 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
       return [settling, said(h)]
     }, [true, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]])
+
+    // ---- D-PLY-40 (2026-11-18): the stop's backstop is the stop's own bound ----
+    //
+    // stopSettleTimer (5 s) was shorter than the detached stop's own worst
+    // case (13.25 s walked, tests/test_player_bounds.py), so a stop still
+    // laddering drew the "outlived a stop" probe and a second stop. Now the
+    // Timer is armed with Model.playerWatchdogMs("stop") (the fixture's
+    // `stop`), and because that holds `stopping` three times as long, a start
+    // of an intent issued after the stop that answers ok ends the settle
+    // itself (the stop ran before it under the lock, or is superseded).
+    // Red on 71700f4: armed at 5 s, and the queued intent dropped.
+    const zapsOf = h => {
+      const seen = []
+      let held = h.ids.controlProc.running
+      Object.defineProperty(h.ids.controlProc, "running", { get() { return held }, set(v) { held = v; if (v === true) { const c = H.helperView(h.ids.controlProc.command, h.ids.controlProc.environment); seen.push(c[c.indexOf("play")] + ":" + c[c.indexOf("--id") + 1]) } }, configurable: true })
+      return seen
+    }
+    const okStartSeq = (id, seq) => JSON.stringify(Object.assign(JSON.parse(okStart(id)), { seq }))
+    const withChannels = h => {
+      const index = M.keyedMap()
+      index[X.id] = X
+      index[Y.id] = Y
+      h.root.channelIndex = index
+      return h
+    }
+
+    checkCall("D-PLY-40: the stop's backstop is armed with the stop's own bound (the fixture's `stop`, 18.25 s), not 5 s -- a stop with nothing to answer it holds `stopping` past 5 s and releases it at that bound, not a millisecond before", () => {
+      const h = bootPlayer()
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.stop()
+      h.drain()
+      const armed = t.armedInterval
+      h.elapse(5000)
+      const atFive = h.root.stopping === true
+      h.elapse(PB.watchdogMs.stop - 5000 - 1)
+      const justBefore = h.root.stopping === true
+      h.elapse(1)
+      return [armed, atFive, justBefore, h.root.stopping === true, h.root.userStopped === true]
+    }, [PB.watchdogMs.stop, true, true, false, false])
+
+    checkCall("D-PLY-40: a start of an intent issued AFTER the stop that answers ok ends the stop's settle -- the backstop stopped, `stopping` false, and the zap burst's last intent queued behind the start delivered over the socket, not dropped", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const startVerb = slotVerb(h), xSeq = h.root.playSeq
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(X.id, xSeq))
+      return [startVerb, queued, h.root.stopping === true, t.running === true, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, ["start", Y.id, false, false, ["play:" + Y.id], Y.id, []])
+
+    checkCall("D-PLY-40: a start issued BEFORE the stop that answers ok after it leaves the settle standing (that stop ladders its player) -- `stopping` true, the backstop armed, nothing zapped", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(X.id, xSeq))
+      return [h.root.stopping === true, t.running === true, zaps, h.root.nowPlaying]
+    }, [true, true, [], null])
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----

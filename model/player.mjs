@@ -158,6 +158,19 @@ function playerLadderMs(fromRung) {
 // The shell's watchdog over one run of `kind` on the player slot, in ms:
 // "start", "restart", "probe", or "" for the birth edge. Anything else, a
 // string or not, gets the longest verb's, never a shorter one.
+//
+// D-PLY-40 (2026-11-18): and "stop", which is no slot's: the detached
+// `player stop` is watched by nothing, so this is the bound Service.qml's
+// stopSettleTimer waits out before it reads the stop as one that did not
+// take (stopSettleMs). Its longest path through player_stop: the lock
+// granted on its last poll, the whole ladder from quit (the quit rung's
+// connect and request at their bounds, SIGTERM's grace, the kill rung and
+// the final settle), and the one connect the settle after it makes, with the
+// margin. The relay's own exit is not on it: player_stop waits for no relay
+// (the relay exits with its player and never holds the lock), and an older
+// build's player meets the same ladder (walked: 13.25 s, the player-bounds
+// walk of `stop`, dev branch). The backstop was 5 s, so a stop still
+// laddering drew the "outlived a stop" probe and a second `player stop`.
 function playerWatchdogMs(kind) {
   var b = PLAYER_BOUNDS
   var k = typeof kind === "string" ? kind : "?"
@@ -176,6 +189,7 @@ function playerWatchdogMs(kind) {
   if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "play") return CONTROL_WATCHDOG_MS + 2 * b.relayIpcMs
+  if (k === "stop") return lock + playerLadderMs("") + b.settleConnectMs + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "") return PLAYER_BIRTH_EDGE_MS
   return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
 }

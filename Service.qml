@@ -94,7 +94,11 @@ Item {
   // M5-01 (2.3): the gap between a seek reply and the next seek run.
   readonly property int seekThrottleMs: 300
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
-  readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
+  // Backstop that clears `stopping` (4.10). D-PLY-40 (2026-11-18): the
+  // detached stop's own worst case with the margin (Model.playerWatchdogMs
+  // says why), where it was 5 s: a stop still laddering then drew the
+  // "outlived a stop" probe and a second `player stop`.
+  readonly property int stopSettleMs: Model.playerWatchdogMs("stop")
   readonly property int focusRetryMs: 500
   // D-PIP-5 widened this from 6, and cost nothing by doing so. Focus now
   // waits for a window the compositor can name rather than dispatching at a
@@ -915,10 +919,17 @@ Item {
   property string ownerToken: Model.playerOwnerToken()
   // `stopping` keeps its name and its four read sites; what changed is its
   // source. It is true from the keystroke until socket EOF confirms the
-  // death (or the 5 s backstop), and while it is true a play() always
-  // starts a fresh player instead of zapping a dying socket (4.10).
+  // death (or the stop's own bound, stopSettleMs), and while it is true a
+  // play() always starts a fresh player instead of zapping a dying socket
+  // (4.10). D-PLY-40: or until a `player start` of an intent issued after
+  // the stop answers ok (handlePlayerResult): under the lock that start ran
+  // either after the stop's whole ladder or before the stop, which the seq
+  // rule then supersedes, so the stop can no longer touch what it started.
   property real stopAt: 0
   readonly property bool stopping: stopAt > 0
+  // The intent number the last stop() went out with (D-PLY-40): what a
+  // start's reply `seq` is compared with to tell an intent issued after it.
+  property int stopSeq: 0
   property int healthSkips: 0
   // The event router's state (4.8). `entryOwners` maps mpv's own
   // playlist_entry_id to the channel that load was for, so a failure that
@@ -1366,6 +1377,7 @@ Item {
     // we learn the ladder finished (and is what clears `stopping`).
     root.playerWanted = false
     root.playSeq += 1
+    root.stopSeq = root.playSeq
     root.stopAt = Date.now()
     stopSettleTimer.restart()
     // The user asked for it, so nothing died unattended: the session record
@@ -3501,6 +3513,21 @@ Item {
     if (status.ok === true) {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
+      // D-PLY-40: a start of an intent issued AFTER the last stop has run
+      // under the player lock, so that stop has either laddered its player
+      // down before this start began or, reaching the lock after it, is
+      // refused as superseded: nothing it does can touch the player this
+      // start reports. So the stop's settle ends here, before the repair,
+      // the observer's follow-up and the drain below read `stopping`. With
+      // no socket EOF to end it -- a stop with nothing attached, or one this
+      // start superseded -- it held for the whole backstop, and through it a
+      // zap burst's last intent was dropped (drainPendingPlay), the repair
+      // refused, rewind presses refused and the new player's death read as
+      // the stop's; the backstop is now the stop's 18 s worst case.
+      if (root.stopping && Number(status.seq) > root.stopSeq) {
+        root.stopAt = 0
+        stopSettleTimer.stop()
+      }
       root.relaunchPending = false
       if (Number(status.seq) === root.previousPlayingSeq) root.previousPlaying = null
       // Restart on adoption: a start or a restart that answered ok has
@@ -4506,8 +4533,9 @@ Item {
     root.clearRewind()
     root.healthSkips = 0
     root.healthFailures = 0
-    // The death IS the end of the stop (4.10); the 5 s backstop is only for
-    // a stop that never had a player to observe.
+    // The death IS the end of the stop (4.10); the backstop (stopSettleMs,
+    // the stop's own bound since D-PLY-40) is only for a stop that never had
+    // a player to observe.
     root.stopAt = 0
     stopSettleTimer.stop()
     // M2-05 / PIP3. The window PiP was applied to is gone, so PiP is over -
