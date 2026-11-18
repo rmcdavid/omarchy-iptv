@@ -26,7 +26,12 @@ is held here to the work it stands in front of:
                 text and the cut, capped and empty shapes.
 
 Each memo is shown TAKEN, so the gate sees it if it is lost (its cost is held
-by test_playlist's PerformanceTest), and bounded. The byte identity of the
+by test_playlist's PerformanceTest), and bounded, in answers and in the length
+of a key it keeps (PARSE_MEMO_KEY_CHARS). The review of 93bd2cf added the
+pairs a lower-cased or case-folded key would join, the counts held to
+literals, and RuleOrderTest, which pins the order stream_entry_refusal asks
+`name`, `zone` and `label` in (older than this change, moved by it, pinned by
+nothing until then). The byte identity of the
 `playlist` verb's output against fdba6be over the fixtures' address vectors,
 every playlist file under tests/ and a seeded corpus is recorded in
 docs/QA-RESULTS.md ("F-HARNESS-73: the parse margin (2026-11-18)"), not
@@ -178,6 +183,26 @@ class EntryMemoTest(unittest.TestCase):
                               scheme + "://@239.1.1.1:1234?sources=a%25b.test")
             self.assert_moves(remote, scheme + "://@239.1.1.1:1234?sources=a.test",
                               scheme + "://@239.1.1.1:1234?sources=cdn")
+        # The netloc exactly as written, never lower-cased or case-folded:
+        # the Kelvin sign lowers to `k` and the sharp s folds to `ss`, and
+        # each pair below gets two answers (the review of 93bd2cf).
+        kelvin = "K" + chr(0x212a) + ".test"
+        sharp = "stra" + chr(0xdf) + "e.test"
+        for source in (remote, helper.playlist_source("file", "")):
+            for scheme in ("http", "rtsp", "rtmp"):
+                self.assert_moves(source, scheme + "://kk.test/a", scheme + "://" + kelvin + "/b")
+                self.assert_moves(source, scheme + "://strasse.test/a", scheme + "://" + sharp + "/b")
+
+    def test_a_netloc_longer_than_the_key_cap_is_asked_every_time(self):
+        cap = helper.PARSE_MEMO_KEY_CHARS
+        for netloc, calls in (("u" * (cap - len("@cdn.test")) + "@cdn.test", 1),
+                              ("u" * (cap + 1 - len("@cdn.test")) + "@cdn.test", 200)):
+            self.assertEqual(len(netloc), cap if calls == 1 else cap + 1)
+            lines = []
+            for i in range(200):
+                lines += ["#EXTINF:-1,N%d" % i, "http://%s/live/%d.ts" % (netloc, i)]
+            parsed, asked = self.counted(lines)
+            self.assertEqual((len(parsed["channels"]), len(asked)), (200, calls))
 
     def test_the_memos_never_outlive_a_parse(self):
         text = "#EXTM3U\n#EXTINF:-1,L\nhttp://10.0.0.5/x\n"
@@ -317,17 +342,99 @@ class GroupMemoTest(unittest.TestCase):
             many += ['#EXTINF:-1 group-title="G%d",N%d' % (i, i), "http://cdn.test/%d" % i]
         many += ['#EXTINF:-1 group-title="G%d",again' % (helper.PARSE_MEMO_ENTRIES + 5), "http://cdn.test/again",
                  '#EXTINF:-1 group-title="G5",again', "http://cdn.test/again5"]
+        memos = []
+        channel = helper.make_channel
+
+        def keeping(*args):
+            memos.append(args[-1])
+            return channel(*args)
+
         helper.group_reading = counting
         try:
             parsed = helper.parse_m3u(lines, SOURCES[1])
             self.assertEqual((len(parsed["channels"]), len(calls)), (300, 3))
             calls.clear()
+            helper.make_channel = keeping
             parsed = helper.parse_m3u(many, SOURCES[1])
         finally:
             helper.group_reading = reading
+            helper.make_channel = channel
         # Past the bound a text is read again; one kept is not.
         self.assertEqual(len(calls), helper.PARSE_MEMO_ENTRIES + 20 + 1)
         self.assertEqual(parsed["channels"][-2]["group"], "G%d" % (helper.PARSE_MEMO_ENTRIES + 5))
+        # And the memo holds the bound exactly (the review of 93bd2cf: the
+        # counts above do not tell 1,024 from 1,025).
+        self.assertIs(memos[0], memos[-1])
+        self.assertEqual(len(memos[0]), helper.PARSE_MEMO_ENTRIES)
+
+    def test_a_text_longer_than_the_key_cap_is_read_every_time(self):
+        cap = helper.PARSE_MEMO_KEY_CHARS
+        names = ";".join("n%03d" % k for k in range(80))
+        calls = []
+        reading = helper.group_reading
+
+        def counting(text):
+            calls.append(text)
+            return reading(text)
+
+        helper.group_reading = counting
+        try:
+            for length, read in ((cap, 1), (cap + 1, 50)):
+                text = names[:length]
+                self.assertEqual(len(text), length)
+                lines = ["#EXTM3U"]
+                for i in range(50):
+                    lines += ['#EXTINF:-1 group-title="%s",N%d' % (text, i), "http://cdn.test/%d" % i]
+                calls.clear()
+                parsed = helper.parse_m3u(lines, SOURCES[1])
+                self.assertEqual((len(parsed["channels"]), len(calls)), (50, read))
+        finally:
+            helper.group_reading = reading
+
+    def test_its_counts_are_added_for_every_channel_that_reads_it(self):
+        # Counted against literals, not against the code that counts: a
+        # text of two names each over M3U_MAX_GROUP (two cuts; longer than
+        # the key cap, so read each time) and one of a cut name and sixteen
+        # more (a cut and a capped list; kept), three channels each.
+        two = "a" * 129 + ";" + "b" * 129
+        one = "c" * 129 + ";" + ";".join("g%d" % k for k in range(16))
+        lines = ["#EXTM3U"]
+        for i in range(3):
+            lines += ['#EXTINF:-1 group-title="%s",T %d' % (two, i), "http://cdn.test/a%d" % i,
+                      '#EXTINF:-1 group-title="%s",O %d' % (one, i), "http://cdn.test/b%d" % i]
+        parsed = helper.parse_m3u(lines, SOURCES[1])
+        self.assertEqual(len(parsed["channels"]), 6)
+        self.assertIn("9 group names cut to 128 characters", parsed["warnings"])
+        self.assertIn("3 channels listed in more than 16 groups kept the first 16", parsed["warnings"])
+        memo, bounds = {}, {}
+        for _ in range(3):
+            for text in (two, one):
+                self.channel(text, "", bounds, memo)
+        self.assertEqual(bounds, {"group": 9, "groupCount": 3})
+        self.assertEqual(list(memo), [one])
+
+
+class RuleOrderTest(unittest.TestCase):
+    """stream_entry_refusal asks `name`, `zone` and `label` in that order
+    (its docstring), an order F-HARNESS-73 moved into _authority_refusal
+    unchanged and nothing pinned until the review of 93bd2cf: a line two
+    rules refuse is counted under the first, and the warning names it."""
+
+    def test_a_line_two_rules_refuse_is_counted_under_the_first(self):
+        remote = helper.playlist_source("http", "http://provider.example.test/list.m3u", "global", "global")
+        zone = "1 entry skipped: its address is an IPv6 literal whose zone is not a number"
+        for scheme in ("udp", "rtp"):
+            # Each rule alone, then two at once.
+            self.assertEqual(helper.stream_entry_refusal(scheme + "://[ff15::1]:1234?sources=cdn", remote)[0], "label")
+            self.assertEqual(helper.stream_entry_refusal(scheme + "://[ff15::1%25eth0]:1234", remote)[0], "zone")
+            self.assertEqual(helper.stream_entry_refusal(scheme + "://[ff15::1]:1234?sources=a%25b.test", remote)[0],
+                             "name")
+            both = scheme + "://[ff15::1%25eth0]:1234?sources=cdn"
+            self.assertEqual(helper.stream_entry_refusal(both, remote)[0], "zone")
+            self.assertEqual(helper.stream_entry_refusal(scheme + "://[ff15::1%25eth0]:1234?sources=a%25b.test",
+                                                         remote)[0], "name")
+            parsed = helper.parse_m3u("#EXTM3U\n#EXTINF:-1,A\n" + both + "\n", remote)
+            self.assertEqual((parsed["channels"], parsed["warnings"]), ([], [zone]))
 
 
 if __name__ == "__main__":

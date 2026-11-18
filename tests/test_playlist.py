@@ -715,12 +715,18 @@ class PerformanceTest(unittest.TestCase):
     (logo_is_web), and the authority's rules and the group text's reading
     kept within one parse (stream_entry_refusal's and make_channel's memos,
     tests/test_parse_margin.py). By this measure, one attempt in a fresh
-    process, ABAB against fdba6be at a load of 1.7 to 1.9, 10 runs an arm:
-    531 ms median (502 to 547) against 742 (698 to 762), and over 10,000
-    channels that each name another host 638 (600 to 696) against 764 (727
-    to 784). Under four busy loops, 8 runs an arm: 712 (693 to 717) against
-    964 (956 to 988), and 832 (828 to 855) against 1,002 (979 to 1,022). The
-    1.35 above holds; the saturated budget list now reads about 0.71 s.]"""
+    process, ABAB against fdba6be, 10 runs an arm idle (load 1.5 to 1.9, two
+    series): 531 and 535 ms median (496 to 673) against 742 and 735 (692 to
+    762), and over 10,000 channels that each name another host 638 and 632
+    (598 to 696) against 764 and 771 (727 to 784). Saturated, the factor
+    above depends on what shares the core: under four bare `while 1: pass`
+    loops, 8 runs an arm, two series, 712 and 713 (693 to 721) against 964
+    and 976 (956 to 988), about 1.33 times idle on both trees, and 832 and
+    833 against 1,002 and 999; under the review's four loops that also read
+    the clock or a file, three series, about 1.5 times idle: medians 779 to
+    802 against 1,080 to 1,101, and 878 to 890 against 1,068 to 1,100. So the
+    saturated budget list reads 0.71 to 0.80 s here, 20 to 29% of the
+    second spare, where fdba6be read 0.96 to 1.10 s.]"""
 
     BUDGET_S = 1.0
     ATTEMPTS = 3

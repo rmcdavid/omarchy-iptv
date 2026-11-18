@@ -2304,8 +2304,9 @@ def stream_entry_refusal(url: str, source: dict[str, Any],
     # playlist, and for udp and rtp its query too (reading 3 and their source
     # entries); so for every other scheme its answer is remembered within
     # one parse by (scheme, netloc) -- `memo`, parse_m3u's, never a module's
-    # -- and a list naming one host pays for it once (EntryMemoTest).
-    if memo is None or scheme in STREAM_QUERY_HOST_SCHEMES:
+    # -- and a list naming one host pays for it once (EntryMemoTest). A
+    # netloc longer than PARSE_MEMO_KEY_CHARS is asked every time.
+    if memo is None or scheme in STREAM_QUERY_HOST_SCHEMES or len(parts.netloc) > PARSE_MEMO_KEY_CHARS:
         return _authority_refusal(url, parts, host, scheme, source, params), host
     key = (scheme, parts.netloc)
     refusal = memo.get(key)
@@ -2321,6 +2322,14 @@ def stream_entry_refusal(url: str, source: dict[str, Any],
 # distinct ones is asked again past them, so a memo's size is bounded
 # whatever the list holds.
 PARSE_MEMO_ENTRIES = 1024
+# And the longest key either keeps, in characters: a longer netloc or group
+# text is read again each time. A real list's are far shorter. Without it a
+# list built to fill the memos with netlocs up to M3U_MAX_URL (4,096) of
+# characters stored at four bytes each grew the parse's peak by about 15 MiB,
+# and with group texts up to M3U_MAX_GROUP_TEXT (512) by 3; with it, by
+# about 1 and 2 (tracemalloc, the review of 93bd2cf and its settling,
+# 2026-11-18).
+PARSE_MEMO_KEY_CHARS = 256
 
 
 def _authority_refusal(url: str, parts: Any, host: str, scheme: str, source: dict[str, Any],
@@ -2828,7 +2837,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     reading = memo.get(group_text) if memo is not None else None
     if reading is None:
         reading = group_reading(group_text)
-        if memo is not None and len(memo) < PARSE_MEMO_ENTRIES:
+        if memo is not None and len(memo) < PARSE_MEMO_ENTRIES and len(group_text) <= PARSE_MEMO_KEY_CHARS:
             memo[group_text] = reading
     groups = list(reading[0])
     if bounds is not None:
