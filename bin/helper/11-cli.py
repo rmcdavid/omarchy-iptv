@@ -602,6 +602,12 @@ def build_parser() -> argparse.ArgumentParser:
     # child's pid and nothing else: no token, no URL, no socket path.
     relay = player_actions.add_parser("relay", help="internal: the player's relay, started by the player's spawn")
     relay.add_argument("--child", type=int, required=True, help="the player's pid")
+    # D-PLY-66: what the shell asks once a load's open has failed. Two
+    # integers from that load's own reply; nothing private rides here.
+    refused = player_actions.add_parser("refused", parents=[player_socket],
+                                        help="how many of one load's connections the player's relay refused (a read; null when nothing can say)")
+    refused.add_argument("--relay-pid", type=int, required=True, help="the relay's pid, from the load's reply")
+    refused.add_argument("--load", type=int, required=True, help="the relay's number for the load, from the load's reply")
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
     orphan.add_argument("--owner-token", type=owner_token_arg, default="", help="the destroyed service instance's token: a claim carrying any other is reassigned")

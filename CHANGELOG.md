@@ -141,9 +141,10 @@ after the shell starts, and you start the channel again yourself.
 ### Worth knowing
 
 - **A channel the relay refuses** shows "Refused a local address" on its
-  failure card, and the guide marks it failed, when it is the channel that
-  starts the player; as a change of channel while another plays, it fails
-  like a stream that would not open.
+  failure card, and the guide marks it failed, whether it starts the player
+  or is a change of channel while another plays. The plugin asks the relay
+  just after the player closes; if it cannot ask within about a second, a
+  change of channel fails like a stream that would not open. (D-PLY-66)
 - **An `rtmp`, `rtsp` or `srt` channel from a playlist on the internet is
   played at the first address its server name gave** when you played it,
   with no fallback to the name's other addresses, and an `rtmp` server

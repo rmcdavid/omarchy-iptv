@@ -520,9 +520,11 @@ def routes(names: dict[str, list[str]]) -> dict[str, list[tuple[str, str]]]:
     R["pub", "/c1/stream.ts"] = redirect(PUB + "/c1/real.ts")
     R["pub", "/c1/real.ts"] = file_route("long.ts", "video/mp2t")
     chan("C1 same-host 302", PUB + "/c1/stream.ts")
-    for case in ("r1", "r10", "r11a"):
+    for case in ("r1", "r10", "r11a", "r21"):
         R["pub", "/%s/stream.ts" % case] = redirect(TRAP + "/%s/admin" % case)
         chan(case.upper() + " 302 to this machine", PUB + "/%s/stream.ts" % case)
+    # R21's control: an address the provider answers 404, which no relay refuses.
+    chan("R21 gone", PUB + "/r21/gone.ts")
     # R2 and R9e over TLS.
     R["pubs", "/r2/stream.ts"] = redirect(TRAPS + "/r2/admin")
     chan("R2 https 302 to this machine", PUBS + "/r2/stream.ts")
@@ -705,11 +707,16 @@ class Rig:
         self.note_players()
         return reply or {}
 
-    def zap(self, playlist: str, name: str) -> dict:
+    def zap(self, playlist: str, name: str, session: bool = False) -> dict:
+        """`play`; with `session`, as the shell sends it (`--scope` and
+        `--since`), which is the reply that carries the load's relay handle."""
         cid = self.ids.get(playlist, {}).get(name)
         if cid is None:
             return {"ok": False}
-        _, reply, _ = self.helper_run(["play", "--socket", self.sock, "--id", cid, "--cache-dir", self.caches[playlist]])
+        args = ["play", "--socket", self.sock, "--id", cid, "--cache-dir", self.caches[playlist]]
+        if session:
+            args += ["--scope", "all", "--since", "1"]
+        _, reply, _ = self.helper_run(args)
         return reply or {}
 
     def stop(self) -> None:
@@ -1174,6 +1181,51 @@ def cases(rig: Rig, playlists: dict) -> None:
     rig.check("R18: pub logged nothing for the entry nobody here loaded", not hits("pub", "/r18/", since),
               "%d request(s)" % len(hits("pub", "/r18/", since)))
     rig.stop()
+
+    # R21 (D-PLY-66): a ZAP the relay refuses, and the question the shell asks
+    # once the failed open has ended the player. The shell's side of it is
+    # the node suite's; here the shipping helper and the real relay answer it
+    # in the window the real relay leaves (RELAY_LINGER_S after its player).
+    for label, name, want in (("R21 a zap redirected to 127.0.0.1", "R21 302 to this machine", True),
+                              ("R21c a zap to a 404, the control", "R21 gone", False)):
+        played(rig, label + ": a public live channel first", "pub", "LIVE public", "pub", "/m/ts/", least=1)
+        rig.note_players()
+        relay_pid, status = rig.relay_status()
+        mpv_pid = (status or {}).get("child", 0)
+        mfd = rig.pidfd(mpv_pid, "mpv") if mpv_pid > 1 else None
+        since = mark()
+        reply = rig.zap("pub", name, session=True)
+        handle = (reply or {}).get("relay")
+        handle = handle if isinstance(handle, dict) else {}
+        rig.check("%s: the zap was applied and its reply names the relay's pid and a load number" % label,
+                  (reply or {}).get("ok") is True and relay_pid > 1 and handle.get("pid") == relay_pid
+                  and isinstance(handle.get("load"), int) and handle.get("load", 0) >= 2,
+                  "got %s, relay %r, the relay's pid %d" % (code(reply), handle, relay_pid))
+        gone = mfd is not None and bool(select.select([mfd], [], [], 10.0)[0])
+        died = time.monotonic()
+        rig.check("%s premise: the failed open ended the player" % label, gone)
+        ask = ["player", "refused", "--socket", rig.sock, "--relay-pid", str(handle.get("pid", 0)),
+               "--load", str(handle.get("load", 0))]
+        rc, answer, _ = rig.helper_run(ask)
+        took = time.monotonic() - died
+        count = (answer or {}).get("refused")
+        if want:
+            rig.check("%s: asked once the player had gone, the relay answers that it refused the load" % label,
+                      rc == 0 and isinstance(count, int) and not isinstance(count, bool) and count >= 1,
+                      "exit %d, %r, %.2f s after the player's death" % (rc, answer, took))
+            rig.check("%s: trap logged nothing under /r21/" % label, not hits("trap", "/r21/", since),
+                      "%d request(s)" % len(hits("trap", "/r21/", since)))
+        else:
+            rig.check("%s: asked once the player had gone, the relay answers that it refused nothing" % label,
+                      rc == 0 and count == 0 and not isinstance(count, bool),
+                      "exit %d, %r, %.2f s after the player's death" % (rc, answer, took))
+        print("NOTE %s: the answer came %.2f s after the player's death" % (label, took), flush=True)
+        if mfd is not None:
+            os.close(mfd)
+        rig.settle_gone(5.0)
+        rc, late, _ = rig.helper_run(ask)
+        rig.check("%s: once the relay has gone too, the question answers null and is no error" % label,
+                  rc == 0 and late == {"ok": True, "kind": "player.refused", "refused": None}, "exit %d, %r" % (rc, late))
 
     # R10: the session's proxy variables.
     proxy_env = {"http_proxy": UPROXY, "no_proxy": "*"}

@@ -1170,13 +1170,45 @@ class ControlTest(Fixture):
         relay = Relay(self)
         replies = [relay.ask({"op": "load", "policy": REMOTE}) for _ in range(helper.RELAY_TOKENS_MAX + 1)]
         for reply in replies:
-            self.assertEqual(sorted(reply), ["ok", "port", "token"])
+            self.assertEqual(sorted(reply), ["load", "ok", "port", "token"])
             self.assertRegex(reply["token"], r"\A[0-9a-f]{32}\Z")
             self.assertEqual(reply["port"], relay.port)
         self.assertEqual(len({reply["token"] for reply in replies}), helper.RELAY_TOKENS_MAX + 1)
         self.assertEqual(relay.ask({"op": "status"})["tokens"], helper.RELAY_TOKENS_MAX)
         self.assertEqual(relay.ask({"op": "count", "token": replies[0]["token"]})["error"]["code"], "unknown_token")
         self.assertEqual(relay.ask({"op": "count", "token": replies[1]["token"]}), {"ok": True, "refused": 0, "upstream": 0})
+
+    def test_a_load_is_numbered_in_order_and_its_count_is_asked_by_that_number(self):
+        """D-PLY-66: the number is what a helper reply hands the shell, which
+        holds no token; it answers that load's counts and no other's."""
+        relay = Relay(self)
+        replies = [relay.ask({"op": "load", "policy": REMOTE}) for _ in range(3)]
+        self.assertEqual([reply["load"] for reply in replies], [1, 2, 3])
+        entry = relay.state.find(replies[1]["token"])
+        relay.state.count_refusal(entry)
+        relay.state.count_refusal(entry)
+        relay.state.count_upstream(entry)
+        self.assertEqual(relay.ask({"op": "count", "load": 2}), {"ok": True, "refused": 2, "upstream": 1})
+        self.assertEqual(relay.ask({"op": "count", "load": 2}), relay.ask({"op": "count", "token": replies[1]["token"]}))
+        for other in (1, 3):
+            self.assertEqual(relay.ask({"op": "count", "load": other}), {"ok": True, "refused": 0, "upstream": 0})
+
+    def test_a_count_by_number_is_read_strictly(self):
+        relay = Relay(self)
+        first = relay.ask({"op": "load", "policy": REMOTE})
+        relay.state.count_refusal(relay.state.find(first["token"]))
+        for load in (0, -1, 2, 99, True, "1", 1.5, None, [1], {"n": 1}):
+            with self.subTest(load=load):
+                self.assertEqual(relay.ask({"op": "count", "load": load})["error"]["code"], "unknown_token")
+        refusal = {"ok": False, "error": {"code": "bad_request", "message": helper.RELAY_CONTROL_REFUSAL}}
+        self.assertEqual(relay.ask({"op": "count", "load": 1, "token": first["token"]}), refusal)
+        self.assertEqual(relay.ask({"op": "count", "load": 1, "x": 1}), refusal)
+        self.assertEqual(relay.ask({"op": "count"}), refusal)
+        # a load the table dropped (the newest RELAY_TOKENS_MAX are kept) has no number left to ask
+        for _ in range(helper.RELAY_TOKENS_MAX):
+            relay.ask({"op": "load", "policy": REMOTE})
+        self.assertEqual(relay.ask({"op": "count", "load": 1})["error"]["code"], "unknown_token")
+        self.assertEqual(relay.ask({"op": "count", "load": 2}), {"ok": True, "refused": 0, "upstream": 0})
 
     def test_a_policy_is_read_strictly(self):
         good = [REMOTE, LAN, USER, loopback_relay(34400), {"host": "", "port": None, "loopback": False, "local": True},

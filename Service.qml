@@ -928,6 +928,9 @@ Item {
   property int currentEntryId: 0
   property var entryOwners: Model.keyedMap()
   property var lastEndFile: null            // { entryId, reason, fileError }
+  // D-PLY-66: the "Stream failed" report that waits for the relay's answer
+  // (askRelayThenRaise), null when none does.
+  property var relayAskReport: null
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
   property bool probeRetried: false         // the one ambiguous-probe re-read (4.5)
@@ -4403,6 +4406,34 @@ Item {
     root.notify("outputFailed", { name: String(target.name || ""), output: output })
   }
 
+  // D-PLY-66. A failed open the player's relay refused -- a redirect, an HLS
+  // or DASH open, a name that led it to a local address -- reaches the shell
+  // only as a failed open, so before a "Stream failed" card is told the
+  // relay is asked, once, how many of that load's connections it refused
+  // (`player refused`, a read; the handle came with the load's own reply and
+  // rides the entry ring). The card is told on the answer
+  // (handleRelayAnswer) or when relayAskWatchdog gives up, whichever is
+  // first, and exactly once: a count nobody can read changes nothing and
+  // withholds nothing (F4). Every other report is told at once, as before.
+  function askRelayThenRaise(report) {
+    var argv = Model.playerRefusedArgv(root.socketPath, Model.relayAsk(report))
+    if (argv.length === 0 || relayAskProc.running || root.relayAskReport !== null) {
+      root.raiseDeath(report)
+      return
+    }
+    root.relayAskReport = report
+    root.runHelper(relayAskProc, Model.helperArgv(root.helperPath, argv), {})
+    relayAskWatchdog.restart()
+  }
+
+  function handleRelayAnswer(text) {
+    relayAskWatchdog.stop()
+    var report = root.relayAskReport
+    if (report === null) return
+    root.relayAskReport = null
+    root.raiseDeath(Model.relayRefusedReport(report, text))
+  }
+
   // Model.deathReport's card, raised. One dispatcher for every detector that
   // asks it (the socket's EOF, the first-load window), so a card the model
   // adds is a card every detector tells.
@@ -4528,8 +4559,10 @@ Item {
     // twice (in python and again in Model.pushPlayerLog). A death with no
     // such end-file -- a crash, a kill, a VO abort -- is told and marks
     // nothing, because nothing says the stream caused it. D-PLY-37: nor does
-    // an end-file error that names an output of this machine.
-    root.raiseDeath(report)
+    // an end-file error that names an output of this machine. D-PLY-66: a
+    // "Stream failed" report first asks the relay whether it refused the
+    // load, so the card can say so.
+    root.askRelayThenRaise(report)
   }
 
   function handlePlaylistExit(text) {
@@ -7492,6 +7525,32 @@ Item {
   Connections {
     target: controlProc
     function onExited(exitCode, exitStatus) { root.handleControlResult(controlStdout.text) }
+  }
+
+  Process {
+    // D-PLY-66: `player refused`, the one question asked of the player's
+    // relay after a failed open (askRelayThenRaise). Its own slot, because
+    // the control slot may be busy at the socket's EOF and the relay answers
+    // for about a second only.
+    id: relayAskProc
+    stdout: StdioCollector { id: relayAskStdout; waitForEnd: true }
+    stderr: StdioCollector { id: relayAskStderr; waitForEnd: true }
+  }
+  Connections {
+    target: relayAskProc
+    function onExited(exitCode, exitStatus) { root.handleRelayAnswer(relayAskStdout.text) }
+  }
+  Timer {
+    // D-PLY-66: the bound on the relay question. The card it holds is told
+    // HERE, as the player told it, and the helper is ended; its late exit
+    // then finds nothing waiting.
+    id: relayAskWatchdog
+    interval: Model.RELAY_ASK_TIMEOUT_MS
+    repeat: false
+    onTriggered: {
+      root.handleRelayAnswer("")
+      if (relayAskProc.running) relayAskProc.signal(15)
+    }
   }
 
   Process {

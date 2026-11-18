@@ -130,7 +130,8 @@ export {
   playerTlsVerdict, PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe,
   olderPlayerUnsafe, parsePlayerEvent, endedVerdict, probeVerdict,
   playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  routePlayerEvent, rememberEntryOwner, RELAY_ASK_TIMEOUT_MS, relayHandle,
+  relayAsk, playerRefusedArgv, relayRefusedReport, channelForEnd, endedReport,
   playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport

@@ -44,7 +44,8 @@ from __future__ import annotations
 #     judged by that stream's own rule. The newest RELAY_TOKENS_MAX are kept.
 #   * The control socket speaks one JSON line each way: `load` registers a
 #     policy and answers a token and the port, `status` answers counts and
-#     this relay's port and build, `count` one token's counts. Nothing it
+#     this relay's port and build, `count` one load's counts, asked by its
+#     token or by its number. Nothing it
 #     answers names a host, a path or a userinfo.
 #
 # It holds request lines and headers, credentials included, in memory for
@@ -211,10 +212,14 @@ class RelayToken:
     failed, so a later one is judged against what the first recorded, never
     beside it."""
 
-    def __init__(self, token: str, record: dict[str, Any]) -> None:
+    def __init__(self, token: str, record: dict[str, Any], load: int = 0) -> None:
         import threading
         self.token = token
         self.record = record
+        # D-PLY-66: this relay's number for the load, 1 upward, which the
+        # helper's reply carries so the shell can ask this load's count once
+        # the player has gone. Not a credential: it opens nothing.
+        self.load = load
         self.user = record.get("origin") == ORIGIN_USER
         self.destination = RelayTypedPolicy(record) if self.user else None
         self.lock = threading.Lock()
@@ -371,17 +376,35 @@ class RelayState:
         self.controls = 0
         self.upstream = 0
         self.refused = 0
+        self.loads = 0
 
-    def register(self, record: dict[str, Any]) -> str:
-        """A new token for one load; the oldest is dropped past
-        RELAY_TOKENS_MAX. A token is never revoked early otherwise: each
-        carries its own load's rule."""
+    def enter(self, record: dict[str, Any]) -> RelayToken:
+        """A new entry for one load, numbered in the order the loads were
+        registered (D-PLY-66); the oldest is dropped past RELAY_TOKENS_MAX.
+        A token is never revoked early otherwise: each carries its own
+        load's rule."""
         import secrets
         token = secrets.token_hex(16)
         with self.lock:
-            self.tokens.append(RelayToken(token, record))
+            self.loads += 1
+            entry = RelayToken(token, record, self.loads)
+            self.tokens.append(entry)
             del self.tokens[:-RELAY_TOKENS_MAX]
-        return token
+        return entry
+
+    def register(self, record: dict[str, Any]) -> str:
+        """A new token for one load (enter)."""
+        return self.enter(record).token
+
+    def find_load(self, load: Any) -> RelayToken | None:
+        """The live entry whose load number is `load`, or None (D-PLY-66)."""
+        if not isinstance(load, int) or isinstance(load, bool) or load <= 0:
+            return None
+        with self.lock:
+            for entry in self.tokens:
+                if entry.load == load:
+                    return entry
+        return None
 
     def find(self, token: Any) -> RelayToken | None:
         """The live entry whose token is `token`, compared in constant time
@@ -1076,9 +1099,12 @@ def relay_control_error(code: str) -> dict[str, Any]:
 
 def relay_control_answer(state: RelayState, text: bytes) -> dict[str, Any]:
     """The answer to one control line: `{"op":"status"}`,
-    `{"op":"load","policy":{...}}` (relay_policy_record) -> a token and the
-    port, `{"op":"count","token":...}` -> that token's counts. Anything else,
-    an unknown key included, is refused with one fixed sentence."""
+    `{"op":"load","policy":{...}}` (relay_policy_record) -> a token, the
+    port and the load's number, `{"op":"count","token":...}` -> that token's
+    counts, `{"op":"count","load":N}` -> the counts of the load with that
+    number (D-PLY-66: what the shell asks after a failed open, holding no
+    token). Anything else, an unknown key included, is refused with one
+    fixed sentence."""
     try:
         request = json_decode(text.decode("utf-8"))
     except (UnicodeError, ValueError):
@@ -1092,9 +1118,10 @@ def relay_control_answer(state: RelayState, text: bytes) -> dict[str, Any]:
         record = relay_policy_record(request.get("policy"))
         if record is None:
             return relay_control_error("bad_policy")
-        return {"ok": True, "token": state.register(record), "port": state.port}
-    if op == "count" and set(request) == {"op", "token"}:
-        entry = state.find(request.get("token"))
+        made = state.enter(record)
+        return {"ok": True, "token": made.token, "port": state.port, "load": made.load}
+    if op == "count" and set(request) in ({"op", "token"}, {"op", "load"}):
+        entry = state.find(request.get("token")) if "token" in request else state.find_load(request.get("load"))
         if entry is None:
             return relay_control_error("unknown_token")
         with state.lock:

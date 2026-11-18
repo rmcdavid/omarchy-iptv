@@ -1145,8 +1145,10 @@ carry channel ids — most do — are not affected at all.
   when the plugin checks it and another a moment later can take the
   player to this computer or your local network: the connection is
   refused, and the channel fails (when it is the channel that starts the
-  player, its failure card says `Refused a local address`; as a change of
-  channel, it fails like a stream that would not open). Secure (`https`)
+  player or is a change of channel, its failure card says `Refused a local
+  address`; if the plugin cannot ask the relay in the second after the
+  player closes, a change of channel fails like a stream that would not
+  open). Secure (`https`)
   streams are still checked end to end: the relay passes their encrypted
   bytes through and the player checks the server's certificate as before.
   `rtmp`, `rtsp` and `srt` channels from such a playlist, which never go

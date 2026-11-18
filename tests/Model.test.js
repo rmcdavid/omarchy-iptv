@@ -18293,6 +18293,117 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + Model.SEP + "Failed to open 127.0.0.1."]],
       [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + Model.SEP + "loading failed"]]])
 
+  // ---- D-PLY-66 (2026-11-18): a failed open the player's relay refused ----
+  //
+  // The model's half is called for real; the service's half runs Service.qml's
+  // own handleControlResult (the play reply), handlePlayerGone (the socket's
+  // EOF), handleRelayAnswer (the helper's exit) and relayAskWatchdog's own
+  // onTriggered. The relay question's process does not run here: its command
+  // is read as the helper would parse it, and its reply is the shipping
+  // helper's shape (tests/test_relay_player.py pins that shape).
+  {
+    const HANDLE = { pid: 4243, load: 2 }
+    const failedReport = target => M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "error", fileError: "loading failed" },
+      owners: M.rememberEntryOwner(M.keyedMap(), 3, target), nowPlaying: { id: "t:x", name: "X" }, entryId: 3, tail: [] })
+    const answer = n => JSON.stringify({ ok: true, kind: "player.refused", refused: n }) + "\n"
+    const LOCAL_REASON = M.statusReason({ ok: false, kind: "player.start", error: { code: "local_address", message: "" } })
+
+    checkCall("D-PLY-66: a relay handle is two whole numbers in range and nothing else -- a pid of 1, a load of 0, a fraction, a string, a boolean (the status reply's `relay`), a missing half are no handle",
+      () => [M.relayHandle(HANDLE), M.relayHandle({ pid: 4243, load: 2, token: "a" })].concat(
+        [{ pid: 1, load: 2 }, { pid: 4243, load: 0 }, { pid: 4243.5, load: 2 }, { pid: "4243", load: 2 }, { pid: 4243, load: "2" }, { pid: 4243 },
+         { load: 2 }, { pid: 4194305, load: 2 }, { pid: -5, load: 2 }, { pid: NaN, load: 2 }, true, false, null, undefined, "x", 7, []].map(M.relayHandle)),
+      [HANDLE, HANDLE].concat(new Array(17).fill(null)))
+
+    checkCall("D-PLY-66: the reply's OWN load carries its handle into the entry ring -- a play reply, a start reply -- and a channel the verb only found on the player (`playing`), a reply without one, and the current channel as the fallback carry none",
+      () => {
+        const own = M.replyTarget({ ok: true, kind: "play", id: "t:x", name: "X", entryId: 3, relay: HANDLE }, null)
+        const found = M.replyTarget({ ok: true, kind: "player.start", id: "t:x", name: "X", relay: HANDLE, playing: { id: "t:y", name: "Y" } }, null)
+        const none = M.replyTarget({ ok: true, kind: "play", id: "t:x", name: "X" }, null)
+        const bad = M.replyTarget({ ok: true, kind: "play", id: "t:x", name: "X", relay: { pid: 1, load: 2 } }, null)
+        const ring = M.rememberEntryOwner(M.keyedMap(), 3, own)
+        return [own, found, none, bad, M.channelForEnd(ring, { entryId: 3 }, null), M.channelForEnd(ring, { entryId: 9 }, { id: "t:x", name: "X", relay: HANDLE })]
+      },
+      [{ id: "t:x", name: "X", relay: HANDLE }, { id: "t:y", name: "Y" }, { id: "t:x", name: "X" }, { id: "t:x", name: "X" },
+       { id: "t:x", name: "X", relay: HANDLE }, { id: "t:x", name: "X" }])
+
+    checkCall("D-PLY-66: only a \"Stream failed\" report whose entry carried a handle is one to ask about -- not one without a handle, not a player that stopped, not an output of this machine, not a report that tells nothing -- and the argv is the two integers after the socket, [] for no handle",
+      () => {
+        const report = failedReport({ id: "t:x", name: "X", relay: HANDLE })
+        return [report.card, M.relayAsk(report), M.relayAsk(failedReport({ id: "t:x", name: "X" })),
+                M.relayAsk(Object.assign({}, report, { card: "playerStopped" })), M.relayAsk(Object.assign({}, report, { card: "outputFailed" })),
+                M.relayAsk(Object.assign({}, report, { notify: false })), M.relayAsk(null),
+                M.playerRefusedArgv("/run/s.sock", HANDLE), M.playerRefusedArgv("/run/s.sock", null), M.playerRefusedArgv("/run/s.sock", { pid: 1, load: 2 })]
+      },
+      ["streamFailed", HANDLE, null, null, null, null, null, ["player", "refused", "--socket", "/run/s.sock", "--relay-pid", "4243", "--load", "2"], [], []])
+
+    checkCall("D-PLY-66: a count above zero gives the report the reason a start's `local_address` refusal shows and changes nothing else; zero, null, a failed or foreign reply, text that is no reply and no output at all leave the report exactly as it was",
+      () => {
+        const report = failedReport({ id: "t:x", name: "X", relay: HANDLE })
+        const told = M.relayRefusedReport(report, answer(1))
+        const same = [answer(0), answer(null), answer(-1), answer("3"), answer(true), "", "not json", "[]",
+                      JSON.stringify({ ok: false, kind: "player.refused", refused: 2, error: { code: "x", message: "y" } }),
+                      JSON.stringify({ ok: true, kind: "player.tracks", refused: 2 })].map(text => M.relayRefusedReport(report, text) === report)
+        const bare = failedReport({ id: "t:x", name: "X" })
+        return [report.reason, told.reason === LOCAL_REASON && LOCAL_REASON !== "", [told.notify, told.mark, told.card, told.output], told.target === report.target,
+                M.relayRefusedReport(report, answer(7)).reason === LOCAL_REASON, same, M.relayRefusedReport(bare, answer(1)) === bare]
+      },
+      ["loading failed", true, [true, true, "streamFailed", ""], true, true, new Array(10).fill(true), true])
+
+    // Through Service.qml.
+    const zapThenFail = relay => {
+      const h = bootPlayer()
+      h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+      h.root.controlKind = "play"
+      h.root.handleControlResult(JSON.stringify(Object.assign({ ok: true, kind: "play", id: "t:x", name: "X", entryId: 3 }, relay ? { relay } : {})) + "\n")
+      h.drain()
+      h.root.lastEndFile = { kind: "end-file", entryId: 3, reason: "error", fileError: "loading failed" }
+      h.root.handlePlayerGone()
+      h.drain()
+      return h
+    }
+    const asked = h => { const p = h.ids.relayAskProc; return p.running ? H.helperView(p.command, p.environment).slice(-7) : null }
+    const deliver = (h, text) => { h.ids.relayAskProc.running = false; h.root.handleRelayAnswer(text); h.drain() }
+    const reasons = h => toasts(h).map(t => t.split(" | ")[0] + " | " + t.split(M.SEP).pop())
+
+    checkCall("D-PLY-66: a zap whose open failed asks the relay BEFORE the card -- one `player refused` with the play reply's two integers, the watchdog armed, nothing told or marked yet -- and a count above zero tells ONE \"Stream failed\" card that says a local address was refused, marked as any stream failure is",
+      () => {
+        const h = zapThenFail(HANDLE)
+        const waiting = [asked(h), h.ids.relayAskWatchdog.restarts, toasts(h).length, Object.keys(h.root.failedAt), h.root.nowPlaying === null,
+                         Object.keys(h.ids.relayAskProc.environment).length]
+        deliver(h, answer(1))
+        return [waiting, reasons(h), Object.keys(h.root.failedAt), h.root.lastFailedId, h.root.lastError === LOCAL_REASON, h.root.relayAskReport === null]
+      },
+      [[["refused", "--socket", bootPlayer().root.socketPath, "--relay-pid", "4243", "--load", "2"], 1, 0, [], true, 0],
+       ["74011 Stream failed | " + LOCAL_REASON], ["t:x"], "t:x", true, true])
+
+    checkCall("D-PLY-66: when the relay counted nothing, cannot say, or the helper printed nothing, the card is the one the player's own ending gives, told once -- and a load whose reply carried no handle is told at once with no question asked",
+      () => [answer(0), answer(null), ""].map(text => { const h = zapThenFail(HANDLE); deliver(h, text); return [reasons(h), Object.keys(h.root.failedAt)] })
+        .concat([(() => { const h = zapThenFail(null); return [reasons(h), Object.keys(h.root.failedAt), asked(h), h.ids.relayAskWatchdog.restarts] })()]),
+      [[["74011 Stream failed | loading failed"], ["t:x"]], [["74011 Stream failed | loading failed"], ["t:x"]], [["74011 Stream failed | loading failed"], ["t:x"]],
+       [["74011 Stream failed | loading failed"], ["t:x"], null, 0]])
+
+    checkCall("D-PLY-66: a relay question that outlives its bound is ended and the card is told THEN, as the player told it, exactly once -- the helper's late exit, even with a count, tells nothing more -- and a second death while a question is out is told at once rather than queued or lost",
+      () => {
+        const h = zapThenFail(HANDLE)
+        const fired = h.fireTimer("relayAskWatchdog")
+        h.drain()
+        const atBound = [fired, reasons(h), h.ids.relayAskProc.signals.slice(), h.root.relayAskReport === null]
+        deliver(h, answer(3))
+        const late = reasons(h)
+        const two = zapThenFail(HANDLE)
+        two.root.nowPlaying = { id: "t:y", name: "Y", group: "", launchedFrom: "", since: 2 }
+        two.root.entryOwners = M.rememberEntryOwner(M.keyedMap(), 4, { id: "t:y", name: "Y", relay: { pid: 4243, load: 3 } })
+        two.root.lastEndFile = { kind: "end-file", entryId: 4, reason: "error", fileError: "loading failed" }
+        two.root.handlePlayerGone()
+        two.drain()
+        const second = reasons(two)
+        deliver(two, answer(1))
+        return [atBound, late, M.RELAY_ASK_TIMEOUT_MS, second, reasons(two)]
+      },
+      [[true, ["74011 Stream failed | loading failed"], [15], true], ["74011 Stream failed | loading failed"], 2500,
+       ["74011 Stream failed | loading failed"], ["74011 Stream failed | loading failed", "74011 Stream failed | " + LOCAL_REASON]])
+  }
+
   checkCall("D-PLY-32: a local refusal still retires the session record (PO-3), so a later reattach that finds no player marks nothing either", () => {
     const h = bootPlayer()
     h.unstub("noteSessionOutcome")

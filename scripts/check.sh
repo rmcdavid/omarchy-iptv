@@ -1411,7 +1411,7 @@ OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 # R15's four, an rtmps channel to 11.0.0.1 whose every connection must be one the relay made for that load's token; red with the
 # per-file proxy emptied for rtmps (a direct connection, as an FFmpeg that
 # stopped handing rtmps's TLS the option would make): 3 of the 4.
-RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-108}
+RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.

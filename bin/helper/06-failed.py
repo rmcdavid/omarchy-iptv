@@ -871,6 +871,11 @@ def cmd_play(args: argparse.Namespace) -> int:
             # Additive, and tied to the additive flags: without --scope /
             # --since the reply is byte-identical to v0.2.1's.
             payload["entryId"] = entry_id
+            # D-PLY-66: the load's relay, for the shell's question when this
+            # entry's open fails after the reply (relay_handle).
+            handle = relay_handle(target)
+            if handle is not None:
+                payload["relay"] = handle
         emit(payload)
         return EXIT_OK
     except HelperError as error:

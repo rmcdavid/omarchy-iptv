@@ -262,6 +262,18 @@ additive field, `relay` (true, false, or null when nothing answered), and
 `player orphan-check`'s gains the reason `relay_gone` (4.5.2's bracket).
 The four public verbs keep their spellings.]**
 
+**[2026-11-18, D-PLY-66: one more verb, a read,
+`player refused --socket S --relay-pid P --load N`.** It asks the relay that
+is process P how many of load N's connections it refused, and answers
+`{"ok":true,"kind":"player.refused","refused":<count or null>}`: null when
+nothing can say, never an error; it needs no player, touches none and
+spawns nothing. P and N come from the load's own reply: the `play` reply
+(with `--scope` or `--since`) and the `player start` and `player restart`
+replies gain one additive field, `relay: {"pid": P, "load": N}`, absent
+when the verb stood down or registered no load. Two integers and never the
+load's token, so they stay on the argv (`Model.playerRefusedArgv`). Section
+20's limits bracket says when the shell asks.]**
+
 **[Amended 2026-11-06, D-PLY-64: `player start`, `player restart` and
 `player probe` take `--owner-token T` beside `--owner-pid`, and
 `player orphan-check` takes it too. T is 32 lowercase hex digits
@@ -4467,6 +4479,16 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   only a start tells, from the relay's count of the first load's refusals
   (decision 19's premise, measured not to hold; the wording is open as
   D-PLY-66).
+  **[2026-11-18, D-PLY-66 fixed, the lead's call under the owner's standing
+  authority of 2026-11-09: the shell asks. The relay numbers each load; the
+  `play`, `player start` and `player restart` replies carry
+  `relay: {pid, load}`, two integers and never the token; at the socket's
+  EOF a "Stream failed" report whose entry carried a handle waits, at most
+  2.5 s, for `player refused --relay-pid P --load N`, a read of the control
+  socket of the relay that is process P, which lingers `RELAY_LINGER_S`
+  after its player. A count above zero makes the card's reason "Refused a
+  local address"; anything else tells the card as the player's ending gave
+  it. Observed on the real player and relay: relay-scenario R21, R21c.]**
 - **The harness**: the windowless arm of tls-scenario starts its own
   players with no relay, so its loads are refused before they are sent
   (F-HARNESS-111). (player-scenario's L7, L8 and L10 asserted the deferral

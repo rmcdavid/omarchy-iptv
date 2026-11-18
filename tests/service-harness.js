@@ -151,6 +151,12 @@ function makeIds(h) {
     // first; a test runs that handler to see how the status branch routes a
     // reply from a damaged helper. Counted like every timer, never run.
     controlWatchdog: timer("controlWatchdog"),
+    // D-PLY-66: the relay question's slot and its bound. The process does
+    // not run: a test delivers its exit through Service.handleRelayAnswer
+    // with the helper's own reply text, and h.fireTimer runs the watchdog's
+    // own onTriggered.
+    relayAskProc: proc("relayAskProc"),
+    relayAskWatchdog: timer("relayAskWatchdog"),
     // D-PLY-30: the player slot's four timers, which handlePlayerResult
     // stops or restarts; a test runs that handler to see what a refused
     // `player start` tells the user. Counted like every timer; the watchdog

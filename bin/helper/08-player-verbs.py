@@ -1077,7 +1077,22 @@ def relay_register(sock_path: str, target: dict[str, Any], peer: int) -> tuple[s
         raise HelperError("not_running", RELAY_REGISTER_REFUSAL, outdated=True)
     target["relayToken"] = token
     target["relayPid"] = int(reply.get("_pid") or 0)
+    load = reply.get("load")
+    target["relayLoad"] = load if isinstance(load, int) and not isinstance(load, bool) and load > 0 else 0
     return relay_proxy_url(token, port), port
+
+
+def relay_handle(target: dict[str, Any]) -> dict[str, int] | None:
+    """What a reply says of the load's relay (D-PLY-66): the relay's pid and
+    its number for the load, two integers and nothing of the token, or None
+    when the load registered none. The shell hands them back to
+    `player refused` when the load's open fails after this reply."""
+    pid, load = target.get("relayPid"), target.get("relayLoad")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        return None
+    if not isinstance(load, int) or isinstance(load, bool) or load <= 0:
+        return None
+    return {"pid": pid, "load": load}
 
 
 def relay_refused_count(sock_path: str, target: dict[str, Any]) -> int:
@@ -1921,6 +1936,12 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         reply["replaced"] = int(outcome["replaced"])
     if paused and newer is None:
         reply["paused"] = True
+    # D-PLY-66, additive: this load's relay, for the shell's question when
+    # the entry's open fails after this reply. Absent when the verb stood
+    # down, because the entry it names is then another verb's load.
+    handle = relay_handle(target) if newer is None else None
+    if handle is not None:
+        reply["relay"] = handle
     emit(reply)
     return EXIT_OK
 
@@ -2342,6 +2363,30 @@ def track_choice(text: str | None) -> int | str | None:
     if value.isascii() and value.isdigit():
         return int(value)
     raise HelperError("bad_track", "a track is a number or 'no'")
+
+
+def player_refused(args: argparse.Namespace) -> int:
+    """`player refused --relay-pid P --load N`: how many of one load's
+    connections its relay refused (D-PLY-66). A read of the relay's control
+    socket and nothing else: no player is needed (a failed open under
+    --idle=once has ended it; the relay answers RELAY_LINGER_S more), none
+    is touched, and nothing is spawned. `P` and `N` are what the load's own
+    reply carried (relay_handle). The relay must BE process `P`
+    (relay_request's `relay_pid`), so a relay a later start bound on the
+    same path never answers for this one. `refused` is the count, or null
+    when nothing can say: no relay, another process, a load the relay no
+    longer keeps, no answer inside RELAY_IPC_S. Never an error: the shell
+    reads null as "tell the failure as the player told it"."""
+    sock = socket_path(args.socket)
+    refused = None
+    pid, load = args.relay_pid, args.load
+    if isinstance(pid, int) and pid > 1 and isinstance(load, int) and load > 0:
+        reply = relay_request(sock, {"op": "count", "load": load}, 0, relay_pid=pid)
+        value = reply.get("refused") if isinstance(reply, dict) and reply.get("ok") is True else None
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            refused = value
+    emit({"ok": True, "kind": "player.refused", "refused": refused})
+    return EXIT_OK
 
 
 def player_tracks(args: argparse.Namespace) -> int:
@@ -2929,6 +2974,8 @@ def cmd_player(args: argparse.Namespace) -> int:
         return player_seek(args)
     if action == "relay":
         return player_relay(args)
+    if action == "refused":
+        return player_refused(args)
     return player_orphan_check(args)
 
 

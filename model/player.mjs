@@ -8,7 +8,7 @@ import {
   str, asList, keyedMap, ownKeyValue, trimEndSpace
 } from "./text.mjs"
 import {
-  parseJsonObject
+  parseJsonObject, statusReason
 } from "./settings.mjs"
 import {
   parseRewind
@@ -407,7 +407,14 @@ function replyTarget(status, nowPlaying) {
   var doc = status && typeof status === "object" ? status : {}
   var left = doc.playing && typeof doc.playing === "object" ? doc.playing : null
   if (left && str(left.id) !== "") return { id: str(left.id), name: str(left.name) }
-  if (str(doc.id) !== "") return { id: str(doc.id), name: str(doc.name) }
+  if (str(doc.id) !== "") {
+    // D-PLY-66: the reply's own load carries its relay's handle; a channel
+    // the verb only found on the player (`playing`, above) has none.
+    var own = { id: str(doc.id), name: str(doc.name) }
+    var handle = relayHandle(doc.relay)
+    if (handle) own.relay = handle
+    return own
+  }
   if (nowPlaying && str(nowPlaying.id) !== "") return { id: str(nowPlaying.id), name: str(nowPlaying.name) }
   return null
 }
@@ -1163,7 +1170,71 @@ function rememberEntryOwner(owners, entryId, target) {
   var keys = Object.keys(map)
   for (var i = Math.max(0, keys.length - (PLAYER_ENTRY_OWNERS - 1)); i < keys.length; i++) out[keys[i]] = map[keys[i]]
   out[String(id)] = { id: str(target.id), name: str(target.name) }
+  var handle = relayHandle(target.relay)
+  if (handle) out[String(id)].relay = handle
   return out
+}
+
+// ---- D-PLY-66 (2026-11-18): a failed open the player's relay refused
+//
+// The relay (D-SINK-102) answers a connection it refuses -- a redirect, an
+// HLS or DASH playlist, segment or key, a name that answered it a local
+// address -- with a 403 the player reports only as a failed open (measured
+// on the relay's branch, 2026-11-15), so a zap read "Failed to open <the
+// channel's own host>" or, for HLS and DASH, the playlist-or-web-page
+// sentence, which names the wrong cause. A start already asks the relay
+// (the helper's relay_refused_count) and answers `local_address`. For every
+// later failure the shell asks: the helper's replies carry the load's
+// handle, `relay: { pid, load }` -- the relay's pid and its number for the
+// load, two integers, no token -- it rides the entry-ownership ring beside
+// the channel, and at the socket's EOF the service asks
+// `player refused` once before it tells a "Stream failed" card. A count
+// above zero makes the card's reason the one a start's refusal shows;
+// anything else -- no handle, no answer, zero -- leaves the report as it was.
+// The lead's calls under the owner's standing authority of 2026-11-09:
+// option (c) of the row; the card waits for the answer at most
+// RELAY_ASK_TIMEOUT_MS; a count that cannot be read never changes or
+// withholds a card.
+var RELAY_ASK_TIMEOUT_MS = 2500
+
+// { pid, load } from a reply's `relay` or an owner's, null unless both are
+// whole numbers in range (a pid above 1, a load above 0).
+function relayHandle(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var pid = raw.pid, load = raw.load
+  if (typeof pid !== "number" || typeof load !== "number") return null
+  if (Math.floor(pid) !== pid || Math.floor(load) !== load) return null
+  if (!(pid > 1 && pid <= 4194304) || !(load > 0 && load <= 9007199254740991)) return null
+  return { pid: pid, load: load }
+}
+
+// Whether a death report is one to ask the relay about, and with what: the
+// handle of the failed entry's own load for a "Stream failed" card, null for
+// every other report (nothing told, an output of this machine, a player that
+// stopped) and for an entry whose load carried none.
+function relayAsk(report) {
+  if (!report || report.notify !== true || report.card !== "streamFailed" || !report.target) return null
+  return relayHandle(report.target.relay)
+}
+
+// `player refused` for a handle; [] for none, so the caller starts nothing.
+function playerRefusedArgv(socket, handle) {
+  var held = relayHandle(handle)
+  if (!held) return []
+  return ["player", "refused", "--socket", str(socket), "--relay-pid", String(held.pid), "--load", String(held.load)]
+}
+
+// The report to tell once the helper has answered (or not): the same report,
+// with the reason a start's `local_address` refusal shows when the relay
+// counted at least one refused connection for the load. `text` is the
+// helper's stdout; "" (killed, no output) changes nothing.
+function relayRefusedReport(report, text) {
+  if (!relayAsk(report)) return report
+  var doc = parseJsonObject(str(text))
+  if (!doc || doc.ok !== true || doc.kind !== "player.refused") return report
+  if (typeof doc.refused !== "number" || !(doc.refused > 0)) return report
+  var reason = statusReason({ ok: false, kind: "player.start", error: { code: "local_address", message: "" } })
+  return { notify: true, mark: report.mark, card: report.card, target: report.target, reason: reason, output: report.output }
 }
 
 // Which channel a load belonged to. The gate FAILS OPEN (F4): an unknown,
@@ -1390,7 +1461,8 @@ export {
   PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, olderPlayerUnsafe,
   parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
   playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  routePlayerEvent, rememberEntryOwner, RELAY_ASK_TIMEOUT_MS, relayHandle,
+  relayAsk, playerRefusedArgv, relayRefusedReport, channelForEnd, endedReport,
   PLAYER_WARNING_RE, playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry

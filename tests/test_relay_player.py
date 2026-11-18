@@ -695,12 +695,12 @@ class LoadRegistrationTest(MpvTestCase):
         server = self.start()
         relay = self.relay_for(self.sock)
         seen = []
-        real = relay.state.register
+        real = relay.state.enter
 
-        def register(record):
+        def enter(record):
             seen.append((len(server.commands), dict(record)))
             return real(record)
-        relay.state.register = register
+        relay.state.enter = enter
         code, _, _, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         # nothing had been said to the player when the load was registered
@@ -1124,6 +1124,87 @@ class FirstLoadRefusalTest(MpvTestCase):
     def test_a_first_load_that_failed_with_nothing_refused_answers_as_before(self):
         code, payload, _, stderr = self.start_verb(False)
         self.assertEqual((code, payload["ok"], payload["firstLoad"]["state"]), (0, True, "failed"), stderr)
+
+
+# ---- the question after a later failed open (D-PLY-66) ------------------------
+
+class RefusedVerbTest(FirstLoadRefusalTest):
+    """D-PLY-66: a load's reply carries its relay's handle -- the relay's pid
+    and its number for the load, no token -- and `player refused` answers
+    that load's count from the relay itself, for the shell to ask when the
+    load's open fails after the reply. The relay is the FakeRelay, the real
+    relay's code in this process, so its pid is this process's."""
+
+    def refused(self, pid, load, sock=None):
+        code, payload, stdout, stderr = run("player", "refused", "--socket", sock or self.sock,
+                                            "--relay-pid", str(pid), "--load", str(load))
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(sorted(payload), ["kind", "ok", "refused"])
+        self.assertEqual((payload["ok"], payload["kind"]), (True, "player.refused"))
+        return payload["refused"]
+
+    def refuse_one(self, relay, token):
+        def literal_only(name, port):
+            if name != "127.0.0.2":
+                raise AssertionError("unexpected lookup of %r" % (name,))
+            return [test_stream_lookup.answer(name, port)]
+        with mock.patch.object(helper, "stream_resolve", literal_only):
+            reply = proxied_request(relay.port, token, "http://127.0.0.2:9/x.ts")
+        self.assertTrue(reply.startswith(b"HTTP/1.1 403 "), reply)
+
+    def test_a_start_reply_carries_the_handle_and_the_verb_counts_that_loads_refusals(self):
+        code, payload, stdout, stderr = self.start_verb(False)
+        self.assertEqual(code, 0, stderr)
+        relay = self.relay_for(self.sock)
+        self.assertEqual(payload["relay"], {"pid": os.getpid(), "load": 1})
+        self.assertNotIn(relay.tokens()[-1], stdout + stderr)
+        self.assertEqual(self.refused(os.getpid(), 1), 0)
+        # what the player does after the reply: a connection the relay refuses
+        self.refuse_one(relay, relay.tokens()[-1])
+        self.assertEqual(self.refused(os.getpid(), 1), 1)
+        self.refuse_one(relay, relay.tokens()[-1])
+        self.assertEqual(self.refused(os.getpid(), 1), 2)
+
+    def test_each_load_is_counted_on_its_own_number(self):
+        self.start_verb(False)
+        relay = self.relay_for(self.sock)
+        second = relay.state.enter(dict(relay.policies()[-1]))
+        self.assertEqual(second.load, 2)
+        self.refuse_one(relay, second.token)
+        self.assertEqual((self.refused(os.getpid(), 1), self.refused(os.getpid(), 2)), (0, 1))
+
+    def test_nothing_that_cannot_say_is_an_error_or_a_count(self):
+        self.start_verb(False)
+        relay = self.relay_for(self.sock)
+        self.refuse_one(relay, relay.tokens()[-1])
+        # another process's pid (compared, never signalled), a load the relay
+        # does not keep, numbers out of range, and no relay at all
+        for pid, load in ((os.getpid() + 1, 1), (os.getppid(), 1), (os.getpid(), 2), (os.getpid(), 0),
+                          (os.getpid(), -1), (1, 1), (0, 1), (-7, 1)):
+            with self.subTest(pid=pid, load=load):
+                self.assertIsNone(self.refused(pid, load))
+        empty = tempfile.mkdtemp(prefix="omarchy-iptv-refused-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, empty, True)
+        self.assertIsNone(self.refused(os.getpid(), 1, sock=os.path.join(empty, "run", "mpv.sock")))
+        self.assertEqual(self.refused(os.getpid(), 1), 1)
+
+    def test_a_zap_reply_carries_its_own_loads_handle_only_with_the_session_flags(self):
+        server = self.start(props=current_props(self.sock, relay_port=self.relay_for(self.sock).port),
+                            cmdline=PINNED_CMDLINE)
+        self.identity(self.sock)
+        root = tempfile.mkdtemp(prefix="omarchy-iptv-zap-")
+        self.addCleanup(shutil.rmtree, root, True)
+        ids = test_stream_lookup.write_cache(root, ["http://93.184.216.34/live/1.ts"], test_stream_lookup.REMOTE)
+        zap = lambda *more: run("play", "--id", ids[0], "--cache-dir", root, "--socket", self.sock, "--ipc-timeout", "1", *more)
+        code, bare, _, stderr = zap()
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("relay", bare)
+        code, first, _, stderr = zap("--scope", "all", "--since", "5")
+        self.assertEqual(code, 0, stderr)
+        code, second, stdout, stderr = zap("--scope", "all", "--since", "6")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((first["relay"], second["relay"]), ({"pid": os.getpid(), "load": 2}, {"pid": os.getpid(), "load": 3}))
+        self.assertNotIn(self.relay_for(self.sock).tokens()[-1], stdout + stderr)
 
 
 # ---- the probe and the orphan check -----------------------------------------
