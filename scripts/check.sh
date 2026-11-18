@@ -1307,7 +1307,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3858}
 # 93bd2cf, 16 errors on fdba6be (RuleOrderTest green there, which it pins),
 # and 10 single-decision helper mutants red (QA-RESULTS "F-HARNESS-73: the
 # parse margin (2026-11-18)"); the suite counts 2769.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2769}
+# 2026-11-18, lane-dl30 (D-LOGO-30, the lead's call under the owner's
+# standing authority of 2026-11-09): 2769 -> 2772 -- tests/test_logo_readings.py
+# (3: logo_is_web over a literal table, and the parse's kept logos and
+# over-length count); LogoSchemeShortcutTest rewritten to both readings
+# keeps its 5. 7 of the two files' 20 tests red on 103ed5f and seven
+# single-decision helper mutants red (QA-RESULTS "D-LOGO-30: one reading of
+# a logo's scheme (2026-11-18)"); the suite counts 2772.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2772}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

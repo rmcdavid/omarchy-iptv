@@ -4,14 +4,18 @@ one answer.
 Three pieces of repeated work in the per-channel path are done once, and each
 is held here to the work it stands in front of:
 
-  logo_is_web   make_channel's logo test, `stream_scheme(logo) in ("http",
-                "https")`, answered from the text's head where urlsplit can
-                read it no other way (an ASCII logo opening above U+0020
-                with no TAB, CR, LF, `[` or `]`). Held equal to the urlsplit
-                reading over every ASCII character at every place the
-                reading turns on, every ASCII pair at the head, every code
-                point in the authority, and random texts of the characters
-                the reading tells apart.
+  logo_is_web   make_channel's logo test, answered from the text's head
+                where urlsplit can read it no other way (an ASCII logo
+                opening above U+0020 with no TAB, CR, LF, `[` or `]`).
+                Since D-LOGO-30 (2026-11-18) the test is that BOTH
+                readings of the scheme say http or https: urlsplit's
+                (stream_scheme) and the survey's and fetch's as written
+                (logo_scheme). Held equal to the two together, and the head
+                answer to EACH reading wherever the head answered, over
+                every ASCII character at every place the readings turn on,
+                every ASCII pair at the head, every code point in the
+                authority, and random texts of the characters the readings
+                tell apart.
   entry memo    stream_entry_refusal's rules after the listening one, kept
                 within one parse by (scheme, netloc) for every scheme but udp
                 and rtp, whose query names hosts. Held equal to the answer
@@ -48,8 +52,21 @@ helper = load_helper()
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+WEB = ("http", "https")
+# The two readings as the helper defines them, kept before any test replaces
+# them on the module (setUp below).
+STREAM_SCHEME = helper.stream_scheme
+LOGO_SCHEME = helper.logo_scheme
+
+
 def urlsplit_reading(logo):
-    return helper.stream_scheme(logo) in ("http", "https")
+    return STREAM_SCHEME(logo) in WEB
+
+
+def written_reading(logo):
+    """The scheme as the logo survey, its slot and the fetch read it
+    (logo_scheme, D-SINK-112): the text before the first `:`, as written."""
+    return LOGO_SCHEME(logo) in WEB
 
 
 # The characters urlsplit's scheme reading and its refusals turn on, and
@@ -64,8 +81,38 @@ TEMPLATES = ["http://l.test/a.png", "https://l.test:8080/a.png", "HTTP:", "Https
 
 
 class LogoSchemeShortcutTest(unittest.TestCase):
+    """logo_is_web against the two readings it joins (D-LOGO-30). Each call
+    is watched: when neither reading was asked, the head answered, and then
+    the answer must be EACH reading's, not only the two together's -- the
+    proof that the shortcut answers the conjunction over its whole class."""
+
+    def setUp(self):
+        self.asked = []
+        self.head_answers = 0
+
+        def stream(url):
+            self.asked.append(url)
+            return STREAM_SCHEME(url)
+
+        def written(raw):
+            self.asked.append(raw)
+            return LOGO_SCHEME(raw)
+
+        helper.stream_scheme = stream
+        helper.logo_scheme = written
+
+    def tearDown(self):
+        helper.stream_scheme = STREAM_SCHEME
+        helper.logo_scheme = LOGO_SCHEME
+
     def check(self, logo):
-        self.assertEqual(helper.logo_is_web(logo), urlsplit_reading(logo), ascii(logo))
+        del self.asked[:]
+        answer = helper.logo_is_web(logo)
+        split, written = urlsplit_reading(logo), written_reading(logo)
+        self.assertEqual(answer, split and written, ascii(logo))
+        if not self.asked:
+            self.head_answers += 1
+            self.assertEqual((split, written), (answer, answer), ascii(logo))
 
     def test_every_ascii_character_at_every_place(self):
         for template in TEMPLATES:
@@ -74,6 +121,7 @@ class LogoSchemeShortcutTest(unittest.TestCase):
                     c = chr(code)
                     self.check(template[:i] + c + template[i:])
                     self.check(template[:i] + c + template[i + 1:])
+        self.assertGreater(self.head_answers, 10000)
 
     def test_every_ascii_pair_at_the_head(self):
         for a in range(128):
@@ -81,6 +129,7 @@ class LogoSchemeShortcutTest(unittest.TestCase):
                 head = chr(a) + chr(b)
                 for tail in ("", "ttp://l.test/x", "tps://x", "://x", "p:", ":"):
                     self.check(head + tail)
+        self.assertGreater(self.head_answers, 50000)
 
     def test_every_code_point_in_the_authority_and_at_the_head(self):
         # Every BMP code point (as the D-PERF-13 sweeps take them) and one in
@@ -93,31 +142,22 @@ class LogoSchemeShortcutTest(unittest.TestCase):
             if code < 0x3400 or code % 61 == 0:
                 self.check(c + "http://l.test")
                 self.check("http" + c + "://l.test")
+        self.assertGreater(self.head_answers, 100)
 
     def test_random_texts(self):
         rng = random.Random(73)
         for _ in range(60000):
             self.check("".join(rng.choice(TURNING) for _ in range(rng.randint(0, 12))))
+        self.assertGreater(self.head_answers, 1000)
 
     def test_the_shortcut_is_taken_where_it_can_answer(self):
-        calls = []
-        slow = helper.stream_scheme
-
-        def counting(url):
-            calls.append(url)
-            return slow(url)
-
-        helper.stream_scheme = counting
-        try:
-            for logo, asked in (("http://l.test/a.png", False), ("HTTPS://l.test/a.png", False),
-                                ("ftp://l.test/a.png", False), ("http://[::1]/a.png", True),
-                                ("ht\ttp://l.test/a.png", True), ("\x01http://l.test", True),
-                                ("http://l" + chr(0xff0f) + "x.test/a.png", True)):
-                calls.clear()
-                helper.logo_is_web(logo)
-                self.assertEqual(bool(calls), asked, ascii(logo))
-        finally:
-            helper.stream_scheme = slow
+        for logo, asked in (("http://l.test/a.png", False), ("HTTPS://l.test/a.png", False),
+                            ("ftp://l.test/a.png", False), ("http://[::1]/a.png", True),
+                            ("ht\ttp://l.test/a.png", True), ("\x01http://l.test", True),
+                            ("http://l" + chr(0xff0f) + "x.test/a.png", True)):
+            del self.asked[:]
+            helper.logo_is_web(logo)
+            self.assertEqual(bool(self.asked), asked, ascii(logo))
 
 
 # Every kind of playlist the parse is handed (playlist_source's), and none.
