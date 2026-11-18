@@ -1651,7 +1651,13 @@ the seq rule then refuses as superseded, so the stop cannot touch the player it
 reports. Without that, a play made after a stop with no EOF coming (nothing
 attached, or the start superseded the stop) held `stopping` for the whole
 backstop, and through it a burst's last intent was dropped, the repair and
-rewind presses refused and the new player's death read as the stop's.]**
+rewind presses refused and the new player's death read as the stop's.
+D-PLY-43, the same day: the start's `busy`/`no_socket` retry (4.4 step 12), its Timer and
+`drainPendingPlay` refused while `stopping`, so a play made after a stop that held the lock
+past the start's own lock wait was told "The player is busy" and a queued last intent was
+dropped. They gate on `userStopped` now, as the refusal tail does (D-PLY-41), and take
+`Model.playFork`'s branch, which is a start while `stopping`: the rule above, kept by every
+path that sends a play, not by `play()` alone.]**
 
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket. That

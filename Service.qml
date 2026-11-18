@@ -3366,13 +3366,26 @@ Item {
   // The last target of a zap burst, applied once the channel is free. It
   // goes over IPC when the player is up and starts one when it is not; both
   // are the same user intent, so neither may be dropped.
+  // D-PLY-43's sibling (rule 15): the same gate as the retry. It returned
+  // while `stopping`, so a zap issued before a stop whose reply came after
+  // it drained the queued last intent of a play made after the stop -- and
+  // dropped it, the guide naming a channel the player never got. The user's
+  // word gates it now, and the play fork's own branch (Model.playFork) sends
+  // it to a start while the stop settles, never to the dying socket; a
+  // start still in flight queues it again (startPlayer).
   function drainPendingPlay() {
     var id = root.pendingPlayId
     root.pendingPlayId = ""
-    if (id === "" || root.stopping || root.userStopped || !root.nowPlaying) return
-    if (root.zapReady) {
-      if (!controlProc.running) root.runControl("play", root.playArgs(id))
-      else root.pendingPlayId = id
+    if (id === "" || root.userStopped || !root.nowPlaying) return
+    var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
+                                stopping: root.stopping, controlBusy: controlProc.running,
+                                restartOwed: root.olderRestartOwed })
+    if (fork === "zap") {
+      root.runControl("play", root.playArgs(id))
+      return
+    }
+    if (fork === "queue") {
+      root.pendingPlayId = id
       return
     }
     var channel = root.channelIndex[id]
@@ -3647,9 +3660,18 @@ Item {
       return
     }
     if ((code === "busy" || code === "no_socket") && root.nowPlaying && !root.userStopped
-        && !root.stopping && root.playRetries < root.playRetryMax) {
+        && root.playRetries < root.playRetryMax) {
       // Another launcher holds the lock, or the spawn did not bind in time:
       // the existing backoff, not a second spawn (4.4 step 12).
+      // D-PLY-43: gated on the user's word, as the refusal tail below is
+      // (D-PLY-41), and no longer on `stopping`: a stop still settling
+      // belongs to the player BEFORE this play, and it is the stop that
+      // holds the lock. With it in the gate a play made in the seconds after
+      // a stop whose ladder outlasted the start's own lock wait was told
+      // "The player is busy" instead of retried. The retries' lock waits
+      // outlast the stop's own bound (the node suite holds the arithmetic),
+      // and the retry starts, never zaps, while the stop settles
+      // (playRetryTimer).
       root.playRetries += 1
       playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
       playRetryTimer.restart()
@@ -7014,12 +7036,24 @@ Item {
     id: playRetryTimer
     interval: root.playRetryBaseMs
     repeat: false
+    // D-PLY-43: a retry made while an earlier stop settles is the user's
+    // play (play() cleared `userStopped`), so it runs; what it may not do is
+    // zap the socket that stop is tearing down, so the branch is the play
+    // fork's own (Model.playFork): a start while `stopping`, which the lock
+    // and the seq rule order after the stop. A stop pressed meanwhile stops
+    // this Timer, clears `nowPlaying` and sets `userStopped` (D-LIVE-15).
     onTriggered: {
-      if (root.userStopped || root.stopping || !root.nowPlaying) return
+      if (root.userStopped || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
-      if (root.zapReady) {
-        if (controlProc.running) root.pendingPlayId = id
-        else root.runControl("play", root.playArgs(id))
+      var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
+                                  stopping: root.stopping, controlBusy: controlProc.running,
+                                  restartOwed: root.olderRestartOwed })
+      if (fork === "queue") {
+        root.pendingPlayId = id
+        return
+      }
+      if (fork === "zap") {
+        root.runControl("play", root.playArgs(id))
         return
       }
       var channel = root.channelIndex[id]

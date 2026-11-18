@@ -734,7 +734,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # leaving it standing; 3 of 3861 red on 71700f4 and six single-decision
 # mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
 # (2026-11-18)"); the suite runs 3861.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3861}
+# 2026-11-18, lane-plyb (D-PLY-43): 3861 -> 3867 -- a play inside a settling
+# stop retried on busy and no_socket, the retry starting and never zapping,
+# D-LIVE-15 for a stop pressed while it is pending or its start runs, the
+# queued intent drained to a start, and the retries' lock waits against the
+# stop's bound; 5 of 3867 red on 775ab7b and six single-decision mutants red
+# (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing (2026-11-18)");
+# the suite runs 3867.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3867}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
