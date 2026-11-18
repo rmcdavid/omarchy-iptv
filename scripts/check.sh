@@ -129,6 +129,10 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# The harness predicates, for qa_display_reachable (F-HARNESS-105). Sourcing
+# the file defines functions and touches nothing else (its own header).
+# shellcheck source=scripts/qa-lib.sh
+. "$ROOT/scripts/qa-lib.sh"
 # E4: QMLROOT was a fixed /tmp/qmlroot and the mkdir and both ln statuses were
 # discarded. If that directory exists owned by someone else the symlink
 # refresh fails silently and qmllint resolves qs.Commons / qs.Ui against
@@ -1861,7 +1865,12 @@ if [[ -x "$QT_BIN/qmltestrunner" ]]; then
   # the same and are fixed in their own files.)
   qml_home="$CHECK_TMP/qml-home"
   mkdir -p -m 700 "$qml_home"
-  if env -u MPV_HOME -u XCOMPOSEFILE HOME="$qml_home" XDG_CONFIG_HOME="$qml_home/.config" \
+  # F-HARNESS-105: with no display reachable (a headless lane's run), the
+  # session's gtk3 platform theme ends the runner with status 1 before any
+  # test function runs; drop the theme then, and only then.
+  qml_theme_unset=()
+  qa_display_reachable || qml_theme_unset=(-u QT_QPA_PLATFORMTHEME)
+  if env -u MPV_HOME -u XCOMPOSEFILE "${qml_theme_unset[@]}" HOME="$qml_home" XDG_CONFIG_HOME="$qml_home/.config" \
        XDG_CACHE_HOME="$qml_home/.cache" XDG_DATA_HOME="$qml_home/.local/share" \
        XDG_STATE_HOME="$qml_home/.local/state" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
        "$QT_BIN/qmltestrunner" -input "$ROOT/tests/Model.spec.qml" >"$qml_log" 2>&1; then

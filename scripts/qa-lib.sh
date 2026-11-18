@@ -1244,6 +1244,47 @@ qa_unlocked() {
   (( rc == 1 ))
 }
 
+# ------------------------------------------------------- offscreen Qt steps
+
+# qa_display_reachable
+# F-HARNESS-105 (2026-11-18). An offscreen Qt step still loads the platform
+# theme QT_QPA_PLATFORMTHEME names, and the Omarchy session sets it to gtk3
+# (/usr/share/omarchy/default/hypr/envs.lua). That theme runs gtk_init, and
+# GTK, finding no display, exits the whole process with status 1 before any
+# QML runs (measured 2026-11-09 on qt6-base 6.12.0-3: rc 1 in 3 of 3 for qml
+# and for qmltestrunner with the variable, rc 0 in 3 of 3 without). So the
+# gate's offscreen steps, run headless the way a caged lane must run them,
+# went red with nothing wrong in the tree. A step asks this and drops the
+# theme only when no display is reachable; with one reachable it keeps the
+# theme and loads exactly what it always loaded, so a run on the desk is
+# unchanged.
+#     0  a display GTK could open is reachable, or this cannot tell
+#     1  none is
+# Reachable, in the order libwayland and Xlib look:
+#   - WAYLAND_SOCKET is set (a connected descriptor was handed down);
+#   - the socket WAYLAND_DISPLAY names, or wayland-0 when it is unset or
+#     empty, exists: an absolute name as it is, a relative one under
+#     XDG_RUNTIME_DIR (libwayland opens a relative name nowhere else);
+#   - DISPLAY names a local X display (":N" or ":N.S") whose socket exists
+#     under QA_X11_SOCKET_DIR (default /tmp/.X11-unix, the tests' lever);
+#   - DISPLAY names anything else (a host form this cannot judge): read as
+#     reachable, so the step behaves as it did before this function.
+qa_display_reachable() {
+  local wl=${WAYLAND_DISPLAY:-wayland-0} xdir=${QA_X11_SOCKET_DIR:-/tmp/.X11-unix}
+  [[ -n ${WAYLAND_SOCKET:-} ]] && return 0
+  if [[ $wl == /* ]]; then
+    [[ -S $wl ]] && return 0
+  elif [[ -n ${XDG_RUNTIME_DIR:-} && -S $XDG_RUNTIME_DIR/$wl ]]; then
+    return 0
+  fi
+  [[ -z ${DISPLAY:-} ]] && return 1
+  if [[ $DISPLAY =~ ^:([0-9]+)(\.[0-9]+)?$ ]]; then
+    [[ -S $xdir/X${BASH_REMATCH[1]} ]] && return 0
+    return 1
+  fi
+  return 0
+}
+
 # ------------------------------------------------------ AF_UNIX socket paths
 
 # F-HARNESS-104 (2026-11-09). Between 19:29 on 2026-11-08 and 03:15 the next

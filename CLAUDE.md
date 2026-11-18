@@ -249,6 +249,9 @@ Consequences you must respect:
   and his manual review is pending. His review of 9e006be on #14290 on
   2026-11-14 raised D-SINK-102 and D-SINK-103, so the next release (the
   relay and the private save) waits on this hold. `dev` moves freely.
+  **[2026-11-18: the owner kept the hold with D-LOGO-29 known -- the
+  released 0.19.1 stalls on long bracketed logo addresses, fixed on `dev`
+  only -- in their own words, "Keep holding main for now".]**
 
 ## Standing authority (product owner, 2026-11-09)
 

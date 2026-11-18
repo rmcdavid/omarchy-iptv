@@ -584,10 +584,13 @@ ck "T2 the helper's streams carry the URL path token" "$t2" "clean"
 # (measured: the pid it runs under is the pid peakrun spawned) -- and never
 # the reporter, which reads ru_maxrss from outside the limit.
 probe() {
-  local file=$1 qml="$WORK/probe-$RANDOM.qml" out line rc kb
+  local file=$1 qml="$WORK/probe-$RANDOM.qml" out line rc kb theme_unset=()
   sed -e "s|__PATH__|$file|" -e "s|__SOURCE_SIZE__|44|" "$SPIKE/probe-tmpl.qml" >"$qml"
+  # F-HARNESS-105: headless, the session's gtk3 platform theme ends qml with
+  # status 1 before the image is read (K1 read rc=1); drop it then only.
+  qa_display_reachable || theme_unset=(-u QT_QPA_PLATFORMTHEME)
   out=$(PEAKRUN_TIMEOUT=90 python3 "$SPIKE/peakrun.py" prlimit --as=$CAP_AS -- \
-          env QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 "$QML_BIN" "$qml" 2>&1)
+          env "${theme_unset[@]}" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 "$QML_BIN" "$qml" 2>&1)
   line=$(printf '%s\n' "$out" | grep -a '^PEAKRUN ' | tail -1)
   rc=$(printf '%s' "$line" | sed -n 's/.*rc=\(-\{0,1\}[0-9]*\).*/\1/p')
   kb=$(printf '%s' "$line" | sed -n 's/.*peak_rss_kb=\([0-9]*\).*/\1/p')

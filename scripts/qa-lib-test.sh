@@ -3741,6 +3741,32 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
    "$(qa_count '^FAIL clip preflight \(exit 2\): REFUSING to start cage: XDG_RUNTIME_DIR is 97 bytes' "$SP/cb.out") $(qa_count '^(ok|SKIP) ' "$SP/cb.out") $(tail -n 1 "$SP/cb.out") $(qa_count '^cage$' "$SP/ran")" \
    "1 0 fail=1 0"
 
+section "qa_display_reachable / F-HARNESS-105: a headless offscreen Qt step drops the platform theme"
+# Each case runs the predicate under `env -i` with only the variables named,
+# so nothing of this run's own session decides it. Sockets are made by
+# python3 in this run's own scratch (no display is ever connected to).
+DR=$TMP/dr; mkdir -p "$DR/empty" "$DR/run" "$DR/x11" "$DR/x11file"
+python3 -I -c 'import socket,sys
+for p in sys.argv[1:]:
+    socket.socket(socket.AF_UNIX).bind(p)' "$DR/run/wayland-0" "$DR/x11/X7"
+: >"$DR/run/wl-file"; : >"$DR/x11file/X7"
+dr() { env -i PATH="$PATH" "$@" bash -c '. "$1"; qa_display_reachable; echo $?' dr "$ROOT/scripts/qa-lib.sh" 2>&1; }
+is "nothing set: no display" "$(dr)" "1"
+is "the lead's headless form (fresh runtime dir, DISPLAY and WAYLAND_DISPLAY unset): no display" "$(dr XDG_RUNTIME_DIR="$DR/empty")" "1"
+is "wayland-0 in the runtime dir, WAYLAND_DISPLAY unset: reachable" "$(dr XDG_RUNTIME_DIR="$DR/run")" "0"
+is "an empty WAYLAND_DISPLAY reads as wayland-0" "$(dr XDG_RUNTIME_DIR="$DR/run" WAYLAND_DISPLAY=)" "0"
+is "a WAYLAND_DISPLAY with no socket behind it: no display" "$(dr XDG_RUNTIME_DIR="$DR/run" WAYLAND_DISPLAY=wl-other)" "1"
+is "a WAYLAND_DISPLAY naming a regular file: no display" "$(dr XDG_RUNTIME_DIR="$DR/run" WAYLAND_DISPLAY=wl-file)" "1"
+is "an absolute WAYLAND_DISPLAY needs no runtime dir" "$(dr WAYLAND_DISPLAY="$DR/run/wayland-0")" "0"
+is "a relative WAYLAND_DISPLAY with no runtime dir: no display" "$(dr WAYLAND_DISPLAY=wayland-0)" "1"
+is "a handed-down WAYLAND_SOCKET: reachable" "$(dr WAYLAND_SOCKET=3)" "0"
+is "DISPLAY :7 with its socket: reachable" "$(dr DISPLAY=:7 QA_X11_SOCKET_DIR="$DR/x11")" "0"
+is "DISPLAY :7.0 with its socket: reachable" "$(dr DISPLAY=:7.0 QA_X11_SOCKET_DIR="$DR/x11")" "0"
+is "DISPLAY :8 with no socket: no display" "$(dr DISPLAY=:8 QA_X11_SOCKET_DIR="$DR/x11")" "1"
+is "DISPLAY :7 naming a regular file: no display" "$(dr DISPLAY=:7 QA_X11_SOCKET_DIR="$DR/x11file")" "1"
+is "a host-form DISPLAY cannot be judged and keeps the theme" "$(dr DISPLAY=remote.test:10.0 XDG_RUNTIME_DIR="$DR/empty")" "0"
+is "an X display beside an absent Wayland one is enough" "$(dr DISPLAY=:7 QA_X11_SOCKET_DIR="$DR/x11" XDG_RUNTIME_DIR="$DR/empty" WAYLAND_DISPLAY=wl-other)" "0"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -3960,7 +3986,10 @@ is "and it reads that refusal RED, with the reason on its FAIL line, even with C
 # 753 -> 754 the same day (F-HARNESS-114, the relay merge's review): no
 # pkill call in any shell script under scripts/. Red on 76a382f, where
 # qa-sources-scenarios.sh still had two.
-EXPECTED=754
+# 754 -> 769 on 2026-11-18 (F-HARNESS-105): qa_display_reachable's fifteen,
+# each under `env -i` with only the variables it names. Red on fdba6be's
+# qa-lib.sh, which lacks the function: all fifteen failed.
+EXPECTED=769
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
