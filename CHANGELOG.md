@@ -150,10 +150,13 @@ after the shell starts, and you start the channel again yourself.
 - **A saved source whose address holds one of the characters refused
   above is dropped when the shell starts**, as one holding `@` or `%` in
   its host has been since 0.19.0, and a guide address holding one is
-  cleared. Add it again, written plainly or percent-encoded. A channel
-  whose host holds one is skipped, and each source's playlist is
-  downloaded once more after the update. (D-SINK-115, D-SINK-116,
-  D-SINK-117, D-SINK-119)
+  cleared. Add it again, written plainly or percent-encoded. A source
+  or guide address given to `state source add` or `state source update`
+  whose host had a capital sigma after a letter and before a hyphen, a
+  digit, an underscore or the end of the name is among them: earlier
+  versions saved it with the final sigma. A channel whose host holds one is skipped, and each source's
+  playlist is downloaded once more after the update. (D-SINK-115,
+  D-SINK-116, D-SINK-117, D-SINK-119)
 
 ### Known limitations
 

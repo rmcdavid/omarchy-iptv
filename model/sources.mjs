@@ -1038,8 +1038,8 @@ function validateSourceUrl(text, opts) {
 // `host` lower-cased (an IPv6 literal with its brackets), `port` without
 // its leading zeros ("" for none), `tail` from the first `/`, `?` or `#`
 // on; `why` one of "char", "fold_host", "fold_userinfo", "bracket",
-// "literal_open", "literal", "literal_after", "host", "empty", "port_text",
-// "port_range" when not ok. The helper's read_authority is the same
+// "literal_open", "literal", "literal_after", "case_fold", "host", "empty",
+// "port_text", "port_range" when not ok. The helper's read_authority is the same
 // reading, held to it by the shared source-urls and host-grammar fixtures.
 // It refuses what the helper's URL library refuses to read, which both
 // validators accepted until then and every fetch then ended as an internal
@@ -1048,7 +1048,10 @@ function validateSourceUrl(text, opts) {
 // authority (DELIMITER_FOLDS); a `[` or `]` in the user information unless
 // the host is a bracketed literal; and a bracketed host that is no IPv6
 // address (isIpv6Literal's characters and zone, then parseIpv6Groups of
-// the text before the zone). The authority ends at the first ASCII `/`,
+// the text before the zone). And, the owner's decision of 2026-11-17
+// (D-SINK-119), a host name the helper's idna codec case-folds into
+// another name, `case_fold`, whose sentence the Sources form shares with
+// `fold_host`. The authority ends at the first ASCII `/`,
 // `?` or `#`, and its user information at the LAST `@` within it (R32a).
 function readAuthority(body) {
   var b = str(body)

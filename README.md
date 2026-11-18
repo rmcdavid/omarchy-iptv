@@ -1060,8 +1060,12 @@ carry channel ids — most do — are not affected at all.
   (`strasse.test` for a host written with the sharp s) while the Sources
   list showed it as you wrote it: write the folded name instead. A saved
   source whose host holds one is dropped when the shell starts after the
-  update, a guide address holding one is cleared, and a channel whose host
-  holds one is skipped.
+  update, a guide address whose host holds one is cleared, and a channel
+  whose host holds one is skipped. That includes a source or guide
+  address given to `state source add` or `state source update` whose host
+  had a capital sigma after a letter and before a hyphen, a digit, an
+  underscore or the end of the name: earlier versions saved it with the
+  final sigma.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.

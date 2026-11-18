@@ -2402,6 +2402,16 @@
   {
    "url": "http://\u03c3\u03b1\u03c3.test/get.php",
    "kept": true
+  },
+  {
+   "url": "http://qqqqqq:zzzzzz@\u03b1\u03c2-1.test/get.php",
+   "note": "D-SINK-118, D-SINK-119 (the review of the case-fold decision, 2026-11-17): the record as the command line stored `state source add` of a host whose capital sigma follows a letter and ends a word (alpha, capital sigma, then -1.test), on 0.19.1 and every release since 0.14.0: Python's str.lower writes that sigma as the final one. 0.19.1's reader kept it; under the owner's decision of 2026-11-17 it is dropped, and the user adds it again",
+   "kept": false
+  },
+  {
+   "url": "http://qqqqqq:zzzzzz@\u03b1\u03c3-1.test/get.php",
+   "note": "D-SINK-118, D-SINK-119 (the review of the case-fold decision, 2026-11-17): the same address as the Sources form stored it, in Qt's engine, which writes no final sigma, and as the command line stores it since D-SINK-118: kept",
+   "kept": true
   }
  ],
  "streams": [

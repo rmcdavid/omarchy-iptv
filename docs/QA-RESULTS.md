@@ -20986,7 +20986,7 @@ The suites on the record's tree: node 3,836 checks, python 2,727 tests (1 skippe
 - D-SRC-12's 28 code points, which node and Qt's engine lower one way and the helper another (measured in Qt's engine this round: its table is node's).
 - An IDN logo host is refused, not fetched by its A-label: the shell's survey would need the codec's tables to count what the fetch would contact (D-SINK-119's cost).
 - A host whose characters compose (`e` then U+0301) is kept and fetched as its composed name's A-label, since the look-alike table is per code point; the codec's B.2 mapping makes `stra<U+00DF>e.test` and `strasse.test` one name, as CPython's socket already did.
-- A record stored before D-SINK-118 with a final sigma keeps its spelling (no migration); a channel written in capitals under it is no longer the playlist's own host for the one-label and proxied-lookup exceptions.
+- A record stored before D-SINK-118 with a final sigma keeps its spelling (no migration); a channel written in capitals under it is no longer the playlist's own host for the one-label and proxied-lookup exceptions. [2026-11-17, superseded: under the owner's decision of 2026-11-17 such a record is dropped on load, not kept ("The review of the bound and the case-fold decision, settled (2026-11-17)" below).]
 - D-LOGO-26's empty logo folder; D-SINK-107's re-derivation of ids and keys (round 2's, open); FFmpeg's own lookup-failure text, which the resolver writes.
 - The Sources row's two guide-hint sentences changed by the lead's instruction (D-SINK-113); UX-SOURCES.md records them in a dated bracket, for the lead to confirm the wording.
 
@@ -21518,3 +21518,62 @@ The gate ran on exactly this commit's tree: node 3,850, python 2,741 (1 skipped)
 ### Open, for the lead
 
 - **The look-alike sentence.** Should the NFKC look-alikes say "cannot be part of a host name" too, as `case_fold` and the delimiter folds now do? Today they say "Invalid URL" and "check the host".
+
+## The review of the bound and the case-fold decision, settled (2026-11-17)
+
+A read-only review of `9ced99c..1280a88` on `r5-build` found the code for the owner's case-fold decision correct in both mirrors: exactly the 67 code points are refused, in host positions only, and nothing else changed. It blocked the push on one finding, that D-SINK-118's row still said a stored record keeps its spelling while the code now drops it. lane-r5d-settle settles that finding and three of the other four on the branch in one gated commit, as the lead's calls under the owner's standing authority of 2026-11-09 (STATUS, the last bracket of the lead's row of 2026-11-17). Nothing here widens or narrows what the owner's decisions delete. The commit holds one code comment, documents, and two fixture rows that hold what the code already does.
+
+No cage, live scenario, player or Quickshell ran, and no test or probe looked a name up. Qt's engine ran offscreen through `run_qml` (a scratch home and runtime directory, `prlimit --as --core=0`) and in the gate. Every heavy run held the shared lock under `nice`. The crash journal read 88 at the start, after lane-r5bound's probe (F-HARNESS-117), and 88 after every run of this lane.
+
+### The review's five findings, and what became of each
+
+1. **D-SINK-118: its row said a record stored before it keeps its spelling (settled).** Under the owner's decision of 2026-11-17 such a record is dropped. D-SINK-118's row has a dated bracket saying so, with what the command line stored and why; the owner's decision row has a bracket listing the cost; and the CHANGELOG and README name it. Round 5's earlier record in this file has a bracket on its "keeps its spelling" line. The cost goes to the owner. The review's optional alternative, rewriting a stored U+03C2 to U+03C3 instead of dropping the record, would narrow the owner's drop, so it is not built; it is a question for the owner.
+2. **D-SINK-112: the logo bound is not on this branch (not settled).** `r5-build` carries no logo authority bound, D-SINK-112's figures are uncorrected, and the bound's own row is unfiled. The work is only on the local, never-gated branch `r5bound-wip` (34ae9f0), which also adds port and literal bounds beyond its brief. Finishing it needs gated red-first runs and timings in Qt's engine. Those timings are the runs that crashed, so this is not cheap and not safe for this lane. It waits for a lane that finishes it, or for a decision that round 5 goes without it. Nothing on the branch claims it.
+3. **F-HARNESS-117: the unexplained `qml` SIGSEGV (filed, not settled).** Filed today as open with what is known: the journal entry's pid, signal and core limit, read in the journal by this lane; the probe's shape, from lane-r5bound's report; and the two readings, neither verified. Measuring it needs a `qml` run under gdb, which posts a card if it faults, so it waits for the owner's word. The guide-hint path (`Model.epgHintVerdict`, then `Model.validateSourceUrl`, then `Model.readAuthority`) has no bound of its own either way, and the row says so.
+4. **D-SINK-119: "whose address holds one" read wider than the code (settled).** The owner's decision row and D-SINK-119's second bracket now say "whose host holds one", for the source and for the guide URL. Each has a dated note that says it was changed. The search below found a third instance, in the README.
+5. **D-SINK-119: `Model.readAuthority`'s comment did not list `case_fold` (settled).** The comment now lists it among the reasons and says what it refuses, as the helper's docstring for `read_authority` does. It is a comment only: `split-model.mjs --relink` and `--check` are clean, and `scripts/model-parts.json` is unchanged.
+
+### Measured: what the released command line stored
+
+Release 0.19.1 (9e006be) was exported to a scratch folder. A short probe loaded its stub with a decoy home and XDG folders, nothing looked up and nothing written. This branch's stub was probed the same way.
+- **0.19.1's `add_source_record`.** Given `http://qqqqqq:zzzzzz@ΑΣ-1.test/get.php` with the guide URL `http://qqqqqq:zzzzzz@ΑΣ-1.test/xmltv.php`, the `state source add` path, it stored both on `ας-1.test`, the final sigma. Its `validate_source_url` gave the same for the `form` and `cli` origins.
+- **0.19.1's `normalize_state`** kept that record as it was.
+- **This branch's `normalize_state`** dropped it, logging `state: dropped source fdeff768 (invalid url: invalid)`. Given the same source on `ασ-1.test` with that guide URL, it kept the source and cleared the guide URL, with no line.
+- **This branch's `add_source_record`** stores `ασ-1.test` for both.
+- **Python's `str.lower` over a host, the lowering every release used.** It writes `ΑΣ-1.test` as `ας-1.test`, `cdn.ΑΣ` as `cdn.ας`, `ΑΣ1.test` as `ας1.test` and `ΑΣ_x.test` as `ας_x.test`. It writes `ΑΣ.test`, `xΣ.test` and `ΑΣΑ.test` with the small sigma: a dot is case-ignorable, so the letter after it decides. So the affected records are those whose host had a capital sigma after a letter and before a hyphen, a digit, an underscore or the host's end.
+- **Read, not run.** v0.14.0, v0.16.0, v0.18.0 and v0.19.1 each lower the host with `host.lower()` in `validate_source_url`. 0.19.1's `update_source_record` validates its URL and guide URL through the same function. The Sources form runs in Qt's engine, which applies no final-sigma rule (D-SINK-118 (a), measured in Qt 6.12's engine), so it stored the small sigma, and its records are kept.
+
+### The fixture rows, and the mutant
+
+tests/fixtures/host-grammar.json gains two `stateReaders` rows, each with a note:
+- **`http://qqqqqq:zzzzzz@ας-1.test/get.php`, dropped.** This is the record as the command line stored it.
+- **`http://qqqqqq:zzzzzz@ασ-1.test/get.php`, kept.** This is the same address as the Sources form stored it, and as the command line stores it since D-SINK-118.
+
+Each row runs through `normalize_state` (StateReaderTest), through `Model.parseState` in node (the state-reader check of D-SINK-115 to -117) and, for the first, through Qt's engine (CaseFoldEngineTest, which takes the rows holding a code point of the table). No test count moves: the rows join existing tests.
+
+**Red runs.** Both rows are green on 1280a88, which already drops the record. The state-reader tests were already red on 9ced99c for the decision's own rows, so neither run shows what these rows catch. One single-decision mutant does: the option the owner did not take. On a scratch copy, sealed and checked, both state readers rewrite a stored U+03C2 in a source's url to U+03C3 before validating it: `normalize_source` in bin/helper/10-state.py, and `normalizeSourceRecord` in model/source-records.mjs.
+
+| Mutant | Red |
+|---|---|
+| Both readers rewrite a stored U+03C2 to U+03C3 | StateReaderTest and CaseFoldEngineTest (2 python tests; in each only the new dropped row differs), and 1 of 3,850 node checks (the state-reader check, only that row) |
+
+The kept row catches nothing the existing `σασ.test` row does not. It is there as the other half of the pair the cost names, and it is said so here rather than counted as a catch.
+
+### Rule 15: where else the job is done
+
+- **"keeps its spelling", "no migration" and "stored before"** in CHANGELOG.md, README.md, CLAUDE.md and docs/*.md. Changed: D-SINK-118's row, and the open list of round 5's record by lane-r5c, now bracketed. Cleared: ARCHITECTURE-PLAYER.md's mpv.conf line, ARCHITECTURE-SOURCES.md's R21e line, QA.md's TC-CFG-38 and QA-SOURCES.md's SRC-MIG-39, and the older QA-RESULTS hits, which all concern other migrations.
+- **"address holds one", "address holding one" and "URL holding one"** in the same files. Changed: the owner's decision row, D-SINK-119's second bracket, and the README's "a guide address holding one" in its case-fold sentence. Cleared:
+  - the CHANGELOG's "A saved source whose address holds one of the characters refused above", ARCHITECTURE.md's and ARCHITECTURE-SOURCES.md's "a guide URL holding one", and the 2026-11-16 decision row and its record here. Each describes decision 1 of 2026-11-16, whose shapes include the user information, so "address" is right there.
+  - CLAUDE.md's and ARCHITECTURE.md's "a stored source holding one", which sits in a sentence about host names.
+- **Every list of the authority reasons**: `port_range` in model/, bin/helper/, Model.mjs and docs/ARCHITECTURE*.md. Only the model comment needed `case_fold`. The helper's `AUTHORITY_REFUSALS` table and its `read_authority` docstring already hold it.
+- **Every command-line path that stores an address**: `add_source_record` and `update_source_record` in 0.19.1, both through `validate_source_url`. Both are named in the cost.
+
+### The gate and the scan
+
+The gate ran on exactly this commit's tree (the diff and status hashes compared before and after): node 3,850 checks, python 2,741 tests (1 skipped), spec 110, unchanged, so no floor moves. The private-label scan over `git log --format=%B e2ae4f4..HEAD`, `git diff e2ae4f4` and the staged diff printed 0.
+
+### Open, for the lead and the owner
+
+- **The cost, for the owner.** A source or guide address given to `state source add` or `state source update` on any release since 0.14.0, whose host had a capital sigma after a letter and before a hyphen, a digit, an underscore or its end, is dropped or cleared at the update, and the user adds it again. Should such a record be rewritten to U+03C3 instead? That narrows the owner's drop and re-keys the source, so only the owner can decide it.
+- **The bound.** Should a lane finish `r5bound-wip`, gated and run red first, with D-SINK-112's figures and the bound's row, or does round 5 go without it?
+- **F-HARNESS-117.** Should it be measured under gdb with a core limit of 0, which posts a card if it faults? That needs the owner's word. And should the guide-hint path get a bound of its own?
