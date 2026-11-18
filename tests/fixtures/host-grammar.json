@@ -2086,7 +2086,7 @@
    "ok": true,
    "url": "http://\u03b1\u03c3-1.test/get.php",
    "host": "\u03b1\u03c3-1.test",
-   "note": "D-SINK-118: a capital sigma at a label's end is the small sigma in every engine; node's and Python's str.lower gave the final sigma, Qt's engine the small one"
+   "note": "D-SINK-118: a capital sigma the Final_Sigma rule reads as final (alpha, capital sigma, then -1.test) is the small sigma in every engine; node's and Python's str.lower gave the final sigma, Qt's engine the small one"
   },
   {
    "input": "https://\u039f\u0394\u039f\u03a3.TEST/",
@@ -2405,7 +2405,7 @@
   },
   {
    "url": "http://qqqqqq:zzzzzz@\u03b1\u03c2-1.test/get.php",
-   "note": "D-SINK-118, D-SINK-119 (the review of the case-fold decision, 2026-11-17): the record as the command line stored `state source add` of a host whose capital sigma has a cased letter before it and no cased letter after it, not counting case-ignorable characters (alpha, capital sigma, then -1.test), on 0.19.1 and every release since 0.14.0: Python's str.lower writes that sigma as the final one (Unicode's Final_Sigma rule; corrected 2026-11-17 by lane-r5bound2, which said \"ends a word\"). 0.19.1's reader kept it; under the owner's decision of 2026-11-17 it is dropped, and the user adds it again",
+   "note": "D-SINK-118, D-SINK-119 (the review of the case-fold decision, 2026-11-17): the record as the command line stored `state source add` of a host whose capital sigma has a cased character before it and none after it, not counting case-ignorable characters (alpha, capital sigma, then -1.test; cased is Unicode's Cased property: an uppercase, lowercase or titlecase letter, or one of the other characters Unicode counts as uppercase or lowercase, such as U+00AA, U+24D0 and U+2160), on 0.19.1 and every release since 0.14.0: Python's str.lower writes that sigma as the final one (Unicode's Final_Sigma rule; corrected 2026-11-17 by lane-r5bound2, which said \"ends a word\"). 0.19.1's reader kept it; under the owner's decision of 2026-11-17 it is dropped, and the user adds it again",
    "kept": false
   },
   {

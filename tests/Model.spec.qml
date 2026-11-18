@@ -3400,9 +3400,9 @@ TestCase {
   // D-SINK-118 (2026-11-16, round 5 of the security review): three things
   // this engine read otherwise than node and the helper, which the node
   // suite cannot see, one case each so each is seen red on its own.
-  // (a) It applies no Final_Sigma rule, so a capital sigma at a label's end
-  // lowered to the small sigma where node and the helper gave the final
-  // one; every lowerer folds it first now (Model.lowerHost), and a final
+  // (a) It applies no Final_Sigma rule, so a capital sigma the rule reads as
+  // final (alpha, capital sigma, then -1.test) lowered to the small sigma
+  // where node and the helper gave the final one; every lowerer folds it first now (Model.lowerHost), and a final
   // sigma written as one is another host. Since the owner's decision of
   // 2026-11-17 (D-SINK-119) a final sigma in a host is refused with
   // fold_host's sentence, since the idna codec writes it as the small one;
@@ -3594,20 +3594,40 @@ TestCase {
   // 201 ms for the short ones; at 456fbd6 11.0 s for the 2,000-unit label,
   // 1.4 s for the 240-unit one, 8.9 s for the port and 9.1 s for the literal
   // followed by a port, and in a probe 14.9 to 21.6 s for 2,000 units in
-  // labels of seven, each counted there. The literal shape is the one that
-  // ran this engine out of its address space at 456fbd6 (F-HARNESS-117), so
-  // it is never asked of a tree without the bound. A shape far past its
-  // bound is not asked twice.
+  // labels of seven, each counted there. A shape far past its bound is not
+  // asked twice.
+  //
+  // The review of the finished bound (2026-11-17): the literal shape is the
+  // one that ran this engine out of its address space at 456fbd6
+  // (F-HARNESS-117), and the labels of seven took it to 1.9 GB, while the
+  // gate runs this case with no cap. So no shape is asked of 10,000 rows
+  // until 200 of its rows have cost, scaled to 10,000, no more than ten
+  // times the bound: the least of up to three evaluations. A model with the
+  // bound meets that with room, one without it fails there, and the case
+  // fails without the 10,000 rows (measured in QA-RESULTS "The review of the
+  // finished bound, settled (2026-11-17)").
   function test_logoAuthorityBoundInV4() {
     var X = new Array(2001).join("x")
     var Y = new Array(241).join("y")
     var P = new Array(2001).join("4")
     var L = new Array(1000).join("1:")
     var S7 = new Array(251).join("abcdefg.").substring(0, 1990)
-    function rowsOf(make) {
+    function rowsOf(make, count) {
       var rows = []
-      for (var i = 0; i < 10000; i++) rows.push({ name: "c" + i, logo: make(i) })
+      for (var i = 0; i < count; i++) rows.push({ name: "c" + i, logo: make(i) })
       return rows
+    }
+    // 200 of a shape's rows, timed as 10,000 would be: the least of up to
+    // three evaluations, stopping at the first within ten times the bound.
+    function sampled(make, bound) {
+      var rows = rowsOf(make, 200)
+      var least = 1e9
+      for (var k = 0; k < 3 && least > 10 * bound; k++) {
+        var t0 = Date.now()
+        Model.logoAuthorityHosts(rows)
+        least = Math.min(least, (Date.now() - t0) * 50)
+      }
+      return least
     }
     // Best of three; with a bound, stop at the first evaluation within it,
     // or past twenty times it.
@@ -3623,7 +3643,7 @@ TestCase {
       }
       return [least, keys]
     }
-    var short = best(rowsOf(function (i) { return "https://cdn" + i + ".test/a.png" }), -1)
+    var short = best(rowsOf(function (i) { return "https://cdn" + i + ".test/a.png" }, 10000), -1)
     var bound = 2 * short[0] + 25
     var shapes = [function (i) { return "https://" + X + i + ".test/a.png" },
                   function (i) { return "https://" + Y + i + ".test/a.png" },
@@ -3634,7 +3654,14 @@ TestCase {
     var got = [short[1]]
     var want = [10000]
     for (var n = 0; n < shapes.length; n++) {
-      var rows = rowsOf(shapes[n])
+      var scaled = sampled(shapes[n], bound)
+      console.log("D-SINK-112, the review of the finished bound: 200 rows of shape " + n + " in V4, scaled to 10,000: " + scaled + " ms; ten times the bound " + 10 * bound + " ms")
+      if (scaled > 10 * bound) {
+        got.push("shape " + n + ": 200 rows cost " + scaled + " ms scaled to 10,000, past ten times the bound, " + 10 * bound + " ms; its 10,000 rows not asked")
+        want.push([10000, true, ""])
+        continue
+      }
+      var rows = rowsOf(shapes[n], 10000)
       var c = best(rows, bound)
       console.log("D-SINK-112, the review of the column fix: the map over 10,000 distinct authorities of shape " + n + " in V4: " + c[0] + " ms; the short ones: " + short[0] + " ms; bound " + bound + " ms")
       got.push([c[1], c[0] <= bound, Model.logoContactHost(rows[7].logo)])

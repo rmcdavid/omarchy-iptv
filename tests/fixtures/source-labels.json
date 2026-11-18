@@ -36,6 +36,6 @@
     { "url": "http://[::1]:8080;sid=SECRET/x", "hostPort": "[::1]:8080", "label": "[::1]:8080",
       "why": "D-SINK-30: a bracketed literal is unaffected by the cut after it" },
     { "url": "http://u:p@\u0391\u03a3-1.TEST:8080/list.m3u", "hostPort": "\u03b1\u03c3-1.test:8080", "label": "\u03b1\u03c3-1.test:8080",
-      "why": "D-SINK-118: a capital sigma at a label's end is lowered to the small sigma in both mirrors and in Qt's engine, which has no Final_Sigma rule" }
+      "why": "D-SINK-118: a capital sigma the Final_Sigma rule reads as final (alpha, capital sigma, then -1.test) is lowered to the small sigma in both mirrors and in Qt's engine, which has no Final_Sigma rule" }
   ]
 }

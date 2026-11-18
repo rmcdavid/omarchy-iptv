@@ -21540,7 +21540,7 @@ Release 0.19.1 (9e006be) was exported to a scratch folder. A short probe loaded 
 - **0.19.1's `normalize_state`** kept that record as it was.
 - **This branch's `normalize_state`** dropped it, logging `state: dropped source fdeff768 (invalid url: invalid)`. Given the same source on `ασ-1.test` with that guide URL, it kept the source and cleared the guide URL, with no line.
 - **This branch's `add_source_record`** stores `ασ-1.test` for both.
-- **Python's `str.lower` over a host, the lowering every release used.** It writes `ΑΣ-1.test` as `ας-1.test`, `cdn.ΑΣ` as `cdn.ας`, `ΑΣ1.test` as `ας1.test` and `ΑΣ_x.test` as `ας_x.test`. It writes `ΑΣ.test`, `xΣ.test` and `ΑΣΑ.test` with the small sigma: a dot is case-ignorable, so the letter after it decides. So the affected records are those whose host had such a capital sigma. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or the host's end", which missed a dot, a colon or an uncased letter after it; "The logo bound, finished (2026-11-17)" has the measurement.)
+- **Python's `str.lower` over a host, the lowering every release used.** It writes `ΑΣ-1.test` as `ας-1.test`, `cdn.ΑΣ` as `cdn.ας`, `ΑΣ1.test` as `ας1.test` and `ΑΣ_x.test` as `ας_x.test`. It writes `ΑΣ.test`, `xΣ.test` and `ΑΣΑ.test` with the small sigma: a dot is case-ignorable, so the letter after it decides. So the affected records are those whose host had such a capital sigma. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is cased and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule, where cased is Unicode's Cased property: an uppercase, lowercase or titlecase letter, or one of the other characters Unicode counts as uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the Roman numeral `Ⅰ`). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or the host's end", which missed a dot, a colon or an uncased letter after it; "The logo bound, finished (2026-11-17)" has the measurement.)
 - **Read, not run.** v0.14.0, v0.16.0, v0.18.0 and v0.19.1 each lower the host with `host.lower()` in `validate_source_url`. 0.19.1's `update_source_record` validates its URL and guide URL through the same function. The Sources form runs in Qt's engine, which applies no final-sigma rule (D-SINK-118 (a), measured in Qt 6.12's engine), so it stored the small sigma, and its records are kept.
 
 ### The fixture rows, and the mutant
@@ -21574,7 +21574,7 @@ The gate ran on exactly this commit's tree (the diff and status hashes compared 
 
 ### Open, for the lead and the owner
 
-- **The cost, for the owner.** A source or guide address given to `state source add` or `state source update` on any release since 0.14.0, whose host had a capital sigma stored as the final sigma, is dropped or cleared at the update, and the user adds it again. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or its end".) Should such a record be rewritten to U+03C3 instead? That narrows the owner's drop and re-keys the source, so only the owner can decide it.
+- **The cost, for the owner.** A source or guide address given to `state source add` or `state source update` on any release since 0.14.0, whose host had a capital sigma stored as the final sigma, is dropped or cleared at the update, and the user adds it again. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is cased and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule, where cased is Unicode's Cased property: an uppercase, lowercase or titlecase letter, or one of the other characters Unicode counts as uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the Roman numeral `Ⅰ`). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or its end".) Should such a record be rewritten to U+03C3 instead? That narrows the owner's drop and re-keys the source, so only the owner can decide it.
 - **The bound.** Should a lane finish the logo bound (a test of each logo authority's lengths before it is read), gated and run red first, with D-SINK-112's figures and the bound's row, or does round 5 go without it? (Settled: "The logo bound, finished (2026-11-17)".)
 - **F-HARNESS-117.** Should it be measured under gdb with a core limit of 0, which posts a card if it faults? That needs the owner's word. And should the guide-hint path get a bound of its own?
 
@@ -21698,7 +21698,7 @@ Notes on the mutants:
 
 Four more readings from the same runs:
 - **Every refused long shape on this tree.** The column test costs 74 to 166 ms first and 74 to 83 ms warm, and the survey 82 to 145 and 81 to 94 ms.
-- **Memory.** One run asked every shape of the table of this tree, and its address space peaked at 979 MB. At 456fbd6 the map over 2,000 units in labels of seven took the resident set to 1,914 MB (VmPeak 2,231 MB).
+- **Memory.** One run asked every shape of the table of this tree, and its address space peaked at 979 MB. (The review of the finished bound: that figure is the probe's, not the bound's. The review's probe of all twelve shapes peaked at VmPeak 1,601 MB, and the literal shape asked alone at 489 MB; 442 MB in the settle's own run.) At 456fbd6 the map over 2,000 units in labels of seven took the resident set to 1,914 MB (VmPeak 2,231 MB).
 - **What the record said.** The recheck had measured about 11.3 s per map and 11.6 s per survey over 10,000 2,000-unit hosts in Qt's engine at 456fbd6; this run measured 10.7 to 10.9 s. D-SINK-112's row had said the map cost 25 to 30 ms per channel list, which held only for the three shapes it timed, and up to 3.8 s for the survey over long logos.
 - **The worst case the bound leaves** is 10,000 distinct hosts DNS can carry, each counted. Over those the service's map costs 1,088 ms first and 1,101 ms warm per channel list, and the consent dialog's survey 2,338 and 2,018 ms. The column test returns at the first row once the map holds them.
 
@@ -21724,7 +21724,7 @@ lane-r5diag measured the crash under gdb, in five runs. The probe ran out of add
 
 The shell has no cap. At 456fbd6 the same list would have grown the shell's heap by about 2.45 GiB and blocked its thread about 18 s. That is an inference from the runs, not observed in the shell. Names grow it too: the map over 2,000 units in labels of seven took 456fbd6 to 1.9 GB above.
 
-On this tree the bound refuses the literal before `readAuthority`. The map over the crash's own shape costs 110 ms first and 87 ms warm, and the heap stays under 1 GB. The row is re-filed as P3 logos, fixed. The harness half is the gdb rule every lane now runs under.
+On this tree the bound refuses the literal before `readAuthority`. The map over the crash's own shape costs 110 ms first and 87 ms warm, and a process that asks only that shape peaks at VmPeak 442 MB ("The review of the finished bound, settled (2026-11-17)"). The row is re-filed as P3 logos, fixed. The harness half is the gdb rule every lane now runs under.
 
 ### D-LOGO-28, filed
 
@@ -21752,7 +21752,9 @@ Measured on a git archive of 9e006be (0.19.1) with a decoy home and `getaddrinfo
 
 The one sentence, now the same in D-SINK-118's row, D-SINK-119's row, the lead's row of 2026-11-17, the README, the CHANGELOG and this file's earlier record (two places):
 
-> Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule).
+> Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is cased and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule, where cased is Unicode's Cased property: an uppercase, lowercase or titlecase letter, or one of the other characters Unicode counts as uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the Roman numeral `Ⅰ`).
+
+(Corrected in place by the review of the finished bound: the quote said "is a cased letter", which mispredicts a sigma beside a cased character that is not a cased letter; "The review of the finished bound, settled (2026-11-17)".)
 
 **New `stateReaders` rows.** tests/fixtures/host-grammar.json gains two, each dropped: `ας.1x` and `ας中.test`, as 0.19.1 stored them. The note on the `ας-1.test` row now states the rule. The rows join existing tests, so no count moves. They are green on 456fbd6, which already drops them. Under the one mutant that matters, both state readers rewriting a stored U+03C2 to U+03C3 (`normalize_source`, `normalizeSourceRecord`), three things go red:
 - StateReaderTest and CaseFoldEngineTest (2 python tests);
@@ -21787,3 +21789,83 @@ The gate ran green on exactly this commit's tree (the diff and status hashes com
 - **The capital-sigma cost, for the owner**, stated with the exact rule on D-SINK-119's row, with the option the review named: rewrite a stored U+03C2 to U+03C3 instead of dropping the record. That would narrow the owner's drop and re-key the source, so it is not built.
 - **D-LOGO-28.** The survey off the main thread, through the helper's `logo_survey`.
 - **The worst case the bound leaves**: about 1.1 s per channel list and 2.0 to 2.3 s per dialog in Qt's engine, over 10,000 distinct counted 253-character hosts. Two answer-preserving walks, about 0.4 s of the map, are named above. Neither was taken.
+
+## The review of the finished bound, settled (2026-11-17)
+
+An independent review of 8337100 (the logo bound, finished) found the bound itself sound and held the push on two findings. lane-r5e-settle settled both, and the three that did not hold the push, on `r5-build`. These are the lead's calls under the owner's standing authority of 2026-11-09, and the lead's row of 2026-11-17 carries the bracket. Nothing here changes what the bound refuses, what either state reader drops, or what the owner's decisions of 2026-11-16 and 2026-11-17 delete.
+
+Every `qml` and `qmltestrunner` run below ran on a scratch copy (a git archive of the tree under test, with this commit's spec copied in), offscreen, under the brief's gdb form: `prlimit --as=2500000000 --core=0`, SIGSEGV, SIGBUS, SIGABRT, SIGFPE and SIGILL stopped and not passed (`info signals SIGSEGV` read Stop Yes, Pass No), a decoy home with `QML_DISK_CACHE_PATH` and `XDG_CACHE_HOME` inside it, a scratch runtime directory, the display variables unset, under the shared lock and `nice`. One addition: a catchpoint on `exit_group`, so `info proc status` reads the process's VmPeak and VmHWM before gdb kills it. Every run ended at that catchpoint with no signal. The crash journal read 88 before and after every run.
+
+### The Qt-engine case asks no shape of 10,000 rows before it has timed 200 (blocked the push)
+
+**The finding.** `test_logoAuthorityBoundInV4` built and mapped all six shapes, 10,000 rows each, on whatever model it ran against. Shape 5 is F-HARNESS-117's crash shape, and shape 3 took 456fbd6's map to 1.9 GB. The gate's spec step runs `qmltestrunner` with no memory cap and no gdb. The case's comment said the literal shape was never asked of a tree without the bound, but nothing in the code made that true.
+
+**The fix.** Before a shape's 10,000 rows, the case maps 200 of them and scales the cost by 50. It takes the least of up to three evaluations and stops at the first one within the line. A shape whose sample is past ten times the bound fails the case there, and its 10,000 rows are never built. The line is ten times rather than the review's twenty, because ten gives the wider margin on both sides:
+- With the bound, every sample on this tree is at least 7.7 times under the line.
+- Without it, the literal's sample at 456fbd6's code is 8.2 times over.
+- At twenty times the bound, a short baseline inflated by load could lift the line past an unbounded literal.
+
+The comment now says what the code does.
+
+**Measured.** Each row is one function run alone (`IptvModel::test_logoAuthorityBoundInV4`). The samples are scaled to 10,000 rows, in ms, for shapes 0 to 5. The time is the run's own total.
+
+| Tree | Result | Samples, shapes 0-5 | Line (10 x bound) | Asked at 10,000 | Time | VmPeak / VmHWM |
+|---|---|---|---|---|---|---|
+| this tree | PASS | 350, 50, 300, 600, 300, 300 | 4,630 | all six (76 to 348 ms against 463) | 3.0 s | 784 / 557 MB |
+| 456fbd6's code | FAIL | 10,850, 1,650, 9,450, 16,050, 9,800, 38,900 | 4,730 | shape 1 only (1,575 ms against 473) | 12.6 s | 632 / 408 MB |
+| this tree, the literal's length arm dropped (model) | FAIL | 300, 50, 300, 350, 300, 35,150 | 4,390 | shapes 0 to 4 | 6.1 s | 989 / 762 MB |
+| this tree, the bound not asked (model) | FAIL | 6,400, 800, 4,400, 10,300, 4,700, 30,650 | 4,410 | shapes 1 and 2 (885 and 4,008 ms against 441) | 20.7 s | 904 / 678 MB |
+
+**Before and after.** "The logo bound, finished" ran both mutants with the literal shape removed by hand. There, the first was green ("the literal shape not asked") and the second was red. Both are now red with every shape in place, and each asks the literal of 200 rows only: 3.1 to 3.9 ms a row, and about 78 MiB per evaluation at lane-r5diag's 0.39 MiB a logo (inferred, not measured here). 456fbd6's code is red the same way.
+
+**Counts.** No test function or check is added. The change is inside one case, so the floors stay: node 3,851, python 2,741, spec 111.
+
+**Left as they are, and why:**
+- **The node twin.** Node collects garbage during the call. At 456fbd6 its map over the literal shape costs 1.5 to 1.6 s (the logo bound's table), so there is no memory hazard to guard.
+- **`scripts/check.sh`'s spec step**, which the review called optional. An address-space cap would turn an unbounded growth into an abort. The host draws its crash card from the journal entry whatever the core limit is (CLAUDE.md, rule 6b), so a cap trades a slow, red gate for a card on the desktop. With the sample in place, no shape is asked at size of a model that would grow.
+
+### What the literal shape costs on its own (the review's fifth finding, information only)
+
+This was measured with a probe on this tree: 10,000 rows of the literal shape, mapped three times and nothing else.
+- **Time:** 305, 188 and 156 ms.
+- **Result:** 10,000 keys, and the contact host of row 7 is `""`.
+- **Memory:** VmPeak 442 MB and VmHWM 202 MB. The review measured 489 MB.
+
+The 979 MB in "The logo bound, finished" was one probe holding every shape. The review's probe of all twelve shapes peaked at 1,601 MB. That figure belongs to the probe, not the bound. F-HARNESS-117's row and that section now cite the literal shape's own figure and mark the other as the probe's.
+
+### The Final_Sigma sentence (blocked the push)
+
+**The finding.** The sentence said a capital sigma is written as the final sigma when the nearest character before it "is a cased letter". Python's `str.lower` asks Unicode's Cased property instead, which also counts characters that are not letters with case. The review measured on 9e006be: of 2,756 stored records, the property predicted every one, and "a cased letter" mispredicted 260 to 368 of them. No record's fate depended on it.
+
+**Measured here** (Python 3.14.8, Unicode 16.0.0):
+- **The test.** Every code point that is not case-ignorable was tried: 1,109,315 of them. Case-ignorable was taken as Mn, Me, Cf, Lm, Sk, plus the 17 MidLetter, MidNumLet and Single_Quote characters. For each character c, `c + Σ` and `α + Σ + c` were lowered.
+- **The result.** Both lowerings agree with "c is cased" read as `islower()`, `isupper()` or `istitle()` of the character: 0 mispredicted either way.
+- **What the old wording missed.** 431 characters are cased outside Lu, Ll and Lt. 267 of them are case-ignorable, which the rule passes over first. The other 164 are where "a cased letter" goes wrong. They include `ª`, `º`, the circled letters and the Roman numerals: `ªΣ` lowers to `ªς`, and `αΣⓐ` to `ασⓐ`.
+
+**The sentence now reads:**
+
+> Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is cased and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule, where cased is Unicode's Cased property: an uppercase, lowercase or titlecase letter, or one of the other characters Unicode counts as uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the Roman numeral `Ⅰ`).
+
+It is changed in all eight copies the review counted: the README, the CHANGELOG, D-SINK-118's row, D-SINK-119's row, the lead's row and three places in this file. The quote in "The recheck's record findings" is marked as corrected. A ninth copy, the note on the `ας-1.test` row in tests/fixtures/host-grammar.json, is changed in ASCII to match.
+
+### The three findings that did not hold the push
+
+- **The owner's decision row of 2026-11-17** keeps the pointer lane-r5bound2 added. The pointer is now labelled as not the owner's words and as the lead's call under the owner's standing authority. Under that authority, a call is recorded where the decision lives so the owner can find it, and the pointer is how a reader of that row finds the correction to it. The owner's words are unchanged.
+- **F-HARNESS-117's id.** The row keeps its id, and now says why no D- id is filed. The shell's side is the cost of the service's logo map, which D-SINK-112's row holds, together with the bound that fixes it and its figures. The id is the one the finding got on the day it was written (rule 13). The row's 11.5 GiB at about 30,000 entries is now marked as lane-r5diag's inferred worst case, not the crash's shape.
+- **The 979 MB figure.** See above.
+
+### Rule 15: where else the job is done
+
+**A Qt-engine run that asks a model a large shape with no check first.** I searched `tests/Model.spec.qml` for 10,000-row loops and `"1:"` joins, and every test and script for `logoAuthorityHosts`, `logoSurvey` and `logoColumnShown`.
+- `test_logoColumnScanInV4` asks only short shapes.
+- `test_logoColumnTailAfterHostInV4` shares ten authorities across its 2,000-unit authority rows, so its map is ten reads.
+- The python suites' `run_qml` cases run the fixed corpus, which holds a handful of long literals and no 10,000-row list.
+- No script under `scripts/` asks the logo map, the survey, the column test or `readAuthority`. Several run `qml` or `qmltestrunner` for other measurements (the filter bench, the clip, logo-decode and text spikes), and `scripts/model-parts.json` only lists the names.
+
+This case was the only one.
+
+**Every statement of the sigma rule.** I searched the tracked files for "cased" and "Final_Sigma".
+- **Changed:** the nine copies of the sentence above.
+- **Changed as siblings:** eight places that said "a capital sigma at a label's end" lowers to the final sigma. That is false for `ΑΣ.test`, whose label ends at the sigma: the dot is case-ignorable and the `t` after it is cased, so it lowers to the small sigma. Each now says "a capital sigma the rule reads as final (alpha, capital sigma, then -1.test)", or, for the SIGMAS tuple, before the hyphen or the colon its uses put after it. They are the comments in bin/helper/01-core.py (resealed), model/sources.mjs, tests/Model.spec.qml and two in tests/test_host_grammar.py, and the notes in tests/fixtures/host-grammar.json, source-labels.json and source-urls.json.
+- **Left as it was:** a historical record earlier in this file ("four vectors only Qt's engine read otherwise (a capital sigma at a label's end, ...)"). It names the vector `ΑΣ-1.test`, and the engine difference it records holds.
+- **Cleared:** the correction notes' "an uncased letter" (a CJK ideograph) and the fixture rows' "is not cased" for `1` and a CJK ideograph. Both hold under the property.

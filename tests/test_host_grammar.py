@@ -1024,8 +1024,9 @@ class StreamTest(unittest.TestCase):
 # ------------------------------------------------------------- D-SINK-118
 
 ENGINE = FIXTURE.get("engine", {"lowerHost": [], "hostKey": [], "labelKey": [], "sourceHost": []})
-# A capital sigma at a label's end, a final sigma written as one, and the
-# small sigma, each after an alpha.
+# A capital sigma, which the Final_Sigma rule reads as final before the
+# hyphen or the colon each use puts after it, a final sigma written as one,
+# and the small sigma, each after an alpha.
 SIGMAS = (chr(0x391) + chr(0x3A3), chr(0x3B1) + chr(0x3C2), chr(0x3B1) + chr(0x3C3))
 
 
@@ -1139,8 +1140,8 @@ class EngineLoweringTest(unittest.TestCase):
     D-SRC-12 pins (measured 2026-11-16 on Qt 6.12: 1,488 entries, none
     different), so the 28 code points D-SRC-12 accepts split the shell from
     the helper as they split node from it, and nothing more; a tripwire for
-    the next Qt. The engine applies no Final_Sigma rule (a capital sigma at a
-    label's end lowers to the small sigma, `plain`, recorded rather than
+    the next Qt. The engine applies no Final_Sigma rule (a capital sigma the
+    rule reads as final lowers to the small sigma, `plain`, recorded rather than
     asserted: the fold makes the answer the same either way), and the
     model's lowering, comparisons and named host read the shared fixture's
     `engine` section as the helper and node do."""

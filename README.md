@@ -1067,9 +1067,12 @@ carry channel ids — most do — are not affected at all.
   release since 0.14.0 lowered a host given to the command line with
   Python's `str.lower`, which writes a capital sigma as the final sigma
   when, passing over case-ignorable characters such as `.`, `:`, `'` and
-  combining marks, the nearest character before it is a cased letter and
-  the nearest after it, if there is one, is not (Unicode's Final_Sigma
-  rule).
+  combining marks, the nearest character before it is cased and the
+  nearest after it, if there is one, is not (Unicode's Final_Sigma rule,
+  where cased is Unicode's Cased property: an uppercase, lowercase or
+  titlecase letter, or one of the other characters Unicode counts as
+  uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the
+  Roman numeral `Ⅰ`).
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.

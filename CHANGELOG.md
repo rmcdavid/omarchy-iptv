@@ -165,11 +165,14 @@ after the shell starts, and you start the channel again yourself.
   0.14.0 lowered a host given to the command line with Python's
   `str.lower`, which writes a capital sigma as the final sigma when,
   passing over case-ignorable characters such as `.`, `:`, `'` and
-  combining marks, the nearest character before it is a cased letter and
-  the nearest after it, if there is one, is not (Unicode's Final_Sigma
-  rule). A channel whose host holds one is skipped, and each source's
-  playlist is downloaded once more after the update. (D-SINK-115,
-  D-SINK-116, D-SINK-117, D-SINK-119)
+  combining marks, the nearest character before it is cased and the
+  nearest after it, if there is one, is not (Unicode's Final_Sigma rule,
+  where cased is Unicode's Cased property: an uppercase, lowercase or
+  titlecase letter, or one of the other characters Unicode counts as
+  uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the
+  Roman numeral `Ⅰ`). A channel whose host holds one is skipped, and each
+  source's playlist is downloaded once more after the update.
+  (D-SINK-115, D-SINK-116, D-SINK-117, D-SINK-119)
 
 ### Known limitations
 

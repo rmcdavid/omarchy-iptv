@@ -2115,8 +2115,8 @@ def chmod_if_kind(path: str, mode: int, kind: Any) -> bool:
 # D-SINK-118 (2026-11-16, round 5 of the security review): a host is
 # lowered by lower_host, which folds the capital sigma (U+03A3) to the small
 # one (U+03C3) before it lowers. str.lower applies Unicode's Final_Sigma
-# rule, so a capital sigma at a label's end lowered to the FINAL sigma
-# (U+03C2) here and in node, while Qt's engine, which runs the Sources form
+# rule, so a capital sigma the rule reads as final (alpha, capital sigma,
+# then -1.test) lowered to the FINAL sigma (U+03C2) here and in node, while Qt's engine, which runs the Sources form
 # and the state reader, applies no such rule and gave the small one: the
 # form stored one spelling and the command line the other, two sources for
 # one address. Folded first, every engine lowers a capital sigma to U+03C3.

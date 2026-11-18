@@ -897,8 +897,9 @@ function looksLikeHost(text) {
 // lowered by lowerHost, which folds the capital sigma (U+03A3) to the small
 // one (U+03C3) before it lowers. Qt 6.12's engine, which runs the Sources
 // form and the state reader, applies no Final_Sigma rule, so it lowered a
-// capital sigma at a label's end to the small sigma, where node and the
-// helper's str.lower gave the final one (U+03C2): the form stored one
+// capital sigma the rule reads as final (alpha, capital sigma, then -1.test)
+// to the small sigma, where node and the helper's str.lower gave the final
+// one (U+03C2): the form stored one
 // spelling and the command line the other, two sources for one address.
 // Folded first, every engine gives U+03C3. A final sigma WRITTEN as one
 // stays one, and no comparison folds it (hostKey included). The helper's

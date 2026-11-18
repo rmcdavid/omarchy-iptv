@@ -2721,7 +2721,7 @@
   "url": "http://\u03b1\u03c3-1.test/get.php?username=u&password=p",
   "host": "\u03b1\u03c3-1.test",
   "key": "2051a302",
-  "note": "D-SINK-118: a capital sigma at a label's end is stored as the small sigma, as Qt's engine stores it"
+  "note": "D-SINK-118: a capital sigma the Final_Sigma rule reads as final (alpha, capital sigma, then -1.test) is stored as the small sigma, as Qt's engine stores it"
  },
  {
   "input": "http://\u03b1\u03c2-1.test/x",
