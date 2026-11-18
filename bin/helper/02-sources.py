@@ -1719,26 +1719,42 @@ def stream_scheme(url: str) -> str:
 
 
 def logo_is_web(logo: str) -> bool:
-    """make_channel's logo test, `stream_scheme(logo) in ("http", "https")`,
-    with no urlsplit where it cannot answer otherwise (F-HARNESS-73, the
+    """make_channel's logo test: whether BOTH readings of the logo's scheme
+    say http or https -- urlsplit's (stream_scheme) and the one the logo
+    survey, its slot and the fetch read it by, as written (logo_scheme,
+    05-ipc-logos.py; Model.logoScheme in the shell). D-LOGO-30, the lead's
+    call under the owner's standing authority of 2026-11-09: urlsplit
+    deletes a TAB, CR and LF anywhere and strips C0 controls and spaces off
+    the front before it reads a scheme, so `ht<TAB>tp://l.test/a.png` and
+    `<U+0001>http://l.test/a.png` read as http to it and as no scheme to
+    logo_scheme, and the parse stored logos every survey counted refused and
+    no fetch would send. A logo is kept only where the two agree; the
+    as-written reading is the authority (D-SINK-112), and the parse is
+    brought to it. Nothing the parse did not keep before is kept now.
+
+    With no urlsplit where it cannot answer otherwise (F-HARNESS-73, the
     10,000-channel budget: the split cost about 42 ms of 730). For a
     `logo` that is ASCII, opens with a character above U+0020 (urlsplit
     first strips C0 controls and spaces off the front) and holds no TAB,
     CR, LF, `[` or `]`, urlsplit deletes nothing, raises nothing, and reads
     the scheme as the text before the first `:` when that is a letter and
-    then scheme characters, lower-cased; `http` and `https` are such text,
-    so the answer is whether the text opens with `http:` or `https:` in any
-    case. Every other logo takes stream_scheme. LogoSchemeShortcutTest holds
-    the two equal over every ASCII character at every place the reading
-    turns on and every BMP code point in the authority. (What the shortcut may not see is asked as five substring tests, not
-    a pattern: urlsplit deletes a TAB, CR and LF anywhere before it reads a
-    scheme, and raises only over a bracket in the netloc or a netloc that is
-    not ASCII.)"""
+    then scheme characters, lower-cased -- which is logo_scheme's reading
+    too; `http` and `https` are such text, so both readings answer whether
+    the text opens with `http:` or `https:` in any case. Every other logo
+    asks both. LogoSchemeShortcutTest holds the head answer equal to each
+    reading on the shortcut's class, and the whole test equal to the two
+    together, over every ASCII character at every place the readings turn
+    on and every BMP code point in the authority. (What the shortcut may
+    not see is asked as five substring tests, not a pattern: urlsplit
+    deletes a TAB, CR and LF anywhere before it reads a scheme, and raises
+    only over a bracket in the netloc or a netloc that is not ASCII.)
+    logo_scheme is defined in a later part; the parts are one namespace
+    (D-REL-7), so it is called here, never copied."""
     if (logo.isascii() and logo[:1] > " " and "\t" not in logo and "\n" not in logo and "\r" not in logo
             and "[" not in logo and "]" not in logo):
         head = logo[:6].lower()
         return head[:5] == "http:" or head == "https:"
-    return stream_scheme(logo) in ("http", "https")
+    return stream_scheme(logo) in ("http", "https") and logo_scheme(logo) in ("http", "https")
 
 
 def is_stream_url(url: str) -> bool:
@@ -2859,6 +2875,11 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["tvgId"] = tvg_id
     if tvg_name and tvg_name != name:
         channel["tvgName"] = tvg_name
+    # A logo is kept only where urlsplit's reading of its scheme and the
+    # survey's and fetch's as-written reading (logo_scheme) both say http or
+    # https (logo_is_web, D-LOGO-30): a logo the two read differently would
+    # be stored, counted refused by every survey and never fetched. Only a
+    # logo kept so is counted over-length.
     logo = attrs.get("tvg-logo", "").strip()
     if logo and logo_is_web(logo):
         if len(logo) > M3U_MAX_LOGO_URL:
