@@ -47,7 +47,7 @@ class LogoIsWebLiteralTest(unittest.TestCase):
         ("http" + TAB + "s://l.test/a.png", False),
         (SOH + "http://l.test/a.png", False),
         (SOH + " http://l.test/a.png", False),
-        (" http://l.test/a.png", False),                  # make_channel strips it first ("Space Ahead")
+        (" http://l.test/a.png", False),                  # parse_attrs strips it first ("Space Ahead")
         (chr(0) + "https://l.test/a.png", False),
         (chr(0x1B) + "http://l.test/a.png", False),
         # The scheme as written is http, and urlsplit refuses the netloc.
@@ -91,6 +91,14 @@ class ParseKeepsWhatBothReadTest(unittest.TestCase):
         ("ht" + TAB + "tp://l.test/a.png", "Tab In Scheme", None),
         (SOH + "http://l.test/a.png", "Control Ahead", None),
         (SOH + " http://l.test/a.png", "Control And Space Ahead", None),
+        # What urlsplit strips past parse_attrs' own strip: a run of
+        # characters at or below U+0020 that opens with a C0 control that is
+        # not whitespace, whatever follows it in the run (the review of
+        # 7c5b53a).
+        (SOH + TAB + "http://l.test/a.png", "Control And Tab Ahead", None),
+        (SOH + chr(0x0B) + "http://l.test/a.png", "Control And Vertical Tab Ahead", None),
+        (SOH + chr(0x1C) + "http://l.test/a.png", "Control And Separator Ahead", None),
+        (SOH + chr(0x02) + "http://l.test/a.png", "Two Controls Ahead", None),
         ("ht" + CR + "tp://l.test/a.png", "Return In Scheme", None),
         (" http://l.test/b.png", "Space Ahead", "http://l.test/b.png"),
         ("http://[::1/a.png", "Bracket Refused", None),
