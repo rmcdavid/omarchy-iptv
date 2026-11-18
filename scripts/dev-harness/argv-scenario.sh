@@ -150,65 +150,15 @@ for i in $(seq 1 20); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && break; sl
 grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || { echo "slow server did not start"; exit 2; }
 
 # ---- the sweeper: every 50 ms, every helper process, cmdline and environ
-cat >"$WORK/sweep.py" <<'PY'
-import os, sys, time, json
-# The needle arrives in THIS process's environment, not its argv: a sweeper
-# that carried the credential on its own command line would be the leak it
-# is looking for.
-needle = os.environ["ARGV_NEEDLE"].encode(); deadline = time.monotonic() + float(sys.argv[1]); out = open(sys.argv[2], "a")
-# Every helper is re-sampled on every tick, not recorded once: the first
-# draft recorded each pid the first time it was seen, which for a process
-# that shields itself before its imports is ALWAYS the start-up window
-# before the shield, and reported the shield as absent. The record for
-# a pid is rewritten each tick with first-seen / first-refused times, so the
-# window between them is MEASURED and the final state is what is asserted.
-seen = {}
-t0 = time.monotonic()
-while time.monotonic() < deadline:
-    for d in os.listdir("/proc"):
-        if not d.isdigit(): continue
-        try:
-            with open("/proc/%s/cmdline" % d, "rb") as f: argv = f.read().split(b"\0")
-        except OSError: continue
-        if len(argv) < 3: continue
-        try: helper_here = os.path.realpath(argv[1].decode("utf-8", "replace")) == os.environ["ARGV_HELPER"]
-        except Exception: helper_here = False
-        if not helper_here: continue
-        key = (d, argv[2])
-        now = round((time.monotonic() - t0) * 1000)
-        refused = False
-        try:
-            with open("/proc/%s/environ" % d, "rb") as f: env = f.read()
-        except PermissionError: env = b""; refused = True
-        except OSError:
-            # Gone between the cmdline read and this one: its last real
-            # sample stands. Rewriting it as "not refused" was the first
-            # draft's bug in the other direction (last sample wins, with no
-            # distinction between readable and vanished).
-            continue
-        carriers = sorted(set(e.split(b"=", 1)[0].decode("ascii", "replace") for e in env.split(b"\0") if needle in e))
-        prev = seen.get(key)
-        rec = {"pid": int(d), "verb": argv[2].decode("ascii", "replace"),
-               "cmdline_has_needle": (prev or {}).get("cmdline_has_needle", False) or needle in b"\0".join(argv),
-               "environ_has_needle": (prev or {}).get("environ_has_needle", False) or needle in env,
-               "environ_refused": refused,
-               "environ_carriers": sorted(set((prev or {}).get("environ_carriers", []) + carriers)),
-               "env_var_present": (prev or {}).get("env_var_present", False) or b"OMARCHY_IPTV_URL=" in env,
-               "first_seen_ms": (prev or {}).get("first_seen_ms", now),
-               "first_refused_ms": (prev or {}).get("first_refused_ms") if prev and prev.get("first_refused_ms") is not None else (now if refused else None),
-               "samples": (prev or {}).get("samples", 0) + 1}
-        seen[key] = rec
-    out.seek(0); out.truncate()
-    for r in seen.values(): out.write(json.dumps(r) + "\n")
-    out.flush()
-    time.sleep(0.05)
-PY
+# The sweeper is fixtures/argv-sweep.py (F-HARNESS-87: it reads the helper's
+# script past the interpreter's flags, and tests/test_harness_sweepers.py
+# runs it against a stand-in started the way the service starts the helper).
 : >"$SWEEP"
 # Both streams redirected: a background process inherits the transcript pipe
 # otherwise, which keeps `tee` alive past the run -- the discipline the harness
 # README states and which this start, one of the two "sweepers" it names, did
 # not follow. A file rather than /dev/null so a traceback is still readable.
-ARGV_NEEDLE="$NEEDLE" ARGV_HELPER="$HELPER" python3 "$WORK/sweep.py" 40 "$SWEEP" >>"$WORK/sweep.err" 2>&1 &
+ARGV_NEEDLE="$NEEDLE" ARGV_HELPER="$HELPER" python3 "$HERE/fixtures/argv-sweep.py" 40 "$SWEEP" >>"$WORK/sweep.err" 2>&1 &
 SWEEP_PID=$!
 
 # ---- the harness, unconfigured; the source arrives over IPC after start

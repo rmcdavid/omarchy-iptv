@@ -966,7 +966,8 @@ The raw floor controls read the floor and seek in ONE probe call: the
 floor on this stream evicts in 4-6 s steps, and a seek aimed at a floor
 read six seconds earlier was refused during development. The held-key
 check counts helper runs with `fixtures/rewind-sweep.py`, a /proc sweep
-keyed on the helper's exact path (the argv-scenario lesson), and reads the
+keyed on the helper's exact path (the argv-scenario lesson), read past the
+interpreter's flags by `fixtures/helper_argv.py` (F-HARNESS-87), and reads the
 intent counter the way `player-scenario.sh` P11 does. The plugin's own IPC
 verbs (`back`, `forward`, `live`, `pause`) are reached with the harness
 environment (`XDG_RUNTIME_DIR=<scratch>/runtime WAYLAND_DISPLAY=<absolute
