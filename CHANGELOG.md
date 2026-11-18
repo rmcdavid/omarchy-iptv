@@ -67,6 +67,12 @@ after the shell starts, and you start the channel again yourself.
   host is longer than any name DNS can carry (more than 253 characters, not
   counting a final dot), which is refused before it is looked up.
   (D-SINK-112)
+- **A playlist whose logo addresses hold very long bracketed hosts no
+  longer stalls the shell.** With logos on, every guide rebuild read every
+  such logo in full, and so did the logo consent dialog with logos off;
+  ten thousand of them could hold the shell for many seconds and grow its
+  memory by gigabytes. Such a logo is now refused by its length before it
+  is read. (D-LOGO-29)
 - **A refused address that a playlist, a guide or a redirect chose is no
   longer named.** The helper's reply, status file and journal say what was
   refused without the host, and the Sources row says why a playlist's own
