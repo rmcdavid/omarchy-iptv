@@ -722,7 +722,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # the shared logo fixtures' new rows, 4 checks red on 456fbd6's model and
 # nine single-decision mutants red (QA-RESULTS "The logo bound, finished
 # (2026-11-17)"); the suite runs 3851.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3851}
+# 2026-11-18, lane-p73-settle (F-HARNESS-73's review): 3851 -> 3858. The
+# floor trailed the suite since D-PLY-66 (061601f), whose 7 checks (the
+# relay question after a failed open and the card it tells) did not raise it:
+# 3851 on 8337100, 666e522 and 1fd76a2, 3858 on 061601f. F-HARNESS-73
+# changes no model and no node test; the suite runs 3858.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3858}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1288,7 +1293,21 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3851}
 # floor stays 2741 -- the bound adds fixture rows and corpus logos to
 # existing tests, 4 of them red on 456fbd6, and no test; the suite runs
 # 2741, 1 skipped.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2741}
+# 2026-11-18, lane-p73 (F-HARNESS-73): 2741 -> 2765. The floor trailed the
+# suite on dev fdba6be, which counts 2752 (D-PLY-66 and F-HARNESS-87 added
+# tests without raising it); tests/test_parse_margin.py adds 13 (the logo
+# scheme shortcut held to urlsplit's reading, the parse's authority and group
+# memos held to no memo, their keys, bounds and taking), 13 red on fdba6be and
+# each of 16 single-decision helper mutants red (QA-RESULTS "F-HARNESS-73: the
+# parse margin (2026-11-18)"); the suite counts 2765.
+# 2026-11-18, lane-p73-settle (the reviews of 93bd2cf): 2765 -> 2769 -- the
+# memos' key cap (PARSE_MEMO_KEY_CHARS), once for each memo, the group
+# counts held to literals, and RuleOrderTest (name, zone, label); with the
+# case-colliding netloc pairs and the group memo's size, 3 tests red on
+# 93bd2cf, 16 errors on fdba6be (RuleOrderTest green there, which it pins),
+# and 10 single-decision helper mutants red (QA-RESULTS "F-HARNESS-73: the
+# parse margin (2026-11-18)"); the suite counts 2769.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2769}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

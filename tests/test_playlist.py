@@ -708,7 +708,25 @@ class PerformanceTest(unittest.TestCase):
     five busy loops), so a tree within a quarter of the budget can still read
     red while the machine is saturated. That is the code's margin, not the
     load's queue, and the message below prints all three numbers per attempt
-    so a reader can tell which it was."""
+    so a reader can tell which it was.
+
+    [2026-11-18, F-HARNESS-73: the margin recovered, no answer moved. The
+    logo's scheme read without a urlsplit where none can answer otherwise
+    (logo_is_web), and the authority's rules and the group text's reading
+    kept within one parse (stream_entry_refusal's and make_channel's memos,
+    tests/test_parse_margin.py). By this measure, one attempt in a fresh
+    process, ABAB against fdba6be, 10 runs an arm idle (load 1.5 to 1.9, two
+    series): 531 and 535 ms median (496 to 673) against 742 and 735 (692 to
+    762), and over 10,000 channels that each name another host 638 and 632
+    (598 to 696) against 764 and 771 (727 to 784). Saturated, the factor
+    above depends on what shares the core: under four bare `while 1: pass`
+    loops, 8 runs an arm, two series, 712 and 713 (693 to 721) against 964
+    and 976 (956 to 988), about 1.33 times idle on both trees, and 832 and
+    833 against 1,002 and 999; under the review's four loops that also read
+    the clock or a file, three series, about 1.5 times idle: medians 779 to
+    802 against 1,080 to 1,101, and 878 to 890 against 1,068 to 1,100. So the
+    saturated budget list reads 0.71 to 0.80 s here, 20 to 29% of the
+    second spare, where fdba6be read 0.96 to 1.10 s.]"""
 
     BUDGET_S = 1.0
     ATTEMPTS = 3
