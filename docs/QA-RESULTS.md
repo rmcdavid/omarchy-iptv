@@ -21528,7 +21528,7 @@ No cage, live scenario, player or Quickshell ran, and no test or probe looked a 
 ### The review's five findings, and what became of each
 
 1. **D-SINK-118: its row said a record stored before it keeps its spelling (settled).** Under the owner's decision of 2026-11-17 such a record is dropped. D-SINK-118's row has a dated bracket saying so, with what the command line stored and why; the owner's decision row has a bracket listing the cost; and the CHANGELOG and README name it. Round 5's earlier record in this file has a bracket on its "keeps its spelling" line. The cost goes to the owner. The review's optional alternative, rewriting a stored U+03C2 to U+03C3 instead of dropping the record, would narrow the owner's drop, so it is not built; it is a question for the owner.
-2. **D-SINK-112: the logo bound is not on this branch (not settled).** `r5-build` carries no logo authority bound, D-SINK-112's figures are uncorrected, and the bound's own row is unfiled. The work is only on the local, never-gated branch `r5bound-wip` (34ae9f0), which also adds port and literal bounds beyond its brief. Finishing it needs gated red-first runs and timings in Qt's engine. Those timings are the runs that crashed, so this is not cheap and not safe for this lane. It waits for a lane that finishes it, or for a decision that round 5 goes without it. Nothing on the branch claims it.
+2. **D-SINK-112: the logo bound is not on this branch (not settled).** `r5-build` carries no logo authority bound, D-SINK-112's figures are uncorrected, and the bound's own row is unfiled. The work, a test of each logo authority's lengths before it is read, had been built and never gated, and also adds port and literal bounds beyond its brief. Finishing it needs gated red-first runs and timings in Qt's engine. Those timings are the runs that crashed, so this is not cheap and not safe for this lane. It waits for a lane that finishes it, or for a decision that round 5 goes without it. Nothing on the branch claims it. (Settled since: "The logo bound, finished (2026-11-17)".)
 3. **F-HARNESS-117: the unexplained `qml` SIGSEGV (filed, not settled).** Filed today as open with what is known: the journal entry's pid, signal and core limit, read in the journal by this lane; the probe's shape, from lane-r5bound's report; and the two readings, neither verified. Measuring it needs a `qml` run under gdb, which posts a card if it faults, so it waits for the owner's word. The guide-hint path (`Model.epgHintVerdict`, then `Model.validateSourceUrl`, then `Model.readAuthority`) has no bound of its own either way, and the row says so.
 4. **D-SINK-119: "whose address holds one" read wider than the code (settled).** The owner's decision row and D-SINK-119's second bracket now say "whose host holds one", for the source and for the guide URL. Each has a dated note that says it was changed. The search below found a third instance, in the README.
 5. **D-SINK-119: `Model.readAuthority`'s comment did not list `case_fold` (settled).** The comment now lists it among the reasons and says what it refuses, as the helper's docstring for `read_authority` does. It is a comment only: `split-model.mjs --relink` and `--check` are clean, and `scripts/model-parts.json` is unchanged.
@@ -21540,7 +21540,7 @@ Release 0.19.1 (9e006be) was exported to a scratch folder. A short probe loaded 
 - **0.19.1's `normalize_state`** kept that record as it was.
 - **This branch's `normalize_state`** dropped it, logging `state: dropped source fdeff768 (invalid url: invalid)`. Given the same source on `ασ-1.test` with that guide URL, it kept the source and cleared the guide URL, with no line.
 - **This branch's `add_source_record`** stores `ασ-1.test` for both.
-- **Python's `str.lower` over a host, the lowering every release used.** It writes `ΑΣ-1.test` as `ας-1.test`, `cdn.ΑΣ` as `cdn.ας`, `ΑΣ1.test` as `ας1.test` and `ΑΣ_x.test` as `ας_x.test`. It writes `ΑΣ.test`, `xΣ.test` and `ΑΣΑ.test` with the small sigma: a dot is case-ignorable, so the letter after it decides. So the affected records are those whose host had a capital sigma after a letter and before a hyphen, a digit, an underscore or the host's end.
+- **Python's `str.lower` over a host, the lowering every release used.** It writes `ΑΣ-1.test` as `ας-1.test`, `cdn.ΑΣ` as `cdn.ας`, `ΑΣ1.test` as `ας1.test` and `ΑΣ_x.test` as `ας_x.test`. It writes `ΑΣ.test`, `xΣ.test` and `ΑΣΑ.test` with the small sigma: a dot is case-ignorable, so the letter after it decides. So the affected records are those whose host had such a capital sigma. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or the host's end", which missed a dot, a colon or an uncased letter after it; "The logo bound, finished (2026-11-17)" has the measurement.)
 - **Read, not run.** v0.14.0, v0.16.0, v0.18.0 and v0.19.1 each lower the host with `host.lower()` in `validate_source_url`. 0.19.1's `update_source_record` validates its URL and guide URL through the same function. The Sources form runs in Qt's engine, which applies no final-sigma rule (D-SINK-118 (a), measured in Qt 6.12's engine), so it stored the small sigma, and its records are kept.
 
 ### The fixture rows, and the mutant
@@ -21574,6 +21574,216 @@ The gate ran on exactly this commit's tree (the diff and status hashes compared 
 
 ### Open, for the lead and the owner
 
-- **The cost, for the owner.** A source or guide address given to `state source add` or `state source update` on any release since 0.14.0, whose host had a capital sigma after a letter and before a hyphen, a digit, an underscore or its end, is dropped or cleared at the update, and the user adds it again. Should such a record be rewritten to U+03C3 instead? That narrows the owner's drop and re-keys the source, so only the owner can decide it.
-- **The bound.** Should a lane finish `r5bound-wip`, gated and run red first, with D-SINK-112's figures and the bound's row, or does round 5 go without it?
+- **The cost, for the owner.** A source or guide address given to `state source add` or `state source update` on any release since 0.14.0, whose host had a capital sigma stored as the final sigma, is dropped or cleared at the update, and the user adds it again. Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule). (Corrected 2026-11-17 by lane-r5bound2: this said "after a letter and before a hyphen, a digit, an underscore or its end".) Should such a record be rewritten to U+03C3 instead? That narrows the owner's drop and re-keys the source, so only the owner can decide it.
+- **The bound.** Should a lane finish the logo bound (a test of each logo authority's lengths before it is read), gated and run red first, with D-SINK-112's figures and the bound's row, or does round 5 go without it? (Settled: "The logo bound, finished (2026-11-17)".)
 - **F-HARNESS-117.** Should it be measured under gdb with a core limit of 0, which posts a card if it faults? That needs the owner's word. And should the guide-hint path get a bound of its own?
+
+## The logo bound, finished (2026-11-17)
+
+lane-r5bound2 brought the logo authority bound onto `r5-build` (456fbd6) and finished it there. lane-r5bound had built the bound and stopped before gating it, when its unguarded `qml` probe crashed (F-HARNESS-117). lane-r5fold had kept that work unchanged, and a patch of it is saved. This lane also settled the recheck of 1280a88 and 456fbd6: its two record findings, which had blocked the push, and its Info findings. Every call here is the lead's, under the owner's standing authority of 2026-11-09 (STATUS, the last bracket of the lead's row of 2026-11-17).
+
+How it was run:
+- No cage, live scenario, player or Quickshell ran, and no test or probe looked a name up. The stand-ins raise and record what they were handed.
+- Every `qml` and `qmltestrunner` run this lane started ran under gdb (`handle SIGSEGV`, `SIGBUS`, `SIGABRT`, `SIGFPE` and `SIGILL` stop, nopass; `info signals SIGSEGV` read Stop Yes, Pass No in each run's log). A fault would stop there and be killed with SIGKILL, which dumps nothing.
+- Each such run had `prlimit --as=2500000000 --core=0`, offscreen, a decoy home with `QML_DISK_CACHE_PATH` and `XDG_CACHE_HOME` inside it, a scratch runtime directory and no display variables, under the shared lock and `nice`. Memory was sampled from outside through `/proc/<pid>/status`.
+- The 2,000-unit literal shape was never asked of a model without its bound in Qt's engine.
+- The crash journal read 88 before and after every run.
+
+### What changed
+
+**The bound, in both mirrors.** `logo_authority_host` (bin/helper/05-ipc-logos.py) and `Model.logoAuthorityHost` (model/logos.mjs) now ask `logo_authority_in_bounds`, and logoAuthorityInBounds in model/logos.mjs, before anything else. The bound uses the engine's own searches and lengths and compiles no new pattern. It refuses:
+- a host as written (the text before the first `:`) longer than 254 characters, or of 254 without a trailing `.` (`LOGO_NAME_MAX` 253). This is the **one new refusal**: no resolver looks such a name up, so it was counted and could only fail at its lookup. It is now counted refused, and `fetch_logo` refuses it as `logo_host` before any lookup;
+- a label longer than 63 (`LOGO_LABEL_MAX`), which `logo_labels_refused` refused later anyway;
+- more than five characters after the host's `:` (`LOGO_PORT_MAX`), which hold a second `:` or a port `port_digits` refuses;
+- a bracketed literal with no `]`, longer than 47 characters (`LOGO_LITERAL_MAX`: the brackets around the longest IPv6 address `read_authority` reads), or followed by more than `:` and five characters. `read_authority` or `port_digits` refused these anyway.
+
+Every refusal but the first is one the reading gave before, only sooner. A host that is not ASCII is refused whatever its lengths, so counting code points in the helper and UTF-16 units in the model decides nothing differently. The port and literal arms are kept because each of those shapes cost seconds of the shell's thread (the timings below).
+
+**The ASCII skip.** `Model.readAuthority` (model/sources.mjs) walked the 19 `DELIMITER_FOLDS` code points (an `indexOf` per unit) over every authority. The helper's `read_authority` skips that walk for an authority that is all ASCII (`if not authority.isascii()`), and now so does the model (`NON_ASCII_RE.test`, the part's existing pattern). None of the 19 is ASCII. The node check `D-SINK-115: DELIMITER_FOLDS is the fixture's table, and the code points whose NFKC holds / ? # @ or : in node` holds that: it computes the table from 0x80 up and compares it with the shipped one. Over 10,000 distinct 253-character hosts in Qt's engine the skip took the map from 1,685 to 1,101 ms warm.
+
+**Tests and fixtures:**
+- tests/fixtures/provider-hosts.json gains nine `logoHosts` rows: 253 characters and 254 with a trailing dot (counted and looked up), 254 without one, 255 with one, 2,000 in labels of seven, a 64-character label, a 2,000-digit port, a 2,000-character literal, and the longest literal followed by a 2,000-digit port (each refused as `logo_host`, nothing looked up).
+- tests/fixtures/logo-survey.json gains one case: the boundaries counted and refused, with the longest literal counted.
+- tests/fixtures/host-grammar.json gains a `longHosts` atom. The logo differential's generator (`logo_corpus` in tests/test_host_grammar.py) adds 400 logos per seed on those hosts, and node's equivalence check adds 1,000.
+- A new node check: `D-SINK-112, the review of the column fix: over 10,000 distinct authorities that are ... the service's map costs no more than over 10,000 distinct short authorities, and 25 ms`. It runs six shapes: a 2,000-unit label, a 240-unit label in a host of 250, a 2,000-digit port, 2,000 units in labels of seven, a 2,000-unit literal, and the longest literal followed by a 2,000-digit port.
+- A new Qt-engine case, `test_logoAuthorityBoundInV4`, runs the same six shapes. Each must cost no more than twice the 10,000 short authorities and 25 ms. Twice, not once, because the long ones are still copied and looked up: on this tree they measured 56 to 224 ms against 170 to 201 ms for the short ones. A shape far past its bound is not asked twice, and the literal shape is asked last.
+- `test_logoColumnTailAfterHostInV4` and its node twin: the 2,000-unit authority shape's rows now share ten authorities. The map built before the timing is then ten reads, not 10,000; the per-row cost being timed is unchanged.
+- `M2-04: every shared logo-survey case matches the agreed answer` counts 24 cases.
+- Two `stateReaders` rows, below.
+
+### The differential against 456fbd6
+
+A scratch differential ran over 47,436 logos in both trees. The logos: the shared logo fixtures, the host-grammar logo corpus, and 40,000 seeded adversarial ones from lane-r5bound's generator, heavy in long hosts, labels near 63, ports, literals and odd characters. It asked each tree everything below: no lookup, every connection refused.
+
+| Asked | Count | Differ | All differences a host past DNS's length, refused | Otherwise |
+|---|---|---|---|---|
+| `logo_contact_host` | 47,436 | 4,756 | 4,756 | 0 |
+| `logo_authority_host` | 44,979 authorities | 5,843 | 5,843 | 0 |
+| `logo_survey`, chunks of 400, the long hosts taken out | 119 | 0 | | 0 |
+| `logo_survey` of each long host alone | 22,330 | 0 not refused | | 0 |
+| `Model.logoContactHost` | 47,436 | 4,756 | 4,756 | 0 |
+| `Model.logoAuthorityHost` | 44,979 | 5,843 | 5,843 | 0 |
+| `Model.logoColumnShown`, map full / empty / foreign / missing | 47,436 each | 4,756 each | 4,756 each | 0 |
+| `Model.logoColumnShown`, a wrong map (each answer inverted) | 47,436 | 0 | | 0 |
+| `Model.logoAuthorityHosts`, chunks of 400 | 119 | same keys; values only for long hosts | | 0 |
+| `Model.logoSurvey`, chunks, long hosts taken out / each alone | 119 / 22,330 | 0 / 0 not refused | | 0 |
+
+- Each column test asked a list of three rows: one with no logo, a local-network logo, and the logo.
+- **Helper against model:** 0 contact hosts and 0 survey chunks differ on this tree, on the keys both surveys give, and 0 at 456fbd6.
+- **The fetch.** This tree's `fetch_logo` refused all 4,756 logos whose answer moved as `logo_host`, and handed the lookup stand-in no name. At 456fbd6 the first 200 of them each handed it the name and failed as `logo_fetch`.
+- **What is still counted.** 1,339 counted logos have a host of 240 characters or more: 248 at 253 and 72 at 254 with a trailing dot.
+- **The ASCII skip.** `readAuthority` and `validateSourceUrl`, old against new, answer alike over 132,135 strings. Those are every string of every shared fixture (and each one's text after `://`), and 120,000 seeded authorities and URLs of up to 80 characters with a non-ASCII character, a fold among them, in about one position in twelve.
+
+### Red runs
+
+The new and changed tests were copied onto 456fbd6's code and run there:
+- **node:** 4 of 3,851 checks red. They are the survey case count, the refused-logo naming check, the map timing check (1,318, 176, 1,200 and 1,562 ms against 57 ms, and a 2,000-unit host in short labels counted) and the logo host of every case.
+- **python:** 4 tests red. They are `test_every_logo_asks_the_resolver_only_what_the_fixture_says` and `test_the_logo_host_of_every_case` (test_provider_hosts.py), and `test_every_case_matches_the_agreed_answer` and `test_the_three_are_refused_as_logo_host_and_the_run_refuses_what_the_survey_refuses` (test_logos.py). test_host_grammar.py stays green there: both mirrors agree at 456fbd6, and its corpus catches a mirror that disagrees (the mutants).
+- **Qt's engine:** `test_logoAuthorityBoundInV4` is red, run without the literal shape and without the shape in labels of seven, whose map took 456fbd6 to 1.9 GB. The shapes cost 11,036, 1,429, 8,939 and 9,123 ms against a bound of 431 ms.
+
+**Single-decision mutants.** Each ran on a scratch copy of this tree, sealed and relinked, against the node suite, the three python suites and the two Qt-engine cases (under gdb). Each arm of the bound was dropped in both mirrors unless the row says otherwise.
+
+| Mutant | node | python | Qt-engine case |
+|---|---|---|---|
+| none (the control) | 0 of 3,851 | 0 | green |
+| the name-length arm dropped | 4 | 4 | red (25.2 s for labels of seven) |
+| the name-length arm dropped in the model only | 4 | 2 (the logo differential) | red |
+| the name-length arm dropped in the helper only | 0 | 6 | not run |
+| 254 without a trailing dot taken | 3 | 4 | green: no cost differs |
+| the label arm dropped | 1 | 0 | red (803 ms) |
+| the port arm dropped | 1 | 0 | red (3.8 s) |
+| the literal's `]` test dropped | 0 | 0 | green |
+| the literal's length arm dropped | 1 | 0 | green: the literal shape not asked |
+| the arm after the literal dropped | 1 | 0 | red (3.8 s) |
+| the bound not asked at all | 4 | 4 | red, the literal shape not asked |
+| the ASCII skip inverted | 4 (the fold vectors) | 1 (the validator differential) | not run |
+
+Notes on the mutants:
+- **Equivalent.** Without its `]` test, the literal arm still refuses any unclosed literal over six characters by its after-length test, and `read_authority` refuses the rest as `literal_open`. No test can tell it apart.
+- **What no python test holds.** The helper's label, port and literal arms change no answer, and no python test times them. They keep the helper's reading in step with the model's, off the shell's thread.
+
+### Timings
+
+10,000 rows, first evaluation and best of three warm evaluations, in ms. Qt's engine under gdb (load 0.6 to 1.2), node in the same session.
+- "Short" is `https://cdn<i>.test/a.png`, "LAN" is `https://10.0.<i>/a.png` and "one LAN" is `https://10.0.0.1/a<i>.png`.
+- "Label" is a 2,000-unit label, "labels" is 2,000 units in labels of seven, and "253" is a 253-character host in labels of seven. "+ tail" adds a DEL after the path.
+- "Port" is a 2,000-digit port, "lit + port" is the longest literal followed by a 2,000-digit port, and "literal" is a 2,000-unit literal.
+- `-` means not run. At 456fbd6 the literal shape was never asked of Qt's engine.
+
+| Shape | Asked | Qt now | Qt 456fbd6 | node now | node 456fbd6 |
+|---|---|---|---|---|---|
+| short | map | 189 / 188 | 222 / 206 | 47 / 28 | 52 / 32 |
+| short | survey | 662 / 623 | 712 / 678 | 58 / 43 | 65 / 49 |
+| LAN | map | 270 / 210 | 290 / 231 | 58 / 30 | 51 / 33 |
+| LAN | column | 82 / 30 | 81 / 30 | 11 / 6 | 12 / 5 |
+| LAN | survey | 269 / 221 | 289 / 233 | 31 / 27 | 30 / 28 |
+| one LAN | survey | 259 / 241 | 273 / 248 | 25 / 24 | 26 / 25 |
+| label | map | 137 / 102 | 10,862 / 10,841 | 64 / 11 | 1,148 / 1,093 |
+| label | column | 103 / 83 | 109 / 107 | 15 / 10 | 12 / 10 |
+| label | survey | 93 / 94 | 10,852 / 10,806 | 9 / 8 | 1,103 / 1,108 |
+| label + tail | map | 109 / 89 | 10,772 / 10,725 | 13 / 13 | 1,101 / 1,080 |
+| labels | map | 131 / 86 | 21,580 / 14,912 | 38 / 12 | 1,401 / 1,335 |
+| labels | column | 95 / 76 | 1 / 1 (counted) | 10 / 10 | 0 / 0 |
+| labels | survey | 87 / 90 | 23,519 / 23,117 | 8 / 8 | 2,472 / 2,480 |
+| labels + tail | map | 112 / 86 | 15,617 / 15,108 | 13 / 12 | 1,381 / 1,327 |
+| 253 | map | 1,088 / 1,101 | 1,741 / 1,685 | 132 / 118 | 204 / 186 |
+| 253 | survey | 2,338 / 2,018 | 3,397 / 3,379 | 208 / 208 | 353 / 355 |
+| 253 + tail | map | 1,023 / 988 | 1,688 / 1,622 | 138 / 118 | 194 / 186 |
+| 253 + tail | column | 43 / 43 | 45 / 41 | 8 / 7 | 7 / 6 |
+| port | map | 296 / 94 | 9,093 / 8,773 | 44 / 12 | 1,053 / 982 |
+| port | survey | 145 / 86 | 8,726 / 8,714 | 7 / 8 | 1,008 / 1,013 |
+| lit + port | map | 106 / 81 | 8,892 / 8,878 | 44 / 10 | 1,052 / 982 |
+| literal | map | 110 / 87 | - | 32 / 11 | 1,595 / 1,547 |
+| literal | survey | 108 / 88 | - | 8 / 7 | 1,577 / 1,581 |
+
+Four more readings from the same runs:
+- **Every refused long shape on this tree.** The column test costs 74 to 166 ms first and 74 to 83 ms warm, and the survey 82 to 145 and 81 to 94 ms.
+- **Memory.** One run asked every shape of the table of this tree, and its address space peaked at 979 MB. At 456fbd6 the map over 2,000 units in labels of seven took the resident set to 1,914 MB (VmPeak 2,231 MB).
+- **What the record said.** The recheck had measured about 11.3 s per map and 11.6 s per survey over 10,000 2,000-unit hosts in Qt's engine at 456fbd6; this run measured 10.7 to 10.9 s. D-SINK-112's row had said the map cost 25 to 30 ms per channel list, which held only for the three shapes it timed, and up to 3.8 s for the survey over long logos.
+- **The worst case the bound leaves** is 10,000 distinct hosts DNS can carry, each counted. Over those the service's map costs 1,088 ms first and 1,101 ms warm per channel list, and the consent dialog's survey 2,338 and 2,018 ms. The column test returns at the first row once the map holds them.
+
+Where the 253-character map's time goes in Qt's engine (10,000 hosts, best of three; a separate run of the pieces):
+- the whole `logoAuthorityHost`, 1,093 ms;
+- `readAuthority`, 477 ms (its `hostNameRefused` 289);
+- `logoLabelsRefused`, 234 ms, and `hostClass`, 231 ms;
+- `logoAuthorityHost`'s own walk for `/ ? # @ %`, 249 ms, against 6 ms for five `indexOf` searches;
+- its walk for a character outside ASCII, 152 ms, against 7 ms for one pattern test.
+
+Those two walks are answer-preserving options left for the lead, not taken here.
+
+### The guide hint: recorded, not bounded
+
+The guide hint's reading goes `Model.epgHintVerdict`, then `Model.validateSourceUrl`, then `Model.readAuthority`. It reaches the same literal parse as the map. It needs no bound of its own:
+- `validateSourceUrl` asks the 2,048-unit cap before anything else, so a longer hint costs nothing measurable.
+- The longest bracketed hint, a 2,048-unit literal, costs 1.98 ms of Qt's engine per evaluation (2.54 at 456fbd6), and a 2,048-unit name 0.84 ms (1.32).
+- The service asks it in two bindings on the active source's hint and playlist (`epgSource`, `epgHintState`), not per channel.
+
+### F-HARNESS-117: what it was, and what the bound does to it
+
+lane-r5diag measured the crash under gdb, in five runs. The probe ran out of address space at its own cap: it was not an engine fault on the input. During one synchronous evaluation of the map, Qt's engine keeps the garbage of `parseIpv6Groups` (model/sources.mjs), about 0.39 MiB for each 2,000-unit literal, and releases it only when the call returns.
+
+The shell has no cap. At 456fbd6 the same list would have grown the shell's heap by about 2.45 GiB and blocked its thread about 18 s. That is an inference from the runs, not observed in the shell. Names grow it too: the map over 2,000 units in labels of seven took 456fbd6 to 1.9 GB above.
+
+On this tree the bound refuses the literal before `readAuthority`. The map over the crash's own shape costs 110 ms first and 87 ms warm, and the heap stays under 1 GB. The row is re-filed as P3 logos, fixed. The harness half is the gdb rule every lane now runs under.
+
+### D-LOGO-28, filed
+
+The consent dialog's survey (`Service.qml`'s `logoSurvey`, asked by `Guide.qml` when the dialog opens) runs the whole source validator over every logo on the main thread. In Qt's engine, first and best of three warm, against 3101349 (before round 5):
+
+| Logos | now | 3101349 |
+|---|---|---|
+| short, counted | 662 / 623 | 115 / 99 |
+| short, on the local network (counted then) | 269 / 221 | 130 / 98 |
+| one local-network authority | 259 / 241 | 45 / 39 |
+| 253-character hosts, counted | 2,338 / 2,018 | (node only: 28 / 19) |
+
+In node the 253-character survey costs 208 ms now and 28 / 19 ms at 3101349. 3101349 cut each logo's host from the raw address and asked no validator, which is why it was cheaper and why it counted logos the fetch never contacts. The fix it waits for is the helper's `logo_survey` answering the dialog off the main thread; it is not built.
+
+### The recheck's record findings
+
+**(a) Final_Sigma.** The rule as five places stated it ("after a letter and before a hyphen, a digit, an underscore or the host's end") was narrower than Python's `str.lower`.
+
+Measured on a git archive of 9e006be (0.19.1) with a decoy home and `getaddrinfo` raising. 0.19.1's `add_source_record` was given `http://qqqqqq:zzzzzz@<host>/get.php` with a guide URL on the same host, and the record went through 0.19.1's and this branch's `normalize_state`:
+
+| Host typed | 0.19.1 stored | 0.19.1's reader | this branch's reader |
+|---|---|---|---|
+| `ΑΣ-1.test`, `ΑΣ.1x`, `ΑΣ中.test`, `ΑΣא.test`, `a.Σ-1.test`, `ΑΣ:8080`, `ΑΣ1.test`, `ΑΣ_x.test`, `cdn.ΑΣ`, `ΑΣ` + U+0301 + `-1.test` | U+03C2 | kept | dropped |
+| `ΑΣ.test`, `ΑΣΑ.test`, `xΣ.test`, `1Σ-1.test` | U+03C3 | kept | kept, guide URL kept |
+
+The one sentence, now the same in D-SINK-118's row, D-SINK-119's row, the lead's row of 2026-11-17, the README, the CHANGELOG and this file's earlier record (two places):
+
+> Every release since 0.14.0 lowered a host given to the command line with Python's `str.lower`, which writes a capital sigma as the final sigma when, passing over case-ignorable characters such as `.`, `:`, `'` and combining marks, the nearest character before it is a cased letter and the nearest after it, if there is one, is not (Unicode's Final_Sigma rule).
+
+**New `stateReaders` rows.** tests/fixtures/host-grammar.json gains two, each dropped: `ας.1x` and `ας中.test`, as 0.19.1 stored them. The note on the `ας-1.test` row now states the rule. The rows join existing tests, so no count moves. They are green on 456fbd6, which already drops them. Under the one mutant that matters, both state readers rewriting a stored U+03C2 to U+03C3 (`normalize_source`, `normalizeSourceRecord`), three things go red:
+- StateReaderTest and CaseFoldEngineTest (2 python tests);
+- the node state-reader check (1 of 3,851).
+
+The rows that turn are the three U+03C2 records, the old one and the two new.
+
+**(b) D-SINK-112's figures.** The two claims are corrected in place, each marked as corrected, and the row gains this bracket's figures.
+
+**The Info findings, settled:**
+- **The CHANGELOG's saved-source sentence** now splits by shape: "address" for the shapes the address reading refuses, which include the user name and password, and "host" for the characters a host name may not hold. It also says that a letter the international-name rules fold by case drops nothing outside the host. The 102-character line is reflowed.
+- **The owner's decision row of 2026-11-17** is back to its words as recorded at 1280a88 ("whose address holds one"), byte for byte apart from a one-line pointer.
+- **The correction and the cost, moved.** The correction ("whose host holds one", which is what the code drops) and the cost that row did not list now sit in the lead's row and on D-SINK-119's row.
+- **The branch name.** The citations of a local branch name for the bound, in STATUS and here, describe the bound by what it does.
+
+### Rule 15: where else the job is done
+
+The search for each job, and what it found:
+- **A per-row or per-list read of a provider-chosen authority in the model**, found by grepping callers of `readAuthority`, `validateSourceUrl`, `ipLiteral`, `parseIpv6Groups` and `hostClass`. Per channel row there are only `logoSurvey`, `logoAuthorityHosts` and `logoColumnShown`, and `logoFile`/`logoSlot` for the 40 drawn rows; all go through `logoAuthorityHost`, now bounded. The guide hint is above. The rest are user-typed fields and stored source records, bounded by the 50-source cap and the 2,048-unit URL cap.
+- **The delimiter-fold walk**: `readAuthority` (fixed) and the helper's `read_authority` (already skipped). No third.
+- **Unit-by-unit walks over a logo authority before a cheaper test**: `logoAuthorityHost`'s two walks, stated above with their costs, not changed.
+- **The helper's side.** `logo_survey` and `fetch_logo` ask `logo_contact_host`, so the bound reaches both. `logo_row_authority` already finds the authority's end with one compiled search.
+- **Every place the old rule was stated** ("after a letter", "before a hyphen", "host's end", "ends a word"): README.md, CHANGELOG.md, docs/STATUS.md, docs/QA-RESULTS.md, tests/fixtures/host-grammar.json. All changed; no other hit.
+- **Every citation of the bound's local branch name**: two in docs/QA-RESULTS.md and two in docs/STATUS.md (F-HARNESS-117's row and the lead's row). All replaced by a description.
+
+### The gate and the scan
+
+The gate ran green on exactly this commit's tree (the diff and status hashes compared before and after). The floors move: node 3,850 to 3,851 and spec 110 to 111; python stays 2,741. The private-label scan over the branch's log, its diff from e2ae4f4 and the staged diff printed 0.
+
+### Open, for the lead and the owner
+
+- **The capital-sigma cost, for the owner**, stated with the exact rule on D-SINK-119's row, with the option the review named: rewrite a stored U+03C2 to U+03C3 instead of dropping the record. That would narrow the owner's drop and re-key the source, so it is not built.
+- **D-LOGO-28.** The survey off the main thread, through the helper's `logo_survey`.
+- **The worst case the bound leaves**: about 1.1 s per channel list and 2.0 to 2.3 s per dialog in Qt's engine, over 10,000 distinct counted 253-character hosts. Two answer-preserving walks, about 0.4 s of the map, are named above. Neither was taken.

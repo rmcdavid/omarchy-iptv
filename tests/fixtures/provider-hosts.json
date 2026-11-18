@@ -1288,6 +1288,91 @@
     ]
    },
    "why": "the review of round 5's build (D-SINK-112): a port of four characters, leading zero included, is one the connection layer takes; counted and looked up"
+  },
+  {
+   "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test/a.png",
+   "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test"
+    ]
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a host of 253 characters in labels of at most 63, the longest name DNS carries, is counted and looked up"
+  },
+  {
+   "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test./a.png",
+   "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test.",
+   "fetch": {
+    "code": "logo_fetch",
+    "lookups": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test."
+    ]
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): the same name with its trailing dot, 254 characters, is counted and looked up as written"
+  },
+  {
+   "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a host of 254 characters with no trailing dot is longer than any name DNS carries; it was counted and looked up, and is now counted refused and refused before any lookup"
+  },
+  {
+   "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test./a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a host of 255 characters ending in a trailing dot, refused as the one without it"
+  },
+  {
+   "url": "https://abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.cdn.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a host of 2,000 characters in labels the idna codec takes was counted and looked up; refused before any lookup"
+  },
+  {
+   "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.test/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a label of 64 characters after the first, refused by its length before the authority is read, as the idna codec's rule refused it after"
+  },
+  {
+   "url": "https://cdn.test:44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): 2,000 characters after the host's colon, refused by their length before the authority is read, as the port rule refused them after"
+  },
+  {
+   "url": "https://[1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:]/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the review of the column fix (D-SINK-112, 2026-11-17): a bracketed literal of 2,000 characters, longer than any IPv6 address, refused by its length before the authority is read, as the literal rule refused it after"
+  },
+  {
+   "url": "https://[2606:4700:1111:2222:3333:4444:255.255.255.255]:44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444/a.png",
+   "host": "",
+   "fetch": {
+    "code": "logo_host",
+    "lookups": []
+   },
+   "why": "the logo bound, finished (D-SINK-112, 2026-11-17): the longest IPv6 literal followed by 2,000 characters of port, refused by their length before the authority is read, as the port rule refused them after"
   }
  ],
  "absorbed": [

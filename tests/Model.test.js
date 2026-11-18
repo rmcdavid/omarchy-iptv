@@ -2685,7 +2685,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [23, []])
+}, [24, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2871,6 +2871,17 @@ checkCall("D-SINK-112, the recheck of round 5's settle: the column test answers 
     }
     logos.push(pick(schemes) + pick(seps) + host + tail)
   }
+  // The review of the column fix (2026-11-17): and 1,000 whose host is one
+  // of host-grammar.json's long hosts, at and past DNS's length.
+  for (let n = 0; n < 1000; n++) {
+    const parts = { userinfo: rnd() < 0.8 ? "" : pick(atoms.userinfo), host: pick(atoms.longHosts), port: rnd() < 0.6 ? "" : pick(atoms.ports), target: pick(atoms.targets) }
+    if (rnd() < 0.35) {
+      const where = pick(["userinfo", "host", "host", "port", "target"])
+      const at = Math.floor(rnd() * (parts[where].length + 1))
+      parts[where] = parts[where].slice(0, at) + pick(atoms.inserts) + parts[where].slice(at)
+    }
+    logos.push("https://" + parts.userinfo + parts.host + parts.port + parts.target)
+  }
   logos.push("", "https", "https:", "https://", "https:///a.png", "https://?a", "https://#a", ":https://cdn.test/a.png", X + "1://cdn.test/a.png")
   const dir = "/c/logos"
   const full = Model.logoAuthorityHosts(logos.map(u => ({ logo: u })))
@@ -2893,7 +2904,7 @@ checkCall("D-SINK-112, the recheck of round 5's settle: the column test answers 
     lists++
   }
   const counted = want.filter(w => w).length
-  return [logos.length > 24000, counted > 1000, logos.length - counted > 10000, lists, bad.length, bad.slice(0, 4),
+  return [logos.length > 25000, counted > 1000, logos.length - counted > 10000, lists, bad.length, bad.slice(0, 4),
           Model.logoColumnShown(logos.map(u => ({ logo: u })), false, dir, full), Model.logoColumnShown(logos.map(u => ({ logo: u })), true, "", full)]
 }, [true, true, true, 4000, 0, [], false, false])
 
@@ -2906,7 +2917,11 @@ checkCall("D-SINK-112, the recheck of round 5's settle: the column test answers 
 // authority is still copied and looked up, in the engine's own code).
 // Measured in the same process, best of three, so the bound scales with the
 // machine's load. In node at 846dd43 the long rows cost 54 to 105 ms
-// against 4 ms for the short rows; on this tree 2 to 11 ms.
+// against 4 ms for the short rows; on this tree 2 to 11 ms. The review of
+// the column fix (2026-11-17): the long authority's rows share ten
+// authorities, so the map built before the timing is ten reads, not 10,000
+// (the map's own cost is the check below); the column's cost per row, a
+// 2,000-unit authority copied and looked up, is what it was.
 checkCall("D-SINK-112, the recheck of round 5's settle: over 10,000 rows of 2,000-unit paths behind an authority that names no host, the column test costs at most four times the short rows' and 25 ms, and over 10,000 rows of a 2,000-unit scheme or authority at most eight times and 25 ms, given the service's map", () => {
   const X = "x".repeat(2000)
   const best = f => {
@@ -2927,13 +2942,61 @@ checkCall("D-SINK-112, the recheck of round 5's settle: over 10,000 rows of 2,00
   const short = cost(i => "https://10.0.0.1/a" + i + ".png")
   const shapes = [[4, i => "https://10.0.0.1/" + X + i + ".png"], [4, i => "https://cdn/" + X + i + ".png"],
                   [4, i => "https://10.0.0.1/" + X + i + ".png" + String.fromCharCode(0x7f)],
-                  [8, i => "https://" + X + i + ".png"], [8, i => X + i + "://cdn.test/a.png"]]
+                  [8, i => "https://" + X + (i % 10) + ".png"], [8, i => X + i + "://cdn.test/a.png"]]
   return [short[1]].concat(shapes.map(([times, make]) => {
     const [ms, answer] = cost(make)
     const bound = times * short[0] + 25
     return [answer, ms <= bound ? true : ms.toFixed(1) + " ms over " + bound.toFixed(1)]
   }))
 }, [false, [false, true], [false, true], [false, true], [false, true], [false, true]])
+
+// The review of the column fix (2026-11-17): the service's map
+// (logoAuthorityHosts, one per channel list) read every distinct authority
+// through readAuthority before logoLabelsRefused refused its label, so over
+// 10,000 distinct 2,000-unit authorities it cost about 11 s of Qt's engine
+// per channel list (1.1 to 1.2 s in node). logoAuthorityHost now asks the
+// authority's lengths first (logoAuthorityInBounds in model/logos.mjs): a
+// host past DNS's 253 characters (254 with a trailing dot), a label past 63,
+// more than five units after the host's colon, a bracketed literal past 47
+// units or followed by more than six. Over 10,000 distinct authorities of
+// each such shape -- a 2,000-unit host, a 240-unit label in a host of 250, a
+// 2,000-unit port, 2,000 units in labels of seven, a 2,000-unit literal, the
+// longest literal followed by a 2,000-unit port -- the map costs no more than
+// over 10,000 distinct short ones, and 25 ms, best of three in the same
+// process. Measured in node on this tree 10 to 13 ms warm against 28 ms for
+// the short ones; at 456fbd6 176 ms for the label and 1.2 to 1.6 s for the
+// rest (the logo bound, finished, 2026-11-17). And each answer is "" (the host
+// past DNS's length is the one new refusal; the shared fixtures hold the
+// boundaries).
+checkCall("D-SINK-112, the review of the column fix: over 10,000 distinct authorities that are a 2,000-unit host, a 240-unit label, a 2,000-unit port, 2,000 units in labels of seven, a 2,000-unit literal or a literal followed by a 2,000-unit port, the service's map costs no more than over 10,000 distinct short authorities, and 25 ms", () => {
+  const X = "x".repeat(2000), Y = "y".repeat(240), P = "4".repeat(2000), L = "1:".repeat(999)
+  const S7 = "abcdefg.".repeat(250).substring(0, 1990)
+  const rowsOf = make => {
+    const rows = []
+    for (let i = 0; i < 10000; i++) rows.push({ name: "c" + i, logo: make(i) })
+    return rows
+  }
+  const best = rows => {
+    let least = Infinity, keys = 0
+    for (let k = 0; k < 3; k++) {
+      const t0 = process.hrtime.bigint()
+      const map = Model.logoAuthorityHosts(rows)
+      least = Math.min(least, Number(process.hrtime.bigint() - t0) / 1e6)
+      keys = Object.keys(map).length
+    }
+    return [least, keys]
+  }
+  const short = best(rowsOf(i => "https://cdn" + i + ".test/a.png"))
+  const bound = short[0] + 25
+  const shapes = [i => "https://" + X + i + ".test/a.png", i => "https://" + Y + i + ".test/a.png",
+                  i => "https://cdn" + i + ".test:" + P + "/a.png", i => "https://h" + i + "." + S7 + "test/a.png",
+                  i => "https://[2606:4700::" + i.toString(16) + "]:" + P + "/a.png", i => "https://[" + i.toString(16) + L + "]/a.png"]
+  return [short[1]].concat(shapes.map(make => {
+    const rows = rowsOf(make)
+    const [ms, keys] = best(rows)
+    return [keys, ms <= bound ? true : ms.toFixed(1) + " ms over " + bound.toFixed(1), Model.logoContactHost(rows[7].logo)]
+  }))
+}, [10000, [10000, true, ""], [10000, true, ""], [10000, true, ""], [10000, true, ""], [10000, true, ""], [10000, true, ""]])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let

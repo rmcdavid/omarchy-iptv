@@ -1061,11 +1061,15 @@ carry channel ids — most do — are not affected at all.
   list showed it as you wrote it: write the folded name instead. A saved
   source whose host holds one is dropped when the shell starts after the
   update, a guide address whose host holds one is cleared, and a channel
-  whose host holds one is skipped. That includes a source or guide
-  address given to `state source add` or `state source update` whose host
-  had a capital sigma after a letter and before a hyphen, a digit, an
-  underscore or the end of the name: earlier versions saved it with the
-  final sigma.
+  whose host holds one is skipped. That includes a source or guide address
+  given to `state source add` or `state source update` whose host had a
+  capital sigma that earlier versions saved as the final sigma. Every
+  release since 0.14.0 lowered a host given to the command line with
+  Python's `str.lower`, which writes a capital sigma as the final sigma
+  when, passing over case-ignorable characters such as `.`, `:`, `'` and
+  combining marks, the nearest character before it is a cased letter and
+  the nearest after it, if there is one, is not (Unicode's Final_Sigma
+  rule).
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.

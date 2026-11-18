@@ -624,16 +624,21 @@ def logo_corpus():
     """The differential's logos (D-SINK-112), from host-grammar.json's atoms
     and seeds as corpus() builds addresses, but shaped as logos are: most are
     https, most carry no user information and no port, and one insert in
-    three; then every fixture logo. Deterministic."""
+    three; then, per seed, 400 more whose host is one of the long hosts at
+    and past DNS's length (`longHosts`, the review of the column fix,
+    2026-11-17); then every fixture logo. Deterministic."""
     atoms = FIXTURE["atoms"]
     out = []
     for seed in FIXTURE["seeds"]:
         rnd = random.Random(seed * 1000 + 112)
-        for _ in range(FIXTURE["corpusSize"] // len(FIXTURE["seeds"]) // 2):
+        share = FIXTURE["corpusSize"] // len(FIXTURE["seeds"]) // 2
+        for n in range(share + 400):
             parts = {"userinfo": "" if rnd.random() < 0.8 else rnd.choice(atoms["userinfo"]),
                      "port": "" if rnd.random() < 0.6 else rnd.choice(atoms["ports"]),
                      "target": rnd.choice(atoms["targets"])}
-            if rnd.random() < 0.2:
+            if n >= share:
+                parts["host"] = rnd.choice(atoms["longHosts"])
+            elif rnd.random() < 0.2:
                 parts["host"] = rnd.choice(atoms["literals"])
             else:
                 labels = [rnd.choice(atoms["labels"]) for _ in range(rnd.randint(1, 2))]

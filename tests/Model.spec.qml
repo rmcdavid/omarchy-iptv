@@ -3530,6 +3530,15 @@ TestCase {
   // for the scheme and the authority, which are still copied and looked up (7
   // and 82 to 89 ms). And the scan still finds the one row that counts behind
   // 10,000 that do not.
+  //
+  // The review of the column fix (2026-11-17): the 2,000-unit authority shape
+  // built a fresh map of 10,000 distinct authorities before it timed the
+  // column, about 11 s of this engine at 9ced99c (logoAuthorityHost read each
+  // one in full). The column only needs the map to hold the rows'
+  // authorities, so the shape's rows now share ten: the map is ten reads, and
+  // what is timed, a 2,000-unit authority copied and looked up per row, is
+  // what it was. The map's own cost over 10,000 distinct long authorities is
+  // test_logoAuthorityBoundInV4's.
   function test_logoColumnTailAfterHostInV4() {
     var X = new Array(2001).join("x")
     function best(f) {
@@ -3552,7 +3561,7 @@ TestCase {
     var shapes = [[4, function (i) { return "https://10.0.0.1/" + X + i + ".png" }],
                   [4, function (i) { return "https://cdn/" + X + i + ".png" }],
                   [4, function (i) { return "https://10.0.0.1/" + X + i + ".png" + String.fromCharCode(0x7f) }],
-                  [8, function (i) { return "https://" + X + i + ".png" }],
+                  [8, function (i) { return "https://" + X + (i % 10) + ".png" }],
                   [8, function (i) { return X + i + "://cdn.test/a.png" }]]
     var got = [short[1]]
     var want = [false]
@@ -3565,6 +3574,72 @@ TestCase {
     }
     got.push(cost(shapes[0][1], "https://cdn.test/a.png")[1])
     want.push(true)
+    compare(got, want)
+  }
+
+  // The review of the column fix (2026-11-17): the service's map
+  // (Model.logoAuthorityHosts, one per channel list) read every distinct
+  // authority through readAuthority, about 1.1 ms of this engine for a
+  // 2,000-unit one before its label was refused, so 10,000 distinct ones cost
+  // about 11 s per channel list. logoAuthorityHost now asks the authority's
+  // lengths first (logoAuthorityInBounds in model/logos.mjs): a host past
+  // DNS's 253 characters (254 with a trailing dot), a label past 63, more
+  // than five units after the host's colon, a bracketed literal past 47 units
+  // or followed by more than six. Over 10,000 distinct authorities of each
+  // such shape the map costs no more than twice what 10,000 distinct short
+  // ones cost, and 25 ms: best of three, in the same run, so the bound scales
+  // with the machine's load. The long ones are still copied and looked up,
+  // which is most of what the short ones cost, hence twice (the logo bound,
+  // finished, 2026-11-17). Measured on this tree 56 to 224 ms against 170 to
+  // 201 ms for the short ones; at 456fbd6 11.0 s for the 2,000-unit label,
+  // 1.4 s for the 240-unit one, 8.9 s for the port and 9.1 s for the literal
+  // followed by a port, and in a probe 14.9 to 21.6 s for 2,000 units in
+  // labels of seven, each counted there. The literal shape is the one that
+  // ran this engine out of its address space at 456fbd6 (F-HARNESS-117), so
+  // it is never asked of a tree without the bound. A shape far past its
+  // bound is not asked twice.
+  function test_logoAuthorityBoundInV4() {
+    var X = new Array(2001).join("x")
+    var Y = new Array(241).join("y")
+    var P = new Array(2001).join("4")
+    var L = new Array(1000).join("1:")
+    var S7 = new Array(251).join("abcdefg.").substring(0, 1990)
+    function rowsOf(make) {
+      var rows = []
+      for (var i = 0; i < 10000; i++) rows.push({ name: "c" + i, logo: make(i) })
+      return rows
+    }
+    // Best of three; with a bound, stop at the first evaluation within it,
+    // or past twenty times it.
+    function best(rows, bound) {
+      var least = 1e9
+      var keys = 0
+      for (var k = 0; k < 3; k++) {
+        var t0 = Date.now()
+        var map = Model.logoAuthorityHosts(rows)
+        least = Math.min(least, Date.now() - t0)
+        keys = Object.keys(map).length
+        if (bound >= 0 && (least <= bound || least > 20 * bound)) break
+      }
+      return [least, keys]
+    }
+    var short = best(rowsOf(function (i) { return "https://cdn" + i + ".test/a.png" }), -1)
+    var bound = 2 * short[0] + 25
+    var shapes = [function (i) { return "https://" + X + i + ".test/a.png" },
+                  function (i) { return "https://" + Y + i + ".test/a.png" },
+                  function (i) { return "https://cdn" + i + ".test:" + P + "/a.png" },
+                  function (i) { return "https://h" + i + "." + S7 + "test/a.png" },
+                  function (i) { return "https://[2606:4700::" + i.toString(16) + "]:" + P + "/a.png" },
+                  function (i) { return "https://[" + i.toString(16) + L + "]/a.png" }]
+    var got = [short[1]]
+    var want = [10000]
+    for (var n = 0; n < shapes.length; n++) {
+      var rows = rowsOf(shapes[n])
+      var c = best(rows, bound)
+      console.log("D-SINK-112, the review of the column fix: the map over 10,000 distinct authorities of shape " + n + " in V4: " + c[0] + " ms; the short ones: " + short[0] + " ms; bound " + bound + " ms")
+      got.push([c[1], c[0] <= bound, Model.logoContactHost(rows[7].logo)])
+      want.push([10000, true, ""])
+    }
     compare(got, want)
   }
 }

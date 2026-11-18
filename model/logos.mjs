@@ -171,7 +171,9 @@ function logoScheme(raw) {
 // zeros while the request carries the port as written, so
 // `https://cdn.test:000443/a.png` was counted as cdn.test and refused at the
 // connection before its lookup: the review of round 5's build, 2026-11-17),
-// its host is ASCII with labels the codec takes (logoLabelsRefused), not one
+// its host is ASCII with labels the codec takes (logoLabelsRefused) and no
+// longer than DNS allows, 253 characters or 254 with a trailing `.`
+// (logoAuthorityInBounds: the review of the column fix, 2026-11-17), not one
 // label (dotlessHost) and not a literal or a name that is not global
 // (hostClass), it absorbed no attribute (absorbedAttribute), and the source
 // validator accepts it with that host (validateSourceUrl). The port is never
@@ -269,15 +271,72 @@ function logoTailPrintable(raw, from) {
   return true
 }
 
+// The lengths logoAuthorityInBounds holds a logo authority to (D-SINK-112,
+// the review of the column fix, 2026-11-17): a host name of at most
+// LOGO_NAME_MAX units, one more when the last is a trailing `.` (DNS: 253
+// characters, 255 octets on the wire); a label of at most LOGO_LABEL_MAX,
+// the idna codec's and DNS's 63; a bracketed literal of at most
+// LOGO_LITERAL_MAX units, `[`, the longest IPv6 address readAuthority reads
+// (45: six groups of four and a dotted tail of 15) and `]`; and a written
+// port of at most LOGO_PORT_MAX, logoPortDigits' five.
+var LOGO_NAME_MAX = 253
+var LOGO_LABEL_MAX = 63
+var LOGO_LITERAL_MAX = 47
+var LOGO_PORT_MAX = 5
+
+// The bound logoAuthorityHost asks before it reads anything unit by unit
+// (D-SINK-112, the review of the column fix, 2026-11-17): false when a logo
+// authority's lengths alone refuse it. readAuthority cost about 1.1 ms of
+// Qt's engine for a 2,000-unit authority, before logoLabelsRefused refused
+// its label, so the service's map over 10,000 distinct ones cost about 11 s
+// per channel list. So, by the engine's own searches and the lengths they
+// give, never a walk of the whole authority:
+//   * a host as written (the text before the first `:`) longer than
+//     LOGO_NAME_MAX, or LOGO_NAME_MAX + 1 without a trailing `.`: a NEW
+//     refusal. No resolver looks such a name up, so it was counted and could
+//     only fail at its lookup; it is counted refused, and the fetch, which
+//     asks this reading first, refuses it before any lookup;
+//   * a label of that host longer than LOGO_LABEL_MAX, which
+//     logoLabelsRefused refuses later anyway;
+//   * more than LOGO_PORT_MAX units after the host's `:`, which hold a second
+//     `:` (readAuthority refuses the host) or a port logoPortDigits refuses;
+//   * a bracketed literal with no `]`, longer than LOGO_LITERAL_MAX, or
+//     followed by more than `:` and LOGO_PORT_MAX units, which readAuthority
+//     or logoPortDigits refuses.
+// Every refusal but the first is one logoAuthorityHost gave before, only
+// sooner: a host that is not ASCII is refused whatever its lengths, so a
+// length in UTF-16 units here and in code points in the helper decides
+// nothing differently. The mirror of the helper's logo_authority_in_bounds.
+function logoAuthorityInBounds(authority) {
+  var a = str(authority)
+  if (a.charAt(0) === "[") {
+    var close = a.indexOf("]")
+    return close !== -1 && close < LOGO_LITERAL_MAX && a.length - close - 1 <= LOGO_PORT_MAX + 1
+  }
+  var colon = a.indexOf(":")
+  var end = colon === -1 ? a.length : colon
+  if (end > LOGO_NAME_MAX + 1 || (end === LOGO_NAME_MAX + 1 && a.charCodeAt(end - 1) !== 0x2e)) return false
+  if (colon !== -1 && a.length - colon - 1 > LOGO_PORT_MAX) return false
+  var from = 0
+  while (from <= end) {
+    var dot = a.indexOf(".", from)
+    if (dot === -1 || dot > end) dot = end
+    if (dot - from > LOGO_LABEL_MAX) return false
+    from = dot + 1
+  }
+  return true
+}
+
 // The second half: the host a logo authority names, or "" when the authority
-// alone refuses it -- readAuthority refuses it, it holds an `@` or a `%`, its
-// port as written is not logoPortDigits', or its host is not ASCII, has
-// labels the codec refuses, is one label, or is a literal or a name that is
-// not global. A pure function of the authority, so one answer serves every
-// logo on it (logoAuthorityHosts). The mirror of the helper's
-// logo_authority_host.
+// alone refuses it -- its lengths do (logoAuthorityInBounds), readAuthority
+// refuses it, it holds an `@` or a `%`, its port as written is not
+// logoPortDigits', or its host is not ASCII, has labels the codec refuses, is
+// one label, or is a literal or a name that is not global. A pure function of
+// the authority, so one answer serves every logo on it (logoAuthorityHosts).
+// The mirror of the helper's logo_authority_host.
 function logoAuthorityHost(authority) {
   if (typeof authority !== "string" || authority === "") return ""
+  if (!logoAuthorityInBounds(authority)) return ""
   for (var k = 0; k < authority.length; k++) {
     var e = authority.charCodeAt(k)
     if (e === 0x2f || e === 0x3f || e === 0x23 || e === 0x40 || e === 0x25) return ""
@@ -988,7 +1047,8 @@ function logoSummaryNotice(line) {
 export {
   LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
   logoScheme, logoContactHost, logoRowAuthority, logoAuthorityWritten,
-  logoSchemeLengthTaken, logoAuthorityAt, logoTailPrintable,
+  logoSchemeLengthTaken, logoAuthorityAt, logoTailPrintable, LOGO_NAME_MAX,
+  LOGO_LABEL_MAX, LOGO_LITERAL_MAX, LOGO_PORT_MAX, logoAuthorityInBounds,
   logoAuthorityHost, logoAddressCounts, logoPortDigits, logoAuthorityHosts,
   logoLabelsRefused, splitLogoUrl, logoConsentLines, logoFile, logoSlot,
   WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,

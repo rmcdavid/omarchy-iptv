@@ -315,8 +315,10 @@ def logo_contact_host(raw: Any) -> str:
         cdn.test and refused at the connection before its lookup (the
         review of round 5's build, 2026-11-17);
       * its host is ASCII with labels the idna codec takes
-        (logo_labels_refused, D-SINK-119), not one DNS label (dotless_host,
-        D-SINK-83) and not a literal or a name that is not global
+        (logo_labels_refused, D-SINK-119), no longer than DNS allows, 253
+        characters or 254 with a trailing `.` (logo_authority_in_bounds:
+        the review of the column fix, 2026-11-17), not one DNS label
+        (dotless_host, D-SINK-83) and not a literal or a name that is not global
         (host_class: loopback, the local networks, localhost), which
         DestinationPolicy.for_logos refuses before connecting;
       * it absorbed no attribute of the playlist (absorbed_attribute);
@@ -375,15 +377,70 @@ def logo_row_authority(raw: Any) -> str:
     return authority
 
 
+# The lengths logo_authority_in_bounds holds a logo authority to (D-SINK-112,
+# the review of the column fix, 2026-11-17): a host name of at most
+# LOGO_NAME_MAX characters, one more when the last is a trailing `.` (DNS:
+# 253 characters, 255 octets on the wire); a label of at most LOGO_LABEL_MAX,
+# the idna codec's and DNS's 63; a bracketed literal of at most
+# LOGO_LITERAL_MAX, `[`, the longest IPv6 address read_authority reads (45:
+# six groups of four and a dotted tail of 15) and `]`; and a written port of
+# at most LOGO_PORT_MAX, port_digits' five. Mirrored by the model's
+# constants of the same names (model/logos.mjs).
+LOGO_NAME_MAX = 253
+LOGO_LABEL_MAX = 63
+LOGO_LITERAL_MAX = 47
+LOGO_PORT_MAX = 5
+
+
+def logo_authority_in_bounds(authority: str) -> bool:
+    """The bound logo_authority_host asks before read_authority (D-SINK-112,
+    the review of the column fix, 2026-11-17): False when a logo
+    authority's lengths alone refuse it. The model's read of a 2,000-unit
+    authority cost about 1.1 ms of Qt's engine, before its label was
+    refused, so the shell's map over 10,000 distinct ones cost about 11 s
+    per channel list; this side keeps the same bound so the two readings
+    give the same answers.
+      * a host as written (the text before the first `:`) longer than
+        LOGO_NAME_MAX, or LOGO_NAME_MAX + 1 without a trailing `.`: a NEW
+        refusal. No resolver looks such a name up, so it was counted and
+        could only fail at its lookup; it is counted refused, and
+        fetch_logo, which asks this reading first, refuses it as
+        `logo_host` before any lookup;
+      * a label of that host longer than LOGO_LABEL_MAX, which
+        logo_labels_refused refuses later anyway;
+      * more than LOGO_PORT_MAX characters after the host's `:`, which hold
+        a second `:` (read_authority refuses the host) or a port
+        port_digits refuses;
+      * a bracketed literal with no `]`, longer than LOGO_LITERAL_MAX, or
+        followed by more than `:` and LOGO_PORT_MAX characters, which
+        read_authority or port_digits refuses.
+    Every refusal but the first is one logo_authority_host gave before, only
+    sooner. A host that is not ASCII is refused whatever its lengths, so a
+    length in code points here and in UTF-16 units in the model decides
+    nothing differently. Mirrored by logoAuthorityInBounds (model/logos.mjs)."""
+    if authority.startswith("["):
+        close = authority.find("]")
+        return close != -1 and close < LOGO_LITERAL_MAX and len(authority) - close - 1 <= LOGO_PORT_MAX + 1
+    colon = authority.find(":")
+    end = len(authority) if colon == -1 else colon
+    if end > LOGO_NAME_MAX + 1 or (end == LOGO_NAME_MAX + 1 and authority[end - 1] != "."):
+        return False
+    if colon != -1 and len(authority) - colon - 1 > LOGO_PORT_MAX:
+        return False
+    return all(len(label) <= LOGO_LABEL_MAX for label in authority[:end].split("."))
+
+
 def logo_authority_host(authority: Any) -> str:
     """The second half: the host a logo authority names, or "" when the
-    authority alone refuses it -- read_authority refuses it, it holds an
-    `@` or a `%`, its port as written is not port_digits', or its host is
-    not ASCII, has labels the idna codec refuses, is one label, or is a
-    literal or a name that is not global. A pure function of the
-    authority, so one answer serves every logo on it. Mirrored by
-    Model.logoAuthorityHost."""
-    if not isinstance(authority, str) or authority == "" or "@" in authority or "%" in authority:
+    authority alone refuses it -- its lengths do (logo_authority_in_bounds),
+    read_authority refuses it, it holds an `@` or a `%`, its port as written
+    is not port_digits', or its host is not ASCII, has labels the idna codec
+    refuses, is one label, or is a literal or a name that is not global. A
+    pure function of the authority, so one answer serves every logo on it.
+    Mirrored by Model.logoAuthorityHost."""
+    if not isinstance(authority, str) or authority == "" or not logo_authority_in_bounds(authority):
+        return ""
+    if "@" in authority or "%" in authority:
         return ""
     if _AUTHORITY_END.search(authority):
         return ""

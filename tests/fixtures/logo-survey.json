@@ -779,6 +779,62 @@
           "https": 5
         }
       }
+    },
+    {
+      "name": "D-SINK-112 (the review of the column fix, 2026-11-17): a host as long as DNS allows -- 253 characters, or 254 with a trailing dot -- is counted, and the longest IPv6 literal (45 characters inside its brackets); a host longer than that, a label of 64 characters, more than five characters after the host's colon and a bracketed literal longer than any IPv6 address are counted refused, and the first is the one new refusal",
+      "channels": [
+        {
+          "logo": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test/a.png"
+        },
+        {
+          "logo": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test./b.png"
+        },
+        {
+          "logo": "https://[2606:4700:1111:2222:3333:4444:255.255.255.255]/c.png"
+        },
+        {
+          "logo": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test/d.png"
+        },
+        {
+          "logo": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test./e.png"
+        },
+        {
+          "logo": "https://abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.abcdefg.cdn.test/f.png"
+        },
+        {
+          "logo": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.test/g.png"
+        },
+        {
+          "logo": "https://cdn.test:44444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444/h.png"
+        },
+        {
+          "logo": "https://[1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:1:]/i.png"
+        }
+      ],
+      "expect": {
+        "channels": 9,
+        "withLogo": 9,
+        "wouldContact": 3,
+        "refused": 6,
+        "hostCount": 3,
+        "hosts": [
+          {
+            "host": "[2606:4700:1111:2222:3333:4444:255.255.255.255]",
+            "channels": 1
+          },
+          {
+            "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test",
+            "channels": 1
+          },
+          {
+            "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddd.test.",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 9
+        }
+      }
     }
   ]
 }

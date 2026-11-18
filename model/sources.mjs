@@ -1067,8 +1067,13 @@ function readAuthority(body) {
   }
   if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return refused("char")
   var at = authority.lastIndexOf("@")
-  for (var i = 0; i < authority.length; i++) {
-    if (DELIMITER_FOLDS.indexOf(authority.charCodeAt(i)) !== -1) return refused(i < at ? "fold_userinfo" : "fold_host")
+  // Every DELIMITER_FOLDS code point is outside ASCII, so an authority that
+  // is all ASCII holds none and is not walked for one, as the helper's
+  // read_authority skips its walk (D-SINK-112, the logo bound, 2026-11-17).
+  if (NON_ASCII_RE.test(authority)) {
+    for (var i = 0; i < authority.length; i++) {
+      if (DELIMITER_FOLDS.indexOf(authority.charCodeAt(i)) !== -1) return refused(i < at ? "fold_userinfo" : "fold_host")
+    }
   }
   var userinfo = at === -1 ? "" : authority.substring(0, at)
   var hostport = at === -1 ? authority : authority.substring(at + 1)

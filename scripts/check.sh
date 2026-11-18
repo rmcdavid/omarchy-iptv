@@ -308,7 +308,14 @@ fail=0
 # the floor stays 110 -- test_engineSigmaInV4 now holds a written final
 # sigma refused with fold_host's sentence rather than kept, red on
 # 9ced99c's model; no case is added, and the spec runs 110.
-QML_SPEC_MIN=${QML_SPEC_MIN:-110}
+# 2026-11-17, lane-r5bound2 (the logo bound, finished, D-SINK-112): 110 ->
+# 111 -- test_logoAuthorityBoundInV4, the service's map over 10,000 distinct
+# logo authorities of six over-long shapes held to twice the short ones' cost
+# and 25 ms in the engine the shell runs; red on 456fbd6's model (1.4 to
+# 11.0 s against 431 ms, run without the literal shape, which ran that model
+# out of its address space, F-HARNESS-117) and under six single-decision
+# mutants of the bound; the spec runs 111.
+QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -705,7 +712,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-110}
 # the whole-range check widened, 6 checks red on 9ced99c's model and each
 # new decision red under a named single-decision mutant (QA-RESULTS "The
 # owner's case-fold decision, built (2026-11-17)"); the suite runs 3850.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3850}
+# 2026-11-17, lane-r5bound2 (the logo bound, finished, D-SINK-112): 3850 ->
+# 3851 -- the service's map over 10,000 distinct logo authorities of six
+# over-long shapes costs no more than over 10,000 short ones and 25 ms; with
+# the shared logo fixtures' new rows, 4 checks red on 456fbd6's model and
+# nine single-decision mutants red (QA-RESULTS "The logo bound, finished
+# (2026-11-17)"); the suite runs 3851.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3851}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1267,6 +1280,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3850}
 # test_stream_host_names' reading count re-levelled, 14 tests red on
 # 9ced99c and 5 single-decision mutants red (QA-RESULTS "The owner's
 # case-fold decision, built (2026-11-17)"); the suite runs 2741, 1 skipped.
+# 2026-11-17, lane-r5bound2 (the logo bound, finished, D-SINK-112): the
+# floor stays 2741 -- the bound adds fixture rows and corpus logos to
+# existing tests, 4 of them red on 456fbd6, and no test; the suite runs
+# 2741, 1 skipped.
 PY_TESTS_MIN=${PY_TESTS_MIN:-2741}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}

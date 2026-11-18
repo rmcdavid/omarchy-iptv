@@ -63,7 +63,10 @@ after the shell starts, and you start the channel again yourself.
   the fetch would refuse or could not send. A logo whose host is
   percent-encoded, whose port is not written as at most five digits, whose
   address is on this computer or your local network, or whose host is not
-  plain ASCII now counts as one that cannot be used. (D-SINK-112)
+  plain ASCII now counts as one that cannot be used, and so does one whose
+  host is longer than any name DNS can carry (more than 253 characters, not
+  counting a final dot), which is refused before it is looked up.
+  (D-SINK-112)
 - **A refused address that a playlist, a guide or a redirect chose is no
   longer named.** The helper's reply, status file and journal say what was
   refused without the host, and the Sources row says why a playlist's own
@@ -147,14 +150,24 @@ after the shell starts, and you start the channel again yourself.
   checks.
 - **The relay is one more small program per player**, about 22 MB of
   memory while idle, and it stops with the player.
-- **A saved source whose address holds one of the characters refused
-  above is dropped when the shell starts**, as one holding `@` or `%` in
-  its host has been since 0.19.0, and a guide address holding one is
-  cleared. Add it again, written plainly or percent-encoded. A source
-  or guide address given to `state source add` or `state source update`
-  whose host had a capital sigma after a letter and before a hyphen, a
-  digit, an underscore or the end of the name is among them: earlier
-  versions saved it with the final sigma. A channel whose host holds one is skipped, and each source's
+- **A saved source is dropped when the shell starts if its address holds
+  one of the shapes the plugin cannot read in an address, refused above**
+  (a character that reads as `/`, `?`, `#`, `@` or `:`, a `[` or `]` in
+  the user name or password, or a bracketed host that is not an IPv6
+  address), **or if its host holds a character a host name may not hold**,
+  as one holding `@` or `%` in its host has been since 0.19.0; a guide
+  address with either is cleared. A letter the international-name rules
+  fold by case drops nothing when it is in the user name, the password,
+  the path or the query. Add it again, written plainly or percent-encoded.
+  A source or guide address given to `state source add` or
+  `state source update` whose host had a capital sigma that earlier
+  versions saved as the final sigma is among them. Every release since
+  0.14.0 lowered a host given to the command line with Python's
+  `str.lower`, which writes a capital sigma as the final sigma when,
+  passing over case-ignorable characters such as `.`, `:`, `'` and
+  combining marks, the nearest character before it is a cased letter and
+  the nearest after it, if there is one, is not (Unicode's Final_Sigma
+  rule). A channel whose host holds one is skipped, and each source's
   playlist is downloaded once more after the update. (D-SINK-115,
   D-SINK-116, D-SINK-117, D-SINK-119)
 
