@@ -746,7 +746,16 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # (play's bound and the margin, 15 s) firing there; with the rewritten
 # control-share check, 5 of 3869 red on 7bcbfb4 (QA-RESULTS "D-PLY-39, -40
 # and -43: the player's timing (2026-11-18)"); the suite runs 3869.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3869}
+# 2026-11-18, lane-plyb-settle (the settle of three reviews of 9d604cf, the
+# lead's call under the owner's standing authority of 2026-11-09): 3869 ->
+# 3880 -- the stopped player's EOF while a play made after the stop is on its
+# way (three), D-LIVE-15 across it, the older start's ok looked for at the
+# backstop (two), the 5 s look for a superseded stop (three), the observer
+# released when a newer start spawned, and the stale queued intent dropped;
+# 8 of the 11 red on 9d604cf and nine single-decision Service.qml mutants red
+# (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing (2026-11-18)", "The
+# settle"); the suite runs 3880.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3880}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1346,7 +1355,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3869}
 # them and the fixture-names test red on 7bcbfb4, fourteen single-decision helper
 # mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
 # (2026-11-18)"); the suite counts 2794.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2794}
+# 2026-11-18, lane-plyb-settle (the settle of the reviews of 9d604cf):
+# 2794 -> 2798 -- DeadlineAtEveryRequestTest's 4 (the deadline landed on each
+# request a start, a replacing start and a restart ask, and on the
+# stand-down's owner claim); 4 of 4 red on 9d604cf and four single-decision
+# helper mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
+# (2026-11-18)", "The settle"); the suite counts 2798.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2798}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

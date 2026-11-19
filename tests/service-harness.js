@@ -190,6 +190,9 @@ function makeIds(h) {
     seekThrottle: timer("seekThrottle"),
     focusTimer: timer("focusTimer"),
     stopSettleTimer: timer("stopSettleTimer"),
+    // The review of 9d604cf: the stop's early look (F-PLY-3). Counted, and
+    // driven only by a check that asks (h.driveTimer), as the backstop is.
+    stopLookTimer: timer("stopLookTimer"),
     pipSequenceWatchdog: timer("pipSequenceWatchdog"),
     pipStepWatchdog: timer("pipStepWatchdog"),
     // D-PLY-35: what the reattach probe's answer reaches through applyProbe,

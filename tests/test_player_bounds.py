@@ -190,7 +190,8 @@ _REAL_IPC = helper.MpvIpc
 
 
 def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, older=False, spawned_slow=0,
-                     vanish_at=None, slow=False, mpv_args=None, unsafe=False, slow_load=False):
+                     vanish_at=None, slow=False, mpv_args=None, unsafe=False, slow_load=False, land_at=None,
+                     spawn_seen=False, newer=None):
     """Run `player <verb>` through the shipping code, every wait on the path
     at its bound. `survivor_answers`: how many requests the found player
     answers (just inside the bound) before it goes quiet. `lock_at` /
@@ -225,7 +226,18 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     `learned` then holds the commands sent (`sent`, name and first argument,
     in order, across every connection), how many relay listeners were closed
     (`closed`) and what the runtime folder held when the verb returned
-    (`leftover`)."""
+    (`leftover`).
+
+    The review of 9d604cf: `land_at` n puts the verb's mpv deadline half a
+    request's bound ahead just as its n-th request (counted from 1 across
+    every connection, refused or not) is about to begin, so that request is
+    the one the deadline refuses -- wherever on the path it is; `asked`
+    then holds each request asked as (the player it went to: "found",
+    "spawned" or "play", name and first argument). `spawn_seen`: the finder
+    sees the player the spawn launched, as `slow` makes it, so a start that
+    stops what it spawned really ladders it. `newer`: what
+    applied_by_another_client reads off the spawned player (the stand-down,
+    D-PLY-11), and the start then carries an owner claim to write."""
     clock = _Clock()
     state = {"phase": "play" if verb == "play" else "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
@@ -247,15 +259,17 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             state["phase"] = "gone"
         return state["phase"] != "found"
 
+    seen = slow or spawn_seen
+
     def find_player(_sock):
         if not gone():
             return [dict(survivor)]
-        return [dict(spawned)] if slow and state["phase"] == "spawned" else []
+        return [dict(spawned)] if seen and state["phase"] == "spawned" else []
 
     def still_the_player(record, _sock):
         if record.get("pid") == survivor["pid"]:
             return not gone()
-        return slow and state["phase"] == "spawned" and record.get("pid") == spawned["pid"]
+        return seen and state["phase"] == "spawned" and record.get("pid") == spawned["pid"]
 
     real_ladder = helper.stop_ladder
 
@@ -424,6 +438,15 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             return (json.dumps({"request_id": request["request_id"], "error": error, "data": data}) + "\n").encode("utf-8")
 
     class Ipc(_REAL_IPC):
+        reached = "?"
+
+        def request(self, command, allow_close=False):
+            state["requests"] = state.get("requests", 0) + 1
+            learned.setdefault("asked", []).append((self.reached, " ".join(str(part) for part in command[:2])))
+            if land_at is not None and state["requests"] == land_at and helper.IPC_DEADLINE[0] is not None:
+                helper.IPC_DEADLINE[0] = clock.t + helper.DEFAULT_IPC_TIMEOUT / 2
+            return super().request(command, allow_close)
+
         def connect(self):
             # D-PLY-39: the shipping check of the verb's mpv deadline runs
             # first, as it does in MpvIpc.connect (a tree before it has none).
@@ -433,6 +456,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                 if slow:
                     clock.t += self.timeout - _JUST_INSIDE
                 self.sock = Sock(None, slow_all=slow)
+                self.reached = "play"
                 return
             if state["phase"] == "bind":
                 learned["bind_last"] = clock.t - state["bind_at"]
@@ -442,7 +466,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             clock.t += self.timeout - _JUST_INSIDE
             if state["phase"] in ("found", "gone"):
                 self.sock = Sock(None, slow_all=True) if survivor_answers is None else Sock(survivor_answers)
+                self.reached = "found"
             else:
+                self.reached = "spawned"
                 # The new player: answers its handshake just inside the
                 # bound, then everything at once but the one request after
                 # the loadfile whose timeout the verb survives.
@@ -472,6 +498,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         mock.patch.object(helper.os, "fork", lambda: 2 ** 22 + 7),
         mock.patch.object(helper.os, "waitpid", mock.Mock(side_effect=ChildProcessError())),
     ]
+    if newer is not None:
+        patches.append(mock.patch.object(helper, "applied_by_another_client", lambda client: dict(newer)))
     # Restart on adoption: who each connection reaches. The found player is
     # 777, the spawned one the pid its pipe reported (4242), and the found one
     # reads as another build's when the walk says so -- the verdict is not
@@ -491,6 +519,8 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     try:
         parser = helper.build_parser()
         session = ["--socket", sock, "--cache-dir", folder, "--id", "t:x", "--seq", "3"]
+        if newer is not None:
+            session += ["--owner-pid", "4321", "--owner-token", "0123456789abcdef" * 2]
         if verb == "probe":
             helper.player_probe(parser.parse_args(["player", "probe", "--socket", sock]))
         elif verb == "play":
@@ -646,9 +676,10 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
 
 # ---- D-PLY-39 (2026-11-18): each watched verb ends inside its own bound ----
 #
-# Every wait on mpv was bounded and no verb was: an mpv answering each of a
-# start's twenty-odd requests just inside 2 s ran it to about 80 s against
-# its watchdog. Now the helper runs each watched verb under a deadline -- its
+# Every wait on mpv was bounded and no verb was: an mpv answering every
+# connect and request just inside 2 s, as a player of this build answers
+# them, ran a start to 139-154 s against its 58.25 s watchdog (the walks
+# below, on 71700f4's helper). Now the helper runs each watched verb under a deadline -- its
 # bound (the fixture's watchdogMs less marginMs, which the helper derives
 # from its own constants: player_verb_bound_ms) less its reserve -- and a
 # wait on mpv that cannot have its whole bound before it is refused unsent
@@ -657,7 +688,8 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
 # its bound, held inside the bound; where the deadline lands and what each
 # verb leaves there (the lock, the spawn, the relay's listeners, the include
 # file, the migration mark); and the client's own rule. Red on 71700f4,
-# which has no deadline: the walks run to 79-100 s for a start.
+# which has no deadline: the walks run to 139-154 s for a start, 142 s for
+# a restart, 127 s for the probe and 93 s for `play`.
 
 def _bound_s(verb):
     return (BOUNDS["watchdogMs"][verb] - BOUNDS["marginMs"]) / 1000.0
@@ -832,6 +864,97 @@ class DeadlineLandingTest(unittest.TestCase):
         # number is the one that lands it there
         _, _, _, earlier = walk_long_path("start", spawned_slow=LANDS_AFTER_THE_LOAD - 1, slow_load=True)
         self.assertNotEqual([s.split(" ")[0] for s in earlier.get("sent", [])][-1], "loadfile")
+
+
+def long_path_knobs(verb, **more):
+    """walk_long_path's first two walks: when the lock is granted and when the
+    spawn's socket accepts on the long path, learned from the code."""
+    _, refused, _, learned = walk_player_verb(verb, **more)
+    assert (refused or {}).get("error", {}).get("code") == "busy", refused
+    lock_at = learned["lock_last"]
+    _, unbound, _, learned = walk_player_verb(verb, lock_at=lock_at, **more)
+    assert (unbound or {}).get("error", {}).get("code") == "no_socket", unbound
+    return {"lock_at": lock_at, "bind_after": learned["bind_last"]}
+
+
+class DeadlineAtEveryRequestTest(unittest.TestCase):
+    """The review of 9d604cf (D-PLY-39 against D-PLY-57): the walks above let
+    the deadline land where mpv's time put it, and in every one that was in
+    the TLS assertion or after the load. apply_channel recorded `loadSent`
+    BEFORE its loadfile, so a deadline landing on the loadfile itself --
+    refused unsent -- left player_start keeping a spawn it had fed nothing:
+    idle, a black window under --force-window=immediate, found by the next
+    start. So here the deadline is landed on EACH request a start asks, in
+    turn, and wherever it lands: the lock is released and no descriptor is
+    left, the include file is gone, the relay's listeners are closed, a
+    loadfile goes out only after the TLS read-back on its connection, and the
+    spawn is stopped exactly when the start wrote it no loadfile -- a start
+    that answers ok has loaded and keeps it, one that answers an error never
+    loaded and stops it."""
+
+    def sweep(self, verb, **more):
+        knobs = long_path_knobs(verb, **more)
+        _, base, base_signals, learned = walk_player_verb(verb, spawn_seen=True, **knobs, **more)
+        self.assertTrue(base and base.get("ok"), base)
+        asked = learned["asked"]
+        spawned_from = [who for who, _ in asked].index("spawned")
+        landings = {}
+        for n in range(1, len(asked) + 1):
+            fds = _open_fds()
+            _, reply, signals, got = walk_player_verb(verb, spawn_seen=True, land_at=n, **knobs, **more)
+            what = "%d %s:%s" % (n, asked[n - 1][0], asked[n - 1][1])
+            with self.subTest(landed=what):
+                self.assertIsNotNone(reply)
+                self.assertEqual(got["asked"][:n], asked[:n])          # the same path up to the landing
+                self.assertEqual(got.get("leftover"), ["player.lock"])
+                self.assertEqual(_open_fds(), fds)
+                names = [s.split(" ")[0] for s in got.get("sent", [])]
+                loaded = "loadfile" in names
+                if loaded:
+                    self.assertIn("get_property " + helper.MPV_TLS_VERIFY_PROP, got["sent"][:names.index("loadfile")])
+                if n > spawned_from:
+                    self.assertEqual(got.get("closed"), learned.get("closed"))
+                if reply.get("ok"):
+                    self.assertTrue(loaded, "ok with no load: %r" % reply)
+                    self.assertEqual(signals, base_signals)            # the spawn kept, fed
+                else:
+                    self.assertFalse(loaded, "refused after a load was written: %r" % reply)
+                    if n > spawned_from:
+                        # the spawn this start fed nothing, laddered from term
+                        self.assertEqual(signals, base_signals + [15, 9])
+                landings[asked[n - 1][1].split(" ")[0]] = reply.get("ok")
+        return landings
+
+    def test_a_start_that_meets_a_wedged_player(self):
+        landings = self.sweep("start", mpv_args=["--volume=50"])
+        self.assertIs(landings.get("loadfile"), False)                # landed on, refused, and stopped
+
+    def test_a_start_that_replaces_another_builds_player(self):
+        self.assertIs(self.sweep("start", survivor_answers=None, older=True).get("loadfile"), False)
+
+    def test_a_restart(self):
+        self.assertIs(self.sweep("restart").get("loadfile"), False)
+
+    def test_a_stand_down_whose_owner_claim_the_deadline_refuses_still_answers_ok(self):
+        """The stand-down (a newer channel already on the spawn, D-PLY-11)
+        writes the owner claim, and that write was the one request on its
+        path not caught: refused by the deadline, or unanswered, the start
+        answered ipc_error and the shell told "Could not start playback" and
+        dropped the channel that plays on. It is best effort now, as the
+        writes after a load are: the reply is the stand-down's ok, naming the
+        channel the player is on, and the spawn is kept."""
+        newer = {"id": "t:y", "name": "Y", "entryId": 5, "seq": 9}
+        knobs = long_path_knobs("start", newer=newer)
+        _, base, base_signals, learned = walk_player_verb("start", spawn_seen=True, newer=newer, **knobs)
+        self.assertTrue(base and base.get("ok") and base.get("applied") is False, base)
+        asked = learned["asked"]
+        self.assertEqual(asked[-1], ("spawned", "set_property " + helper.USER_DATA_OWNER))
+        _, reply, signals, got = walk_player_verb("start", spawn_seen=True, newer=newer, land_at=len(asked), **knobs)
+        self.assertTrue(reply and reply.get("ok"), reply)
+        self.assertIs(reply.get("applied"), False)
+        self.assertEqual(reply.get("playing"), {"id": "t:y", "name": "Y"})
+        self.assertNotIn("set_property " + helper.USER_DATA_OWNER, got.get("sent", []))
+        self.assertEqual(signals, base_signals)
 
 
 class IpcDeadlineRuleTest(unittest.TestCase):

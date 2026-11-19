@@ -635,6 +635,27 @@ inside its bound; the summed worst paths are unchanged (47.07, 51.05, 50.05,
 their bound and which adds the margin, 15 s (20.7). The recovery stays, for
 what no bound cuts.]**
 
+**[Corrected 2026-11-18, the settle of three reviews of 9d604cf: "no exit is
+new" was false. A request refused UNSENT is a new kind of failure for a caller
+that records a send before making it, and `apply_channel` did: it set
+`loadSent` before its loadfile, so a deadline landing on the loadfile itself
+-- which none of the walks above did; they landed in the TLS assertion or
+after the load -- left `player_start` keeping the spawn it had fed nothing,
+D-PLY-57's idle black window, in exactly the slow-player regime this
+amendment bounds. `MpvIpc` now counts the requests it has written whole
+(`sent`) and `loadSent` is set only when the loadfile's write moved that
+count. Landed on each request a start, a replacing start and a restart ask,
+in turn, every landing leaves what the verb's existing refusals leave and
+stops the spawn exactly when no loadfile was written. The stand-down's owner
+claim, the one write on its path nothing caught, is no refusal when the
+deadline refused it unsent (a claim mpv took and did not answer, or a closed
+connection, still is). And a cost the record did not name: a request begun
+only with its whole bound left trims up to 2 s off each verb, so a player
+that answers every request in 0.8 s, which finished a `status` inside its
+watchdog before, now ends it `ipc_error`, a health strike, and a `play` over
+about 45 requests at 0.2 s each ends at 8 s and is retried; at millisecond
+latency every reply is as it was.]**
+
 Two concurrent IPC clients are safe: mpv names them `ipc_0`/`ipc_1` and
 correlates by `request_id`.
 
@@ -1526,6 +1547,10 @@ leading-dash and typographic-quote rules), `NOTIFY_IDS.streamFailed = 74011`,
 > the recorded sequence (`Service.qml` `stopSettleTimer`; harness P10). Read
 > 4.9 with that in hand; 4.9.1 was edited in place after section 14 existed
 > and carried no such pointer, which is the risk this line retires.
+> **[2026-11-18: since D-PLY-40 that timer waits out the stop's own worst
+> case, 18.25 s, and the 5 s look for a superseded stop is its own Timer,
+> `stopLookTimer`, which re-issues only when the record is past the stop's
+> sequence (4.10's amendment).]**
 
 The UI contract is unchanged: `stop()` still clears `pendingPlayId`,
 `wantFocus`, the timers and `nowPlaying` synchronously
@@ -1686,6 +1711,31 @@ past the start's own lock wait was told "The player is busy" and a queued last i
 dropped. They gate on `userStopped` now, as the refusal tail does (D-PLY-41), and take
 `Model.playFork`'s branch, which is a start while `stopping`: the rule above, kept by every
 path that sends a play, not by `play()` alone.]**
+
+**[Amended 2026-11-18, the settle of three reviews of 9d604cf: a settle three
+times as long reached four readers the amendment above had not. (1) The
+stopped player's EOF, arriving while a play made after the stop is still on
+its way (its start in flight, or between D-PLY-43's retries), was read as the
+stop's own death: the retry cancelled, `nowPlaying` cleared, the play dropped
+untold. That EOF now ends the stop and nothing else (`handlePlayerGone`): the
+play keeps its intent, its queue and its retries, and the hunt goes on while
+its start runs. (2) An ok from a start issued BEFORE the stop, landing inside
+the settle with nothing attached, read as abandoned, and a stop refused `busy`
+behind that start's own lock left its player unobserved under an idle bar:
+the backstop now probes for it (`stopOlderStartOk`), and a stop that took
+finds nothing. (3) A stop the lock record superseded (section 14, F-PLY-3,
+PLY-STOP-07) was caught at 18.25 s instead of 5 s, the player playing on after
+the user's stop: so `stopLookTimer` looks at the old 5 s and re-issues the stop
+only when the record is past `stopSeq`; a record that is the stop's own (it is
+laddering) or older (it is waiting for the lock) is D-PLY-40's case, and the
+look issues nothing and ends nothing. (4) The order of two events: an ok from a
+newer start that SPAWNED, handled before the stopped player's EOF, left the
+observer on that player, and its EOF then read as the new player's death. A
+start that spawned replaced whatever it was issued over (`sessionSocket`), so
+an observer still on that object is released at the ok and the spawn hunted
+for. And `drainPendingPlay` drops a queued id that is no longer
+`nowPlaying`'s: every writer queues the id `nowPlaying` holds, so such an id
+was superseded by a play that went out itself.]**
 
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket. That

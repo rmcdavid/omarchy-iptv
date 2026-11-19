@@ -19048,7 +19048,209 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const stopHolds = M.playerWatchdogMs("stop") - M.PLAYER_WATCHDOG_MARGIN_MS
       const askedUntil = n => { let at = 0; for (let k = 0; k <= n; k++) at += lock + (k > 0 ? base * k : 0); return at }
       return [base, max, stopHolds, askedUntil(max) > stopHolds, askedUntil(2) > stopHolds, askedUntil(1) > stopHolds]
-    }, [300, 3, 13250, true, true, false])
+    }, [300, 3, PB.watchdogMs.stop - PB.marginMs, true, true, false])
+
+    // ---- the review of 9d604cf: what the longer settle let through ----
+    //
+    // Three reviews of D-PLY-39/-40/-43 found readers of the stop's settle
+    // that misbehave inside a backstop three times as long, each run here
+    // through Service.qml's own functions. The stopped player's EOF is
+    // delivered as the Socket's own handler delivers it: only while that
+    // object is still the observer (`playerSocket !== this` returns), then
+    // released and handlePlayerGone. Red on 9d604cf unless a check says.
+    const eofOf = (h, sock) => {
+      if (h.root.playerSocket === sock) {
+        h.root.releasePlayerSocket()
+        h.root.handlePlayerGone()
+      }
+      h.drain()
+    }
+    const stopsIssued = h => h.detached.filter(a => a[a.indexOf("player") + 1] === "stop").map(a => Number(a[a.indexOf("--seq") + 1]))
+    const probeSeq = (seq, o) => probeOf(Object.assign({ seq, stash: null, owner: null, claimed: false }, o || {}))
+
+    checkCall("9d604cf review (D-PLY-41, D-PLY-43): the stopped player's EOF, arriving while a play made after the stop is between its retries, ends the stop and nothing else -- the play kept, its retry still armed and then sent as a start, no card", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      const stops = h.ids.playRetryTimer.stops
+      eofOf(h, dying)
+      const kept = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.ids.playRetryTimer.stops - stops, h.root.playRetries, h.root.stopping === true, toasts(h)]
+      const starts = slotRuns(h)
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [kept, starts]
+    }, [[Y.id, 0, 1, false, []], ["start"]])
+
+    checkCall("9d604cf review: the stopped player's EOF while the play's start is in flight keeps the play and hunts for the player that start will report, which its ok then finds wanted", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      eofOf(h, dying)
+      const during = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.playerPending === true, h.root.playerWanted === true, h.root.stopping === true, toasts(h)]
+      exit(h, okStartSeq(Y.id, ySeq))
+      return [during, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.playerWanted === true, toasts(h)]
+    }, [[Y.id, true, true, false, []], Y.id, true, []])
+
+    checkCall("9d604cf review (D-PLY-41): a play whose every try meets busy, with the stopped player's EOF between two of them, is still told once the tries are spent -- Could not start playback / The player is busy, marking nothing", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      eofOf(h, dying)
+      for (let k = 0; k < 3; k++) {
+        h.fireTimer("playRetryTimer")
+        h.drain()
+        exit(h, refusedSeq("busy", h.root.playSeq))
+      }
+      return [toasts(h), h.root.nowPlaying, Object.keys(h.root.failedAt)]
+    }, [["74021 Could not start playback | \u201cY\u201d did not play" + M.SEP + "The player is busy"], null, []])
+
+    checkCall("9d604cf review (D-LIVE-15): a stop pressed after that play, before the EOF, keeps the EOF the stop's -- nothing resurrected, nothing told", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      h.root.stop()
+      h.drain()
+      eofOf(h, dying)
+      const starts = slotRuns(h)
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [h.root.nowPlaying, starts, toasts(h)]
+    }, [null, [], []])
+
+    checkCall("9d604cf review (D-PLY-40): a start issued before the stop that answers ok while the stop settles, nothing attached, is looked for at the backstop -- one probe, and a player it finds is stopped past the record -- where 9d604cf left it playing unobserved under an idle bar", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(X.id, xSeq))
+      const runs = slotRuns(h)
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      const asked = runs.slice()
+      exit(h, probeSeq(xSeq))
+      return [asked, stopsIssued(h).length - before, h.root.nowPlaying, t.running === true]
+    }, [["probe"], 1, null, false])
+
+    checkCall("9d604cf review (D-PLY-40): and when that stop took, the backstop's probe finds nothing and stops nothing", () => {
+      const h = withChannels(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(X.id, xSeq))
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      exit(h, probeSeq(h.root.stopSeq, { running: false, responsive: false, pid: null, tls: null }))
+      return [stopsIssued(h).length - before, h.root.nowPlaying, toasts(h)]
+    }, [0, null, []])
+
+    checkCall("9d604cf review (F-PLY-3, PLY-STOP-07): a stop the lock record superseded is looked at 5 s, not at the 18.25 s backstop -- the probe reads a record past the stop's sequence and the player is stopped past it, that stop settling as the user's did", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const look = h.driveTimer("stopLookTimer")
+      h.root.stop()
+      h.drain()
+      const armed = look.armedInterval
+      const runs = slotRuns(h)
+      h.elapse(5000 - 1)
+      const early = runs.slice()
+      h.elapse(1)
+      const asked = runs.slice()
+      exit(h, probeSeq(9999))
+      const issued = stopsIssued(h)
+      return [armed, early, asked, issued.length, issued[issued.length - 1] > 9999, h.root.stopSeq === issued[issued.length - 1], h.root.stopping === true]
+    }, [5000, [], ["probe"], 2, true, true, true])
+
+    checkCall("9d604cf review (D-PLY-40): the 5 s look over a stop whose own record stands -- laddering, or still waiting for the lock -- stops nothing a second time", () => [0, -1].map(behind => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      h.driveTimer("stopLookTimer")
+      h.root.stop()
+      h.drain()
+      h.elapse(5000)
+      exit(h, probeSeq(h.root.stopSeq + behind))
+      return [behind, stopsIssued(h).length, h.root.stopping === true, h.root.userStopped === true]
+    }), [0, -1].map(behind => [behind, 1, true, true]))
+
+    checkCall("9d604cf review: the 5 s look asks nothing of a stop with nothing to observe, and an unreadable look leaves the backstop its own probe", () => {
+      const quiet = withChannels(bootPlayer())
+      quiet.driveTimer("stopLookTimer")
+      const runs = slotRuns(quiet)
+      quiet.root.stop()
+      quiet.drain()
+      quiet.elapse(5000)
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      h.driveTimer("stopLookTimer")
+      h.driveTimer("stopSettleTimer")
+      const later = slotRuns(h)
+      h.root.stop()
+      h.drain()
+      h.elapse(5000)
+      exit(h, "not a reply")
+      h.elapse(PB.watchdogMs.stop - 5000)
+      return [runs, later]
+    }, [[], ["probe", "probe"]])
+
+    checkCall("9d604cf review (D-PLY-40, the order of two events): a newer start that spawned answers ok before the stopped player's EOF is delivered -- the observer still on that player is released and the spawn hunted for, so the late EOF tells nothing and drops nothing", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, okStartSeq(Y.id, h.root.playSeq))
+      const after = [h.root.playerSocket === dying, h.root.playerWanted === true, h.root.stopping === true]
+      eofOf(h, dying)
+      return [after, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, [[false, true, false], Y.id, []])
+
+    checkCall("9d604cf review (D-PLY-43, rule 15): a queued intent a newer play has since replaced is dropped at the drain, not zapped over the channel the guide names", () => {
+      const h = withChannels(bootPlayer())
+      const Z = { id: "t:z", name: "Z", url: "http://s.example.test/z.ts", group: "G" }
+      h.root.channelIndex[Z.id] = Z
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      exit(h, refusedSeq("busy", xSeq))
+      h.root.play(Z.id, true, "")
+      h.drain()
+      const zSeq = h.root.playSeq
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(Z.id, zSeq))
+      return [queued, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.pendingPlayId]
+    }, [Y.id, [], "t:z", ""])
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----

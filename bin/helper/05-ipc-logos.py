@@ -50,13 +50,15 @@ def no_descriptors(error: OSError) -> HelperError:
 # ---- D-PLY-39 (2026-11-18): the verb's own deadline over mpv's waits ----
 #
 # Every wait on mpv was bounded (the client's timeout, 2 s), and the verbs
-# the shell watches make many: a `player start` some twenty after its spawn,
-# the probe about ten after its handshake, `play` about thirteen. Only the
-# waits a verb's bound SUMS were in the shell's watchdog
-# (Model.playerWatchdogMs), so an mpv that answered each request just inside
-# its bound ran a start to about 80 s against its 58.25 s watchdog, the
-# probe to about 25 s against 12 s. That residual was recovered (a start the
-# watchdog stopped is no verdict, D-PLY-35), never bounded.
+# the shell watches make many. Only the waits a verb's bound SUMS were in the
+# shell's watchdog (Model.playerWatchdogMs), so an mpv that answered every
+# connect and request just inside its bound, with the answers a player of
+# this build gives, ran a start to 139-154 s against its 58.25 s watchdog, a
+# restart to 142 s, the probe to 127 s against 12 s and `play` to 93 s
+# against 10 s (walked under the player-bounds virtual clock; the row's
+# first estimates, about 80 s and 25 s, were low). That residual was
+# recovered (a start the watchdog stopped is no verdict, D-PLY-35), never
+# bounded.
 #
 # So a verb the shell watches runs under verb_deadline: IPC_DEADLINE holds
 # the moment its mpv waits must be over -- its bound, the watchdog less the
@@ -67,11 +69,17 @@ def no_descriptors(error: OSError) -> HelperError:
 #   - a connect or a request is BEGUN only when its whole bound (the
 #     client's timeout) fits before the deadline, and is otherwise refused
 #     unsent, as `ipc_error` -- the code a request that times out already
-#     raises, so every verb's own handling of mpv's silence is what runs,
-#     and no exit is new. min(bound, what is left) was not taken: a request
-#     sent with a sliver left is a command mpv may act on whose answer the
-#     helper stops waiting for -- a loadfile, a migration mark -- and refused
-#     unsent it is neither;
+#     raises, so every verb's own handling of mpv's silence is what runs.
+#     min(bound, what is left) was not taken: a request sent with a sliver
+#     left is a command mpv may act on whose answer the helper stops waiting
+#     for -- a loadfile, a migration mark -- and refused unsent it is neither.
+#     [2026-11-18, the review of 9d604cf: "no exit is new" was false. A
+#     request refused UNSENT is a new kind of failure for a caller that
+#     records a send before making it, and apply_channel did: its
+#     `loadSent`, set before the loadfile, made player_start keep a spawn
+#     whose loadfile the deadline refused, fed nothing (D-PLY-57's black
+#     window). So the client counts what it has sent (`sent`, after the
+#     write), and a caller asks that count, never its own intention.];
 #   - drain_events ends at the deadline (an event wait sends nothing), the
 #     first-load window excepted: that is the start's verdict, summed and
 #     bounded on its own (observe_first_load).
@@ -154,6 +162,12 @@ class MpvIpc:
         self.refused = False
         self.events: list[dict[str, Any]] = []
         self.closed = False
+        # D-PLY-39's settle (2026-11-18): how many requests this client has
+        # written whole to mpv. A request the verb's deadline refuses is not
+        # written, and one whose write fails is not written whole, so mpv
+        # never reads it as a command; a caller that must know whether mpv
+        # may hold a command (apply_channel's `loadSent`) asks this.
+        self.sent = 0
 
     def connect(self) -> None:
         # D-PLY-38 (2026-11-11): the import and the socket are this
@@ -281,6 +295,7 @@ class MpvIpc:
             raise HelperError("ipc_error", "mpv closed the connection")
         except OSError as error:
             raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or type(error).__name__))
+        self.sent += 1
         while True:
             line = self.read_line(deadline)
             if line is None:
