@@ -22044,3 +22044,13 @@ The daily run, solo, on a worktree of `dev` c4113a6. Fixtures, the manual plan's
 - `tests/test_qa_sources_fixtures.py`, 8 tests, 0.006 s. Red first, on an export of c4113a6 with the test added: 3 failures (every channel the plan counts; the legacy cache lists the playlist's own channels; the fixture comments name that id and no other). Each half moved alone, on the new fixtures: the state's old id back, 2 red; the legacy cache's old id back, 3 red; the hint moved onto the playlist's port, 1 red.
 - The scratch server was this run's own child, found by its listener and stopped by pid after its command line was read; port 8765 was free before and after.
 - Not run: `scripts/qa-sources-scenarios.sh` itself, which drives the harness on a display.
+
+## F-HARNESS-118: the ordering rigs wait for the relay (2026-11-19)
+
+The daily run, solo, on a worktree of `dev` 39fa9cd. Test code only (`tests/test_player.py`).
+
+- The read. `play` calls `player_verdict`, which for a player of this build asks `relay_status` until `RELAY_IPC_S` (1.0 s) runs out; a relay not yet listening again refuses at once and is asked again. The three rigs that hold `player start` at the stub's handshake (`STUB_MPV_GATE`) sent their zap as soon as the player's socket existed.
+- Reproduced. `python3 -m unittest test_player.OrderingTest` (8 tests, 4.4 s idle, green) at `nice -n 10` beside six busy loops: 2 of 12 runs red, 6 failures, each `play: the running player was started by another build of this plugin; play again to replace it` (the zap's exit status 1 where the rig expects 0).
+- Old against new, interleaved, beside eight busy loops (load average 9.13 at the end): the old rig red in 5 of 10 runs (8 failures, the same sentence each), the new rig green 10 of 10.
+- The busy loops were this run's own children, each under `timeout`, stopped by the pids recorded when they were started.
+- Not measured: how long the relay took to answer in those runs, and what the shell does with the refusal (D-PLY-70).

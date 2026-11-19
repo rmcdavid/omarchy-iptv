@@ -3288,6 +3288,44 @@ class OrderingTest(PlayerTestCase):
         # number anywhere, so the lock record still reads the start's.
         self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 1)
 
+    def wait_for_the_cold_player(self, seconds=20.0):
+        """The held start's player has bound its socket AND its relay
+        answers. F-HARNESS-118: these cases used to zap the moment the
+        socket appeared, and a zap asks the player's relay before it feeds
+        the player (player_verdict). The relay is a fresh interpreter that
+        answers about 0.3 s after its spawn on an idle machine and later on
+        a busy one, and the zap waits RELAY_IPC_S for it, one second: under
+        load the zap gave up first, read the newborn player as one whose
+        relay is gone and refused it as another build's, which is not the
+        ordering these cases are about. The shell never zaps a player its
+        own start has not answered for, so the rig waits as the start does.
+        One answered status is enough: the relay serves only after it has
+        listened again, so the zap's own connection is the relay's."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline and not os.path.exists(self.sock):
+            time.sleep(0.005)
+        self.assertTrue(os.path.exists(self.sock), "the player bound its socket")
+        path = helper.relay_socket_path(self.sock)
+        while time.monotonic() < deadline:
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                    conn.settimeout(0.25)
+                    conn.connect(path)
+                    conn.sendall(b'{"op":"status"}\n')
+                    line = b""
+                    while b"\n" not in line:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        line += chunk
+                answer = json.loads(line.split(b"\n", 1)[0].decode("utf-8"))
+                if isinstance(answer, dict) and answer.get("ok") is True:
+                    return
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.02)
+        self.fail("the cold player's relay did not answer within %.0f s" % seconds)
+
     def test_a_zap_that_lands_inside_a_cold_starts_handshake_is_left_playing(self):
         # THE DEFECT, driven directly. The cold-burst shape made deterministic
         # at the one point the two client slots can be ordered: the stub binds
@@ -3305,10 +3343,7 @@ class OrderingTest(PlayerTestCase):
                                   "--owner-pid", str(os.getpid())],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.reap_process, start)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not os.path.exists(self.sock):
-            time.sleep(0.005)
-        self.assertTrue(os.path.exists(self.sock), "the player bound its socket")
+        self.wait_for_the_cold_player()
         # The zap gets there first and completes, start to finish.
         code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
                                  "--cache-dir", self.cache, "--scope", "g:QA",
@@ -3356,9 +3391,7 @@ class OrderingTest(PlayerTestCase):
                                   "--spawn-timeout", "8", "--first-load-timeout", "30"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.reap_process, start)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not os.path.exists(self.sock):
-            time.sleep(0.005)
+        self.wait_for_the_cold_player()
         code, _, _, stderr = run("play", "--id", "t:espn.us", "--socket", self.sock,
                                  "--cache-dir", self.cache, "--scope", "g:QA",
                                  "--since", "3000", "--ipc-timeout", "2")
@@ -3423,10 +3456,7 @@ class OrderingTest(PlayerTestCase):
                                   "--spawn-timeout", "8", "--first-load-timeout", "1", *extra],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanup(self.reap_process, start)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not os.path.exists(self.sock):
-            time.sleep(0.005)
-        self.assertTrue(os.path.exists(self.sock), "the player bound its socket")
+        self.wait_for_the_cold_player()
         code, _, _, stderr = run("play", "--id", zap_id, "--socket", self.sock,
                                  "--cache-dir", self.cache, "--scope", "g:QA",
                                  "--since", "3000", "--ipc-timeout", "2")
