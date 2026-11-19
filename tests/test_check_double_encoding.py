@@ -271,6 +271,130 @@ class ShapeCase(Repo):
         self.assertIn('read no files at all', out)
 
 
+ELLIPSIS, RDQUO, LDQUO, RSQUO, EM_DASH, TRADEMARK = (chr(o) for o in (0x2026, 0x201D, 0x201C, 0x2019, 0x2014, 0x2122))
+NBSP, RAQUO, E_ACUTE, E_ACUTE_UP, SHARP_S = '\xa0', '\xbb', '\xe9', '\xc9', '\xdf'
+CHANNEL_ONE = ''.join(chr(o) for o in (0x41F, 0x435, 0x440, 0x432, 0x44B, 0x439, 0x20, 0x43A, 0x430, 0x43D, 0x430, 0x43B))
+GREEK = ''.join(chr(o) for o in (0x3B1, 0x3B2, 0x3B3))
+ARABIC = ''.join(chr(o) for o in (0x642, 0x646, 0x627, 0x629))
+HEBREW = ''.join(chr(o) for o in (0x5E2, 0x5E8, 0x5D5, 0x5E5))
+
+
+class WordEndCase(Repo):
+    """F-GATE-13: the two shapes legitimate text writes that decode as valid
+    UTF-8, and the damage that used to hide behind the rule that spared one
+    of them. Every legitimate string here was red, or every damaged one
+    green, before the rule was settled."""
+
+    def check_one(self, text):
+        self.write('a.md', text)
+        return self.run_checker()
+
+    def green(self, text, rejected):
+        rc, out = self.check_one(text + '\n')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('%d candidate(s) rejected, 0 problem(s)' % rejected, out)
+
+    def red(self, text, problems):
+        rc, out = self.check_one(text + '\n')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('%d problem(s)' % problems, out)
+        return out
+
+    def test_an_accented_word_before_an_ellipsis_and_a_closing_quote_is_green(self):
+        # The row's own case: E9 85 94 is valid UTF-8 for U+9154, and the
+        # repair would have written that ideograph over the text.
+        self.green('Le caf' + E_ACUTE + ELLIPSIS + RDQUO, 1)
+
+    def test_an_accented_word_before_a_french_closing_guillemet_is_green(self):
+        # Pure Latin-1 and the commonest of them: E9 A0 BB is U+983B.
+        self.green('\xab' + NBSP + 'caf' + E_ACUTE + NBSP + RAQUO, 1)
+
+    def test_other_word_ends_after_a_lower_case_accent_are_green(self):
+        for tail in (RSQUO + RDQUO, EM_DASH + RDQUO, ELLIPSIS + RAQUO, RDQUO + EM_DASH, TRADEMARK + RDQUO):
+            for letter in ('\xe0', '\xe1', '\xe7', '\xe8', E_ACUTE, '\xed'):
+                self.green('x' + letter + tail, 1)
+
+    def test_repair_leaves_that_text_alone(self):
+        text = 'Le caf' + E_ACUTE + ELLIPSIS + RDQUO + ' and ' + '\xab' + NBSP + 'caf' + E_ACUTE + NBSP + RAQUO + '\n'
+        path = self.write('fr.md', text)
+        rc, out = self.run_checker('--repair', path)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('0 sequence(s) repaired', out)
+        with open(path, 'rb') as fh:
+            self.assertEqual(fh.read(), text.encode('utf-8'))
+
+    def test_the_leads_where_real_damage_lives_are_never_excused(self):
+        # Box drawing (U+2514: E2 94 94) and a private-use glyph (U+E5FB:
+        # EE 97 BB, U+F152: EF 85 92) read through Windows-1252 are a letter
+        # and two word-end marks as well, and they are damage.
+        for cp_ in (0x2514, 0xE5FB, 0xF152):
+            damaged = cp1252(chr(cp_))
+            self.assertTrue(all(c in checker.WORD_END for c in damaged[1:]), hex(cp_))
+            out = self.red('x ' + damaged, 1)
+            self.assertIn('U+%04X written as 3 characters' % cp_, out)
+
+    def test_a_three_byte_sequence_with_one_word_end_mark_is_still_red(self):
+        # A curly quote read through Windows-1252: a-circumflex, the euro
+        # sign, a closing quote. And an e-acute lead with one mark that ends
+        # no word (U+9100: E9 84 80, a low quote and the euro sign).
+        self.red('a ' + cp1252(RDQUO) + ' b', 1)
+        self.red('a ' + cp1252(chr(0x9100)) + ' b', 1)
+        # ... and with exactly one of its two followers a word-end mark, in
+        # either place (U+9140: E9 85 80, U+9014: E9 80 94).
+        for cp_ in (0x9140, 0x9014):
+            damaged = cp1252(chr(cp_))
+            self.assertEqual(sum(c in checker.WORD_END for c in damaged[1:]), 1, hex(cp_))
+            self.red('a ' + damaged + ' b', 1)
+
+    def test_a_cyrillic_channel_name_read_through_windows_1252_is_red(self):
+        out = self.red(cp1252(CHANNEL_ONE), 11)
+        self.assertIn('a.md:1:1: U+041F written as 2 characters', out)
+
+    def test_the_same_name_read_through_latin1_is_red(self):
+        self.red(latin1(CHANNEL_ONE), 11)
+
+    def test_greek_arabic_and_hebrew_read_either_way_are_red(self):
+        for word in (GREEK, ARABIC, HEBREW):
+            for damage in (latin1, cp1252):
+                self.red('x ' + damage(word) + ' y', len(word))
+
+    def test_a_windows_1252_letter_after_the_lead_is_red_on_its_own(self):
+        # Cyrillic pe alone, D0 9F: U+00D0 and Y-diaeresis. One sequence, no
+        # neighbour: the second character is not one that ends a word.
+        out = self.red('x ' + cp1252(chr(0x41F)) + ' y', 1)
+        self.assertIn('U+041F written as 2 characters', out)
+
+    def test_a_capital_before_a_word_end_mark_alone_is_green(self):
+        # Sharp s before a German closing quote, a capital E-acute before an
+        # ellipsis, a brand that ends in sharp s: each decodes, each is text.
+        for text in ('Fu' + SHARP_S + LDQUO, 'CAF' + E_ACUTE_UP + ELLIPSIS, 'Edelwei' + SHARP_S + TRADEMARK,
+                     'CAF' + E_ACUTE_UP + RDQUO):
+            self.green(text, 1)
+
+    def test_two_such_capitals_with_a_letter_between_them_are_green(self):
+        # GUILLEMETS' shape twice: neither sequence touches the other.
+        self.green('CAF' + E_ACUTE_UP + ELLIPSIS + ' CAF' + E_ACUTE_UP + ELLIPSIS, 2)
+        self.green(E_ACUTE_UP + NBSP + 'x' + E_ACUTE_UP + NBSP, 2)
+
+    def test_a_word_end_shape_of_three_is_not_a_neighbour(self):
+        # A capital before its no-break space, then a lower-case word end:
+        # the second is no two-character sequence, and both are text.
+        self.green(E_ACUTE_UP + NBSP + E_ACUTE + ELLIPSIS + RDQUO, 2)
+
+    def test_one_letter_from_another_script_standing_alone_is_the_stated_gap(self):
+        # Cyrillic de-with-a-symbol-second (U+0434: D0 B4) between ASCII is
+        # the capital-before-a-symbol shape exactly. Stated in the docstring;
+        # pinned so that closing it is a decision, not an accident.
+        self.green('x ' + latin1(chr(0x434)) + ' y', 1)
+
+    def test_the_neighbour_may_stand_before_or_after(self):
+        pair = latin1(chr(0x434))
+        self.red('x ' + pair + pair + ' y', 2)
+        # ... and a flagged neighbour of the classic kind counts as one.
+        self.red('x ' + latin1(E_ACUTE) + pair + ' y', 2)
+        self.red('x ' + pair + latin1(E_ACUTE) + ' y', 2)
+
+
 class RepairCase(Repo):
 
     def test_repair_changes_only_the_sequences(self):

@@ -2596,9 +2596,12 @@ step "double-encoding guard (no UTF-8 read as one byte per character and written
 # read for it. The guard walks every run of characters that a Latin-1 or a
 # Windows-1252 reading gives one byte each for a strict UTF-8 sequence, and
 # flags one of three or four bytes, or of two with an A-circumflex or
-# A-tilde lead or a C1 control in it; a Latin-1 letter before a symbol or a
-# no-break space is legitimate text and is counted as rejected, never
-# flagged. `--repair FILE` undoes a flagged sequence and nothing else, and
+# A-tilde lead, a C1 control in it, a Windows-1252 character that ends no
+# word, or another two-byte sequence right beside it. What a word's end
+# looks like is legitimate text and is counted as rejected, never flagged
+# (F-GATE-13, 2026-11-19): a Latin-1 letter alone before a symbol, a
+# no-break space or a closing mark, and a lower-case accented letter before
+# two closing marks. `--repair FILE` undoes a flagged sequence and nothing else, and
 # refuses to write unless the reverse at the same places is the original.
 # Seen red on da0000d: 64 problems, all docs/UX.md, on 50 lines.
 dbl_log=$CHECK_TMP/double-encoding.log

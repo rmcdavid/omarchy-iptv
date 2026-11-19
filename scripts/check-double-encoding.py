@@ -18,21 +18,47 @@ sign, which a cp1252 round trip leaves behind where a Latin-1 one leaves C1
 controls) is turned back into those bytes and walked for a valid UTF-8
 sequence, strict: no overlong form, no surrogate, nothing past U+10FFFF. A
 valid sequence is flagged when
-  * it is three or four bytes long -- it decodes to U+0800 or above (the
-    glyphs, the curly quotes and dashes, arrows, emoji), and no text writes
-    a Latin-1 letter from U+00E0..U+00F4 followed by two or three symbols
-    from U+0080..U+00BF; or
+  * it is four bytes long (the glyphs past U+FFFF, emoji); or
+  * it is three bytes long -- it decodes to U+0800 or above (the glyphs,
+    the curly quotes and dashes, arrows, box drawing) -- unless it is what
+    a word's end looks like (below); or
   * it is two bytes long and its lead is U+00C2 or U+00C3 (the classic
     accented-letter form, an e-acute as U+00C3 U+00A9), or its second
-    character is a C1 control (U+0080..U+009F), which text never holds.
+    character is a C1 control (U+0080..U+009F), which text never holds, or
+    one of Windows-1252's 27 that does not end a word (the euro sign, the
+    low quotes, the daggers, S-caron, Y-diaeresis: Cyrillic pe read through
+    Windows-1252 is U+00D0 U+0178); or
+  * it is two bytes long, of the kind legitimate text writes (below), and
+    ANOTHER valid two-byte sequence stands directly before or after it:
+    Cyrillic, Greek, Hebrew and Arabic written twice are a row of them, and
+    no text puts two accented capitals each before its own symbol back to
+    back.
 Everything else is a REJECTED candidate, counted on the summary line and
 left alone: a character that cannot start a sequence, a lead whose
-followers do not complete one, and a two-byte sequence whose lead is a
-Latin-1 letter from U+00C4..U+00DF followed by a printable Latin-1 symbol
-or a no-break space, because legitimate text writes exactly that -- an
-upper-case accented word before a French closing guillemet with its
-no-break space, a sharp s before a middle dot -- and decodes as valid
-UTF-8 all the same. A guard red on legitimate text gets routed around.
+followers do not complete one, and the two shapes legitimate text writes
+that decode as valid UTF-8 all the same (F-GATE-13):
+  * a two-byte sequence, standing alone, whose lead is a Latin-1 letter
+    from U+00C4..U+00DF followed by a printable Latin-1 symbol, a no-break
+    space, or one of the marks that end a word (WORD_END: a closing
+    guillemet, an apostrophe or closing quote, an ellipsis, a dash, a
+    trademark sign) -- an upper-case accented word before a French closing
+    guillemet with its no-break space, a sharp s before a middle dot or a
+    German closing quote, an upper-case E-acute before an ellipsis;
+  * a three-byte sequence whose lead is a lower-case letter a word ends in
+    (U+00E0..U+00ED but U+00E2) and whose two followers are both marks that
+    end a word -- an e-acute, an ellipsis and a closing quote; an e-acute,
+    a no-break space and a closing guillemet. Read as bytes these are a
+    CJK, Hangul, Indic or kana character, which this guard therefore does
+    not see when it is double-encoded ALONE and both its last bytes fall on
+    those nine marks (9 of 64 each way); the leads U+00E2, U+00EE and
+    U+00EF, where the punctuation, the box drawing and the private-use
+    glyphs live, are never excused.
+A guard red on legitimate text gets routed around, and one whose --repair
+rewrites it is worse: before F-GATE-13 "caf<e-acute><ellipsis><closing
+quote>" was flagged and repaired into U+9154. What it still cannot see,
+stated: ONE double-encoded letter from U+0100..U+07FF standing alone whose
+second character is a printable Latin-1 symbol (a lone Cyrillic or Greek
+letter between ASCII), because that is exactly the first shape above.
 Decode validity alone is the discriminator for everything else: an e-acute
 followed by a letter decodes to nothing, so it is not touched.
 
@@ -91,12 +117,54 @@ def sequence_length(lead):
     return 0
 
 
-def flagged(chars):
-    """The rule in the docstring, for one valid sequence of `chars`."""
+# What legitimately follows a word's last letter with nothing between: a
+# no-break space, a closing guillemet, an apostrophe or closing quote (the
+# German one included), an ellipsis, a dash, a trademark sign. F-GATE-13.
+WORD_END = frozenset(chr(o) for o in (0xA0, 0xBB, 0x2019, 0x201C, 0x201D, 0x2026, 0x2013, 0x2014, 0x2122))
+# The lower-case letters a word ends in whose three-byte reading lands in a
+# script this tree does not write. Not U+00E2 (U+2000..U+2FFF: the quotes,
+# dashes, arrows and box drawing, the commonest damage there is) and not
+# U+00EE or U+00EF (the private-use glyphs D-DOC-28 was about).
+WORD_END_LEADS = frozenset(chr(o) for o in range(0xE0, 0xEE) if o != 0xE2)
+
+
+def verdict(chars):
+    """The rule in the docstring, for one valid sequence of `chars`:
+    'flag', 'reject', or 'pair' -- a two-character sequence that legitimate
+    text writes on its own and that is flagged only beside another one."""
+    lead = chars[0]
     if len(chars) >= 3:
-        return True
-    lead, second = chars
-    return ord(lead) in (0xC2, 0xC3) or 0x80 <= ord(second) <= 0x9F
+        # A four-byte lead (U+00F0..U+00F4) is no WORD_END_LEADS member.
+        if lead in WORD_END_LEADS and chars[1] in WORD_END and chars[2] in WORD_END:
+            return "reject"
+        return "flag"
+    second = chars[1]
+    if ord(lead) in (0xC2, 0xC3) or 0x80 <= ord(second) <= 0x9F:
+        return "flag"
+    if second in CP1252_BYTE and second not in WORD_END:
+        return "flag"
+    return "pair"
+
+
+def sequence_at(run, k):
+    """(chars, decoded) for the valid UTF-8 sequence that starts at run[k],
+    or (None, None)."""
+    n = sequence_length(byte_of(run[k]))
+    chars = run[k:k + n]
+    if n == 0 or len(chars) != n:
+        return None, None
+    try:
+        return chars, bytes(byte_of(c) for c in chars).decode("utf-8")
+    except UnicodeDecodeError:
+        return None, None
+
+
+def two_at(run, k):
+    """Does a valid two-character sequence start at run[k]?"""
+    if k < 0 or k >= len(run):
+        return False
+    chars, _ = sequence_at(run, k)
+    return chars is not None and len(chars) == 2
 
 
 def scan_text(text):
@@ -108,20 +176,16 @@ def scan_text(text):
         run = m.group()
         k = 0
         while k < len(run):
-            n = sequence_length(byte_of(run[k]))
-            if n == 0:
+            if sequence_length(byte_of(run[k])) == 0:
                 k += 1
                 continue
-            chars = run[k:k + n]
-            decoded = None
-            if len(chars) == n:
-                try:
-                    decoded = bytes(byte_of(c) for c in chars).decode("utf-8")
-                except UnicodeDecodeError:
-                    decoded = None
-            if decoded is not None and flagged(chars):
+            chars, decoded = sequence_at(run, k)
+            said = verdict(chars) if chars is not None else "reject"
+            if said == "pair" and (two_at(run, k + 2) or two_at(run, k - 2)):
+                said = "flag"
+            if said == "flag":
                 hits.append((m.start() + k, chars, decoded))
-                k += n
+                k += len(chars)
             else:
                 rejected += 1
                 k += 1

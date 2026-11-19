@@ -22054,3 +22054,13 @@ The daily run, solo, on a worktree of `dev` 39fa9cd. Test code only (`tests/test
 - Old against new, interleaved, beside eight busy loops (load average 9.13 at the end): the old rig red in 5 of 10 runs (8 failures, the same sentence each), the new rig green 10 of 10.
 - The busy loops were this run's own children, each under `timeout`, stopped by the pids recorded when they were started.
 - Not measured: how long the relay took to answer in those runs, and what the shell does with the refusal (D-PLY-70).
+
+## F-GATE-13: the double-encoding guard's rule, settled (2026-11-19)
+
+The daily run, solo, on a worktree of `dev` 09a7b66. `scripts/check-double-encoding.py` and its tests; no shipped file.
+
+- Before, through `scan_text`, strings composed at run time: an accented word, an ellipsis and a closing quote, 1 hit (U+9154); the same word before a no-break space and a closing guillemet, 1 hit (U+983B), a sibling the row did not list; the Cyrillic channel name read through Windows-1252, 0 hits and 11 rejected; Greek through Latin-1, 0 hits; Arabic through Windows-1252, 0 hits.
+- After: the two legitimate strings 0 hits; the Cyrillic name 11 hits under Windows-1252 and 11 under Latin-1; Greek 3 of its 3 adjacent letters either way (a fourth letter standing alone after a space is the stated gap); Arabic 4 and Hebrew 4; a sharp s before a German closing quote, a capital E-acute before an ellipsis, a brand ending in sharp s before a trademark sign, and the existing guillemet case, 0 hits each; box drawing U+2514 and U+2500, the glyph U+E5FB, U+2153 and three CJK characters read through Windows-1252, all flagged; U+9154 double-encoded alone, not flagged (the same bytes as the legitimate string: the stated gap).
+- The tree: `526 file(s) read (0 untracked), 2 skipped, 41 candidate(s) rejected, 0 problem(s)`, the count it had.
+- Tests 26 to 41 (0.9 s). The 15 new ones on the guard as it was: 10 failures and 2 errors (the two that read `WORD_END`), 3 green (the three that pin behaviour the old rule already had).
+- Mutants, one decision each, 16 of 16 red: a word end never excused; one mark enough; every lead excused; U+00E2 excused; U+00EE excused; a Windows-1252 second never flagged; always flagged; no neighbour rule; a neighbour only after; only before; a pair always flagged; the trademark sign, the German quote and the no-break space each taken out of the marks; three characters always flagged; a neighbour of any length. Three survived the first pass: one was an equivalent (a separate four-byte branch, removed), and two got a test each (one mark of the two; a three-character word end as a neighbour).
