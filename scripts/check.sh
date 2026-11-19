@@ -94,6 +94,10 @@
 #                                version the host's load patch pins its
 #                                `import QtQuick` to, read from the installed
 #                                quickshell and type files; D-HOST-10)
+#  22. metric literal guard      (scripts/check-metric-literals.py: no shipped
+#                                .qml binds a pixel size, radius, gap, margin
+#                                or border width to a number without a
+#                                CONVENTION-EXCEPTION comment; F-GATE-24)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -1401,6 +1405,11 @@ THEME_NAME_USES_MIN=${THEME_NAME_USES_MIN:-279}
 # holds. A floor for the same reason: a scanner that read no literal at all
 # would call any file clean.
 COLOUR_LITERALS_MIN=${COLOUR_LITERALS_MIN:-7}
+# The metric literal guard (F-GATE-24, 2026-11-19): 197 metric bindings in
+# the three shipped files when it landed (Guide.qml 192, BarWidget.qml 4,
+# Service.qml 1). A floor a little under that, so a refactor that folds a
+# few bindings away is not a red gate and a scanner that reads none is.
+METRIC_BINDINGS_MIN=${METRIC_BINDINGS_MIN:-180}
 # The helper regex guard: 34 regex calls across the eleven helper parts when
 # it landed (2026-10-21, lane-bounds-h, R30g). A floor for the text format
 # guard's reason -- a scan that finds nothing has reviewed nothing. 36 once
@@ -2461,6 +2470,27 @@ if python3 "$ROOT/scripts/check-qt-revisions.py" --root "$ROOT" --qml-dir "$QML_
   fi
 else
   cat "$qtrev_log"; bad "qt revision guard"
+fi
+
+step "metric literal guard (no shipped QML binds a metric to a number without saying why)"
+# F-GATE-24 (2026-11-19): constraint 1's last half. A pixel size, a corner
+# radius, a gap, a margin or a border width bound to a number -- alone, or
+# added to the theme's value -- needs a CONVENTION-EXCEPTION comment; until
+# this step nothing looked. A number inside a `Style.` call, a factor, one
+# side of a comparison and zero are not metrics. The count is the floor: a
+# scanner that stopped seeing bindings would pass anything.
+metriclit_log=$CHECK_TMP/metric-literals.log
+if python3 "$ROOT/scripts/check-metric-literals.py" --root "$ROOT" >"$metriclit_log" 2>&1; then
+  metriclit_n=$(grep -oE '^metric literal guard: [0-9]+ metric binding' "$metriclit_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $metriclit_n ]]; then
+    cat "$metriclit_log"; bad "metric literal guard printed no count at all"
+  elif (( metriclit_n < METRIC_BINDINGS_MIN )); then
+    cat "$metriclit_log"; bad "metric literal guard read $metriclit_n binding(s), expected at least $METRIC_BINDINGS_MIN"
+  else
+    ok "metric literal guard ($metriclit_n metric bindings read, none hardcoded without a reason)"
+  fi
+else
+  cat "$metriclit_log"; bad "metric literal guard"
 fi
 
 step "helper regex guard (every helper regex has a reviewed cost)"

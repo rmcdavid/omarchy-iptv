@@ -45,7 +45,7 @@ which is read by no part of this guard (it holds no hex string today). A
 ternary broken so that its middle operand starts a line (`cond ?` / `a :` /
 `"red"`) reads that operand as the binding's name, and misses.
 Metrics are not this guard's: the constraint's other literal, a pixel size
-that should be `Style.*`, has no check yet (F-GATE-24).
+that should be `Style.*`, is check-metric-literals.py's (F-GATE-24).
 
 With no FILE, the .qml entries of ALLOWLIST in scripts/release.py. Exit 0
 clean, 1 on a problem, 2 when a file or the allowlist cannot be read.

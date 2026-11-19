@@ -317,8 +317,12 @@ requests and raise the batch.
    or in the `//` comment directly above: `scripts/check-color-literals.py`
    refuses, in every shipped QML file, a hex colour, `"white"`, `"black"`, a
    named colour where the code says colour, and a `Qt.rgba` of numbers
-   without one (F-GATE-17, 2026-11-16). `"transparent"` needs none. No check
-   holds a METRIC literal to `Style.*` yet (F-GATE-24).
+   without one (F-GATE-17, 2026-11-16). `"transparent"` needs none.
+   `scripts/check-metric-literals.py` refuses the same way a pixel size, a
+   radius, a gap, a margin or a border width bound to a number, alone or
+   added to the theme's value (F-GATE-24, 2026-11-19); a number inside a
+   `Style.` call, a factor, one side of a comparison and zero are not
+   metrics, and a plain `width:` or `height:` is not judged.
 2. argv-only process launching. Never `bash -c`, never string interpolation
    into a command, never `shell=True`. Playlist-derived data reaches mpv or
    curl as argv items, never as shell text.
