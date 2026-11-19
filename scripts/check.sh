@@ -741,7 +741,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # stop's bound; 5 of 3867 red on 775ab7b and six single-decision mutants red
 # (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing (2026-11-18)");
 # the suite runs 3867.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3867}
+# 2026-11-18, lane-plyb (D-PLY-39): 3867 -> 3869 -- playerVerbBoundMs held to
+# the fixture's watchdogMs less marginMs, and the control slot's watchdog
+# (play's bound and the margin, 15 s) firing there; with the rewritten
+# control-share check, 5 of 3869 red on 7bcbfb4 (QA-RESULTS "D-PLY-39, -40
+# and -43: the player's timing (2026-11-18)"); the suite runs 3869.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3869}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1333,7 +1338,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3867}
 # fixture's `stop` less the margin), red under a fixture mutant and a helper
 # mutant (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
 # (2026-11-18)"); the suite counts 2773.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2773}
+# 2026-11-18, lane-plyb (D-PLY-39): 2773 -> 2794 -- tests/test_player_bounds.py's
+# 21 new tests (the helper's verb bounds and reserves held to the fixture, every
+# watched verb walked with mpv answering every request just inside its bound,
+# where the deadline lands and what each verb leaves, MpvIpc's begin rule, the
+# lifted first-load window, the seek's capped wait, the migration mark); 20 of
+# them and the fixture-names test red on 7bcbfb4, fourteen single-decision helper
+# mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
+# (2026-11-18)"); the suite counts 2794.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2794}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -121,7 +121,17 @@ var RELAY_GONE_LINE = "omarchy-iptv: the player's relay does not answer, checkin
 // answering each of a start's twenty-odd requests just inside 2 s could run a
 // verb past this. That residual is recovered, not bounded: a start the
 // watchdog stopped is no verdict, and the reattach probe decides what it left
-// (Service.qml, handlePlayerResult). The margin is what no bound cuts: the
+// (Service.qml, handlePlayerResult). [2026-11-18, D-PLY-39: no longer. The
+// helper runs each watched verb under its own deadline, this sum without the
+// margin (playerVerbBoundMs, from the helper's own constants:
+// player_verb_bound_ms, the shared fixture holding both to watchdogMs less
+// marginMs), less what the verb may still spend after its last wait on mpv
+// (player_verb_reserve_ms); a wait on mpv that cannot have its whole bound
+// before that is refused unsent as `ipc_error`, the code a request that times
+// out raises, so each verb's own handling of mpv's silence runs. The walk of
+// every watched verb with mpv answering EVERY request just inside its bound
+// ends inside the bound (the player-bounds walk, dev branch). The recovery
+// stays for what no bound cuts.] The margin is what no bound cuts: the
 // interpreter and the stub's compile (a whole `player probe` with no player,
 // 259-306 ms at load 3.2), a 10,000-channel cache read (a start that resolves
 // its id in one, 356-390 ms), the /proc scans and the poll overshoots; 5 s is
@@ -140,10 +150,15 @@ var PLAYER_BOUNDS = {
   lookupMs: 3000,         // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
   relayStartMs: 5000,     // RELAY_START_S: a spawn's wait for its relay's status (D-SINK-102)
   relayIpcMs: 1000,       // RELAY_IPC_S: one question to the relay, both ways
-  relayStaggerMs: 200     // RELAY_ATTEMPT_STAGGER_S: a dead answer delays the relay's next by this (not summed)
+  relayStaggerMs: 200,    // RELAY_ATTEMPT_STAGGER_S: a dead answer delays the relay's next by this (not summed)
+  controlIpcMs: 5000      // CONTROL_IPC_S: mpv's round trips in one control-slot verb, together (D-PLY-39)
 }
 // The control slot's watchdog over one `play` or `status` before D-SINK-102,
-// which `play` extends by its two relay questions (playerWatchdogMs("play")).
+// which `play` extended by its two relay questions. [2026-11-18, D-PLY-39:
+// that 10 s is now `play`'s BOUND -- the lookup, the two relay questions and
+// controlIpcMs, the 5 s this 8 s left mpv's round trips after the lookup --
+// which the helper's own deadline holds the control slot's verbs inside, and
+// the watchdog adds the margin, 15 s.]
 var CONTROL_WATCHDOG_MS = 8000
 var PLAYER_WATCHDOG_MARGIN_MS = 5000
 var PLAYER_BIRTH_EDGE_MS = 12000
@@ -159,6 +174,9 @@ function playerLadderMs(fromRung) {
 // "start", "restart", "probe", or "" for the birth edge. Anything else, a
 // string or not, gets the longest verb's, never a shorter one.
 //
+// D-PLY-39 (2026-11-18): the watchdog is the verb's bound (playerVerbBoundMs)
+// and the margin, and the bound is what the helper runs the verb inside.
+//
 // D-PLY-40 (2026-11-18): and "stop", which is no slot's: the detached
 // `player stop` is watched by nothing, so this is the bound Service.qml's
 // stopSettleTimer waits out before it reads the stop as one that did not
@@ -172,6 +190,20 @@ function playerLadderMs(fromRung) {
 // walk of `stop`, dev branch). The backstop was 5 s, so a stop still
 // laddering drew the "outlived a stop" probe and a second `player stop`.
 function playerWatchdogMs(kind) {
+  var k = typeof kind === "string" ? kind : "?"
+  if (k === "") return PLAYER_BIRTH_EDGE_MS
+  var bound = playerVerbBoundMs(k)
+  if (bound !== null) return bound + PLAYER_WATCHDOG_MARGIN_MS
+  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+}
+
+// D-PLY-39 (2026-11-18): a watched verb's bound in ms, the watchdog less the
+// margin -- "start", "restart", "probe", "stop", or "play" for the control
+// slot, whose verbs (`play`, `status`, `pause`, `tracks`, `seek`) share its
+// one watchdog -- and null for anything else. The helper's
+// player_verb_bound_ms is the same arithmetic over its own constants, and
+// the shared player-bounds fixture holds both to watchdogMs less marginMs.
+function playerVerbBoundMs(kind) {
   var b = PLAYER_BOUNDS
   var k = typeof kind === "string" ? kind : "?"
   var lock = b.lockMs + b.lockPollMs
@@ -185,13 +217,12 @@ function playerWatchdogMs(kind) {
   // the 38.25 s the bound left without them; lane RA's M9).
   var carry = 2 * b.ipcMs
   var relay = b.relayStartMs + 3 * b.relayIpcMs
-  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "play") return CONTROL_WATCHDOG_MS + 2 * b.relayIpcMs
-  if (k === "stop") return lock + playerLadderMs("") + b.settleConnectMs + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "") return PLAYER_BIRTH_EDGE_MS
-  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + relay
+  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay
+  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs
+  if (k === "play") return b.lookupMs + 2 * b.relayIpcMs + b.controlIpcMs
+  if (k === "stop") return lock + playerLadderMs("") + b.settleConnectMs
+  return null
 }
 
 // ---- D-PLY-11: the play fork ----
@@ -1461,8 +1492,8 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
 export {
   stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,
   PLAYER_BOUNDS, CONTROL_WATCHDOG_MS, PLAYER_WATCHDOG_MARGIN_MS,
-  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
-  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
+  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playerVerbBoundMs,
+  playFork, playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
   helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget, ID_WITHHELD,
   reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,

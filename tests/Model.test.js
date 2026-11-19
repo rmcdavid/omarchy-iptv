@@ -7359,9 +7359,20 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
   // D-SINK-102: `play`'s fixed 8 s is the fixture's controlMs, which the
   // python walk of `play` holds mpv's round trips to (tests/test_player_bounds.py);
   // a name joined to a number only by a copy is checked here (rule 13).
-  checkCall("D-SINK-102: the control slot's fixed watchdog before the relay is the fixture's controlMs, and play's adds its two relay questions to it", () =>
-    [Model.CONTROL_WATCHDOG_MS, typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs("play") - Model.CONTROL_WATCHDOG_MS : "none"],
-    [PB.controlMs, 2 * PB.helper.relayIpcMs])
+  // D-PLY-39 (2026-11-18): play's 10 s is now its BOUND -- the lookup, its
+  // two relay questions and controlIpcMs, the 5 s the 8 s left mpv's round
+  // trips -- which the helper runs the control slot's verbs inside, and the
+  // watchdog adds the margin. Red on 71700f4, where the watchdog was the
+  // bound itself (10 s) and nothing ran inside it.
+  checkCall("D-SINK-102, D-PLY-39: the control slot's fixed watchdog before the relay is the fixture's controlMs; play's BOUND is the lookup, its two relay questions and controlIpcMs (what that 8 s left mpv's round trips), and its watchdog that bound and the margin", () =>
+    [Model.CONTROL_WATCHDOG_MS, (Model.PLAYER_BOUNDS || {}).controlIpcMs,
+     typeof Model.playerVerbBoundMs === "function" ? Model.playerVerbBoundMs("play") : "none", Model.playerWatchdogMs("play")],
+    [PB.controlMs, PB.controlMs - PB.helper.lookupMs, PB.helper.lookupMs + 2 * PB.helper.relayIpcMs + PB.helper.controlIpcMs,
+     PB.helper.lookupMs + 2 * PB.helper.relayIpcMs + PB.helper.controlIpcMs + PB.marginMs])
+  checkCall("D-PLY-39: playerVerbBoundMs per verb is the fixture's watchdogMs less marginMs -- the bound the helper runs each verb inside (its player_verb_bound_ms, held to the same numbers in python) -- and null for the birth edge and for any kind that is not a watched verb", () =>
+    [Object.keys(PB.watchdogMs).filter(k => k !== "").map(k => k + "=" + (typeof Model.playerVerbBoundMs === "function" ? Model.playerVerbBoundMs(k) : "none")),
+     typeof Model.playerVerbBoundMs === "function" ? ["", "strat", null, undefined, 7, "status"].map(k => Model.playerVerbBoundMs(k)) : "none"],
+    [Object.keys(PB.watchdogMs).filter(k => k !== "").map(k => k + "=" + (PB.watchdogMs[k] - PB.marginMs)), [null, null, null, null, null, null]])
   checkCall("D-PLY-35: every verb's bound is past its own deadlines -- a start past lock + spawn + first load (the board's 14 s) plus a request, a restart past that plus its ladder from term, a probe past three requests -- and every one is past what the old 12 s let a start have", () => {
     const h = PB.helper, w = k => typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : PB.previousMs
     return [w("start") > PB.boardMs + h.ipcMs,
@@ -19016,6 +19027,21 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // 3 * 6.05 + 0.3 + 0.6 = 19.05 s, and the third's at 26 s -- before the
     // interpreter, the play-time lookup and the spawn, which only delay each
     // try. Read off the tree: the Service's backoff and Model's bounds.
+    // D-PLY-39: the control slot's one Timer is play's bound and the margin,
+    // read from its own block by the harness -- it TERMs a control helper
+    // that outlives the helper's own deadline and the margin, not one that
+    // runs past the old 10 s. Red on 7bcbfb4 (10 s).
+    checkCall("D-PLY-39: the control slot's watchdog is play's bound and the margin (the fixture's `play`, 15 s): a control helper still running at 10 s is not terminated, one at 15 s is", () => {
+      const h = bootPlayer()
+      const t = h.driveTimer("controlWatchdog")
+      h.root.runControl("status", ["status", "--socket", h.root.socketPath])
+      const armed = t.armedInterval
+      h.elapse(10000)
+      const atTen = h.ids.controlProc.signals.slice()
+      h.elapse(PB.watchdogMs.play - 10000)
+      return [h.root.controlTimeoutMs, armed, atTen, h.ids.controlProc.signals.slice()]
+    }, [PB.watchdogMs.play, PB.watchdogMs.play, [], [15]])
+
     checkCall("D-PLY-43: the retries' lock waits outlast the stop's own worst case -- the last try still asks the lock after the worst stop has released it, and so does the second retry", () => {
       const h = bootPlayer()
       const base = h.root.playRetryBaseMs, max = h.root.playRetryMax, lock = M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs

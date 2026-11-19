@@ -829,6 +829,7 @@ def neutral_header_properties(user_agent: str) -> list[tuple[str, Any]]:
     return [("user-agent", user_agent), ("referrer", ""), ("http-header-fields", [])]
 
 
+@verb_deadline("play")
 def cmd_play(args: argparse.Namespace) -> int:
     """Zap an already-running player. The wire sequence and the reply shape
     are unchanged (requirement 2); the body is `apply_channel()`, shared
@@ -936,6 +937,7 @@ def status_relay(client: MpvIpc, sock_path: str) -> bool | None:
     return relay_status(sock_path, peer, port) is not None
 
 
+@verb_deadline("status")
 def cmd_status(args: argparse.Namespace) -> int:
     path = socket_path(args.socket)
     client = MpvIpc(path, args.ipc_timeout)

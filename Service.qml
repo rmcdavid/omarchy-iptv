@@ -89,7 +89,9 @@ Item {
   // a ~130 ms run and next to the helper's own --ipc-timeout, because this
   // is the belt and braces, not the deadline. D-SINK-102: 8 s plus the two
   // questions to the player's relay that `play` now asks, its status and the
-  // load's registration (Model says why).
+  // load's registration (Model says why). D-PLY-39 (2026-11-18): that 10 s is
+  // now the BOUND the helper runs every control verb inside, its waits on mpv
+  // ending by its own deadline, and this watchdog adds the margin (15 s).
   readonly property int controlTimeoutMs: Model.playerWatchdogMs("play")
   // M5-01 (2.3): the gap between a seek reply and the next seek run.
   readonly property int seekThrottleMs: 300

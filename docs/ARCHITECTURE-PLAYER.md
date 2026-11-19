@@ -607,6 +607,34 @@ answered, `Could not start playback` with "Helper timed out", marking nothing
 (D-PLY-32). A probe that is stale (a newer play went out) or a socket EOF that
 already told a death drops the stopped start untold.]**
 
+**[Amended 2026-11-18, D-PLY-39: the residual above -- every request that is
+not summed, which an mpv answering each just inside 2 s ran past the bound --
+is now bounded, not only recovered. Walked under the player-bounds virtual
+clock with mpv answering EVERY connect and request just inside its bound, the
+shipping verbs ran to 154 s (a start that adopts), 139-143 s (a start that
+spawns or replaces), 142 s (a restart), 127 s (a probe), 93 s (`play`) and
+14-21 s (`status`, `pause`, `seek`). Now each verb the shell watches runs under
+its own deadline (`verb_deadline`, bin/helper/05-ipc-logos.py): its bound, the
+watchdog less the margin, which the helper derives from its own constants by
+the model's arithmetic (`player_verb_bound_ms`, `Model.playerVerbBoundMs`, the
+shared fixture holding both to `watchdogMs` less `marginMs`), less what it may
+still spend after its last wait on mpv (`player_verb_reserve_ms`: for a start
+or a restart the first-load window and the relay's count after a load, or the
+ladder from term that stops a spawn it fed nothing, 4 s; for `status` the
+relay question after its reads, 1 s; none for the rest). A connect or a
+request that cannot have its whole bound before that deadline is refused
+unsent, as `ipc_error` -- the code a request that times out raises, so each
+verb's own handling of mpv's silence runs and no exit is new; an event wait
+ends at it, the first-load window excepted (summed, and the start's verdict).
+The same walks now end at 48.05 s (adopting: refused in the pins or the TLS
+assertion, the player it found neither fed nor signalled), 51.2-52.2 s
+(spawning or replacing: refused before the load, the spawn laddered down from
+term by D-PLY-57's own path), 51.2 s (a restart), 7 s, 9 s and 8-10 s, each
+inside its bound; the summed worst paths are unchanged (47.07, 51.05, 50.05,
+7, 5 s). The control slot's verbs share its one watchdog, whose 10 s is now
+their bound and which adds the margin, 15 s (20.7). The recovery stays, for
+what no bound cuts.]**
+
 Two concurrent IPC clients are safe: mpv names them `ipc_0`/`ipc_1` and
 correlates by `request_id`.
 
@@ -3595,7 +3623,10 @@ previous reply, and runs `drainPendingPlay()` on every path of the branch
 
 **A health-count exemption (amends 4.13).** `Model.healthTick`'s busy-skip
 counter exists to restart a helper that never returns, and the 8 s control
-watchdog (`controlTimeoutMs`, 4.3's slot) already terminates that case. A
+watchdog (`controlTimeoutMs`, 4.3's slot) already terminates that case.
+[2026-11-18: 10 s since D-SINK-102 and 15 s since D-PLY-39, whose deadline
+ends a control verb's waits on mpv inside 10 s; the watchdog is for what no
+bound cuts.] A
 slot re-occupied every few hundred milliseconds by a sub-second verb -- a
 held rewind key -- is the benign case the three-strikes counter must not
 punish, so seek runs are exempt: `busy = controlProc.running &&
@@ -4356,7 +4387,11 @@ status, the registration, the first-load count), 58,250 and 57,450 ms; a
 probe adds one `relayIpcMs`, 12,000 ms; `play`'s fixed 8 s control slot
 (`Model.CONTROL_WATCHDOG_MS`, the fixture's `controlMs`) gains two, the
 gate's status and the load's registration, 10,000 ms (`Service.qml`
-`controlTimeoutMs` is now `Model.playerWatchdogMs("play")`). That 8 s was
+`controlTimeoutMs` is now `Model.playerWatchdogMs("play")`). [2026-11-18,
+D-PLY-39: that 10,000 ms is now `play`'s BOUND -- the lookup, the two
+questions and `controlIpcMs` (`CONTROL_IPC_S`, the 5 s this 8 s left mpv's
+round trips) -- which the helper's own deadline holds every control verb
+inside, and the watchdog adds the margin, 15,000 ms.] That 8 s was
 never a sum of `play`'s bounds, so the walk of `play` (the lookup and both
 relay questions at their bounds, the player answering at once) holds a
 different thing: what they leave of the watchdog for mpv's round trips may

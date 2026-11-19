@@ -75,6 +75,13 @@ STOP_POLL_S = 0.05
 # of socket_is_dead's one look at a socket that may be stale.
 SPAWN_PID_TIMEOUT = 2.0
 SETTLE_CONNECT_TIMEOUT = 0.2
+# D-PLY-39 (2026-11-18): mpv's round trips in one control-slot verb (`play`,
+# `status`, `pause`, `tracks`, `seek`), together: what the control slot's 8 s
+# watchdog left them after the play-time lookup (Model.CONTROL_WATCHDOG_MS
+# less STREAM_LOOKUP_TIMEOUT_S), now the share player_verb_bound_ms gives
+# them and the verb's deadline holds them to. Mirrored by
+# Model.PLAYER_BOUNDS.controlIpcMs, pinned by the player-bounds fixture.
+CONTROL_IPC_S = 5.0
 LAUNCH_STDERR_MAX = 4096          # PO-6: the launch window's stderr, memory only
 PLAYER_UMASK = 0o077              # PO-11: 0600 files / 0700 dirs, requirement 10
 # Mirror of Model.splitMpvArgs (4.12). The helper re-validates every
@@ -2192,5 +2199,83 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
     result["deadline"] = _monotonic() + STOP_SETTLE_MS / 1000.0
     result["running"] = not wait_for_exit(targets, sock_path, STOP_SETTLE_MS)
     return result
+
+
+# ---- D-PLY-39 (2026-11-18): each watched verb's bound, from this helper ----
+#
+# Model.playerWatchdogMs(verb) is the shell's watchdog over a verb: the
+# verb's longest path through this code with every wait it survives at its
+# bound, and a margin for what no bound cuts. These are the same sums, from
+# this helper's own constants and without the margin, so the deadline a verb
+# runs under (verb_deadline) is the watchdog less the margin by construction;
+# the shared player-bounds fixture (dev branch) holds both sides to the same
+# numbers (watchdogMs less marginMs) and its walk holds the verbs inside them.
+# model/player.mjs says why each term is there.
+CONTROL_SLOT_VERBS = ("play", "status", "pause", "tracks", "seek")
+
+
+def _bound_ms(seconds: float) -> int:
+    return int(round(seconds * 1000))
+
+
+def player_ladder_ms(from_rung: str) -> int:
+    """Model.playerLadderMs: the stop ladder's longest run from its first
+    rung, "" (quit) or "term"."""
+    tail = STOP_KILL_GRACE_MS + 2 * STOP_SETTLE_MS
+    if from_rung == "term":
+        return tail
+    return max(STOP_QUIT_GRACE_MS, 2 * _bound_ms(DEFAULT_IPC_TIMEOUT)) + tail
+
+
+def player_verb_bound_ms(verb: str) -> int:
+    """A watched verb's bound in ms (Model.playerVerbBoundMs): `start`,
+    `restart`, `probe`, `stop`, or one of the control slot's verbs, which
+    share its one watchdog and so its bound. Anything else is a ValueError:
+    a verb with no bound has no deadline to run under."""
+    ipc = _bound_ms(DEFAULT_IPC_TIMEOUT)
+    lock = _bound_ms(DEFAULT_LOCK_TIMEOUT) + _bound_ms(LOCK_POLL_S)
+    settle_connect = _bound_ms(SETTLE_CONNECT_TIMEOUT)
+    relay_ipc = _bound_ms(RELAY_IPC_S)
+    lookup = _bound_ms(STREAM_LOOKUP_TIMEOUT_S)
+    spawn = settle_connect + _bound_ms(SPAWN_PID_TIMEOUT) + 2 * _bound_ms(DEFAULT_SPAWN_TIMEOUT) + 2 * ipc
+    tail = max(player_ladder_ms("term") + settle_connect, ipc + _bound_ms(DEFAULT_FIRST_LOAD_TIMEOUT))
+    carry = 2 * ipc
+    relay = _bound_ms(RELAY_START_S) + 3 * relay_ipc
+    if verb == "start":
+        return lookup + lock + 2 * ipc + carry + player_ladder_ms("") + spawn + tail + relay
+    if verb == "restart":
+        return (lookup + lock + player_ladder_ms("term") + settle_connect + 2 * ipc + player_ladder_ms("")
+                + spawn + tail + relay)
+    if verb == "probe":
+        return max(3 * ipc, _bound_ms(SETTLE_LOCK_TIMEOUT) + _bound_ms(LOCK_POLL_S) + settle_connect) + relay_ipc
+    if verb == "stop":
+        return lock + player_ladder_ms("") + settle_connect
+    if verb in CONTROL_SLOT_VERBS:
+        return lookup + 2 * relay_ipc + _bound_ms(CONTROL_IPC_S)
+    raise ValueError("no bound for player verb %r" % (verb,))
+
+
+def player_verb_reserve_ms(verb: str) -> int:
+    """What a watched verb may still spend, uncut by its mpv deadline, after
+    its last wait on mpv ends or is refused, in ms. A start or a restart:
+    the first-load window and the first-load count it asks the relay
+    (DEFAULT_FIRST_LOAD_TIMEOUT + RELAY_IPC_S) after a load, or the ladder
+    from term that stops a spawn it fed nothing (stop_fresh_spawn, with a
+    settle's connect), whichever is longer. `status`: the relay question it
+    asks after its reads (status_relay). Every other: nothing -- the probe's
+    and `play`'s questions to the relay, and the lookup, come before their
+    mpv waits end, and their refusals only print."""
+    if verb in ("start", "restart"):
+        return max(_bound_ms(DEFAULT_FIRST_LOAD_TIMEOUT) + _bound_ms(RELAY_IPC_S),
+                   player_ladder_ms("term") + _bound_ms(SETTLE_CONNECT_TIMEOUT))
+    if verb == "status":
+        return _bound_ms(RELAY_IPC_S)
+    return 0
+
+
+def player_verb_ipc_span_ms(verb: str) -> int:
+    """How long after a watched verb begins its waits on mpv must be over:
+    its bound less its reserve (verb_deadline)."""
+    return player_verb_bound_ms(verb) - player_verb_reserve_ms(verb)
 
 

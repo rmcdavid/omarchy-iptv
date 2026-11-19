@@ -1380,12 +1380,21 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
     cross into QML.
     """
     deadline = time.monotonic() + max(0.0, timeout)
-    state = "unknown"
-    reason = ""
     last_error = launch_reason(launch_errors or [])
     # D-PLY-29: a warning replaces only a reason that is itself a warning
     # (or none), so a driver line after the failure does not become it.
     named = last_error != "" and not player_log_warning(last_error)
+    # D-PLY-39: the window is the start's verdict, summed in its bound and
+    # bounded on its own, so the verb's mpv deadline does not cut it; the
+    # verb's reserve (player_verb_reserve_ms) is what keeps it inside.
+    with ipc_deadline_lifted():
+        return _observe_first_load(client, entry_id, deadline, last_error, named)
+
+
+def _observe_first_load(client: MpvIpc, entry_id: int | None, deadline: float, last_error: str,
+                        named: bool) -> dict[str, Any]:
+    state = "unknown"
+    reason = ""
     while time.monotonic() < deadline:
         events = client.drain_events(deadline)
         if events is None:                       # mpv closed the connection
@@ -1784,6 +1793,7 @@ def stop_fresh_spawn(sock_path: str, launched_pid: int, ipc_timeout: float) -> N
         stop_ladder(sock_path, targets, "term", ipc_timeout)
 
 
+@verb_deadline(None)
 def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     kind = "player.%s" % verb
     sock = socket_path(args.socket)
@@ -1994,6 +2004,7 @@ def unlink_relay_socket(sock_path: str) -> None:
         pass
 
 
+@verb_deadline("probe")
 def player_probe(args: argparse.Namespace) -> int:
     """Lock-free, and side-effect-free but for one stale-socket unlink, the
     owner claim and the TLS migration. `path` and `media-title` are never read
@@ -2196,6 +2207,7 @@ def player_orphan_check(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
+@verb_deadline("pause")
 def player_pause(args: argparse.Namespace) -> int:
     """Pause, resume, or toggle the live stream.
 
@@ -2389,6 +2401,7 @@ def player_refused(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+@verb_deadline("tracks")
 def player_tracks(args: argparse.Namespace) -> int:
     """List the audio and subtitle tracks, after applying a selection if one
     was asked for. The reply always carries the list AS MPV NOW HAS IT, so
@@ -2827,7 +2840,9 @@ def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, boo
     ours -- the user's own arrow key in the player window at the same
     instant -- counts as ours (review nit, accepted): the read that
     follows still decides by the threshold, and the status tick re-syncs.
-    A `playback-restart` is counted only after a `seek` was seen."""
+    A `playback-restart` is counted only after a `seek` was seen.
+    D-PLY-39: and no later than the verb's mpv deadline."""
+    deadline = ipc_deadline_capped(deadline)
     landed = False
     while True:
         remaining = deadline - time.monotonic()
@@ -2846,6 +2861,7 @@ def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, boo
                 return "refused", False
 
 
+@verb_deadline("seek")
 def player_seek(args: argparse.Namespace) -> int:
     """`player seek --by N` (signed seconds, negative is back) or `--live`.
 

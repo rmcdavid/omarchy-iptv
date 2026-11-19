@@ -157,10 +157,22 @@ class PlayerBoundsFixtureTest(unittest.TestCase):
 # 35.45 - 5 = 30.45 s.
 
 class _Clock:
+    # D-PLY-39: a loop that turns over without the time moving -- a wait cut
+    # to nothing by a deadline and asked again -- would never end on this
+    # clock, where on a real one it spins until its own bound. So the clock
+    # counts its reads and fails the walk past a million, which no walk here
+    # comes near (the longest reads it a few thousand times).
+    READS_MAX = 1000000
+
     def __init__(self):
         self.t = 0.0
+        self.reads = 0
 
     def monotonic(self):
+        self.reads += 1
+        if self.reads > self.READS_MAX:
+            raise AssertionError("the clock was read %d times with the time at %.3f s: a loop that turns over "
+                                 "without the time moving" % (self.reads, self.t))
         return self.t
 
     def sleep(self, seconds):
@@ -178,7 +190,7 @@ _REAL_IPC = helper.MpvIpc
 
 
 def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, older=False, spawned_slow=0,
-                     vanish_at=None):
+                     vanish_at=None, slow=False, mpv_args=None, unsafe=False, slow_load=False):
     """Run `player <verb>` through the shipping code, every wait on the path
     at its bound. `survivor_answers`: how many requests the found player
     answers (just inside the bound) before it goes quiet. `lock_at` /
@@ -195,11 +207,30 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
     the moment the found player's process is gone -- the finder and the
     re-verification before each signal no longer see it -- while its socket
     still accepts a connect, just inside the bound, which is how a killed
-    player leaves it (D-PLY-8); None for never."""
+    player leaves it (D-PLY-8); None for never.
+
+    D-PLY-39, mpv answering EVERY request just inside its bound: `slow` --
+    the player this verb spawns, the one `play` reaches and the one the
+    control verbs (`status`, `pause`, `tracks`, `seek`) find answer every
+    connect and every request just inside the bound the code hands it, with
+    the answers a player of this build gives (the pin block's readings, the
+    handshake's version, the carry's values), so the verb gets as far as
+    mpv's time lets it; the player a spawn launched is then also one the
+    finder sees, so a start that stops what it spawned really ladders it
+    (stop_fresh_spawn). `survivor_answers` None: the found player does the
+    same. `mpv_args`: the user's tokens, so the spawn writes its 0600
+    include file (D-SINK-47) and must remove it on every way out. `unsafe`:
+    every player reads `tls-verify` false (a probe migrates it). `slow_load`:
+    the spawned player answers its loadfile just inside the bound too.
+    `learned` then holds the commands sent (`sent`, name and first argument,
+    in order, across every connection), how many relay listeners were closed
+    (`closed`) and what the runtime folder held when the verb returned
+    (`leftover`)."""
     clock = _Clock()
     state = {"phase": "play" if verb == "play" else "found", "bind_at": None, "pipes": 0}
     learned = {"lock_last": None, "bind_last": None}
     survivor = {"pid": 777, "startTime": "1"}
+    spawned = {"pid": 4242, "startTime": "1"}
     signals = []
     replies = []
     folder = tempfile.mkdtemp(prefix="ply35-walk-")
@@ -217,10 +248,14 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         return state["phase"] != "found"
 
     def find_player(_sock):
-        return [] if gone() else [dict(survivor)]
+        if not gone():
+            return [dict(survivor)]
+        return [dict(spawned)] if slow and state["phase"] == "spawned" else []
 
     def still_the_player(record, _sock):
-        return not gone() and record.get("pid") == survivor["pid"]
+        if record.get("pid") == survivor["pid"]:
+            return not gone()
+        return slow and state["phase"] == "spawned" and record.get("pid") == spawned["pid"]
 
     real_ladder = helper.stop_ladder
 
@@ -281,7 +316,7 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             return -1
 
         def close(self):
-            pass
+            learned["closed"] = learned.get("closed", 0) + 1
 
     def relay_request(sock_path, request, peer, timeout=None, relay_pid=0):
         timeout = helper.RELAY_IPC_S if timeout is None else timeout
@@ -301,9 +336,10 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
         return reply
 
     class Sock:
-        def __init__(self, answers, then_all=False):
+        def __init__(self, answers, then_all=False, slow_all=False):
             self.answers = answers          # requests answered just inside the bound; None: all, at once
             self.then_all = then_all        # after those: quiet (False) or answering at once (True)
+            self.slow_all = slow_all        # D-PLY-39: "at once" becomes "just inside the bound"
             self.timeout = None
             self.pending = []
             self.loaded = False
@@ -312,7 +348,9 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             self.timeout = value
 
         def sendall(self, data):
-            self.pending.append(json.loads(data.decode("utf-8")))
+            request = json.loads(data.decode("utf-8"))
+            learned.setdefault("sent", []).append(" ".join(str(part) for part in request["command"][:2]))
+            self.pending.append(request)
 
         def close(self):
             pass
@@ -357,7 +395,14 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                            "drag-and-drop": False,
                            "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE},
                            # D-SINK-102: and the relay pin, at the walk's port.
-                           "http-proxy": "http://127.0.0.1:%d" % walk_port}
+                           "http-proxy": "http://127.0.0.1:%d" % walk_port,
+                           # D-PLY-39: the handshake's version and the
+                           # carry's values, so a player that answers every
+                           # request slowly answers them as one of this build.
+                           "mpv-version": "mpv 0.41.0"}
+                answers.update({prop: value for (verb_, prop), value in _CARRY_ANSWERS.items()})
+                if unsafe:
+                    answers[helper.MPV_TLS_VERIFY_PROP] = False
                 for option in helper.PER_FILE_TLS_OPTIONS:
                     answers["option-info/%s/set-from-commandline" % option] = True
                 data = answers.get(command[1])
@@ -366,6 +411,12 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             elif command[0] == "loadfile":
                 data = {"playlist_entry_id": 1}
                 self.loaded = True
+                if slow_load:
+                    clock.t += self.timeout - _JUST_INSIDE
+            if self.slow_all:
+                clock.t += self.timeout - _JUST_INSIDE
+            if command[0] == "loadfile":
+                learned["loaded_at"] = clock.t
             return self.line(request, error, data)
 
         @staticmethod
@@ -374,8 +425,14 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
 
     class Ipc(_REAL_IPC):
         def connect(self):
+            # D-PLY-39: the shipping check of the verb's mpv deadline runs
+            # first, as it does in MpvIpc.connect (a tree before it has none).
+            if hasattr(helper, "ipc_wait_bound"):
+                helper.ipc_wait_bound(self.timeout)
             if state["phase"] == "play":
-                self.sock = Sock(None)
+                if slow:
+                    clock.t += self.timeout - _JUST_INSIDE
+                self.sock = Sock(None, slow_all=slow)
                 return
             if state["phase"] == "bind":
                 learned["bind_last"] = clock.t - state["bind_at"]
@@ -384,13 +441,13 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
                     raise helper.HelperError("not_running", "refused")
             clock.t += self.timeout - _JUST_INSIDE
             if state["phase"] in ("found", "gone"):
-                self.sock = Sock(survivor_answers)
+                self.sock = Sock(None, slow_all=True) if survivor_answers is None else Sock(survivor_answers)
             else:
                 # The new player: answers its handshake just inside the
                 # bound, then everything at once but the one request after
                 # the loadfile whose timeout the verb survives.
                 state["phase"] = "spawned"
-                self.sock = Sock(1 + spawned_slow, then_all=True)
+                self.sock = Sock(None, slow_all=True) if slow else Sock(1 + spawned_slow, then_all=True)
 
     patches = [
         mock.patch.object(helper, "time", types.SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep, time=clock.time)),
@@ -440,12 +497,23 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None, ol
             helper.cmd_play(parser.parse_args(["play", "--socket", sock, "--cache-dir", folder, "--id", "t:x"]))
         elif verb == "stop":
             helper.player_stop(parser.parse_args(["player", "stop", "--socket", sock, "--seq", "3"]))
+        elif verb == "status":
+            helper.cmd_status(parser.parse_args(["status", "--socket", sock]))
+        elif verb == "pause":
+            helper.player_pause(parser.parse_args(["player", "pause", "--socket", sock, "--state", "off"]))
+        elif verb == "tracks":
+            helper.player_tracks(parser.parse_args(["player", "tracks", "--socket", sock, "--audio", "2"]))
+        elif verb == "seek":
+            helper.player_seek(parser.parse_args(["player", "seek", "--socket", sock, "--by", "-10"]))
         else:
             extra = ["--from", "term"] if verb == "restart" else []
+            for token in mpv_args or []:
+                extra += ["--mpv-arg=" + token]
             helper.player_start(parser.parse_args(["player", verb] + session + extra), verb)
     finally:
         for patch in reversed(patches):
             patch.stop()
+        learned["leftover"] = sorted(os.listdir(folder))
         shutil.rmtree(folder, ignore_errors=True)
     return clock.t, (replies[-1] if replies else None), signals, learned
 
@@ -543,7 +611,10 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
         self.assertEqual(signals, [])
         h = BOUNDS["helper"]
         self.assertGreater(spent, (h["lookupMs"] + 2 * h["relayIpcMs"]) / 1000.0 - 0.01)   # both questions were asked
-        left = BOUNDS["watchdogMs"]["play"] / 1000.0 - spent
+        # D-PLY-39: held against play's BOUND, the watchdog less the margin,
+        # which the helper now runs it inside -- the share left there for
+        # mpv's round trips is controlIpcMs, the 5 s the 8 s left them.
+        left = _bound_s("play") - spent
         self.assertGreaterEqual(left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0,
                                 "play's watchdog leaves mpv's round trips %.3f s, less than the %.3f s its 8 s left them"
                                 % (left, (BOUNDS["controlMs"] - h["lookupMs"]) / 1000.0))
@@ -570,6 +641,380 @@ class PlayerWorstPathWalkTest(unittest.TestCase):
                 self.assertEqual(signals, [])
                 self.assertGreater(spent, floor)
                 self.assert_inside_its_watchdog("probe", spent)
+
+
+
+# ---- D-PLY-39 (2026-11-18): each watched verb ends inside its own bound ----
+#
+# Every wait on mpv was bounded and no verb was: an mpv answering each of a
+# start's twenty-odd requests just inside 2 s ran it to about 80 s against
+# its watchdog. Now the helper runs each watched verb under a deadline -- its
+# bound (the fixture's watchdogMs less marginMs, which the helper derives
+# from its own constants: player_verb_bound_ms) less its reserve -- and a
+# wait on mpv that cannot have its whole bound before it is refused unsent
+# as `ipc_error`. Below: the join of the helper's bounds to the fixture; the
+# walk of every watched verb with mpv answering EVERY request just inside
+# its bound, held inside the bound; where the deadline lands and what each
+# verb leaves there (the lock, the spawn, the relay's listeners, the include
+# file, the migration mark); and the client's own rule. Red on 71700f4,
+# which has no deadline: the walks run to 79-100 s for a start.
+
+def _bound_s(verb):
+    return (BOUNDS["watchdogMs"][verb] - BOUNDS["marginMs"]) / 1000.0
+
+
+def _open_fds():
+    return len(os.listdir("/proc/self/fd"))
+
+
+def walk_locked(verb, **more):
+    """walk_long_path's first two steps for a verb that spawns nothing: the
+    lock refused throughout (its last poll learned), then granted there."""
+    _, refused, _, learned = walk_player_verb(verb, **more)
+    assert (refused or {}).get("error", {}).get("code") == "busy", refused
+    return walk_player_verb(verb, lock_at=learned["lock_last"], **more)
+
+
+class VerbBoundJoinTest(unittest.TestCase):
+
+    def test_each_watched_verbs_bound_is_the_fixtures_watchdog_less_the_margin(self):
+        for verb in ("start", "restart", "probe", "play", "stop"):
+            with self.subTest(verb=verb):
+                self.assertEqual(helper.player_verb_bound_ms(verb), BOUNDS["watchdogMs"][verb] - BOUNDS["marginMs"])
+
+    def test_the_control_slots_verbs_share_its_one_bound(self):
+        # One Timer watches the control slot (Service.qml controlWatchdog,
+        # Model.playerWatchdogMs("play")), so every verb it runs has play's.
+        for verb in ("status", "pause", "tracks", "seek"):
+            with self.subTest(verb=verb):
+                self.assertEqual(helper.player_verb_bound_ms(verb), helper.player_verb_bound_ms("play"))
+        with self.assertRaises(ValueError):
+            helper.player_verb_bound_ms("relay")
+
+    def test_the_control_share_is_what_the_8_s_left_mpv(self):
+        h = BOUNDS["helper"]
+        self.assertEqual(h["controlIpcMs"], BOUNDS["controlMs"] - h["lookupMs"])
+
+    def test_each_reserve_is_what_the_verb_may_spend_after_its_last_wait_on_mpv(self):
+        h = BOUNDS["helper"]
+        ladder_term = h["killGraceMs"] + 2 * h["settleMs"]
+        start = max(h["firstLoadMs"] + h["relayIpcMs"], ladder_term + h["settleConnectMs"])
+        want = {"start": start, "restart": start, "status": h["relayIpcMs"], "probe": 0, "play": 0,
+                "pause": 0, "tracks": 0, "seek": 0}
+        for verb, reserve in want.items():
+            with self.subTest(verb=verb):
+                self.assertEqual(helper.player_verb_reserve_ms(verb), reserve)
+                self.assertEqual(helper.player_verb_ipc_span_ms(verb), helper.player_verb_bound_ms(verb) - reserve)
+                self.assertGreater(helper.player_verb_ipc_span_ms(verb), 0)
+
+
+class VerbDeadlineWalkTest(unittest.TestCase):
+    """The walks with mpv answering every request just inside its bound."""
+
+    def assert_inside_its_bound(self, verb, spent, bound_of=None):
+        bound = _bound_s(bound_of or verb)
+        self.assertLessEqual(spent, bound, "%s walked %.3f s with mpv answering every request just inside its "
+                             "bound, past its own %.3f s" % (verb, spent, bound))
+
+    def assert_refused_in_time(self, reply, kind):
+        self.assertIsNotNone(reply)
+        self.assertFalse(reply.get("ok"), reply)
+        self.assertEqual(reply.get("kind"), kind)
+        self.assertEqual(reply["error"]["code"], "ipc_error")
+        self.assertEqual(reply["error"]["message"], helper.IPC_DEADLINE_REFUSAL)
+
+    def test_a_start_over_an_adopted_player_that_answers_everything_slowly(self):
+        """The current player is adopted, pinned and fed: the deadline lands in
+        its pins or the load's TLS assertion, the start answers ipc_error, and
+        that player -- the one the shell already plays on -- is neither fed a
+        load nor signalled."""
+        fds = _open_fds()
+        spent, reply, signals, learned = walk_locked("start", survivor_answers=None)
+        self.assert_refused_in_time(reply, "player.start")
+        self.assertEqual(signals, [])
+        self.assertNotIn("loadfile", " ".join(learned.get("sent", [])))
+        # ended within one request's bound of its mpv deadline: it was reached
+        self.assertGreater(spent, helper.player_verb_ipc_span_ms("start") / 1000.0 - helper.DEFAULT_IPC_TIMEOUT)
+        self.assert_inside_its_bound("start", spent)
+        self.assertEqual(_open_fds(), fds)
+
+    def test_a_start_whose_spawn_answers_everything_slowly_stops_the_spawn(self):
+        """A wedged player laddered, a spawn that answers every request just
+        inside: the deadline lands before the load, so the spawn this start
+        fed nothing is laddered down from term (stop_fresh_spawn, D-PLY-57),
+        the lock released, both relay listeners closed and the include file
+        removed -- what any refusal before the load leaves (D-PLY-39 (d))."""
+        fds = _open_fds()
+        spent, reply, signals, learned = walk_long_path("start", slow=True, mpv_args=["--volume=50"])
+        self.assert_refused_in_time(reply, "player.start")
+        self.assertEqual(signals, [15, 9, 15, 9])     # the wedged player's ladder, then the spawn's
+        self.assertNotIn("loadfile", " ".join(learned.get("sent", [])))
+        self.assertEqual(learned.get("closed"), 2)
+        self.assertEqual(learned.get("leftover"), ["player.lock"])
+        self.assertEqual(_open_fds(), fds)
+        self.assert_inside_its_bound("start", spent)
+
+    def test_a_start_that_replaces_an_older_player_answering_everything_slowly(self):
+        spent, reply, signals, learned = walk_long_path("start", survivor_answers=None, older=True, slow=True)
+        self.assert_refused_in_time(reply, "player.start")
+        self.assertEqual(signals, [15, 9, 15, 9])     # the older player's ladder, then the spawn's
+        self.assertNotIn("loadfile", " ".join(learned.get("sent", [])))
+        self.assert_inside_its_bound("start", spent)
+
+    def test_a_restart_whose_spawn_answers_everything_slowly(self):
+        spent, reply, signals, _ = walk_long_path("restart", slow=True)
+        self.assert_refused_in_time(reply, "player.restart")
+        self.assertEqual(signals, [15, 9, 15, 9, 15, 9])
+        self.assert_inside_its_bound("restart", spent)
+
+    def test_a_start_whose_deadline_lands_after_its_load_keeps_its_window(self):
+        """The load sent with its whole bound, the bookkeeping after it
+        refused unsent (its failure is caught there, as a closed connection's
+        is), and the first-load window run to its end, uncut: the reply is
+        the ok of a start that loaded, and the walk ends inside the bound."""
+        spent, reply, signals, learned = walk_long_path("start", spawned_slow=LANDS_AFTER_THE_LOAD, slow_load=True)
+        self.assertTrue(reply and reply.get("ok"), reply)
+        sent = learned.get("sent", [])
+        self.assertIn("loadfile", " ".join(sent))
+        after = sent[[s.split(" ")[0] for s in sent].index("loadfile") + 1:]
+        self.assertEqual(after, [], "a request after the load was sent past the deadline: %r" % after)
+        self.assertEqual(reply["firstLoad"]["state"], "unknown")
+        # the window ran its whole bound after the load, uncut by the deadline
+        self.assertAlmostEqual(spent - learned["loaded_at"], helper.DEFAULT_FIRST_LOAD_TIMEOUT, places=3)
+        self.assertGreater(learned["loaded_at"] + helper.DEFAULT_IPC_TIMEOUT,
+                           _bound_s("start") - helper.player_verb_reserve_ms("start") / 1000.0)
+        self.assert_inside_its_bound("start", spent)
+
+    def test_a_probe_that_answers_everything_slowly(self):
+        spent, reply, signals, learned = walk_player_verb("probe", survivor_answers=None)
+        self.assert_refused_in_time(reply, "player.probe")
+        self.assertFalse(reply.get("running"))
+        self.assertEqual(signals, [])
+        self.assertEqual([s for s in learned.get("sent", []) if s.startswith("set_property")], [])
+        self.assert_inside_its_bound("probe", spent)
+
+    def test_a_play_whose_player_answers_everything_slowly(self):
+        spent, reply, signals, learned = walk_player_verb("play", slow=True)
+        self.assert_refused_in_time(reply, "play")
+        self.assertNotIn("loadfile", " ".join(learned.get("sent", [])))
+        self.assert_inside_its_bound("play", spent)
+
+    def test_the_control_verbs_whose_player_answers_everything_slowly(self):
+        for verb, kind in (("status", "status"), ("pause", "player.pause"), ("seek", "seek"), ("tracks", "player.tracks")):
+            with self.subTest(verb=verb):
+                spent, reply, signals, _ = walk_player_verb(verb, survivor_answers=None, slow=True)
+                self.assertIsNotNone(reply)
+                if verb == "tracks":
+                    # Four requests, 8 s: inside the deadline, so it answers.
+                    self.assertTrue(reply.get("ok"), reply)
+                else:
+                    self.assert_refused_in_time(reply, kind)
+                self.assertEqual(signals, [])
+                self.assert_inside_its_bound(verb, spent, "play")
+
+
+# The spawn's slow requests after its handshake (its loadfile slow too) that
+# put the start's load across its mpv deadline on the wedged path -- begun
+# with its whole bound left, answered with less than a request's left -- held
+# by the companion below, which fails if the number stops landing it there.
+LANDS_AFTER_THE_LOAD = 2
+
+
+class DeadlineLandingTest(unittest.TestCase):
+
+    def test_the_after_the_load_walk_really_lands_its_deadline_between_the_load_and_the_bookkeeping(self):
+        spent, reply, _, learned = walk_long_path("start", spawned_slow=LANDS_AFTER_THE_LOAD, slow_load=True)
+        sent = learned.get("sent", [])
+        names = [s.split(" ")[0] for s in sent]
+        self.assertIn("loadfile", names)
+        self.assertEqual(names[-1], "loadfile")          # nothing after it went out
+        # and with one slow request fewer the bookkeeping does go out, so the
+        # number is the one that lands it there
+        _, _, _, earlier = walk_long_path("start", spawned_slow=LANDS_AFTER_THE_LOAD - 1, slow_load=True)
+        self.assertNotEqual([s.split(" ")[0] for s in earlier.get("sent", [])][-1], "loadfile")
+
+
+class IpcDeadlineRuleTest(unittest.TestCase):
+    """MpvIpc under a verb's deadline, on a double that answers as mpv does."""
+
+    def setUp(self):
+        self.clock = _Clock()
+        self.patch = mock.patch.object(helper, "time", types.SimpleNamespace(
+            monotonic=self.clock.monotonic, sleep=self.clock.sleep, time=self.clock.time))
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.addCleanup(lambda: helper.IPC_DEADLINE.__setitem__(0, None))
+
+    def client(self, delays=None, events=None):
+        clock = self.clock
+        sent = []
+        unasked = list(events or [])
+
+        class FakeSock:
+            def __init__(self):
+                self.timeout = None
+                self.pending = []
+
+            def settimeout(self, value):
+                self.timeout = value
+
+            def sendall(self, data):
+                request = json.loads(data.decode("utf-8"))
+                sent.append(request["command"])
+                self.pending.append(request)
+
+            def recv(self, _size):
+                if not self.pending and unasked:
+                    # an event mpv sends unasked, a moment into the wait
+                    clock.t += 0.5
+                    return (json.dumps(unasked.pop(0)) + "\n").encode()
+                if not self.pending:
+                    clock.t += self.timeout
+                    raise TimeoutError()
+                request = self.pending.pop(0)
+                clock.t += (delays or {}).get(tuple(request["command"][:2]), 0.0)
+                return (json.dumps({"request_id": request["request_id"], "error": "success", "data": None}) + "\n").encode()
+
+            def close(self):
+                pass
+
+        ipc = helper.MpvIpc("/nonexistent-ply39/mpv.sock", helper.DEFAULT_IPC_TIMEOUT)
+        ipc.sock = FakeSock()
+        return ipc, sent
+
+    def test_a_request_that_cannot_have_its_whole_bound_is_refused_unsent(self):
+        ipc, sent = self.client()
+        helper.IPC_DEADLINE[0] = self.clock.t + helper.DEFAULT_IPC_TIMEOUT - 0.01
+        with self.assertRaises(helper.HelperError) as caught:
+            ipc.request(["loadfile", "x", "replace"])
+        self.assertEqual((caught.exception.code, caught.exception.message), ("ipc_error", helper.IPC_DEADLINE_REFUSAL))
+        self.assertEqual(sent, [])
+        self.assertEqual(self.clock.t, 0.0)
+
+    def test_one_that_can_is_sent_and_waited_its_whole_bound(self):
+        ipc, sent = self.client(delays={("get_property", "x"): helper.DEFAULT_IPC_TIMEOUT - 0.001})
+        helper.IPC_DEADLINE[0] = self.clock.t + helper.DEFAULT_IPC_TIMEOUT
+        self.assertEqual(ipc.request(["get_property", "x"]).get("error"), "success")
+        self.assertEqual(sent, [["get_property", "x"]])
+        with self.assertRaises(helper.HelperError):
+            ipc.request(["get_property", "y"])
+        self.assertEqual(sent, [["get_property", "x"]])
+
+    def test_a_connect_that_cannot_have_its_bound_is_not_begun(self):
+        ipc = helper.MpvIpc("/nonexistent-ply39/mpv.sock", helper.DEFAULT_IPC_TIMEOUT)
+        helper.IPC_DEADLINE[0] = self.clock.t + 0.5
+        with self.assertRaises(helper.HelperError) as caught:
+            ipc.connect()
+        self.assertEqual(caught.exception.code, "ipc_error")
+        self.assertIsNone(ipc.sock)
+
+    def test_an_event_wait_ends_at_the_deadline_and_the_first_load_window_does_not(self):
+        """drain_events ends at the deadline; the first-load window, lifted,
+        still reads the socket after it and sees the load's file-loaded. (A
+        window held to the deadline would read nothing past it and turn over
+        until its own end -- three seconds of a spinning loop -- so the clock
+        here moves a millisecond each time it is read, and that window ends
+        "unknown" rather than never.)"""
+        ipc, _ = self.client()
+        helper.IPC_DEADLINE[0] = self.clock.t + 0.5
+        self.assertEqual(ipc.drain_events(self.clock.t + 3.0), [])
+        self.assertAlmostEqual(self.clock.t, 0.5)
+        ipc, _ = self.client(events=[{"event": "file-loaded"}])
+        clock = self.clock
+
+        def ticking():
+            clock.t += 0.001
+            return clock.t
+
+        with mock.patch.object(helper, "time", types.SimpleNamespace(monotonic=ticking, sleep=clock.sleep, time=clock.time)):
+            result = helper.observe_first_load(ipc, 1, 3.0)
+        self.assertEqual(result["state"], "playing")
+        self.assertLess(clock.t, 1.1)
+        self.assertEqual(helper.IPC_DEADLINE[0], 0.5)    # put back after the window
+
+    def test_the_seeks_event_wait_ends_at_the_deadline(self):
+        """await_seek_outcome loops until its own bound (SEEK_EVENT_BOUND_S)
+        over drain_events, which returns at once past the verb's deadline;
+        the loop's own deadline is capped too, so it ends there rather than
+        turning over until its bound. A clock that moves a millisecond each
+        time it is read, so an uncapped loop ends at its bound, not never."""
+        ipc, _ = self.client()
+        clock = self.clock
+
+        def ticking():
+            clock.t += 0.001
+            return clock.t
+
+        with mock.patch.object(helper, "time", types.SimpleNamespace(monotonic=ticking, sleep=clock.sleep, time=clock.time)):
+            helper.IPC_DEADLINE[0] = clock.t + 0.05
+            outcome = helper.await_seek_outcome(ipc, clock.t + helper.SEEK_EVENT_BOUND_S)
+        self.assertEqual(outcome, (None, False))
+        self.assertLess(clock.t, 0.06)
+
+    def test_outside_a_verb_nothing_changes(self):
+        ipc, sent = self.client(delays={("get_property", "x"): 1.9})
+        self.assertIsNone(helper.IPC_DEADLINE[0])
+        ipc.request(["get_property", "x"])
+        ipc.request(["get_property", "x"])
+        self.assertEqual(len(sent), 2)
+        self.assertAlmostEqual(self.clock.t, 3.8)
+
+    def test_the_verb_sets_its_deadline_and_puts_it_back_whatever_it_does(self):
+        seen = []
+
+        @helper.verb_deadline("probe")
+        def returns(args):
+            seen.append(helper.IPC_DEADLINE[0])
+            return 7
+
+        @helper.verb_deadline(None)
+        def raises(args, verb="start"):
+            seen.append(helper.IPC_DEADLINE[0])
+            raise helper.HelperError("x", "y")
+
+        self.assertEqual(returns(None), 7)
+        with self.assertRaises(helper.HelperError):
+            raises(None, "restart")
+        self.assertIsNone(helper.IPC_DEADLINE[0])
+        self.assertEqual(seen, [helper.player_verb_ipc_span_ms("probe") / 1000.0,
+                                helper.player_verb_ipc_span_ms("restart") / 1000.0])
+        helper.IPC_DEADLINE[0] = 1.0
+        returns(None)
+        self.assertEqual(seen[-1], 1.0)                  # never moved later
+        self.assertEqual(helper.IPC_DEADLINE[0], 1.0)
+
+    def test_a_probe_never_writes_a_migration_without_its_mark(self):
+        """D-SINK-72 under the deadline: the probe marks a player it must
+        migrate BEFORE it writes, and a request refused for the deadline is
+        refused unsent, so wherever the deadline lands no write goes out
+        without a mark mpv answered. Two landings: the last reading slow
+        enough that the mark cannot have its bound (nothing written, no
+        mark), and the mark slow enough that no write can (marked, nothing
+        written)."""
+        unsafe = {helper.MPV_TLS_VERIFY_PROP: False}
+        for slow_one, marked in ((("get_property", helper.MPV_HTTP_PROXY_PROP), False),
+                                 (("set_property", helper.USER_DATA_TLS), True)):
+            with self.subTest(slow=slow_one):
+                self.clock.t = 0.0
+                ipc, sent = self.client(delays={slow_one: helper.DEFAULT_IPC_TIMEOUT - 0.05})
+                original = ipc.request
+
+                def request(command, allow_close=False, original=original):
+                    reply = original(command, allow_close)
+                    if command[0] == "get_property":
+                        reply["data"] = unsafe.get(command[1])
+                        if reply["data"] is None:
+                            reply["error"] = "property unavailable"
+                    return reply
+
+                ipc.request = request
+                helper.IPC_DEADLINE[0] = self.clock.t + 2 * helper.DEFAULT_IPC_TIMEOUT - 0.1
+                with self.assertRaises(helper.HelperError):
+                    helper.migrate_tls(ipc, 40000)
+                writes = [c for c in sent if c[0] in ("set_property", "change-list") and c[1] != helper.USER_DATA_TLS]
+                marks = [c for c in sent if c[:2] == ["set_property", helper.USER_DATA_TLS]]
+                self.assertEqual(writes, [])
+                self.assertEqual(bool(marks), marked)
 
 
 if __name__ == "__main__":
