@@ -89,6 +89,11 @@
 #                                a named colour where the code says colour, or
 #                                a Qt.rgba of numbers without a
 #                                CONVENTION-EXCEPTION comment; F-GATE-17)
+#  21. qt revision guard         (scripts/check-qt-revisions.py: no shipped
+#                                .qml uses a Qt type or member newer than the
+#                                version the host's load patch pins its
+#                                `import QtQuick` to, read from the installed
+#                                quickshell and type files; D-HOST-10)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -2433,6 +2438,29 @@ if python3 "$ROOT/scripts/check-color-literals.py" --root "$ROOT" >"$colourlit_l
   fi
 else
   cat "$colourlit_log"; bad "colour literal guard"
+fi
+
+step "qt revision guard (no shipped QML uses a type or member the host's load patch hides)"
+# D-HOST-10 (2026-11-19): Omarchy's quickshell rewrites a plugin's
+# `import QtQuick` to 6.11 while qmllint, the dev harness, the a11y trees and
+# every plain qml run here load the same file at the installed Qt's newest,
+# so a type or member Qt added in between loads in every check above and
+# fails to load on the host (`Item { mutabilityGroup: 0 }`, measured by
+# rc-host9). This reads the rewrite out of the installed quickshell and the
+# difference out of the installed type files, and refuses a use. A
+# quickshell with no rewrite is green and says so: the host then loads what
+# the gate loads.
+qtrev_log=$CHECK_TMP/qt-revisions.log
+if python3 "$ROOT/scripts/check-qt-revisions.py" --root "$ROOT" --qml-dir "$QML_IMPORTS" >"$qtrev_log" 2>&1; then
+  if grep -qE '^qt revision guard: [1-9][0-9]* file\(s\), [1-9][0-9]* read as the host.s rewrite pins them' "$qtrev_log"; then
+    ok "qt revision guard ($(sed -n 's/^qt revision guard: //p' "$qtrev_log" | head -1))"
+  elif grep -qE '^qt revision guard: .* carries no QtQuick import rewrite' "$qtrev_log"; then
+    ok "qt revision guard (the installed quickshell carries no import rewrite: nothing to judge)"
+  else
+    cat "$qtrev_log"; bad "qt revision guard printed neither of its two summaries"
+  fi
+else
+  cat "$qtrev_log"; bad "qt revision guard"
 fi
 
 step "helper regex guard (every helper regex has a reviewed cost)"

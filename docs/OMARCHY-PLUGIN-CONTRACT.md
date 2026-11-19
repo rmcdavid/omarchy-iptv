@@ -1882,6 +1882,14 @@ What holds it now, and what the patch's pins still say:
   without the rewrite, every theme singleton a shipped file names is the
   theme's (red on rel-0160), and, in synthetic files, the lookup the guard
   rests on still holds on the installed Qt.
+- `scripts/check-qt-revisions.py` (the gate's "qt revision guard", D-HOST-10,
+  2026-11-19) holds the other side of that: it reads the rewrite out of the
+  installed quickshell, reads each shipped file's imports as written and as
+  rewritten, and refuses a type or member the installed type files give the
+  first reading and not the second (on Qt 6.12.0: six type names, among them
+  QtQuick's own `Color` and QtQml.Models' filters, and the thirteen members
+  revisioned 6.12). A use that is something else carries
+  `// QT-REVISION-EXCEPTION: <reason>`. `tests/test_qt_revisions.py` holds it.
 
 Every name the three files use unqualified from the host kit, against every
 name their imports export (QML builtins 20, QtQuick with QtQml, QtQml.Models

@@ -1509,6 +1509,13 @@ does not export. Since 2026-10-31 it reads the QML source itself rather than
 qmllint's lines: qmllint 6.12.0's text output prints only a trailing run of
 its warnings, which blinded the old reading (F-GATE-15). Anything outside
 that baseline is a real finding.
+The host loads a shipped QML file's `import QtQuick` at the version its load
+patch pins (6.11 today) while everything in the gate loads it at the
+installed Qt's newest, so the gate's "qt revision guard"
+(`scripts/check-qt-revisions.py`, D-HOST-10) refuses a Qt type or member
+newer than the pin, read from the installed quickshell and type files; a
+use that is really something else carries
+`// QT-REVISION-EXCEPTION: <reason>`.
 
 Pure logic belongs in the model so it is unit-testable from node, not only
 visible on screen. Since D-REL-5 (2026-10-12) the model is ES modules:
