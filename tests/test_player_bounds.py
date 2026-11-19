@@ -938,11 +938,13 @@ class DeadlineAtEveryRequestTest(unittest.TestCase):
     def test_a_stand_down_whose_owner_claim_the_deadline_refuses_still_answers_ok(self):
         """The stand-down (a newer channel already on the spawn, D-PLY-11)
         writes the owner claim, and that write was the one request on its
-        path not caught: refused by the deadline, or unanswered, the start
-        answered ipc_error and the shell told "Could not start playback" and
-        dropped the channel that plays on. It is best effort now, as the
-        writes after a load are: the reply is the stand-down's ok, naming the
-        channel the player is on, and the spawn is kept."""
+        path not caught: refused by the deadline, the start answered
+        ipc_error and the shell told "Could not start playback" and dropped
+        the channel that plays on. A claim the deadline refused unsent is best
+        effort now, as the writes after a load are: the reply is the
+        stand-down's ok, naming the channel the player is on, and the spawn
+        is kept. An unanswered claim or a closed connection is still the
+        start's refusal (test_relay_player holds that half)."""
         newer = {"id": "t:y", "name": "Y", "entryId": 5, "seq": 9}
         knobs = long_path_knobs("start", newer=newer)
         _, base, base_signals, learned = walk_player_verb("start", spawn_seen=True, newer=newer, **knobs)

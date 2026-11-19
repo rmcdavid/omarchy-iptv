@@ -164,7 +164,7 @@ Depth for this area is in section 2; the rows below are the contract.
 | PLY-STOP-04 | the ladder completes if the shell dies mid-ladder | L 9.6 step 4 | issue a stop against a SIGSTOPped player, then `pkill -KILL` the shell 200 ms later: the detached helper still SIGTERMs at 2 s and SIGKILLs at 4 s and the player is gone by 4.5 s, with no shell running. This is the property `escalateStop()` in QML could never have |
 | PLY-STOP-05 | the socket is unlinked only when it is truly dead | A `test_nothing_running_is_a_clean_stop_that_unlinks_a_stale_socket`, `test_stop_after_a_start_leaves_nothing_behind` | settle unlinks only when `find_player()` is empty **and** `connect()` returns ENOENT/ECONNREFUSED, S_ISSOCK-guarded; a racing start's fresh socket is never deleted |
 | PLY-STOP-06 | a recycled pid is never signalled | A `test_a_recycled_pid_is_never_signalled` | pid + `/proc/<pid>/stat` field 22 start time + the `--input-ipc-server` cmdline token are re-verified immediately before **each** signal; a pid whose start time no longer matches gets no signal at all |
-| PLY-STOP-07 | a stop that loses the sequence race is not a silent no-op | L 9.6 step 5; H PLY-H10 | ARCH-P section 14's regression. Push the lock sequence ahead from a terminal (`player start` or `player stop` with a high `--seq`), then press `s`: the interface clears **and the player actually stops**. The `stopSettleTimer` (5 s) must fire, log `the player outlived a stop, re-reading its sequence`, run `player probe` and re-issue past the recorded sequence. **The interface going idle while the player keeps playing is a P1** |
+| PLY-STOP-07 | a stop that loses the sequence race is not a silent no-op | L 9.6 step 5; H PLY-H10 | ARCH-P section 14's regression. Push the lock sequence ahead from a terminal (`player start` or `player stop` with a high `--seq`), then press `s`: the interface clears **and the player actually stops**. The `stopLookTimer` (5 s) must fire, log `a stop has not ended after 5 s, reading the player's sequence`, run `player probe`, log `stopping a player that survived a superseded stop` and re-issue past the recorded sequence **[2026-11-18, D-PLY-40: this named `stopSettleTimer` (5 s), which is the 18.25 s backstop since, and its `outlived a stop` line]**. **The interface going idle while the player keeps playing is a P1** |
 | PLY-STOP-08 | play during a stop starts a fresh player | H PLY-H07 | while `stopping` is true, `play()` always takes the `startPlayer()` branch and never writes a zap to a dying socket; `player start` blocks on the lock behind the running ladder and wins on `--seq`; one window at the end, on the newly selected channel. README: "Playing a channel while the old player is still shutting down starts a fresh player once it has exited" |
 | PLY-STOP-09 | stop with nothing running | A `test_nothing_running_is_a_clean_stop_that_unlinks_a_stale_socket`; H PLY-H07 | `{ok:true, running:false, rung:""}`; no error surfaces in the UI; `stop()` never gates on `playerUp`, so it is issued unconditionally and is simply a no-op |
 | PLY-STOP-10 | `--from term` skips the quit rung | A `test_from_term_skips_the_quit_rung` | `player restart --from term` starts at rung 2; the timeline is TERM at 0, KILL at 2.0 s; used only by the health verdict |
@@ -1240,8 +1240,11 @@ Repeat steps 4-5 five times for PLY-PERF-01's medians.
    terminal:
    `$H player stop --socket "$S" --seq 999999`. Play a channel, then press
    `s`. Assert the interface clears **and the player actually stops**; assert
-   the `stopSettleTimer` line appears in the console within 5 s if the first
-   stop was refused. **The interface idle with the player still playing is a
+   the `stopLookTimer` lines (`a stop has not ended after 5 s, reading the
+   player's sequence`, then `stopping a player that survived a superseded
+   stop`) appear in the console within 5 s if the first stop was refused
+   **[2026-11-18, D-PLY-40: this named the `stopSettleTimer` line, the 18.25 s
+   backstop's since]**. **The interface idle with the player still playing is a
    P1.**
 
 ### 9.7 PO-2: disable and remove (PLY-WEAK-01..05)

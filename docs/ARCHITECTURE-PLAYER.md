@@ -1728,7 +1728,9 @@ PLY-STOP-07) was caught at 18.25 s instead of 5 s, the player playing on after
 the user's stop: so `stopLookTimer` looks at the old 5 s and re-issues the stop
 only when the record is past `stopSeq`; a record that is the stop's own (it is
 laddering) or older (it is waiting for the lock) is D-PLY-40's case, and the
-look issues nothing and ends nothing. (4) The order of two events: an ok from a
+look issues no second stop and ends nothing: its one `player probe` is the
+price of the 5 s catch, logged as "a stop has not ended after 5 s, reading the
+player's sequence" (the recheck of 2cfeb74). (4) The order of two events: an ok from a
 newer start that SPAWNED, handled before the stopped player's EOF, left the
 observer on that player, and its EOF then read as the new player's death. A
 start that spawned replaced whatever it was issued over (`sessionSocket`), so
@@ -1738,7 +1740,13 @@ for. And `drainPendingPlay` drops a queued id that is no longer
 was superseded by a play that went out itself.]**
 
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
-never the IPC branch, so a zap can never be written to a dying socket. That
+never the IPC branch, so a zap can never be written to a dying socket
+**[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older
+start holds the lock. The earlier stop's EOF ends the settle ((1) above) before
+the later stop has run, and that start's ok then zaps the queued channel at the
+player the later stop ladders. The user ends on a "stopped unexpectedly" card
+or, where the zap meets `not_running`, on the channel through a fresh start;
+before this round the same sequence dropped the play in silence]**. That
 preserves the documented behaviour ("Playing a channel while the old player is
 still shutting down starts a fresh player once it has exited") with a stronger
 mechanism: `player start` blocks on the lock behind the running ladder and, when

@@ -19194,8 +19194,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.drain()
       h.elapse(5000)
       exit(h, probeSeq(h.root.stopSeq + behind))
-      return [behind, stopsIssued(h).length, h.root.stopping === true, h.root.userStopped === true]
-    }), [0, -1].map(behind => [behind, 1, true, true]))
+      // The recheck of 2cfeb74: the look's probe runs here (the cost of the
+      // 5 s catch), and its journal line does not claim the player outlived
+      // a stop that is only laddering or waiting for the lock.
+      const claims = h.warnings.filter(w => /outlived/.test(w)).length
+      return [behind, stopsIssued(h).length, h.root.stopping === true, h.root.userStopped === true, claims]
+    }), [0, -1].map(behind => [behind, 1, true, true, 0]))
 
     checkCall("9d604cf review: the 5 s look asks nothing of a stop with nothing to observe, and an unreadable look leaves the backstop its own probe", () => {
       const quiet = withChannels(bootPlayer())

@@ -4581,8 +4581,12 @@ Item {
   function handlePlayerGone() {
     // The review of 9d604cf: the player a stop is laddering died while a play
     // made AFTER that stop is still on its way -- its start in flight, or
-    // between the retries D-PLY-43 now makes while a stop settles. Only
-    // reachable that way: a later start's ok ends the settle, and a stop
+    // between the retries D-PLY-43 now makes while a stop settles. Reached
+    // that way and one other (D-PLY-69, open): stop, play, stop, play while
+    // an older start holds the lock, where this EOF is the EARLIER stop's
+    // and the later stop has not run, so ending the settle here lets that
+    // start's ok zap the queued channel at the player the later stop then
+    // ladders. Otherwise a later start's ok ends the settle, and a stop
     // after the play sets `userStopped`. Read as below, the death was the
     // stop's own (silent), so the retry was cancelled, `nowPlaying` cleared
     // and the user's play dropped with no card -- the opposite of D-PLY-41's
@@ -7085,13 +7089,20 @@ Item {
     // record is the stop's own (it is laddering) or older (it is waiting for
     // the lock), which is D-PLY-40's case. It ends nothing: `stopping` and
     // `userStopped` are the backstop's and the EOF's.
+    //
+    // The recheck of 2cfeb74: the look still runs one `player probe` over a
+    // stop that is only laddering or waiting for the lock -- that is the
+    // price of the 5 s catch; only the second `player stop` is gone -- so
+    // its line says what it does and claims nothing the probe has not
+    // found. A superseded stop then logs "stopping a player that survived a
+    // superseded stop" from applyProbe.
     id: stopLookTimer
     interval: root.stopLookMs
     repeat: false
     onTriggered: {
       if (!root.stopping || root.nowPlaying !== null || root.stopConfirmPending) return
       if (!root.socketAttached() && !root.playerUp && !root.stopOlderStartOk) return
-      console.warn("omarchy-iptv: the player outlived a stop, re-reading its sequence")
+      console.warn("omarchy-iptv: a stop has not ended after 5 s, reading the player's sequence")
       root.stopConfirmPending = true
       root.stopConfirmLook = true
       if (!root.runPlayerProbe()) {

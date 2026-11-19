@@ -8,7 +8,8 @@ WHILE the control slot is held, and a healthy `player seek` run holds it for
 about 220 ms, so an observation of it is a coincidence rather than a
 measurement -- which is how the old R14 came to pass whether or not the
 exemption existed. This wrapper stretches the run to seconds, deterministic
-and under the service's own 8 s control watchdog, so a health tick really
+and under the service's own control watchdog (8 s when written, 15 s since
+D-PLY-39), so a health tick really
 does land on a running seek and a sample really does land inside the window.
 
 HOW IT IS USED. rewind-scenario.sh's R16 copies the tree under test into a

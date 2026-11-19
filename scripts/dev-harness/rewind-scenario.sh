@@ -111,7 +111,8 @@ TREE=""
 EXPORT_DIR=""
 WORK=""
 # R16's window sizes and the slow helper's sleep. The sleep must stay under
-# the service's own controlTimeoutMs (8 s) or the control watchdog kills the
+# the service's own controlTimeoutMs (8 s when written, 15 s since D-PLY-39,
+# Model.playerWatchdogMs("play")) or the control watchdog kills the
 # helper mid-run and the slot frees for a reason that is not the exemption.
 # HEALTH_TICK_MS mirrors Service.qml's healthCheckMs: it is a NAME joining
 # two files, so R16 asserts the consequence of the value rather than reading
