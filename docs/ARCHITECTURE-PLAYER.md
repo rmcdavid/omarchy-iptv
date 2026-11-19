@@ -607,6 +607,55 @@ answered, `Could not start playback` with "Helper timed out", marking nothing
 (D-PLY-32). A probe that is stale (a newer play went out) or a socket EOF that
 already told a death drops the stopped start untold.]**
 
+**[Amended 2026-11-18, D-PLY-39: the residual above -- every request that is
+not summed, which an mpv answering each just inside 2 s ran past the bound --
+is now bounded, not only recovered. Walked under the player-bounds virtual
+clock with mpv answering EVERY connect and request just inside its bound, the
+shipping verbs ran to 154 s (a start that adopts), 139-143 s (a start that
+spawns or replaces), 142 s (a restart), 127 s (a probe), 93 s (`play`) and
+14-21 s (`status`, `pause`, `seek`). Now each verb the shell watches runs under
+its own deadline (`verb_deadline`, bin/helper/05-ipc-logos.py): its bound, the
+watchdog less the margin, which the helper derives from its own constants by
+the model's arithmetic (`player_verb_bound_ms`, `Model.playerVerbBoundMs`, the
+shared fixture holding both to `watchdogMs` less `marginMs`), less what it may
+still spend after its last wait on mpv (`player_verb_reserve_ms`: for a start
+or a restart the first-load window and the relay's count after a load, or the
+ladder from term that stops a spawn it fed nothing, 4 s; for `status` the
+relay question after its reads, 1 s; none for the rest). A connect or a
+request that cannot have its whole bound before that deadline is refused
+unsent, as `ipc_error` -- the code a request that times out raises, so each
+verb's own handling of mpv's silence runs and no exit is new; an event wait
+ends at it, the first-load window excepted (summed, and the start's verdict).
+The same walks now end at 48.05 s (adopting: refused in the pins or the TLS
+assertion, the player it found neither fed nor signalled), 51.2-52.2 s
+(spawning or replacing: refused before the load, the spawn laddered down from
+term by D-PLY-57's own path), 51.2 s (a restart), 7 s, 9 s and 8-10 s, each
+inside its bound; the summed worst paths are unchanged (47.07, 51.05, 50.05,
+7, 5 s). The control slot's verbs share its one watchdog, whose 10 s is now
+their bound and which adds the margin, 15 s (20.7). The recovery stays, for
+what no bound cuts.]**
+
+**[Corrected 2026-11-18, the settle of three reviews of 9d604cf: "no exit is
+new" was false. A request refused UNSENT is a new kind of failure for a caller
+that records a send before making it, and `apply_channel` did: it set
+`loadSent` before its loadfile, so a deadline landing on the loadfile itself
+-- which none of the walks above did; they landed in the TLS assertion or
+after the load -- left `player_start` keeping the spawn it had fed nothing,
+D-PLY-57's idle black window, in exactly the slow-player regime this
+amendment bounds. `MpvIpc` now counts the requests it has written whole
+(`sent`) and `loadSent` is set only when the loadfile's write moved that
+count. Landed on each request a start, a replacing start and a restart ask,
+in turn, every landing leaves what the verb's existing refusals leave and
+stops the spawn exactly when no loadfile was written. The stand-down's owner
+claim, the one write on its path nothing caught, is no refusal when the
+deadline refused it unsent (a claim mpv took and did not answer, or a closed
+connection, still is). And a cost the record did not name: a request begun
+only with its whole bound left trims up to 2 s off each verb, so a player
+that answers every request in 0.8 s, which finished a `status` inside its
+watchdog before, now ends it `ipc_error`, a health strike, and a `play` over
+about 45 requests at 0.2 s each ends at 8 s and is retried; at millisecond
+latency every reply is as it was.]**
+
 Two concurrent IPC clients are safe: mpv names them `ipc_0`/`ipc_1` and
 correlates by `request_id`.
 
@@ -1498,6 +1547,10 @@ leading-dash and typographic-quote rules), `NOTIFY_IDS.streamFailed = 74011`,
 > the recorded sequence (`Service.qml` `stopSettleTimer`; harness P10). Read
 > 4.9 with that in hand; 4.9.1 was edited in place after section 14 existed
 > and carried no such pointer, which is the risk this line retires.
+> **[2026-11-18: since D-PLY-40 that timer waits out the stop's own worst
+> case, 18.25 s, and the 5 s look for a superseded stop is its own Timer,
+> `stopLookTimer`, which re-issues only when the record is past the stop's
+> sequence (4.10's amendment).]**
 
 The UI contract is unchanged: `stop()` still clears `pendingPlayId`,
 `wantFocus`, the timers and `nowPlaying` synchronously
@@ -1638,8 +1691,62 @@ property real stopAt: 0
 readonly property bool stopping: stopAt > 0        // cleared on socket EOF, or by stopSettleTimer (5 s)
 ```
 
+**[Amended 2026-11-18, D-PLY-40: stopSettleTimer's 5 s was shorter than the
+detached stop's own worst case -- the lock granted on its last poll, the whole
+ladder from quit and the settle's one connect, 13.25 s walked through the
+shipping `player_stop` under the player-bounds walk's virtual clock -- so a
+stop still laddering drew the "outlived a stop" probe and a second `player
+stop`. Its interval is now `Model.playerWatchdogMs("stop")`, that path with the
+5 s margin, 18.25 s. And a `player start` of an intent issued after the stop
+(its reply's `seq` past the stop's, `stopSeq`) that answers ok ends `stopping`
+there: under the lock it ran after the stop's ladder, or before the stop, which
+the seq rule then refuses as superseded, so the stop cannot touch the player it
+reports. Without that, a play made after a stop with no EOF coming (nothing
+attached, or the start superseded the stop) held `stopping` for the whole
+backstop, and through it a burst's last intent was dropped, the repair and
+rewind presses refused and the new player's death read as the stop's.
+D-PLY-43, the same day: the start's `busy`/`no_socket` retry (4.4 step 12), its Timer and
+`drainPendingPlay` refused while `stopping`, so a play made after a stop that held the lock
+past the start's own lock wait was told "The player is busy" and a queued last intent was
+dropped. They gate on `userStopped` now, as the refusal tail does (D-PLY-41), and take
+`Model.playFork`'s branch, which is a start while `stopping`: the rule above, kept by every
+path that sends a play, not by `play()` alone.]**
+
+**[Amended 2026-11-18, the settle of three reviews of 9d604cf: a settle three
+times as long reached four readers the amendment above had not. (1) The
+stopped player's EOF, arriving while a play made after the stop is still on
+its way (its start in flight, or between D-PLY-43's retries), was read as the
+stop's own death: the retry cancelled, `nowPlaying` cleared, the play dropped
+untold. That EOF now ends the stop and nothing else (`handlePlayerGone`): the
+play keeps its intent, its queue and its retries, and the hunt goes on while
+its start runs. (2) An ok from a start issued BEFORE the stop, landing inside
+the settle with nothing attached, read as abandoned, and a stop refused `busy`
+behind that start's own lock left its player unobserved under an idle bar:
+the backstop now probes for it (`stopOlderStartOk`), and a stop that took
+finds nothing. (3) A stop the lock record superseded (section 14, F-PLY-3,
+PLY-STOP-07) was caught at 18.25 s instead of 5 s, the player playing on after
+the user's stop: so `stopLookTimer` looks at the old 5 s and re-issues the stop
+only when the record is past `stopSeq`; a record that is the stop's own (it is
+laddering) or older (it is waiting for the lock) is D-PLY-40's case, and the
+look issues no second stop and ends nothing: its one `player probe` is the
+price of the 5 s catch, logged as "a stop has not ended after 5 s, reading the
+player's sequence" (the recheck of 2cfeb74). (4) The order of two events: an ok from a
+newer start that SPAWNED, handled before the stopped player's EOF, left the
+observer on that player, and its EOF then read as the new player's death. A
+start that spawned replaced whatever it was issued over (`sessionSocket`), so
+an observer still on that object is released at the ok and the spawn hunted
+for. And `drainPendingPlay` drops a queued id that is no longer
+`nowPlaying`'s: every writer queues the id `nowPlaying` holds, so such an id
+was superseded by a play that went out itself.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
-never the IPC branch, so a zap can never be written to a dying socket. That
+never the IPC branch, so a zap can never be written to a dying socket
+**[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older
+start holds the lock. The earlier stop's EOF ends the settle ((1) above) before
+the later stop has run, and that start's ok then zaps the queued channel at the
+player the later stop ladders. The user ends on a "stopped unexpectedly" card
+or, where the zap meets `not_running`, on the channel through a fresh start;
+before this round the same sequence dropped the play in silence]**. That
 preserves the documented behaviour ("Playing a channel while the old player is
 still shutting down starts a fresh player once it has exited") with a stronger
 mechanism: `player start` blocks on the lock behind the running ladder and, when
@@ -3574,7 +3681,10 @@ previous reply, and runs `drainPendingPlay()` on every path of the branch
 
 **A health-count exemption (amends 4.13).** `Model.healthTick`'s busy-skip
 counter exists to restart a helper that never returns, and the 8 s control
-watchdog (`controlTimeoutMs`, 4.3's slot) already terminates that case. A
+watchdog (`controlTimeoutMs`, 4.3's slot) already terminates that case.
+[2026-11-18: 10 s since D-SINK-102 and 15 s since D-PLY-39, whose deadline
+ends a control verb's waits on mpv inside 10 s; the watchdog is for what no
+bound cuts.] A
 slot re-occupied every few hundred milliseconds by a sub-second verb -- a
 held rewind key -- is the benign case the three-strikes counter must not
 punish, so seek runs are exempt: `busy = controlProc.running &&
@@ -4335,7 +4445,11 @@ status, the registration, the first-load count), 58,250 and 57,450 ms; a
 probe adds one `relayIpcMs`, 12,000 ms; `play`'s fixed 8 s control slot
 (`Model.CONTROL_WATCHDOG_MS`, the fixture's `controlMs`) gains two, the
 gate's status and the load's registration, 10,000 ms (`Service.qml`
-`controlTimeoutMs` is now `Model.playerWatchdogMs("play")`). That 8 s was
+`controlTimeoutMs` is now `Model.playerWatchdogMs("play")`). [2026-11-18,
+D-PLY-39: that 10,000 ms is now `play`'s BOUND -- the lookup, the two
+questions and `controlIpcMs` (`CONTROL_IPC_S`, the 5 s this 8 s left mpv's
+round trips) -- which the helper's own deadline holds every control verb
+inside, and the watchdog adds the margin, 15,000 ms.] That 8 s was
 never a sum of `play`'s bounds, so the walk of `play` (the lookup and both
 relay questions at their bounds, the player answering at once) holds a
 different thing: what they leave of the watchdog for mpv's round trips may

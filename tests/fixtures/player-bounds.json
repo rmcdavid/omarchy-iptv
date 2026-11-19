@@ -37,8 +37,22 @@
     "  (controlMs, Model.CONTROL_WATCHDOG_MS) plus its two relay questions, the gate's status and the load's registration. So",
     "  the lookup and the relay take 5 s of it and mpv's round trips keep the 5 s the 8 s left them before the relay; the walk",
     "  of `play` holds that. It first summed one question, which left them 4 s (the review of 7c281d8).",
+    "  [D-PLY-39, 2026-11-18: that 10000 is now play's BOUND, and the watchdog adds the margin:",
+    "  play    = lookupMs + 2 relayIpcMs + controlIpcMs + marginMs = 3000 + 2000 + 5000 + 5000 = 15000,",
+    "  controlIpcMs (CONTROL_IPC_S) being the 5 s the 8 s left mpv's round trips (controlMs - lookupMs). Every verb the",
+    "  control slot runs (`play`, `status`, `pause`, `tracks`, `seek`) shares its one watchdog and so this bound.]",
+    "D-PLY-39 (2026-11-18): every verb's watchdogMs less marginMs is its BOUND, which the helper runs it inside: its own",
+    "player_verb_bound_ms computes the same sums from its own constants (held to watchdogMs - marginMs by",
+    "tests/test_player_bounds.py) and a verb's waits on mpv end by that bound less what it may still spend after them",
+    "(player_verb_reserve_ms), a wait that cannot have its whole bound by then refused unsent as `ipc_error`. The walk",
+    "below runs every watched verb with mpv answering EVERY request just inside its bound and holds each inside its bound.",
     "  (relayStaggerMs is in no sum: the relay starts its next connect attempt that long after one that has not answered,",
     "  inside the player's own load, which no verb waits on; a dead first answer costs a channel that much, not RELAY_CONNECT_S.)",
+    "  stop    = lockMs + lockPollMs + ladder(\"\") + settleConnectMs + marginMs = 6050 + 7000 + 200 + 5000 = 18250",
+    "  (D-PLY-40, 2026-11-18: no slot's watchdog. The detached `player stop` is watched by nothing, so this is the bound",
+    "  Service.qml's stopSettleTimer waits out (stopSettleMs) before it reads a stop as one that did not take. Its 5 s",
+    "  was shorter than the stop's own 13.25 s, so a stop still laddering drew the \"outlived a stop\" probe and a second",
+    "  `player stop`. player_stop waits for no relay and meets an older build's player with the same ladder.)",
     "tests/test_player_bounds.py also WALKS the shipping verbs' worst paths under a virtual clock and holds each",
     "inside its `watchdogMs` less `marginMs`, so the composition is checked against the code and not only the leaves;",
     "`play`, whose 8 s was never a sum of its bounds, is walked with every bound of the helper's own at that bound and",
@@ -61,7 +75,8 @@
     "lookupMs": 3000,
     "relayStartMs": 5000,
     "relayIpcMs": 1000,
-    "relayStaggerMs": 200
+    "relayStaggerMs": 200,
+    "controlIpcMs": 5000
   },
   "names": {
     "lockMs": ["DEFAULT_LOCK_TIMEOUT", "s"],
@@ -78,7 +93,8 @@
     "lookupMs": ["STREAM_LOOKUP_TIMEOUT_S", "s"],
     "relayStartMs": ["RELAY_START_S", "s"],
     "relayIpcMs": ["RELAY_IPC_S", "s"],
-    "relayStaggerMs": ["RELAY_ATTEMPT_STAGGER_S", "s"]
+    "relayStaggerMs": ["RELAY_ATTEMPT_STAGGER_S", "s"],
+    "controlIpcMs": ["CONTROL_IPC_S", "s"]
   },
   "marginMs": 5000,
   "controlMs": 8000,
@@ -87,7 +103,8 @@
     "restart": 57450,
     "probe": 12000,
     "": 12000,
-    "play": 10000
+    "play": 15000,
+    "stop": 18250
   },
   "boardMs": 14000,
   "previousMs": 12000

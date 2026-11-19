@@ -89,12 +89,22 @@ Item {
   // a ~130 ms run and next to the helper's own --ipc-timeout, because this
   // is the belt and braces, not the deadline. D-SINK-102: 8 s plus the two
   // questions to the player's relay that `play` now asks, its status and the
-  // load's registration (Model says why).
+  // load's registration (Model says why). D-PLY-39 (2026-11-18): that 10 s is
+  // now the BOUND the helper runs every control verb inside, its waits on mpv
+  // ending by its own deadline, and this watchdog adds the margin (15 s).
   readonly property int controlTimeoutMs: Model.playerWatchdogMs("play")
   // M5-01 (2.3): the gap between a seek reply and the next seek run.
   readonly property int seekThrottleMs: 300
   readonly property int playerProbeRetryMs: 500    // the one ambiguous-probe re-read (4.5)
-  readonly property int stopSettleMs: 5 * 1000     // backstop that clears `stopping` (4.10)
+  // Backstop that clears `stopping` (4.10). D-PLY-40 (2026-11-18): the
+  // detached stop's own worst case with the margin (Model.playerWatchdogMs
+  // says why), where it was 5 s: a stop still laddering then drew the
+  // "outlived a stop" probe and a second `player stop`.
+  readonly property int stopSettleMs: Model.playerWatchdogMs("stop")
+  // The old backstop's moment, kept for the one case it was right about: a
+  // stop the lock record superseded is refused at once, and the player is
+  // looked for at 5 s, as PLY-STOP-07 has it (stopLookTimer).
+  readonly property int stopLookMs: 5 * 1000
   readonly property int focusRetryMs: 500
   // D-PIP-5 widened this from 6, and cost nothing by doing so. Focus now
   // waits for a window the compositor can name rather than dispatching at a
@@ -913,12 +923,28 @@ Item {
   // that reads nothing notifiable: evaluated once, at creation, and nothing
   // assigns it.
   property string ownerToken: Model.playerOwnerToken()
-  // `stopping` keeps its name and its four read sites; what changed is its
-  // source. It is true from the keystroke until socket EOF confirms the
-  // death (or the 5 s backstop), and while it is true a play() always
-  // starts a fresh player instead of zapping a dying socket (4.10).
+  // `stopping` keeps its name; what changed is its source (its readers are
+  // many more than the four this said it had; QA-RESULTS "D-PLY-39, -40 and
+  // -43" on the dev branch lists them). It is true from the keystroke until socket EOF
+  // confirms the death (or the stop's own bound, stopSettleMs), and while it
+  // is true a play() always starts a fresh player instead of zapping a dying
+  // socket (4.10). D-PLY-40: or until a `player start` of an intent issued
+  // after the stop answers ok (handlePlayerResult): under the lock that start
+  // ran either after the stop's whole ladder or before the stop, which the
+  // seq rule then supersedes, so the stop can no longer touch what it
+  // started. And the stopped player's EOF ends it even when a play made
+  // after the stop is still on its way (handlePlayerGone).
   property real stopAt: 0
   readonly property bool stopping: stopAt > 0
+  // The intent number the last stop() went out with (D-PLY-40): what a
+  // start's reply `seq` is compared with to tell an intent issued after it.
+  property int stopSeq: 0
+  // The review of 9d604cf: a start issued BEFORE the last stop answered ok
+  // while that stop settles. Its player was up a moment ago, and whether the
+  // stop then laddered it or was refused (`busy` behind that very start's
+  // lock) nothing here can see when no socket is attached, so the backstop
+  // probes for it (stopSettleTimer) rather than leave it unobserved.
+  property bool stopOlderStartOk: false
   property int healthSkips: 0
   // The event router's state (4.8). `entryOwners` maps mpv's own
   // playlist_entry_id to the channel that load was for, so a failure that
@@ -961,6 +987,10 @@ Item {
   // stop is detached and its reply is by design unobservable, so this is
   // the only way to notice one that was refused (4.9, 4.10).
   property bool stopConfirmPending: false
+  // The review of 9d604cf (F-PLY-3): that probe is the early look's
+  // (stopLookTimer), which stops the player only when the lock record shows
+  // the stop superseded, never while the stop's own record stands.
+  property bool stopConfirmLook: false
   // Whose failure has already been toasted for this play. `player start`'s
   // own first-load window and socket EOF are two independent detectors of
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
@@ -1254,6 +1284,7 @@ Item {
     // A play cancels a pending stop-confirmation: the player that is coming
     // up is wanted, whatever the one before it did.
     root.stopConfirmPending = false
+    root.stopConfirmLook = false
     root.playSeq += 1                       // every play is a new intent (4.10)
     root.previousPlaying = root.playerUp ? root.nowPlaying : null
     root.previousPlayingSeq = root.playSeq
@@ -1366,8 +1397,11 @@ Item {
     // we learn the ladder finished (and is what clears `stopping`).
     root.playerWanted = false
     root.playSeq += 1
+    root.stopSeq = root.playSeq
     root.stopAt = Date.now()
+    root.stopOlderStartOk = false
     stopSettleTimer.restart()
+    stopLookTimer.restart()
     // The user asked for it, so nothing died unattended: the session record
     // has done its job and a reattach must not find it (PO-3 would then mark
     // a perfectly good channel red).
@@ -3354,13 +3388,34 @@ Item {
   // The last target of a zap burst, applied once the channel is free. It
   // goes over IPC when the player is up and starts one when it is not; both
   // are the same user intent, so neither may be dropped.
+  // D-PLY-43's sibling (rule 15): the same gate as the retry. It returned
+  // while `stopping`, so a zap issued before a stop whose reply came after
+  // it drained the queued last intent of a play made after the stop -- and
+  // dropped it, the guide naming a channel the player never got. The user's
+  // word gates it now, and the play fork's own branch (Model.playFork) sends
+  // it to a start while the stop settles, never to the dying socket; a
+  // start still in flight queues it again (startPlayer).
+  // The review of 9d604cf: and only while it is still the guide's channel.
+  // Every writer of pendingPlayId queues the id `nowPlaying` holds at that
+  // moment, so one that is no longer `nowPlaying`'s was superseded by a play
+  // that went out itself (a start through a free slot, or a zap) -- and
+  // drained, it put the player on the older channel under the newer name
+  // until a health tick's repair, now that a retry made while a stop settles
+  // keeps the queue (D-PLY-43).
   function drainPendingPlay() {
     var id = root.pendingPlayId
     root.pendingPlayId = ""
-    if (id === "" || root.stopping || root.userStopped || !root.nowPlaying) return
-    if (root.zapReady) {
-      if (!controlProc.running) root.runControl("play", root.playArgs(id))
-      else root.pendingPlayId = id
+    if (id === "" || root.userStopped || !root.nowPlaying) return
+    if (String(root.nowPlaying.id) !== String(id)) return
+    var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
+                                stopping: root.stopping, controlBusy: controlProc.running,
+                                restartOwed: root.olderRestartOwed })
+    if (fork === "zap") {
+      root.runControl("play", root.playArgs(id))
+      return
+    }
+    if (fork === "queue") {
+      root.pendingPlayId = id
       return
     }
     var channel = root.channelIndex[id]
@@ -3501,6 +3556,28 @@ Item {
     if (status.ok === true) {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
+      // D-PLY-40: a start of an intent issued AFTER the last stop has run
+      // under the player lock, so that stop has either laddered its player
+      // down before this start began or, reaching the lock after it, is
+      // refused as superseded: nothing it does can touch the player this
+      // start reports. So the stop's settle ends here, before the repair,
+      // the observer's follow-up and the drain below read `stopping`. With
+      // no socket EOF to end it -- a stop with nothing attached, or one this
+      // start superseded -- it held for the whole backstop, and through it a
+      // zap burst's last intent was dropped (drainPendingPlay), the repair
+      // refused, rewind presses refused and the new player's death read as
+      // the stop's; the backstop is now the stop's own bound with the
+      // margin, 18.25 s.
+      if (root.stopping && Number(status.seq) > root.stopSeq) {
+        root.stopAt = 0
+        stopSettleTimer.stop()
+        stopLookTimer.stop()
+      } else if (root.stopping) {
+        // The review of 9d604cf: a start issued before the stop. Its player
+        // was up; whether the stop laddered it or was refused behind this
+        // start's own lock, the backstop looks (stopOlderStartOk).
+        root.stopOlderStartOk = true
+      }
       root.relaunchPending = false
       if (Number(status.seq) === root.previousPlayingSeq) root.previousPlaying = null
       // Restart on adoption: a start or a restart that answered ok has
@@ -3535,6 +3612,19 @@ Item {
         console.log("omarchy-iptv: the player start settled on another channel; re-applying the intent")
         root.reapplyIntent(repair)
       }
+      // The review of 9d604cf: a start that SPAWNED replaced whatever the
+      // observer was on when it was issued (sessionSocket) -- it spawns only
+      // after laddering what it found, or finding nothing -- so an observer
+      // still on that same object is on a player that is gone or going,
+      // whose EOF has not been delivered yet (the shell's events can come in
+      // either order). Read as "attached", the shell kept watching that
+      // connection, and its EOF then read as this player's death: "Playback
+      // stopped" and the channel dropped while the new player played on
+      // (silent before D-PLY-40 ended a stop's settle here, loud after). So
+      // it is released here, before the follow-up, which then hunts for the
+      // player this start reports.
+      if (status.spawned === true && root.sessionSocket && root.playerSocket === root.sessionSocket)
+        root.releasePlayerSocket()
       // The helper has just reported a live player of this shell's making,
       // so the observer belongs on it. Doing nothing here is the second
       // half of the reported P1: `wanted` false leaves the 250 ms retry
@@ -3620,9 +3710,18 @@ Item {
       return
     }
     if ((code === "busy" || code === "no_socket") && root.nowPlaying && !root.userStopped
-        && !root.stopping && root.playRetries < root.playRetryMax) {
+        && root.playRetries < root.playRetryMax) {
       // Another launcher holds the lock, or the spawn did not bind in time:
       // the existing backoff, not a second spawn (4.4 step 12).
+      // D-PLY-43: gated on the user's word, as the refusal tail below is
+      // (D-PLY-41), and no longer on `stopping`: a stop still settling
+      // belongs to the player BEFORE this play, and it is the stop that
+      // holds the lock. With it in the gate a play made in the seconds after
+      // a stop whose ladder outlasted the start's own lock wait was told
+      // "The player is busy" instead of retried. The retries' lock waits
+      // outlast the stop's own bound (the node suite holds the arithmetic),
+      // and the retry starts, never zaps, while the stop settles
+      // (playRetryTimer).
       root.playRetries += 1
       playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
       playRetryTimer.restart()
@@ -3726,6 +3825,12 @@ Item {
       // Garbage, a truncated line or an error reply is not evidence of a
       // player; the 10 s poll and the next play() both recover.
       root.playerPending = false
+      // The review of 9d604cf: and the early look learned nothing, so the
+      // backstop, which skips while a confirmation is pending, still looks.
+      if (root.stopConfirmLook) {
+        root.stopConfirmPending = false
+        root.stopConfirmLook = false
+      }
       // D-PLY-35: and when this probe was looking for what a stopped start
       // left, it has found nothing it can name, so that start fails here.
       root.settleTimedOutPlay(false)
@@ -3748,11 +3853,26 @@ Item {
     }
     if (root.stopConfirmPending) {
       root.stopConfirmPending = false
+      var look = root.stopConfirmLook
+      root.stopConfirmLook = false
+      if (look && !(probe.running && Number(probe.seq) > root.stopSeq)) {
+        // The early look (the review of 9d604cf): the lock record holds this
+        // stop's own sequence, or one before it, so the stop is laddering or
+        // still waiting for the lock. A second stop then was D-PLY-40's
+        // noise; its EOF or the backstop decides.
+        return
+      }
       if (probe.running) {
         // The stop was refused and the player is still there. Now that the
         // sequence is resynced, the ladder cannot be superseded again.
         console.warn("omarchy-iptv: stopping a player that survived a superseded stop")
         root.stopForeignPlayer()
+        if (look) {
+          // and that stop settles as the user's did: its own bound, from now.
+          root.stopSeq = root.playSeq
+          root.stopAt = Date.now()
+          stopSettleTimer.restart()
+        }
       } else {
         root.playerWanted = false
         playerSocketTimer.stop()
@@ -4459,6 +4579,40 @@ Item {
   // names, and with what text. Read before any of the state below is
   // cleared, which is also what keeps the decision out of this method.
   function handlePlayerGone() {
+    // The review of 9d604cf: the player a stop is laddering died while a play
+    // made AFTER that stop is still on its way -- its start in flight, or
+    // between the retries D-PLY-43 now makes while a stop settles. Reached
+    // that way and one other (D-PLY-69, open): stop, play, stop, play while
+    // an older start holds the lock, where this EOF is the EARLIER stop's
+    // and the later stop has not run, so ending the settle here lets that
+    // start's ok zap the queued channel at the player the later stop then
+    // ladders. Otherwise a later start's ok ends the settle, and a stop
+    // after the play sets `userStopped`. Read as below, the death was the
+    // stop's own (silent), so the retry was cancelled, `nowPlaying` cleared
+    // and the user's play dropped with no card -- the opposite of D-PLY-41's
+    // rule. This EOF ends the stop and nothing else: the play keeps its
+    // intent, its queued last channel and its retries, and the hunt goes on
+    // for the player its start will report.
+    if (root.stopping && !root.userStopped && root.nowPlaying !== null) {
+      root.stopAt = 0
+      stopSettleTimer.stop()
+      stopLookTimer.stop()
+      root.stopOlderStartOk = false
+      root.stopConfirmPending = false
+      root.stopConfirmLook = false
+      root.lastEndFile = null
+      root.currentEntryId = 0
+      root.playerIdle = false
+      root.clearRewind()
+      root.pipReset()
+      root.entryOwners = Model.keyedMap()
+      if (playerProc.running) {
+        root.playerPending = true
+        root.playerWanted = true
+        root.armPlayerSocket()
+      }
+      return
+    }
     focusTimer.stop()
     playRetryTimer.stop()
     playerSocketTimer.stop()
@@ -4496,6 +4650,8 @@ Item {
     root.userStopped = false
     root.relaunchPending = false
     root.stopConfirmPending = false     // the EOF is the confirmation
+    root.stopConfirmLook = false
+    root.stopOlderStartOk = false
     root.pendingPlayId = ""
     root.playRetries = 0
     // D-PLY-35: a stopped start whose player the socket reached has its end
@@ -4506,10 +4662,12 @@ Item {
     root.clearRewind()
     root.healthSkips = 0
     root.healthFailures = 0
-    // The death IS the end of the stop (4.10); the 5 s backstop is only for
-    // a stop that never had a player to observe.
+    // The death IS the end of the stop (4.10); the backstop (stopSettleMs,
+    // the stop's own bound since D-PLY-40) is only for a stop that never had
+    // a player to observe.
     root.stopAt = 0
     stopSettleTimer.stop()
+    stopLookTimer.stop()
     // M2-05 / PIP3. The window PiP was applied to is gone, so PiP is over -
     // including on a respawn, which brings back a different window with a
     // different pid. Nothing remembers an intent across a window's lifetime
@@ -6896,17 +7054,61 @@ Item {
     // live: the UI went idle while the player kept playing. One probe
     // re-reads the record, and applyProbe() then stops it with a sequence
     // that is past whatever is recorded.
+    //
+    // The review of 9d604cf: and a start issued before the stop that
+    // answered ok while it settled (stopOlderStartOk) is looked for too,
+    // with nothing attached: its player was up, and a stop refused `busy`
+    // behind that start's own lock left it playing unobserved under an idle
+    // bar. One probe: a stop that took finds nothing.
     id: stopSettleTimer
     interval: root.stopSettleMs
     repeat: false
     onTriggered: {
       root.stopAt = 0
       root.userStopped = false
+      stopLookTimer.stop()
+      var older = root.stopOlderStartOk
+      root.stopOlderStartOk = false
       if (root.nowPlaying !== null || root.stopConfirmPending) return
-      if (!root.socketAttached() && !root.playerUp) return
+      if (!root.socketAttached() && !root.playerUp && !older) return
       console.warn("omarchy-iptv: the player outlived a stop, re-reading its sequence")
       root.stopConfirmPending = true
       root.runPlayerProbe()
+    }
+  }
+
+  Timer {
+    // The review of 9d604cf (F-PLY-3, PLY-STOP-07): the backstop above waits
+    // out the stop's own worst case since D-PLY-40, and a stop the lock
+    // record SUPERSEDED -- another launcher's higher --seq, a terminal
+    // `omarchy-iptv player stop` -- is refused at once and leaves the player
+    // playing, which the old 5 s backstop caught at 5 s and the 18.25 s one
+    // would catch at 18.25 s. So this looks at the old moment and acts only
+    // on that case: the probe (stopConfirmLook) stops the player when the
+    // record is past this stop's sequence, and changes nothing while the
+    // record is the stop's own (it is laddering) or older (it is waiting for
+    // the lock), which is D-PLY-40's case. It ends nothing: `stopping` and
+    // `userStopped` are the backstop's and the EOF's.
+    //
+    // The recheck of 2cfeb74: the look still runs one `player probe` over a
+    // stop that is only laddering or waiting for the lock -- that is the
+    // price of the 5 s catch; only the second `player stop` is gone -- so
+    // its line says what it does and claims nothing the probe has not
+    // found. A superseded stop then logs "stopping a player that survived a
+    // superseded stop" from applyProbe.
+    id: stopLookTimer
+    interval: root.stopLookMs
+    repeat: false
+    onTriggered: {
+      if (!root.stopping || root.nowPlaying !== null || root.stopConfirmPending) return
+      if (!root.socketAttached() && !root.playerUp && !root.stopOlderStartOk) return
+      console.warn("omarchy-iptv: a stop has not ended after 5 s, reading the player's sequence")
+      root.stopConfirmPending = true
+      root.stopConfirmLook = true
+      if (!root.runPlayerProbe()) {
+        root.stopConfirmPending = false
+        root.stopConfirmLook = false
+      }
     }
   }
 
@@ -6986,12 +7188,24 @@ Item {
     id: playRetryTimer
     interval: root.playRetryBaseMs
     repeat: false
+    // D-PLY-43: a retry made while an earlier stop settles is the user's
+    // play (play() cleared `userStopped`), so it runs; what it may not do is
+    // zap the socket that stop is tearing down, so the branch is the play
+    // fork's own (Model.playFork): a start while `stopping`, which the lock
+    // and the seq rule order after the stop. A stop pressed meanwhile stops
+    // this Timer, clears `nowPlaying` and sets `userStopped` (D-LIVE-15).
     onTriggered: {
-      if (root.userStopped || root.stopping || !root.nowPlaying) return
+      if (root.userStopped || !root.nowPlaying) return
       var id = String(root.nowPlaying.id)
-      if (root.zapReady) {
-        if (controlProc.running) root.pendingPlayId = id
-        else root.runControl("play", root.playArgs(id))
+      var fork = Model.playFork({ socketAttached: root.socketAttached(), playerPending: root.playerPending,
+                                  stopping: root.stopping, controlBusy: controlProc.running,
+                                  restartOwed: root.olderRestartOwed })
+      if (fork === "queue") {
+        root.pendingPlayId = id
+        return
+      }
+      if (fork === "zap") {
+        root.runControl("play", root.playArgs(id))
         return
       }
       var channel = root.channelIndex[id]

@@ -1021,10 +1021,19 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # ({"name": "loadfile", ...}) was measured equal; the array form is the
     # one every double of the player and the harness stub read.
     options = channel_load_options(target, default, proxy)
-    # From here the player may hold this load, so a `player start` that
-    # fails now keeps its spawn rather than stopping it (player_start).
-    target["loadSent"] = True
-    data = client.command("loadfile", target["url"], "replace", -1, options)
+    # From the loadfile's write the player may hold this load, so a `player
+    # start` that fails after it keeps its spawn rather than stopping it
+    # (player_start). Only from its WRITE: set before the call, as it was
+    # until the review of 9d604cf, it also marked a loadfile the verb's
+    # deadline refused unsent (D-PLY-39), and the start then kept a spawn it
+    # had fed nothing -- D-PLY-57's idle black window. The client's count of
+    # what it wrote (MpvIpc.sent) is the record, whatever the call then does.
+    sent = client.sent
+    try:
+        data = client.command("loadfile", target["url"], "replace", -1, options)
+    finally:
+        if client.sent != sent:
+            target["loadSent"] = True
     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
     if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
         entry_id = None
@@ -1046,8 +1055,10 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
             continue
         try:
             client.try_command("set_property", prop, value)
-        except HelperError:
-            log("%s: the player closed while recording %s" % (label, prop))
+        except HelperError as error:
+            # error.message names no value: a closed connection, a request
+            # mpv did not answer, or one the verb's deadline refused unsent.
+            log("%s: %s while recording %s" % (label, error.message, prop))
             break
     return entry_id
 
@@ -1380,12 +1391,21 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
     cross into QML.
     """
     deadline = time.monotonic() + max(0.0, timeout)
-    state = "unknown"
-    reason = ""
     last_error = launch_reason(launch_errors or [])
     # D-PLY-29: a warning replaces only a reason that is itself a warning
     # (or none), so a driver line after the failure does not become it.
     named = last_error != "" and not player_log_warning(last_error)
+    # D-PLY-39: the window is the start's verdict, summed in its bound and
+    # bounded on its own, so the verb's mpv deadline does not cut it; the
+    # verb's reserve (player_verb_reserve_ms) is what keeps it inside.
+    with ipc_deadline_lifted():
+        return _observe_first_load(client, entry_id, deadline, last_error, named)
+
+
+def _observe_first_load(client: MpvIpc, entry_id: int | None, deadline: float, last_error: str,
+                        named: bool) -> dict[str, Any]:
+    state = "unknown"
+    reason = ""
     while time.monotonic() < deadline:
         events = client.drain_events(deadline)
         if events is None:                       # mpv closed the connection
@@ -1784,6 +1804,7 @@ def stop_fresh_spawn(sock_path: str, launched_pid: int, ipc_timeout: float) -> N
         stop_ladder(sock_path, targets, "term", ipc_timeout)
 
 
+@verb_deadline(None)
 def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     kind = "player.%s" % verb
     sock = socket_path(args.socket)
@@ -1871,7 +1892,23 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
             if claim is not None:
                 # The claim is about which shell owns the player, not about
                 # which channel is on it, so it is still ours to write.
-                client.try_command("set_property", USER_DATA_OWNER, claim)
+                # The review of 9d604cf (rule 15): the verb's deadline
+                # (D-PLY-39) refusing this write UNSENT is no refusal of the
+                # start. The newer channel plays whether or not the claim
+                # lands, and the player answered the stand-down's own reads
+                # just before, so answering ipc_error here told "Could not
+                # start playback" and dropped, unobserved, the channel that
+                # plays on -- reachable on a player that answers slowly but
+                # answers. Only that refusal: a claim mpv took and did not
+                # answer, or a connection it closed, says something about
+                # the player and stays the refusal it was (the relay player
+                # tests hold that half, dev branch).
+                try:
+                    client.try_command("set_property", USER_DATA_OWNER, claim)
+                except HelperError as error:
+                    if error.message != IPC_DEADLINE_REFUSAL:
+                        raise
+                    log("player %s: the owner claim was not written: %s" % (verb, error.message))
             log("player %s: %s" % (verb, stand_down_note(seq, target, newer)))
             warnings.append("a newer channel change reached the player first")
     except HelperError as error:
@@ -1885,11 +1922,12 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
         # (a wrapper that appends its own --http-proxy, say), an ipc_error
         # from any command before the load, and the stand-down's own read
         # (applied_by_another_client) failing. Kept, as before: a spawn whose
-        # loadfile this start sent (`loadSent`, set by apply_channel just
-        # before it; what follows the load cannot raise), and one a newer
-        # channel already plays on (the stand-down's claim), whose owner is
-        # another client (the lead's call under the owner's standing
-        # authority of 2026-11-09, made on 2026-11-16).
+        # loadfile this start wrote to it (`loadSent`, set by apply_channel
+        # once MpvIpc counts the write -- a loadfile the verb's deadline
+        # refused unsent is not one, D-PLY-39; what follows the load cannot
+        # raise), and one a newer channel already plays on (the stand-down),
+        # whose owner is another client (the lead's call under the owner's
+        # standing authority of 2026-11-09, made on 2026-11-16).
         fed = newer is not None or bool(target is not None and target.get("loadSent"))
         if outcome is not None and outcome["spawned"] and not fed:
             stop_fresh_spawn(sock, int(outcome["pid"]), args.ipc_timeout)
@@ -1994,6 +2032,7 @@ def unlink_relay_socket(sock_path: str) -> None:
         pass
 
 
+@verb_deadline("probe")
 def player_probe(args: argparse.Namespace) -> int:
     """Lock-free, and side-effect-free but for one stale-socket unlink, the
     owner claim and the TLS migration. `path` and `media-title` are never read
@@ -2196,6 +2235,7 @@ def player_orphan_check(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
+@verb_deadline("pause")
 def player_pause(args: argparse.Namespace) -> int:
     """Pause, resume, or toggle the live stream.
 
@@ -2389,6 +2429,7 @@ def player_refused(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+@verb_deadline("tracks")
 def player_tracks(args: argparse.Namespace) -> int:
     """List the audio and subtitle tracks, after applying a selection if one
     was asked for. The reply always carries the list AS MPV NOW HAS IT, so
@@ -2827,7 +2868,9 @@ def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, boo
     ours -- the user's own arrow key in the player window at the same
     instant -- counts as ours (review nit, accepted): the read that
     follows still decides by the threshold, and the status tick re-syncs.
-    A `playback-restart` is counted only after a `seek` was seen."""
+    A `playback-restart` is counted only after a `seek` was seen.
+    D-PLY-39: and no later than the verb's mpv deadline."""
+    deadline = ipc_deadline_capped(deadline)
     landed = False
     while True:
         remaining = deadline - time.monotonic()
@@ -2846,6 +2889,7 @@ def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, boo
                 return "refused", False
 
 
+@verb_deadline("seek")
 def player_seek(args: argparse.Namespace) -> int:
     """`player seek --by N` (signed seconds, negative is back) or `--live`.
 

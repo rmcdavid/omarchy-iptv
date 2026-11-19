@@ -47,6 +47,101 @@ def no_descriptors(error: OSError) -> HelperError:
     return HelperError("no_descriptors", "the helper has no file descriptor left (%s)" % (error.strerror or "too many open files"))
 
 
+# ---- D-PLY-39 (2026-11-18): the verb's own deadline over mpv's waits ----
+#
+# Every wait on mpv was bounded (the client's timeout, 2 s), and the verbs
+# the shell watches make many. Only the waits a verb's bound SUMS were in the
+# shell's watchdog (Model.playerWatchdogMs), so an mpv that answered every
+# connect and request just inside its bound, with the answers a player of
+# this build gives, ran a start to 139-154 s against its 58.25 s watchdog, a
+# restart to 142 s, the probe to 127 s against 12 s and `play` to 93 s
+# against 10 s (walked under the player-bounds virtual clock; the row's
+# first estimates, about 80 s and 25 s, were low). That residual was
+# recovered (a start the watchdog stopped is no verdict, D-PLY-35), never
+# bounded.
+#
+# So a verb the shell watches runs under verb_deadline: IPC_DEADLINE holds
+# the moment its mpv waits must be over -- its bound, the watchdog less the
+# margin, derived from this helper's own constants by the model's arithmetic
+# (player_verb_bound_ms, held to the model by the shared player-bounds
+# fixture), less what the verb may still spend after them that no deadline
+# cuts (player_verb_reserve_ms). Against it:
+#   - a connect or a request is BEGUN only when its whole bound (the
+#     client's timeout) fits before the deadline, and is otherwise refused
+#     unsent, as `ipc_error` -- the code a request that times out already
+#     raises, so every verb's own handling of mpv's silence is what runs.
+#     min(bound, what is left) was not taken: a request sent with a sliver
+#     left is a command mpv may act on whose answer the helper stops waiting
+#     for -- a loadfile, a migration mark -- and refused unsent it is neither.
+#     [2026-11-18, the review of 9d604cf: "no exit is new" was false. A
+#     request refused UNSENT is a new kind of failure for a caller that
+#     records a send before making it, and apply_channel did: its
+#     `loadSent`, set before the loadfile, made player_start keep a spawn
+#     whose loadfile the deadline refused, fed nothing (D-PLY-57's black
+#     window). So the client counts what it has sent (`sent`, after the
+#     write), and a caller asks that count, never its own intention.];
+#   - drain_events ends at the deadline (an event wait sends nothing), the
+#     first-load window excepted: that is the start's verdict, summed and
+#     bounded on its own (observe_first_load).
+# Outside such a verb -- a test, the CLI's `stop`, the orphan check, the
+# relay -- it is None and nothing changes.
+IPC_DEADLINE: list[float | None] = [None]
+IPC_DEADLINE_REFUSAL = "mpv did not answer in time"
+
+
+def ipc_deadline_capped(at: float) -> float:
+    """`at`, or the verb's mpv deadline when that comes first (D-PLY-39)."""
+    end = IPC_DEADLINE[0]
+    return at if end is None else min(at, end)
+
+
+def ipc_wait_bound(own: float) -> float:
+    """`own`, the bound of a connect or a request about to begin, when it
+    fits before the verb's mpv deadline; otherwise HelperError(ipc_error),
+    before anything is sent (D-PLY-39)."""
+    end = IPC_DEADLINE[0]
+    if end is not None and end - time.monotonic() < own:
+        raise HelperError("ipc_error", IPC_DEADLINE_REFUSAL)
+    return own
+
+
+class ipc_deadline_lifted:
+    """The verb's mpv deadline set aside for one summed wait that is bounded
+    on its own -- the first-load window (observe_first_load) -- and put back
+    after it, whatever happens inside."""
+
+    def __enter__(self) -> None:
+        self.saved = IPC_DEADLINE[0]
+        IPC_DEADLINE[0] = None
+
+    def __exit__(self, *_: Any) -> None:
+        IPC_DEADLINE[0] = self.saved
+
+
+def verb_deadline(verb: str | None) -> Any:
+    """Run a verb the shell watches under its own mpv deadline (D-PLY-39):
+    from its first statement, player_verb_ipc_span_ms(verb) ahead, and put
+    back as it was when the verb returns or raises. `verb` None takes the
+    verb from the call (player_start's start or restart). A deadline already
+    standing is never moved later."""
+    def wrap(function: Any) -> Any:
+        def bounded(args: Any, *rest: Any, **more: Any) -> Any:
+            name = verb if verb is not None else (rest[0] if rest else more.get("verb", "start"))
+            end = time.monotonic() + player_verb_ipc_span_ms(name) / 1000.0
+            saved = IPC_DEADLINE[0]
+            IPC_DEADLINE[0] = end if saved is None else min(saved, end)
+            try:
+                return function(args, *rest, **more)
+            finally:
+                IPC_DEADLINE[0] = saved
+        bounded.__name__ = function.__name__
+        bounded.__qualname__ = function.__qualname__
+        bounded.__doc__ = function.__doc__
+        bounded.__wrapped__ = function
+        return bounded
+    return wrap
+
+
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
     correlated by request_id, unsolicited events KEPT.
@@ -67,6 +162,12 @@ class MpvIpc:
         self.refused = False
         self.events: list[dict[str, Any]] = []
         self.closed = False
+        # D-PLY-39's settle (2026-11-18): how many requests this client has
+        # written whole to mpv. A request the verb's deadline refuses is not
+        # written, and one whose write fails is not written whole, so mpv
+        # never reads it as a command; a caller that must know whether mpv
+        # may hold a command (apply_channel's `loadSent`) asks this.
+        self.sent = 0
 
     def connect(self) -> None:
         # D-PLY-38 (2026-11-11): the import and the socket are this
@@ -76,6 +177,8 @@ class MpvIpc:
         # holds its lock. Named (no_descriptors says why it is its own
         # code); any other failure to make the socket is the connection
         # that could not be made, in the words connect()'s own have.
+        # D-PLY-39: begun only when its whole bound fits the verb's deadline.
+        ipc_wait_bound(self.timeout)
         try:
             import socket
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -175,10 +278,16 @@ class MpvIpc:
         sent counts as `{"error": "success"}` (used by `quit`).
         """
         assert self.sock is not None
+        # D-PLY-39: begun only when its whole bound fits the verb's deadline,
+        # and the whole exchange -- the send too, which used to inherit what
+        # the previous read left of ITS bound -- inside that bound.
+        ipc_wait_bound(self.timeout)
         request_id = self.next_id
         self.next_id += 1
         payload = '{"command": %s, "request_id": %d}\n' % (ipc_json(list(command)), request_id)
+        deadline = time.monotonic() + self.timeout
         try:
+            self.sock.settimeout(max(0.001, deadline - time.monotonic()))
             self.sock.sendall(payload.encode("utf-8"))
         except (ConnectionResetError, BrokenPipeError):
             if allow_close:
@@ -186,7 +295,7 @@ class MpvIpc:
             raise HelperError("ipc_error", "mpv closed the connection")
         except OSError as error:
             raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or type(error).__name__))
-        deadline = time.monotonic() + self.timeout
+        self.sent += 1
         while True:
             line = self.read_line(deadline)
             if line is None:
@@ -214,6 +323,8 @@ class MpvIpc:
             return drained
         if self.sock is None or self.closed:
             return None
+        # D-PLY-39: and no later than the verb's mpv deadline.
+        deadline = ipc_deadline_capped(deadline)
         try:
             line = self.read_line(deadline)
         except HelperError:

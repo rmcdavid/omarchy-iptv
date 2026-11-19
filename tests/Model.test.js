@@ -7359,9 +7359,20 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
   // D-SINK-102: `play`'s fixed 8 s is the fixture's controlMs, which the
   // python walk of `play` holds mpv's round trips to (tests/test_player_bounds.py);
   // a name joined to a number only by a copy is checked here (rule 13).
-  checkCall("D-SINK-102: the control slot's fixed watchdog before the relay is the fixture's controlMs, and play's adds its two relay questions to it", () =>
-    [Model.CONTROL_WATCHDOG_MS, typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs("play") - Model.CONTROL_WATCHDOG_MS : "none"],
-    [PB.controlMs, 2 * PB.helper.relayIpcMs])
+  // D-PLY-39 (2026-11-18): play's 10 s is now its BOUND -- the lookup, its
+  // two relay questions and controlIpcMs, the 5 s the 8 s left mpv's round
+  // trips -- which the helper runs the control slot's verbs inside, and the
+  // watchdog adds the margin. Red on 71700f4, where the watchdog was the
+  // bound itself (10 s) and nothing ran inside it.
+  checkCall("D-SINK-102, D-PLY-39: the control slot's fixed watchdog before the relay is the fixture's controlMs; play's BOUND is the lookup, its two relay questions and controlIpcMs (what that 8 s left mpv's round trips), and its watchdog that bound and the margin", () =>
+    [Model.CONTROL_WATCHDOG_MS, (Model.PLAYER_BOUNDS || {}).controlIpcMs,
+     typeof Model.playerVerbBoundMs === "function" ? Model.playerVerbBoundMs("play") : "none", Model.playerWatchdogMs("play")],
+    [PB.controlMs, PB.controlMs - PB.helper.lookupMs, PB.helper.lookupMs + 2 * PB.helper.relayIpcMs + PB.helper.controlIpcMs,
+     PB.helper.lookupMs + 2 * PB.helper.relayIpcMs + PB.helper.controlIpcMs + PB.marginMs])
+  checkCall("D-PLY-39: playerVerbBoundMs per verb is the fixture's watchdogMs less marginMs -- the bound the helper runs each verb inside (its player_verb_bound_ms, held to the same numbers in python) -- and null for the birth edge and for any kind that is not a watched verb", () =>
+    [Object.keys(PB.watchdogMs).filter(k => k !== "").map(k => k + "=" + (typeof Model.playerVerbBoundMs === "function" ? Model.playerVerbBoundMs(k) : "none")),
+     typeof Model.playerVerbBoundMs === "function" ? ["", "strat", null, undefined, 7, "status"].map(k => Model.playerVerbBoundMs(k)) : "none"],
+    [Object.keys(PB.watchdogMs).filter(k => k !== "").map(k => k + "=" + (PB.watchdogMs[k] - PB.marginMs)), [null, null, null, null, null, null]])
   checkCall("D-PLY-35: every verb's bound is past its own deadlines -- a start past lock + spawn + first load (the board's 14 s) plus a request, a restart past that plus its ladder from term, a probe past three requests -- and every one is past what the old 12 s let a start have", () => {
     const h = PB.helper, w = k => typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : PB.previousMs
     return [w("start") > PB.boardMs + h.ipcMs,
@@ -18808,7 +18819,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the refusal tail's gate, `!userStopped && !stopping`, so the same play
     // made while a stop settles, whose start the watchdog then ended with
     // nothing left behind, was dropped untold too. In time this needs the
-    // stop to settle slower than a start's 43 s bound, which the 5 s backstop
+    // stop to settle slower than a start's 43 s bound, which the backstop
     // forbids; the harness holds `stopping`, so the gate is what is pinned.
     checkCall("D-PLY-41 (sibling): a play made while an earlier stop is still settling, whose start the watchdog ended and the probe found nothing of, is told once as Could not start playback / Helper timed out, marking nothing", () => {
       const h = bootPlayer()
@@ -18825,6 +18836,425 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
       return [settling, said(h)]
     }, [true, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]])
+
+    // ---- D-PLY-40 (2026-11-18): the stop's backstop is the stop's own bound ----
+    //
+    // stopSettleTimer (5 s) was shorter than the detached stop's own worst
+    // case (13.25 s walked, tests/test_player_bounds.py), so a stop still
+    // laddering drew the "outlived a stop" probe and a second stop. Now the
+    // Timer is armed with Model.playerWatchdogMs("stop") (the fixture's
+    // `stop`), and because that holds `stopping` three times as long, a start
+    // of an intent issued after the stop that answers ok ends the settle
+    // itself (the stop ran before it under the lock, or is superseded).
+    // Red on 71700f4: armed at 5 s, and the queued intent dropped.
+    const zapsOf = h => {
+      const seen = []
+      let held = h.ids.controlProc.running
+      Object.defineProperty(h.ids.controlProc, "running", { get() { return held }, set(v) { held = v; if (v === true) { const c = H.helperView(h.ids.controlProc.command, h.ids.controlProc.environment); seen.push(c[c.indexOf("play")] + ":" + c[c.indexOf("--id") + 1]) } }, configurable: true })
+      return seen
+    }
+    const okStartSeq = (id, seq) => JSON.stringify(Object.assign(JSON.parse(okStart(id)), { seq }))
+    const withChannels = h => {
+      const index = M.keyedMap()
+      index[X.id] = X
+      index[Y.id] = Y
+      h.root.channelIndex = index
+      return h
+    }
+
+    checkCall("D-PLY-40: the stop's backstop is armed with the stop's own bound (the fixture's `stop`, 18.25 s), not 5 s -- a stop with nothing to answer it holds `stopping` past 5 s and releases it at that bound, not a millisecond before", () => {
+      const h = bootPlayer()
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.stop()
+      h.drain()
+      const armed = t.armedInterval
+      h.elapse(5000)
+      const atFive = h.root.stopping === true
+      h.elapse(PB.watchdogMs.stop - 5000 - 1)
+      const justBefore = h.root.stopping === true
+      h.elapse(1)
+      return [armed, atFive, justBefore, h.root.stopping === true, h.root.userStopped === true]
+    }, [PB.watchdogMs.stop, true, true, false, false])
+
+    checkCall("D-PLY-40: a start of an intent issued AFTER the stop that answers ok ends the stop's settle -- the backstop stopped, `stopping` false, and the zap burst's last intent queued behind the start delivered over the socket, not dropped", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const startVerb = slotVerb(h), xSeq = h.root.playSeq
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(X.id, xSeq))
+      return [startVerb, queued, h.root.stopping === true, t.running === true, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, ["start", Y.id, false, false, ["play:" + Y.id], Y.id, []])
+
+    checkCall("D-PLY-40: a start issued BEFORE the stop that answers ok after it leaves the settle standing (that stop ladders its player) -- `stopping` true, the backstop armed, nothing zapped", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(X.id, xSeq))
+      return [h.root.stopping === true, t.running === true, zaps, h.root.nowPlaying]
+    }, [true, true, [], null])
+
+    // ---- D-PLY-43 (2026-11-18): a play inside a settling stop is retried ----
+    //
+    // handlePlayerResult's retry branch and playRetryTimer refused while
+    // `stopping`, so a play made after a stop whose ladder held the lock past
+    // the start's own 6 s lock wait was told "The player is busy" (D-PLY-41
+    // made it told; before that it was dropped). Now both gate on the user's
+    // word, as the refusal tail does, and the retry takes the play fork's
+    // branch -- a start while the stop settles, never a zap at the socket it
+    // is tearing down. Red on 775ab7b (the D-PLY-40 commit): told, not
+    // retried; the Timer did nothing; the drained intent dropped.
+    const refusedSeq = (code, seq) => JSON.stringify({ ok: false, kind: "player.start", error: { code, message: code === "busy" ? "another player command holds the lock" : "the player did not open its socket" }, id: X.id, seq })
+    // The observer still on the player the stop is laddering: stop() keeps an
+    // attached socket (its EOF ends the stop). The harness's Socket never
+    // connects (rule 10), so the attached one is stood in by an object that
+    // reads connected and swallows writes -- the state stop() leaves, with
+    // nothing about onPlayerAttached's own subscriptions claimed.
+    const attachedToDying = h => { h.root.playerSocket = { connected: true, write() {}, flush() {}, destroy() {} } }
+    const slotRuns = h => {
+      const seen = []
+      let held = h.ids.playerProc.running
+      Object.defineProperty(h.ids.playerProc, "running", { get() { return held }, set(v) { held = v; if (v === true) { const c = h.ids.playerProc.command; const i = c.indexOf("player"); seen.push(i === -1 ? "" : c[i + 1]) } }, configurable: true })
+      return seen
+    }
+
+    checkCall("D-PLY-43: a play made while an earlier stop settles, whose `player start` answers busy or no_socket, is RETRIED with the backoff (300 ms, silent, the intent kept), not told", () => ["busy", "no_socket"].map(code => {
+      const h = withChannels(bootPlayer())
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const settling = h.root.stopping === true, xSeq = h.root.playSeq
+      const restarts = h.ids.playRetryTimer.restarts
+      exit(h, refusedSeq(code, xSeq))
+      return [code, settling, h.root.playRetries, h.ids.playRetryTimer.restarts - restarts, h.ids.playRetryTimer.interval, toasts(h), h.root.nowPlaying ? h.root.nowPlaying.id : null]
+    }), ["busy", "no_socket"].map(code => [code, true, 1, 1, 300, [], X.id]))
+
+    checkCall("D-PLY-43: the retry fired while the stop still settles, the observer still on the dying player, sends a `player start` and never a zap at that socket (the play fork's own branch)", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      const zaps = zapsOf(h), starts = slotRuns(h)
+      const settling = h.root.stopping === true && h.root.socketAttached() === true
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [settling, starts, zaps]
+    }, [true, ["start"], []])
+
+    checkCall("D-PLY-43 (D-LIVE-15): a stop pressed while the retry is pending leaves nothing to resurrect -- the Timer stopped, and fired anyway it starts nothing", () => {
+      const h = withChannels(bootPlayer())
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      const stops = h.ids.playRetryTimer.stops
+      h.root.stop()
+      h.drain()
+      const zaps = zapsOf(h), starts = slotRuns(h)
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [h.ids.playRetryTimer.stops - stops > 0, starts, zaps, h.root.nowPlaying, toasts(h)]
+    }, [true, [], [], null, []])
+
+    checkCall("D-PLY-43 (D-LIVE-15): a stop pressed while a retried start runs -- its busy is not retried and not told, and its ok neither zaps nor starts nor ends the newer stop's settle", () => ["busy", "ok"].map(how => {
+      const h = withChannels(bootPlayer())
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      exit(h, refusedSeq("busy", xSeq))
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      const retried = slotVerb(h) === "start" && h.ids.playerProc.running === true
+      h.root.stop()
+      h.drain()
+      const restarts = h.ids.playRetryTimer.restarts
+      const zaps = zapsOf(h), starts = slotRuns(h)
+      exit(h, how === "busy" ? refusedSeq("busy", xSeq) : okStartSeq(X.id, xSeq))
+      return [how, retried, h.ids.playRetryTimer.restarts - restarts, starts, zaps, toasts(h), h.root.nowPlaying, h.root.stopping === true]
+    }), ["busy", "ok"].map(how => [how, true, 0, [], [], [], null, true]))
+
+    checkCall("D-PLY-43 (rule 15, drainPendingPlay): a zap issued before a stop whose reply comes after a play made after it drains that play's queued intent to a start behind the one in flight, not to nothing; the start's ok then delivers it over the socket", () => {
+      const h = withChannels(bootPlayer())
+      const Z = { id: "t:z", name: "Z", url: "http://s.example.test/z.ts", group: "G" }
+      const index = h.root.channelIndex
+      index[Z.id] = Z
+      attachedToDying(h)
+      h.root.nowPlaying = { id: X.id, name: "X", group: "G", launchedFrom: "", since: 1 }
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const zapped = h.ids.controlProc.running === true
+      h.root.stop()
+      h.drain()
+      h.root.play(Z.id, true, "")
+      h.drain()
+      const zSeq = h.root.playSeq
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      h.ids.controlProc.running = false
+      h.root.handleControlResult(JSON.stringify({ ok: true, kind: "play", id: Y.id, name: "Y" }))
+      h.drain()
+      const kept = h.root.pendingPlayId
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(Z.id, zSeq))
+      return [zapped, queued, kept, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+    }, [true, Y.id, Y.id, ["play:" + Y.id], Y.id])
+
+    // The arithmetic the row asks for: a play's start waits out the lock
+    // (lockMs + lockPollMs) on every try, and the tries are spaced by the
+    // backoff (300, 600, 900 ms); the stop holds the lock for at most its own
+    // walked path (the fixture's `stop` less the margin, 13.25 s) after it
+    // went out, and the play went out after it. So a try still asks the lock
+    // after the worst stop has let it go -- the second retry's wait ends at
+    // 3 * 6.05 + 0.3 + 0.6 = 19.05 s, and the third's at 26 s -- before the
+    // interpreter, the play-time lookup and the spawn, which only delay each
+    // try. Read off the tree: the Service's backoff and Model's bounds.
+    // D-PLY-39: the control slot's one Timer is play's bound and the margin,
+    // read from its own block by the harness -- it TERMs a control helper
+    // that outlives the helper's own deadline and the margin, not one that
+    // runs past the old 10 s. Red on 7bcbfb4 (10 s).
+    checkCall("D-PLY-39: the control slot's watchdog is play's bound and the margin (the fixture's `play`, 15 s): a control helper still running at 10 s is not terminated, one at 15 s is", () => {
+      const h = bootPlayer()
+      const t = h.driveTimer("controlWatchdog")
+      h.root.runControl("status", ["status", "--socket", h.root.socketPath])
+      const armed = t.armedInterval
+      h.elapse(10000)
+      const atTen = h.ids.controlProc.signals.slice()
+      h.elapse(PB.watchdogMs.play - 10000)
+      return [h.root.controlTimeoutMs, armed, atTen, h.ids.controlProc.signals.slice()]
+    }, [PB.watchdogMs.play, PB.watchdogMs.play, [], [15]])
+
+    checkCall("D-PLY-43: the retries' lock waits outlast the stop's own worst case -- the last try still asks the lock after the worst stop has released it, and so does the second retry", () => {
+      const h = bootPlayer()
+      const base = h.root.playRetryBaseMs, max = h.root.playRetryMax, lock = M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs
+      const stopHolds = M.playerWatchdogMs("stop") - M.PLAYER_WATCHDOG_MARGIN_MS
+      const askedUntil = n => { let at = 0; for (let k = 0; k <= n; k++) at += lock + (k > 0 ? base * k : 0); return at }
+      return [base, max, stopHolds, askedUntil(max) > stopHolds, askedUntil(2) > stopHolds, askedUntil(1) > stopHolds]
+    }, [300, 3, PB.watchdogMs.stop - PB.marginMs, true, true, false])
+
+    // ---- the review of 9d604cf: what the longer settle let through ----
+    //
+    // Three reviews of D-PLY-39/-40/-43 found readers of the stop's settle
+    // that misbehave inside a backstop three times as long, each run here
+    // through Service.qml's own functions. The stopped player's EOF is
+    // delivered as the Socket's own handler delivers it: only while that
+    // object is still the observer (`playerSocket !== this` returns), then
+    // released and handlePlayerGone. Red on 9d604cf unless a check says.
+    const eofOf = (h, sock) => {
+      if (h.root.playerSocket === sock) {
+        h.root.releasePlayerSocket()
+        h.root.handlePlayerGone()
+      }
+      h.drain()
+    }
+    const stopsIssued = h => h.detached.filter(a => a[a.indexOf("player") + 1] === "stop").map(a => Number(a[a.indexOf("--seq") + 1]))
+    const probeSeq = (seq, o) => probeOf(Object.assign({ seq, stash: null, owner: null, claimed: false }, o || {}))
+
+    checkCall("9d604cf review (D-PLY-41, D-PLY-43): the stopped player's EOF, arriving while a play made after the stop is between its retries, ends the stop and nothing else -- the play kept, its retry still armed and then sent as a start, no card", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      const stops = h.ids.playRetryTimer.stops
+      eofOf(h, dying)
+      const kept = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.ids.playRetryTimer.stops - stops, h.root.playRetries, h.root.stopping === true, toasts(h)]
+      const starts = slotRuns(h)
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [kept, starts]
+    }, [[Y.id, 0, 1, false, []], ["start"]])
+
+    checkCall("9d604cf review: the stopped player's EOF while the play's start is in flight keeps the play and hunts for the player that start will report, which its ok then finds wanted", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      eofOf(h, dying)
+      const during = [h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.playerPending === true, h.root.playerWanted === true, h.root.stopping === true, toasts(h)]
+      exit(h, okStartSeq(Y.id, ySeq))
+      return [during, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.playerWanted === true, toasts(h)]
+    }, [[Y.id, true, true, false, []], Y.id, true, []])
+
+    checkCall("9d604cf review (D-PLY-41): a play whose every try meets busy, with the stopped player's EOF between two of them, is still told once the tries are spent -- Could not start playback / The player is busy, marking nothing", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      eofOf(h, dying)
+      for (let k = 0; k < 3; k++) {
+        h.fireTimer("playRetryTimer")
+        h.drain()
+        exit(h, refusedSeq("busy", h.root.playSeq))
+      }
+      return [toasts(h), h.root.nowPlaying, Object.keys(h.root.failedAt)]
+    }, [["74021 Could not start playback | \u201cY\u201d did not play" + M.SEP + "The player is busy"], null, []])
+
+    checkCall("9d604cf review (D-LIVE-15): a stop pressed after that play, before the EOF, keeps the EOF the stop's -- nothing resurrected, nothing told", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, refusedSeq("busy", h.root.playSeq))
+      h.root.stop()
+      h.drain()
+      eofOf(h, dying)
+      const starts = slotRuns(h)
+      h.fireTimer("playRetryTimer")
+      h.drain()
+      return [h.root.nowPlaying, starts, toasts(h)]
+    }, [null, [], []])
+
+    checkCall("9d604cf review (D-PLY-40): a start issued before the stop that answers ok while the stop settles, nothing attached, is looked for at the backstop -- one probe, and a player it finds is stopped past the record -- where 9d604cf left it playing unobserved under an idle bar", () => {
+      const h = withChannels(bootPlayer())
+      const t = h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(X.id, xSeq))
+      const runs = slotRuns(h)
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      const asked = runs.slice()
+      exit(h, probeSeq(xSeq))
+      return [asked, stopsIssued(h).length - before, h.root.nowPlaying, t.running === true]
+    }, [["probe"], 1, null, false])
+
+    checkCall("9d604cf review (D-PLY-40): and when that stop took, the backstop's probe finds nothing and stops nothing", () => {
+      const h = withChannels(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(X.id, xSeq))
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      exit(h, probeSeq(h.root.stopSeq, { running: false, responsive: false, pid: null, tls: null }))
+      return [stopsIssued(h).length - before, h.root.nowPlaying, toasts(h)]
+    }, [0, null, []])
+
+    checkCall("9d604cf review (F-PLY-3, PLY-STOP-07): a stop the lock record superseded is looked at 5 s, not at the 18.25 s backstop -- the probe reads a record past the stop's sequence and the player is stopped past it, that stop settling as the user's did", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const look = h.driveTimer("stopLookTimer")
+      h.root.stop()
+      h.drain()
+      const armed = look.armedInterval
+      const runs = slotRuns(h)
+      h.elapse(5000 - 1)
+      const early = runs.slice()
+      h.elapse(1)
+      const asked = runs.slice()
+      exit(h, probeSeq(9999))
+      const issued = stopsIssued(h)
+      return [armed, early, asked, issued.length, issued[issued.length - 1] > 9999, h.root.stopSeq === issued[issued.length - 1], h.root.stopping === true]
+    }, [5000, [], ["probe"], 2, true, true, true])
+
+    checkCall("9d604cf review (D-PLY-40): the 5 s look over a stop whose own record stands -- laddering, or still waiting for the lock -- stops nothing a second time", () => [0, -1].map(behind => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      h.driveTimer("stopLookTimer")
+      h.root.stop()
+      h.drain()
+      h.elapse(5000)
+      exit(h, probeSeq(h.root.stopSeq + behind))
+      // The recheck of 2cfeb74: the look's probe runs here (the cost of the
+      // 5 s catch), and its journal line does not claim the player outlived
+      // a stop that is only laddering or waiting for the lock.
+      const claims = h.warnings.filter(w => /outlived/.test(w)).length
+      return [behind, stopsIssued(h).length, h.root.stopping === true, h.root.userStopped === true, claims]
+    }), [0, -1].map(behind => [behind, 1, true, true, 0]))
+
+    checkCall("9d604cf review: the 5 s look asks nothing of a stop with nothing to observe, and an unreadable look leaves the backstop its own probe", () => {
+      const quiet = withChannels(bootPlayer())
+      quiet.driveTimer("stopLookTimer")
+      const runs = slotRuns(quiet)
+      quiet.root.stop()
+      quiet.drain()
+      quiet.elapse(5000)
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      h.driveTimer("stopLookTimer")
+      h.driveTimer("stopSettleTimer")
+      const later = slotRuns(h)
+      h.root.stop()
+      h.drain()
+      h.elapse(5000)
+      exit(h, "not a reply")
+      h.elapse(PB.watchdogMs.stop - 5000)
+      return [runs, later]
+    }, [[], ["probe", "probe"]])
+
+    checkCall("9d604cf review (D-PLY-40, the order of two events): a newer start that spawned answers ok before the stopped player's EOF is delivered -- the observer still on that player is released and the spawn hunted for, so the late EOF tells nothing and drops nothing", () => {
+      const h = withChannels(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, okStartSeq(Y.id, h.root.playSeq))
+      const after = [h.root.playerSocket === dying, h.root.playerWanted === true, h.root.stopping === true]
+      eofOf(h, dying)
+      return [after, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, [[false, true, false], Y.id, []])
+
+    checkCall("9d604cf review (D-PLY-43, rule 15): a queued intent a newer play has since replaced is dropped at the drain, not zapped over the channel the guide names", () => {
+      const h = withChannels(bootPlayer())
+      const Z = { id: "t:z", name: "Z", url: "http://s.example.test/z.ts", group: "G" }
+      h.root.channelIndex[Z.id] = Z
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      exit(h, refusedSeq("busy", xSeq))
+      h.root.play(Z.id, true, "")
+      h.drain()
+      const zSeq = h.root.playSeq
+      const zaps = zapsOf(h)
+      exit(h, okStartSeq(Z.id, zSeq))
+      return [queued, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.pendingPlayId]
+    }, [Y.id, [], "t:z", ""])
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----
