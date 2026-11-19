@@ -331,7 +331,7 @@ scenario_SRC_H01() {
   harness_start --open --serve --keep --timeout 0 --playlist "$A" || return 1
   pause 3
   sh_step "state after migration" "jq '{version,cacheLayout,favorites,recents,lastPlayed,sources}' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
-  expect "version 2, cacheLayout 2, favorites [t:qa.a.news1, t:qa.shared, u:502142db], 3 recents in order, lastPlayed intact; sources[0] key $KA url $A origin migrated fetchedAt 1789244100 (or now with --fresh) channelCount 8 groupCount 3 (SRC-MIG-01)"
+  expect "version 2, cacheLayout 2, favorites [t:qa.a.news1, t:qa.shared, u:3a0fe282], 3 recents in order, lastPlayed intact; sources[0] key $KA url $A origin migrated fetchedAt 1789244100 (or now with --fresh) channelCount 8 groupCount 3 (SRC-MIG-01)"
   sh_step "layout" "ls -la $(printf '%q' "$SCRATCH/cache/omarchy-iptv") $(printf '%q' "$SCRATCH/cache/omarchy-iptv/sources/$KA")"
   expect "top-level channels.json / playlist-status.json gone, no .tmp-*, sources/$KA/ holds them (SRC-MIG-02)"
   sh_step "modes" "find $(printf '%q' "$SCRATCH/cache") $(printf '%q' "$SCRATCH/state") -exec stat -c '%a %n' {} +"

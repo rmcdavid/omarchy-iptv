@@ -9,8 +9,8 @@
 #  - 3 channels in 1 group (Charlie); "Charlie Two" streams from a credentialed URL (second needle: cu / cs)
 #  - the third entry has an empty title and a credentialed URL: the name must be "Channel 3", never the URL (D-QA-02 regression)
 #EXTINF:-1 tvg-id="qa.c.one" group-title="Charlie",Charlie One
-http://127.0.0.1:9/charlie/one.m3u8
+http://127.0.0.1:8765/charlie/one.m3u8
 #EXTINF:-1 tvg-id="qa.c.two" group-title="Charlie",Charlie Two
-http://cu:cs@127.0.0.1:9/charlie/live/cu/cs/two.ts
+http://cu:cs@127.0.0.1:8765/charlie/live/cu/cs/two.ts
 #EXTINF:-1 group-title="Charlie",
-http://cu:cs@127.0.0.1:9/charlie/live/cu/cs/three.ts
+http://cu:cs@127.0.0.1:8765/charlie/live/cu/cs/three.ts
