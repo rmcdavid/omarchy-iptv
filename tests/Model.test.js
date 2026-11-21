@@ -17436,6 +17436,32 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // the helper's output to the same list over the same document. A key added
 // to the service side alone reddens this; one added to the helper alone
 // reddens that; and the value cases below run through both readers.
+// D-STATE-5: the code points both state readers take off state.json's two
+// ends, the shared state-edges fixture (tests/test_state.py runs the
+// helper's verbs over it). node's trim leaves U+0085, which V4's takes
+// (F-GATE-4): `nodeKeeps`, held in V4 by tests/Model.spec.qml.
+;(function () {
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-edges.json"), "utf8"))
+  const text = JSON.stringify(fx.document)
+  checkCall("D-STATE-5 (shared fixture): parseState reads a state.json with the trim class at its edges, and none with U+001C..U+001F there", function () {
+    const bad = []
+    fx.edges.forEach(function (code) {
+      if (fx.nodeKeeps.indexOf(code) !== -1) return
+      const c = String.fromCharCode(code)
+      ;[c + text, text + c, c + c + text + c].forEach(function (body) {
+        if (JSON.stringify(Model.parseState(body).favorites) !== '["t:a"]') bad.push("edge " + code)
+      })
+    })
+    fx.neither.forEach(function (code) {
+      const c = String.fromCharCode(code)
+      ;[c + text, text + c].forEach(function (body) {
+        if (Model.parseState(body).favorites.length !== 0) bad.push("neither " + code)
+      })
+    })
+    return [fx.edges.length, fx.nodeKeeps, fx.neither, bad]
+  }, [26, [133], [28, 29, 30, 31], []])
+})()
+
 // D-STATE-6: where state.json holds text, both readers take a JSON string
 // and nothing else. The shared state-text-fields fixture, which
 // tests/test_state.py runs through the helper's normalize_state.

@@ -196,6 +196,29 @@ TestCase {
     compare(Model.normalizeText("News\ufeffHD"), "news\ufeffhd")
   }
 
+  // D-STATE-5 in the shell's own engine: parseState takes V4's trim class
+  // off state.json's two ends -- the 26 code points of the shared
+  // state-edges fixture (dev branch), U+0085 among them, which node's trim
+  // leaves -- and reads a file with U+001C..U+001F at an edge as unparsed.
+  // The helper's state verbs read the same list (state_json).
+  function test_parseStateTakesTheTrimClassOffTheEdgesInV4() {
+    var edges = [9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+                 8232, 8233, 8239, 8287, 12288, 65279]
+    var text = JSON.stringify({ version: 2, favorites: ["t:a"] })
+    var bad = []
+    for (var i = 0; i < edges.length; i++) {
+      var c = String.fromCharCode(edges[i])
+      if (Model.parseState(c + text + c).favorites.length !== 1) bad.push(edges[i])
+    }
+    compare(bad, [])
+    var neither = [28, 29, 30, 31]
+    for (var j = 0; j < neither.length; j++) {
+      var n = String.fromCharCode(neither[j])
+      if (Model.parseState(n + text).favorites.length !== 0 || Model.parseState(text + n).favorites.length !== 0) bad.push(neither[j])
+    }
+    compare(bad, [])
+  }
+
   // D-STATE-2 in the shell's own engine: every strip the model mirrors takes
   // the reader's class, url-whitespace.json's union (Model.stripSpace), not
   // V4's trim, which takes U+FEFF and U+0085 and leaves U+001C-U+001F.

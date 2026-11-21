@@ -80,6 +80,50 @@ class StateCommandTest(unittest.TestCase):
     def state(self, *args):
         return run("state", "--state-dir", self.dir, *args)
 
+    def _edges_fixture(self):
+        with open(ROOT / "tests" / "fixtures" / "state-edges.json", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_a_file_with_the_shells_trim_class_at_its_edges_reads_as_the_shell_reads_it(self):
+        """D-STATE-5: a state.json an editor saved with a byte-order mark, or
+        with any code point the shell's trim takes at either end, loaded in
+        the guide and was state_unreadable to every state verb that reads it
+        (and an empty state to `init`). The shared state-edges fixture; node
+        and the QML spec hold Model.parseState to the same list."""
+        fixture = self._edges_fixture()
+        self.assertEqual(len(fixture["edges"]), 26)
+        text = json.dumps(fixture["document"])
+        self.path.parent.mkdir(parents=True)
+        for code in fixture["edges"]:
+            for body in (chr(code) + text, text + chr(code), chr(code) * 2 + text + chr(code)):
+                self.path.write_bytes(body.encode("utf-8"))
+                code_show, shown, _ = self.state("show")
+                self.assertEqual((code_show, shown.get("state", {}).get("favorites")), (0, ["t:a"]), "show, U+%04X" % code)
+                code_init, init, _ = self.state("init")
+                self.assertEqual((code_init, init["created"], init["state"]["favorites"]), (0, False, ["t:a"]), "init, U+%04X" % code)
+                # init never rewrites a file it found.
+                self.assertEqual(self.path.read_bytes(), body.encode("utf-8"))
+            self.path.write_bytes((chr(code) + text + chr(code)).encode("utf-8"))
+            code_add, added, _ = self.state("favorite", "add", "t:b")
+            self.assertEqual((code_add, added.get("state", {}).get("favorites")), (0, ["t:a", "t:b"]), "favorite add, U+%04X" % code)
+            # The write is the helper's own text: the edge is gone.
+            self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["favorites"], ["t:a", "t:b"])
+
+    def test_an_edge_neither_engine_trims_is_still_refused_and_nothing_is_written(self):
+        """D-STATE-5: U+001C..U+001F, which Python's strip() takes and the
+        shell's trim does not. The shell reads such a file as unparsed, so the
+        helper refuses it too, and an interior member of the class is no edge."""
+        fixture = self._edges_fixture()
+        text = json.dumps(fixture["document"])
+        self.path.parent.mkdir(parents=True)
+        bodies = [chr(code) + text for code in fixture["neither"]] + [text + chr(code) for code in fixture["neither"]]
+        bodies.append(text[:1] + chr(0xFEFF) + text[1:])
+        for body in bodies:
+            self.path.write_bytes(body.encode("utf-8"))
+            code, payload, _ = self.state("favorite", "add", "t:b")
+            self.assertEqual((code, payload["error"]["code"]), (1, "state_unreadable"), repr(body[:3] + body[-2:]))
+            self.assertEqual(self.path.read_bytes(), body.encode("utf-8"))
+
     def test_show_on_missing_file_is_empty_and_writes_nothing(self):
         code, payload, _ = self.state("show")
         self.assertEqual(code, 0)

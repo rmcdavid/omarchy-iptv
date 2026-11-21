@@ -1,0 +1,58 @@
+{
+ "comment": [
+  "D-STATE-5. The code points both state readers take off the two ends of",
+  "state.json before they parse it: the shell's engine's own trim (Qt's V4:",
+  "ECMAScript's WhiteSpace and LineTerminator, 25 code points, and U+0085),",
+  "which Model.parseJsonObject has always applied, so a file an editor saved",
+  "with a byte-order mark, or one ending in a no-break space, loads in the",
+  "guide; and since D-STATE-5 the helper's state verbs (state_json), which",
+  "refused such a file as state_unreadable. `nodeKeeps` is the one member",
+  "node's trim leaves and V4's takes (F-GATE-4), so the node suite skips it",
+  "and tests/Model.spec.qml holds it in V4. `neither` is U+001C..U+001F,",
+  "which Python's strip() takes and neither engine's trim does: both readers",
+  "refuse a file with one at its edge. Only a hand edit makes any of these."
+ ],
+ "edges": [
+  9,
+  10,
+  11,
+  12,
+  13,
+  32,
+  133,
+  160,
+  5760,
+  8192,
+  8193,
+  8194,
+  8195,
+  8196,
+  8197,
+  8198,
+  8199,
+  8200,
+  8201,
+  8202,
+  8232,
+  8233,
+  8239,
+  8287,
+  12288,
+  65279
+ ],
+ "nodeKeeps": [
+  133
+ ],
+ "neither": [
+  28,
+  29,
+  30,
+  31
+ ],
+ "document": {
+  "version": 2,
+  "favorites": [
+   "t:a"
+  ]
+ }
+}

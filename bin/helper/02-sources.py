@@ -3449,7 +3449,12 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
         target = state_file_target(path)
     except HelperError:
         return 0
-    raw = read_json(target)
+    # D-STATE-5: through state_json, the shell's reading of the file's two
+    # ends, as every state verb reads it; read_json refused a byte-order mark.
+    try:
+        raw = state_json(read_regular_text(target))
+    except (OSError, ValueError):
+        return 0
     if not isinstance(raw, dict):
         return 0
     remap = channel_id_remap(channels)

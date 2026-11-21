@@ -429,6 +429,21 @@ class RemapStateFileTest(unittest.TestCase):
         self.assertEqual(helper.remap_state_file(self.path, self.channels), 0)
         self.assertEqual(self.read(), [1, 2, 3])
 
+    def test_a_file_with_a_byte_order_mark_is_remapped_as_the_shell_reads_it(self):
+        """D-STATE-5's sibling (rule 15): this read refused a state.json an
+        editor saved with a byte-order mark, or with a no-break space after
+        it, so the saved references stayed on the old ids while the shell
+        loaded the file. U+001C at the edge is still left alone."""
+        document = json.dumps({"version": 2, "favorites": ["u:54f81d29"], "recents": [], "lastPlayed": None, "session": None, "sources": []})
+        for body in (chr(0xFEFF) + document, document + chr(0xA0) + "\n", chr(0x0B) + document):
+            with open(self.path, "w", encoding="utf-8", newline="") as handle:
+                handle.write(body)
+            self.assertEqual(helper.remap_state_file(self.path, self.channels), 1, repr(body[:2]))
+            self.assertEqual(self.read()["favorites"], ["n:bc9e3e3d"])
+        with open(self.path, "w", encoding="utf-8", newline="") as handle:
+            handle.write(chr(0x1C) + document)
+        self.assertEqual(helper.remap_state_file(self.path, self.channels), 0)
+
     def test_moves_the_references_and_writes_once(self):
         self.write({"version": 2, "favorites": ["u:54f81d29"], "recents": [], "lastPlayed": None, "session": None, "sources": []})
         self.assertEqual(helper.remap_state_file(self.path, self.channels), 1)

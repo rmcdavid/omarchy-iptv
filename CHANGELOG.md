@@ -123,6 +123,11 @@ after the shell starts, and you start the channel again yourself.
   address and label) and holds a number, a list or `true` instead, the two
   read it differently, and a source the guide showed could be erased by the
   next `state` command. Both now read such a value as missing (D-STATE-6).
+- **A `state.json` saved by an editor that adds a byte-order mark works
+  with the helper's `state` commands too.** The guide loaded such a file,
+  while the helper's `state show` and `state favorite add` answered that it
+  could not be read, and saved favourites could stay on old channel ids
+  after a playlist update. (D-STATE-5)
 
 ### Changed
 

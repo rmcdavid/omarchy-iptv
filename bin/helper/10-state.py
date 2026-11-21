@@ -815,6 +815,26 @@ def init_state_file(path: str, state: dict[str, Any]) -> bool:
     return True
 
 
+# D-STATE-5: what the shell takes off state.json's two ends before it parses
+# it -- its engine's own trim (Model.parseJsonObject; Qt's V4: ECMAScript's
+# WhiteSpace and LineTerminator, and U+0085), which is the reader's class
+# less U+001C..U+001F. json.loads takes the four JSON whitespace characters
+# there and nothing else, so a file an editor saved with a byte-order mark,
+# or one ending in a no-break space, loaded in the guide while every state
+# verb that reads the file answered state_unreadable and `init` read it as an
+# empty state. The shared state-edges fixture (dev branch) holds this list,
+# Model.parseState in node and in V4, and the verbs to one answer. Nothing
+# inside the text is touched, and a U+001C..U+001F at an edge is refused, as
+# the shell reads such a file as unparsed.
+STATE_EDGE_CHARS = "".join(char for char in URL_SPACE_CHARS if not "\x1c" <= char <= "\x1f")
+
+
+def state_json(text: str) -> Any:
+    """state.json's text parsed as the shell parses it: STATE_EDGE_CHARS off
+    both ends, then json_decode. Raises ValueError as json_decode does."""
+    return json_decode(text.strip(STATE_EDGE_CHARS))
+
+
 def read_state_strict(path: str) -> dict[str, Any]:
     """state.json for a verb that reads it to WRITE it (or to report it).
 
@@ -840,7 +860,7 @@ def read_state_strict(path: str) -> dict[str, Any]:
     except ValueError:
         raise HelperError("state_unreadable", "state.json is not UTF-8 text; nothing was written")
     try:
-        raw = json_decode(text)
+        raw = state_json(text)
     except ValueError:
         raw = None
     if not isinstance(raw, dict):
@@ -1165,7 +1185,7 @@ def cmd_state(args: argparse.Namespace) -> int:
             # descriptor outranks the lstat: a regular file swapped for
             # something else in between is "other".
             try:
-                state = normalize_state(json_decode(read_regular_text(path)))
+                state = normalize_state(state_json(read_regular_text(path)))
             except NotRegularFile:
                 state = default_state()
                 if found != "link":
