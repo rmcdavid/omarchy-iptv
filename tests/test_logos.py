@@ -976,6 +976,33 @@ class LogoSurveyRefusedUrlTest(unittest.TestCase):
         self.assertEqual((reply["refusedOnPolicy"], reply["failed"], reply["fetched"]), (survey["refused"], 1, 0))
         self.assertEqual(asked, ["cdn.test"])
 
+    def test_the_rows_own_addresses_make_no_logo_folder(self):
+        """D-LOGO-26's last open point, closed by measurement (2026-11-21):
+        a cache whose only logos the fetch cannot contact got an empty logo
+        folder, because the survey counted hosts the fetch never reached. The
+        row's own addresses -- a tab inside the host, a C0 control before the
+        scheme, a code point the reader's class strips at the authority's
+        edge -- and the three the URL library refuses are each counted
+        refused by the survey and by the run, and no folder is made."""
+        urls = ["https://b.te" + chr(9) + "st/1.png", chr(1) + "https://b.test/1.png",
+                "https://b.test" + chr(0x1C) + "/1.png", "https://" + chr(0x85) + "b.test/1.png",
+                "https://" + chr(0xFEFF) + "b.test/1.png"] + list(self.REFUSED)
+        import socket
+        from unittest import mock
+        asked = []
+
+        def no_lookup(host, *args, **kwargs):
+            asked.append(host)
+            raise socket.gaierror(socket.EAI_NONAME, "refused by the test")
+
+        with mock.patch.object(socket, "getaddrinfo", no_lookup):
+            code_s, survey, _ = self.run_verb(urls, fetch=False)
+            code_f, reply, made_folder = self.run_verb(urls, fetch=True)
+        self.assertEqual((code_s, code_f, asked), (0, 0, []))
+        self.assertEqual((survey["withLogo"], survey["wouldContact"], survey["refused"], survey["hosts"]), (len(urls), 0, len(urls), []))
+        self.assertEqual((reply["refusedOnPolicy"], reply["failed"], reply["fetched"]), (len(urls), 0, 0))
+        self.assertFalse(made_folder, "no logo the fetch would contact, so no logo folder")
+
     def test_the_survey_verb_answers_over_a_cache_holding_one(self):
         code, reply, _ = self.run_verb(self.REFUSED, fetch=False)
         self.assertEqual(code, 0)
