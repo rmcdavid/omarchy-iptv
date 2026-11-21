@@ -907,6 +907,218 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
             "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
 
 
+# D-STATE-9 (2026-11-21): the most links the walk below follows -- QSaveFile's
+# own bound, measured on qt6-base 6.12.0-3 (the spike's chain127 and chain128
+# cases): a literal reading of 127 links reaches its file, and at 128 it stops
+# and writes over the PATH itself, replacing the link at it (a loop on the
+# literal reading included). The kernel's MAXSYMLINKS (ELOOP past 40) bounds
+# one resolution of its own, not this walk: a literal reading can take 41 or
+# 127 links where the kernel takes 2 and still end at the kernel's file
+# (corrected by the review of 2026-11-21, which measured it; this said 40).
+STATE_LINK_HOPS = 127
+
+
+def qt_clean_path(path: str) -> str:
+    """QDir::cleanPath on Unix, as the installed Qt computes it, ported step
+    by step from its qt_normalizePathSegments (Qt 6's modified RFC 3986
+    "remove dot segments", for a local path) because its corners are not
+    posixpath.normpath's: a `..` with nothing before it is KEPT, above the
+    root too (`/a/../../b` is `/../b`, where normpath answers `/b`), and
+    removing a segment back to the root skips one slash only, so
+    `/.//a/` is `//a`. Then the trailing slash goes, but the root's. A
+    backslash is a character, not a separator, and nothing is asked of the
+    filesystem, so no link is resolved. Held to Qt 6.12.0 by the shared
+    qt-clean-path fixture (dev branch), QDir::cleanPath's own answers
+    written by the D-STATE-9 spike's probe and run by the python suite:
+    the Qt source is not on this machine, so the port is held to the
+    library's answers, not its text."""
+    if path == "":
+        return ""
+    text = path
+    size = len(text)
+    root = 1 if text.startswith("/") else 0
+    # Is there a `.` or `..` segment, or a doubled slash, at all?
+    at, after_slash = root, True
+    while at < size:
+        if after_slash and text[at] == ".":
+            if at + 1 == size or text[at + 1] == "/":
+                break
+            if text[at + 1] == "." and (at + 2 == size or text[at + 2] == "/"):
+                break
+        if after_slash and text[at] == "/" and at > 0:
+            at -= 1
+            break
+        after_slash = text[at] == "/"
+        at += 1
+    if at < size:
+        out = list(text[:at])
+        start, read = root, at
+        while True:
+            if read < size and text[read] == "/":
+                out.append("/")
+                read += 1
+                while read < size and text[read] == "/":
+                    read += 1
+            kind = ""
+            if read < size and text[read] == ".":
+                if read + 1 == size or text[read + 1] == "/":
+                    kind = "."
+                elif text[read + 1] == "." and (read + 2 == size or text[read + 2] == "/"):
+                    kind = ".."
+            if kind == "":
+                while read < size and text[read] != "/":
+                    out.append(text[read])
+                    read += 1
+            elif kind == ".." and len(out) == start:
+                # Nothing to climb out of: kept, and the root moves past it.
+                out.extend("..")
+                if read + 2 != size:
+                    out.append("/")
+                    read += 1
+                start = len(out)
+                read += 2
+            else:
+                if kind == "..":
+                    if len(out) > start:
+                        out.pop()
+                    while len(out) > start and out[-1] != "/":
+                        out.pop()
+                    read += 2
+                else:
+                    read += 1
+                if read != size and len(out) > start and out[-1] == "/":
+                    out.pop()
+                if len(out) == start:
+                    if read != size and text[read] == "/":
+                        read += 1
+                    while root == 0 and read != size and text[read] == "/":
+                        read += 1
+            if read >= size:
+                break
+        text = "".join(out) or "."
+    if len(text) > 1 and text.endswith("/"):
+        text = text[:-1]
+    return text
+
+
+def qt_link_literal(path: str) -> str | None:
+    """The file QSaveFile -- the FileView's atomic writer -- writes for
+    `path`: its LITERAL reading of the links there (D-STATE-9). While what is
+    at the current path is a symbolic link, its target replaces it, a
+    relative one joined to the current path's folder AS TEXT (everything
+    before its last `/`) and the whole cleaned with qt_clean_path; the first
+    path is made absolute and cleaned the same way (QFileSystemEngine's
+    absoluteName). So a `..` climbs out of the folder the TEXT names, where
+    the kernel climbs out of the folder that folder really is: through a
+    linked folder they differ. A target is decoded as UTF-8, an invalid byte
+    read as U+FFFD, as QFile::decodeName reads it. Measured, not read: the
+    Qt source is not on this machine, and the spike's driver asserts for
+    every case that this names the file the installed QSaveFile wrote.
+    -> that path (it may not exist; nothing at it, or a folder missing on
+    the way, ends the walk as it ends QSaveFile's); `path` itself, as given
+    and made absolute, while a link is still there after STATE_LINK_HOPS
+    links, because QSaveFile then writes over the path, replacing its link
+    (measured: chain128, loop); or None where a link cannot be read."""
+    current = qt_clean_path(os.path.join(os.getcwd(), path))
+    hops = 0
+    while True:
+        try:
+            if not stat.S_ISLNK(os.lstat(current).st_mode):
+                return current
+        except OSError:
+            return current
+        if hops == STATE_LINK_HOPS:
+            return os.path.join(os.getcwd(), path)
+        hops += 1
+        try:
+            target = os.readlink(os.fsencode(current)).decode("utf-8", "replace")
+        except OSError:
+            return None
+        if not target.startswith("/"):
+            target = (current.rpartition("/")[0] or "/") + "/" + target
+        current = qt_clean_path(target)
+
+
+def state_link_entry(folder: str, name: str) -> tuple[tuple[int, int], str] | None:
+    """One directory entry, as a writer that renames onto it sees it: the
+    folder by its (st_dev, st_ino) and the name in it. What is at the name
+    is not part of it: a rename replaces the entry whatever file it held
+    (the review of 2026-11-21; the file's identity was compared here, and a
+    hard link passed). None when the folder cannot be read as a folder
+    (missing, not one, not searchable: the name is looked up in it, and only
+    a name with nothing there is an answer)."""
+    try:
+        held = os.stat(folder)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(held.st_mode):
+        return None
+    try:
+        os.stat(os.path.join(folder, name))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return None
+    return (held.st_dev, held.st_ino), name
+
+
+def state_link_split(path: str) -> bool:
+    """True when state.json is a symbolic link that QSaveFile would save to
+    a different file than the kernel -- and so the FileView's read, the
+    helper and every other program -- reads (D-STATE-9): a relative target
+    that climbs with `..` out of a linked folder, at any hop of a chain, or a
+    target that is not UTF-8 (QSaveFile reads an invalid byte as U+FFFD and
+    writes the file of that name, measured: nonutf8). The two answers are
+    compared as directory ENTRIES, never as strings: qt_clean_path
+    resolves no link and the kernel resolves every one, so a link inside a
+    linked state folder, or an absolute target through a linked folder
+    (~/Sync -> /mnt/data/Sync), names the same file by two strings. What is
+    compared is the ENTRY a rename replaces: the folder (by st_dev and
+    st_ino, so a bind mount of it is the same folder) and the name in it.
+    Two names of one inode are two entries, in two folders or in ONE:
+    QSaveFile's rename would replace the one and leave the other, which the
+    plugin reads, holding the old text (measured, the spike's hardlink and
+    hardlink2). So a different name is a different entry, always [the
+    review of 2026-11-21: this let a second name in the same folder pass
+    when it named the same inode, for a case-folding filesystem, and a hard
+    link there was saved past]. The cost, stated: on a case-folding
+    filesystem, two spellings of one name that the two readings end at are
+    refused too, where they are one entry; the readings can end in two
+    spellings only after they have gone through different links (not
+    measured: such a filesystem needs root to make).
+    False when there is no link at the path, and when the kernel cannot
+    resolve it either (a loop, a folder that cannot be searched): the
+    verbs' own answers name those (`link`, `unreachable`). True when a link
+    on the literal walk cannot be read, when no folder is at its end, which
+    QSaveFile cannot open (`open failed: No such file or directory`,
+    measured), because then no save reaches the file the plugin reads
+    either, and when the walk passes STATE_LINK_HOPS, because QSaveFile then
+    writes over the path's own entry, a link, which is never the entry the
+    kernel reads."""
+    try:
+        if not stat.S_ISLNK(os.lstat(path).st_mode):
+            return False
+    except OSError:
+        return False
+    try:
+        os.stat(path)
+        kernel = os.path.realpath(path, strict=True)
+    except FileNotFoundError:
+        kernel = os.path.realpath(path)
+    except OSError:
+        return False
+    read = state_link_entry(os.path.dirname(kernel), os.path.basename(kernel))
+    if read is None:
+        return False
+    literal = qt_link_literal(path)
+    if literal is None:
+        return True
+    written = state_link_entry(literal.rpartition("/")[0] or "/", literal.rpartition("/")[2])
+    if written is None:
+        return True
+    return written != read
+
+
 # undo_state_private_create's reason when the inode it created is no longer
 # empty: another program wrote into it in place (a `cp` of a backup onto
 # the name opens it with O_TRUNC and writes into the SAME inode), and
@@ -928,6 +1140,9 @@ def state_private_refusal(why: str, reason: str = "", created: tuple[str, str] =
         "not-owned": "state.json belongs to another account",
         "unreachable": "state.json could not be reached (%s)" % (reason or "error"),
         "unconfirmed": "state.json could not be made private (%s)" % (reason or "error"),
+        # D-STATE-9: the shell's writer reads the link as text, so its save
+        # would land in a file the plugin never reads back.
+        "split-link": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8)",
     }
     word, failure = created
     if failure == STATE_PRIVATE_WRITTEN:
@@ -1093,7 +1308,16 @@ def state_private(path: str) -> dict[str, Any]:
     own modes leaves no empty state.json of this run's behind, unless
     something else took the name meanwhile (the claims check of
     D-SINK-103, 2026-11-14).
+    Refused first, before anything is opened or changed (D-STATE-9,
+    2026-11-21): a state.json link that the FileView's writer, QSaveFile,
+    reads as TEXT to a different file than the kernel reads it
+    (`split-link`, state_link_split): its save would land where nothing
+    reads it back, and the 0600 this run makes, or the empty file it
+    creates, would be the other file's. The lead's call under the owner's
+    standing authority of 2026-11-09.
     -> {"file": "kept"|"changed"|"created"}"""
+    if state_link_split(path):
+        raise state_private_refusal("split-link")
     fd, how, made = state_private_open(path)
 
     def refuse(why: str, reason: str = "") -> HelperError:
@@ -1179,6 +1403,16 @@ def cmd_state(args: argparse.Namespace) -> int:
                 emit({"ok": True, "kind": "state", "action": action, "found": found, "created": False,
                       "state": public_state(default_state())})
                 return EXIT_OK
+            # D-STATE-9 (2026-11-21): a link the FileView's writer reads as
+            # text to another file than the kernel does is named, as a link
+            # to nothing is (`link`), so a start that cannot load the file
+            # blocks with the sentence that fixes it. Nothing more is done
+            # than for any link at the path: nothing is created through it
+            # (O_EXCL meets the link), and the file the kernel names is made
+            # 0600, which writes no text and narrows the file the plugin
+            # reads. `state private` refuses every save over it.
+            if found in ("file", "link") and state_link_split(path):
+                found = "split-link"
             # The init reads tolerantly: what it read is only ever written
             # when nothing was there (O_EXCL), so tolerance costs nothing.
             # R23b: through the one opener, so a FIFO answers at once. The
@@ -1188,7 +1422,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                 state = normalize_state(state_json(read_regular_text(path)))
             except NotRegularFile:
                 state = default_state()
-                if found != "link":
+                if found not in ("link", "split-link"):
                     found = "other"
             except (OSError, ValueError):
                 state = default_state()

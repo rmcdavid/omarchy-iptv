@@ -13,7 +13,18 @@
 // holding NEW is where the save landed; the kernel's answer for where the
 // plugin READS is realpath's. No path is invented here: the driver names
 // every file it wants read. Links against the installed libQt6Core.
+//
+//   probe --clean HEX...
+//
+// (D-STATE-9's guard, 2026-11-21.) For each argument, the UTF-8 text whose
+// hex it is, prints `CLEAN <hex in> <hex out>`, out being QDir::cleanPath of
+// it: the cleaning QSaveFile gives each hop of a link (the helper's
+// qt_clean_path reimplements it, and tests/fixtures/qt-clean-path.json is
+// this mode's output, which the python suite holds it to). Hex both ways,
+// so no text needs quoting through the shell or gdb.
+#include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
 #include <climits>
@@ -45,8 +56,16 @@ static void show(const char *path) {
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     if (argc < 2) {
-        fprintf(stderr, "usage: probe PATH FILE...\n");
+        fprintf(stderr, "usage: probe PATH FILE... | probe --clean HEX...\n");
         return 2;
+    }
+    if (strcmp(argv[1], "--clean") == 0) {
+        for (int i = 2; i < argc; ++i) {
+            const QString in = QString::fromUtf8(QByteArray::fromHex(QByteArray(argv[i])));
+            const QByteArray out = QDir::cleanPath(in).toUtf8().toHex();
+            printf("CLEAN %s %s\n", argv[i], out.isEmpty() ? "-" : out.constData());
+        }
+        return 0;
     }
     const QString path = QString::fromLocal8Bit(argv[1]);
     char resolved[PATH_MAX];

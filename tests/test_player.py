@@ -60,7 +60,42 @@ http://provider.test/live/espn.m3u8
 # mpv 0.41 (including the playlist_entry_id of a loadfile and the events that
 # follow it). STUB_MPV_MODE picks the failure being tested.
 STUB_MPV = '''#!/usr/bin/env python3
-import json, os, socket, stat, sys, threading, time
+import json, os, select, socket, stat, sys, threading, time
+
+# F-HARNESS-119 (2026-11-21): the stub ends with the test process that
+# started it. `player start` setsids the player and its relay into a session
+# of their own, so a signal to the suite's process group never reaches them,
+# and a suite stopped by a default SIGTERM or a SIGKILL runs no addCleanup:
+# measured, a stub and its relay outlived the SIGTERM of the process holding
+# them. STUB_MPV_OWNER is that process's `<pid>:<start time>` (PlayerTestCase
+# sets it); the stub watches it through a pidfd and exits once it is gone,
+# whichever signal ended it. The start time is asked after the pidfd is
+# open, so a pid reused before that reads as the owner gone. Real mpv has no
+# such watch; it acts only once no test is left to assert anything of this
+# process, and until then it is one thread blocked on a descriptor of the
+# stub's own (CLAUDE.md 10: nothing a test asserts changes).
+def watch_owner(owner):
+    pid, _, start = owner.partition(":")
+    try:
+        fd = os.pidfd_open(int(pid))
+    except (OSError, ValueError):
+        os._exit(0)
+    try:
+        with open("/proc/%d/stat" % int(pid), "rb") as handle:
+            fields = handle.read().rsplit(b")", 1)[1].split()
+        if fields[19].decode("ascii") != start:
+            os._exit(0)
+    except (OSError, IndexError, UnicodeError):
+        os._exit(0)
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+    while not poller.poll():
+        pass
+    os._exit(0)
+
+
+if os.environ.get("STUB_MPV_OWNER", ""):
+    threading.Thread(target=watch_owner, args=(os.environ["STUB_MPV_OWNER"],), daemon=True).start()
 
 raw_argv = sys.argv[1:]
 mask = os.umask(0o022)
@@ -618,6 +653,9 @@ class PlayerTestCase(IdentitySeam, unittest.TestCase):
         pathlib.Path(stub).write_text(STUB_MPV, encoding="utf-8")
         os.chmod(stub, 0o755)
         self.env(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""), STUB_MPV_RECORD=self.record)
+        # F-HARNESS-119: every stub this test starts, through the shipping
+        # spawn or directly, ends with this process (STUB_MPV's watch_owner).
+        self.env(STUB_MPV_OWNER="%d:%s" % (os.getpid(), helper.proc_start_time(os.getpid())))
         self.addCleanup(self.reap)
         self.server = None
         self.install_identity_seam(helper)
