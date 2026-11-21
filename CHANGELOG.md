@@ -141,6 +141,13 @@ after the shell starts, and you start the channel again yourself.
   first, and if that run cannot make the file private the save fails and
   says so. Reported by the Omarchy plugin marketplace's maintainer against
   0.19.1. (D-SINK-103)
+- **If `state.json` is a symbolic link that the shell would save to a
+  different file than the one it reads** -- a relative target that climbs
+  with `..` out of a folder that is itself a link, or a target name that is
+  not UTF-8 -- the plugin now stops saving and says it could not write
+  `state.json`, instead of silently saving to a file it never reads back.
+  Point the link at your state file with an absolute path that has no `..`
+  in it. (D-STATE-9)
 - **Playing a channel right after Stop no longer fails with "The player is
   busy"**: the new channel starts once the old player has finished
   closing, and is no longer lost if the old player closes between two
@@ -159,6 +166,11 @@ after the shell starts, and you start the channel again yourself.
   guide no longer picks the restarted player back up after the stop,
   and a channel chosen right after such a stop starts on its own
   instead of ending on a false "stopped unexpectedly" message. (D-PLY-72)
+- **Choosing a channel just after the plugin stopped a player on its own**
+  -- one that kept playing after your Stop, or one it would not take over
+  when the shell started -- now starts that channel fresh, instead of
+  sending it to the player being shut down, where it was lost behind a
+  false "stopped unexpectedly" message. (D-PLY-73)
 - **Starting, changing channel, pausing or seeking on a player that
   answers too slowly now gives up within its own time limit** and says
   "mpv did not answer", instead of waiting a minute or more, and a start

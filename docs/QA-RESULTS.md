@@ -22628,3 +22628,43 @@ stub resealed each time, against the 25:
 - Finding 3's shape is a fixed time claimed for a process that lingers by
   design. Searched in this branch's records only: the F-HARNESS-119 row and
   subsection, both corrected.
+
+## The lead's follow-ups to the ply73 and state9 lanes (2026-11-21)
+
+Both lanes merged into dev (9633e30 and 762f956) after their rechecks read
+pushable. Each call below is the lead's call under the owner's standing
+authority of 2026-11-09.
+
+- D-PLY-73: the changed D-PLY-40 check (its last value now `true`) is
+  accepted. The backstop's stop opens a settle in the row's first option,
+  so its timer necessarily runs again; the second option breaks the same
+  check (the lane's O2). What the old value meant -- nothing more is asked
+  after that stop -- is held by the new unattended invariant-4 check, red
+  on 085a49d and on M03. The fix's scope over every caller of
+  `stopUnadoptedPlayer`, the lane's rule-15 call, is kept, with its cost:
+  `stopping` reads true for up to 18.25 s after a stop at reattach.
+- D-PLY-76 is kept at P4, as the review offered it and the settle lane
+  filed it.
+- D-PLY-77, filed open at P4 from the review of lane-ply73: a terminal
+  `player` verb on its default `--seq 0` lowers the lock record, so an
+  older shell stop still waiting for the lock passes `check_seq`. Read in
+  `bin/helper/07-player.py` (`check_seq`, `write_lock_record`) and seen in
+  the review's world variant on seeds 61, 237 and 473, on 085a49d and on
+  the fix alike. Not built: which readers meet a record left high by an
+  earlier shell needs reading before either fix.
+- D-PLY-75 stays open, its fix not built; the row names both probe
+  windows now.
+- D-STATE-9: the lane's proposals are taken as they stand -- a second name
+  in one folder is always another entry, with the case-folding cost stated;
+  QSaveFile's own 127 as the bound; no folder at the literal location and a
+  hard link there refused; `state init` still making the kernel's file
+  0600; the widened sentence and notice. The two earlier commit messages
+  (a0fb773, 2ca6c76) are left as they are: 064570d's message and the
+  dated brackets correct them, as this project corrects a record.
+- D-STATE-11, filed open at P4 from the review of lane-state9 (its finding
+  4): over a state file that loads, the `split-link` refusal is told only
+  as "Could not write state.json". The CHANGELOG line says exactly that,
+  not that the plugin says why; the recheck caught the first wording.
+- The D-SINK-112 logo-column cost check failed once in lane-settle-state9's
+  node run (42.5 ms against a 42.3 ms bound) and passed on the rerun; it is
+  outside both changes and is watched in the gate rather than filed.
