@@ -1746,7 +1746,25 @@ start holds the lock. The earlier stop's EOF ends the settle ((1) above) before
 the later stop has run, and that start's ok then zaps the queued channel at the
 player the later stop ladders. The user ends on a "stopped unexpectedly" card
 or, where the zap meets `not_running`, on the channel through a fresh start;
-before this round the same sequence dropped the play in silence]**. That
+before this round the same sequence dropped the play in silence. Closed
+2026-11-21 (lane-ply69, the ply69 branch): the shell records the intent and
+whether a stop was settling when the player slot's start goes out
+(`sessionSeq`, `sessionInStop`), and while a start that went out inside one
+stop's settle and before the last stop is in flight (`staleStartInFlight`),
+no EOF ends the settle -- neither (1)'s, with a play made after the last stop,
+nor the plain one with the user's stop the last word, which had ended the
+settle and cleared `userStopped`, so that start's ok was recovered and its
+player adopted under the stop. The death is cleaned up and told to no one; the
+start's own ok then reads as a start from before the stop
+(`stopOlderStartOk`), and a play made after the stop goes out as its own
+start, ordered after the stop by the lock and the seq rule. A start that went
+out with no stop settling is the single stop's case and is left exactly as it
+was. D-PLY-71, its sibling: a start issued before the last stop has its first
+load told to no one, because the stop laddering its player in that window
+reads there as mpv closing the connection, and told it named the play made
+after the stop and dropped it. Held by the service harness and a seeded world
+of the helper's lock, record and players (tests/player-world.js); not watched
+on a real player]**. That
 preserves the documented behaviour ("Playing a channel while the old player is
 still shutting down starts a fresh player once it has exited") with a stronger
 mechanism: `player start` blocks on the lock behind the running ladder and, when

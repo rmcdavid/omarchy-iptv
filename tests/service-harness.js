@@ -178,6 +178,15 @@ function makeIds(h) {
     // be a half-attached player no real shell can be in. (The first version
     // had such a switch, `h.socketListening`, that no test set; the recheck
     // of lane-ply32 removed it.)
+    // D-PLY-69 (2026-11-21): one opt-in exception that is not that switch.
+    // A test that models the helper and its players (tests/player-world.js)
+    // sets `h.socketWorld`, and each fresh object is that world's socket: it
+    // connects only while the world has a live player bound to the path, and
+    // its connect and its peer's close run the Component's OWN
+    // onConnectionStateChanged, compiled from the tree's text
+    // (h.socketChanged below), synchronously inside the assignment as the
+    // real Socket does (C4) -- so an attached observer here is one the shell
+    // attached itself, never one a test stood in.
     // D-PLY-32: and what the socket's EOF (handlePlayerGone) stops on its way
     // to the failure report: the player slot (asked whether a start is in
     // flight; nothing runs), the focus retry, the stop backstop and PiP's two
@@ -214,6 +223,7 @@ function makeIds(h) {
     playerSocketComponent: {
       createObject() {
         h.socketsMade = (h.socketsMade || 0) + 1
+        if (h.socketWorld) return h.socketWorld.socket()
         return {
           get connected() { return false },
           set connected(v) {},
@@ -844,6 +854,21 @@ function helperPrivate(file) {
   return { code: 0, raises, reply: line({ ok: true, kind: "state", action: "private", file: how }) }
 }
 
+// D-PLY-69: what bootService reads out of a tree's text depends on the text
+// alone, so it is read once per text -- a seeded sweep boots the service a
+// few hundred times (tests/player-world.js), and the read was a third of a
+// boot. Nothing below writes to what it returns; every compile is still per
+// boot, in that boot's own scope.
+const PARSED = new Map()
+function parsedText(serviceText) {
+  let v = PARSED.get(serviceText)
+  if (v === undefined) {
+    v = { fns: rootFunctions(serviceText), props: rootProperties(serviceText), ipc: ipcFunctions(serviceText) }
+    PARSED.set(serviceText, v)
+  }
+  return v
+}
+
 function bootService(serviceText, Model, o) {
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], detachedRuns: [], turns: 0, cacheHang: false,
@@ -865,8 +890,9 @@ function bootService(serviceText, Model, o) {
     return JSON.stringify({ ok: true, kind: "cache", action: verb }) + "\n"
   }
   const ids = makeIds(h)
-  const fns = rootFunctions(serviceText)
-  const props = rootProperties(serviceText)
+  const parsed = parsedText(serviceText)
+  const fns = parsed.fns
+  const props = parsed.props
   const values = {}
   const root = {}
   // D-SINK-24 (rule 10): EVERY argument, joined by a space, as the real
@@ -904,6 +930,12 @@ function bootService(serviceText, Model, o) {
   const onSettingsText = (serviceText.match(/^  onSettingsChanged: (.*)$/m) || [])[1]
   const onHostText = (serviceText.match(/^  onHostSettingsChanged: (.*)$/m) || [])[1]
   const onSettingsChanged = onSettingsText ? compile("", onSettingsText, "onSettingsChanged") : () => {}
+  // D-PLY-69: the socket observer's own onConnectionStateChanged, from the
+  // playerSocketComponent block of the tree, run by h.socketWorld's sockets
+  // with `this` the socket (null on a tree without the block).
+  const sockAt = serviceText.indexOf("id: playerSocketComponent")
+  const sockBody = sockAt === -1 ? null : handlerBlock(serviceText.slice(sockAt), "onConnectionStateChanged: {")
+  h.socketChanged = sockBody ? compile("", sockBody, "playerSocket_onConnectionStateChanged") : null
   const onHostSettingsChanged = onHostText ? compile("", onHostText, "onHostSettingsChanged") : () => {}
   // Properties. A readonly binding is re-evaluated on every read.
   for (const p of props) {
@@ -955,7 +987,7 @@ function bootService(serviceText, Model, o) {
   // F-SINK-16: the IPC verbs, from their own text (ipcFunctions above), run
   // in the root's scope as the handler's `root.` and `Model.` resolve there.
   h.ipc = {}
-  const ipcFns = ipcFunctions(serviceText)
+  const ipcFns = parsed.ipc
   for (const name in ipcFns) h.ipc[name] = compile(ipcFns[name].args, ipcFns[name].body, "ipc_" + name)
   root.runConfigShield = () => {}
   root.noteSessionOutcome = () => {}
