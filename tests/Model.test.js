@@ -19195,7 +19195,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const asked = runs.slice()
       exit(h, probeSeq(xSeq))
       return [asked, stopsIssued(h).length - before, h.root.nowPlaying, t.running === true]
-    }, [["probe"], 1, null, false])
+    // [2026-11-21, D-PLY-73: the last value read `false`, the backstop not
+    // armed again once the stop it found the player for was issued. That
+    // stop now settles as the user's does (stopUnadoptedPlayer), so the
+    // backstop runs once more for that stop's own bound and then asks
+    // nothing (the D-PLY-73 checks below hold both). The rest is unchanged.]
+    }, [["probe"], 1, null, true])
 
     checkCall("9d604cf review (D-PLY-40): and when that stop took, the backstop's probe finds nothing and stops nothing", () => {
       const h = withChannels(bootPlayer())
@@ -19633,13 +19638,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the shell's own. On d3a9511: (1) on seeds 7, 26, 122, 139, 147 and
     // 152, (3) on seed 2, (2b) on 51 seeds (41 of them D-PLY-71's card, the
     // rest a card for the player the later stop laddered). About 5 s.
-    const worldSweep = (count, steps, restartP) => {
+    const worldSweep = (count, steps, restartP, contestP) => {
       const PW = require("./player-world.js")
       const red = { one: [], two: [], twoB: [], three: [], quiet: [] }
       for (let seed = 1; seed <= count; seed++) {
         const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
         h.detached.length = 0
-        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP,
+        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP, contestP,
                                          lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
         if (v.one.length > 0) red.one.push(seed)
         if (v.two !== "") red.two.push(seed)
@@ -19662,6 +19667,172 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // seeds, (2b) on 49. About 5 s.
     checkCall("D-PLY-72 (seeded world, with health restarts): 150 sequences of plays, stops and the health path's restarts -- no zap into a player a stop then ladders, no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
       worldSweep(150, 20, 0.15), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // ---- D-PLY-73 (2026-11-21): a stop the shell issues itself settles too ----
+    //
+    // A user's stop refused or superseded by another launcher leaves the
+    // player playing with the observer still on it; the 5 s look reads the
+    // record, and when it does not act (the slot busy, or the record the
+    // stop's own or older) the backstop's probe finds the player and
+    // stopUnadoptedPlayer stops it. That stop kept the observer and opened
+    // no settle, so play() read an attached observer, nothing stopping and
+    // nothing owed, and zapped the user's next channel into the player the
+    // stop was laddering (4.10: "a zap can never be written to a dying
+    // socket"). The 5 s look's own stop reopened the settle; the backstop's
+    // did not. Now every stop the shell issues itself opens one
+    // (stopUnadoptedPlayer), and the one issued on the backstop's own probe
+    // is the last: its settle's backstop asks nothing more (stopFromBackstop). Red
+    // on 085a49d unless a check says it is a pin.
+    const survivorProbe = (seq, o) => probeSeq(seq, Object.assign({ stash: STASH_OF(X.id, seq), claimed: true }, o || {}))
+    // -> the shell's own stop just issued at the backstop, over a player
+    // that outlived the user's stop (the record below it: the stop never
+    // got the lock), the observer still on that player.
+    const outlived = () => {
+      const h = withThree(bootPlayer())
+      const settle = h.driveTimer("stopSettleTimer")
+      attachedToDying(h)
+      const survivor = h.root.playerSocket
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      const asks = slotAsks(h)
+      h.elapse(PB.watchdogMs.stop)
+      exit(h, survivorProbe(h.root.stopSeq - 1))
+      return { h, settle, survivor, asks }
+    }
+
+    checkCall("D-PLY-73: the backstop's stop of a player that outlived the user's stop settles as the user's does -- a play made while it ladders goes out as a start, never a zap into that player; that player's EOF ends the stop and keeps the play, whose start's ok names it, no card", () => {
+      const v = outlived()
+      const h = v.h
+      const shell = [stopsIssued(h), h.root.stopSeq, h.root.stopping === true, h.root.socketAttached()]
+      const zaps = zapsOf(h)
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      const sent = [zaps.slice(), v.asks.slice()]
+      eofOf(h, v.survivor)
+      const afterEof = [h.root.stopping === true, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      exit(h, okStartSeq(Y.id, ySeq))
+      return [shell, sent, afterEof, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, [[[1, 2], 2, true, true], [[], ["probe", "start:" + Y.id]], [false, Y.id], [], Y.id, []])
+
+    // Why the settle and not the row's other option (the stop releasing the
+    // observer, so a play reads no player up): the first play's start arms
+    // the observer, whose connect reaches the player the shell's stop is
+    // still laddering, and a SECOND play then read an attached observer and
+    // nothing stopping -- the same zap, one play later. So also with nothing
+    // attached when the shell's stop went out (the 9d604cf review's start
+    // from before the stop, its player found by the backstop's probe). The
+    // arm's connect is the one-shot stand-in of D-PLY-72's `cold-wedged`.
+    checkCall("D-PLY-73: a second play made while the shell's stop ladders, after the first play's start put the observer on that player, is queued behind that start, never zapped -- with the observer on the player when the shell's stop went out, and with nothing attached then", () => ["attached", "unattended"].map(how => {
+      let h
+      if (how === "attached") {
+        h = outlived().h
+      } else {
+        h = withThree(bootPlayer())
+        h.driveTimer("stopSettleTimer")
+        h.root.play(X.id, true, "")
+        h.drain()
+        const xSeq = h.root.playSeq
+        h.root.stop()
+        h.drain()
+        exit(h, okStartSeq(X.id, xSeq))
+        h.elapse(PB.watchdogMs.stop)
+        exit(h, probeSeq(xSeq))
+      }
+      listeningOnce(h)
+      const zaps = zapsOf(h), asks = slotAsks(h)
+      h.root.play(Y.id, true, "")
+      h.drain()
+      h.root.play(Z.id, true, "")
+      h.drain()
+      return [how, stopsIssued(h).length, zaps, asks, h.root.pendingPlayId, h.root.stopping === true]
+    }), [["attached", 2, [], ["start:" + Y.id], Z.id, true], ["unattended", 2, [], ["start:" + Y.id], Z.id, true]])
+
+    // Invariant 4 (the lead's brief): a settle the shell's own stop opens
+    // always ends. With no EOF at all -- the player outlived that stop too,
+    // or the observer never hears it -- it ends at the stop's own bound, and
+    // since the backstop's stop is the last the shell sends after the
+    // user's, that bound asks nothing and nothing reopens it.
+    checkCall("D-PLY-73 (invariant 4): that settle ends with no EOF at all -- `stopping` held to the stop's own bound and released there, its backstop asks nothing and stops nothing more, and nothing opens it again", () => {
+      const v = outlived()
+      const h = v.h
+      const asked = v.asks.length
+      h.elapse(PB.watchdogMs.stop - 1)
+      const justBefore = [h.root.stopping === true, v.settle.running === true]
+      h.elapse(1)
+      const atBound = [h.root.stopping === true, h.root.userStopped === true, v.asks.slice(asked), stopsIssued(h)]
+      h.elapse(3 * PB.watchdogMs.stop)
+      return [justBefore, atBound, h.root.stopping === true, v.asks.slice(asked), stopsIssued(h)]
+    }, [[true, true], [false, false, [], [1, 2]], false, [], [1, 2]])
+
+    // Pins: the stops the shell sends after a user's stop are the ones it
+    // sent before -- the 5 s look's, looked at once by its backstop, whose
+    // stop is the last -- and a user's stop made after such a settle is
+    // looked at as ever. Green on 085a49d; red when the mark is taken for
+    // the look's stop too, or left standing past the next stop.
+    checkCall("D-PLY-73 (pin): the 5 s look's stop of a player a superseded stop left is looked at once by its backstop, as before -- one probe, and the stop that probe issues over a survivor is the last", () => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      attachedToDying(h)
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      const asks = slotAsks(h)
+      h.elapse(5000)
+      exit(h, survivorProbe(9999))
+      const look = [asks.slice(), stopsIssued(h).length]
+      h.elapse(PB.watchdogMs.stop)
+      const backstop = asks.slice()
+      exit(h, survivorProbe(h.root.playSeq - 1))
+      const after = stopsIssued(h).length
+      h.elapse(3 * PB.watchdogMs.stop)
+      return [look, backstop, after, asks.slice(), stopsIssued(h).length]
+    }, [[["probe"], 2], ["probe", "probe"], 3, ["probe", "probe"], 3])
+
+    checkCall("D-PLY-73 (pin): a user's stop made after the backstop's stop has settled is looked at by its own backstop again", () => {
+      const v = outlived()
+      const h = v.h
+      eofOf(h, v.survivor)
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, okStartSeq(Y.id, h.root.playSeq))
+      attachedToDying(h)
+      h.root.stop()
+      h.drain()
+      const asked = v.asks.length
+      h.elapse(PB.watchdogMs.stop)
+      return [v.asks.slice(asked), h.root.stopConfirmPending === true]
+    }, [["probe"], true])
+
+    // Rule 15: every other stop the shell issues itself is looked at once by
+    // its backstop, as the user's is (here a player that does not answer a
+    // probe, after a settle the backstop's own stop ended). On 085a49d that
+    // stop opened no settle and nothing looked.
+    checkCall("D-PLY-73 (rule 15): a stop the shell issues for any other reason -- a player that does not answer a probe -- settles, and its backstop looks once, also after a settle the backstop's own stop ended", () => {
+      const v = outlived()
+      const h = v.h
+      eofOf(h, v.survivor)
+      attachedToDying(h)
+      h.root.runPlayerProbe()
+      exit(h, survivorProbe(h.root.playSeq - 1, { responsive: false }))
+      const stopped = [stopsIssued(h).length, h.root.stopping === true]
+      const asked = v.asks.length
+      h.elapse(PB.watchdogMs.stop)
+      return [stopped, v.asks.slice(asked)]
+    }, [[3, true], ["probe"]])
+
+    // The seeded world with a contested stop (the header's `contestP`: after
+    // a user's stop, a 30% chance that another launcher's verb reaches the
+    // lock at once and holds it past the stop's wait, recording 0 as a
+    // terminal verb does, and the next action waits out the backstop). 150
+    // sequences of 16 steps. On 085a49d: (1) on seeds 25, 31, 52, 63, 71,
+    // 92, 100, 108, 121, 141, 145 and 146 -- each a play zapped into the
+    // player the backstop's own stop then laddered -- and (2b) on 25, 100,
+    // 108, 121 and 141, that player's "stopped unexpectedly". About 5 s.
+    checkCall("D-PLY-73 (seeded world, with contested stops): 150 sequences of plays and stops, some refused by another launcher holding the lock -- no zap into a player a stop then ladders, the shell's own stops included; no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
+      worldSweep(150, 16, 0, 0.3), { one: [], two: [], twoB: [], three: [], quiet: [] })
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----
@@ -20536,6 +20707,55 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       }
       return [run(STASH({ sourceKey: KB })), run(STASH())]
     }, [[[], true], [["t:x"], false]])
+
+    // ---- D-PLY-73 (rule 15): every stop the shell issues itself settles ----
+    //
+    // stopUnadoptedPlayer is reached from five more branches than the
+    // backstop's, and on 085a49d none opened a settle: the observer stayed on
+    // the player being laddered, so the next play zapped it. A player that
+    // does not answer a probe, one of this build that will not verify the
+    // certificate, and one this shell cannot identify (an idle player of this
+    // build: another launcher's start before its first load) can each be a
+    // player the helper's `play` feeds; another build's player that cannot be
+    // restarted, or whose automatic restart this build refused for its
+    // channel, is refused by the build gate and that zap routed to a start
+    // (read). Now each is a start at once, and the stopped player's EOF ends
+    // the stop and keeps the play. Red on 085a49d in every row: the zap.
+    const SHELL_STOPS = ["unresponsive", "unverified", "unidentified", "older-unsafe", "restart-refused"]
+    checkCall("D-PLY-73 (rule 15): a play made while ANY stop the shell issues itself ladders goes out as a start -- a player that does not answer, will not verify, cannot be identified, another build's that cannot be restarted, or whose restart was refused for its channel; its EOF ends the stop and keeps the play", () => SHELL_STOPS.map(how => {
+      const { h, slots, zaps } = boot()
+      if (how === "older-unsafe") {
+        reattach(h, probeOf({ tls: UNSAFE }))
+        attach(h)
+        h.elapse(M.OLDER_RESTART_HOLD_MS)
+      } else if (how === "restart-refused") {
+        reattach(h, probeOf())
+        attach(h)
+        land(h)
+        exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code: "local_address", message: "the stream address is on this machine or its network" }, id: "t:x", seq: h.root.playSeq }))
+      } else {
+        attach(h)
+        const reply = probeOf(how === "unresponsive" ? { launch: "current", relay: true, responsive: false }
+          : how === "unverified" ? { launch: "current", relay: true, tls: UNSAFE }
+          : { launch: "current", relay: true, stash: null, idle: true })
+        reattach(h, reply)
+        if (how === "unidentified") {
+          h.fireTimer("probeRetryTimer")
+          h.drain()
+          exit(h, reply)
+        }
+      }
+      if (how !== "restart-refused") land(h)
+      const stopped = [stops(h), h.root.stopping === true, h.root.socketAttached()]
+      const z0 = zaps.length, s0 = slots.length
+      h.root.play("t:y", true, "")
+      h.drain()
+      const sent = [zaps.slice(z0).map(verbOf), startArgs(slots.slice(s0)).map(idOf)]
+      eof(h)
+      const afterEof = [h.root.stopping === true, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      exit(h, okStart("t:y", { seq: h.root.playSeq }))
+      return [how, stopped, sent, afterEof, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h).map(t => t.split(" | ")[0])]
+    }), SHELL_STOPS.map(how => [how, [1, true, true], [[], ["t:y"]], [false, "t:y"], "t:y", how === "restart-refused" ? ["74011 Stream failed"] : []]))
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----

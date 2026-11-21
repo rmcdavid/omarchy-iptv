@@ -936,7 +936,10 @@ Item {
   // after the stop is still on its way (handlePlayerGone) -- but no EOF
   // ends it while a start that went out before this stop, inside an earlier
   // stop's settle or over a player it may ladder itself, is still in flight
-  // (D-PLY-69, D-PLY-72, staleStartInFlight).
+  // (D-PLY-69, D-PLY-72, staleStartInFlight). D-PLY-73: and a stop the
+  // shell issues itself (stopUnadoptedPlayer: a player that outlived the
+  // user's stop, or one it will not adopt) opens the same settle, with its
+  // own `stopSeq` and bound.
   property real stopAt: 0
   readonly property bool stopping: stopAt > 0
   // The intent number the last stop() went out with (D-PLY-40): what a
@@ -1003,6 +1006,17 @@ Item {
   // (stopLookTimer), which stops the player only when the lock record shows
   // the stop superseded, never while the stop's own record stands.
   property bool stopConfirmLook: false
+  // D-PLY-73: the settle running waits on a stop issued on the backstop's
+  // own probe (applyProbe), so its backstop ends it and looks no further. Every
+  // other stop -- the user's, and one the shell issues itself
+  // (stopUnadoptedPlayer) -- is looked at once by its backstop, and this is
+  // what ends that chain: without it a player that outlives every stop drew
+  // a probe and a stop once a backstop for ever, `stopping` true nearly all
+  // the while. Set only after such a stop and cleared by both openers of a
+  // settle (stop() and stopUnadoptedPlayer), which are the only callers of
+  // the backstop's restart(), so the backstop reads what the settle it ends
+  // was opened with.
+  property bool stopFromBackstop: false
   // Whose failure has already been toasted for this play. `player start`'s
   // own first-load window and socket EOF are two independent detectors of
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
@@ -1412,6 +1426,9 @@ Item {
     root.stopSeq = root.playSeq
     root.stopAt = Date.now()
     root.stopOlderStartOk = false
+    // D-PLY-73: the user's stop is looked at by its backstop whatever the
+    // settle before it was.
+    root.stopFromBackstop = false
     stopSettleTimer.restart()
     stopLookTimer.restart()
     // The user asked for it, so nothing died unattended: the session record
@@ -3942,15 +3959,17 @@ Item {
       }
       if (probe.running) {
         // The stop was refused and the player is still there. Now that the
-        // sequence is resynced, the ladder cannot be superseded again.
+        // sequence is resynced, the ladder cannot be superseded again. That
+        // stop settles as the user's did, its own bound from now
+        // (stopUnadoptedPlayer, D-PLY-73, which since then opens the settle
+        // for the backstop's stop as it always did for the look's).
         console.warn("omarchy-iptv: stopping a player that survived a superseded stop")
         root.stopForeignPlayer()
-        if (look) {
-          // and that stop settles as the user's did: its own bound, from now.
-          root.stopSeq = root.playSeq
-          root.stopAt = Date.now()
-          stopSettleTimer.restart()
-        }
+        // D-PLY-73: and a stop issued on the BACKSTOP's own probe is the
+        // last the shell sends after the user's: its settle's backstop ends
+        // it and looks no further (stopFromBackstop). The 5 s look's stop is
+        // looked at once by its backstop, as before.
+        if (!look) root.stopFromBackstop = true
       } else {
         root.playerWanted = false
         playerSocketTimer.stop()
@@ -4338,6 +4357,24 @@ Item {
   // different reason and the session record should say which: a player that
   // could not be made to verify the stream's certificate is stopped rather than
   // fed, and that is not the same event as a player we could not identify.
+  //
+  // D-PLY-73 (closed 2026-11-21): and the stop the shell issues here settles
+  // as the user's does (4.10). It kept the observer on the player it ladders
+  // and opened no settle, so play() -- an observer attached, nothing
+  // stopping, nothing owed -- zapped the user's next channel into that
+  // player, the backstop's stop of a player that outlived the user's stop
+  // above all (the 5 s look's reopened the settle itself). Now `stopping`
+  // runs from here until that player's EOF, a start of an intent issued
+  // after this stop answering ok, or this stop's own bound (stopSettleTimer),
+  // so a play made meanwhile goes out as a start, which the lock and the seq
+  // rule order after the ladder. Every caller: the backstop's and the look's
+  // stop of a survivor, and at any probe a player that does not answer, one
+  // that will not verify the certificate or one this shell cannot identify
+  // (each can be a player of this build, which the helper's `play` feeds),
+  // and another build's player that cannot be restarted or whose automatic
+  // restart this build refused (whose zap the build gate already routed to
+  // a start). `stopSeq` moves to this stop, so a start's reply is judged
+  // against the last stop issued, the user's or the shell's.
   function stopUnadoptedPlayer(outcome) {
     root.playSeq += 1
     root.playerWanted = false
@@ -4350,6 +4387,13 @@ Item {
     root.endOlderRestart()
     root.noteSessionOutcome(outcome)
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
+    root.stopSeq = root.playSeq
+    root.stopAt = Date.now()
+    // Looked at once by its backstop, as the user's stop is -- unless it was
+    // issued on the backstop's own probe (applyProbe sets this after the
+    // call).
+    root.stopFromBackstop = false
+    stopSettleTimer.restart()
     // D-PLY-35: when the reattach probe was looking for what a stopped start
     // left, this is what it found, and that start failed.
     root.settleTimedOutPlay(false)
@@ -7157,6 +7201,14 @@ Item {
     // with nothing attached: its player was up, and a stop refused `busy`
     // behind that start's own lock left it playing unobserved under an idle
     // bar. One probe: a stop that took finds nothing.
+    //
+    // D-PLY-73: a stop the shell issues itself (stopUnadoptedPlayer) opens
+    // a settle of its own, and this backstop looks at it once as it looks at
+    // the user's -- except the stop this probe leads to, whose settle it
+    // ends here and looks no further (stopFromBackstop): so the shell sends
+    // no more stops after the user's than it did before those settles
+    // existed, and a player that outlives every stop does not hold
+    // `stopping` for good.
     id: stopSettleTimer
     interval: root.stopSettleMs
     repeat: false
@@ -7166,7 +7218,7 @@ Item {
       stopLookTimer.stop()
       var older = root.stopOlderStartOk
       root.stopOlderStartOk = false
-      if (root.nowPlaying !== null || root.stopConfirmPending) return
+      if (root.stopFromBackstop || root.nowPlaying !== null || root.stopConfirmPending) return
       if (!root.socketAttached() && !root.playerUp && !older) return
       console.warn("omarchy-iptv: the player outlived a stop, re-reading its sequence")
       root.stopConfirmPending = true

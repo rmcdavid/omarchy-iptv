@@ -1773,17 +1773,27 @@ ok zapped a play made after the stop into it, or, with the stop the last
 word, recovered and adopted it under the stop. The shell records whether the
 start went out over a player it may ladder (`sessionOverPlayer`: the
 observer on one after the start's own arm, a restart, an owed replacement)
-and holds such an EOF as well. Two exceptions remain to the rule this
-bracket qualifies, both open: D-PLY-74, a cold start whose arm could not reach a
-wedged player of this build that it then ladders, when a later connect of
-the hunt does (read, not built: at EOF nothing tells that
-player from the start's own spawn, and holding every cold start would undo the single
-stop's settle); and D-PLY-73, a stop the shell issues itself -- the
-backstop's stop of a player that outlived the user's stop -- which opens no
-settle, so a play made while it ladders is zapped into that player. Held by
-the service harness and a seeded world of the helper's lock, record, players
-and the health path's restart (tests/player-world.js); not watched on a real
-player]**. That
+and holds such an EOF as well. D-PLY-73, closed the same day (lane-ply73,
+the ply73 branch): a stop the shell issues itself -- the backstop's stop of
+a player that outlived the user's stop, and at any probe a player it will
+not adopt -- kept the observer and opened no settle, so a play made while
+it laddered was zapped into that player. `stopUnadoptedPlayer` now opens
+the settle the user's stop opens, with that stop's own `stopSeq` and bound,
+so the play goes out as a start (the 5 s look's stop, which reopened the
+settle itself, takes the same code), and the stop issued on the backstop's
+own probe is the last the shell sends after the user's: its settle's
+backstop asks nothing more (`stopFromBackstop`), so the shell sends the
+stops it sent before and every such settle ends. Releasing the observer
+instead was rejected: the first play's start arms it onto the player still
+laddering, and a second play is the same zap. One exception remains to the
+rule this bracket qualifies, open: D-PLY-74, a cold start whose arm could
+not reach a wedged player of this build that it then ladders, when a later
+connect of the hunt does (read, not built: at EOF nothing tells that player
+from the start's own spawn, and holding every cold start would undo the
+single stop's settle). Held by the service harness and a seeded world of the
+helper's lock, record, players, the health path's restart and another
+launcher holding the lock past a stop's wait (tests/player-world.js); not
+watched on a real player]**. That
 preserves the documented behaviour ("Playing a channel while the old player is
 still shutting down starts a fresh player once it has exited") with a stronger
 mechanism: `player start` blocks on the lock behind the running ladder and, when

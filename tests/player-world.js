@@ -41,6 +41,16 @@
 //     up or a stop settling, a stop() once its one relaunch is spent, and,
 //     with the slot busy, a retry on relaunchTimer, which runs from its own
 //     block.
+//   - Another launcher (D-PLY-73), when a sequence asks for it (`contestP`):
+//     right after a user's stop, with that chance, another launcher's verb
+//     wants the lock at once and, once it has it, holds it past a stop's
+//     wait (the lock wait plus 0.1 to 2.5 s, drawn: which real verb holds it
+//     that long is not claimed), records 0 as a terminal verb's default
+//     --seq does, and leaves the player as it is. A user's stop it reaches
+//     the lock before gives up and the player plays on; the 5 s look reads a
+//     record below the stop and does nothing; the backstop's probe finds the
+//     player and the shell stops it itself. The next action then also waits
+//     out that backstop, so it lands around the shell's own stop.
 //   - `status` (the control slot): the live player's stash, or not running.
 //     Asked once, by the health tick's own block (h.fireTimer), after a
 //     sequence whose last action is a play: ruling CL6 lets the label and the
@@ -54,8 +64,12 @@
 // build launched (restart on adoption's probe, hold and replacement -- the
 // node suite's deterministic D-PLY-72 rows hold that start); a health tick
 // during a sequence (only the one after it); a wedged player a start finds
-// and ladders; the watchdog's stopped start beyond its TERM; and any real
-// timing -- every interval here is drawn from the ranges written in it.
+// and ladders; the watchdog's stopped start beyond its TERM; another
+// launcher that supersedes a stop with a higher --seq, writes a channel or
+// starts a player (a second Service object's, a terminal `player start`'s);
+// a player that does not answer, will not verify or cannot be identified
+// (the node suite's D-PLY-73 table holds the shell's stop of each); and any
+// real timing -- every interval here is drawn from the ranges written in it.
 // Time is the harness's clock. The shell's Timers that the settle reads run
 // from their own blocks (h.driveTimer), playerSocketTimer as the repeating
 // Timer it is.
@@ -238,6 +252,15 @@ function playerWorld(h, o) {
     v.waiting = false
     w.waiters.splice(w.waiters.indexOf(v), 1)
     w.holder = v
+    if (v.kind === "foreign") {
+      // Another launcher's verb (`contest`): a terminal `omarchy-iptv player`
+      // verb's --seq defaults to 0, which check_seq never refuses and
+      // write_lock_record records; it leaves the player as it is.
+      w.record = 0
+      note("another launcher's verb holds the lock for " + v.holdMs + " ms (record 0)")
+      release(v.holdMs)
+      return
+    }
     if (v.seq < w.record) {
       note(v.kind + " @" + v.seq + " superseded (record " + w.record + ")")
       release(5)
@@ -364,6 +387,13 @@ function playerWorld(h, o) {
     throw new Error("player-world: no end in sight")
   }
   w.quiet = () => w.events.length === 0 && w.waiters.length === 0 && w.holder === null && !pRunning && !cRunning
+  // D-PLY-73: another launcher wants the lock now, and holds it past a
+  // stop's wait once it has it (`contestP`, playerSequence).
+  w.contest = () => {
+    const v = { kind: "foreign", seq: 0, holdMs: between(LOCK_WAIT + 100, LOCK_WAIT + 2500) }
+    note("another launcher wants the lock")
+    wantLock(v)
+  }
   w.rnd = rnd
   w.between = between
   w.note = note
@@ -375,16 +405,23 @@ function playerWorld(h, o) {
 // verdicts above, with the run's log. With `restartP`, before each action
 // after the first the health path's restart is asked with that chance, and
 // the action follows 0 to 600 ms later (no draw is made without it, so a
-// sequence without it is the one it always was).
+// sequence without it is the one it always was). With `contestP`, each user
+// stop is contested by another launcher with that chance (the header), and
+// the next action waits out the backstop too; likewise no draw without it.
 function playerSequence(h, o) {
   const opts = o || {}
   const w = playerWorld(h, opts)
   const channels = opts.channels
   const actions = []
+  let contested = false
   for (let k = 0; k < opts.steps; k++) {
     const r = w.rnd()
     const gap = r < 0.45 ? w.between(0, 120) : r < 0.8 ? w.between(120, 2500) : w.between(2500, 9000)
-    w.advance(gap)
+    // After a contested stop the next action waits out the stop's backstop
+    // too, so it lands around the stop the shell then issues itself.
+    const wait = contested ? w.between(h.root.stopSettleMs, h.root.stopSettleMs + 4000) : 0
+    contested = false
+    w.advance(gap + wait)
     if (opts.restartP && k > 0 && w.rnd() < opts.restartP) {
       w.note("HEALTH restart")
       h.root.restartPlayer()
@@ -396,6 +433,10 @@ function playerSequence(h, o) {
     if (stop) {
       w.note("USER stop")
       h.root.stop()
+      if (opts.contestP && w.rnd() < opts.contestP) {
+        w.contest()
+        contested = true
+      }
     } else {
       chosen = channels[Math.floor(w.rnd() * channels.length)]
       w.note("USER play " + chosen)
