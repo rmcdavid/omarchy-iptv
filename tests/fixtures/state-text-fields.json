@@ -1,0 +1,10441 @@
+{
+ "comment": [
+  "D-STATE-6. Where state.json holds text -- a favourite, a played record's id",
+  "and name, a saved search's query, a source record's key, url, epgUrl, label",
+  "and origin -- both readers take a JSON string and nothing else. A number, a",
+  "boolean, null, an array or an object there reads as the field being absent:",
+  "the entry is dropped where the field is its identity (a favourite, a played",
+  "record's id, a query, a source's key or url) and the field reads empty where",
+  "it is not (a name, a label, an origin, a guide address). Before, each side",
+  "turned such a value into text its own way (1.0 was 1 and 1.0, true was true",
+  "and True, [news] was news and ['news']) and the helper dropped a source the",
+  "shell kept, so a CLI write erased it. Model.parseState and the helper's",
+  "normalize_state both run every case; `want` is the projection the tests",
+  "compare: favorites, recents, lastPlayed, session, savedSearches, and each",
+  "source's key, url, epgUrl, label, labelCustom and origin."
+ ],
+ "cases": [
+  {
+   "name": "every text field a string: read as written",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite in an array is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     [
+      "t:z"
+     ]
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's id in an array is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": [
+       "t:z"
+      ],
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name in an array is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": [
+      "B Two"
+     ],
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search's query in an array is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": [
+       "sport"
+      ],
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record's key in an array is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": [
+       "12e22d28"
+      ],
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record's url in an array is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": [
+       "http://a.example.test/list.m3u"
+      ],
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label in an array is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": [
+       "My list"
+      ],
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin in an array is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": [
+       "cli"
+      ],
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address in an array is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": [
+       "http://epg.example.test/guide.xml"
+      ],
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite 0 is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     0,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is 0 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": 0,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": 0,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": 0,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name 0 is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": 0,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": 0,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": 0,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is 0 is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": 0,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is 0 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": 0,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is 0 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": 0,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label 0 is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": 0,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin 0 is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": 0,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address 0 is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": 0,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite 1 is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     1,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is 1 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": 1,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": 1,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": 1,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name 1 is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": 1,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": 1,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": 1,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is 1 is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": 1,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is 1 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": 1,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is 1 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": 1,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label 1 is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": 1,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin 1 is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": 1,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address 1 is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": 1,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite 12345678 is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     12345678,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is 12345678 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": 12345678,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": 12345678,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": 12345678,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name 12345678 is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": 12345678,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": 12345678,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": 12345678,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is 12345678 is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": 12345678,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is 12345678 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": 12345678,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is 12345678 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": 12345678,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label 12345678 is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": 12345678,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin 12345678 is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": 12345678,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address 12345678 is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": 12345678,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite 1.5 is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     1.5,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is 1.5 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": 1.5,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": 1.5,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": 1.5,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name 1.5 is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": 1.5,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": 1.5,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": 1.5,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is 1.5 is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": 1.5,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is 1.5 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": 1.5,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is 1.5 is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": 1.5,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label 1.5 is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": 1.5,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin 1.5 is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": 1.5,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address 1.5 is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": 1.5,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite true is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     true,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is true is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": true,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": true,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": true,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name true is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": true,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": true,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": true,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is true is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": true,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is true is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": true,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is true is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": true,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label true is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": true,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin true is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": true,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address true is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": true,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite false is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     false,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is false is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": false,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": false,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": false,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name false is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": false,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": false,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": false,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is false is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": false,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is false is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": false,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is false is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": false,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label false is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": false,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin false is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": false,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address false is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": false,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite null is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     null,
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is null is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": null,
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": null,
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": null,
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name null is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": null,
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": null,
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": null,
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is null is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": null,
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is null is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": null,
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is null is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": null,
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label null is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": null,
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin null is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": null,
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address null is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": null,
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite [] is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     [],
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is [] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": [],
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": [],
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": [],
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name [] is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": [],
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": [],
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": [],
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is [] is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": [],
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is [] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": [],
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is [] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": [],
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label [] is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": [],
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin [] is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": [],
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address [] is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": [],
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite [\"news\"] is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     [
+      "news"
+     ],
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is [\"news\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": [
+       "news"
+      ],
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": [
+      "news"
+     ],
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": [
+      "news"
+     ],
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name [\"news\"] is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": [
+       "news"
+      ],
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": [
+      "news"
+     ],
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": [
+      "news"
+     ],
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is [\"news\"] is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": [
+       "news"
+      ],
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is [\"news\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": [
+       "news"
+      ],
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is [\"news\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": [
+       "news"
+      ],
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label [\"news\"] is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": [
+       "news"
+      ],
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin [\"news\"] is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": [
+       "news"
+      ],
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address [\"news\"] is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": [
+       "news"
+      ],
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite [\"t:a\"] is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     [
+      "t:a"
+     ],
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is [\"t:a\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": [
+       "t:a"
+      ],
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": [
+      "t:a"
+     ],
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": [
+      "t:a"
+     ],
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name [\"t:a\"] is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": [
+       "t:a"
+      ],
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": [
+      "t:a"
+     ],
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": [
+      "t:a"
+     ],
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is [\"t:a\"] is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": [
+       "t:a"
+      ],
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is [\"t:a\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": [
+       "t:a"
+      ],
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is [\"t:a\"] is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": [
+       "t:a"
+      ],
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label [\"t:a\"] is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": [
+       "t:a"
+      ],
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin [\"t:a\"] is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": [
+       "t:a"
+      ],
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address [\"t:a\"] is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": [
+       "t:a"
+      ],
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite {} is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     {},
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is {} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": {},
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": {},
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": {},
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name {} is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": {},
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": {},
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": {},
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is {} is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": {},
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is {} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": {},
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is {} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": {},
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label {} is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": {},
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin {} is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": {},
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address {} is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": {},
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a favourite {\"a\": 1} is no id",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a",
+     {
+      "a": 1
+     },
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a",
+     "t:z"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record whose id is {\"a\": 1} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": {
+       "a": 1
+      },
+      "name": "X",
+      "at": 1
+     },
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": {
+      "a": 1
+     },
+     "name": "X",
+     "at": 1
+    },
+    "session": {
+     "id": {
+      "a": 1
+     },
+     "name": "X",
+     "at": 1
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": null,
+    "session": null,
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a played record's name {\"a\": 1} is no name",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": {
+       "a": 1
+      },
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": {
+      "a": 1
+     },
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": {
+      "a": 1
+     },
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a saved search whose query is {\"a\": 1} is no search",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": {
+       "a": 1
+      },
+      "at": 1
+     },
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source record whose key is {\"a\": 1} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": {
+       "a": 1
+      },
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source record whose url is {\"a\": 1} is no record",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": {
+       "a": 1
+      },
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": []
+   }
+  },
+  {
+   "name": "a source's label {\"a\": 1} is no label, so the derived one",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": {
+       "a": 1
+      },
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "a.example.test",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's origin {\"a\": 1} is no origin",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": {
+       "a": 1
+      },
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "http://epg.example.test/guide.xml",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a source's guide address {\"a\": 1} is none",
+   "input": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": {
+       "a": 1
+      },
+      "kind": "http",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli",
+      "addedAt": 10,
+      "lastUsed": 20,
+      "fetchedAt": 30,
+      "channelCount": 3,
+      "groupCount": 2
+     }
+    ],
+    "hiddenGroups": [],
+    "activeKey": "12e22d28"
+   },
+   "want": {
+    "favorites": [
+     "t:a"
+    ],
+    "recents": [
+     {
+      "id": "t:a",
+      "name": "A One",
+      "at": 10
+     }
+    ],
+    "lastPlayed": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "session": {
+     "id": "t:b",
+     "name": "B Two",
+     "at": 20
+    },
+    "savedSearches": [
+     {
+      "query": "news",
+      "at": 5
+     }
+    ],
+    "sources": [
+     {
+      "key": "12e22d28",
+      "url": "http://a.example.test/list.m3u",
+      "epgUrl": "",
+      "label": "My list",
+      "labelCustom": true,
+      "origin": "cli"
+     }
+    ]
+   }
+  }
+ ]
+}

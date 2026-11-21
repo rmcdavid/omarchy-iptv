@@ -1548,7 +1548,7 @@
       }
     },
     {
-      "name": "a numeric name and a string clock are coerced, not dropped",
+      "name": "a numeric name is no name (D-STATE-6) and a string clock is coerced; the record is kept",
       "state": {
         "version": 2,
         "session": {
@@ -1559,7 +1559,7 @@
       },
       "record": {
         "id": "t:x",
-        "name": "7",
+        "name": "",
         "at": 1758000123
       }
     },

@@ -3,8 +3,8 @@ import {
   STATE_VERSION, SCOPE_RECENT, SCOPE_FAVORITES, MAX_HIDDEN_GROUPS, SEP
 } from "./build.mjs"
 import {
-  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey, tokenize,
-  channelId
+  str, storedText, asList, keyedMap, hasOwnKey, normalizeText, searchKey,
+  tokenize, channelId
 } from "./text.mjs"
 import {
   primaryGroup, rowGroup, groupSearchText
@@ -388,7 +388,8 @@ function storedInt(value) {
 
 // One stored record. A query that tokenizes to nothing is not a saved search.
 function savedSearchRecord(entry) {
-  if (!entry || typeof entry !== "object") return null
+  // D-STATE-6: a query that is not a string is no search (storedText's rule).
+  if (!entry || typeof entry !== "object" || typeof entry.query !== "string") return null
   var query = savedQueryCut(entry.query)
   if (savedSearchTerms(query).length === 0) return null
   return { query: query, at: storedInt(entry.at) }
@@ -529,7 +530,11 @@ function channelIdWithheld(id) {
 // channelIdWithheld deletes on load (D-SINK-111). playedRecord itself is what
 // every writer builds with, and is unchanged.
 function loadedPlayedRecord(entry) {
-  var rec = playedRecord(entry)
+  // D-STATE-6: from a file, an id is a string or the record is none, and a
+  // name is a string or empty (storedText); the helper's normalize_played
+  // reads the same.
+  if (!entry || typeof entry !== "object" || typeof entry.id !== "string") return null
+  var rec = playedRecord({ id: entry.id, name: storedText(entry.name), at: entry.at })
   return rec !== null && channelIdWithheld(rec.id) ? null : rec
 }
 
@@ -616,7 +621,7 @@ function parseState(text) {
     var rec = normalizeSourceRecord(srcs[s])
     if (!rec) {
       // Logged by key (D-SRC-09); a record without a usable key is silent.
-      var badKey = srcs[s] && typeof srcs[s] === "object" ? str(srcs[s].key) : ""
+      var badKey = srcs[s] && typeof srcs[s] === "object" ? storedText(srcs[s].key) : ""
       if (isSourceKey(badKey)) warnState("dropped source " + badKey + " (invalid url)")
       continue
     }
@@ -666,7 +671,7 @@ function parseState(text) {
   var favs = asList(parsed.favorites)
   if (favs.length > 0) {
     for (var i = 0; i < favs.length; i++) {
-      var id = str(favs[i])
+      var id = storedText(favs[i])  // D-STATE-6
       if (id !== "" && !channelIdWithheld(id) && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
@@ -1129,7 +1134,7 @@ function normalizeFailed(list) {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i]
     if (!r || typeof r !== "object") continue
-    var id = str(r.id)
+    var id = storedText(r.id)  // D-STATE-6: as the helper's normalize_failed
     var at = storedInt(r.at)
     if (id === "" || at <= 0) continue
     if (seen[id] === true) continue

@@ -65,6 +65,7 @@
         "PUNCT_RE",
         "ID_PUNCT_RE",
         "str",
+        "storedText",
         "asList",
         "keyedMap",
         "hasOwnKey",

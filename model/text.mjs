@@ -79,6 +79,18 @@ function str(value) {
   return String(value === undefined || value === null ? "" : value)
 }
 
+// D-STATE-6: what a FILE's text field reads as -- a JSON string, or nothing.
+// str() turns a number, a boolean, an array or an object into text the
+// engine's way, and the helper's str() into other text (1.0 is "1" here and
+// "1.0" there, true is "true" and "True", ["news"] is "news" and
+// "['news']"), so the two state readers disagreed about a hand-edited file
+// and a CLI write stored the helper's reading, or erased a source the shell
+// had kept. Both readers now take a string and nothing else where they
+// expect text (the shared state-text-fields fixture, dev branch).
+function storedText(value) {
+  return typeof value === "string" ? value : ""
+}
+
 // Always a real Array. Values that cross the QML boundary (a `property var`
 // holding an object literal, a QVariantList) are array-like but fail
 // Array.isArray in the Qt engine; copy them so every caller can use Array
@@ -485,9 +497,9 @@ function findByUrl(channels, url) {
   return null
 }
 export {
-  FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, asList, keyedMap, hasOwnKey,
-  ownKeyValue, trimEndSpace, LATIN_COMBINING_RE, decompose, normalizeText,
-  normalizeIdText, foldText, searchKey, tokenize, fnv1a32,
+  FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, storedText, asList, keyedMap,
+  hasOwnKey, ownKeyValue, trimEndSpace, LATIN_COMBINING_RE, decompose,
+  normalizeText, normalizeIdText, foldText, searchKey, tokenize, fnv1a32,
   CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, GENERATED_NAME_WORD,
   GENERATED_NAME_RE, nameIdKey, suffixIds, channelIds, legacyChannelIds,
   substituteNameIds, channelIdRemap, remapStateIds, remapChannelIds,

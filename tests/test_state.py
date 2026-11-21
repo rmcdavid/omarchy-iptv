@@ -216,8 +216,9 @@ class StateCommandTest(unittest.TestCase):
             "unknownKey": True,
         }), encoding="utf-8")
         code, payload, _ = self.state("show")
+        # D-STATE-6: the favourite 7 is no id (it read "7" until then).
         self.assertEqual(payload["state"], v2(
-            favorites=["t:a", "7"],
+            favorites=["t:a"],
             recents=[{"id": "t:a", "name": "", "at": 12}, {"id": "t:b", "name": "", "at": 0}],
             lastPlayed={"id": "t:a", "name": "", "at": 0},
         ))
@@ -1170,6 +1171,21 @@ class SessionKeyTest(unittest.TestCase):
     def _state_keys_fixture(self):
         with open(ROOT / "tests" / "fixtures" / "state-keys.json", encoding="utf-8") as fh:
             return json.load(fh)
+
+    def test_text_fields_take_a_json_string_and_nothing_else(self):
+        """D-STATE-6: the shared state-text-fields fixture, which
+        tests/Model.test.js runs through Model.parseState. A number, a
+        boolean, null, an array or an object where state.json holds text
+        reads as the field being absent, on both sides."""
+        with open(ROOT / "tests" / "fixtures" / "state-text-fields.json", encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        self.assertGreater(len(fixture["cases"]), 100)
+        for case in fixture["cases"]:
+            state = helper.normalize_state(json.loads(json.dumps(case["input"])))
+            got = {name: state[name] for name in ("favorites", "recents", "lastPlayed", "session", "savedSearches")}
+            got["sources"] = [{name: record[name] for name in ("key", "url", "epgUrl", "label", "labelCustom", "origin")}
+                              for record in state["sources"]]
+            self.assertEqual(got, case["want"], case["name"])
 
     def test_r20a_value_cases_run_the_shared_fixture(self):
         fixture = self._state_keys_fixture()

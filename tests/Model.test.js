@@ -2500,7 +2500,7 @@ checkCall("dead channels: every shared normalize case matches the agreed answer"
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) bad.push(c.name)
   })
   return [failedFixture.cases.length, bad]
-}, [4, []])
+}, [5, []])
 
 checkCall("dead channels: the mark is DROPPED when its channel leaves the playlist", function () {
   // The whole reason this lives in the source cache rather than state.json.
@@ -9306,7 +9306,7 @@ check("parseState coerces a sparse session, drops one without an id and one that
   Model.parseState('{"session":{"id":"t:y","name":7,"at":"1758000123"}}').session,
   Model.parseState('{"session":{"name":"no id","at":5}}').session,
   Model.parseState('{"session":"junk"}').session
-], [{ id: "t:x", name: "", at: 0 }, { id: "t:y", name: "7", at: 1758000123 }, null, null])
+], [{ id: "t:x", name: "", at: 0 }, { id: "t:y", name: "", at: 1758000123 }, null, null])
 check("clearSession empties the key and keeps the rest", (() => { const st = Model.clearSession(Model.withFavorites(sessionState, ["t:f"])); return [st.session, st.lastPlayed, st.favorites, st.recents.length] })(), [null, { id: "t:bbc1.uk", name: "BBC One HD", at: 1758000123 }, ["t:f"], 1])
 check("clearSession returns the same object when there is nothing to clear (no needless write)", (() => { const st = Model.emptyState(); return [Model.clearSession(st) === st, Model.clearSession(sessionState) === sessionState] })(), [true, false])
 check("clearSession does not mutate its input", (() => { Model.clearSession(sessionState); return sessionState.session.id })(), "t:bbc1.uk")
@@ -17436,6 +17436,23 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // the helper's output to the same list over the same document. A key added
 // to the service side alone reddens this; one added to the helper alone
 // reddens that; and the value cases below run through both readers.
+// D-STATE-6: where state.json holds text, both readers take a JSON string
+// and nothing else. The shared state-text-fields fixture, which
+// tests/test_state.py runs through the helper's normalize_state.
+;(function () {
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-text-fields.json"), "utf8"))
+  fx.cases.forEach(function (c) {
+    checkCall("D-STATE-6 (shared fixture, both readers): " + c.name, function () {
+      const st = Model.parseState(JSON.stringify(c.input))
+      return { favorites: st.favorites, recents: st.recents, lastPlayed: st.lastPlayed, session: st.session,
+               savedSearches: st.savedSearches,
+               sources: st.sources.map(function (r) {
+                 return { key: r.key, url: r.url, epgUrl: r.epgUrl, label: r.label, labelCustom: r.labelCustom, origin: r.origin }
+               }) }
+    }, c.want)
+  })
+})()
+
 ;(function () {
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-keys.json"), "utf8"))
   fx.cases.forEach(function (c) {

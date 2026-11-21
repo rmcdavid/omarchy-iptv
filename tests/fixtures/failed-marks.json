@@ -120,6 +120,45 @@
           "at": 1790300000
         }
       ]
+    },
+    {
+      "name": "D-STATE-6: a mark's id is a JSON string or the mark is none; the model read 7 as the id 7 and [t:g] as t:g, and the helper dropped both",
+      "failed": [
+        {
+          "id": 7,
+          "at": 1790300000
+        },
+        {
+          "id": [
+            "t:g"
+          ],
+          "at": 1790300000
+        },
+        {
+          "id": true,
+          "at": 1790300000
+        },
+        {
+          "id": {
+            "a": 1
+          },
+          "at": 1790300000
+        },
+        {
+          "id": 1.5,
+          "at": 1790300000
+        },
+        {
+          "id": "t:h",
+          "at": 1790300000
+        }
+      ],
+      "expect": [
+        {
+          "id": "t:h",
+          "at": 1790300000
+        }
+      ]
     }
   ]
 }

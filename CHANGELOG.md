@@ -117,6 +117,12 @@ after the shell starts, and you start the channel again yourself.
   restart looked its channel up in the current source's list and could
   bring back a different channel under the old name. It is now stopped
   instead. (D-PLY-58)
+- **A hand-edited `state.json` reads the same in the guide and in the
+  helper's `state` commands.** Where the file should hold text (a
+  favourite, a recent channel's id and name, a saved search, a source's key,
+  address and label) and holds a number, a list or `true` instead, the two
+  read it differently, and a source the guide showed could be erased by the
+  next `state` command. Both now read such a value as missing (D-STATE-6).
 
 ### Changed
 

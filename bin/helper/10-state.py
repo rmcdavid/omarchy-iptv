@@ -21,6 +21,16 @@ def default_state() -> dict[str, Any]:
             "session": None, "sources": [], "savedSearches": [], "hiddenGroups": [], "activeKey": ""}
 
 
+def stored_text(value: Any) -> str:
+    """Model.storedText (D-STATE-6): what a file's text field reads as -- a
+    JSON string, or nothing. str() turned a number, a boolean, an array or
+    an object into text Python's way and the model's str() into other text
+    (1.0 was "1.0" here and "1" there, True and "true", ['news'] and
+    "news"), so the two state readers disagreed about a hand-edited file.
+    The shared state-text-fields fixture (dev branch) runs both."""
+    return value if isinstance(value, str) else ""
+
+
 def normalize_active_key(raw: Any) -> str:
     """Mirror of Model.activeKeyText: the active source's key (D-SINK-19), or
     "" when the value is not a key. A key naming no record is KEPT -- the shell
@@ -94,7 +104,9 @@ def saved_search_terms(query: Any) -> list[str]:
 
 
 def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
-    if not isinstance(entry, dict):
+    # D-STATE-6: a query that is not a string is no search, as
+    # Model.savedSearchRecord reads it (stored_text's rule).
+    if not isinstance(entry, dict) or not isinstance(entry.get("query"), str):
         return None
     query = saved_query_cut(entry.get("query"))
     if not saved_search_terms(query):
@@ -115,11 +127,14 @@ def normalize_saved_search(entry: Any) -> dict[str, Any] | None:
 # user could not remove it; nothing reachable is lost. The file loses it at
 # the next save, which every state verb that writes makes.
 def normalize_played(entry: Any) -> dict[str, Any] | None:
-    if not isinstance(entry, dict) or not entry.get("id"):
+    # D-STATE-6: an id is a string or the record is none, and a name is a
+    # string or empty (stored_text), as Model.loadedPlayedRecord reads them.
+    if not isinstance(entry, dict):
         return None
-    if channel_id_withheld(str(entry["id"])):
+    cid = stored_text(entry.get("id"))
+    if not cid or channel_id_withheld(cid):
         return None
-    return {"id": str(entry["id"]), "name": str(entry.get("name") or ""),
+    return {"id": cid, "name": stored_text(entry.get("name")),
             "at": coerce_int(entry.get("at"))}
 
 
@@ -270,7 +285,7 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
         raw_epg = ""
     epg = validate_source_url(raw_epg, origin="cli") if isinstance(raw_epg, str) else None
     # SR22: the helper truncates an over-cap label on read, never errors.
-    label = cap_code_points(sanitize_input(raw.get("label"), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
+    label = cap_code_points(sanitize_input(stored_text(raw.get("label")), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
     origin = raw.get("origin")
     record = {
         "key": key,
@@ -301,7 +316,7 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     favorites = raw.get("favorites")
     if isinstance(favorites, list):
         for item in favorites:
-            key = str(item or "")
+            key = stored_text(item)  # D-STATE-6
             if key and key not in state["favorites"] and not channel_id_withheld(key):
                 state["favorites"].append(key)
     recents = raw.get("recents")
