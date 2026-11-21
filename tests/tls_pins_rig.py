@@ -49,22 +49,28 @@ relay:
     tree's player_environment. The rig still adds `--config-dir`, `--vo=null
     --ao=null` and drops `--force-window`, as before; and it waits for the
     relay with the tree's wait_for_relay, as adopt_or_spawn does (R0).
-  - every load the rig makes is registered under ONE rule, the one the
-    tree's own player_target composes for a channel of a local playlist
-    FILE (relay_rule): local and not a loopback relay, the one shipping rule
-    under which the relay lets every connection to 127.0.0.1 through on any
-    port. A typed --url's rule and a loopback relay playlist's both hold
-    loopback to one host:port after the first connection, so the attacker's
-    HLS segment on 8781 under the provider's 8780 would have been the
-    relay's refusal, vacuous again for a new reason.
+  - every load the rig makes is registered under the rule the tree's own
+    player_target composes for a channel of a local playlist FILE
+    (relay_rule): local and not a loopback relay, a local playlist's rule
+    (a file's, or a LAN host's: _class_refusal reads them alike), under
+    which the relay lets every connection to 127.0.0.1 through on any port.
+    A typed --url's rule and a loopback relay playlist's both hold loopback
+    to one host:port after the first connection, so the attacker's HLS
+    segment on 8781 under the provider's 8780 would have been the relay's
+    refusal, vacuous again for a new reason. C3 alone, the loopback relay
+    playlist, is loaded as the tree loads it: the target, its headers and
+    its rule are the tree's player_target over C3's own cache.
   - each "the attacker gets nothing" check (tls_held) now requires the load
     SENT, the attacker's ACCEPT of the player's connection, no request after
     it, a certificate error line from the player, and the relay's own counts
     (asked by its pid) showing an upstream connection and no destination
     refusal; the checks refused by design before any connection (W9, W17,
-    W18 at the read-back, W30 at the build gate) say so in their line and
+    W18 at the read-back through readback_held, W9 and W18 with the relay
+    pin read back as held; W30 at the build gate) say so in their line and
     require that refusal's own code, never `not_running` from a relay that
-    did not answer. C6 is their positive control through the relay.
+    did not answer: W30's code is the gate's `not_running`, which is also
+    relay_register's, so W30 requires that its case's relay answered. C6 is
+    their positive control through the relay.
   - the --pre-pin tree (v0.15.0, no relay) composes its own argv; the tree's
     relay pin is appended to it and the player is started beside the tree's
     relay: the model of a player of the tree under test whose other options
@@ -80,10 +86,34 @@ relay:
     the relay) and only while /proc still reads it as this case's.
   - R2b: the player's exit status is its relay's to read now, not the rig's;
     it reads that the player exited on `quit` with nothing on stderr.
+  - nothing it starts outlives it. The spawn's setsid puts a relay and its
+    mpv in a session of their own, which a signal to this rig's process
+    group (GNU timeout's, the gate's wrapper) does not reach, and the relay
+    watches only its child, never its own parent. So SIGTERM, SIGHUP and
+    SIGINT (each unless it was ignored when the rig started) end the rig
+    through SystemExit (stop_on_signal), every `finally` runs, and
+    Player.finish kills each player it still holds through its pidfd after
+    a short grace, then its relay; a player started inside a deferred stop
+    (deferred_stop, around the spawn and its Player) is registered first,
+    and main's own `finally` finishes any player still registered (LIVE). A
+    second signal while it stops is ignored, so the stop runs to its end.
+  - an entry the helper did not load (W14, W22) meets the launch pin, which
+    carries no token, and stops at the relay before any server. So that
+    the header's absence is measured and not only implied, the rig
+    registers a token of its OWN for such an entry and appends it with that
+    per-file `http-proxy` and nothing else: it then reaches the lab server
+    as it does on a player with no relay, under the global options mpv
+    restored when the channel's file ended.
 Baselines: a tree without the relay (anything before D-SINK-102, e.g.
 `--baseline v0.19.1` or the --pre-pin default) runs exactly as before, its
 player this rig's own child; a tree with it runs as above. A `--pre-pin` ref
-with the relay composes its own pin and is started under the tree's relay.
+with the relay composes its own pin and is started under the tree's relay,
+supported in code and not run; two cases assume a pre-pin tree from BEFORE
+the pins and are red by design on a later one: W17's premise (the
+player's mpv.conf `reset-on-next-file=all`, which a pinned tree's own launch
+argv overrides, so the next load is sent rather than refused) and W28b's
+control (the pre-pin tree's own load with a demuxer tls_verify=0 must reach
+the attacker, which a pinned tree's own pins stop).
 
 Checks, each asserting the FIXED behaviour (so `--baseline <ref before the
 fix>` reds W1..W10 and the controls stay green):
@@ -126,9 +156,9 @@ is on the namespace's only interface:
   W13 provider headers with commas, `=`, quotes and backslashes (the per-file
       loadfile options, 2026-10-29): each arrives as ONE header, verbatim
   W14 an entry the helper did not load (an append, then playlist-next): the
-      channel's provider header does not reach it (on a player with a relay
-      the entry stops at the launch pin, which carries no token, before any
-      server; the channel's own request must carry the header either way)
+      channel's provider header does not reach it, and the entry is fetched
+      (on a player with a relay under a token the rig registers for it,
+      "The relay" above); the channel's own request must carry the header
   W15 the paste-to-playlist key (D-PLY-46): with the user's own input.conf
       binding ctrl+v to append a URL -- the deterministic stand-in for mpv's
       clipboard binding, which a headless player has no clipboard for -- the
@@ -150,7 +180,9 @@ is on the namespace's only interface:
       file outside the runtime folder holds the credential
   C3  a loopback relay (Threadfin's shape: playlist, guide and streams on one
       port): the playlist verb keeps its channel's Cookie, the guide hint on
-      that port is fetched, and the channel plays with the Cookie
+      that port is fetched, and the channel plays with the Cookie, loaded as
+      the tree's player_target composes it from C3's own cache (on a tree
+      with the relay, under that playlist's rule: loopback held to its port)
 
 lane-p1c (2026-10-29) adds, on the same lab server and, for the listener
 checks, inside the same `unshare -rn`:
@@ -165,7 +197,8 @@ checks, inside the same `unshare -rn`:
   W22 the user's `--prefetch-playlist=yes`, refused as a token, then past the
       filter and as an mpv.conf line (D-SINK-63): an entry appended while the
       channel plays is fetched without the channel's provider header (on a
-      player with a relay, or not at all: the launch pin stops it)
+      player with a relay under a token the rig registers for it, "The
+      relay" above)
   W23 an HLS key that 404s while the channel plays logs its whole URL at error
       level; the console key and both console bindings then draw nothing that
       carries it (D-SINK-61: no console), and the same error line still
@@ -252,6 +285,7 @@ Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
 from __future__ import annotations
 
 import http.server
+import contextlib
 import inspect
 import json
 import os
@@ -630,7 +664,9 @@ def make_rig(work: str) -> dict[str, str]:
     return {"certs": c, "www": www}
 
 
-def start_servers(work: str, rig: dict[str, str]) -> list[subprocess.Popen]:
+def start_servers(work: str, rig: dict[str, str], procs: list[subprocess.Popen]) -> list[subprocess.Popen]:
+    """Start every server, each appended to `procs` as it starts (main's
+    `finally` stops what is there, a stop signal mid-way included)."""
     c = rig["certs"]
     log = os.path.join(work, "requests.log")
     for path in (log, os.path.join(work, CONN_LOG)):
@@ -644,9 +680,9 @@ def start_servers(work: str, rig: dict[str, str]) -> list[subprocess.Popen]:
         "plain": ("", "", "", "", ""),
         "lab": ("", "", "", "", ""),
     }
-    procs = [subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--serve-rtsp", str(PORTS["rtsp"]),
-                               rig["www"], log], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL)]
+    procs.append(subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--serve-rtsp", str(PORTS["rtsp"]),
+                                   rig["www"], log], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL))
     for name, (cert, key, acert, akey, seg) in specs.items():
         procs.append(subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--serve", name, str(PORTS[name]),
                                        rig["www"], log, cert, key, acert, akey, seg],
@@ -703,6 +739,49 @@ def load_helper(tree: str) -> dict:
 # tree's player_environment). A tree before D-SINK-102 starts as it always
 # did, as this rig's own child.
 
+# The review of 0c435d0: the spawn's setsid puts a relay and its mpv in a
+# session of their own, out of reach of a signal to this rig's process group
+# (GNU timeout signals its whole group), and the relay exits only after its
+# child. A rig ended by the default SIGTERM ran no `finally`, so the case's
+# relay and an mpv idling for its load under --idle=once outlived it. Now a
+# stop signal is SystemExit, every `finally` runs, and every player this rig
+# holds is finished: those still registered in LIVE by main's own `finally`.
+STOP = {"signal": 0, "defer": 0}
+LIVE: list = []
+
+
+def stop_on_signal(signum: int, frame) -> None:
+    """SIGTERM, SIGHUP, SIGINT: end the rig through SystemExit, so every
+    `finally` runs. A second signal while it stops is ignored, so the stop
+    runs to its end; one inside deferred_stop is raised when that ends."""
+    if STOP["signal"]:
+        return
+    STOP["signal"] = signum
+    if not STOP["defer"]:
+        raise SystemExit(128 + signum)
+
+
+def stop_point() -> None:
+    """Raise the stop a signal asked for, if one did and nothing defers it
+    (also the backstop for a SystemExit something swallowed)."""
+    if STOP["signal"] and not STOP["defer"]:
+        raise SystemExit(128 + STOP["signal"])
+
+
+@contextlib.contextmanager
+def deferred_stop():
+    """No stop between a spawn and the Player that registers what it started
+    (a signal there is raised once the Player exists). Signals are DEFERRED,
+    never masked: a mask would be inherited by the relay and mpv the spawn
+    execs, and change how the shipping relay hears its SIGTERM."""
+    STOP["defer"] += 1
+    try:
+        yield
+    finally:
+        STOP["defer"] -= 1
+    stop_point()
+
+
 def has_relay(ns: dict) -> bool:
     """Whether this tree pins its player to a relay it spawns (D-SINK-102)."""
     return all(name in ns for name in ("relay_register", "bind_relay_listeners", "spawn_player",
@@ -713,13 +792,14 @@ _RULES: dict[int, dict] = {}
 
 
 def relay_rule(ns: dict, work: str) -> dict:
-    """The rule every load the rig registers with a relay is judged by: the
-    one `ns`'s own player_target composes for a channel of a playlist that
-    is a local FILE, read off player_target over a one-channel cache that
-    says so (rule 12: called, not copied). Chosen because it is the one
-    shipping rule under which the relay lets every connection to this
-    machine through: a local file is local and not a loopback relay, so
-    _class_refusal holds no loopback address to a port. A typed --url's rule
+    """The rule every load the rig registers with a relay is judged by (C3's
+    excepted): the one `ns`'s own player_target composes for a channel of a
+    playlist that is a local FILE, read off player_target over a one-channel
+    cache that says so (rule 12: called, not copied). Chosen because it is a
+    local playlist's rule -- a file's, or a LAN host's, which _class_refusal
+    reads alike -- under which the relay lets every connection to this
+    machine through: local and not a loopback relay, so _class_refusal
+    holds no loopback address to a port. A typed --url's rule
     holds every connection after the first to the URL's own host AND port on
     loopback, and so does a loopback relay playlist's, so the attacker's
     segment on another port of 127.0.0.1 would be the RELAY's refusal and
@@ -802,6 +882,7 @@ class Player:
         self.reader: threading.Thread | None = None
         self.returncode: int | None = None
         self.killed = False
+        LIVE.append(self)
 
     def alive(self) -> bool:
         if self.popen is not None:
@@ -878,7 +959,15 @@ class Player:
         `grace`; then its relay, which exits RELAY_LINGER_S after its child:
         asked to stop past RELAY_EXIT_S, killed 5 s after that, and reaped
         (this rig is a child subreaper, so the double fork lands it here);
-        and an mpv whose relay went first, which lands here too."""
+        and an mpv whose relay went first, which lands here too. While the
+        rig stops on a signal no `quit` was sent, so the grace is short."""
+        try:
+            self._finish(0.5 if STOP["signal"] else grace)
+        finally:
+            if self in LIVE:
+                LIVE.remove(self)
+
+    def _finish(self, grace: float) -> None:
         if not self.wait(grace):
             self.killed = True
             self.kill()
@@ -956,18 +1045,22 @@ def launch(base: str, runtime: str, env: dict, argv_ns: dict, logic_ns: dict,
         marker = "--config-dir=" + base + "/config/mpv"
         cmd = ["mpv", marker, "--vo=null", "--ao=null"] + [a for a in argv[1:] if not a.startswith("--force-window")]
         errpath = os.path.join(base, "mpv.stderr")
+        stop_point()
         if relayed:
             penv = logic_ns["player_environment"](env) if "player_environment" in logic_ns else dict(env)
-            launched = logic_ns["spawn_player"](cmd, runtime, proxy.fileno(), control.fileno(), env=penv)
-            player = Player(launched["pid"], marker)
-            player.reader = pump(launched["stderrFd"], errpath)
-            player.relayed, player.relay_port = True, port
+            # Deferred, so a stop signal cannot land between the spawn and the
+            # Player that registers what it started (LIVE).
+            with deferred_stop():
+                launched = logic_ns["spawn_player"](cmd, runtime, proxy.fileno(), control.fileno(), env=penv)
+                player = Player(launched["pid"], marker)
+                player.reader = pump(launched["stderrFd"], errpath)
+                player.relayed, player.relay_port = True, port
         else:
             fd = os.open(errpath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "wb") as err:
+            with os.fdopen(fd, "wb") as err, deferred_stop():
                 popen = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err,
                                          preexec_fn=no_core)
-            player = Player(popen.pid, marker, popen)
+                player = Player(popen.pid, marker, popen)
     finally:
         # adopt_or_spawn's shape: the relay holds its own copies now.
         for held in (proxy, control):
@@ -977,10 +1070,11 @@ def launch(base: str, runtime: str, env: dict, argv_ns: dict, logic_ns: dict,
 
 
 def feed(ns: dict, client, target: dict, player: Player, work: str, relay_ns: dict | None = None,
-         vouch: bool = True, **kw):
+         vouch: bool = True, rule: dict | None = None, **kw):
     """One channel through `ns`'s own apply_channel. A tree with the relay
-    is handed the relay rule (relay_rule) on the target, where player_target
-    would have put its own. A tree WITHOUT one feeding a player that has a
+    is handed the relay rule on the target, where player_target would have
+    put its own: `rule` when the caller has the one player_target composed
+    (C3), else relay_rule's. A tree WITHOUT one feeding a player that has a
     relay (the --pre-pin tree loading the channel an adopted player was
     playing, W17) cannot register the load, so the rig registers it with
     `relay_ns`'s relay_register and sets that load's per-file proxy value
@@ -990,7 +1084,7 @@ def feed(ns: dict, client, target: dict, player: Player, work: str, relay_ns: di
     the pid it launched, unless `vouch` is False (W30)."""
     target = dict(target)
     if has_relay(ns):
-        target["relay"] = relay_rule(ns, work)
+        target["relay"] = dict(rule) if rule is not None else relay_rule(ns, work)
     elif relay_ns is not None and player.relayed:
         proxy, _ = relay_ns["relay_register"](client.path, {"relay": relay_rule(relay_ns, work)}, player.pid)
         client.try_command("set_property", "http-proxy", proxy)
@@ -1010,6 +1104,25 @@ def bypass_load(ns: dict, client, target: dict, player: Player, work: str) -> No
     client.try_command("set_property", "tls-verify", False)
     options = ns["channel_load_options"](target, ns["default_user_agent"](client), proxy)
     client.command("loadfile", target["url"], "replace", -1, options)
+
+
+def appended(url: str, flag: str):
+    """A post command (probe's `post`) that appends `url` as an entry the
+    helper did not load, composed when it runs. On a player with a relay the
+    entry would meet the launch pin, which carries no token, and stop at the
+    relay before any server, so the header's absence would be implied, not
+    measured (the review of 0c435d0). So there the rig registers a token of
+    its OWN for the entry under relay_rule and appends it with that per-file
+    `http-proxy` and nothing else: the entry then reaches the lab server
+    under the options mpv restored when the channel's file ended, as it does
+    on a player with no relay, and a provider header that reached it is
+    seen."""
+    def compose(ns: dict, client, player: Player, work: str) -> list:
+        if not player.relayed:
+            return ["loadfile", url, flag]
+        proxy, _ = ns["relay_register"](client.path, {"relay": relay_rule(ns, work)}, player.pid)
+        return ["loadfile", url, flag, -1, {ns["MPV_HTTP_PROXY_PROP"]: proxy}]
+    return compose
 
 
 def kids_with_secret(pid: int) -> list[str]:
@@ -1047,7 +1160,8 @@ def listening(pid: int) -> list[str]:
 
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
           seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None,
-          drawwatch=False, cmdline_words=(), vouch=True, after_post=(), bypass=False) -> dict:
+          drawwatch=False, cmdline_words=(), vouch=True, after_post=(), bypass=False, rule=None) -> dict:
+    stop_point()
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
@@ -1117,7 +1231,7 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                 if bypass:
                     bypass_load(logic_ns, client, target, player, work)
                 else:
-                    feed(logic_ns, client, target, player, work, vouch=vouch)
+                    feed(logic_ns, client, target, player, work, vouch=vouch, rule=rule)
                 result["applied"] = True
             except logic_ns["HelperError"] as error:
                 result["applied"] = False
@@ -1149,8 +1263,14 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                             result["listening"].append(held)
                 except logic_ns["HelperError"]:
                     break
+                stop_point()
                 while pending and time.monotonic() - started >= pending[0][0]:
-                    reply = client.request(pending.pop(0)[1], allow_close=True)
+                    command = pending.pop(0)[1]
+                    if callable(command):
+                        # Composed now, against this case's player and relay
+                        # (appended(), W14 and W22).
+                        command = command(logic_ns, client, player, work)
+                    reply = client.request(command, allow_close=True)
                     result["post"].append(reply.get("error"))
                     time.sleep(1.0)
                     result["kids"] += kids_with_secret(player.pid)
@@ -1222,6 +1342,7 @@ def launch_checks(work: str, tree: dict, url: str) -> list[tuple[str, bool, str]
     own player, windowless, its argv the tree's (less --force-window), the
     channel a plain-http file on the rig's own server, loaded by the tree's
     apply_channel with the pid the rig spawned vouched for."""
+    stop_point()
     out: list[tuple[str, bool, str]] = []
     if "player_build" not in tree:
         return [("R1 the launch argv names the build (M1, M2)", False, "this tree composes no build marker")]
@@ -1428,6 +1549,13 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["--serve-rtsp"]:
         serve_rtsp(int(argv[1]), argv[2], argv[3])
         return 0
+    # The rig only, never a server: a stop signal is SystemExit, so every
+    # `finally` runs and nothing this rig starts outlives it (stop_on_signal).
+    # A signal ignored when the rig started stays ignored (nohup, a job
+    # started with SIGINT ignored).
+    for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        if signal.getsignal(number) is not signal.SIG_IGN:
+            signal.signal(number, stop_on_signal)
     # One line per check, in order with the helper's own stderr lines.
     sys.stdout.reconfigure(line_buffering=True)
     opts = {"--tree": "", "--pre-pin": "", "--work": ""}
@@ -1478,9 +1606,7 @@ def main(argv: list[str]) -> int:
          if has_relay(tree) and "relay_port" not in inspect.signature(pre["mpv_launch_argv"]).parameters
          else "under the tree's relay, its own argv naming the relay's port" if has_relay(tree) else "as the tree's do"),
         "is" if reaper else "is NOT"))
-    rig = make_rig(work)
-    ca = "--tls-ca-file=" + rig["certs"] + "/ca.pem"
-    procs = start_servers(work, rig)
+    procs: list[subprocess.Popen] = []
     passed = failed = 0
     j0 = journal()
 
@@ -1494,6 +1620,11 @@ def main(argv: list[str]) -> int:
             print("FAIL %s (%s)" % (label, detail))
 
     try:
+        # Inside the try, so a stop signal while the servers start still
+        # stops the ones that did (start_servers fills `procs` as it goes).
+        rig = make_rig(work)
+        ca = "--tls-ca-file=" + rig["certs"] + "/ca.pem"
+        start_servers(work, rig, procs)
         p, a = "https://127.0.0.1:%d" % PORTS["provider"], "https://127.0.0.1:%d" % PORTS["attacker"]
         hls = p + "/live/rig/%s/live.m3u8" % SECRET
         direct_evil = a + "/live/rig/%s/seg.ts" % SECRET
@@ -1582,13 +1713,18 @@ def main(argv: list[str]) -> int:
                 check("W30 the pre-pin player fed by the tree's unvouched apply_channel: refused by the build gate with nothing sent, the attacker gets nothing",
                       r["applied"] is False and r.get("refusal") == "not_running" and got(r, "attacker") == 0
                       and accepted(r, "attacker") == 0
+                      # The review of 0c435d0: `not_running` is also
+                      # relay_register's code, so the case's relay must have
+                      # answered, or a regressed gate behind a relay that
+                      # did not start would read the same.
+                      and (not r["relayed"] or r["relay"] is True)
                       and r["props"].get("load-auto-profiles") == "auto" and isinstance(demux, dict)
                       and "protocol_whitelist" not in demux and r["props"].get("idle-active") is True,
                       "applied %s, refused as %s before any command, load-auto-profiles %s, whitelist there %s, idle %s, "
-                      "attacker accepted %d and got %d request(s)" % (
+                      "attacker accepted %d and got %d request(s), its relay answered %s" % (
                           r["applied"], r.get("refusal"), r["props"].get("load-auto-profiles"),
                           isinstance(demux, dict) and "protocol_whitelist" in demux, r["props"].get("idle-active"),
-                          accepted(r, "attacker"), got(r, "attacker")))
+                          accepted(r, "attacker"), got(r, "attacker"), r["relay"]))
             else:
                 check("W30 the pre-pin player fed by the tree's unvouched apply_channel: refused by the build gate",
                       False, "this tree has no build gate")
@@ -1616,20 +1752,20 @@ def main(argv: list[str]) -> int:
               sorted(mine) == sorted([["X-Hard", HARD_VALUE], ["X-Two", "1,2"], ["User-Agent", hard["User-Agent"]],
                                       ["Referer", hard["Referer"]]]), "got %s" % mine)
         r = probe(work, "W14", tree, tree, lab + "/chan.ts", seconds=4,
-                  post=[[1.5, ["loadfile", lab + "/pasted.ts", "append-play"]], [2.0, ["playlist-next"]]])
+                  post=[[1.5, appended(lab + "/pasted.ts", "append-play")], [2.0, ["playlist-next"]]])
         pasted = lab_headers(r, "/pasted.ts")
-        # F-HARNESS-111: on a player with a relay an entry the helper did not
-        # load meets the launch pin, which carries no token, so the relay
-        # answers it 407 and no server sees it at all (D-SINK-102): the
-        # header cannot reach it, and nor can anything else. Only a player
-        # without one fetches it, so only there is "fetched" required.
+        # F-HARNESS-111 and its review: on a player with a relay the entry
+        # carries a token of the rig's own and nothing else (appended), so it
+        # reaches the server there too, and "fetched" is required on every
+        # tree: a pasted request with no header is the observation, where a
+        # pasted request that never arrived implied it.
         check("W14 an entry the helper did not load: the channel's provider header does not reach it",
-              (pasted != [] or r["relayed"]) and not any(HEADER_VALUE in json.dumps(h) for h in pasted)
+              pasted != [] and not any(HEADER_VALUE in json.dumps(h) for h in pasted)
               and any(HEADER_VALUE in json.dumps(h) for h in lab_headers(r, "/chan.ts")),
               "the channel's own request carried it %s; pasted requests %d, with the header %d%s" % (
                   any(HEADER_VALUE in json.dumps(h) for h in lab_headers(r, "/chan.ts")), len(pasted),
                   sum(HEADER_VALUE in json.dumps(h) for h in pasted),
-                  ", the entry stopped at the relay's launch pin before any server" if r["relayed"] and not pasted else ""))
+                  "; the entry carried a token of the rig's own through the relay" if r["relayed"] else ""))
         r = probe(work, "W15", tree, tree, lab + "/chan2.ts", seconds=4,
                   inputconf="ctrl+v loadfile %s/pasted2.ts append-play\n" % lab,
                   # append-play only appends while a channel plays; the next
@@ -1661,11 +1797,16 @@ def main(argv: list[str]) -> int:
                   "the first channel played %s; %s" % (r.get("firstPlayed"), how))
             r = probe(work, "W18", pre, tree, "http://127.0.0.1:%d/live/rig/%s/long.ts" % (PORTS["plain"], SECRET),
                       conf="[protocol.http]\nsave-watch-history=yes\n", migrate=True, seconds=3)
+            # The review of 0c435d0: refused by the read-back before any
+            # connection (the plain server, the channel's, saw nothing), for
+            # the PROFILE -- the per-file profile counted -- with the relay
+            # pin read back as held, so not for the pin's absence; W9's shape.
+            held, how = readback_held(r, "plain")
             check("W18 an adopted pre-pin player whose per-file profile sets a non-TLS pin: refused, nothing written",
-                  r["applied"] is False and r.get("refusal") == "tls_unverified" and r["leaks"] == []
-                  and isinstance(r.get("threats"), int) and r["threats"] >= 1,
-                  "applied %s, refused as %s, per-file profiles %s, relay pin held %s, files %s" % (
-                      r["applied"], r.get("refusal"), r.get("threats"), r.get("pinHeld"), r["leaks"]))
+                  held and r["leaks"] == [] and isinstance(r.get("threats"), int) and r["threats"] >= 1
+                  and (not r["relayed"] or r.get("pinHeld") is True),
+                  "%s; per-file profiles that undo a loose pin %s, relay pin held %s, files %s" % (
+                      how, r.get("threats"), r.get("pinHeld"), r["leaks"]))
         # ---- lane-p1c (2026-10-29): D-SINK-62..64, D-SINK-61, and the
         # kinds the format list keeps.
         if os.environ.get("OMARCHY_IPTV_RIG_NETNS") != "1":
@@ -1703,29 +1844,30 @@ def main(argv: list[str]) -> int:
             check("W25 a forced --demuxer-lavf-format=concat over an ffconcat file naming the CPL: nothing listens",
                   r["listening"] == [] and reached(r), "listening %s, reached the server %s" % (r["listening"], reached(r)))
         told = probe(work, "W22a", tree, tree, lab + "/pre/chan.ts", user=["--prefetch-playlist=yes"], seconds=5,
-                     post=[[0.3, ["loadfile", lab + "/pre/next-a.ts", "append"]], [3.5, ["playlist-next"]]])
+                     post=[[0.3, appended(lab + "/pre/next-a.ts", "append")], [3.5, ["playlist-next"]]])
         past = probe(work, "W22b", tree, tree, lab + "/pre/chan.ts", raw=["--prefetch-playlist=yes"], seconds=5,
-                     post=[[0.3, ["loadfile", lab + "/pre/next-b.ts", "append"]], [3.5, ["playlist-next"]]])
+                     post=[[0.3, appended(lab + "/pre/next-b.ts", "append")], [3.5, ["playlist-next"]]])
         conf = probe(work, "W22c", tree, tree, lab + "/pre/chan.ts", conf="prefetch-playlist=yes\n", seconds=5,
-                     post=[[0.3, ["loadfile", lab + "/pre/next-c.ts", "append"]], [3.5, ["playlist-next"]]])
-        # On a player without a relay the appended entry is fetched one way or
-        # the other: prefetched while the channel's per-file options are live,
-        # or at the playlist-next. F-HARNESS-111: on a player with one, a
-        # prefetch made under the channel's per-file options would carry its
-        # token and its header to the server, and the entry opened at the
-        # playlist-next meets the launch pin, which carries no token, and
-        # stops at the relay -- so there it is either fetched WITH the header
-        # (the leak) or not at all, and only the leak is red.
+                     post=[[0.3, appended(lab + "/pre/next-c.ts", "append")], [3.5, ["playlist-next"]]])
+        # The appended entry is fetched one way or the other: prefetched while
+        # the channel's per-file options are live, or at the playlist-next.
+        # On a player with a relay it carries a token of the rig's own and
+        # nothing else (appended, the review of 0c435d0), so it reaches the
+        # server at the playlist-next there too; a prefetch made under the
+        # channel's per-file options would carry the channel's token and its
+        # header (reasoned, not measured: the pin keeps prefetch off), and is
+        # the leak this check is red for.
         cases = ((told, "a"), (past, "b"), (conf, "c"))
         nexts = [lab_headers(r, "/pre/next-%s.ts" % leaf) for r, leaf in cases]
         leaked = [h for got in nexts for h in got if HEADER_VALUE in json.dumps(h)]
         chans = [any(HEADER_VALUE in json.dumps(h) for h in lab_headers(r, "/pre/chan.ts")) for r, _ in cases]
         check("W22 prefetch-playlist on by token, past the filter and from mpv.conf: refused as a token, and an appended entry gets no provider header",
               told["rejected"] == ["--prefetch-playlist=yes"] and leaked == [] and all(chans)
-              and all(got != [] or r["relayed"] for got, (r, _) in zip(nexts, cases)),
+              and all(got != [] for got in nexts),
               "rejected %d, each channel's own request carried the header %s, appended entry fetched %s, with the header %d%s" % (
                   len(told["rejected"]), chans, [len(got) for got in nexts], len(leaked),
-                  "; an entry not fetched stopped at the relay's launch pin" if any(r["relayed"] for r, _ in cases) else ""))
+                  "; each entry carried a token of the rig's own through the relay"
+                  if any(r["relayed"] for r, _ in cases) else ""))
         r = probe(work, "W23", tree, tree, lab + "/ck/v.m3u8", raw=["--video-osd=no"], seconds=7, drawwatch=True,
                   post=[[4.5, ["keypress", "`"]], [5.0, ["script-binding", "console/enable"]],
                         [5.5, ["script-binding", "commands/open"]]], watch=("load-console",))
@@ -1820,11 +1962,29 @@ def main(argv: list[str]) -> int:
         ecode, ereply = helper_verb(opts["--tree"], work, "C3", "epg", lab + "/epg.xml",
                                     {"OMARCHY_IPTV_ORIGIN": "playlist", "OMARCHY_IPTV_PLAYLIST_HOST": "127.0.0.1",
                                      "OMARCHY_IPTV_PLAYLIST_CLASS": "loopback", "OMARCHY_IPTV_PLAYLIST_PORT": str(PORTS["lab"])})
-        r = probe(work, "C3", tree, tree, lab + "/stream/1", seconds=3, headers={"Cookie": "relay=1"})
+        # The review of 0c435d0: on a tree with the relay C3 is loaded as the
+        # tree loads it -- the URL, the headers and the relay rule are the
+        # tree's own player_target over C3's own cache, so the relay holds
+        # loopback to this playlist's port, the shipping rule for the one
+        # source shape C3 covers, not relay_rule's local-file one.
+        c3_url, c3_headers, c3_rule, composed = lab + "/stream/1", {"Cookie": "relay=1"}, None, "relay_rule's"
+        if has_relay(tree) and channels.get("channels"):
+            try:
+                c3 = tree["player_target"](str(channels["channels"][0].get("id") or ""), "",
+                                           os.path.dirname(cache))
+                c3_url, c3_headers, c3_rule = c3["url"], dict(c3.get("headers") or {}), dict(c3.get("relay") or {})
+                composed = "player_target's (loopback %s, local %s, port %s)" % (
+                    c3_rule.get("loopback"), c3_rule.get("local"), c3_rule.get("port"))
+            except tree["HelperError"] as error:
+                composed = "none: player_target refused it as %s" % getattr(error, "code", "")
+        r = probe(work, "C3", tree, tree, c3_url, seconds=3, headers=c3_headers, rule=c3_rule)
         check("C3 a loopback relay on one port: its sign-in header is kept, its guide on that port fetched, its channel plays with it (control)",
               code == 0 and kept == [{"Cookie": "relay=1"}] and ecode == 0 and r["timePos"] is not None
-              and any("relay=1" in json.dumps(h) for h in lab_headers(r, "/stream/1")),
-              "playlist exit %d, headers %s, guide exit %d, played %s" % (code, kept, ecode, r["timePos"] is not None))
+              and any("relay=1" in json.dumps(h) for h in lab_headers(r, "/stream/1"))
+              and (not has_relay(tree) or (c3_rule or {}).get("loopback") is True),
+              "playlist exit %d, headers %s, guide exit %d, played %s%s" % (
+                  code, kept, ecode, r["timePos"] is not None,
+                  ", under the relay rule %s" % composed if has_relay(tree) else ""))
         r = probe(work, "C1", tree, tree, p + "/live/rig/%s/long.ts" % SECRET, seconds=4,
                   user=["--hwdec=auto-safe", "--profile=low-latency", "--cache-secs=30", "--volume=50", ca],
                   watch=("volume", "cache-secs"))
@@ -1855,6 +2015,9 @@ def main(argv: list[str]) -> int:
         for label, ok, detail in launch_checks(work, tree, "http://127.0.0.1:%d/live/rig/%s/long.ts" % (PORTS["plain"], SECRET)):
             check(label, ok, detail)
     finally:
+        # Any player a stop signal left registered (LIVE), then the servers.
+        for player in list(LIVE):
+            player.finish()
         for proc in procs:
             proc.terminate()
         for proc in procs:
