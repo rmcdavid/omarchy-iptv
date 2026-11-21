@@ -132,8 +132,60 @@ after the shell starts, and you start the channel again yourself.
   plugin no longer stops the wrapper's shell** when it starts a channel on
   a player it finds already running. The player played on, but anything the
   wrapper does after mpv exits did not run. (D-PLY-62)
+- **`state.json` is made private before every save, not after it.** Where
+  `state.json` is a link into a folder other accounts can enter, which the
+  plugin supports, and the file there had been made readable by others,
+  each save that held a source's address, password included, stayed
+  readable for about a quarter of a second, until the plugin repaired the
+  file's mode. Each save now costs one more short helper run
+  first, and if that run cannot make the file private the save fails and
+  says so. Reported by the Omarchy plugin marketplace's maintainer against
+  0.19.1. (D-SINK-103)
+- **Playing a channel right after Stop no longer fails with "The player is
+  busy"**: the new channel starts once the old player has finished
+  closing, and is no longer lost if the old player closes between two
+  tries. Changing channel several times quickly just after a stop now ends
+  on the channel you picked last. (D-PLY-43)
+- **A stop that takes a few seconds no longer sets off a second stop**; a
+  player another program had taken over is still stopped within about
+  five seconds. (D-PLY-40)
+- **Stopping, choosing a channel and stopping again in quick succession
+  no longer sends that channel to a player that is shutting down**, and
+  a quick play, stop, play no longer shows a false "stopped
+  unexpectedly" message or loses the channel you chose last.
+  (D-PLY-69, D-PLY-71)
+- **Pressing Stop while the player is being restarted, after it stopped
+  answering or to replace it after an update, is no longer undone**: the
+  guide no longer picks the restarted player back up after the stop,
+  and a channel chosen right after such a stop starts on its own
+  instead of ending on a false "stopped unexpectedly" message. (D-PLY-72)
+- **Starting, changing channel, pausing or seeking on a player that
+  answers too slowly now gives up within its own time limit** and says
+  "mpv did not answer", instead of waiting a minute or more, and a start
+  that gives up no longer leaves a black, empty player window behind.
+  (D-PLY-39)
+- **When another program answers the player's socket, the player the
+  plugin had just started is closed** instead of being left as an empty
+  black window. (D-PLY-57)
+- **An `mpvArgs` setting too long to hand to the player (over 64 KiB) no
+  longer stops every channel from starting**; the options that do not fit
+  are left out and the guide's footer says so. (D-PLY-50)
+- **A channel logo address with a stray bracket in its host no longer
+  stops the logo fetch for every channel of that source.** (D-LOGO-26)
+- **A channel whose playlist writes its logo address with a tab or
+  carriage return inside `http` or `https`, or with a control character
+  other than whitespace in front of it, is listed without a logo** after
+  the next refresh. Such a logo was never fetched or shown, and the logo
+  dialog no longer counts it as one it could not use. (D-LOGO-30)
 
 ### Changed
+
+- **With Omarchy's animations turned off** (`omarchy toggle animations`),
+  the bar label, the glyph colour, the guide's banner and the Sources row
+  change at once instead of animating, as the rest of the shell does.
+  (D-A11Y-11)
+- **Reading a large playlist is about a quarter faster**, with no change
+  to which channels it keeps or refuses. (F-HARNESS-73)
 
 - **`--http-proxy` in `mpvArgs` is refused**, and so is a
   `--demuxer-lavf-o` token naming `http_proxy`; both were accepted with a

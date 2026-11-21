@@ -1774,9 +1774,9 @@ word, recovered and adopted it under the stop. The shell records whether the
 start went out over a player it may ladder (`sessionOverPlayer`: the
 observer on one after the start's own arm, a restart, an owed replacement)
 and holds such an EOF as well. Two exceptions remain to the rule this
-bracket qualifies, both open: a cold start whose arm could not reach a
+bracket qualifies, both open: D-PLY-74, a cold start whose arm could not reach a
 wedged player of this build that it then ladders, when a later connect of
-the hunt does (read, not built, on D-PLY-72's row: at EOF nothing tells that
+the hunt does (read, not built: at EOF nothing tells that
 player from the start's own spawn, and holding every cold start would undo the single
 stop's settle); and D-PLY-73, a stop the shell issues itself -- the
 backstop's stop of a player that outlived the user's stop -- which opens no
