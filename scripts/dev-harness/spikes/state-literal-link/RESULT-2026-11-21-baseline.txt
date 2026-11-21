@@ -1,4 +1,4 @@
-# the same driver (measure.sh, judge.py and probe.cpp as committed beside this file) over a git archive of 085a49d, the tree before the guard (its stub's entry ("10-state.py", 67033, 0x8fd64d4f)), about 2026-11-21T18:05Z, otherwise as RESULT-2026-11-21.txt: judge.py finds no state_link_split and checks nothing, and `state private` confirms every layout but selfloop; the first ten cases' probe lines are RESULT-2026-11-15.txt's, line for line; lane-state9, load 1.64 1.06 0.83 before
+# the same driver (measure.sh, judge.py and probe.cpp as committed beside this file) over a git archive of 085a49d, the tree before the guard (its stub's entry ("10-state.py", 67033, 0x8fd64d4f)), all 27 cases, 2026-11-21T19:53Z, otherwise as RESULT-2026-11-21.txt: judge.py finds no state_link_split and checks nothing, and `state private` confirms every layout but selfloop; the first ten cases' probe lines are RESULT-2026-11-15.txt's, line for line; lane-settle-state9, load 2.02 2.11 1.84 before and 2.14 2.14 1.90 after
 == CASE r600
   symLinkTarget wide/state.json
   realpath      T/wide/state.json
@@ -178,5 +178,59 @@
   FILE state/state.json mode 644 text 'NEW'
   VERDICT case=selfloop read=(none) landed=state/state.json:644 same-file=NO
   CHECK case=selfloop guard=none (this tree's helper has no state_link_split)
+== CASE hardlink2
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget x/b.json
+  realpath      R/b.json
+  commit 1
+  FILE R/b.json mode 600 text 'REAL'
+  FILE R/a.json mode 600 text 'NEW'
+  VERDICT case=hardlink2 read=R/b.json landed=R/a.json:600 same-file=NO
+  CHECK case=hardlink2 guard=none (this tree's helper has no state_link_split)
+== CASE twofiles2
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget x/b.json
+  realpath      R/b.json
+  commit 1
+  FILE R/b.json mode 600 text 'REAL'
+  FILE R/a.json mode 600 text 'NEW'
+  VERDICT case=twofiles2 read=R/b.json landed=R/a.json:600 same-file=NO
+  CHECK case=twofiles2 guard=none (this tree's helper has no state_link_split)
+== CASE chain41
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'NEW'
+  FILE T/state/state.json link
+  VERDICT case=chain41 read=T/l/s0 landed=T/l/s0:600 same-file=yes
+  CHECK case=chain41 guard=none (this tree's helper has no state_link_split)
+== CASE chain127
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'NEW'
+  FILE T/state/state.json link
+  VERDICT case=chain127 read=T/l/s0 landed=T/l/s0:600 same-file=yes
+  CHECK case=chain127 guard=none (this tree's helper has no state_link_split)
+== CASE chain128
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'REAL'
+  FILE T/state/state.json mode 600 text 'NEW'
+  VERDICT case=chain128 read=T/l/s0 landed=T/state/state.json:600 same-file=NO
+  CHECK case=chain128 guard=none (this tree's helper has no state_link_split)
+== CASE nonutf8
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget state/\xef\xbf\xbd.json
+  realpath      state/\xff.json
+  commit 1
+  FILE state/\xff.json mode 600 text 'REAL'
+  FILE state/\xef\xbf\xbd.json mode 600 text 'NEW'
+  VERDICT case=nonutf8 read=state/\xff.json landed=state/\xef\xbf\xbd.json:600 same-file=NO
+  CHECK case=nonutf8 guard=none (this tree's helper has no state_link_split)
 # checks failed: 0
 # exit 0

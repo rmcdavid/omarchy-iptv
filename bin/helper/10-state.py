@@ -907,12 +907,15 @@ def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
             "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
 
 
-# D-STATE-9 (2026-11-21): the most links the walk below follows -- the
-# kernel's own limit on one resolution (MAXSYMLINKS: ELOOP past 40). A chain
-# QSaveFile could follow further (it stops at 127 and then writes over the
-# path itself, a loop included) is refused: no layout the kernel can read
-# by its own resolution reads more than 40 of them on the literal one.
-STATE_LINK_HOPS = 40
+# D-STATE-9 (2026-11-21): the most links the walk below follows -- QSaveFile's
+# own bound, measured on qt6-base 6.12.0-3 (the spike's chain127 and chain128
+# cases): a literal reading of 127 links reaches its file, and at 128 it stops
+# and writes over the PATH itself, replacing the link at it (a loop on the
+# literal reading included). The kernel's MAXSYMLINKS (ELOOP past 40) bounds
+# one resolution of its own, not this walk: a literal reading can take 41 or
+# 127 links where the kernel takes 2 and still end at the kernel's file
+# (corrected by the review of 2026-11-21, which measured it; this said 40).
+STATE_LINK_HOPS = 127
 
 
 def qt_clean_path(path: str) -> str:
@@ -1012,8 +1015,10 @@ def qt_link_literal(path: str) -> str | None:
     Qt source is not on this machine, and the spike's driver asserts for
     every case that this names the file the installed QSaveFile wrote.
     -> that path (it may not exist; nothing at it, or a folder missing on
-    the way, ends the walk as it ends QSaveFile's), or None past
-    STATE_LINK_HOPS links or where a link cannot be read."""
+    the way, ends the walk as it ends QSaveFile's); `path` itself, as given
+    and made absolute, while a link is still there after STATE_LINK_HOPS
+    links, because QSaveFile then writes over the path, replacing its link
+    (measured: chain128, loop); or None where a link cannot be read."""
     current = qt_clean_path(os.path.join(os.getcwd(), path))
     hops = 0
     while True:
@@ -1023,7 +1028,7 @@ def qt_link_literal(path: str) -> str | None:
         except OSError:
             return current
         if hops == STATE_LINK_HOPS:
-            return None
+            return os.path.join(os.getcwd(), path)
         hops += 1
         try:
             target = os.readlink(os.fsencode(current)).decode("utf-8", "replace")
@@ -1034,11 +1039,14 @@ def qt_link_literal(path: str) -> str | None:
         current = qt_clean_path(target)
 
 
-def state_link_entry(folder: str, name: str) -> tuple[tuple[int, int], str, tuple[int, int] | None] | None:
+def state_link_entry(folder: str, name: str) -> tuple[tuple[int, int], str] | None:
     """One directory entry, as a writer that renames onto it sees it: the
-    folder by its (st_dev, st_ino), the name in it, and the file there by
-    its (st_dev, st_ino), or None when nothing is there. None when the
-    folder cannot be read as a folder (missing, not one, not searchable)."""
+    folder by its (st_dev, st_ino) and the name in it. What is at the name
+    is not part of it: a rename replaces the entry whatever file it held
+    (the review of 2026-11-21; the file's identity was compared here, and a
+    hard link passed). None when the folder cannot be read as a folder
+    (missing, not one, not searchable: the name is looked up in it, and only
+    a name with nothing there is an answer)."""
     try:
         held = os.stat(folder)
     except OSError:
@@ -1046,37 +1054,47 @@ def state_link_entry(folder: str, name: str) -> tuple[tuple[int, int], str, tupl
     if not stat.S_ISDIR(held.st_mode):
         return None
     try:
-        st = os.stat(os.path.join(folder, name))
-        there: tuple[int, int] | None = (st.st_dev, st.st_ino)
+        os.stat(os.path.join(folder, name))
     except FileNotFoundError:
-        there = None
+        pass
     except OSError:
         return None
-    return (held.st_dev, held.st_ino), name, there
+    return (held.st_dev, held.st_ino), name
 
 
 def state_link_split(path: str) -> bool:
     """True when state.json is a symbolic link that QSaveFile would save to
     a different file than the kernel -- and so the FileView's read, the
     helper and every other program -- reads (D-STATE-9): a relative target
-    that climbs with `..` out of a linked folder, at any hop of a chain. The
-    two answers are compared as FILES, never as strings: qt_clean_path
+    that climbs with `..` out of a linked folder, at any hop of a chain, or a
+    target that is not UTF-8 (QSaveFile reads an invalid byte as U+FFFD and
+    writes the file of that name, measured: nonutf8). The two answers are
+    compared as directory ENTRIES, never as strings: qt_clean_path
     resolves no link and the kernel resolves every one, so a link inside a
     linked state folder, or an absolute target through a linked folder
     (~/Sync -> /mnt/data/Sync), names the same file by two strings. What is
     compared is the ENTRY a rename replaces: the folder (by st_dev and
-    st_ino, so a bind mount of it is the same folder) and the name in it --
-    the same entry, or, where the names differ, the same file in that one
-    folder (a case-folding filesystem). Two names of one inode in two
-    folders are two entries: QSaveFile's rename would replace the one and
-    leave the other, which the plugin reads, holding the old text.
+    st_ino, so a bind mount of it is the same folder) and the name in it.
+    Two names of one inode are two entries, in two folders or in ONE:
+    QSaveFile's rename would replace the one and leave the other, which the
+    plugin reads, holding the old text (measured, the spike's hardlink and
+    hardlink2). So a different name is a different entry, always [the
+    review of 2026-11-21: this let a second name in the same folder pass
+    when it named the same inode, for a case-folding filesystem, and a hard
+    link there was saved past]. The cost, stated: on a case-folding
+    filesystem, two spellings of one name that the two readings end at are
+    refused too, where they are one entry; the readings can end in two
+    spellings only after they have gone through different links (not
+    measured: such a filesystem needs root to make).
     False when there is no link at the path, and when the kernel cannot
     resolve it either (a loop, a folder that cannot be searched): the
-    verbs' own answers name those (`link`, `unreachable`). True when the
-    literal walk passes STATE_LINK_HOPS, a link on it cannot be read, or no
-    folder is at its end, which QSaveFile cannot open (`open failed: No
-    such file or directory`, measured), because then no save reaches the
-    file the plugin reads either."""
+    verbs' own answers name those (`link`, `unreachable`). True when a link
+    on the literal walk cannot be read, when no folder is at its end, which
+    QSaveFile cannot open (`open failed: No such file or directory`,
+    measured), because then no save reaches the file the plugin reads
+    either, and when the walk passes STATE_LINK_HOPS, because QSaveFile then
+    writes over the path's own entry, a link, which is never the entry the
+    kernel reads."""
     try:
         if not stat.S_ISLNK(os.lstat(path).st_mode):
             return False
@@ -1098,11 +1116,7 @@ def state_link_split(path: str) -> bool:
     written = state_link_entry(literal.rpartition("/")[0] or "/", literal.rpartition("/")[2])
     if written is None:
         return True
-    if written[0] != read[0]:
-        return True
-    if written[1] == read[1]:
-        return False
-    return written[2] is None or written[2] != read[2]
+    return written != read
 
 
 # undo_state_private_create's reason when the inode it created is no longer
@@ -1128,7 +1142,7 @@ def state_private_refusal(why: str, reason: str = "", created: tuple[str, str] =
         "unconfirmed": "state.json could not be made private (%s)" % (reason or "error"),
         # D-STATE-9: the shell's writer reads the link as text, so its save
         # would land in a file the plugin never reads back.
-        "split-link": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link)",
+        "split-link": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8)",
     }
     word, failure = created
     if failure == STATE_PRIVATE_WRITTEN:

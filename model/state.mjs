@@ -2184,10 +2184,13 @@ function stateUnreadableNotice(reason, path, midSession) {
     // D-STATE-9 (2026-11-21): the helper's `state init` names a state.json
     // link whose relative target climbs with .. out of a folder that is
     // itself a link: the shell's writer reads that .. as text and would save
-    // to another file than the one read. An absolute target with no .. is
-    // read the same way by both.
-    what = "is a symbolic link that would be saved to a different file than the one it is read from, because its target climbs with .. out of a folder that is itself a symbolic link"
-    fix = "Point it at the file that holds your state with an absolute path that has no .. in it, then run omarchy restart shell."
+    // to another file than the one read. Or a target that is not UTF-8,
+    // which the writer reads with U+FFFD in it (the review of 2026-11-21,
+    // measured; this named only the .. and sent such a user to a fix that
+    // keeps the refusal). An absolute target in UTF-8 with no .. is read the
+    // same way by both.
+    what = "is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8"
+    fix = "Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     // R27e left this one as it was: at a START the helper names a link that
     // leads nowhere itself ("link", "folder-link"), so the file it found and

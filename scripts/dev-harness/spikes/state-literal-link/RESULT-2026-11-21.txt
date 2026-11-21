@@ -1,4 +1,4 @@
-# scripts/dev-harness/spikes/state-literal-link/measure.sh (all 21 cases), 2026-11-21T18:19Z, the state9 tree on 085a49d with the guard as committed beside this file (the stub's entry ("10-state.py", 77370, 0x362e9f0c)), probe.cpp built against the installed libQt6Core, qt6-base 6.12.0-3 gcc 16.2.1+r23+gd564253eb6c8-1 umask 0022, offscreen, each probe under gdb 18.1 (handle all nopass, debuginfod off) on a private bus (private-bus.sh), run under the heavy lock as: flock heavy.lock nice -n 10 timeout 900 env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME HOME=<decoy under the lane's scratch> TMPDIR=<a short scratch folder> measure.sh; lane-state9, load 1.72 1.99 1.58 before and 1.98 2.02 1.65 after
+# scripts/dev-harness/spikes/state-literal-link/measure.sh (all 27 cases), 2026-11-21T19:58Z, the state9 tree with the guard as its review settled it, committed beside this file (the stub's entry ("10-state.py", 78570, 0x68287174)), probe.cpp built against the installed libQt6Core, qt6-base 6.12.0-3 gcc 16.2.1+r23+gd564253eb6c8-1 umask 0022, offscreen, each probe under gdb 18.1 (handle all nopass, debuginfod off) on a private bus (private-bus.sh), run under the heavy lock as: flock heavy.lock nice -n 10 timeout 1200 env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME HOME=<decoy under the lane's scratch> TMPDIR=<a short scratch folder> measure.sh; lane-settle-state9, load 0.55 1.41 1.65 before and 1.24 1.50 1.67 after; the same run at 19:52Z, before a docstring-only edit of the part, gave every line below unchanged
 == CASE r600
   symLinkTarget wide/state.json
   realpath      T/wide/state.json
@@ -48,8 +48,8 @@
   VERDICT case=nodir read=T/wide/state.json landed=none same-file=n/a open-failed
   CHECK case=nodir helper-literal=wide/state.json literal-written=open-failed kernel=T/wide/state.json missed-kernel=yes split=yes expected=yes ok
 == CASE r644-private
-  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it
-{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
   symLinkTarget wide/state.json
   realpath      T/wide/state.json
   commit 1
@@ -58,8 +58,8 @@
   VERDICT case=r644-private read=T/wide/state.json landed=wide/state.json:644 same-file=NO
   CHECK case=r644-private helper-literal=wide/state.json literal-written=yes kernel=T/wide/state.json missed-kernel=yes split=yes expected=yes ok
 == CASE none-private
-  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it
-{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
   symLinkTarget wide/state.json
   realpath      (none)
   commit 1
@@ -142,8 +142,8 @@
   VERDICT case=dotdot read=home/.local/dotfiles/state.json landed=home/.local/dotfiles/state.json:600 same-file=yes
   CHECK case=dotdot helper-literal=home/.local/dotfiles/state.json literal-written=yes kernel=home/.local/dotfiles/state.json missed-kernel=no split=no expected=no ok
 == CASE chain2
-  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it
-{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
   symLinkTarget a/b/state.json
   realpath      T/a/b/state.json
   commit 1
@@ -154,8 +154,8 @@
   VERDICT case=chain2 read=T/a/b/state.json landed=a/w/state.json:600 same-file=NO
   CHECK case=chain2 helper-literal=a/w/state.json literal-written=yes kernel=T/a/b/state.json missed-kernel=yes split=yes expected=yes ok
 == CASE hardlink
-  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it
-{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
   symLinkTarget wide/state.json
   realpath      T/wide/state.json
   commit 1
@@ -164,8 +164,8 @@
   VERDICT case=hardlink read=T/wide/state.json landed=wide/state.json:600 same-file=NO
   CHECK case=hardlink helper-literal=wide/state.json literal-written=yes kernel=T/wide/state.json missed-kernel=yes split=yes expected=yes ok
 == CASE loop
-  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it
-{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
   symLinkTarget a/state.json
   realpath      T/a/state.json
   commit 1
@@ -173,7 +173,7 @@
   FILE a/state.json link
   FILE T/state/state.json mode 600 text 'NEW'
   VERDICT case=loop read=T/a/state.json landed=T/state/state.json:600 same-file=NO
-  CHECK case=loop helper-literal=none literal-written=past-bound kernel=T/a/state.json missed-kernel=yes split=yes expected=yes ok
+  CHECK case=loop helper-literal=state/state.json literal-written=yes kernel=T/a/state.json missed-kernel=yes split=yes expected=yes ok
 == CASE selfloop
   private rc=1 omarchy-iptv: state: state.json could not be reached (Too many levels of symbolic links); nothing may be written to it
 {"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json could not be reached (Too many levels of symbolic links); nothing may be written to it"}, "why": "unreachable", "action": "private"}
@@ -182,6 +182,64 @@
   commit 1
   FILE state/state.json mode 644 text 'NEW'
   VERDICT case=selfloop read=(none) landed=state/state.json:644 same-file=NO
-  CHECK case=selfloop helper-literal=none literal-written=past-bound kernel=none missed-kernel=n/a split=no expected=no ok
+  CHECK case=selfloop helper-literal=state/state.json literal-written=yes kernel=none missed-kernel=n/a split=no expected=no ok
+== CASE hardlink2
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  symLinkTarget x/b.json
+  realpath      R/b.json
+  commit 1
+  FILE R/b.json mode 600 text 'REAL'
+  FILE R/a.json mode 600 text 'NEW'
+  VERDICT case=hardlink2 read=R/b.json landed=R/a.json:600 same-file=NO
+  CHECK case=hardlink2 helper-literal=R/a.json literal-written=yes kernel=R/b.json missed-kernel=yes split=yes expected=yes ok
+== CASE twofiles2
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  symLinkTarget x/b.json
+  realpath      R/b.json
+  commit 1
+  FILE R/b.json mode 600 text 'REAL'
+  FILE R/a.json mode 600 text 'NEW'
+  VERDICT case=twofiles2 read=R/b.json landed=R/a.json:600 same-file=NO
+  CHECK case=twofiles2 helper-literal=R/a.json literal-written=yes kernel=R/b.json missed-kernel=yes split=yes expected=yes ok
+== CASE chain41
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'NEW'
+  FILE T/state/state.json link
+  VERDICT case=chain41 read=T/l/s0 landed=T/l/s0:600 same-file=yes
+  CHECK case=chain41 helper-literal=T/l/s0 literal-written=yes kernel=T/l/s0 missed-kernel=no split=no expected=no ok
+== CASE chain127
+  private rc=0 {"ok": true, "kind": "state", "action": "private", "file": "kept"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'NEW'
+  FILE T/state/state.json link
+  VERDICT case=chain127 read=T/l/s0 landed=T/l/s0:600 same-file=yes
+  CHECK case=chain127 helper-literal=T/l/s0 literal-written=yes kernel=T/l/s0 missed-kernel=no split=no expected=no ok
+== CASE chain128
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  symLinkTarget l/s0
+  realpath      T/l/s0
+  commit 1
+  FILE T/l/s0 mode 600 text 'REAL'
+  FILE T/state/state.json mode 600 text 'NEW'
+  VERDICT case=chain128 read=T/l/s0 landed=T/state/state.json:600 same-file=NO
+  CHECK case=chain128 helper-literal=state/state.json literal-written=yes kernel=T/l/s0 missed-kernel=yes split=yes expected=yes ok
+== CASE nonutf8
+  private rc=1 omarchy-iptv: state: state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it
+{"ok": false, "kind": "state", "error": {"code": "state_not_private", "message": "state.json is a symbolic link that the shell would save to a different file than the one it reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8); nothing may be written to it"}, "why": "split-link", "action": "private"}
+  symLinkTarget state/\xef\xbf\xbd.json
+  realpath      state/\xff.json
+  commit 1
+  FILE state/\xff.json mode 600 text 'REAL'
+  FILE state/\xef\xbf\xbd.json mode 600 text 'NEW'
+  VERDICT case=nonutf8 read=state/\xff.json landed=state/\xef\xbf\xbd.json:600 same-file=NO
+  CHECK case=nonutf8 helper-literal=state/\xef\xbf\xbd.json literal-written=yes kernel=state/\xff.json missed-kernel=yes split=yes expected=yes ok
 # checks failed: 0
 # exit 0

@@ -11,9 +11,11 @@ folder that is itself a link, the two name different files, and the save
 lands where nothing reads it back (measured: scripts/dev-harness/spikes/
 state-literal-link, docs/QA-RESULTS.md "D-STATE-9"). The guard: `state
 private` and `state init` refuse such a link by name (`split-link`), comparing
-the two answers as FILES, never as strings, because two strings for one file
-is the common, supported case (a link in a linked state folder, an absolute
-target through ~/Sync -> /mnt/data/Sync).
+the two answers as directory ENTRIES (a folder and the name in it), never as
+strings, because two strings for one file is the common, supported case (a
+link in a linked state folder, an absolute target through ~/Sync ->
+/mnt/data/Sync), and never as inodes, because a rename replaces a name, not a
+file (a hard link).
 
 Every layout is built in a 0700 scratch folder (tempfile, under the suite's
 TMPDIR), and every assertion reads the filesystem, never the code. The Qt
@@ -36,8 +38,8 @@ helper = load_helper()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLEAN_FIXTURE = ROOT / "tests" / "fixtures" / "qt-clean-path.json"
 SPLIT_SENTENCE = ("state.json is a symbolic link that the shell would save to a different file than the one it "
-                  "reads (its target climbs with .. out of a folder that is itself a symbolic link); nothing may "
-                  "be written to it")
+                  "reads (a target on the way climbs with .. out of a folder that is itself a symbolic link, or is "
+                  "not UTF-8); nothing may be written to it")
 
 
 class QtCleanPathTest(unittest.TestCase):
@@ -119,8 +121,9 @@ class StateLinkGuardTest(unittest.TestCase):
     def assert_split(self, state_dir, init_changes=False):
         before = self.listing()
         code, payload, err = self.private(state_dir)
-        self.assertEqual((code, payload["ok"], payload.get("why"), payload["error"]["code"], payload["error"]["message"]),
-                         (1, False, "split-link", "state_not_private", SPLIT_SENTENCE), err)
+        self.assertEqual((code, payload.get("why")), (1, "split-link"), payload)   # a confirmed save reads as a failure
+        self.assertEqual((payload["ok"], payload["error"]["code"], payload["error"]["message"]),
+                         (False, "state_not_private", SPLIT_SENTENCE), err)
         self.assertNotIn("created", payload)
         self.assertEqual(self.listing(), before)   # nothing created, chmod-ed or moved
         code, payload, err = self.init(state_dir)
@@ -182,8 +185,8 @@ class StateLinkGuardTest(unittest.TestCase):
         self.assert_kept(state)
 
     def test_forty_links_on_the_literal_reading_are_followed(self):
-        # The bound's other side: 40 links (state.json, then s0..s38) end at
-        # the file the kernel reads, so nothing is refused.
+        # 40 links (state.json, then s0..s38) end at the file the kernel
+        # reads, so nothing is refused (QSaveFile's bound is 127, below).
         self.chain_of(40)
         self.assert_kept(self.c / "state")
 
@@ -250,6 +253,50 @@ class StateLinkGuardTest(unittest.TestCase):
         os.link(self.c / "T" / "wide" / "state.json", self.c / "wide" / "state.json")
         self.assert_split(state)
 
+    def same_folder_layout(self, hard_link):
+        """The review's layout (2026-11-21): the two readings end in ONE
+        folder, R, under two names. state -> T/state; T/state/state.json ->
+        ../x/b.json; T/x -> R (absolute); a real folder x holding x/b.json ->
+        ../R/a.json. The kernel reads R/b.json; QSaveFile writes R/a.json, a
+        hard link of R/b.json or a file of its own."""
+        state = self.linked_state()
+        self.put(self.c / "R" / "b.json")
+        os.symlink(self.c / "R", self.c / "T" / "x")
+        self.link(self.c / "x" / "b.json", "../R/a.json")
+        if hard_link:
+            os.link(self.c / "R" / "b.json", self.c / "R" / "a.json")
+        else:
+            self.put(self.c / "R" / "a.json", text="OTHER\n")
+        self.link(self.c / "T" / "state" / "state.json", "../x/b.json")
+        self.assertEqual(helper.qt_link_literal(str(state / "state.json")), str(self.c / "R" / "a.json"))
+        self.assertEqual(os.path.realpath(state / "state.json"), str(self.c / "R" / "b.json"))
+        return state
+
+    def test_a_hard_link_under_another_name_in_the_kernels_own_folder_is_two_entries(self):
+        # Measured (the spike's hardlink2): QSaveFile wrote NEW into a new
+        # inode at R/a.json and R/b.json, which the plugin reads, kept REAL.
+        # The guard used to count two names of one inode in one folder as one
+        # entry (for a case-folding filesystem) and confirmed this layout.
+        self.assert_split(self.same_folder_layout(hard_link=True))
+
+    def test_another_file_in_the_kernels_own_folder_is_another_entry(self):
+        self.assert_split(self.same_folder_layout(hard_link=False))
+
+    def test_a_target_that_is_not_utf8(self):
+        # The review's layout (2026-11-21): state.json -> b"\xff.json" in a
+        # real folder, no `..` and no linked folder. QSaveFile reads the byte
+        # as U+FFFD and wrote the file of THAT name (the spike's nonutf8),
+        # while the plugin reads b"\xff.json".
+        state = self.c / "state"
+        state.mkdir(mode=0o700)
+        real = os.fsencode(state) + b"/\xff.json"
+        with open(real, "w", encoding="utf-8") as handle:
+            handle.write(self.real)
+        os.chmod(real, 0o600)
+        os.symlink(b"\xff.json", os.fsencode(state / "state.json"))
+        self.assertEqual(helper.qt_link_literal(str(state / "state.json")), str(state / "\ufffd.json"))
+        self.assert_split(state)
+
     def chain_of(self, links):
         """state.json and links-1 more on the literal reading, ending at the
         file the kernel reads (T/l/s0) by an absolute target; the kernel's own
@@ -262,19 +309,39 @@ class StateLinkGuardTest(unittest.TestCase):
             self.link(self.c / "l" / ("s%d" % k), "s%d" % (k + 1))
         self.link(self.c / "l" / ("s%d" % (links - 2)), self.c / "T" / "l" / "s0")
 
-    def test_forty_one_links_on_the_literal_reading_are_past_the_bound(self):
+    def test_forty_one_links_on_the_literal_reading_are_followed(self):
+        # The kernel's MAXSYMLINKS bounds one resolution of its own, and the
+        # kernel reads this through 2 links: QSaveFile followed all 41 to the
+        # kernel's file (measured, the spike's chain41). The guard used to
+        # stop at 40 and refuse it.
         self.chain_of(41)
-        self.assertIsNone(helper.qt_link_literal(str(self.c / "state" / "state.json")))
+        self.assertEqual(helper.qt_link_literal(str(self.c / "state" / "state.json")), str(self.c / "T" / "l" / "s0"))
+        self.assert_kept(self.c / "state")
+
+    def test_a_hundred_and_twenty_seven_links_are_followed(self):
+        # QSaveFile's own bound, its last link (measured, chain127).
+        self.chain_of(127)
+        self.assertEqual(helper.qt_link_literal(str(self.c / "state" / "state.json")), str(self.c / "T" / "l" / "s0"))
+        self.assert_kept(self.c / "state")
+
+    def test_a_hundred_and_twenty_eight_links_save_over_the_path_itself(self):
+        # Past its bound QSaveFile writes over the PATH, replacing the link
+        # with a regular file, while the kernel reads T/l/s0 (measured,
+        # chain128): the link's own entry is never the kernel's.
+        self.chain_of(128)
+        path = self.c / "state" / "state.json"
+        self.assertEqual(helper.qt_link_literal(str(path)), str(path))
         self.assert_split(self.c / "state")
 
     def test_a_literal_loop_the_kernel_resolves(self):
         # The literal a/state.json -> ../a/state.json is itself; the kernel
         # reads T/a/state.json. QSaveFile, past its own bound, wrote over the
-        # path itself (the spike's loop case).
+        # path itself (the spike's loop case), and so does the reading.
         state = self.linked_state()
         self.put(self.c / "T" / "a" / "state.json")
         self.link(self.c / "a" / "state.json", "../a/state.json")
         self.link(self.c / "T" / "state" / "state.json", "../a/state.json")
+        self.assertEqual(helper.qt_link_literal(str(state / "state.json")), str(state / "state.json"))
         self.assert_split(state)
 
     def test_a_loop_the_kernel_cannot_resolve_either_keeps_its_own_answers(self):
@@ -320,9 +387,10 @@ class ModelSplitLinkTest(unittest.TestCase):
             {"ok": False, "why": "split-link"},
             "Saved sources not loaded",
             "/home/u/.local/state/omarchy-iptv/state.json is a symbolic link that would be saved to a different "
-            "file than the one it is read from, because its target climbs with .. out of a folder that is itself "
-            "a symbolic link. Sources, favorites and settings changed now are not kept. Point it at the file that "
-            "holds your state with an absolute path that has no .. in it, then run omarchy restart shell.",
+            "file than the one it is read from, because a target on the way climbs with .. out of a folder that "
+            "is itself a symbolic link, or is not UTF-8. Sources, favorites and settings changed now are not "
+            "kept. Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in "
+            "it, then run omarchy restart shell.",
             "Saving has stopped",
         ])
 

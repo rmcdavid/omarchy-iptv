@@ -22155,7 +22155,10 @@ path's folder as TEXT (everything before its last `/`) and cleaned by
 asks nothing of the filesystem. The two readings are compared as directory
 ENTRIES -- the folder by st_dev and st_ino, and the name in it, or, where the
 names differ, the same file in that one folder -- never as strings, because a
-supported layout gives two strings for one file. `state private` refuses
+supported layout gives two strings for one file [the review of the branch:
+a different name is a different entry, always, since a hard link under
+another name in the kernel's own folder passed; "D-STATE-9 and
+F-HARNESS-119: the review settled", below]. `state private` refuses
 with exit 1, nothing changed, `why: split-link` and a sentence that names no
 path; `state init` answers `found: split-link`. The model reads the word
 (`Model.stateInitFound`, `stateLoadDecision`, `stateUnreadableNotice`,
@@ -22174,7 +22177,12 @@ path; `state init` answers `found: split-link`. The model reads the word
   QSaveFile follows 127 and then writes over the path ITSELF, which replaces
   the user's link with a regular file (measured below, `loop` and
   `selfloop`). A link the kernel cannot resolve either (a pure loop) keeps
-  the verbs' own answers, `unreachable` and `link`.
+  the verbs' own answers, `unreachable` and `link`. [The review of the
+  branch: the kernel's MAXSYMLINKS bounds one resolution of its own, not the
+  literal walk, so a literal reading of 41 to 127 links that ends at the
+  kernel's file was refused though QSaveFile saves it there. The bound is
+  now QSaveFile's own 127, measured, and past it the reading is the path
+  itself; below.]
 - A hard link at the literal location is refused. The file is one inode but
   two entries, and QSaveFile's rename replaces the literal entry, so the
   kernel's name keeps the old text (measured, `hardlink`). That is why the
@@ -22190,7 +22198,8 @@ notice ("... is a symbolic link that would be saved to a different file
 than the one it is read from, because its target climbs with .. out of a
 folder that is itself a symbolic link. ... Point it at the file that holds
 your state with an absolute path that has no .. in it, then run omarchy
-restart shell.") reaches only a start that could NOT load the file (the
+restart shell."; widened by the review to a target that is not UTF-8,
+below) reaches only a start that could NOT load the file (the
 link dangles), because Service.qml blocks writes only on a failed load and
 otherwise passes the reason through untouched. Proposals, outside this
 lane's files: (1) Service.qml's `finishStatePrivate` blocks writes with
@@ -22219,7 +22228,8 @@ lock and `nice -n 10`, with a decoy HOME.
   `/../b`); the kernel reads that as `/b`, and the comparison asks the
   kernel.
 - `measure.sh` over all 21 cases with the guard
-  (RESULT-2026-11-21.txt): 21 CHECK lines, 0 failed. Each asserts that the
+  (RESULT-2026-11-21.txt, since replaced by the settled guard's 27 cases,
+  below): 21 CHECK lines, 0 failed. Each asserts that the
   file the helper says QSaveFile writes is the file NEW landed in (or, for
   `nodir`, that its folder is missing where the open failed too), and that
   the helper's verdict is exactly "NEW missed the file the kernel read
@@ -22270,6 +22280,10 @@ resealed each time):
 | MM2 Model.stateLoadDecision drops it | 1 |
 | MM3 STATE_PRIVATE_WHY drops it | 1 |
 | MM4 no sentence of its own | 1 |
+
+[That is the first guard's table. The settled guard's, with M7 rewritten
+and M8 to M10 replaced, is in "D-STATE-9 and F-HARNESS-119: the review
+settled", below.]
 
 Also run: `node tests/Model.test.js` 4012 checks, 0 failures;
 `scripts/split-helper.py --check`; `node scripts/split-model.mjs --check`
@@ -22327,10 +22341,18 @@ HYPRLAND_INSTANCE_SIGNATURE`, a scratch XDG_RUNTIME_DIR and a short TMPDIR.
 
 | test whose setUp and start the driver ran | signal | before the fix | after |
 |---|---|---|---|
-| test_player StartTest | SIGTERM | stub and relay running 1 s and 6 s later | nothing at 1 s |
-| test_relay_player SpawnPlayerTest | SIGTERM | stub and relay running 1 s and 6 s later | nothing at 1 s |
-| test_player StartTest | SIGKILL | stub and relay running 1 s and 6 s later | nothing at 1 s |
-| test_relay_player SpawnPlayerTest | SIGKILL | (not run) | nothing at 1 s |
+| test_player StartTest | SIGTERM | stub and relay running 1 s and 6 s later | no stub at 1 s; nothing at 6 s |
+| test_relay_player SpawnPlayerTest | SIGTERM | stub and relay running 1 s and 6 s later | no stub at 1 s; nothing at 6 s |
+| test_player StartTest | SIGKILL | stub and relay running 1 s and 6 s later | no stub at 1 s; nothing at 6 s |
+| test_relay_player SpawnPlayerTest | SIGKILL | (not run) | no stub at 1 s; nothing at 6 s |
+
+[The review of the branch: this table said "nothing at 1 s", and the
+lane's driver did find nothing at 1 s, but that was a race it won. The
+review ran the same measurement four times (both files, both signals) and
+found the relay still running at 1 s in all four and gone at 3 s, the stub
+gone at 1 s each time. The relay ends RELAY_LINGER_S (1.0 s) after its stub
+by design, so the claim is no stub at 1 s and nothing within a few seconds;
+the new test's bound, 5 s plus RELAY_LINGER_S, was already that.]
 
 The driver exited -15 or -9 each time: Python's default SIGTERM runs no
 `finally` and no `addCleanup`, and unittest's is the same. The "before"
@@ -22394,3 +22416,193 @@ the suite's process group, with no bound of its own".
   lane's files and not unit tests. Not changed.
 - What a stopped suite still leaves: its scratch folders under /tmp, since
   no cleanup ran; /tmp is wiped at boot. No process.
+
+### D-STATE-9 and F-HARNESS-119: the review settled (lane-settle-state9, 2026-11-21)
+
+A review of the `state9` branch at 2ca6c76 upheld three must-fix findings
+and raised three others. This lane checked each one itself before changing
+anything and settled them in one commit on the same branch. Fixing them is
+the work the lead assigned; the choices below that the review left open are
+this lane's, stated as proposals for the lead. Crash journal 88 before the
+lane's first run and 88 after its last.
+
+**1. A hard link under another name in the kernel's own folder (upheld).**
+The review's layout: `state -> T/state`, `T/state/state.json ->
+../x/b.json`, `T/x -> R` (absolute), a real folder `x` holding `x/b.json ->
+../R/a.json`, `R/b.json` holding REAL and `R/a.json` a hard link of it. The
+kernel reads `R/b.json`; the literal reading reaches `R/a.json`; one folder,
+two names, one inode. Checked: on 2ca6c76 `state private` answered `kept`
+(the test below, and the spike's `hardlink2`: CHECK FAIL, split no while the
+save missed the kernel's file), and QSaveFile wrote NEW into a new inode at
+`R/a.json` while `R/b.json` kept REAL. The cause was the last line of
+`state_link_split`, which counted two names of one inode in one folder as
+one entry, for a case-folding filesystem.
+- The fix: a different name is a different entry, always. The comparison
+  is the folder's (st_dev, st_ino) and the name, and `state_link_entry` no
+  longer returns the file's identity at all, because a rename replaces a
+  name whatever file it held.
+- The review offered a second fix: keep one entry where the inode's
+  `st_nlink` is 1. Not taken: the branch it keeps is reachable only on a
+  case-folding filesystem, which needs root to make here, so no test could
+  reach it, and the two readings can end in two spellings only after they
+  have gone through different links. The cost, stated in the docstring:
+  such a filesystem's two spellings of one entry are refused too.
+
+**2. The 40-link bound (upheld).** Measured before changing it: the
+spike's probe under gdb on a private bus, over chains that rejoin the
+kernel's file `T/l/s0` (the kernel reads it through 2 links):
+- 2, 40, 41, 126 and 127 links on the literal reading: NEW in `T/l/s0`.
+- 128 and 129: `T/l/s0` kept REAL, and `T/state/state.json`, the link, was
+  replaced by a regular 0600 file holding NEW.
+So QSaveFile follows 127 links and at the 128th writes over the path
+itself, and the kernel's MAXSYMLINKS bounds one resolution of its own, not
+this walk. The old comment ("no layout the kernel can read by its own
+resolution reads more than 40 of them on the literal one") was false, and
+41 to 127 were refused though the save reaches the kernel's file.
+- The fix models Qt's bound, the review's first option:
+  `STATE_LINK_HOPS` is 127, and past it `qt_link_literal` answers the path
+  itself, as given and made absolute, as QSaveFile does. The entry
+  comparison then refuses it, because the path's own entry is a link and
+  never the entry the kernel reads. None now means only a link that cannot
+  be read.
+- The spike holds it: `chain41` and `chain127` kept, `chain128` refused,
+  and the existing `loop` and `selfloop` cases now show the helper's
+  reading as the path, the file QSaveFile wrote over.
+
+**3. F-HARNESS-119's "nothing at 1 s" (upheld; records only).** Not
+re-measured. The review's four runs found the relay still running 1 s after
+the holder's death and gone at 3 s, with the stub gone at 1 s. The lane's
+own runs found nothing 1 s after the driver's exit and nothing 6 s after.
+Both fit the relay's design: it sleeps RELAY_LINGER_S (1.0 s, 01-core.py)
+after its last child (12-relay.py, read). So the claim is no stub at 1 s
+and nothing within a few seconds. Corrected:
+- the STATUS row;
+- the table above, whose cells now read "no stub at 1 s; nothing at 6 s",
+  with a bracket after it.
+2ca6c76's commit message ("nothing is left a second after either signal")
+stays as it is, because the branch is not rewritten; this commit's message
+corrects it. The new test's bound, 5 s plus RELAY_LINGER_S, was already
+right.
+
+**The other three findings.**
+- Over a state file that loads, the user is told only "Could not write
+  state.json". Confirmed by reading; Service.qml is lane-ply73's file.
+  Nothing changed here, and the first lane's proposals (1) and (2) stand
+  for the lead.
+- A target that is not UTF-8. Checked (spike `nonutf8`): `state/state.json
+  -> b"\xff.json"` in a real folder, and QSaveFile wrote NEW to
+  `state/\xef\xbf\xbd.json` (U+FFFD) while the plugin reads
+  `state/\xff.json`. The guard refused it, but its sentence named only the
+  `..`, and the notice's fix would have left the user refused. Widened:
+  - The helper's sentence now ends "(a target on the way climbs with .. out
+    of a folder that is itself a symbolic link, or is not UTF-8)".
+  - The model's notice now gives the fix as "an absolute path in UTF-8 that
+    has no .. in it".
+  Why those two causes are the only ones (reasoned, not measured): without
+  a `..` after a linked folder and without a byte the decoding changes,
+  each string on the literal reading names, through the kernel, the entry
+  the kernel's own walk reaches at that hop. That walk follows at most 40
+  links, so even a refusal past 127 has one of the two causes on the way.
+- The D-STATE-10 row said the helper would judge another folder than the
+  one the FileView "reads and writes". It is now hedged. The read goes
+  through the kernel. The write does too while state.json is no link
+  (QSaveFile writes its path as given). Through a link, QSaveFile joins the
+  target to the path made absolute and cleaned, as the helper's abspath
+  reads it, so that write may land in the helper's folder.
+
+**Tests.** tests/test_state_literal_link.py goes from 20 tests to 25.
+- New, 5: the same-folder hard link, another file under the same-folder
+  name, a target that is not UTF-8, 127 links followed, and 128 links
+  saving over the path.
+- Rewritten, 1: 41 links, where a refusal is now a follow.
+- Extended, 2: the literal loop now also asserts that the reading is the
+  path, and `assert_split` checks the exit and the word first, so a
+  confirmed save reads as a failure rather than a KeyError.
+- Changed: the two pinned sentences.
+Runs:
+- On 2ca6c76 with this file: 14 of 25 red, every refusal's pinned sentence
+  among them.
+- With the OLD sentences pinned instead (a scratch copy): 5 of 25 red,
+  exactly the decisions: the same-folder hard link (`kept`), 41 and 127
+  links (refused), and 128 links and the literal loop (the reading None).
+  Green there: the other file and the non-UTF-8 target, which 2ca6c76
+  already refused (N2 and N7 hold them).
+- On 085a49d: 18 of 25 red (6 failures, 12 errors). Green there: six
+  layouts that must not be refused, and the fixture's corner list.
+- On the branch: 25 / 0, and with tests/test_state.py 141 / 0.
+
+Mutants of the settled guard, one decision each, in a scratch copy with the
+stub resealed each time, against the 25:
+
+| mutant | red |
+|---|---|
+| N1 the old same-folder rule: a second name of the same inode is the same entry | 1 (the same-folder hard link) |
+| N2 a different name in the same folder is the same entry | 3 (the hard link, the other file, the non-UTF-8 target) |
+| N3 the bound: 40, the kernel's | 2 (41 and 127 links) |
+| N4 the bound: 128 | 1 (128 links) |
+| N5 past the bound: None, not the path | 2 (128 links, the literal loop) |
+| N6 past the bound: the path cleaned | 0: equivalent by reading (the path comes from `state_dir`'s abspath, so cleaning it changes no folder the kernel finds) |
+| N7 a target decoded with surrogateescape, not U+FFFD | 1 (the non-UTF-8 target) |
+| N8 the bound: none | the 128-link test red; the literal loop never returns, its test killed at 60 s |
+| M1 the join: a relative target joined to the hop's REAL folder | 11 |
+| M2 the join: every hop joined to the FIRST path's folder | 5 |
+| M3 the cleaning: none | 12 |
+| M4 the cleaning: realpath | 12 |
+| M5 the cleaning: posixpath.normpath | 1 (the fixture) |
+| M6 the comparison: as strings | 3 (inlinked, samedir, ~/Sync) |
+| M7 the comparison: by inode alone | 4 (both hard links, 128 links, the loop) |
+| M11 a path the kernel cannot resolve claimed split | 1 (the pure loop) |
+| M12 no folder at the literal end read as not split | 1 (`nodir`) |
+| M13 `state private` not wired | 11 |
+| M14 `state init` not wired | 11 |
+| MM1 to MM4, the model (the word dropped from stateInitFound, stateLoadDecision, STATE_PRIVATE_WHY; no sentence) | 1 each |
+
+**The spike.** measure.sh goes from 21 cases to 27: `hardlink2`,
+`twofiles2`, `chain41`, `chain127`, `chain128` and `nonutf8`.
+- Its output stays ASCII: a byte that is not ASCII prints as a `\x`
+  escape. The VERDICT line compares bytes, so a U+FFFD name and the `\xff`
+  one do not read as one name. judge.py labels a None reading
+  `unreadable-link`.
+- On the branch: 27 CHECKs, 0 failed (RESULT-2026-11-21.txt, which replaces
+  the first guard's 21-case run).
+- 2ca6c76's helper under the new driver, over the six new cases plus
+  `loop` and `selfloop`: 3 CHECKs failed. They are `hardlink2` (split no,
+  the save missed the kernel's file) and `chain41` and `chain127` (split
+  yes, the save reached it). The other five were ok.
+- 085a49d over all 27 (RESULT-2026-11-21-baseline.txt): no guard, and
+  `state private` answered `kept` for each of the six new cases. The first
+  ten cases' probe lines are still RESULT-2026-11-15.txt's, line for line.
+- Each probe ran under gdb (`handle all nopass`, debuginfod off) on a
+  private bus, with no display variables, a decoy HOME and a short TMPDIR,
+  under the heavy lock and `nice -n 10`.
+
+**Also run.**
+- `node tests/Model.test.js`: 4012 checks, 0 failures. The first run had 1
+  failure, a D-SINK-112 cost bound in the logo column ("42.5 ms over
+  42.3"), outside this change; the rerun was green.
+- `scripts/split-helper.py --check` and `node scripts/split-model.mjs
+  --check`.
+- `python3 scripts/release.py check` and `python3
+  scripts/check-defect-ledger.py`.
+- check.sh's two byte scans (`--byte-scan ascii` and `control`).
+
+**Rule 15, the search.**
+- Finding 1's shape is a file's identity compared where a name is what
+  the operation replaces. Every `st_ino` comparison in bin/helper was read:
+  - 10-state.py `undo_state_private_create`, 11-cli.py `_same_inode` and
+    the relay's control-socket unlink ask "is this name still the inode we
+    made, tightened or bound", so the inode IS the question there. Cleared.
+  - 07-player.py's lock loop asks whether the path still names the inode
+    it locked. That is the same question. It compares `st_ino` without
+    `st_dev`, but `stat` there follows only what the user's own 0700
+    runtime folder holds. Cleared, not filed.
+- Finding 2's shape is a bound on one walker borrowed from another's
+  limit. The helper's other link walks (`broken_folder_link`,
+  01-core.py's folder walk) climb parents and are bounded by the path's
+  depth; `qt_link_literal` is the only walk that follows link targets.
+  Cleared.
+- The non-UTF-8 shape is a link target decoded by another rule than the
+  reader's. `os.readlink` appears once in bin/helper, here. Cleared.
+- Finding 3's shape is a fixed time claimed for a process that lingers by
+  design. Searched in this branch's records only: the F-HARNESS-119 row and
+  subsection, both corrected.

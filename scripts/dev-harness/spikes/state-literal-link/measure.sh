@@ -50,6 +50,19 @@
 #                 kernel resolves the path to a real file
 #     selfloop    state.json -> state.json: the kernel cannot resolve it
 #                 either (refused by the verb as unreachable, not as split)
+# Added by the review of the guard (2026-11-21), each with `state private`:
+#     hardlink2   the two readings end in ONE folder under two names that
+#                 are hard links: state.json -> ../x/b.json, T/x -> R, a real
+#                 x/b.json -> ../R/a.json; the kernel reads R/b.json, the
+#                 literal reading R/a.json, one inode (refused)
+#     twofiles2   the same with R/a.json a file of its own (refused)
+#     chain41     41 links on the literal reading, 2 on the kernel's, ending
+#                 at the kernel's file (not refused: QSaveFile follows them)
+#     chain127    the same with 127, QSaveFile's last (not refused)
+#     chain128    the same with 128: past QSaveFile's bound it writes over
+#                 the path itself, replacing the link (refused)
+#     nonutf8     state.json -> b"\xff.json" in a real folder: QSaveFile
+#                 reads the byte as U+FFFD and writes that name (refused)
 #
 # The layout, under a 0700 work folder in $TMPDIR (removed at exit), for the
 # first ten but `above`:
@@ -72,7 +85,8 @@
 # Hyprland signature or platform theme, debuginfod off, and
 # QT_QPA_PLATFORM=offscreen (a QCoreApplication loads no platform plugin;
 # set all the same). Touches nothing outside its work folder. Exit 1 when a
-# CHECK fails.
+# CHECK fails. A byte that is not ASCII is printed as a \x escape, so the
+# output stays ASCII (nonutf8).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../../../.." && pwd)
@@ -102,7 +116,7 @@ if [[ ${1:-} == --clean ]]; then
   python3 -I -B "$HERE/judge.py" fixture "$WORK/clean" "$qt"
   exit $?
 fi
-CASES=${*:-r600 r644 r600-l644 r644-l600 none nodir r644-private none-private chain above plain abs rel inlinked samedir sync dotdot chain2 hardlink loop selfloop}
+CASES=${*:-r600 r644 r600-l644 r644-l600 none nodir r644-private none-private chain above plain abs rel inlinked samedir sync dotdot chain2 hardlink loop selfloop hardlink2 twofiles2 chain41 chain127 chain128 nonutf8}
 private_argv() {   # the model's `state private` argv for state folder $1, one item per line
   node -e 'import(process.argv[1]).then(M => { for (const a of M.statePrivateArgv(process.argv[2], process.argv[3])) process.stdout.write(a + "\n") })' \
     "$ROOT/Model.mjs" "$ROOT/bin/omarchy-iptv" "$1"
@@ -158,6 +172,38 @@ for case in $CASES; do
       ln -s state.json "$c/state/state.json"
       path=$c/state/state.json
       files=("$c/state/state.json") ;;
+    hardlink2|twofiles2)
+      private=yes
+      mkdir -m 700 -p "$c/T/state"
+      ln -s "$c/T/state" "$c/state"
+      mkdir -m 755 "$c/R" "$c/x"
+      ln -s "$c/R" "$c/T/x"
+      put "$c/R/b.json" REAL 600
+      ln -s ../R/a.json "$c/x/b.json"
+      if [[ $case == hardlink2 ]]; then ln "$c/R/b.json" "$c/R/a.json"; else put "$c/R/a.json" OTHER 600; fi
+      ln -s ../x/b.json "$c/T/state/state.json"
+      path=$c/state/state.json
+      files=("$c/R/b.json" "$c/R/a.json") ;;
+    chain41|chain127|chain128)
+      private=yes
+      n=${case#chain}
+      (( n == 128 )) || expect=no
+      mkdir -m 700 -p "$c/T/state"
+      ln -s "$c/T/state" "$c/state"
+      mkdir -m 755 "$c/T/l" "$c/l"
+      put "$c/T/l/s0" REAL 600
+      ln -s ../l/s0 "$c/T/state/state.json"
+      for ((k = 0; k < n - 2; k++)); do ln -s "s$((k + 1))" "$c/l/s$k"; done
+      ln -s "$c/T/l/s0" "$c/l/s$((n - 2))"
+      path=$c/state/state.json
+      files=("$c/T/l/s0" "$c/T/state/state.json") ;;
+    nonutf8)
+      private=yes
+      mkdir -m 700 "$c/state"
+      put "$c/state/"$'\xff'.json REAL 600
+      ln -s $'\xff'.json "$c/state/state.json"
+      path=$c/state/state.json
+      files=("$c/state/"$'\xff'.json "$c/state/"$'\xef\xbf\xbd'.json) ;;
     *)
       mkdir -m 700 -p "$c/T/state"
       mkdir -m 755 "$c/T/wide"
@@ -216,19 +262,22 @@ for case in $CASES; do
   if [[ $private == yes ]]; then
     mapfile -t argv < <(private_argv "$(dirname "$path")")
     reply=$(env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME "${argv[@]}" 2>&1)
-    echo "  private rc=$? $reply" | sed "s#$c/##g"
+    echo "  private rc=$? $reply" | LC_ALL=C sed "s#$c/##g"
   fi
-  under_gdb "$path" "${files[@]}" | sed "s#$c/##g" >"$WORK/out$N"
-  cat "$WORK/out$N"
+  under_gdb "$path" "${files[@]}" | LC_ALL=C sed "s#$c/##g" >"$WORK/out$N"
+  python3 -I -c 'import sys; sys.stdout.write(open(sys.argv[1], "rb").read().decode("ascii", "backslashreplace"))' "$WORK/out$N"
   python3 -I - "$WORK/out$N" "$case" <<'PY'
 import sys
-lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
-read = next((l.split(None, 1)[1] for l in lines if l.strip().startswith("realpath")), "?").strip()
-landed = [l.split()[1] + ":" + l.split()[3] for l in lines if l.strip().startswith("FILE") and "text 'NEW'" in l]
-failed = any("open failed" in l for l in lines)
-where = "none" if not landed else " ".join(landed)
-same = "n/a" if not landed else ("yes" if any(x.split(":")[0] == read for x in landed) else "NO")
-print("  VERDICT case=%s read=%s landed=%s same-file=%s%s" % (sys.argv[2], read, where, same, " open-failed" if failed else ""))
+# Bytes, not text: a name that is not UTF-8 and the U+FFFD name QSaveFile
+# writes for it would read as one name decoded (nonutf8).
+lines = open(sys.argv[1], "rb").read().splitlines()
+read = next((l.split(None, 1)[1] for l in lines if l.strip().startswith(b"realpath")), b"?").strip()
+landed = [l.split()[1] + b":" + l.split()[3] for l in lines if l.strip().startswith(b"FILE") and b"text 'NEW'" in l]
+failed = any(b"open failed" in l for l in lines)
+where = b"none" if not landed else b" ".join(landed)
+same = "n/a" if not landed else ("yes" if any(x.split(b":")[0] == read for x in landed) else "NO")
+show = lambda b: b.decode("ascii", "backslashreplace")
+print("  VERDICT case=%s read=%s landed=%s same-file=%s%s" % (sys.argv[2], show(read), show(where), same, " open-failed" if failed else ""))
 PY
   python3 -I -B "$HERE/judge.py" after "$WORK/v$N" "$WORK/out$N" "$case" "$expect" "$c" || FAILS=$((FAILS + 1))
 done

@@ -7,7 +7,8 @@ that matches where the save landed.
   judge.py before ROOT PATH OUT
       loads ROOT's helper (bin/omarchy-iptv, no bytecode written), and
       writes to OUT a JSON object: `literal`, qt_link_literal(PATH) -- the
-      file the helper says QSaveFile writes, null past its hop bound --
+      file the helper says QSaveFile writes (PATH itself past QSaveFile's
+      bound of 127 links), null where a link cannot be read --
       `split`, state_link_split(PATH), and `kernel`, the file the kernel
       resolves PATH to (realpath; null when it cannot be resolved). A tree
       with no guard (a baseline run) writes `guard: false` and no verdict.
@@ -77,14 +78,16 @@ def after(out, probe_out, case, expect, work):
         verdict = json.load(handle)
     lines = open(probe_out, encoding="utf-8", errors="replace").read().splitlines()
     open_failed = any("open failed" in line for line in lines)
-    rel = lambda p: "none" if p is None else os.path.relpath(p, work)
+    # A name that is not UTF-8 (the kernel's, a surrogate) and the U+FFFD
+    # name QSaveFile writes for it are printed as their bytes, \x-escaped.
+    rel = lambda p: "none" if p is None else os.fsencode(os.path.relpath(p, work)).decode("ascii", "backslashreplace")
     if not verdict["guard"]:
         print("  CHECK case=%s guard=none (this tree's helper has no state_link_split)" % case)
         return 0
     literal, kernel, split = verdict["literal"], verdict["kernel"], verdict["split"]
     problems = []
     if literal is None:
-        written = "past-bound"
+        written = "unreadable-link"
     elif open_failed:
         written = "open-failed" + ("" if not os.path.isdir(os.path.dirname(literal)) else "-BUT-FOLDER-THERE")
         if os.path.isdir(os.path.dirname(literal)):

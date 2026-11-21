@@ -33,8 +33,8 @@ ran bare on the bus.
 | `judge.py` | the helper's half: BEFORE the save, the shipping helper's literal reading and split verdict (read-only, no bytecode written); AFTER it, the `CHECK` line; and the cleanPath corpus and fixture |
 | `RESULT-2026-11-14.txt` | the run of the first ten cases on this machine's qt6-base 6.12.0-3 |
 | `RESULT-2026-11-15.txt` | the same ten cases again, with that day's driver and the helper as committed: every line after the header the same |
-| `RESULT-2026-11-21.txt` | all 21 cases with the guard: 21 CHECKs, 0 failed |
-| `RESULT-2026-11-21-baseline.txt` | the same driver over 085a49d, the tree before the guard: no CHECK (no guard), and `state private` confirming every layout it now refuses; the first ten cases' probe lines are RESULT-2026-11-15.txt's, line for line |
+| `RESULT-2026-11-21.txt` | all 27 cases with the guard as its review settled it: 27 CHECKs, 0 failed (the first guard's run, 21 cases, is replaced; docs/QA-RESULTS.md keeps its counts) |
+| `RESULT-2026-11-21-baseline.txt` | the same driver over 085a49d, the tree before the guard, all 27 cases: no CHECK (no guard), and `state private` confirming every layout it now refuses; the first ten cases' probe lines are RESULT-2026-11-15.txt's, line for line |
 
 ## The cases
 
@@ -64,8 +64,14 @@ folder LINK.
 | `dotdot` | `state.json -> ../../dotfiles/state.json`, no folder climbed out of a link | the same file; `kept` |
 | `chain2` | `chain` one folder deeper: `../a/b/state.json`, the literal `a/b/state.json -> ../w/state.json` | `NEW` in `a/w/state.json`: each hop against the PREVIOUS hop's folder, not the first's; refused |
 | `hardlink` | `r600` with `wide/state.json` a hard link of the real file | `NEW` in a new inode at `wide/state.json`, the real name keeps `REAL`: one inode, two entries; refused |
-| `loop` | the literal `a/state.json -> ../a/state.json` (itself), the kernel reading `T/a/state.json` | `QSaveFile`, past its own bound, wrote over the PATH: the `state.json` link replaced by a regular file holding `NEW`; refused (the helper stops at 40 links) |
-| `selfloop` | `state.json -> state.json` | the kernel cannot resolve it either; `QSaveFile` replaced the link with a 0644 file; `state private` refuses it as `unreachable`, as before |
+| `loop` | the literal `a/state.json -> ../a/state.json` (itself), the kernel reading `T/a/state.json` | `QSaveFile`, past its own bound, wrote over the PATH: the `state.json` link replaced by a regular file holding `NEW`; the helper's reading, past the same bound, is the path too; refused |
+| `selfloop` | `state.json -> state.json` | the kernel cannot resolve it either; `QSaveFile` replaced the link with a 0644 file, the file the helper's reading names; `state private` refuses it as `unreachable`, as before |
+| `hardlink2` | the review's: `state.json -> ../x/b.json`, `T/x -> R` (absolute), a real `x/b.json -> ../R/a.json`, `R/a.json` a hard link of `R/b.json` | the kernel reads `R/b.json`, `QSaveFile` wrote `NEW` into a new inode at `R/a.json`: ONE folder, two names, one inode, two entries; refused (the first guard counted them one entry and confirmed it) |
+| `twofiles2` | the same with `R/a.json` a file of its own | `NEW` in `R/a.json`; refused |
+| `chain41` | 41 links on the literal reading (`state.json -> ../l/s0`, `l/s0 -> s1` ... `l/s39 -> T/l/s0`), 2 on the kernel's | `NEW` in `T/l/s0`, the kernel's file; not refused (the first guard stopped at 40 and refused it) |
+| `chain127` | the same with 127 | `NEW` in `T/l/s0`: `QSaveFile`'s last; not refused |
+| `chain128` | the same with 128 | `QSaveFile` wrote over the PATH, the link replaced by a regular file holding `NEW`, `T/l/s0` kept `REAL`; refused |
+| `nonutf8` | `state.json -> b"\xff.json"` in a real folder, `REAL` there | `QSaveFile` read the byte as U+FFFD and wrote `NEW` into a new file of that name (`\xef\xbf\xbd.json`), `\xff.json` kept `REAL`; refused. Printed as `\x` escapes |
 
 So the mode of the misplaced file is the mode of the file the kernel
 resolves, read when the save opens (or the umask's when there is none), not
