@@ -21010,6 +21010,110 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, okStart("t:y", { seq: h.root.playSeq }))
       return [how, stopped, sent, afterEof, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h).map(t => t.split(" | ")[0])]
     }), SHELL_STOPS.map(how => [how, [1, true, true], [[], ["t:y"]], [false, "t:y"], "t:y", how === "restart-refused" ? ["74011 Stream failed"] : []]))
+
+    // ---- D-PLY-76 (2026-11-21): an intent made inside the re-read's 500 ms is the newer word ----
+    //
+    // A probe that finds a player of this build idle (no stash) re-reads it
+    // once, 500 ms later (probeRetryTimer, 4.5). A play made in between, with
+    // the observer on that player, was zapped into it; the re-read went out
+    // after the play, so its answer was not stale, and it still read the
+    // player idle before the zap had loaded: the shell stopped it and
+    // cleared `nowPlaying`, and the zap's ok then named nothing -- the play
+    // dropped with no card. Now the re-read is not sent when an intent was
+    // issued since the answer that armed it, and what that answer left
+    // waiting ends as a stale answer ends it. Rows: the review's sequence
+    // (the observer on the idle player); D-PLY-35's path, where it is real
+    // -- a start the watchdog stopped after its spawn bound, the observer on
+    // that spawn by the arm's connect before the probe answers, or by the
+    // hunt's inside the 500 ms (which resets `probeRetried`); a play that is
+    // a start (nothing attached), whose re-read could not go out on the busy
+    // slot and stayed owed, so the NEXT idle answer -- that start stopped by
+    // its watchdog too -- stopped its spawn at once instead of re-reading;
+    // and a stop, which drew a second stop of the shell's over the player
+    // the user's was laddering. Red on f74ee09 in every row. With no intent
+    // in the window the re-read still goes out and decides: the D-PLY-73
+    // table's "unidentified" row above and D-SINK-71's ambiguous first probe
+    // hold that.
+    const IDLE = probeOf({ launch: "current", relay: true, stash: null, idle: true })
+    const zapOk = (h, id) => { h.ids.controlProc.running = false; h.root.handleControlResult(JSON.stringify({ ok: true, kind: "play", id, name: id.slice(2).toUpperCase(), entryId: 2 })); h.drain() }
+    // The re-read's Timer, fired as QML fires it -- only when an answer has
+    // armed it since it last fired -- and its probe answered; -> the probes
+    // that firing sent.
+    const reread = (h, slots, answer) => {
+      const t = h.ids.probeRetryTimer
+      if ((t.fired || 0) >= t.restarts) return 0
+      t.fired = t.restarts
+      const n = slots.length
+      h.fireTimer("probeRetryTimer")
+      h.drain()
+      const sent = slots.slice(n).filter(c => verbOf(c) === "player probe").length
+      if (sent > 0 && h.ids.playerProc.running) exit(h, answer)
+      return sent
+    }
+    const timedOutStart = h => {
+      land(h)
+      h.root.play("t:x", true, "")
+      h.drain()
+      h.elapse(M.playerWatchdogMs("start"))
+      exit(h, "")
+    }
+    const REREAD_ROWS = ["zap", "timed-out", "timed-out-hunt", "start", "stop"]
+    checkCall("D-PLY-76: an intent made inside the 500 ms re-read of a player found idle owns the outcome -- the re-read is not sent: a play zapped into that player plays and is named, no stop, no card (the review's sequence, and a start the watchdog stopped with the observer on its spawn, attached before the probe answered or by the hunt inside the 500 ms); a play that is a start leaves no re-read owed, so its own stopped start's idle spawn is re-read and adopted; a stop is the only stop", () => REREAD_ROWS.map(how => {
+      const { h, slots, zaps } = boot()
+      if (how === "timed-out" || how === "timed-out-hunt") {
+        timedOutStart(h)
+        if (how === "timed-out") attach(h)
+        exit(h, IDLE)
+        if (how === "timed-out-hunt") attach(h)
+      } else {
+        if (how !== "start") attach(h)
+        reattach(h, IDLE)
+        land(h)
+      }
+      const z0 = zaps.length, s0 = slots.length, before = stops(h)
+      if (how === "stop") {
+        h.root.stop()
+        h.drain()
+        return [how, reread(h, slots, IDLE), stops(h) - before]
+      }
+      h.root.play("t:y", true, "")
+      h.drain()
+      const sent = zaps.slice(z0).map(c => verbOf(c) + ":" + idOf(c)).concat(startArgs(slots.slice(s0)).map(c => "start:" + idOf(c)))
+      let rereads = reread(h, slots, IDLE)
+      if (how === "start") {
+        // That start stopped by its watchdog after its spawn bound: the probe
+        // finds the spawn idle, and its own re-read finds Y loaded.
+        h.elapse(M.playerWatchdogMs("start"))
+        exit(h, "")
+        exit(h, IDLE)
+        rereads += reread(h, slots, probeOf({ launch: "current", relay: true, stash: STASH({ id: "t:y", name: "Y" }) }))
+      } else {
+        // An answer read as a first one arms the re-read again (the hunt's
+        // attach reset `probeRetried`): it fires too.
+        rereads += reread(h, slots, IDLE)
+        zapOk(h, "t:y")
+      }
+      return [how, sent, rereads, stops(h) - before, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.timedOutPlay === null, toasts(h).map(t => t.split(" | ")[0])]
+    }), REREAD_ROWS.map(how => how === "stop" ? [how, 0, 1]
+      : [how, how === "start" ? ["start:t:y"] : ["play:t:y"], how === "start" ? 1 : 0, 0, "t:y", true, []]))
+
+    // Rule 15, a pin: the other decisions an adopting answer leaves waiting
+    // for the channel list -- the TLS reload owed to a migrated player of
+    // this build, and the reconcile of the stash's name against the cache --
+    // already yield to a play made before the list lands (play() spends the
+    // reload; the reconcile resolves the play's own channel). Green on
+    // f74ee09. The restart episode's hold is held by the N5 checks above.
+    checkCall("D-PLY-76 (rule 15, pin): a play made after an adoption and before the channel list lands owns the owed TLS reload and the reconcile too -- only its own zap goes out, and the bar keeps its channel when the list lands", () => {
+      const { h, zaps } = boot()
+      reattach(h, probeOf({ launch: "current", relay: true, tls: MIGRATED }))
+      const owed = [h.root.tlsReloadPending === true, h.root.reconcilePending === true, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      h.root.channelIndex = M.keyedMap()
+      h.root.channelIndex["t:y"] = { name: "Y", group: "G", tvgId: "y", url: "http://s.example.test/y.ts" }
+      h.root.play("t:y", true, "")
+      h.drain()
+      land(h)
+      return [owed, zaps.map(c => verbOf(c) + ":" + idOf(c)), h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.tlsReloadPending === true]
+    }, [[true, true, "t:x"], ["play:t:y"], "t:y", false])
   }
 
   // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----

@@ -1759,6 +1759,17 @@ nothing attached, still looks for nothing (D-PLY-73's last stop). Held by
 the service harness and the seeded world aimed at those windows; not
 watched on a real player.]**
 
+**[Amended 2026-11-21, D-PLY-76 (lane-ply7576): the sequence also overrules
+the one 500 ms re-read of a probe that found a player idle (4.5). The re-read
+went out after a play made inside those 500 ms, so its answer was not stale,
+and while the play's zap had not loaded it still read the player idle: the
+shell stopped the player the zap was going into, and the play was dropped
+with no card. An ambiguous answer now records `playSeq` as it arms the
+re-read (`probeRetrySeq`), and when an intent has been issued since, the
+re-read is not sent and that answer ends as a stale one ends
+(`probeOverruled`): the play, or a stop, owns the outcome. Held by the
+service harness; not watched on a real player.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
 **[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older

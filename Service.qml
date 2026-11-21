@@ -990,6 +990,11 @@ Item {
   // it - a play from the guide, or over IPC one frame after the shell came
   // back - is the newer word and must not be overruled by the older answer.
   property int probeSeq: 0
+  // D-PLY-76: `playSeq` as it stood when an ambiguous answer armed the one
+  // re-read (probeRetryTimer). An intent issued since -- a play, a stop --
+  // is the newer word over that answer as much as over a probe in flight,
+  // so the re-read is not sent (probeOverruled).
+  property int probeRetrySeq: 0
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
   // D-SINK-16: this shell adopted a player that was not verifying the stream's
   // certificate, the probe has migrated it, and the channel it is already
@@ -3947,6 +3952,16 @@ Item {
     root.noteSessionOutcome("attached")
   }
 
+  // A probe's answer, or the re-read an ambiguous one armed, that an intent
+  // issued since has overtaken (4.10, section 15): that intent owns the
+  // outcome. The stale branch of applyProbe below, and since D-PLY-76 the
+  // re-read that has not gone out yet (probeRetryTimer).
+  function probeOverruled() {
+    root.probeRetried = false
+    // D-PLY-35: and a stopped start's, whose player the newer one adopts.
+    root.timedOutPlay = null
+  }
+
   function applyProbe(text) {
     var probe = Model.parsePlayerProbe(text)
     if (!probe.valid) {
@@ -3974,9 +3989,7 @@ Item {
       // Everything below is about a world the user has since moved on from;
       // the play they issued owns the outcome, and drainPendingPlay() is
       // about to deliver it.
-      root.probeRetried = false
-      // D-PLY-35: and a stopped start's, whose player the newer one adopts.
-      root.timedOutPlay = null
+      root.probeOverruled()
       return
     }
     if (root.stopConfirmPending) {
@@ -4082,6 +4095,7 @@ Item {
       if (!root.probeRetried) {
         root.probeRetried = true
         root.probeRetryMigrated = migrated
+        root.probeRetrySeq = root.playSeq
         probeRetryTimer.restart()
         return
       }
@@ -7324,10 +7338,31 @@ Item {
     // The single re-read of an ambiguous probe (4.5): an idle or stashless
     // player is either a racing start or a foreign one, and 500 ms tells
     // them apart without a second guess.
+    //
+    // D-PLY-76: unless an intent was issued since the answer that armed it
+    // (probeRetrySeq). A play made in these 500 ms with the observer on that
+    // idle player was zapped into it, and the re-read, going out after the
+    // play and so not stale, still read it idle before the zap had loaded:
+    // the shell stopped the player and cleared `nowPlaying`, and the zap's
+    // ok and the player's EOF then named nothing -- the play dropped with no
+    // card. A stop made in them drew a second stop of the shell's over the
+    // player the user's was laddering. Now that answer is overruled as a
+    // stale one is: the play or the stop owns the outcome (the zap feeds a
+    // player of this build, the helper's build gate routes any other to a
+    // start; the stop's own look and backstop look). A re-read already out
+    // when the intent comes is stale, as before. Asked of the sequence
+    // alone, not of `probeRetried`: the observer attaching meanwhile resets
+    // that (onPlayerAttached), and a play made after it was the same zap.
     id: probeRetryTimer
     interval: root.playerProbeRetryMs
     repeat: false
-    onTriggered: root.runPlayerProbe()
+    onTriggered: {
+      if (root.playSeq !== root.probeRetrySeq) {
+        root.probeOverruled()
+        return
+      }
+      root.runPlayerProbe()
+    }
   }
 
   Timer {

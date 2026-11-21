@@ -75,7 +75,12 @@
 // launcher that supersedes a stop with a higher --seq, writes a channel or
 // starts a player (a second Service object's, a terminal `player start`'s);
 // a player that does not answer, will not verify or cannot be identified
-// (the node suite's D-PLY-73 table holds the shell's stop of each); and any
+// (the node suite's D-PLY-73 table holds the shell's stop of each), and so
+// no probe that finds a player idle and re-reads it 500 ms later: the world
+// has no shell restart and no reattach, and its one way to an idle player
+// under the observer is a start stopped by its 58.25 s watchdog after its
+// spawn bound, which its starts never reach (the node suite's D-PLY-76 rows
+// hold a play or a stop inside that re-read); and any
 // real timing -- every interval here is drawn from the ranges written in it.
 // Time is the harness's clock. The shell's Timers that the settle reads run
 // from their own blocks (h.driveTimer), playerSocketTimer as the repeating
