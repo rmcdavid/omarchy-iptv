@@ -4391,7 +4391,9 @@ Item {
     root.stopAt = Date.now()
     // Looked at once by its backstop, as the user's stop is -- unless it was
     // issued on the backstop's own probe (applyProbe sets this after the
-    // call).
+    // call). Restarted even while a settle runs: the 5 s look's stop is
+    // issued inside the user's, and its ladder needs a whole bound from
+    // here, not what is left of the user's (the review of 241a226).
     root.stopFromBackstop = false
     stopSettleTimer.restart()
     // D-PLY-35: when the reattach probe was looking for what a stopped start

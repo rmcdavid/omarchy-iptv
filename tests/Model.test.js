@@ -19199,7 +19199,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // armed again once the stop it found the player for was issued. That
     // stop now settles as the user's does (stopUnadoptedPlayer), so the
     // backstop runs once more for that stop's own bound and then asks
-    // nothing (the D-PLY-73 checks below hold both). The rest is unchanged.]
+    // nothing: "D-PLY-73 (invariant 4, nothing attached)" below holds both
+    // for this case, and "D-PLY-73 (invariant 4)" for the observer on the
+    // player. The rest is unchanged.]
     }, [["probe"], 1, null, true])
 
     checkCall("9d604cf review (D-PLY-40): and when that stop took, the backstop's probe finds nothing and stops nothing", () => {
@@ -19766,6 +19768,35 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [justBefore, atBound, h.root.stopping === true, v.asks.slice(asked), stopsIssued(h)]
     }, [[true, true], [false, false, [], [1, 2]], false, [], [1, 2]])
 
+    // The review of 241a226: and so with nothing attached when the shell's
+    // stop went out -- the 9d604cf review's start from before the user's
+    // stop, answering ok while it settled, its player found by the
+    // backstop's probe. The D-PLY-40 check above reads that backstop armed
+    // again for the shell's stop; here that settle runs its whole bound from
+    // the shell's stop and ends there, asking nothing and stopping nothing
+    // more.
+    checkCall("D-PLY-73 (invariant 4, nothing attached): the backstop's stop of a player that a start from before the user's stop left, with no observer on it, settles for its own bound and ends there -- nothing asked or stopped then or after", () => {
+      const h = withThree(bootPlayer())
+      const settle = h.driveTimer("stopSettleTimer")
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(X.id, xSeq))
+      const asks = slotAsks(h)
+      h.elapse(PB.watchdogMs.stop)
+      exit(h, probeSeq(xSeq))
+      const shellAt = h.clock
+      const shell = [asks.slice(), stopsIssued(h), h.root.socketAttached()]
+      h.elapse(shellAt + h.root.stopSettleMs - 1 - h.clock)
+      const justBefore = [h.root.stopping === true, settle.running === true]
+      h.elapse(1)
+      const atBound = [h.root.stopping === true, settle.running === true]
+      h.elapse(3 * PB.watchdogMs.stop)
+      return [shell, justBefore, atBound, asks.slice(), stopsIssued(h)]
+    }, [[["probe"], [2, 3], false], [true, true], [false, false], ["probe"], [2, 3]])
+
     // Pins: the stops the shell sends after a user's stop are the ones it
     // sent before -- the 5 s look's, looked at once by its backstop, whose
     // stop is the last -- and a user's stop made after such a settle is
@@ -19790,6 +19821,43 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.elapse(3 * PB.watchdogMs.stop)
       return [look, backstop, after, asks.slice(), stopsIssued(h).length]
     }, [[["probe"], 2], ["probe", "probe"], 3, ["probe", "probe"], 3])
+
+    // The review of 241a226: the 5 s look's stop is issued INSIDE the user's
+    // settle, so the settle it opens runs a whole bound of its own from that
+    // stop, never the rest of the user's. Kept to the user's bound
+    // (stopSettleTimer restarted only when not running), `stopping` fell
+    // 13.25 s after the look's stop -- the detached stop's own worst case,
+    // with none of the margin -- and a play made then was zapped into the
+    // player that stop was laddering. A pin on 085a49d, whose look restarted
+    // the backstop itself; red on that mutant of the tree's
+    // stopUnadoptedPlayer and of 085a49d's look alike.
+    checkCall("D-PLY-73: the 5 s look's stop, issued inside the user's settle, holds `stopping` for a whole bound of its own -- 1 ms past the user's stop's bound a play goes out as a start, never a zap into the player that stop ladders; with no play the settle ends at the look's stop's own bound", () => ["play", "none"].map(how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      attachedToDying(h)
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      const userAt = h.clock
+      const asks = slotAsks(h), zaps = zapsOf(h)
+      h.elapse(h.root.stopLookMs)
+      exit(h, survivorProbe(9999))
+      const lookAt = h.clock
+      const look = [stopsIssued(h), h.root.stopSeq, lookAt - userAt]
+      h.elapse(userAt + h.root.stopSettleMs + 1 - h.clock)
+      const pastUserBound = h.root.stopping === true
+      if (how === "play") {
+        h.root.play(Y.id, true, "")
+        h.drain()
+        return [how, look, pastUserBound, zaps.slice(), asks.slice()]
+      }
+      h.elapse(lookAt + h.root.stopSettleMs - 1 - h.clock)
+      const justBefore = h.root.stopping === true
+      h.elapse(1)
+      return [how, look, pastUserBound, justBefore, h.root.stopping === true, asks.slice()]
+    }), [["play", [[1, 10001], 10001, 5000], true, [], ["probe", "start:" + Y.id]],
+         ["none", [[1, 10001], 10001, 5000], true, true, false, ["probe", "probe"]]])
 
     checkCall("D-PLY-73 (pin): a user's stop made after the backstop's stop has settled is looked at by its own backstop again", () => {
       const v = outlived()

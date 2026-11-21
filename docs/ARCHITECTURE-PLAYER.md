@@ -1782,8 +1782,13 @@ the settle the user's stop opens, with that stop's own `stopSeq` and bound,
 so the play goes out as a start (the 5 s look's stop, which reopened the
 settle itself, takes the same code), and the stop issued on the backstop's
 own probe is the last the shell sends after the user's: its settle's
-backstop asks nothing more (`stopFromBackstop`), so the shell sends the
-stops it sent before and every such settle ends. Releasing the observer
+backstop asks nothing more (`stopFromBackstop`), so after a user's stop the
+shell sends the stops it sent before, and every such settle ends; after a
+stop it issues at any other probe or at Q4's exceptions, whose settle its
+backstop now looks at once, it may send one probe more, and one stop more
+over a player that outlived that stop. The 5 s look's stop, issued inside
+the user's settle, runs a whole bound of its own from that stop (the review
+of 241a226). Releasing the observer
 instead was rejected: the first play's start arms it onto the player still
 laddering, and a second play is the same zap. One exception remains to the
 rule this bracket qualifies, open: D-PLY-74, a cold start whose arm could
