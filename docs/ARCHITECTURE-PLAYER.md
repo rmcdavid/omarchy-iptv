@@ -4642,6 +4642,10 @@ Not measured: the shipped relay under a real live player at 20 Mbit/s.
   it. Observed on the real player and relay: relay-scenario R21, R21c.]**
 - **The harness**: the windowless arm of tls-scenario starts its own
   players with no relay, so its loads are refused before they are sent
-  (F-HARNESS-111). (player-scenario's L7, L8 and L10 asserted the deferral
+  (F-HARNESS-111). **[2026-11-21, fixed: the rig starts each player of a
+  tree with the relay through that tree's own `bind_relay_listeners` and
+  `spawn_player`, beside its own relay, and registers every load under the
+  rule `player_target` composes for a local playlist file; QA-RESULTS
+  "F-HARNESS-111".]** (player-scenario's L7, L8 and L10 asserted the deferral
   decision 15 replaced until 2026-11-16; they now read their premises inside
   the hold and assert the stop at its end, F-HARNESS-112, fixed.)

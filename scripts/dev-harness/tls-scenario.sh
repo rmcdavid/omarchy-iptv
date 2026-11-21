@@ -269,6 +269,38 @@
 # 2727179 33 passed, 3 failed: W26, W27 and W29 red, W28 and every control
 # green.
 #
+# F-HARNESS-111 (2026-11-21): the relay. Since D-SINK-102 the tree's
+# apply_channel registers every load with the player's relay before it sends
+# a line, and the rig's players had none (their pin named port 0), so on dev
+# every load was refused `not_running`: W1..W6 and the other "nothing reaches
+# it" checks passed for that reason and every control was red (d3a9511: 19
+# passed, 17 failed, then a traceback at R4). A player of a tree with the
+# relay is now started by THAT tree's own bind_relay_listeners and
+# spawn_player, beside its own `player relay`, the pin naming the relay's
+# port; each load is registered under the rule the tree's own player_target
+# composes for a local playlist file -- a local playlist's rule (a file's, or
+# a LAN host's), which lets every loopback port through -- so a refusal the
+# attacker sees is TLS's and not the relay's (C3 alone, the loopback relay
+# playlist, loads under the rule player_target composes from its own cache);
+# and each "the attacker gets nothing" check now needs the attacker's own
+# accept log to show the connection, no request after it, the player's
+# certificate error, and the relay's counts (C6 is its positive control: the
+# rig's own load with tls-verify off reaches the attacker through the relay).
+# The --pre-pin tree's player is started beside the tree's relay with the
+# tree's pin appended to its argv. The rig is a child subreaper and signals
+# only through pidfds of pids it recorded. A tree before D-SINK-102 (e.g.
+# `--baseline v0.19.1`) runs as it always did, its players the rig's own
+# children. On dev d3a9511 with the fix: 45 passed, 0 failed.
+# The review of that fix (2026-11-21): the spawn's setsid puts each relay
+# and its mpv in a session of their own, which this script's process group
+# -- and GNU timeout's signal to it -- does not reach, so the rig turns
+# SIGTERM, SIGHUP and SIGINT into SystemExit and finishes every player it
+# started, relay included, before it exits (a SIGTERM run on the fix left
+# nothing; on the fix before it, the case's relay and mpv). An entry W14 or
+# W22 appends carries a token of the rig's own, so it reaches the lab
+# server through the relay and the header's absence is measured. 45 passed,
+# 0 failed again; `--baseline v0.19.1` 43 and 0.
+#
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
 #   ./scripts/dev-harness/tls-scenario.sh --windowless [--baseline <ref>] [--pre-pin <ref>]
 #   ./scripts/dev-harness/tls-scenario.sh
