@@ -19640,13 +19640,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the shell's own. On d3a9511: (1) on seeds 7, 26, 122, 139, 147 and
     // 152, (3) on seed 2, (2b) on 51 seeds (41 of them D-PLY-71's card, the
     // rest a card for the player the later stop laddered). About 5 s.
-    const worldSweep = (count, steps, restartP, contestP) => {
+    const worldSweep = (count, steps, restartP, contestP, windowP) => {
       const PW = require("./player-world.js")
       const red = { one: [], two: [], twoB: [], three: [], quiet: [] }
       for (let seed = 1; seed <= count; seed++) {
         const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
         h.detached.length = 0
-        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP, contestP,
+        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP, contestP, windowP,
                                          lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
         if (v.one.length > 0) red.one.push(seed)
         if (v.two !== "") red.two.push(seed)
@@ -19901,6 +19901,192 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // 108, 121 and 141, that player's "stopped unexpectedly". About 5 s.
     checkCall("D-PLY-73 (seeded world, with contested stops): 150 sequences of plays and stops, some refused by another launcher holding the lock -- no zap into a player a stop then ladders, the shell's own stops included; no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
       worldSweep(150, 16, 0, 0.3), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // ---- D-PLY-75 (2026-11-21): a stop takes over the question the settle before it left open ----
+    //
+    // A user's stop that did not take (another launcher holding the lock, or
+    // superseding it) leaves its player playing; its 5 s look and its
+    // backstop then probe for it. A second stop pressed while that probe is
+    // in flight made its answer stale (the stop moves `playSeq`), and
+    // applyProbe drops a stale answer before the branch that clears
+    // `stopConfirmPending` (and, for the look's, `stopConfirmLook`); an
+    // unreadable or timed-out answer to the backstop's probe left it set as
+    // well. The second stop's look and backstop both return while it is
+    // set, so a player that outlived both stops played on under an idle bar.
+    // And with nothing attached they look only for a start from before the
+    // stop that answered ok in its settle (stopOlderStartOk), which stop()
+    // reset. Now stop() clears the flags and, when the settle before it left
+    // a question open, its own look and backstop look even with nothing
+    // attached. Each row: the first stop contested (no EOF, the record below
+    // it), the second stop pressed in that window, then the second stop's
+    // own look and backstop, each answered with the player still there and
+    // the record below the stop. Red on f74ee09 in every row: nothing asked,
+    // nothing stopped.
+    const QUESTION_WINDOWS = ["backstop", "look", "unreadable", "timed-out"]
+    const secondStopIn = (window, attached) => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      if (attached) {
+        attachedToDying(h)
+        playingX(h)
+      } else {
+        h.root.play(X.id, true, "")
+        h.drain()
+      }
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      // Nothing attached: the 9d604cf review's start from before the stop,
+      // answering ok inside its settle, is what the look and backstop seek.
+      if (!attached) exit(h, okStartSeq(X.id, xSeq))
+      const there = () => survivorProbe(0)
+      h.elapse(h.root.stopLookMs)
+      if (window === "look") {
+        h.root.stop()
+        h.drain()
+        exit(h, there())
+      } else {
+        exit(h, there())
+        h.elapse(h.root.stopSettleMs - h.root.stopLookMs)
+        if (window === "backstop") {
+          h.root.stop()
+          h.drain()
+          exit(h, there())
+        } else if (window === "unreadable") {
+          exit(h, "omarchy-iptv: not a reply")
+          h.root.stop()
+          h.drain()
+        } else {
+          h.elapse(PB.watchdogMs.probe)
+          exit(h, "")
+          h.root.stop()
+          h.drain()
+        }
+      }
+      const before = asks.length, stopped = stopsIssued(h).length
+      h.elapse(h.root.stopLookMs)
+      const look = asks.slice(before)
+      if (h.ids.playerProc.running) exit(h, there())
+      h.elapse(h.root.stopSettleMs - h.root.stopLookMs)
+      const backstop = asks.slice(before + look.length)
+      if (h.ids.playerProc.running) exit(h, there())
+      return [window, attached ? "attached" : "unattended", look, backstop, stopsIssued(h).length - stopped]
+    }
+    checkCall("D-PLY-75: a stop pressed while the stop before it is still asking whether its player outlived it -- the backstop's probe or the 5 s look's in flight, or the backstop's answered unreadably or timed out -- is looked at by its own look and backstop, with the observer on the player and with nothing attached, and the backstop stops the player that outlived both stops", () =>
+      QUESTION_WINDOWS.map(w => secondStopIn(w, true)).concat(QUESTION_WINDOWS.map(w => secondStopIn(w, false))),
+      QUESTION_WINDOWS.map(w => [w, "attached", ["probe"], ["probe"], 1]).concat(QUESTION_WINDOWS.map(w => [w, "unattended", ["probe"], ["probe"], 1])))
+
+    // Rule 15: the other questions a stop reset or skipped the same way. A
+    // stop the shell issued itself (D-PLY-73: here at a probe that found a
+    // player not answering) has its backstop's probe in flight when the user
+    // stops; a start from before the first stop answered ok and the second
+    // stop comes before that settle's look or backstop asked; and the shell's
+    // own stop of the player the backstop found, issued with nothing
+    // attached, is still settling when the user stops (no probe in flight:
+    // the world's seed 103 below). Red on f74ee09 in every row.
+    const otherQuestion = how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      const there = () => survivorProbe(0)
+      if (how === "shell-backstop") {
+        attachedToDying(h)
+        h.root.runPlayerProbe()
+        exit(h, survivorProbe(0, { responsive: false }))
+        h.elapse(h.root.stopSettleMs)
+        h.root.stop()
+        h.drain()
+        exit(h, there())
+      } else {
+        h.root.play(X.id, true, "")
+        h.drain()
+        const xSeq = h.root.playSeq
+        h.root.stop()
+        h.drain()
+        exit(h, okStartSeq(X.id, xSeq))
+        if (how === "older-unasked") {
+          h.elapse(1000)
+        } else {
+          h.elapse(h.root.stopLookMs)
+          exit(h, there())
+          h.elapse(h.root.stopSettleMs - h.root.stopLookMs)
+          exit(h, there())
+          h.elapse(65)
+        }
+        h.root.stop()
+        h.drain()
+      }
+      const before = asks.length, stopped = stopsIssued(h).length
+      h.elapse(h.root.stopLookMs)
+      const look = asks.slice(before)
+      if (h.ids.playerProc.running) exit(h, there())
+      h.elapse(h.root.stopSettleMs - h.root.stopLookMs)
+      const backstop = asks.slice(before + look.length)
+      if (h.ids.playerProc.running) exit(h, there())
+      return [how, look, backstop, stopsIssued(h).length - stopped]
+    }
+    checkCall("D-PLY-75 (rule 15): a user's stop is looked at by its own look and backstop also when the question it took over was a stop the shell issued itself whose backstop's probe was in flight, a start from before the stop before it that nothing had looked for yet, or the shell's own stop of the player that outlived the stop before it, still settling with nothing attached", () =>
+      ["shell-backstop", "older-unasked", "shell-settling"].map(otherQuestion),
+      ["shell-backstop", "older-unasked", "shell-settling"].map(how => [how, ["probe"], ["probe"], 1]))
+
+    // Pins. A stale answer is still never acted on: the player found by the
+    // probe the second stop made stale is not stopped on that answer, only
+    // by the second stop's own backstop (the rows above count one stop, and
+    // here nothing is issued before it). And a question that has been
+    // answered is not inherited: after the shell's own stop's player died
+    // (its EOF ended that settle), a user's stop with nothing attached asks
+    // nothing, as before. Green on f74ee09; the second is red when stop()
+    // inherits a question from a settle that has ended.
+    checkCall("D-PLY-75 (pin): the stale answer to the probe a stop overtook stops nothing -- the player is stopped only by that stop's own backstop", () => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      attachedToDying(h)
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      h.elapse(h.root.stopLookMs)
+      exit(h, survivorProbe(0))
+      h.elapse(h.root.stopSettleMs - h.root.stopLookMs)
+      h.root.stop()
+      h.drain()
+      exit(h, survivorProbe(9999))
+      return [stopsIssued(h), h.root.stopSeq, h.root.stopping === true]
+    }, [[1, 2], 2, true])
+
+    checkCall("D-PLY-75 (pin): a stop made after the settle before it has ended inherits nothing -- the shell's own stop of a player that did not answer, ended by that player's EOF, leaves no question; a user's stop then, and a second one inside its settle, with nothing attached, ask nothing", () => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.runPlayerProbe()
+      exit(h, survivorProbe(0, { responsive: false }))
+      const settling = h.root.stopping === true
+      eofOf(h, dying)
+      const before = asks.length
+      h.root.stop()
+      h.drain()
+      h.elapse(1000)
+      h.root.stop()
+      h.drain()
+      h.elapse(3 * h.root.stopSettleMs)
+      return [settling, h.root.socketAttached(), asks.slice(before), stopsIssued(h).length]
+    }, [true, false, [], 3])
+
+    // The seeded world, aimed at those windows (the header's `windowP`: after
+    // a contested stop, the next action lands 1 to 250 ms after that stop's
+    // look or backstop sends its probe), with the health path's restarts and
+    // contested stops; 300 sequences of 4 steps, so a last stop is often the
+    // one in the window. The plain schedule reaches it about once in 300
+    // sequences of 20 steps (lane-ply73's seed 226). On f74ee09: (3) on
+    // seeds 49, 258, 264, 268 and 291. About 6 s.
+    checkCall("D-PLY-75 (seeded world, a stop inside a stop's probe): 300 sequences of plays, stops, health restarts and contested stops, the next action after a contested stop landing while its look's or backstop's probe is out -- nothing playing after a last stop, no zap into a player a stop then ladders, no last play dropped in silence or told falsely", () =>
+      worldSweep(300, 4, 0.15, 0.6, 0.9), { one: [], two: [], twoB: [], three: [], quiet: [] })
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----

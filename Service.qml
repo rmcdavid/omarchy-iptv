@@ -950,6 +950,9 @@ Item {
   // stop then laddered it or was refused (`busy` behind that very start's
   // lock) nothing here can see when no socket is attached, so the backstop
   // probes for it (stopSettleTimer) rather than leave it unobserved.
+  // D-PLY-75: stop() also sets it when the settle before it left a question
+  // open (a confirmation pending, or this flag), so that stop's look and
+  // backstop ask it again.
   property bool stopOlderStartOk: false
   // D-PLY-69: the intent number the player slot's start or restart went out
   // with, and whether a stop was still settling then (issuePlayerSession).
@@ -1000,7 +1003,9 @@ Item {
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
   // A stop whose EOF never came, so the ladder did not end the player. The
   // stop is detached and its reply is by design unobservable, so this is
-  // the only way to notice one that was refused (4.9, 4.10).
+  // the only way to notice one that was refused (4.9, 4.10). D-PLY-75: a
+  // stop pressed while it is set takes it over (stop()), since that stop
+  // makes the answer stale.
   property bool stopConfirmPending: false
   // The review of 9d604cf (F-PLY-3): that probe is the early look's
   // (stopLookTimer), which stops the player only when the lock record shows
@@ -1017,6 +1022,12 @@ Item {
   // the backstop's restart(), so the backstop reads what the settle it ends
   // was opened with.
   property bool stopFromBackstop: false
+  // D-PLY-75: the settle running was opened by a stop the shell issued itself
+  // (stopUnadoptedPlayer), always over a player a probe or an adoption found
+  // up. Read only by stop(): a user's stop pressed while it settles inherits
+  // that player, so its look and backstop look for it even with nothing
+  // attached. Set there, cleared by stop().
+  property bool stopByShell: false
   // Whose failure has already been toasted for this play. `player start`'s
   // own first-load window and socket EOF are two independent detectors of
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
@@ -1422,10 +1433,32 @@ Item {
     // Stop hunting for a socket, but keep an attached one: its EOF is how
     // we learn the ladder finished (and is what clears `stopping`).
     root.playerWanted = false
+    // D-PLY-75: a question the stop before this one still had open is this
+    // stop's now. A confirmation probe in flight -- the 5 s look's or the
+    // backstop's, after a user's stop or one the shell issued -- answers
+    // stale once this stop moves `playSeq`, and applyProbe drops a stale
+    // answer before the branch that clears the two flags; an answer that
+    // was unreadable, or a backstop probe still waiting for the slot, has
+    // left `stopConfirmPending` set as well. Left set, they made this stop's
+    // look and backstop skip, both returning while a confirmation is
+    // pending, so a player that outlived the earlier stop and this one
+    // played on under an idle bar. Two more questions were forgotten here
+    // the same way while the earlier settle still ran: a start from before
+    // the earlier stop whose player its backstop was still to look for
+    // (stopOlderStartOk), and the player a stop the shell issued itself was
+    // laddering (stopByShell) -- with nothing attached this stop had no way
+    // to learn that either outlived it. So the flags are cleared, and when
+    // any of those questions was open this stop's own look and backstop
+    // look even with nothing attached, as after an older start's ok: at
+    // most two probes, each finding nothing when this stop took.
+    var asking = root.stopConfirmPending || (root.stopping && (root.stopOlderStartOk || root.stopByShell))
+    root.stopConfirmPending = false
+    root.stopConfirmLook = false
+    root.stopByShell = false
     root.playSeq += 1
     root.stopSeq = root.playSeq
     root.stopAt = Date.now()
-    root.stopOlderStartOk = false
+    root.stopOlderStartOk = asking
     // D-PLY-73: the user's stop is looked at by its backstop whatever the
     // settle before it was.
     root.stopFromBackstop = false
@@ -4395,6 +4428,9 @@ Item {
     // issued inside the user's, and its ladder needs a whole bound from
     // here, not what is left of the user's (the review of 241a226).
     root.stopFromBackstop = false
+    // D-PLY-75: a user's stop pressed while this settles inherits the
+    // player this stop ladders (stop()).
+    root.stopByShell = true
     stopSettleTimer.restart()
     // D-PLY-35: when the reattach probe was looking for what a stopped start
     // left, this is what it found, and that start failed.
@@ -7202,7 +7238,9 @@ Item {
     // answered ok while it settled (stopOlderStartOk) is looked for too,
     // with nothing attached: its player was up, and a stop refused `busy`
     // behind that start's own lock left it playing unobserved under an idle
-    // bar. One probe: a stop that took finds nothing.
+    // bar. One probe: a stop that took finds nothing. D-PLY-75: and so when
+    // the stop took over a question the settle before it left open
+    // (stop() sets stopOlderStartOk then).
     //
     // D-PLY-73: a stop the shell issues itself (stopUnadoptedPlayer) opens
     // a settle of its own, and this backstop looks at it once as it looks at

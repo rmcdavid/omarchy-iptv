@@ -1739,6 +1739,26 @@ for. And `drainPendingPlay` drops a queued id that is no longer
 `nowPlaying`'s: every writer queues the id `nowPlaying` holds, so such an id
 was superseded by a play that went out itself.]**
 
+**[Amended 2026-11-21, D-PLY-75 (lane-ply7576, the ply7576 branch): a stop
+takes over the question the settle before it left open. A stop pressed
+while the look's or the backstop's probe of the stop before it was in
+flight made that answer stale, and applyProbe drops a stale answer before
+it clears the confirmation; an unreadable or timed-out answer to the
+backstop's left it set too. Both looks of the new stop then skipped, and
+with nothing attached they had no reason to look anyway, since `stop()`
+reset the older start's question (`stopOlderStartOk`). So a player that
+outlived both stops -- each refused or superseded by another launcher --
+played on under an idle bar. Now `stop()` clears the confirmation, and when
+one was pending, or the settle it replaces was still running over an older
+start's player nothing had looked for or over the player a stop the shell
+issued itself was laddering (`stopByShell`), its own look and backstop look
+for it even with nothing attached: at most two probes, each finding nothing
+when the stop took. A stale answer is still acted on by nothing. A user's
+stop made after the shell's own last stop has settled to its bound, with
+nothing attached, still looks for nothing (D-PLY-73's last stop). Held by
+the service harness and the seeded world aimed at those windows; not
+watched on a real player.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
 **[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older
