@@ -24443,11 +24443,13 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
       h.privateAnswer = null
       h.root.toggleFavorite("t:two.uk"); h.drain(); while (h.stateModeExit()) {}
       return [refused, seen.map(s => s[0]), h.root.stateSaveFailed, /p4ss/.test(h.stateFile.disk), h.file().favorites,
-              // D-STATE-11 (2026-11-21), re-levelled: every such line but the
-              // notice a `not-owned` refusal now tells, whose journal line names
-              // the state file's path as the no-write notice's does, and no URL
-              // (held by the D-STATE-11 checks below).
-              /p4ss|\/\.local\/state/.test(h.warnings.filter(w => /made private/.test(w) && w.indexOf("omarchy-iptv: Saving has stopped: ") !== 0).join("\n")), h.compileErrors]
+              // D-STATE-11 (2026-11-21), re-levelled: no such line names the
+              // credential, and every one but the notice a `not-owned` refusal
+              // now tells names no path -- that notice's journal line names the
+              // state file's path as the no-write notice's does (held by the
+              // D-STATE-11 checks below). Narrowed on the review of 3926a4b:
+              // the notice's line stays under the credential half.
+              (lines => /p4ss/.test(lines.join("\n")) || /\/\.local\/state/.test(lines.filter(w => w.indexOf("omarchy-iptv: Saving has stopped: ") !== 0).join("\n")))(h.warnings.filter(w => /made private/.test(w))), h.compileErrors]
     }, [[true, 0, true, ["state_write_failed"], 2, false, true, 2], ["600"], false, true, ["t:one.uk", "t:two.uk"], false, []])
   }
   checkCall("D-SINK-103 (through Service): nothing at the path -- `state private` CREATES it 0600 and empty, and a watching view that loads that empty file before the exit is handled (the order that leaves the most to get wrong) does not read it as a state: no no-write mode, the write lands at 0600; before the echo rule: `unparsed`, saving stopped, nothing written", () => {
@@ -24605,6 +24607,44 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.root.toggleFavorite("t:two.uk"); h.drain()
     return [before, merged, stateCards(h).length, persisted(h).length, h.compileErrors]
   }, [[true, "split-link"], [false, "", ["t:one.uk"]], 2, 2, []])
+  // The review of 3926a4b (2026-11-21): the refused notice and the no-write
+  // notice share the 74017 id, so whichever goes out second replaces the
+  // first on screen. Each card is labelled by the notice it carries word for
+  // word: the refused one for its word, or "block" for the mid-session block
+  // that `unparsed` begins.
+  const cardLabels = h => stateCards(h).map(c => {
+    const block = M.stateUnreadableNotice("unparsed", h.root.stateFilePath, true)
+    if (c[1] === block.title && c[2] === block.body) return "block"
+    return M.STATE_PRIVATE_TOLD.filter(w => c[1] === "Saving has stopped" && c[2] === refusedBody(h, w))[0] || c.slice(1).join(" | ")
+  })
+  const refusedLines = (h, why) => h.warnings.filter(w => w === "omarchy-iptv: Saving has stopped: " + refusedBody(h, why)).length
+  checkCall("D-STATE-11 (through Service, the review of 3926a4b): a refusal told, then another program makes state.json unparsable -- the no-write block's card replaces the refused card on its id -- then the file loads again and the block lifts: the next save refused for the same cause is told AGAIN, a third card in the refused split-link words, where before the episode's word kept it silent under a card naming a cause that had cleared", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    h.privateAnswer = () => refusal("split-link")
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    h.foreign(sf => { sf.disk = "garbage{" }); h.drain()
+    const blocked = [h.root.stateWriteBlocked, h.root.statePrivateTold, cardLabels(h)]
+    h.foreign(sf => { sf.disk = stateText([rec(A)], KA) }); h.drain()
+    const lifted = h.root.stateWriteBlocked
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    return [blocked, lifted, cardLabels(h), refusedLines(h, "split-link"), h.root.statePrivateTold, h.root.stateSaveFailed, h.root.userState.favorites, h.compileErrors]
+  }, [["unparsed", "", ["split-link", "block"]], "", ["split-link", "block", "split-link"], 2, "split-link", true, ["t:one.uk", "t:two.uk"], []])
+  checkCall("D-STATE-11 (through Service, the review of 3926a4b): the other order -- a save's `state private` is out when another program makes state.json unparsable, the block's card goes out, and then the run answers split-link: that refusal is NOT told over the block's card, which names the cause that stops every write; nothing is marked told, so once the file loads again the next save refused split-link is told", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    h.privateHang = true
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const out = h.root.statePrivatePending
+    h.foreign(sf => { sf.disk = "garbage{" }); h.drain()
+    h.privateHang = false
+    h.privateExit({ code: 1, reply: refusal("split-link").reply }); h.drain()
+    const during = [h.root.stateWriteBlocked, cardLabels(h), refusedLines(h, "split-link"), h.root.statePrivateTold, persisted(h)]
+    h.foreign(sf => { sf.disk = stateText([rec(A)], KA) }); h.drain()
+    h.privateAnswer = () => refusal("split-link")
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    return [out, during, h.root.stateWriteBlocked, cardLabels(h), refusedLines(h, "split-link"), h.root.statePrivateTold, h.compileErrors]
+  }, [true, ["unparsed", ["block"], 0, "", ["state_write_failed"]], "", ["block", "split-link"], 1, "split-link", []])
   // D-SINK-69's sweep, for the refused notice (the sweep above calls each
   // event once, as the no-write notice): whatever its parameters carry, the
   // argv holds the state file's path as the shell reads it and no URL part.

@@ -2525,6 +2525,17 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    the shipping `Service.qml`, with the shipping helper's own reply over a
    real split layout (`D-STATE-11 (through Service, ...)`); not watched on
    a display.
+   [2026-11-21, the review of 3926a4b: the two cards on the one id. A
+   no-write block that begins mid-episode replaces the refused card, and the
+   refusal it replaced counts as told no longer: once the block lifts (the
+   file loads again), the next save refused for the same cause is told
+   again, rather than leaving the block's card, whose cause has cleared and
+   whose fix is a restart. And while the no-write mode stands no refusal is
+   told: a save whose `state private` was out when the block began answers
+   after the block's card, which names the cause that stops every write, so
+   that card stands and the refusal is told after the lift if it still
+   holds. Pinned by the two `D-STATE-11 (through Service, the review of
+   3926a4b)` checks.]
 
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;

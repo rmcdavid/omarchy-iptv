@@ -2752,6 +2752,10 @@ Item {
     root.settleEntryFlush()
     if (root.stateBlockTold) return
     root.stateBlockTold = true
+    // D-STATE-11's review (2026-11-21): this card goes out on the refused
+    // notice's id and replaces it, so the refusal told is told no longer, and
+    // one after the block lifts is told again (tellStateSaveRefused).
+    root.statePrivateTold = ""
     var path = root.stateFilePath
     // R27e (D-SRC-42): a block that begins once a state has loaded is titled
     // "Saving has stopped", here and in the notification; one Model sentence.
@@ -5397,7 +5401,13 @@ Item {
   // it), and every later save still reads and asks `state private`, which
   // refuses each while the cause stands and confirms the first after the
   // fix, whose write carries everything held -- no restart, no reload.
+  // And not while the no-write mode stands (the review, 2026-11-21): a run
+  // that was out when a load began it answers after that block's card,
+  // which names the cause that stops every write and which this card would
+  // replace on the same id. Nothing is marked told, so a refusal after the
+  // block lifts is told then.
   function tellStateSaveRefused(why) {
+    if (root.stateWriteBlocked !== "") return
     if (!Model.statePrivateRefusalTell(why, root.statePrivateTold)) return
     root.statePrivateTold = String(why)
     console.warn("omarchy-iptv: " + Model.statePrivateRefusalJournal(why, root.stateFilePath))

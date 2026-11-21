@@ -2117,6 +2117,85 @@ class LockTest(PlayerTestCase):
         self.assertFalse(helper.find_player(self.sock))
         self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
 
+    # D-PLY-77's review (2026-11-21): with the higher seq kept, a typed seq
+    # the shell cannot count above stayed in the record for the life of the
+    # runtime folder. The shell's counter is a QML int: it resyncs to the
+    # record + 1 and issues the record + 2, and past 2**31 - 1 it wraps (a
+    # typed 100000000000 resynced it to 1215752193, below the record, so its
+    # every verb was superseded; a typed 2147483647 wrapped it negative, so
+    # its every verb went as --seq 0 and, kept, never lowered the record).
+    # SEQ_MAX is the highest record it can count above; one above reads as
+    # none.
+    def test_d_ply_77_a_record_the_shell_cannot_count_above_reads_as_none(self):
+        os.makedirs(self.runtime, 0o700)
+        fd = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, fd)
+        read = lambda: helper.record_seq(helper.read_lock_record(fd))
+        seen = []
+        for seq in (2147483645, 2147483646, 2147483647, 100000000000):
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.truncate(fd, 0)
+            os.write(fd, json.dumps({"schema": 1, "seq": seq, "verb": "stop", "at": 0}).encode("utf-8"))
+            seen.append(read())
+        self.assertEqual(seen, [2147483645, 0, 0, 0], "the highest record the shell can count above, then none")
+        helper.write_lock_record(fd, 5, "start")
+        self.assertEqual(read(), 5, "a verb's seq replaces a record above the bound")
+        helper.write_lock_record(fd, 100000000000, "stop")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual([read(), helper.read_lock_record(fd).get("seq")], [0, 0],
+                         "a typed seq past the shell's counter outlives its verb in no record")
+
+    def test_d_ply_77_the_shell_is_never_left_below_a_typed_seq_or_unable_to_count(self):
+        # Through the CLI, with the shell's verbs as its counter sends them.
+        # The counter is a stand-in for Service.qml's `property int playSeq`
+        # as measured under gdb on Qt 6.12 through the shipping Model
+        # (QA-RESULTS "D-STATE-11 and D-PLY-77: the review of 3926a4b
+        # settled"): the resync is Model.probeVerdict's max(current, record +
+        # 1) assigned to an int, which wraps past 2**31 - 1; an intent is
+        # `+= 1`, sent by seqArg (model/privacy.mjs) as itself above 0 and as
+        # "0" otherwise. No player runs: `player stop` checks, records and
+        # answers running false.
+        wrap = lambda n: (n + 2 ** 31) % 2 ** 32 - 2 ** 31
+        shell = {"seq": 7}
+
+        def resync():
+            shell["seq"] = wrap(max(shell["seq"], run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")[1]["seq"] + 1))
+
+        def stop(seq):
+            code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--ipc-timeout", "1", "--seq", seq)
+            return [code, (payload.get("error") or {}).get("code")]
+
+        def shell_stop():
+            shell["seq"] = wrap(shell["seq"] + 1)
+            sent = str(shell["seq"]) if shell["seq"] > 0 else "0"
+            return [sent] + stop(sent)
+
+        outcome = []
+        for typed in ("100000000000", "2147483647", "2147483646"):
+            shell["seq"] = 7
+            typed_stop = stop(typed)    # a person's typed stop
+            resync()
+            outcome.append([typed, typed_stop, shell_stop()])
+        # Before: 100000000000 resynced the shell to 1215752193, below the
+        # record, and its stop was superseded; 2147483647 and 2147483646 left
+        # it sending --seq 0.
+        self.assertEqual(outcome, [["100000000000", [0, None], ["8", 0, None]],
+                                   ["2147483647", [0, None], ["8", 0, None]],
+                                   ["2147483646", [0, None], ["8", 0, None]]],
+                         "a record the shell cannot count above is read as none: the shell counts on from its own seq")
+        # The top of the range: a typed SEQ_MAX is honoured; the shell
+        # resyncs to 2147483646 and issues 2147483647, which records as none;
+        # its counter then wraps to --seq 0, which leaves 0, and its next
+        # probe resyncs it to 1, so its next stop is ordered over a stale one.
+        shell["seq"] = 7
+        trail = [stop("2147483645")]
+        for _ in range(3):
+            resync()
+            trail.append(shell_stop())
+        trail.append(stop("1"))
+        self.assertEqual(trail, [[0, None], ["2147483647", 0, None], ["0", 0, None], ["2", 0, None], [1, "superseded"]],
+                         "ordered again once the shell's counter has wrapped")
+
 
 class SpawnFailureTest(PlayerTestCase):
     def test_a_player_that_never_binds_is_reaped_by_the_helper_that_created_it(self):
