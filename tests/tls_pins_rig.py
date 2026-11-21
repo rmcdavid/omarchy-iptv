@@ -960,12 +960,16 @@ class Player:
         asked to stop past RELAY_EXIT_S, killed 5 s after that, and reaped
         (this rig is a child subreaper, so the double fork lands it here);
         and an mpv whose relay went first, which lands here too. While the
-        rig stops on a signal no `quit` was sent, so the grace is short."""
-        try:
-            self._finish(0.5 if STOP["signal"] else grace)
-        finally:
-            if self in LIVE:
-                LIVE.remove(self)
+        rig stops on a signal no `quit` was sent, so the grace is short.
+        The player leaves LIVE only once this has run to its end: a stop
+        signal that lands in one of its waits leaves it registered, and
+        main's own `finally` finishes it again with the short grace (the
+        recheck of fa60910: removed in a `finally`, such a player was
+        neither killed nor its relay stopped). So every step below may run
+        twice, and each fd is taken before it is closed."""
+        self._finish(0.5 if STOP["signal"] else grace)
+        if self in LIVE:
+            LIVE.remove(self)
 
     def _finish(self, grace: float) -> None:
         if not self.wait(grace):
@@ -982,8 +986,8 @@ class Player:
                 os.waitid(os.P_PIDFD, self.relay_fd, os.WEXITED | os.WNOHANG)
             except ChildProcessError:
                 pass
-            os.close(self.relay_fd)
-            self.relay_fd = None
+            fd, self.relay_fd = self.relay_fd, None
+            os.close(fd)
         if self.popen is None and self.fd is not None:
             try:
                 os.waitid(os.P_PIDFD, self.fd, os.WEXITED | os.WNOHANG)
@@ -992,8 +996,8 @@ class Player:
         if self.reader is not None:
             self.reader.join(5.0)
         if self.fd is not None:
-            os.close(self.fd)
-            self.fd = None
+            fd, self.fd = self.fd, None
+            os.close(fd)
 
 
 def case_env(base: str) -> dict:
