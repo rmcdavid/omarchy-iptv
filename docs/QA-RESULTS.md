@@ -22819,3 +22819,105 @@ only by the guide's persist line, over a file that loads".
   lane. Not searched further.
 - Not watched: no display and no real notification server were used; the
   card's rendering is UNVERIFIED.
+
+## D-PLY-77: the lock record keeps the higher seq (lane-state11, 2026-11-21)
+
+Fixing it rather than accepting it is the lead's call under the owner's
+standing authority of 2026-11-09; which fix, this lane's proposal, after
+reading every reader of the record. Branch `state11`, the commit after
+D-STATE-11's. Crash journal 88 before and after.
+
+**Every reader of the record, read before choosing.** The record is
+`player.lock`'s JSON (`schema`, `seq`, `verb`, `at`), written only by
+`write_lock_record`, from `player start|restart` and `player stop`, each
+under the lock and after `check_seq` (bin/helper/08-player-verbs.py).
+- `check_seq` (07-player.py): refuses `superseded` a verb whose seq is
+  above 0 and below the record's. A seq-0 verb -- the CLI's default for
+  `player stop`, `start` and `restart` (11-cli.py), what a person types --
+  is never refused, so `omarchy-iptv player stop`, the documented escape
+  hatch, always works.
+- `player probe` reports `record_seq(read_lock_file())` as `seq`, read
+  without the lock. The shell reads it in `applyProbe`:
+  `Model.probeVerdict` resyncs `playSeq` to `max(playSeq, record + 1)`,
+  and the stop confirmation's look returns early while `probe.seq` is not
+  above `stopSeq` (the stop laddering or still waiting) and otherwise stops
+  a surviving player.
+- `play` stamps the stash with the record's seq (06-failed.py, ruling CL4:
+  `play` has no `--seq`). Nothing compares a stash's `seq` (the model parses
+  it in `playerStash`; no reader in the model or Service.qml).
+- Nothing reads the record's `verb` or `at`.
+- The start's reply `seq` that the shell compares with `stopSeq`
+  (D-PLY-40) is the verb's own argument, not the record.
+
+**Which fix is safe.** The row's two candidates are one change for the
+seq: every seq above 0 that passes `check_seq` is at least the record's, so
+"keep the higher" differs from "write the verb's" only for a seq-0 verb,
+which then leaves the recorded seq where it was. Built as "keep the
+higher", inside `write_lock_record` (`max(seq, record_seq(read_lock_record
+(fd)))`), so no caller can lower it; the record's `verb` and `at` still say
+which verb held the lock last. What a record left high by an EARLIER shell
+does to a new one, read: the new shell's start-up reattach probe is its
+first player verb (Service.qml's start-up, `runPlayerProbe` after the pip
+probe), and its answer resyncs `playSeq` above the record before any
+`play()` is issued from the slot (a play made meanwhile waits for the
+probe, `drainPendingPlay`); a detached stop issued before that answer is
+superseded by the higher record, exactly as on f74ee09 when no terminal
+verb intervened, and the look or the backstop's probe then resyncs and
+stops the player (D-PLY-73's path). So the fix changes nothing for a record
+an earlier shell left; it removes the one way the record went DOWN, which
+only a seq-0 verb had, by accident. For the stop confirmation the record
+is now monotonic, which is what its comparison assumes: a record above the
+stop's seq means a later intent was recorded. The other option the review
+named implicitly -- refusing a seq-0 verb below the record -- is not safe:
+it breaks the escape hatch (mutant P3 below). Cost: a record a person
+raised with a typed `--seq` is no longer lowered by the next seq-0 verb; the
+shell's probe resyncs above it as above any record, until the runtime
+folder or the lock file goes.
+
+**Tests.** tests/test_player.py `LockTest`, 3 new (7 in the class, 4 + 3):
+- `test_d_ply_77_the_record_keeps_the_higher_seq`: 14 then a seq-0 stop
+  reads 14 with `verb` "stop"; 20 raises it; an unreadable record reads 0
+  and is replaced by 5, which a seq-0 verb keeps.
+- `test_d_ply_77_a_terminal_verb_does_not_let_an_older_stop_ladder_a_newer_start`:
+  the row's sequence in the order the lock grants it -- the stub player
+  started `--seq 14`, a terminal `player start` with no `--seq` adopting it,
+  then the shell's stop `--seq 13` -- answers `superseded` and leaves the
+  player; the probe then reads 14.
+- `test_d_ply_77_a_terminal_stop_is_still_never_superseded`: after `--seq
+  14`, `player stop` with no `--seq` stops the player, and the record stays
+  14.
+- On f74ee09's helper (a git archive with this branch's test file): 3 of 7
+  red. The row's case reads `[0, None, []]` there -- the stop @13 passed and
+  laddered the player of start @14 -- against `[1, "superseded", [pid]]`;
+  the escape hatch's stop still stops the player there, and its test is red
+  only for the record (0 for 14).
+
+Mutants, one decision each, in a scratch copy, the stub resealed, against
+`LockTest`:
+
+| mutant | red |
+|---|---|
+| P1 `write_lock_record` writes the verb's own seq (f74ee09's) | 3 |
+| P2 it keeps the LOWER | 5 (the three new and the two record tests the class had) |
+| P3 the other way out: f74ee09's write, and `check_seq` refusing a seq-0 verb below the record | 3 (the escape hatch's stop refused; the row's case's terminal start refused) |
+
+Also run: `scripts/split-helper.py --seal` and `--check`; tests/test_player.py
+whole, 174 / 0; test_local_refusals, test_player_bounds,
+test_stream_host_names, test_relay_player, test_stream_label_zone,
+test_stream_lookup, test_state and test_state_literal_link, 306 / 0.
+
+**Rule 15, the search.** The shape is "an ordering value a later write can
+lower".
+- Writers of the lock record: `write_lock_record` alone, from its two
+  callers. Fixed in the writer.
+- The stash's `seq` (`player_stash`): a seq-0 start writes 0 there, and
+  `play` writes the record's. No reader orders by it. Cleared, not changed.
+- The shell's counters: `playSeq` moves by `+= 1` and the probe's resync is
+  a max (`Model.probeVerdict`); `stopSeq` is taken from it. Cleared.
+- `play` carries no seq (CL4); `player restart` is `player start`'s path.
+  Cleared.
+- The node world double (tests/player-world.js, outside this lane's files):
+  its other launcher still sets `w.record = 0`, the helper as it was. It is
+  off unless a sequence asks for it (`contestP`), and with the fix it is
+  harsher than the helper, not more forgiving; a proposal to the lead.
+- Not watched on a real player or a terminal beside a running shell.

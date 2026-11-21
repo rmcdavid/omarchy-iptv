@@ -1608,7 +1608,19 @@ def record_seq(record: dict[str, Any]) -> int:
 
 
 def write_lock_record(fd: int, seq: int, verb: str) -> None:
-    payload = json.dumps({"schema": 1, "seq": int(seq), "verb": verb, "at": int(time.time())})
+    """The record a verb leaves under the lock: the HIGHER of its own seq
+    and the one recorded (D-PLY-77, 2026-11-21). A verb on the CLI's default
+    `--seq 0` -- `omarchy-iptv player stop` typed in a terminal -- is never
+    superseded (check_seq), and it used to write its 0 here, so a stop of the
+    shell's issued before a start that had recorded a higher seq, still
+    waiting for the lock, passed check_seq after it and laddered that start's
+    player. Every seq above 0 that passes check_seq is already at least the
+    record's, so only a seq-0 verb is changed: it leaves the record's seq
+    where it was. Its readers ask the highest intent the lock has seen: the
+    probe's `seq`, which the shell resyncs its playSeq above, and the stop
+    look's comparison with the stop's seq; nothing reads `verb` or `at`."""
+    seq = max(int(seq), record_seq(read_lock_record(fd)))
+    payload = json.dumps({"schema": 1, "seq": seq, "verb": verb, "at": int(time.time())})
     try:
         os.lseek(fd, 0, os.SEEK_SET)
         os.truncate(fd, 0)

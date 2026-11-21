@@ -2056,6 +2056,67 @@ class LockTest(PlayerTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["seq"], 41)
 
+    # D-PLY-77 (2026-11-21): a verb on the CLI's default `--seq 0` -- typed in
+    # a terminal -- used to write its 0 into the record, so a stop of the
+    # shell's issued BEFORE a start that recorded a higher seq, and still
+    # waiting for the lock, passed check_seq afterwards and laddered that
+    # start's player. The record now keeps the higher seq.
+    def terminal_start(self):
+        """`omarchy-iptv player start` as a person types it: no --seq."""
+        return run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                   "--id", "t:bbc1.uk", "--ipc-timeout", "1", "--lock-timeout", "1",
+                   "--spawn-timeout", "4", "--first-load-timeout", "1")
+
+    def test_d_ply_77_the_record_keeps_the_higher_seq(self):
+        os.makedirs(self.runtime, 0o700)
+        fd = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, fd)
+        read = lambda: helper.read_lock_record(fd)
+        helper.write_lock_record(fd, 14, "start")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual([helper.record_seq(read()), read().get("verb")], [14, "stop"],
+                         "a seq-0 verb leaves the recorded seq where it was")
+        helper.write_lock_record(fd, 20, "start")
+        self.assertEqual(helper.record_seq(read()), 20, "a higher seq still raises it")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.truncate(fd, 0)
+        os.write(fd, b"not a record")
+        helper.write_lock_record(fd, 5, "start")
+        self.assertEqual(helper.record_seq(read()), 5, "an unreadable record reads as 0 and is replaced")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual(helper.record_seq(read()), 5)
+
+    def test_d_ply_77_a_terminal_verb_does_not_let_an_older_stop_ladder_a_newer_start(self):
+        # The row's sequence, in the order the lock grants it: the shell's
+        # start @14 runs and records 14; a terminal `player start` (seq 0)
+        # runs and adopts the player; the shell's stop @13, issued before the
+        # start and kept waiting, runs last.
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        pid = helper.find_player(self.sock)[0]["pid"]
+        code, payload, _, stderr = self.terminal_start()
+        self.assertEqual([code, payload["spawned"]], [0, False], stderr)
+        code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--seq", "13", "--ipc-timeout", "1")
+        # Before D-PLY-77: [0, None, []] -- the stop passed and laddered it.
+        self.assertEqual([code, (payload.get("error") or {}).get("code"), [record["pid"] for record in helper.find_player(self.sock)]],
+                         [1, "superseded", [pid]], "the older stop must not touch the player of the newer start")
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+        # And the shell's probe reads the record the start left, so its
+        # playSeq resyncs above 14 (Model.probeVerdict).
+        code, payload, _, _ = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual([code, payload["seq"]], [0, 14])
+
+    def test_d_ply_77_a_terminal_stop_is_still_never_superseded(self):
+        # The documented escape hatch: `omarchy-iptv player stop` with no
+        # --seq stops the player whatever the record holds, and leaves the
+        # record's seq for the shell to resync above.
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        code, payload, _, stderr = run("player", "stop", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual([code, payload.get("running")], [0, False], stderr)
+        self.assertFalse(helper.find_player(self.sock))
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+
 
 class SpawnFailureTest(PlayerTestCase):
     def test_a_player_that_never_binds_is_reaped_by_the_helper_that_created_it(self):
