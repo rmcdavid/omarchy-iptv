@@ -22138,3 +22138,167 @@ lane-tls111, on a worktree of `dev` d3a9511. Test code only: `tests/tls_pins_rig
 - D-PLY-74, filed from D-PLY-72's row. The recheck of 23dbc13 found the one case lane-settle-ply69 left unbuilt -- a cold start whose arm could not reach a wedged player of this build that it then ladders, when a later connect of the hunt does -- recorded only inside a row that reads fixed, while ARCHITECTURE-PLAYER 4.10 called it open. It has its own open row now, and 4.10 names it. The same recheck's other nit, the backstop's "the player outlived a stop" journal line after a held-over stop whose probe finds nothing, is named in D-PLY-72's cost and the line is left as it is.
 - F-HARNESS-119, filed from lane-settle-tls111's rule-15 search. Read in `tests/test_player.py`: `setUp` registers `reap` with `addCleanup`; `run("player", "start", ...)` calls the shipping helper in process, whose `spawn_player` calls `setsid` in its first child; and the stub's `serve` mode loops on `accept` with no deadline. So a default SIGTERM to the suite, which runs no cleanup, leaves a stub and its relay running in a session of their own. `tests/test_relay_player.py` starts its stubs the same way. Not measured; open. Its fix is not `tests/relay_rig.py`'s one line: unittest's `testPartExecutor` records a SystemExit raised inside a test as an error and goes on to the next test (read in CPython's unittest).
 - The lanes' other proposals, each taken as the lead's call under the same authority: D-PLY-71's fix (lane-ply69); D-PLY-72's fix and its P3 (lane-settle-ply69); D-PLY-73 kept open at P4; the hold's stated cost, a held-over stop that runs to its look and its backstop where the hold was not needed; the TLS rig's mutant C and control C6 in place of the brief's mutants A and B, which are equivalent for every load through `apply_channel` (the live arm's S5 stays the only test of the trailing `--tls-verify=yes` alone, as before; no new finding); and the bracketed note on ARCHITECTURE-PLAYER section 20's F-HARNESS-111 line, kept.
+
+### D-STATE-9: the guard (lane-state9, 2026-11-21)
+
+Building the row's cheap guard is the lead's call under the owner's standing
+authority of 2026-11-09. Branch `state9`, cut from dev 085a49d. Crash journal
+88 before the lane's first run and 88 after its last.
+
+**What it is.** `state private` and `state init` now ask, before anything
+else, whether state.json is a link that the FileView's writer, QSaveFile,
+reads to a different file than the kernel reads it (bin/helper/10-state.py
+`state_link_split`). The writer's reading is `qt_link_literal`: while the
+path is a link, its target replaces it, a relative one joined to the current
+path's folder as TEXT (everything before its last `/`) and cleaned by
+`qt_clean_path`, a step-by-step port of Qt 6's segment normalisation that
+asks nothing of the filesystem. The two readings are compared as directory
+ENTRIES -- the folder by st_dev and st_ino, and the name in it, or, where the
+names differ, the same file in that one folder -- never as strings, because a
+supported layout gives two strings for one file. `state private` refuses
+with exit 1, nothing changed, `why: split-link` and a sentence that names no
+path; `state init` answers `found: split-link`. The model reads the word
+(`Model.stateInitFound`, `stateLoadDecision`, `stateUnreadableNotice`,
+`STATE_PRIVATE_WHY`).
+
+**Calls the lane made, as proposals for the lead.**
+- No folder at the literal location (`nodir`) is refused by the same word.
+  QSaveFile's open fails there (measured), so every save already failed,
+  told only as `state_write_failed`; the refusal names the cause, and no
+  layout that saves today is refused by it.
+- `state init` keeps doing what it does for any link at the path: it never
+  creates through one (O_EXCL meets the link) and it makes the file the
+  kernel names 0600, which writes no text. Refusing that chmod too would
+  leave a 0644 file of credentials as it is, for no gain.
+- A literal reading past 40 links is refused: the kernel's own MAXSYMLINKS.
+  QSaveFile follows 127 and then writes over the path ITSELF, which replaces
+  the user's link with a regular file (measured below, `loop` and
+  `selfloop`). A link the kernel cannot resolve either (a pure loop) keeps
+  the verbs' own answers, `unreachable` and `link`.
+- A hard link at the literal location is refused. The file is one inode but
+  two entries, and QSaveFile's rename replaces the literal entry, so the
+  kernel's name keeps the old text (measured, `hardlink`). That is why the
+  comparison is by entry and not by inode alone.
+
+**What the user sees.** Over a file that LOADS -- the common split shape,
+the real file present -- the state applies and the first save meets the
+refusal: it fails closed as any refused `state private` does
+(`state_write_failed` once per episode, the guide's "Could not write
+state.json" line, memory stands), and the journal line now reads
+`(split-link)` where an unknown word read `(refused)`. The plain-words
+notice ("... is a symbolic link that would be saved to a different file
+than the one it is read from, because its target climbs with .. out of a
+folder that is itself a symbolic link. ... Point it at the file that holds
+your state with an absolute path that has no .. in it, then run omarchy
+restart shell.") reaches only a start that could NOT load the file (the
+link dangles), because Service.qml blocks writes only on a failed load and
+otherwise passes the reason through untouched. Proposals, outside this
+lane's files: (1) Service.qml's `finishStatePrivate` blocks writes with
+`reply.why` when it is `split-link`, so the notice is told over a loaded
+file too (a lifted block re-arms at the next refused save, so the lead may
+prefer the guide's persist line with a sentence of its own); (2)
+`split-link` added to tests/fixtures/state-notices.json and to the
+`decided` list in tests/Model.test.js that holds it (adding it to the
+fixture alone turns that check red), with the README and docs/UX-SOURCES.md
+quoting the sentence. Until then the sentence is pinned verbatim by
+tests/test_state_literal_link.py.
+
+**Held to the installed Qt.** The spike
+(scripts/dev-harness/spikes/state-literal-link) now runs its probe under
+gdb (`handle all nopass`, debuginfod off) on the private bus, where it ran
+bare on the bus before, and gained eleven cases, a judge (judge.py) and a
+`--clean` mode. qt6-base 6.12.0-3, gcc 16.2.1, offscreen, under the heavy
+lock and `nice -n 10`, with a decoy HOME.
+- `measure.sh --clean` wrote tests/fixtures/qt-clean-path.json: 426
+  inputs (71 written by hand, the rest seeded random) and QDir::cleanPath's
+  answer to each. The port reproduces all 426. posixpath.normpath misses 60,
+  and the lane's first port, which collapsed every doubled slash, missed 2:
+  Qt answers `//a` for `/.//a/` and `//b/a\b` for `/st ate/..//b/a\b`,
+  because removing a segment back to the root skips one slash only. A `..`
+  with nothing before it is kept, above the root too (`/a/../../b` is
+  `/../b`); the kernel reads that as `/b`, and the comparison asks the
+  kernel.
+- `measure.sh` over all 21 cases with the guard
+  (RESULT-2026-11-21.txt): 21 CHECK lines, 0 failed. Each asserts that the
+  file the helper says QSaveFile writes is the file NEW landed in (or, for
+  `nodir`, that its folder is missing where the open failed too), and that
+  the helper's verdict is exactly "NEW missed the file the kernel read
+  before the save" and the case's expectation. `r644-private` and
+  `none-private` are refused `split-link` with nothing changed, where
+  085a49d answered `changed` and `created`. New facts it measured:
+  `chain2` -- each hop is read against the PREVIOUS hop's folder, not the
+  first's (NEW in `a/w/state.json`); `hardlink` -- NEW in a new inode at the
+  literal name, `REAL` kept at the kernel's; `loop` and `selfloop` -- the
+  link replaced by a regular file holding NEW (0600 and the umask's 0644).
+- The same driver over a git archive of 085a49d
+  (RESULT-2026-11-21-baseline.txt): no guard, so no check, and `state
+  private` confirming every layout it now refuses (`changed`, `created`,
+  and `kept` for chain2, hardlink and loop); the first ten cases' probe lines
+  are RESULT-2026-11-15.txt's, line for line.
+
+**Tests.** tests/test_state_literal_link.py, 20 (2 against the cleanPath
+fixture, 17 over layouts in a 0700 scratch folder, each reading the
+filesystem, and 1 running the model in node). On 085a49d: 13 of 20 red (1
+failure, 12 errors: every layout that must be refused, which `state
+private` confirmed, plus the fixture test and two that call the new
+reading). The 7 green there are the ones the guard must leave alone (no
+link, an absolute link, a relative link with no `..`, a link in a linked
+state folder, a `..` where nothing climbed out of is a link, 40 links) and
+the fixture's corner list, which reads only the fixture; the mutants hold
+them. On the branch 20 / 0, and with tests/test_state.py 136 / 0.
+
+Mutants, one decision each, against the 20 (in a scratch copy, the stub
+resealed each time):
+
+| mutant | red |
+|---|---|
+| M1 the join: a relative target joined to the hop's REAL folder | 9 (3 failures, 6 errors) |
+| M2 the join: every hop joined to the FIRST path's folder | 3 (the chain, 40 and 41 links) |
+| M3 the cleaning: none, the joined text handed to the kernel | 8 |
+| M4 the cleaning: realpath, which resolves links | 10 |
+| M5 the cleaning: posixpath.normpath | 1 (the fixture: 60 pairs) |
+| M6 the comparison: as strings | 3 (inlinked, samedir, ~/Sync: refused) |
+| M7 the comparison: by inode alone | 1 (the hard link) |
+| M8 the bound: none | the 41-link test red; the literal loop never returns, and its test was ended at 30 s by the verb's own SIGALRM deadline (STATE_INIT_DEADLINE), rc 142 |
+| M9 the bound: Qt's 127 | 1 (41 links) |
+| M10 the bound: 41 | 1 (41 links) |
+| M11 a path the kernel cannot resolve claimed split | 1 (the pure loop) |
+| M12 no folder at the literal end read as not split | 1 (`nodir`) |
+| M13 `state private` not wired | 8 |
+| M14 `state init` not wired | 8 |
+| MM1 Model.stateInitFound drops the word | 1 |
+| MM2 Model.stateLoadDecision drops it | 1 |
+| MM3 STATE_PRIVATE_WHY drops it | 1 |
+| MM4 no sentence of its own | 1 |
+
+Also run: `node tests/Model.test.js` 4012 checks, 0 failures;
+`scripts/split-helper.py --check`; `node scripts/split-model.mjs --check`
+(no public name added); `python3 scripts/release.py check`;
+`python3 scripts/check-defect-ledger.py`.
+
+**Rule 15, the search.** The shape is "a path read as text against a link,
+then used by the kernel".
+- Other atomic writers in the shell (`grep atomicWrites|setText(` over the
+  shipped QML): only `stateFile` (Service.qml). Cleared.
+- The helper's own resolution of a state.json link (`state_file_target`,
+  `state_private_open`, `write_state_file`, `chmod_if_kind`): the kernel's
+  reading throughout, the same file the FileView reads. Cleared.
+  `write_state_file`'s `through_link` compares strings, but only to decide
+  whether to chmod the folder, and a wrong "through a link" only skips that
+  chmod. Cleared.
+- Lexical normalisation in the helper (`grep abspath|normpath
+  bin/helper`): `state_dir`, `cache_dir` and `socket_path` take
+  `os.path.abspath` of the folder the service hands them as text, which
+  drops `link/..` as text while the shell opens the raw text through the
+  kernel -- FOUND, filed as D-STATE-10 (P4, open, the FileView's half
+  reasoned). `broken_folder_link` reads the same abspath'd path, so it is
+  part of D-STATE-10. `sweep_stale_temps_once` uses abspath for a memo key
+  and `source_key_of` normpath to parse a name; neither opens anything.
+  Cleared.
+- The model's text dirname in `stateUnreadableNotice` (the folder's path
+  in a sentence) is display only. Cleared.
+- The service harness's FileView double (tests/service-harness.js, not
+  this lane's file) models no link's literal reading, so nothing in the
+  node suite can stage D-STATE-9 through Service.qml. Recorded here, not
+  filed: it is a narrower world, not a more forgiving answer to a case it
+  stages; the guard is held through the helper instead.

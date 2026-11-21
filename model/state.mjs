@@ -1867,7 +1867,9 @@ function stateInitFound(text, exitCode, timedOut) {
     if (f === "absent") return "absent"
     // R25c: "folder-link", a link at the state FOLDER (or above it) that
     // leads nowhere, is the helper's word too and gets its own sentence.
-    if (f === "link" || f === "not-a-dir" || f === "folder-link") return f
+    // D-STATE-9 (2026-11-21): "split-link", a link the FileView's writer
+    // reads as text to another file than the one it reads, likewise.
+    if (f === "link" || f === "not-a-dir" || f === "folder-link" || f === "split-link") return f
     if (f === "file" || f === "other" || f === "unreadable") return "present"
     return "unknown"
   }
@@ -1921,7 +1923,7 @@ function stateLoadDecision(ctx) {
   // R24b: the helper named what is at the path, and that is the reason --
   // the folder-permission sentence "absent-unconfirmed" carries would send
   // the user to chmod a folder that is fine.
-  if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
+  if (found === "link" || found === "not-a-dir" || found === "folder-link" || found === "split-link") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
@@ -1979,10 +1981,12 @@ function statePrivateArgv(helperPath, stateDir) {
 // file word it does not know, no reply at all (the watchdog stopped it, an
 // empty stub mid-update) and a non-zero exit are all `ok: false`. `why` is
 // the helper's own word when it refused ("not-a-file", "not-owned",
-// "unreachable", "unconfirmed"), "no-reply" otherwise; one fixed word, never
-// a path or a URL, for the journal line the service writes.
+// "unreachable", "unconfirmed", and since D-STATE-9 "split-link": a
+// state.json link the FileView's writer would save to another file than the
+// one it reads), "no-reply" otherwise; one fixed word, never a path or a
+// URL, for the journal line the service writes.
 var STATE_PRIVATE_FILE = ["kept", "changed", "created"]
-var STATE_PRIVATE_WHY = ["not-a-file", "not-owned", "unreachable", "unconfirmed"]
+var STATE_PRIVATE_WHY = ["not-a-file", "not-owned", "unreachable", "unconfirmed", "split-link"]
 function statePrivateReply(text, exitCode) {
   var lines = str(text).split("\n")
   for (var i = lines.length - 1; i >= 0; i--) {
@@ -2176,6 +2180,14 @@ function stateUnreadableNotice(reason, path, midSession) {
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
     fix = "Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell."
+  } else if (r === "split-link") {
+    // D-STATE-9 (2026-11-21): the helper's `state init` names a state.json
+    // link whose relative target climbs with .. out of a folder that is
+    // itself a link: the shell's writer reads that .. as text and would save
+    // to another file than the one read. An absolute target with no .. is
+    // read the same way by both.
+    what = "is a symbolic link that would be saved to a different file than the one it is read from, because its target climbs with .. out of a folder that is itself a symbolic link"
+    fix = "Point it at the file that holds your state with an absolute path that has no .. in it, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     // R27e left this one as it was: at a START the helper names a link that
     // leads nowhere itself ("link", "folder-link"), so the file it found and
