@@ -1759,12 +1759,31 @@ start's own ok then reads as a start from before the stop
 (`stopOlderStartOk`), and a play made after the stop goes out as its own
 start, ordered after the stop by the lock and the seq rule. A start that went
 out with no stop settling is the single stop's case and is left exactly as it
-was. D-PLY-71, its sibling: a start issued before the last stop has its first
+was, unless it went out over a player it ladders itself (D-PLY-72, below).
+D-PLY-71, its sibling: a start issued before the last stop has its first
 load told to no one, because the stop laddering its player in that window
 reads there as mpv closing the connection, and told it named the play made
-after the stop and dropped it. Held by the service harness and a seeded world
-of the helper's lock, record and players (tests/player-world.js); not watched
-on a real player]**. That
+after the stop and dropped it. D-PLY-72, the same day (the review of
+138b5de): with ONE stop, the EOF can be the in-flight start's own rung. A
+`player restart --from term`, a start that replaces another build's player
+and a start that went out over the observed player each ladder the player
+they find before they spawn, under the lock the stop waits for, so that EOF
+ended the settle while the stop had still to ladder the respawn: the start's
+ok zapped a play made after the stop into it, or, with the stop the last
+word, recovered and adopted it under the stop. The shell records whether the
+start went out over a player it may ladder (`sessionOverPlayer`: the
+observer on one after the start's own arm, a restart, an owed replacement)
+and holds such an EOF as well. Two exceptions remain to the rule this
+bracket qualifies, both open: a cold start whose arm could not reach a
+wedged player of this build that it then ladders, when a later connect of
+the hunt does (read, not built, on D-PLY-72's row: at EOF nothing tells that
+player from the start's own spawn, and holding every cold start would undo the single
+stop's settle); and D-PLY-73, a stop the shell issues itself -- the
+backstop's stop of a player that outlived the user's stop -- which opens no
+settle, so a play made while it ladders is zapped into that player. Held by
+the service harness and a seeded world of the helper's lock, record, players
+and the health path's restart (tests/player-world.js); not watched on a real
+player]**. That
 preserves the documented behaviour ("Playing a channel while the old player is
 still shutting down starts a fresh player once it has exited") with a stronger
 mechanism: `player start` blocks on the lock behind the running ladder and, when

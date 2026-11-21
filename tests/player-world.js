@@ -33,9 +33,29 @@
 //   - The socket observer: h.socketWorld's sockets connect only to a live,
 //     bound player and see its death a few milliseconds after it, through
 //     the Component's own handler (tests/service-harness.js).
+//   - `player restart --from term` (D-PLY-72), when a sequence asks for the
+//     health path (`restartP`): under the lock it TERMs the live player, which
+//     dies 20 ms to 2 s later, and then spawns as a start does. The verdict
+//     that sends it is drawn, not observed: restartPlayer() is called as the
+//     health tick calls it, and does what it does -- nothing with no player
+//     up or a stop settling, a stop() once its one relaunch is spent, and,
+//     with the slot busy, a retry on relaunchTimer, which runs from its own
+//     block.
+//   - `status` (the control slot): the live player's stash, or not running.
+//     Asked once, by the health tick's own block (h.fireTimer), after a
+//     sequence whose last action is a play: ruling CL6 lets the label and the
+//     player disagree for up to one health tick (D-PLY-11 T-A, a zap racing an
+//     adopting start), and the tick's repair is the shell's own.
 //   - Nothing crashes, no stream fails and no refusal but `busy` and
-//     `superseded` happens: every death is a stop's, so a card that says a
-//     channel stopped unexpectedly or failed is a false card here.
+//     `superseded` happens: every death is a stop's or a restart's rung, so a
+//     card that says a channel stopped unexpectedly or failed is a false card
+//     here.
+// What it does NOT model, so it cannot find a defect there: a player another
+// build launched (restart on adoption's probe, hold and replacement -- the
+// node suite's deterministic D-PLY-72 rows hold that start); a health tick
+// during a sequence (only the one after it); a wedged player a start finds
+// and ladders; the watchdog's stopped start beyond its TERM; and any real
+// timing -- every interval here is drawn from the ranges written in it.
 // Time is the harness's clock. The shell's Timers that the settle reads run
 // from their own blocks (h.driveTimer), playerSocketTimer as the repeating
 // Timer it is.
@@ -45,7 +65,8 @@
 //       stop, when that stop then laddered that player: a zap written to a
 //       socket a stop the user issued still had to tear down (4.10).
 //   (2) the user's last action a play: at the end their LAST chosen channel
-//       plays and the shell names it, or a card was raised after that play.
+//       plays and the shell names it, or a card was raised after that play --
+//       asked after the one health tick above, which is CL6's window.
 //   (2b) any card the world does not justify (only "The player is busy"
 //       after a start's every try met the lock is one).
 //   (3) the user's last action a stop: at the end nothing plays.
@@ -152,6 +173,14 @@ function playerWorld(h, o) {
     const v = { kind, id: argOf(c, "--id"), issue: ++w.issued, slot: "control" }
     w.control = v
     note("issue control " + kind + (v.id ? " " + v.id : ""))
+    if (kind === "status") {
+      at(between(20, 80), "status answers", () => {
+        const p = w.player && w.player.alive && w.player.bound ? w.player : null
+        controlReply(v, JSON.stringify(p === null ? { ok: true, kind: "status", running: false }
+          : { ok: true, kind: "status", running: true, paused: false, idle: p.channel === "", mpvVersion: "mpv 0.41.0", stash: stashOf(p), rewind: null }))
+      })
+      return
+    }
     if (kind !== "play") { at(between(20, 80), "control answers", () => controlReply(v, JSON.stringify({ ok: false, kind, error: { code: "not_running", message: "mpv socket not found" } }))); return }
     at(between(40, 250), "zap connects", () => {
       const p = w.player
@@ -234,7 +263,20 @@ function playerWorld(h, o) {
       })
       return
     }
+    if (p && v.kind === "restart") {
+      // `--from term`: the TERM rung, then the spawn, still under the lock.
+      at(between(20, 2000), "restart ladders", () => {
+        if (v.dead) return
+        kill(p, null)
+        spawn(v)
+      })
+      return
+    }
     if (p) kill(p, null)
+    spawn(v)
+  }
+
+  function spawn(v) {
     const took = rnd() < 0.85 ? between(150, 400) : between(1500, 5000)
     const q = { pid: ++w.nextPid, alive: true, bound: false, channel: "", zapped: false, entries: 0 }
     w.players.push(q)
@@ -262,10 +304,14 @@ function playerWorld(h, o) {
     p.onDeath = () => { if (watch.done) return; watch.done = true; at(between(1, 10), "first load closed", () => reply(v, ok("failed", { reason: "mpv exited", ended: "closed" }))) }
   }
 
+  function stashOf(p) {
+    return p.channel === "" ? null : { schema: 1, playing: true, id: p.channel, name: nameOf(p.channel), group: "G", launchedFrom: "", sourceKey, since: 1, entryId: p.entries, seq: w.record, verb: "start" }
+  }
+
   function probeReply() {
     const p = w.player && w.player.alive && w.player.bound ? w.player : null
     if (!p) return JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: w.record, claimed: false, rewind: null, tls: null })
-    const stash = p.channel === "" ? null : { schema: 1, playing: true, id: p.channel, name: nameOf(p.channel), group: "G", launchedFrom: "", sourceKey, since: 1, entryId: p.entries, seq: w.record, verb: "start" }
+    const stash = stashOf(p)
     return JSON.stringify({ ok: true, kind: "player.probe", running: true, responsive: true, pid: p.pid, idle: stash === null, stash, owner: null, seq: w.record, claimed: true, rewind: null,
       tls: { verify: true, optionCount: 0, unpinned: 0, migrated: false } })
   }
@@ -326,7 +372,10 @@ function playerWorld(h, o) {
 
 // One seeded sequence: `steps` user plays and stops over `channels` (ids),
 // the world run between them, then for `settleMs` after the last; -> the
-// verdicts above, with the run's log.
+// verdicts above, with the run's log. With `restartP`, before each action
+// after the first the health path's restart is asked with that chance, and
+// the action follows 0 to 600 ms later (no draw is made without it, so a
+// sequence without it is the one it always was).
 function playerSequence(h, o) {
   const opts = o || {}
   const w = playerWorld(h, opts)
@@ -336,6 +385,12 @@ function playerSequence(h, o) {
     const r = w.rnd()
     const gap = r < 0.45 ? w.between(0, 120) : r < 0.8 ? w.between(120, 2500) : w.between(2500, 9000)
     w.advance(gap)
+    if (opts.restartP && k > 0 && w.rnd() < opts.restartP) {
+      w.note("HEALTH restart")
+      h.root.restartPlayer()
+      h.drain()
+      w.advance(w.between(0, 600))
+    }
     const stop = k > 0 && w.rnd() < 0.45
     let chosen = ""
     if (stop) {
@@ -350,12 +405,18 @@ function playerSequence(h, o) {
     actions.push({ stop, id: chosen, cards: cardsOf(h).length })
   }
   w.advance(opts.settleMs)
+  const last = actions[actions.length - 1]
+  if (!last.stop && (h.root.playerUp || h.root.nowPlaying !== null)) {
+    w.note("HEALTH tick")
+    h.fireTimer("healthTimer")
+    h.drain()
+    w.advance(10000)
+  }
   const verdict = { one: [], two: "", twoB: [], three: "", quiet: w.quiet(), log: w.log }
   for (const s of w.stops) {
     if (!s.laddered) continue
     for (const x of w.writes) if (x.pid === s.laddered && x.issue > s.issue) verdict.one.push(x.by + " " + x.id + " into " + x.pid + " after stop @" + s.seq + " that laddered it")
   }
-  const last = actions[actions.length - 1]
   const cards = cardsOf(h)
   const p = w.player && w.player.alive ? w.player : null
   if (!last.stop) {
