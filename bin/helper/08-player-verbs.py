@@ -1629,7 +1629,15 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
                 failed = pin_adopted_player(client, sock_path)
                 if failed:
                     log("%s: the adopted player refused %d pin(s)" % (label, failed))
-                others = [record for record in found if record["pid"] != keep]
+                # D-PLY-62: every other token holder but the kept player's own
+                # ancestors. A user's `mpv` wrapper that runs the real player
+                # as its child (no `exec`, D-PLY-55's shape) holds the token
+                # too, and it is that player's parent, not a second player:
+                # stopping it left the player reparented and ended whatever
+                # the wrapper meant to do once mpv exits. Read only -- an
+                # ancestor is never signalled here, which is the point.
+                others = [record for record in found
+                          if record["pid"] != keep and not descends_from(keep, int(record["pid"]))]
                 if others:
                     # Never rung 1 here: `quit` travels over the shared socket and
                     # would hit the player we are keeping. Signal the rest by pid.

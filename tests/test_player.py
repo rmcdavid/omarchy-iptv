@@ -1039,16 +1039,52 @@ class WrapperSpawnTest(GateTestCase):
         code, probe, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(probe["launch"], "current")
-        # The answering player is still there. (A child wrapper's own shell,
-        # which holds the token too, is laddered by the adopting start as
-        # "another player process on this socket" -- adopt_or_spawn's rule
-        # for every token holder but the one it keeps, D-PLY-55's shape and
-        # not this test's subject.)
-        self.assertIn(player[0], [r["pid"] for r in helper.find_player(self.sock)])
+        # The answering player is still there, and so is every other token
+        # holder: a child wrapper's own shell is the player's parent, which
+        # the adopting start leaves alone since D-PLY-62.
+        self.assertEqual(sorted(r["pid"] for r in helper.find_player(self.sock)), holders)
         loads = [c for c in self.told(player[0]) if isinstance(c, list) and c[:1] == ["loadfile"]]
         self.assertEqual(len(loads), 4, "start, two zaps and the second start each load into the same player")
         self.assertNotIn(helper.PLAYER_REPLACED_LINE, stderr)
         return first
+
+    def test_d_ply_62_an_adopting_start_leaves_a_child_wrappers_own_shell_alone(self):
+        """D-PLY-62: a wrapper script without `exec` holds the socket token
+        too, and it is the kept player's PARENT, no second player. The
+        adopting start sent its /bin/sh SIGTERM as "another player process on
+        this socket"; the player played on, reparented, and whatever the
+        wrapper meant to do after mpv exits never ran."""
+        self.wrap('REAL "$@"')
+        code, first, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        holders = sorted(r["pid"] for r in helper.find_player(self.sock))
+        player = [pid for pid in holders if self.told(pid)]
+        self.assertEqual((len(holders), len(player)), (2, 1), holders)
+        wrapper = [pid for pid in holders if pid != player[0]][0]
+        self.assertEqual(helper.proc_parent(player[0]), wrapper, "the premise: the wrapper is the player's parent")
+        code, again, _, stderr = self.player_start("--seq", "2")
+        self.assertEqual((code, again["spawned"], again.get("replaced")), (0, False, None), stderr)
+        self.assertEqual(sorted(r["pid"] for r in helper.find_player(self.sock)), holders)
+        self.assertEqual(helper.proc_parent(player[0]), wrapper, "the player still has its wrapper")
+        self.assertEqual([w for w in again["warnings"] if "other player" in w], [])
+
+    def test_d_ply_62_a_token_holder_that_is_no_ancestor_of_the_kept_player_is_still_stopped(self):
+        """The other half, unchanged: a process holding the socket token that
+        the kept player does not descend from IS another player on the
+        socket, wrapper or not, and the adopting start stops it."""
+        self.wrap('REAL "$@"')
+        code, first, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        holders = sorted(r["pid"] for r in helper.find_player(self.sock))
+        stray = hold_launch(self.sock, "token")
+        self.addCleanup(self.reap_process, stray)
+        self.assertIn(stray.pid, [r["pid"] for r in helper.find_player(self.sock)])
+        code, again, _, stderr = self.player_start("--seq", "2")
+        self.assertEqual((code, again["spawned"]), (0, False), stderr)
+        self.assertTrue(wait_gone(stray), "the stray token holder outlived the adopting start")
+        self.assertEqual(sorted(r["pid"] for r in helper.find_player(self.sock)), holders)
+        self.assertEqual([w for w in again["warnings"] if "other player" in w],
+                         ["stopped 1 other player process(es) on this socket"])
 
     def test_d_ply_61_an_exec_wrapper_that_appends_keeps_one_player_across_zaps_and_starts(self):
         """The wrapper a user writes: `exec /usr/bin/mpv "$@" --hwdec=auto`.

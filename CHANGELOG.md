@@ -128,6 +128,10 @@ after the shell starts, and you start the channel again yourself.
   while the helper's `state show` and `state favorite add` answered that it
   could not be read, and saved favourites could stay on old channel ids
   after a playlist update. (D-STATE-5)
+- **If your `mpv` is a wrapper script that runs mpv without `exec`, the
+  plugin no longer stops the wrapper's shell** when it starts a channel on
+  a player it finds already running. The player played on, but anything the
+  wrapper does after mpv exits did not run. (D-PLY-62)
 
 ### Changed
 
