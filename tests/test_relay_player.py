@@ -30,6 +30,7 @@ import json
 import os
 import pathlib
 import resource
+import select
 import shutil
 import signal
 import socket
@@ -278,6 +279,51 @@ class SpawnPlayerTest(test_player.PlayerTestCase):
         relay = status["_pid"]
         os.close(relay_pidfd(relay, player))
         return payload, player, relay
+
+    def test_every_stub_the_spawn_starts_names_this_process_as_its_owner(self):
+        """F-HARNESS-119: PlayerTestCase hands every stub this process as its
+        owner, through the shipping spawn's environment (player_environment
+        keeps it), so a suite ended by any signal leaves none of them
+        running. The kernel is asked: the stub's own /proc environ."""
+        _, player, _ = self.start_player()
+        self.assertEqual(proc_environ(player).get(b"STUB_MPV_OWNER"),
+                         ("%d:%s" % (os.getpid(), helper.proc_start_time(os.getpid()))).encode("ascii"))
+
+    def test_the_stub_and_its_relay_end_with_the_process_that_started_them(self):
+        """F-HARNESS-119 (2026-11-21): `player start` puts the stub and its
+        relay in a session of their own, so a signal to the suite's group
+        never reaches them, and a suite ended by a SIGTERM or a SIGKILL runs
+        no cleanup; measured, both outlived the SIGTERM of the process that
+        held them. The stub now watches its owner (STUB_MPV_OWNER, which
+        PlayerTestCase sets to this process) through a pidfd and exits once
+        it is gone, and the relay exits after its last child by itself. Here
+        the owner is a child of this test, SIGKILLed while the stub plays:
+        the stub, then its relay, are gone within the bound. The kernel is
+        asked: each process through a pidfd opened on its checked command
+        line (pidfd_naming, relay_pidfd), never a pid read off ancestry."""
+        owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.reap_process, owner)
+        self.env(STUB_MPV_OWNER="%d:%s" % (owner.pid, helper.proc_start_time(owner.pid)))
+        _, player, relay = self.start_player()
+        token = os.fsencode("--input-ipc-server=%s" % self.sock)
+        player_fd = pidfd_naming(player, token)
+        self.addCleanup(os.close, player_fd)
+        relay_fd = relay_pidfd(relay, player)
+        self.addCleanup(os.close, relay_fd)
+
+        def gone_within(fd, seconds):
+            poller = select.poll()
+            poller.register(fd, select.POLLIN)
+            return bool(poller.poll(int(seconds * 1000)))
+
+        # Alive while the owner is: the watch ends nothing early.
+        self.assertFalse(gone_within(player_fd, 0.5))
+        owner.kill()
+        owner.wait(timeout=5)
+        self.assertTrue(gone_within(player_fd, 5), "the stub outlived its owner")
+        self.assertTrue(gone_within(relay_fd, 5 + helper.RELAY_LINGER_S), "the relay outlived its player")
+        self.assertEqual(helper.find_player(self.sock), [])
 
     def test_the_player_is_its_relays_child_and_its_environment_names_no_proxy_ffmpeg_reads(self):
         self.env(http_proxy="http://proxy.example.test:3128", no_proxy="*", NO_PROXY="mine.example.test")

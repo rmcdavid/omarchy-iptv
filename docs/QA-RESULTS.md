@@ -22302,3 +22302,95 @@ then used by the kernel".
   node suite can stage D-STATE-9 through Service.qml. Recorded here, not
   filed: it is a narrower world, not a more forgiving answer to a case it
   stages; the guard is held through the helper instead.
+
+### F-HARNESS-119: the stub ends with its owner (lane-state9, 2026-11-21)
+
+Fixing it is the lead's call under the owner's standing authority of
+2026-11-09. Branch `state9`, after the D-STATE-9 commit. Crash journal 88
+before and after.
+
+**Measured first.** The row was read, not measured. The lane's driver (in
+its scratch, not kept: one python process that imports the test module,
+runs a test's `setUp` and its `player start` -- a stub through the shipping
+spawn -- prints the socket and its scratch folder, and then holds the stub
+as a test body would) was started by argv with its pid recorded and a pidfd
+opened on it at once, and signalled through that pidfd once it said READY.
+Survivors were found by this test's own tokens only: the stub by
+`--input-ipc-server=<its /tmp/omarchy-iptv-player-* socket>` on its command
+line, the relay by its own command line (this tree's helper, `player relay`,
+`--child=<that stub's pid>`), because the relay runs non-dumpable and its
+cwd cannot be read. Each was stopped through a pidfd after the same check
+(the relay with SIGTERM, which ends its group, then the stub with SIGKILL),
+and the folder removed by its literal path. Every run under the heavy lock,
+`nice -n 10`, `env -u DISPLAY -u WAYLAND_DISPLAY -u
+HYPRLAND_INSTANCE_SIGNATURE`, a scratch XDG_RUNTIME_DIR and a short TMPDIR.
+
+| test whose setUp and start the driver ran | signal | before the fix | after |
+|---|---|---|---|
+| test_player StartTest | SIGTERM | stub and relay running 1 s and 6 s later | nothing at 1 s |
+| test_relay_player SpawnPlayerTest | SIGTERM | stub and relay running 1 s and 6 s later | nothing at 1 s |
+| test_player StartTest | SIGKILL | stub and relay running 1 s and 6 s later | nothing at 1 s |
+| test_relay_player SpawnPlayerTest | SIGKILL | (not run) | nothing at 1 s |
+
+The driver exited -15 or -9 each time: Python's default SIGTERM runs no
+`finally` and no `addCleanup`, and unittest's is the same. The "before"
+runs of the relay file used a git archive of 085a49d.
+
+**The fix.** The stub bounds its own life, as preferred: PlayerTestCase's
+setUp sets `STUB_MPV_OWNER` to `<this process's pid>:<its start time>`, the
+shipping spawn's `player_environment` keeps it, and the stub
+(tests/test_player.py `STUB_MPV`, `watch_owner`) opens a pidfd on that pid,
+checks the start time after the open (so a pid reused first reads as the
+owner gone), and exits once the pidfd says the process is gone. A pidfd
+covers SIGKILL, which no handler in the suite could. The relay needs
+nothing: it reaps its children and exits RELAY_LINGER_S (1 s) after the
+last (bin/helper/12-relay.py, read, and measured above). A stub a test
+starts directly (GateTestCase's older player) inherits the same variable
+and the same bound.
+
+**Rule 10.** Real mpv has no such watch, and the stub is no more forgiving
+for it: the watch acts only once the process that runs the tests is gone,
+when no assertion about the stub can run, and until then it is one daemon
+thread blocked in `poll` on a descriptor the stub opened after its exec.
+So its argv, what it applied, the OMARCHY_IPTV names it records, its
+socket, its replies and events, its exit codes on quit, fail and crash, and
+the descriptors the hygiene test asserts (the relay's listeners and this
+test's pipe; a pidfd is neither) are what they were: test_player,
+test_relay_player and test_rewind 284 / 0 on the branch.
+
+**Tests.** Two new, in tests/test_relay_player.py's SpawnPlayerTest: the
+stub's own /proc environ names this process as its owner; and with a child
+of the test as the owner, SIGKILLed while the stub plays, the stub is alive
+until then (0.5 s), and the stub and then its relay are gone within 5 s and
+5 s plus RELAY_LINGER_S, each asked through a pidfd on its checked command
+line. On the code before: 2 of 2 red. Mutants of tests/test_player.py:
+
+| mutant | red |
+|---|---|
+| no watch in the stub | 1 (the owner's death) |
+| the watch on the stub's parent, its relay, not its owner | 1 (the owner's death) |
+| no owner from setUp | 1 (the environ) |
+| the start-time check inverted | 2 (the stub exits at its start) |
+
+**Rule 15, the search.** The shape is "a process a test starts that leaves
+the suite's process group, with no bound of its own".
+- Every unit test whose stub is started through the shipping spawn goes
+  through PlayerTestCase's setUp: tests/test_player.py (StartTest,
+  GateTestCase and the rest), tests/test_relay_player.py (SpawnPlayerTest,
+  StatusRelayTest, ProbeAndOrphanRelayTest and the GateTestCase
+  subclasses) and tests/test_rewind.py (RewindPlayerTestCase). Fixed by the
+  one hook.
+- tests/test_player_bounds.py calls the real spawn_player with `fcntl`
+  replaced by a namespace that has no `fcntl.fcntl`, so its grandchild dies
+  at its first descriptor move and nothing is exec'd. Cleared.
+- The holders tests start directly (`hold_launch`, `sleeper`,
+  `shed_double`) are children in the suite's group and each sleeps 30 s or
+  its stated hold at most. Cleared: bounded.
+- The harness's stand-in, scripts/qa-stub-mpv.py, already bounds its life
+  (STUB_LIFE, 60 s by default), and tests/test_relay.py and
+  tests/test_stub_mpv_pins.py start it with a shorter one. Cleared.
+- tests/relay_rig.py and tests/tls_pins_rig.py start the real mpv through
+  the shipping spawn, with teardown of their own (F-HARNESS-111); not this
+  lane's files and not unit tests. Not changed.
+- What a stopped suite still leaves: its scratch folders under /tmp, since
+  no cleanup ran; /tmp is wiped at boot. No process.
