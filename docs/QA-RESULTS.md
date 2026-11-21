@@ -22668,3 +22668,154 @@ authority of 2026-11-09.
 - The D-SINK-112 logo-column cost check failed once in lane-settle-state9's
   node run (42.5 ms against a 42.3 ms bound) and passed on the rerun; it is
   outside both changes and is watched in the gate rather than filed.
+
+## D-STATE-11: a save refused over a file that loads is told (lane-state11, 2026-11-21)
+
+Fixing it rather than accepting it is the lead's call under the owner's
+standing authority of 2026-11-09; how, below, is this lane's proposal.
+Branch `state11`, cut from dev f74ee09. Crash journal 88 before the lane's
+first run and 88 after its last.
+
+**The defect, as read and shown.** `state private` runs before every write
+(D-SINK-103). Over a `state.json` that LOADS -- the kernel reads it fine --
+its refusal never begins the no-write mode, which is a load's answer
+(`stateLoadDecision`). `finishStatePrivate` took the refusal to
+`noteStateWriteFailed`: `sourcesPersistFailed("state_write_failed")` once
+per episode, which the guide shows only while it is open (`showPersistFailed`
+returns when it is not), and a journal line with the word. On f74ee09,
+through the shipping Service.qml with the shipping helper's own reply over a
+real split layout (below), the user is given `state_write_failed` and
+nothing else: no card, no line naming the cause or the fix.
+
+**What was decided, and why not the row's two options.**
+- Not the block (`finishStatePrivate` blocking with `reply.why`). Built as a
+  mutant (M7 below) and run through the suite: a block over a file that
+  loads is lifted by the next save's own read (`stateLoadArrived` ->
+  `liftStateBlock`, which also resets `stateBlockTold`), so every later
+  refused save re-tells it -- two cards after the second refusal, three
+  after the fix and one more refusal -- and its sentence is the mid-session
+  block's, which says "then run omarchy restart shell" (a restart is the one
+  way the held changes are lost) and that changes are dropped "if the file
+  comes back by itself first" (the failed-save flag prevents exactly that).
+- Not the persist line alone with a sentence of its own: the guide shows it
+  only while it is open, and a first refusal from a save made with the guide
+  closed tells nothing, after which the episode's flag silences every later
+  one.
+- Built: a notice of its own, NOT a block. `tellStateSaveRefused(why)` runs
+  after `noteStateWriteFailed` and, when `Model.statePrivateRefusalTell(why,
+  statePrivateTold)` says so, posts `Model.statePrivateRefusalNotice` on the
+  no-write notice's kind (`stateUnreadable`, id 74017; `notifyArgv` takes
+  `refused: true`) and writes `Model.statePrivateRefusalJournal`. Told once
+  per failure episode and cause: `statePrivateTold` holds the word told and
+  is cleared where `stateSaveFailed` is -- `onSaved`'s landed write, and
+  `mergeForeignText`'s merge that leaves nothing unsaved (D-SRC-43).
+- The copy (fixture `refused`): title `Saving has stopped`; body `<path>
+  <what>. <unsaved> <fix>`; `<unsaved>` is `Sources, favorites and other
+  changes made now are held in this session only: once this is fixed, the
+  next change made here saves them all, without a restart, and they are
+  dropped if the shell is stopped first.`; the fix names no restart. The
+  split link's `<what>` is the start notice's (`STATE_SPLIT_LINK_WHAT`, one
+  sentence for one cause).
+
+**What each case does now** (all pinned through the shipping Service.qml):
+- A reload of the file, the view's own or a save's read: nothing applied
+  over memory (`reloadDisposition`'s `save-failed`: ignored when the text is
+  the disk as known, merged when another program wrote it); no card.
+- A second refused save: no second card, its own journal line with the
+  word, refused by the helper as every save is while the cause stands.
+- The link fixed while the shell runs: the next save reads, `state private`
+  confirms, and the write carries everything held (three favourites toggled
+  across the episode, all on disk at 0600); no restart. A refusal after that
+  is a new episode, told again.
+- Another cause in the same episode (the link pointed at another account's
+  file, say): told, and its card goes out on the same kind.
+
+**Rule 15, the other refusal words** (read in bin/helper/10-state.py
+`state_private`, `state_private_open`, `state_private_refusal`):
+- `not-owned`: another account's file this account can read (0644, put back
+  as root). Loads, every save refused, fixable while the shell runs (chown).
+  Same treatment, `<what>` `belongs to another account, so it cannot be made
+  private before a save`, fix `Make your own account its owner with chown,
+  run as root.`
+- `unconfirmed`: mode 600 could not be set or read back (a FAT or SMB mount
+  without Unix permissions, some FUSE mounts; a chmod refused). Loads, every
+  save refused. Same treatment, fix `Keep it, or the file its symbolic link
+  points to, on a filesystem that keeps Unix permissions: ...`.
+- `not-a-file`, `unreachable`: over a file that just loaded through the
+  same path, only a change of the path between the save's read and the run
+  gets there (the O_PATH open fails where the read would, the create path
+  needs nothing at the path); the next read meets that change and blocks
+  with its own no-write notice, which names what is there. Not told here.
+- A refusal with no word (`refused`), no reply, `timeout`, `still-running`:
+  nothing at the path to name. Not told here.
+
+**Tests.** tests/Model.test.js, 12 new checks, 4,022 -> 4,034 on the tree,
+0 failures:
+- 2 model checks beside the fixture's R27e checks: the `refused` bodies word
+  for word both ways, the second sentence once in each, no restart in any
+  fix, the split link's `<what>` the start's, no notice and no journal line
+  for eleven other words, the journal line the title then the body; and the
+  tell table.
+- 10 service checks beside the D-SINK-103 ones: the row's case (the shipping
+  helper's reply, exit 1 `split-link`, over a real split layout made in a
+  0700 scratch folder -- the state folder a link, `state.json ->
+  ../wide/state.json`, a folder at the literal location -- the target file
+  and the literal folder untouched), the six-word rule-15 table, another
+  cause in one episode, the merge's end of the episode, and D-SINK-69's
+  sweep for the refused notice (a URL as the reason sends no card; a URL in
+  the path puts none of its parts on the argv).
+- The fixture check's red: with `split-link` added to the fixture's
+  `bodies.start` and not to `decided`, `R27e / R28e: the notice fixture
+  covers every reason ...` was red (got the start keys with `split-link`,
+  want them without), in a run of 4,022 whose one other failure was the
+  D-SINK-103 assertion re-levelled here: `a state private that does not
+  confirm (not-owned, a refusal)` asserted that no journal line matching
+  "made private" names a path, and the not-owned notice's line (`... cannot
+  be made private before a save ...`) names the state file's path, as the
+  no-write notice's journal line does. Its filter now leaves out the
+  notice's own line, dated in the test; every other line it read is read.
+- On f74ee09 (a git archive with this branch's tests/Model.test.js and
+  fixture): 12 of 4,034 red. The row's case reads `[0, true, "",
+  ["state_write_failed"], [], [], undefined]` there: nothing written,
+  `state_write_failed`, no card, no line. The four rule-15 checks that must
+  send no card are red there only for the missing `statePrivateTold`
+  (`<undefined>` for `""`); M5 holds them.
+
+Mutants, one decision each, in a scratch copy of the tree, through the whole
+suite (4,034):
+
+| mutant | red |
+|---|---|
+| M1 `finishStatePrivate` does not call `tellStateSaveRefused` | 5 |
+| M2 the tell ignores the word told (every refusal told) | 5 |
+| M3 a landed write keeps the word told | 1 (the row's case: the refusal after the fix untold) |
+| M4 the merge that leaves nothing unsaved keeps it | 1 (the merge check) |
+| M5 `STATE_PRIVATE_TOLD` widened with `not-a-file` and `unreachable` | 5 |
+| M6 `notifyArgv`'s refused branch takes the block's copy | 5 |
+| M7 the row's first option: `blockStateWrites(why)` instead of the notice | 5 |
+| M8 once per episode, not per cause | 1 (another cause in one episode) |
+| M9 the refused notice takes the mid-session block's second sentence | 5 |
+
+Also run: `node scripts/split-model.mjs --relink` and `--check` (five
+public names added to `Model.mjs`'s state block, its one hand edit, as
+c37d81c added D-SINK-103's; the private `STATE_SPLIT_LINK_WHAT` and the
+manifest's generated lists by `--relink`); `scripts/check-model-members.py`
+over Service.qml and Guide.qml; qmllint 6.12.0 under gdb over Service.qml,
+432 entries against 430 on f74ee09, the two new `missing-property` lines
+being the two new `Model` members (the known baseline); `python3
+scripts/check-defect-ledger.py`.
+
+**Rule 15, the search.** The shape is "a refusal that ends a save, told
+only by the guide's persist line, over a file that loads".
+- Every caller of `noteStateWriteFailed`: `finishStatePrivate` (this fix)
+  and `stateFile`'s `onSaveFailed`. A QSaveFile failure carries only Qt's
+  error enum, no cause at the path to name, and its known causes over a
+  file that loads (a 0500 folder, a full disk) are not ones a word from it
+  separates. Cleared, not changed.
+- `finishStatePrivate`'s other refusal, the no-write mode a load set while
+  the run was out: told by that load's own block. Cleared.
+- Every other `sourcesPersistFailed` reason (`config_unsafe`,
+  `persist_failed`): the host's settings file, not state.json, outside this
+  lane. Not searched further.
+- Not watched: no display and no real notification server were used; the
+  card's rendering is UNVERIFIED.

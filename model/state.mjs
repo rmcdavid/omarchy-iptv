@@ -2149,6 +2149,10 @@ var STATE_BLOCK_TITLE_MID = "Saving has stopped"
 var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
 var STATE_BLOCK_UNSAVED = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
 var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
+// D-STATE-9 / D-STATE-11 (2026-11-21): what a split link IS, in one place,
+// for the start's no-write notice (stateUnreadableNotice) and for the notice
+// of a save refused over a file that loads (statePrivateRefusalNotice).
+var STATE_SPLIT_LINK_WHAT = "is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8"
 function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
   var r = str(reason)
@@ -2189,7 +2193,7 @@ function stateUnreadableNotice(reason, path, midSession) {
     // measured; this named only the .. and sent such a user to a fix that
     // keeps the refusal). An absolute target in UTF-8 with no .. is read the
     // same way by both.
-    what = "is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8"
+    what = STATE_SPLIT_LINK_WHAT
     fix = "Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     // R27e left this one as it was: at a START the helper names a link that
@@ -2231,6 +2235,67 @@ function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
   return stateUnreadableNotice(reason, path, midSession === true).title
 }
+
+// D-STATE-11 (2026-11-21): a save `state private` REFUSED over a state.json
+// that LOADS. The no-write mode above is a load's answer, and a load over
+// such a file succeeds -- the kernel reads it fine -- so it never begins, and
+// until this the refusal was told only as the guide's "Could not write
+// state.json" line (sourcesPersistFailed's state_write_failed, shown only
+// while the guide is open) and a journal word. The helper's word names the
+// cause for three refusals that stay true while the shell runs and that the
+// user can fix while it runs (STATE_PRIVATE_TOLD):
+//   split-link  the shell's writer would save to another file than the one
+//               read (D-STATE-9's guard)
+//   not-owned   another account's file, which no chmod of ours can make
+//               private
+//   unconfirmed mode 600 could not be set and read back: a filesystem
+//               without Unix permissions (FAT, SMB, some FUSE mounts), or a
+//               chmod refused
+// and each gets this notice, once per failure episode (Service.qml
+// tellStateSaveRefused, statePrivateRefusalTell). Not told here, and why:
+// `not-a-file` and `unreachable` over a file that just loaded mean the path
+// changed between the save's read and the run, and the next read meets that
+// change and blocks with its own reason and the no-write notice, which names
+// what is there; `refused`, `no-reply`, `timeout` and `still-running` name no
+// cause at the path. The save is NOT a no-write block: every save still reads
+// and asks `state private`, and the helper refuses each while the cause
+// stands, so the first save after the fix confirms and writes everything
+// memory holds -- no restart, which would drop that. Hence a second sentence
+// of its own (STATE_REFUSED_UNSAVED), and a fix with no restart in it.
+var STATE_PRIVATE_TOLD = ["split-link", "not-owned", "unconfirmed"]
+var STATE_REFUSED_UNSAVED = "Sources, favorites and other changes made now are held in this session only: once this is fixed, the next change made here saves them all, without a restart, and they are dropped if the shell is stopped first."
+function statePrivateRefusalNotice(why, path) {
+  var w = str(why)
+  if (STATE_PRIVATE_TOLD.indexOf(w) === -1) return null
+  var file = str(path) !== "" ? str(path) : "state.json"
+  var what = STATE_SPLIT_LINK_WHAT
+  var fix = "Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it."
+  if (w === "not-owned") {
+    what = "belongs to another account, so it cannot be made private before a save"
+    fix = "Make your own account its owner with chown, run as root."
+  } else if (w === "unconfirmed") {
+    what = "could not be made private (mode 600) before a save"
+    fix = "Keep it, or the file its symbolic link points to, on a filesystem that keeps Unix permissions: a FAT or SMB mount without them, and some FUSE mounts, cannot hold mode 600."
+  }
+  return { title: STATE_BLOCK_TITLE_MID, body: file + " " + what + ". " + STATE_REFUSED_UNSAVED + " " + fix }
+}
+
+// The journal's line for that notice -- the title, then the body -- or ""
+// for a word that has none.
+function statePrivateRefusalJournal(why, path) {
+  var n = statePrivateRefusalNotice(why, path)
+  return n ? n.title + ": " + n.body : ""
+}
+
+// Whether a refusal is told now: its word has a notice and is not the word
+// already told in this failure episode (`told`, "" once a write lands). A
+// second save refused for the same cause is told nothing more; a refusal
+// for ANOTHER cause in the same episode (a link pointed at another
+// account's file, say) is told, and its card replaces the first.
+function statePrivateRefusalTell(why, told) {
+  var w = str(why)
+  return STATE_PRIVATE_TOLD.indexOf(w) !== -1 && w !== str(told)
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedQueryCut,
   savedSearchTerms, savedSearchHit, savedSearchCount, savedSearchChannels,
@@ -2260,6 +2325,8 @@ export {
   STATE_PRIVATE_FILE, STATE_PRIVATE_WHY, statePrivateReply, statePrivateEcho,
   stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
   STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  STATE_BLOCK_LINK_FIRST, STATE_SPLIT_LINK_WHAT, stateUnreadableNotice,
+  stateUnreadableJournal, stateBlockedHeader, STATE_PRIVATE_TOLD,
+  STATE_REFUSED_UNSAVED, statePrivateRefusalNotice,
+  statePrivateRefusalJournal, statePrivateRefusalTell
 }

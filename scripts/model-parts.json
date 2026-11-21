@@ -325,9 +325,15 @@
         "STATE_BLOCK_UNSAVED_START",
         "STATE_BLOCK_UNSAVED",
         "STATE_BLOCK_LINK_FIRST",
+        "STATE_SPLIT_LINK_WHAT",
         "stateUnreadableNotice",
         "stateUnreadableJournal",
-        "stateBlockedHeader"
+        "stateBlockedHeader",
+        "STATE_PRIVATE_TOLD",
+        "STATE_REFUSED_UNSAVED",
+        "statePrivateRefusalNotice",
+        "statePrivateRefusalJournal",
+        "statePrivateRefusalTell"
       ]
     },
     {

@@ -9,7 +9,8 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  mergeConflictNotice, mergeDropNotice, stateUnreadableNotice
+  mergeConflictNotice, mergeDropNotice, stateUnreadableNotice,
+  statePrivateRefusalNotice
 } from "./state.mjs"
 import {
   parseHelperStatus, entryInputNotice
@@ -393,8 +394,12 @@ function notifyArgv(event, params, replaceId) {
     // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
     // same reason as the refusal above. A reason and a PATH, never a URL.
     // R27e: and the mid-session title when the block began after a load.
-    var told = stateUnreadableNotice(p.reason, shownText(p.path), p.midSession === true)
-    spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
+    // D-STATE-11: and, with `refused`, a save `state private` refused over a
+    // file that loads (Model.statePrivateRefusalNotice), on the same id, so a
+    // block that follows replaces its card. A word with no notice sends none.
+    var told = p.refused === true ? statePrivateRefusalNotice(p.reason, shownText(p.path))
+      : stateUnreadableNotice(p.reason, shownText(p.path), p.midSession === true)
+    if (told) spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   } else if (event === "mergeDropped") {
     // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and
     // caps, never a URL, a label, a query or a group name.

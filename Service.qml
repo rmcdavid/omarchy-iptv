@@ -884,6 +884,11 @@ Item {
   property int statePrivateRuns: 0
   property int statePrivateRefusals: 0
   property int statePrivateEchoes: 0
+  // D-STATE-11 (2026-11-21): the refusal word whose notice this failure
+  // episode has told (tellStateSaveRefused; Model.statePrivateRefusalTell),
+  // "" when none. Cleared where `stateSaveFailed` is: a write that lands, or a
+  // merge that leaves nothing unsaved. A fixed word, never a path or a URL.
+  property string statePrivateTold: ""
   // A string property holding the LAST persist failure's code USED TO BE
   // HERE (D-SRC-67, P23 lane A's second finding, 2026-10-24, removed by
   // lane A2 the same day): set by the three failure sites and
@@ -2884,6 +2889,7 @@ Item {
     if (Model.mergeLeavesNothingUnsaved(merged.state, theirs, { savesInFlight: root.stateSavesInFlight })) {
       if (root.stateSaveFailed) console.warn("omarchy-iptv: the other program's write holds everything this session has; the earlier failed save is no longer pending")
       root.stateSaveFailed = false
+      root.statePrivateTold = ""   // D-STATE-11: the episode is over
       root.recentSaves = []
     }
     var behind = !Model.sameState(merged.state, theirs)
@@ -5334,6 +5340,7 @@ Item {
       // A fixed word, never a path or a URL (Model.statePrivateReply).
       console.warn("omarchy-iptv: state.json was not written: it could not be made private first (" + String(reply ? reply.why : "no-reply") + "); the in-memory state stands")
       root.noteStateWriteFailed()
+      root.tellStateSaveRefused(reply ? reply.why : "")
       return
     }
     // A mode this plugin changed, or a file it created, is worth a line the
@@ -5373,6 +5380,28 @@ Item {
     }
     root.stateSaveFailed = true
     root.settleEntryFlush()
+  }
+
+  // D-STATE-11 (2026-11-21). A `state private` refusal over a state.json
+  // that LOADS -- a link the writer would save elsewhere (`split-link`),
+  // another account's file (`not-owned`), a mode that would not hold
+  // (`unconfirmed`) -- is no load failure, so the no-write mode never begins
+  // and the guide's "Could not write state.json" line, shown only while the
+  // guide is open, was all the user had. Its notice is told here: once per
+  // failure episode and cause (Model.statePrivateRefusalTell), as a
+  // notification on the no-write notice's id (one card for the file's
+  // trouble) and the journal, in the words of
+  // Model.statePrivateRefusalNotice: why, what becomes of a change, and the
+  // fix. Nothing else changes, and on purpose: memory stands
+  // (noteStateWriteFailed's flag, so a reload of the file is not applied over
+  // it), and every later save still reads and asks `state private`, which
+  // refuses each while the cause stands and confirms the first after the
+  // fix, whose write carries everything held -- no restart, no reload.
+  function tellStateSaveRefused(why) {
+    if (!Model.statePrivateRefusalTell(why, root.statePrivateTold)) return
+    root.statePrivateTold = String(why)
+    console.warn("omarchy-iptv: " + Model.statePrivateRefusalJournal(why, root.stateFilePath))
+    root.notify("stateUnreadable", { reason: String(why), path: root.stateFilePath, refused: true })
   }
 
   // The verb's answer. `hostConfigShield` moves from unknown to private or
@@ -6764,6 +6793,7 @@ Item {
           root.stateSavesInFlight = 0
           root.statePrivateCreated = false   // D-SINK-103: the created file holds our text now
           root.stateSaveFailed = false
+          root.statePrivateTold = ""         // D-STATE-11: the episode is over
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
           root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
           // R27a: a save held for this write now reads, from a turn of its own.

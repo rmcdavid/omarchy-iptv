@@ -12514,7 +12514,10 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
   const kinds = Object.keys(Model.STATE_LOAD_ERRORS).map(k => Model.STATE_LOAD_ERRORS[k]).concat(["unparsed"])
   // R28a (2026-10-20) withdrew R27a's read-timeout, and R29a kept it out: a
   // silent read is no block; its save is written after R26a's 2 s bound.
-  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link"]
+  // D-STATE-9 / D-STATE-11 (2026-11-21): and `split-link`, the helper's word
+  // for a state.json link the shell's writer would save to another file,
+  // which blocks a start that could not load the file (stateLoadDecision).
+  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link", "split-link"]
   const B = fx.bodies
   checkCall("R27e / R28e: the notice fixture covers every reason a block can carry, and nothing else -- at a START every load kind and every reason the start-up decision adds; MID-session the load kinds alone (Model.stateLoadDecision blocks with the kind itself); read-timeout is gone (R28a)", () =>
     [Object.keys(B.start).sort(), Object.keys(B.midSession).sort(), Model.stateLoadDecision({ kind: "permission", loadedBefore: true }).reason],
@@ -12553,6 +12556,33 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
             [argv(true).slice(-2), argv(false).slice(-2), argv(undefined)[argv(undefined).length - 2]]]
   }, [true, true, true, true, true, ["Saving has stopped", "Saved sources not loaded"],
       [["Saving has stopped", B.midSession.absent], ["Saved sources not loaded", B.start.absent], "Saved sources not loaded"]])
+  // D-STATE-11 (2026-11-21): the notice of a save `state private` REFUSED over
+  // a file that LOADS. It is no no-write block -- memory stands, every save
+  // still asks, and the first after the fix writes everything held -- so it
+  // has a second sentence of its own and a fix with no restart in it, pinned
+  // both ways through the same fixture (`refused`). The split link's `what`
+  // is the start's, one sentence for one cause.
+  checkCall("D-STATE-11: statePrivateRefusalNotice -- one body for each word a save is refused for over a file that loads (split-link, not-owned, unconfirmed), the fixture's word for word and titled \"Saving has stopped\"; its second sentence once in each and no restart in any fix; the split link's what is the start's; every other refusal word has none; the journal line is the title then the body, or nothing", () => {
+    const R = fx.refused
+    const words = Object.keys(R.bodies)
+    const fix = w => R.bodies[w].slice(R.bodies[w].indexOf(R.unsaved) + R.unsaved.length + 1)
+    const others = ["not-a-file", "unreachable", "refused", "no-reply", "timeout", "still-running", "", "link", "absent", "split", "http://u:p4ss@h.example.test/x"]
+    const startSplit = B.start["split-link"], refusedSplit = R.bodies["split-link"]
+    return [Model.STATE_PRIVATE_TOLD.slice().sort(), words.slice().sort(),
+            words.filter(w => { const n = Model.statePrivateRefusalNotice(w, P); return !n || n.title !== R.title || n.body !== R.bodies[w] }),
+            [Model.STATE_REFUSED_UNSAVED === R.unsaved, R.title === fx.titles.midSession],
+            words.filter(w => !(R.bodies[w].split(R.unsaved).length === 2 && R.bodies[w].indexOf(". " + R.unsaved + " ") !== -1)),
+            words.filter(w => /restart/.test(fix(w))), words.filter(w => R.bodies[w].indexOf(P + " ") !== 0 || /:\/\//.test(R.bodies[w])),
+            startSplit.slice(0, startSplit.indexOf(fx.unsaved.start)) === refusedSplit.slice(0, refusedSplit.indexOf(R.unsaved)),
+            others.map(w => [Model.statePrivateRefusalNotice(w, P), Model.statePrivateRefusalJournal(w, P)]).filter(x => x[0] !== null || x[1] !== ""),
+            words.filter(w => Model.statePrivateRefusalJournal(w, P) !== R.title + ": " + R.bodies[w]),
+            Model.statePrivateRefusalNotice("split-link", "").body.indexOf("state.json is a symbolic link") === 0]
+  }, [["not-owned", "split-link", "unconfirmed"], ["not-owned", "split-link", "unconfirmed"], [], [true, true], [], [], [], true, [], [], true])
+  checkCall("D-STATE-11: statePrivateRefusalTell -- a word with a notice is told unless it is the word already told this episode; another such word is told; a word with none never is", () => {
+    const T = (w, told) => Model.statePrivateRefusalTell(w, told)
+    return [T("split-link", ""), T("split-link", "split-link"), T("not-owned", "split-link"), T("unconfirmed", "not-owned"), T("not-owned", "not-owned"),
+            T("not-a-file", ""), T("unreachable", ""), T("refused", ""), T("", ""), T(undefined, undefined), T("split-link", undefined)]
+  }, [true, false, true, true, false, false, false, false, false, false, true])
   // R29a (2026-10-20): R28a's held save past the read's bound is withdrawn,
   // and with it its notice and its schedule. Nothing sends the "Saving is
   // waiting" card any more: no NOTIFY_IDS entry, and notifyArgv sends
@@ -24413,7 +24443,11 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
       h.privateAnswer = null
       h.root.toggleFavorite("t:two.uk"); h.drain(); while (h.stateModeExit()) {}
       return [refused, seen.map(s => s[0]), h.root.stateSaveFailed, /p4ss/.test(h.stateFile.disk), h.file().favorites,
-              /p4ss|\/\.local\/state/.test(h.warnings.filter(w => /made private/.test(w)).join("\n")), h.compileErrors]
+              // D-STATE-11 (2026-11-21), re-levelled: every such line but the
+              // notice a `not-owned` refusal now tells, whose journal line names
+              // the state file's path as the no-write notice's does, and no URL
+              // (held by the D-STATE-11 checks below).
+              /p4ss|\/\.local\/state/.test(h.warnings.filter(w => /made private/.test(w) && w.indexOf("omarchy-iptv: Saving has stopped: ") !== 0).join("\n")), h.compileErrors]
     }, [[true, 0, true, ["state_write_failed"], 2, false, true, 2], ["600"], false, true, ["t:one.uk", "t:two.uk"], false, []])
   }
   checkCall("D-SINK-103 (through Service): nothing at the path -- `state private` CREATES it 0600 and empty, and a watching view that loads that empty file before the exit is handled (the order that leaves the most to get wrong) does not read it as a state: no no-write mode, the write lands at 0600; before the echo rule: `unparsed`, saving stopped, nothing written", () => {
@@ -24460,6 +24494,126 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.privateExit({ code: 0, reply: JSON.stringify({ ok: true, kind: "state", action: "private", file: "kept" }) + "\n" }); h.drain()
     return [blocked, seen.length, h.root.stateWritesRefused > 0, h.root.statePrivatePending, h.compileErrors]
   }, ["not-a-file", 0, true, false, []])
+  // ---- D-STATE-11 (2026-11-21): a save `state private` refuses over a
+  // state.json that LOADS. The no-write mode is a load's answer and such a
+  // load succeeds, so until this the refusal was told only as the guide's
+  // persist line (shown only while the guide is open) and a journal word. Now
+  // the refusals that name a cause the user can fix while the shell runs are
+  // told once per failure episode and cause, as the no-write notice's
+  // 74017 card and the journal, in the fixture's `refused` words; memory
+  // stands and every save still asks, so the first after the fix writes
+  // everything held. `splitReply` is the shipping helper's own reply over a
+  // real split layout in a 0700 scratch folder (D-STATE-9's shape: the state
+  // folder a link, state.json a relative link that climbs with .. out of it,
+  // and a folder at the literal location), so the join between the helper's
+  // word and the shell is called, not copied.
+  const NOTICES = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-notices.json"), "utf8"))
+  const refusedBody = (h, why) => NOTICES.refused.bodies[why].split(NOTICES.path).join(h.root.stateFilePath)
+  const stateCards = h => h.notifyRuns.filter(r => r.kind === "stateUnreadable").map(r => [r.command[r.command.indexOf("-r") + 1]].concat(r.command.slice(-2)))
+  const toldLines = h => h.warnings.filter(w => w.indexOf("omarchy-iptv: Saving has stopped: ") === 0)
+  const persisted = h => h.signals.filter(s => s[0] === "sourcesPersistFailed").map(s => s[1])
+  const refusal = why => ({ code: 1, raises: false, reply: JSON.stringify(Object.assign({ ok: false, kind: "state", error: { code: "state_not_private", message: "state.json ...; nothing may be written to it" } }, why === "" ? {} : { why }, { action: "private" })) + "\n" })
+  let splitMemo = null
+  const splitReply = () => {
+    if (splitMemo) return splitMemo
+    const os = require("os"), cp = require("child_process")
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dstate11-"))
+    try {
+      fs.chmodSync(root, 0o700)
+      fs.mkdirSync(path.join(root, "T", "state"), { recursive: true })
+      fs.mkdirSync(path.join(root, "T", "wide")); fs.mkdirSync(path.join(root, "wide"))
+      fs.writeFileSync(path.join(root, "T", "wide", "state.json"), stateText([rec(A)], KA), { mode: 0o600 })
+      fs.symlinkSync("T/state", path.join(root, "state"))
+      fs.symlinkSync("../wide/state.json", path.join(root, "T", "state", "state.json"))
+      const env = Object.assign({}, process.env, { HOME: root, XDG_STATE_HOME: root, XDG_CACHE_HOME: root, XDG_RUNTIME_DIR: root })
+      delete env.DISPLAY; delete env.WAYLAND_DISPLAY; delete env.HYPRLAND_INSTANCE_SIGNATURE
+      const run = cp.spawnSync("python3", ["-I", path.join(__dirname, "../bin/omarchy-iptv"), "state", "--state-dir", path.join(root, "state"), "private"],
+                               { env, encoding: "utf8", timeout: 60000 })
+      splitMemo = { code: run.status, raises: false, reply: String(run.stdout || ""),
+                    untouched: fs.readFileSync(path.join(root, "T", "wide", "state.json"), "utf8") === stateText([rec(A)], KA) && fs.readdirSync(path.join(root, "wide")).length === 0 }
+      return splitMemo
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  }
+  checkCall("D-STATE-11 (through Service, the shipping helper's reply over a real split link): a save refused `split-link` over a state.json that LOADS writes nothing and is told ONCE -- the 74017 card and one journal line in the fixture's refused split-link words (why, what becomes of a change, the fix, no restart), beside the guide's one persist line -- with no no-write mode; a second refused save tells nothing more; the view's reload of the file applies nothing over memory; once the link is fixed the next change saves everything held, no restart; a refusal after that save is a new episode, told again", () => {
+    const split = splitReply()
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    const seen = writesMeet(h)
+    h.privateAnswer = () => split
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const body = refusedBody(h, "split-link")
+    const first = [seen.length, h.root.stateSaveFailed, h.root.stateWriteBlocked, persisted(h), stateCards(h), toldLines(h), h.root.statePrivateTold]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    const second = [seen.length, stateCards(h).length, toldLines(h).length, persisted(h).length,
+                    h.warnings.filter(w => w === "omarchy-iptv: state.json was not written: it could not be made private first (split-link); the in-memory state stands").length]
+    h.loadState(); h.runLater(); h.drain()
+    const reloaded = [h.root.userState.favorites, h.root.stateWriteBlocked, stateCards(h).length]
+    h.privateAnswer = null   // the link fixed: `state private` confirms
+    h.root.toggleFavorite("t:three.uk"); h.drain(); while (h.stateModeExit()) {}
+    const fixed = [seen.map(s => s[0]), h.file().favorites, h.root.stateSaveFailed, h.root.statePrivateTold, stateCards(h).length]
+    h.privateAnswer = () => split
+    h.root.toggleFavorite("t:four.uk"); h.drain()
+    const again = [stateCards(h).length, persisted(h).length, toldLines(h).length]
+    return [[split.code, Model.statePrivateReply(split.reply, split.code), split.untouched], first, second, reloaded, fixed, again, h.compileErrors]
+  }, [[1, { ok: false, why: "split-link" }, true],
+      [0, true, "", ["state_write_failed"], [["74017", "Saving has stopped", refusedBody({ root: { stateFilePath: "/.local/state/omarchy-iptv/state.json" } }, "split-link")]], ["omarchy-iptv: Saving has stopped: " + refusedBody({ root: { stateFilePath: "/.local/state/omarchy-iptv/state.json" } }, "split-link")], "split-link"],
+      [0, 1, 1, 1, 2], [["t:one.uk", "t:two.uk"], "", 1], [["600"], ["t:one.uk", "t:two.uk", "t:three.uk"], false, "", 1], [2, 2, 2], []])
+  // Rule 15 over the other refusal words, decided one by one (model/state.mjs
+  // STATE_PRIVATE_TOLD says why): another account's file and a mode that
+  // will not hold are causes that stand while the shell runs and that the
+  // user can fix while it runs, so they take the same notice; a target that
+  // is not a file, one that cannot be reached, and a refusal or reply that
+  // names no cause tell only what they told before -- the persist line and
+  // the journal word -- because over a file that just loaded the first two
+  // mean the path changed since the read, which the next read blocks on with
+  // its own no-write notice, and the others name nothing to fix.
+  for (const [why, answer, card] of [
+    ["not-owned", refusal("not-owned"), true], ["unconfirmed", refusal("unconfirmed"), true],
+    ["not-a-file", refusal("not-a-file"), false], ["unreachable", refusal("unreachable"), false],
+    ["refused", refusal(""), false], ["no-reply", { code: 0, raises: false, reply: "" }, false]
+  ]) {
+    checkCall("D-STATE-11 (through Service, rule 15): a save refused `" + why + "` over a state.json that loads writes nothing, opens no no-write mode and sends the guide's persist line once; " + (card ? "it is told once, as the 74017 card and one journal line in the fixture's refused " + why + " words, and a second refusal tells nothing more" : "no card and no notice line: the word names no cause to fix while the shell runs"), () => {
+      const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+      h.drain(); while (h.stateModeExit()) {}
+      const seen = writesMeet(h)
+      h.privateAnswer = () => answer
+      h.root.toggleFavorite("t:one.uk"); h.drain()
+      h.root.toggleFavorite("t:two.uk"); h.drain()
+      return [seen.length, h.root.stateWriteBlocked, persisted(h), stateCards(h).map(c => c.slice(1)), toldLines(h).length, h.root.statePrivateTold, h.compileErrors]
+    }, [0, "", ["state_write_failed"], card ? [["Saving has stopped", refusedBody({ root: { stateFilePath: "/.local/state/omarchy-iptv/state.json" } }, why)]] : [], card ? 1 : 0, card ? why : "", []])
+  }
+  checkCall("D-STATE-11 (through Service): another cause in the same episode is told too -- a split link, then the link pointed at another account's file -- and its card goes out on the same notice kind; the same cause again tells nothing", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    h.privateAnswer = () => refusal("split-link")
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    h.privateAnswer = () => refusal("not-owned")
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    h.root.toggleFavorite("t:three.uk"); h.drain()
+    return [stateCards(h).map(c => c[2] === refusedBody(h, "split-link") ? "split-link" : c[2] === refusedBody(h, "not-owned") ? "not-owned" : c[2]), persisted(h).length, h.root.statePrivateTold, h.compileErrors]
+  }, [["split-link", "not-owned"], 1, "not-owned", []])
+  checkCall("D-STATE-11 (through Service): the episode also ends at a merge that leaves nothing unsaved (D-SRC-43's clear) -- another program's write that holds what memory holds -- so the next refusal is told again", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.drain(); while (h.stateModeExit()) {}
+    h.privateAnswer = () => refusal("split-link")
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const before = [h.root.stateSaveFailed, h.root.statePrivateTold]
+    h.foreign(sf => { sf.disk = stateText([rec(A)], KA, { favorites: ["t:one.uk"] }) }); h.drain()
+    const merged = [h.root.stateSaveFailed, h.root.statePrivateTold, h.root.userState.favorites]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    return [before, merged, stateCards(h).length, persisted(h).length, h.compileErrors]
+  }, [[true, "split-link"], [false, "", ["t:one.uk"]], 2, 2, []])
+  // D-SINK-69's sweep, for the refused notice (the sweep above calls each
+  // event once, as the no-write notice): whatever its parameters carry, the
+  // argv holds the state file's path as the shell reads it and no URL part.
+  checkCall("D-STATE-11 (D-SINK-69's sweep): notifyArgv(\"stateUnreadable\", { refused: true }) -- a URL as the reason sends no card; each told word with a URL in the path puts no credential, path, query or fragment of it on the argv", () => {
+    const url = "http://user:s3cr3tpw@cdn.example.test/live/u:0badc0de/x.ts?token=t0kenval#fragval"
+    const secret = ["s3cr3tpw", "user:", "0badc0de", "t0kenval", "fragval", "/live/"]
+    const tail = M.STATE_PRIVATE_TOLD.map(w => { const a = M.notifyArgv("stateUnreadable", { reason: w, path: "/home/u/.local/state/omarchy-iptv/" + url, refused: true }); return a === null ? "no card" : secret.filter(x => a.some(y => y.indexOf(x) !== -1)) })
+    return [M.notifyArgv("stateUnreadable", { reason: url, path: "/home/u/.local/state/omarchy-iptv/state.json", refused: true }), tail]
+  }, [null, [[], [], []]])
   checkCall("D-SRC-49 / D-SRC-37 (c): a `state mode` that never answers is TERMed at helperTimeoutMs; its exit stops the watchdog, a non-zero exit with no reply gets one line, and the folded re-run still goes", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.root.toggleFavorite("t:one.uk"); h.drain()
