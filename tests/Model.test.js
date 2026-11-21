@@ -19298,6 +19298,370 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(h, okStartSeq(Z.id, zSeq))
       return [queued, zaps, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.pendingPlayId]
     }, [Y.id, [], "t:z", ""])
+
+    // ---- D-PLY-69 (2026-11-21): two stops outstanding ----
+    //
+    // Stop, play, stop, play while the start the first play sent still holds
+    // the lock: the EOF that comes is the EARLIER stop's, the later stop has
+    // not run, and that start may still adopt or spawn the player the later
+    // stop ladders. handlePlayerGone ended the whole settle at that EOF, so
+    // the start's ok read as an ordinary one and its repair, the drain or a
+    // play() meanwhile zapped the user's channel into that player (4.10: "a
+    // zap can never be written to a dying socket"). Now an EOF with such a
+    // start in flight (Service.staleStartInFlight: it went out while a stop
+    // settled, and before the last stop) ends nothing. Red on d3a9511 unless
+    // a check says it is a pin.
+    const Z = { id: "t:z", name: "Z", url: "http://s.example.test/z.ts", group: "G" }
+    const withThree = h => { withChannels(h); h.root.channelIndex[Z.id] = Z; return h }
+    // The player slot's runs as the helper parses them: verb and channel.
+    const slotAsks = h => {
+      const seen = []
+      let held = h.ids.playerProc.running
+      Object.defineProperty(h.ids.playerProc, "running", { get() { return held }, set(v) { held = v; if (v === true) { const c = H.helperView(h.ids.playerProc.command, h.ids.playerProc.environment); const i = c.indexOf("player"); const j = c.indexOf("--id"); seen.push((i === -1 ? "" : c[i + 1]) + (j === -1 ? "" : ":" + c[j + 1])) } }, configurable: true })
+      return seen
+    }
+    const playingX = h => { h.root.nowPlaying = { id: X.id, name: "X", group: "G", launchedFrom: "", since: 1 } }
+    const failedFirst = (id, seq) => JSON.stringify(Object.assign(JSON.parse(okStartSeq(id, seq)), { firstLoad: { state: "failed", reason: "mpv exited", ended: "closed" } }))
+
+    checkCall("D-PLY-69: stop, play, stop, play while the first play's start holds the lock -- the EARLIER stop's EOF ends nothing, so that start's ok zaps nothing into the player the later stop ladders; the queued channel goes out as its own start, whose ok then ends the settle", () => {
+      const h = withThree(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      h.root.play(Z.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      const zaps = zapsOf(h), asks = slotAsks(h)
+      eofOf(h, dying)
+      const afterEof = h.root.stopping === true
+      exit(h, okStartSeq(Y.id, ySeq))
+      const afterOk = [h.root.stopping === true, asks.slice(), zaps.slice(), h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      exit(h, okStartSeq(Z.id, h.root.playSeq))
+      return [queued, afterEof, afterOk, zaps, h.root.stopping === true, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }, [Z.id, true, [true, ["start:" + Z.id], [], Z.id], [], false, Z.id, []])
+
+    checkCall("D-PLY-69: and a play made after that EOF, while the first play's start still holds the lock, is queued behind it rather than zapped at whatever answers the socket", () => {
+      const h = withThree(bootPlayer())
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      eofOf(h, dying)
+      const zaps = zapsOf(h)
+      h.root.play(Z.id, true, "")
+      h.drain()
+      return [zaps, h.root.pendingPlayId, h.root.stopping === true]
+    }, [[], Z.id, true])
+
+    checkCall("D-PLY-69 (rule 15, the user's stop the last word): there the earlier stop's EOF ended the settle and cleared the stop, so the first play's start's ok was recovered and adopted under it -- now that ok is a start from before the stop, nothing is asked or adopted, and the backstop stops what it left past the record", () => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      const asks = slotAsks(h)
+      eofOf(h, dying)
+      const afterEof = [h.root.stopping === true, h.root.userStopped === true, h.root.playerPending === true, h.root.playerWanted === true]
+      exit(h, okStartSeq(Y.id, ySeq))
+      const afterOk = [h.root.stopping === true, h.root.userStopped === true, h.root.nowPlaying, asks.slice()]
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      const backstop = asks.slice()
+      exit(h, probeSeq(ySeq, { stash: { schema: 1, playing: true, id: Y.id, name: "Y", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: ySeq, verb: "start" }, claimed: true }))
+      return [afterEof, afterOk, backstop, stopsIssued(h).length - before, h.root.nowPlaying, toasts(h)]
+    }, [[true, true, false, false], [true, true, null, []], ["probe"], 1, null, []])
+
+    // Pins: once the held-over start has answered, nothing is left for the
+    // later stop but the player that start reported, so ITS EOF ends the
+    // settle -- with the slot idle, and with the 5 s look's probe in flight
+    // (a probe is not a start). Green on d3a9511; red when the slot's verb
+    // or its running is not asked.
+    checkCall("D-PLY-69 (pin): once the held-over start has answered, the later stop's own EOF ends the settle -- with the slot idle and with the 5 s look's probe in flight", () => ["idle", "look"].map(how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopLookTimer")
+      attachedToDying(h)
+      const first = h.root.playerSocket
+      playingX(h)
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      h.root.play(Z.id, true, "")
+      h.drain()
+      eofOf(h, first)
+      // The hunt the EOF kept armed finds the start's spawn.
+      attachedToDying(h)
+      const spawn = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      exit(h, okStartSeq(Y.id, ySeq))
+      if (how === "look") h.elapse(5000)
+      const slot = h.ids.playerProc.running === true ? slotVerb(h) : "idle"
+      eofOf(h, spawn)
+      return [how, slot, h.root.stopping === true, h.root.userStopped === true]
+    }), [["idle", "idle", false, false], ["look", "probe", false, false]])
+
+    // Invariant 4 (the lead's brief): a single stop is D-PLY-40's settle as
+    // it was. A cold start -- no stop settling and nothing it may ladder
+    // when it went out -- is not held over, so the stop's EOF ends that stop
+    // with or without a play after it. (A start that went out over a player
+    // it may ladder is D-PLY-72, below.) Pins: green on d3a9511, red when
+    // the start's moment is not asked, or when every start is held.
+    checkCall("D-PLY-69 (pin): one stop over a start that went out with no stop settling -- the stop's EOF ends the settle as it did, with the user's stop the last word and with a play made after it", () => ["stop", "play"].map(last => {
+      const h = withThree(bootPlayer())
+      h.root.play(X.id, true, "")
+      h.drain()
+      attachedToDying(h)
+      const dying = h.root.playerSocket
+      h.root.stop()
+      h.drain()
+      if (last === "play") {
+        h.root.play(Y.id, true, "")
+        h.drain()
+      }
+      eofOf(h, dying)
+      return [last, h.root.stopping === true, h.root.userStopped === true, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.pendingPlayId]
+    }), [["stop", false, false, null, ""], ["play", false, false, Y.id, Y.id]])
+
+    // ---- D-PLY-72 (2026-11-21): one stop, and the EOF of the start's own ladder ----
+    //
+    // A verb in the player slot can ladder the player it finds before it
+    // spawns, under one lock: the health path's `player restart --from term`,
+    // and a `player start` that replaces another build's player (restart on
+    // adoption) or that went out over a player the observer was on (a zap
+    // that met `not_running` before that player's EOF came). A stop pressed
+    // while it holds the lock waits for it, so the EOF that comes first is
+    // the OLD player's, laddered by the verb, while the stop has still to
+    // ladder what the verb spawns. D-PLY-69's hold asked only whether the
+    // start went out inside a settle, so with one stop that EOF ended the
+    // settle: a play made after the stop was zapped by the verb's ok (the CL5
+    // repair) into the player the stop then laddered, and with the user's
+    // stop the last word the plain path cleared the stop and the ok's
+    // `recover` probe adopted the respawn under it. Now a start or restart
+    // that went out over a player it may ladder -- the observer on one, a
+    // restart, an owed replacement -- is held over as well
+    // (Service.staleStartInFlight). One row per way the verb goes out; the
+    // `-late` rows put the observer on the old player only after the verb
+    // went out (a later connect of the hunt it arms reaching that player),
+    // and `cold-wedged` is a plain start with nothing observed and nothing
+    // pending whose own arm reaches, at once, a player that was already
+    // listening -- a wedged one, which adopt_or_spawn ladders ("Matches
+    // found, none answers"); its socket is a one-shot stand-in that connects
+    // once and runs the Component's own handler (h.socketChanged). Red on
+    // 138b5de (the D-PLY-69 commit) and on d3a9511 unless a check says it is
+    // a pin.
+    const STASH_OF = (id, seq) => ({ schema: 1, playing: true, id, name: id.slice(2).toUpperCase(), group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq, verb: "start" })
+    const okVerb = (kind, id, seq) => JSON.stringify(Object.assign(JSON.parse(okStartSeq(id, seq)), { kind: "player." + kind, replaced: 1 }))
+    const LADDERING = ["restart", "restart-late", "owed", "owed-late", "unanswered-zap", "cold-wedged"]
+    const listeningOnce = h => {
+      let open = true
+      h.socketWorld = { socket: () => {
+        const s = { _c: false, destroyed: false, write() {}, flush() {}, destroy() { this.destroyed = true } }
+        Object.defineProperty(s, "connected", { get() { return s._c }, set(v) { if (v !== true || s._c || !open) return; open = false; s._c = true; h.socketChanged.call(s) } })
+        return s
+      } }
+    }
+    // -> the verb in flight on the player slot, the observer on the player it
+    // is about to ladder (`dying`).
+    const ladderingVerb = how => {
+      const h = withThree(bootPlayer())
+      playingX(h)
+      const late = /-late$/.test(how)
+      if (late) h.root.playerPending = true     // the birth edge held, the observer on nothing
+      else if (how !== "cold-wedged") attachedToDying(h)
+      if (how === "cold-wedged") {
+        listeningOnce(h)
+        h.root.play(Y.id, true, "")
+      } else if (how.indexOf("owed") === 0) {
+        h.root.openOlderRestart(false, false, 4242, STASH_OF(X.id, 1))
+        h.root.play(Y.id, true, "")
+      } else if (how.indexOf("restart") === 0) {
+        h.root.restartPlayer()
+      } else {
+        h.root.play(Y.id, true, "")
+        h.drain()
+        h.ids.controlProc.running = false
+        h.root.handleControlResult(JSON.stringify({ ok: false, kind: "play", error: { code: "not_running", message: "mpv socket not found" }, id: Y.id }))
+      }
+      h.drain()
+      const kind = h.ids.playerProc.running === true ? slotVerb(h) : "idle"
+      const seq = h.root.playSeq
+      if (late) attachedToDying(h)
+      return { h, dying: h.root.playerSocket, kind, id: kind === "restart" ? X.id : Y.id, seq }
+    }
+    const kindOf = how => how.indexOf("restart") === 0 ? "restart" : "start"
+
+    checkCall("D-PLY-72: one stop while a verb that ladders the player holds the lock (a restart, an owed replacement, a start over the observed player), a play after the stop queued -- the old player's EOF ends nothing, the verb's ok zaps nothing into the player the stop then ladders, and the queued channel goes out as its own start, whose ok ends the settle", () => LADDERING.map(how => {
+      const v = ladderingVerb(how)
+      const h = v.h
+      h.root.stop()
+      h.drain()
+      h.root.play(Z.id, true, "")
+      h.drain()
+      const queued = h.root.pendingPlayId
+      const zaps = zapsOf(h), asks = slotAsks(h)
+      eofOf(h, v.dying)
+      const afterEof = h.root.stopping === true
+      exit(h, okVerb(v.kind, v.id, v.seq))
+      const afterOk = [h.root.stopping === true, asks.slice(), zaps.slice(), h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      exit(h, okStartSeq(Z.id, h.root.playSeq))
+      return [how, v.kind, queued, afterEof, afterOk, zaps, h.root.stopping === true, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }), LADDERING.map(how => [how, kindOf(how), Z.id, true, [true, ["start:" + Z.id], [], Z.id], [], false, Z.id, []]))
+
+    checkCall("D-PLY-72 (the user's stop the last word): the same EOF no longer ends the stop and clears it, so the verb's ok is a start from before the stop -- nothing hunts, nothing is asked or adopted, `userStopped` kept -- and the backstop stops what it left past the record", () => LADDERING.map(how => {
+      const v = ladderingVerb(how)
+      const h = v.h
+      h.driveTimer("stopSettleTimer")
+      h.root.stop()
+      h.drain()
+      const asks = slotAsks(h)
+      eofOf(h, v.dying)
+      const afterEof = [h.root.stopping === true, h.root.userStopped === true, h.root.playerPending === true, h.root.playerWanted === true]
+      exit(h, okVerb(v.kind, v.id, v.seq))
+      const afterOk = [h.root.stopping === true, h.root.userStopped === true, h.root.nowPlaying, asks.slice()]
+      const before = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop)
+      const backstop = asks.slice()
+      exit(h, probeSeq(v.seq, { stash: STASH_OF(v.id, v.seq), claimed: true }))
+      return [how, afterEof, afterOk, backstop, stopsIssued(h).length - before, h.root.nowPlaying, toasts(h)]
+    }), LADDERING.map(how => [how, [true, true, false, false], [true, true, null, []], ["probe"], 1, null, []]))
+
+    // Pin: with no stop, the same EOF is the verb's own rung, as it was
+    // (playerDeathKind's `respawn`): the hunt held, the channel kept, no card.
+    // Green on d3a9511 and on 138b5de.
+    checkCall("D-PLY-72 (pin): with no stop pressed, the old player's EOF while that verb runs is still a respawn -- the hunt held, the channel kept, no card, nothing zapped", () => LADDERING.map(how => {
+      const v = ladderingVerb(how)
+      const h = v.h
+      const zaps = zapsOf(h)
+      eofOf(h, v.dying)
+      return [how, h.root.stopping === true, h.root.playerPending === true, h.root.playerWanted === true, h.root.nowPlaying ? h.root.nowPlaying.id : null, zaps, toasts(h)]
+    }), LADDERING.map(how => [how, false, true, true, how.indexOf("restart") === 0 ? X.id : Y.id, [], []]))
+
+    // ---- D-PLY-71 (2026-11-21): a stopped start's first load, told as the next play's ----
+    //
+    // The helper releases the lock before its first-load window so a stop
+    // can ladder in (4.4 step 10), and when one does the window sees mpv
+    // close the connection: `failed`, `closed`. handlePlayerResult told that
+    // through playerFirstLoadFailed against `nowPlaying` -- the play made
+    // AFTER the stop -- so play X, stop, play Y while X's start ran raised
+    // "Y stopped unexpectedly" and, nothing attached, cleared Y before the
+    // drain could send it. Now a start issued before the last stop has its
+    // first load told to no one; the drain sends the newer play.
+    checkCall("D-PLY-71: a start issued before a stop answers that its first load failed (the stop laddered its player in the window) while a play made after the stop waits behind it -- nothing is told, and that play goes out as its own start", () => {
+      const h = withThree(bootPlayer())
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const asks = slotAsks(h)
+      exit(h, failedFirst(X.id, xSeq))
+      return [toasts(h), h.root.nowPlaying ? h.root.nowPlaying.id : null, asks, Object.keys(h.root.failedAt)]
+    }, [[], Y.id, ["start:" + Y.id], []])
+
+    // Its other half: the same start REFUSED. The tail told the refusal
+    // against `nowPlaying` -- a channel refusal of X marked Y failed -- and
+    // cleared Y. Now Y goes out as its own start; D-PLY-41's checks above
+    // hold that Y's own start's refusal is still told.
+    checkCall("D-PLY-71: that start refused instead -- for its channel (unsupported scheme) or by this machine (the spawn) -- tells nothing and marks nothing, and the play made after the stop goes out as its own start", () =>
+      [["unsupported_scheme", "unsupported stream URL scheme 'rtmp'"], ["spawn_failed", "could not start mpv: Resource temporarily unavailable"]].map(([code, message]) => {
+        const h = withThree(bootPlayer())
+        h.root.play(X.id, true, "")
+        h.drain()
+        const xSeq = h.root.playSeq
+        h.root.stop()
+        h.drain()
+        h.root.play(Y.id, true, "")
+        h.drain()
+        const asks = slotAsks(h)
+        exit(h, JSON.stringify({ ok: false, kind: "player.start", error: { code, message }, id: X.id, seq: xSeq }))
+        return [code, toasts(h), Object.keys(h.root.failedAt), h.jobs(), h.root.nowPlaying ? h.root.nowPlaying.id : null, asks]
+      }), ["unsupported_scheme", "spawn_failed"].map(code => [code, [], [], [], Y.id, ["start:" + Y.id]]))
+
+    checkCall("D-PLY-71 (pin): the play's own start, issued after the stop, whose first load fails is told as before -- Playback stopped, the play ended", () => {
+      const h = withThree(bootPlayer())
+      h.root.stop()
+      h.drain()
+      h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, failedFirst(Y.id, h.root.playSeq))
+      return [toasts(h), h.root.nowPlaying]
+    }, [["74022 Playback stopped | \u201cY\u201d stopped unexpectedly"], null])
+
+    // ---- the settle as a protocol: a seeded world (D-PLY-69, D-PLY-71) ----
+    //
+    // tests/player-world.js models the helper's lock, its record, the stop
+    // ladder, the start's lock section and first-load window, the zap, the
+    // probe and the players themselves; the shell is Service.qml's own
+    // functions, its socket observer the Component's own handler, its
+    // settle's Timers their own blocks. Each seed is a sequence of 16 user
+    // plays and stops over three channels with bursts and pauses between
+    // them, the world run between them and for a minute after the last.
+    // Nothing in this world crashes and no stream fails, so the verdicts
+    // (the file's header): (1) no channel written into a player by a verb
+    // the shell issued after a stop that then laddered that player; (2) a
+    // last play ends playing its channel, named, or told; (2b) no card the
+    // world does not justify; (3) a last stop leaves nothing playing. (2) is
+    // asked after one health tick, the window ruling CL6 allows (D-PLY-11
+    // T-A: a zap landing after an adopting start's load), whose repair is
+    // the shell's own. On d3a9511: (1) on seeds 7, 26, 122, 139, 147 and
+    // 152, (3) on seed 2, (2b) on 51 seeds (41 of them D-PLY-71's card, the
+    // rest a card for the player the later stop laddered). About 5 s.
+    const worldSweep = (count, steps, restartP) => {
+      const PW = require("./player-world.js")
+      const red = { one: [], two: [], twoB: [], three: [], quiet: [] }
+      for (let seed = 1; seed <= count; seed++) {
+        const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
+        h.detached.length = 0
+        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP,
+                                         lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
+        if (v.one.length > 0) red.one.push(seed)
+        if (v.two !== "") red.two.push(seed)
+        if (v.twoB.length > 0) red.twoB.push(seed)
+        if (v.three !== "") red.three.push(seed)
+        if (!v.quiet) red.quiet.push(seed)
+      }
+      return red
+    }
+    checkCall("D-PLY-69, D-PLY-71 (seeded world): 200 sequences of user plays and stops against the helper's lock, record and players -- no zap into a player a stop then ladders, no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
+      worldSweep(200, 16, 0), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // D-PLY-72: the same world with the health path's restart in it (the
+    // header's `restartP`: before each action after the first, a 15% chance
+    // of restartPlayer(), then the action 0 to 600 ms later; the restart's
+    // TERM rung takes 20 ms to 2 s under the lock). 150 sequences of 20
+    // steps. On 138b5de: (1) on seeds 8, 54, 73, 79, 109, 112, 115, 129, 131
+    // and 140 -- each a restart in flight at the stop concerned, its own
+    // rung's EOF ending the settle -- and (2b) on 11. On d3a9511: (1) on 13
+    // seeds, (2b) on 49. About 5 s.
+    checkCall("D-PLY-72 (seeded world, with health restarts): 150 sequences of plays, stops and the health path's restarts -- no zap into a player a stop then ladders, no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
+      worldSweep(150, 20, 0.15), { one: [], two: [], twoB: [], three: [], quiet: [] })
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----

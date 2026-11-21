@@ -933,7 +933,10 @@ Item {
   // ran either after the stop's whole ladder or before the stop, which the
   // seq rule then supersedes, so the stop can no longer touch what it
   // started. And the stopped player's EOF ends it even when a play made
-  // after the stop is still on its way (handlePlayerGone).
+  // after the stop is still on its way (handlePlayerGone) -- but no EOF
+  // ends it while a start that went out before this stop, inside an earlier
+  // stop's settle or over a player it may ladder itself, is still in flight
+  // (D-PLY-69, D-PLY-72, staleStartInFlight).
   property real stopAt: 0
   readonly property bool stopping: stopAt > 0
   // The intent number the last stop() went out with (D-PLY-40): what a
@@ -945,6 +948,15 @@ Item {
   // lock) nothing here can see when no socket is attached, so the backstop
   // probes for it (stopSettleTimer) rather than leave it unobserved.
   property bool stopOlderStartOk: false
+  // D-PLY-69: the intent number the player slot's start or restart went out
+  // with, and whether a stop was still settling then (issuePlayerSession).
+  // D-PLY-72: and whether it went out over a player it may ladder itself --
+  // the observer on one, a restart, or an owed replacement. A start that
+  // went out before the last stop with either is the one an EOF cannot be
+  // read past: see staleStartInFlight().
+  property int sessionSeq: 0
+  property bool sessionInStop: false
+  property bool sessionOverPlayer: false
   property int healthSkips: 0
   // The event router's state (4.8). `entryOwners` maps mpv's own
   // playlist_entry_id to the channel that load was for, so a failure that
@@ -3515,10 +3527,49 @@ Item {
       ? Model.playerRestartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, fromRung, Quickshell.processId, keepPause, root.ownerToken)
       : Model.playerStartArgv(root.socketPath, root.activeCacheDir, key, root.playSeq, scope, since, extra.args, Quickshell.processId, keepPause, root.ownerToken)
     root.sessionSocket = root.socketAttached() ? root.playerSocket : null
+    root.sessionSeq = root.playSeq
+    root.sessionInStop = root.stopping
     root.playerPending = true
     root.playerWanted = true
     root.armPlayerSocket()
+    // D-PLY-72: after the arm. An observer on a player now -- kept, or
+    // attached by this arm's own connect, which is synchronous (C5) -- is on
+    // one that was there before the verb, which has not run yet: the verb
+    // adopts it or ladders it (a restart, another build's, a wedged one).
+    // And a restart ladders from `term` whatever it finds, and an owed start
+    // replaces another build's player, whether or not the observer is on it
+    // yet (a connect that fails now can reach it later in the flight).
+    root.sessionOverPlayer = root.socketAttached() || verb === "restart" || root.olderRestartOwed
     return root.runPlayer(verb, argv)
+  }
+
+  // D-PLY-69: two stops outstanding around the start in the player slot --
+  // it went out while an earlier stop still settled, and the user has
+  // stopped again since (its seq is below `stopSeq`). An EOF that arrives
+  // now may be the EARLIER stop's: that stop laddered the player the
+  // observer was on, while the later stop has not run, and this start, its
+  // seq past the earlier stop's, may yet adopt or spawn a player under the
+  // lock -- the one the later stop then ladders.
+  // D-PLY-72: and with one stop, the same EOF may be the start's OWN ladder:
+  // a restart, an owed replacement or a start over the observed player
+  // ladders the player it finds before it spawns, under the lock the stop
+  // waits for, so the stop has still to ladder what it spawns. So such an
+  // EOF ends the stop's settle for nothing (handlePlayerGone): the start's
+  // own reply reads as a start from before the stop (stopOlderStartOk), and
+  // a play after the stop goes out as a fresh start, which the lock and the
+  // seq rule order after it. A start that went out with no stop settling
+  // and over nothing it may ladder -- a cold start -- is the single stop's
+  // case: the player its flight shows the observer is the one it spawns,
+  // which only the stop ladders, so that EOF still ends the settle. One
+  // exception is left, read and not built (D-PLY-72's row): a cold start
+  // whose arm could not reach a player that was already there -- a wedged
+  // one of this build, which the start then ladders -- when a later connect
+  // of the hunt does reach it during the flight. At EOF nothing tells that
+  // player from the start's own spawn, and holding every cold start would
+  // undo the single stop's settle.
+  function staleStartInFlight() {
+    return playerProc.running && (root.playerKind === "start" || root.playerKind === "restart")
+      && (root.sessionInStop || root.sessionOverPlayer) && root.sessionSeq < root.stopSeq
   }
 
   // The player slot: its own Process with its own watchdog, so a cold start
@@ -3553,6 +3604,10 @@ Item {
       return
     }
     var status = Model.parseHelperStatus(text, "player." + kind)
+    // D-PLY-71: this start went out before the user's last stop, which
+    // withdrew its intent (issuePlayerSession recorded its seq; every reply
+    // of a start or a restart is this one's, the slot running one verb).
+    var withdrawn = root.sessionSeq < root.stopSeq
     if (status.ok === true) {
       var warnings = Model.statusWarnings(status)
       if (warnings.length > 0) console.warn("omarchy-iptv: player " + kind + ":", warnings.join("; "))
@@ -3655,7 +3710,14 @@ Item {
         if (follow === "recover") root.runPlayerProbe()
       }
       var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
-      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(first)
+      // D-PLY-71: not for a start the user's stop withdrew. The helper
+      // releases the lock before its first-load window so that a stop can
+      // ladder in, and a stop that does reads there as mpv closing the
+      // connection; a stream failure of it is a channel the user stopped.
+      // Told, it named the play made AFTER the stop ("stopped unexpectedly",
+      // the target being nowPlaying) and, with nothing attached, dropped that
+      // play before the drain below could send it.
+      if (first && String(first.state) === "failed" && !withdrawn) root.playerFirstLoadFailed(first)
       root.drainPendingPlay()
       return
     }
@@ -3726,6 +3788,22 @@ Item {
       playRetryTimer.interval = root.playRetryBaseMs * root.playRetries
       playRetryTimer.restart()
       root.noteSessionOutcome("retrying")
+      return
+    }
+    // D-PLY-71: a start the user's stop withdrew, refused, while a play made
+    // after that stop waits behind it. The refusal is no verdict on that
+    // play: told, it named it (a channel refusal of the older channel marked
+    // the newer one failed) and cleared it before anything sent it. So the
+    // drain sends it as its own start, which meets this machine's refusal
+    // itself if there is one, as a superseded start's newer intent does
+    // above (a play queued behind this start, which is every play made while
+    // it ran but one that went out as a zap). With the user's stop the last
+    // word there is no such play (stop() clears `nowPlaying`, and only a
+    // play or an adoption, which clear `userStopped`, set it again), and the
+    // tail below tells nothing, as before.
+    if (withdrawn && root.nowPlaying !== null) {
+      root.noteSessionOutcome("superseded")
+      root.drainPendingPlay()
       return
     }
     root.lastError = reason
@@ -4581,32 +4659,51 @@ Item {
   function handlePlayerGone() {
     // The review of 9d604cf: the player a stop is laddering died while a play
     // made AFTER that stop is still on its way -- its start in flight, or
-    // between the retries D-PLY-43 now makes while a stop settles. Reached
-    // that way and one other (D-PLY-69, open): stop, play, stop, play while
-    // an older start holds the lock, where this EOF is the EARLIER stop's
-    // and the later stop has not run, so ending the settle here lets that
+    // between the retries D-PLY-43 now makes while a stop settles. Read as
+    // below, the death was the stop's own (silent), so the retry was
+    // cancelled, `nowPlaying` cleared and the user's play dropped with no
+    // card -- the opposite of D-PLY-41's rule. This EOF ends the stop and
+    // nothing else: the play keeps its intent, its queued last channel and
+    // its retries, and the hunt goes on for the player its start will
+    // report.
+    // D-PLY-69 (closed 2026-11-21): except with two stops outstanding --
+    // stop, play, stop, play while the start the first play sent still holds
+    // the lock (staleStartInFlight). This EOF may then be the EARLIER stop's
+    // while the later one has not run, and ending the settle here let that
     // start's ok zap the queued channel at the player the later stop then
-    // ladders. Otherwise a later start's ok ends the settle, and a stop
-    // after the play sets `userStopped`. Read as below, the death was the
-    // stop's own (silent), so the retry was cancelled, `nowPlaying` cleared
-    // and the user's play dropped with no card -- the opposite of D-PLY-41's
-    // rule. This EOF ends the stop and nothing else: the play keeps its
-    // intent, its queued last channel and its retries, and the hunt goes on
-    // for the player its start will report.
-    if (root.stopping && !root.userStopped && root.nowPlaying !== null) {
-      root.stopAt = 0
-      stopSettleTimer.stop()
-      stopLookTimer.stop()
-      root.stopOlderStartOk = false
-      root.stopConfirmPending = false
-      root.stopConfirmLook = false
+    // laddered (the repair, the drain, or a play() meanwhile). So the death
+    // is told to no one and ends nothing: the settle runs on until a start
+    // issued after the last stop answers ok, or a later EOF with no such
+    // start in flight, or its backstop. And the same EOF with the user's
+    // stop the last word, which took the plain path below, is held over
+    // here too: that path ended the settle and cleared `userStopped`, so the
+    // start's ok read as the shell's own player to recover, and the probe
+    // adopted it under the user's stop (the node suite's seeded world of
+    // the player, dev branch, found it). Held over, nothing hunts for it.
+    // D-PLY-72 (closed 2026-11-21): and with ONE stop, when the start in
+    // flight went out before it over a player it ladders itself (a restart,
+    // an owed replacement, a start over the observed player): the EOF is
+    // then that start's own rung while the stop waits for its lock, and
+    // ending the settle here let its ok zap a play made after the stop into
+    // the player the stop then laddered, or, with the stop the last word,
+    // recover and adopt that player under it (staleStartInFlight).
+    var heldOver = root.staleStartInFlight()
+    if (root.stopping && (heldOver || (!root.userStopped && root.nowPlaying !== null))) {
+      if (!heldOver) {
+        root.stopAt = 0
+        stopSettleTimer.stop()
+        stopLookTimer.stop()
+        root.stopOlderStartOk = false
+        root.stopConfirmPending = false
+        root.stopConfirmLook = false
+      }
       root.lastEndFile = null
       root.currentEntryId = 0
       root.playerIdle = false
       root.clearRewind()
       root.pipReset()
       root.entryOwners = Model.keyedMap()
-      if (playerProc.running) {
+      if (playerProc.running && !root.userStopped && root.nowPlaying !== null) {
         root.playerPending = true
         root.playerWanted = true
         root.armPlayerSocket()
