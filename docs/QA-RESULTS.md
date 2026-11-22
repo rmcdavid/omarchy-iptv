@@ -24548,3 +24548,39 @@ without an id.
   disagreements.
 - Crash journal 89 at the start and at the end; no qml, qmltestrunner or
   quickshell process was started.
+
+## F-HARNESS-124: the clip preflight's red in relsplit-2's merge gate (the lead, 2026-11-22)
+
+The lead's full gate on 3157c56 (the merge of relsplit-2 and its board
+follow-up; no QML and no clip file changed) read `check.sh: FAILED` on one
+step, `clip-scenario.sh check-tree`, and every other step green: node 4069,
+python 2991, the service split guard (2,267 sites, 32 of 32 cases), chno 16.
+The step's own lines:
+
+    PASS P1 the nested display is cage's own (caller: wayland-1): nested
+       (readonly.qml drew no frame within 5 s of its start; it is not measured)
+       readonly.qml  before/peak/growth MB: 0 0 no-frame
+       editable.qml  before/peak/growth MB: 289 328 38
+       nofield.qml   before/peak/growth MB: 286 286 0
+    FAIL P2 a consumer on the nested display reads the whole offer (bytes) -- got [0], want [26214400]
+    PASS P3 the editable probe reads everything ...: reads-everything
+    FAIL P4 the read-only probe reads nothing (grew less than 8 MB) -- got [not measured: no-frame], want [reads-nothing]
+    PASS P5 the no-field probe reads nothing ...: reads-nothing
+    clip-scenario: 5 passed, 2 failed (mode check-tree, ..., 14.0 s)
+
+Run alone right after, under the heavy lock with the gate's `env -u` set and
+short private TMPDIR and XDG_RUNTIME_DIR, three times: 7 passed, 0 failed
+each (11.3, 11.2, 11.2 s; readonly.qml 295/295/0, 290/290/0, 290/290/0;
+load 1.34). Crash journal 89 before and after.
+
+Read, not measured under a controlled load: readonly.qml is the arm's first
+qml start, so the cold one. `probe()` waits at most 5 s for its "Frame
+prepared" line (the daily run's F-HARNESS-66 fix, on dev since this
+morning), and the probes quit themselves at 9 s, so the bound cannot simply
+grow. P2's consumer runs after the readonly probe's sampling window, and the
+window is skipped when the probe is not measured, so `wl-paste` then runs
+directly after `producer_start`, before its offer can be served: the 0
+bytes are the first half's knock-on, not a second fault on the display.
+Before the F-HARNESS-66 fix the same slow start was measured as growth
+(that row's 143/299/155); now it is red, which is the honest answer, and
+the readiness it lacks is filed as F-HARNESS-124.
