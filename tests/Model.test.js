@@ -864,9 +864,13 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // later shared cases and the regular-file door on a27b90c's reader or a
 // one-decision mutant, and the last five (code after a closing brace, a
 // comment after one, a tree before D-REL-5 importing Model.js) on 9b80fcb's
-// reader or a one-decision mutant; the counts are in docs/QA-RESULTS.md,
-// "D-REL-14: the service readers", "The review of a27b90c, settled" and
-// "The rechecks of 76bff05 and the harness commits, settled".
+// reader or a one-decision mutant, and the ten of D-REL-14's C2 (a
+// code-behind named Service-<domain>.js as Service<Domain>, a Model.js import
+// beside Model.mjs, an ES module other than the model, a .import line) on
+// ab3d287's reader or a one-decision mutant; the counts are in
+// docs/QA-RESULTS.md, "D-REL-14: the service readers", "The review of
+// a27b90c, settled", "The rechecks of 76bff05 and the harness commits,
+// settled" and "D-REL-14: the splitter and its guards".
 ;(function () {
   const fs = require("fs"), path = require("path"), cp = require("child_process")
   const SF = serviceReader
@@ -938,7 +942,7 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
       if (!got) wrong.push(c.name)
     }
     return [C.length, wrong]
-  }, [37, []])
+  }, [47, []])
 
   // IPTV_SERVICE_QML names a mutant copy, and a rule-11 copy need not end in
   // `.qml`: the readers take any regular file as the service's file (on

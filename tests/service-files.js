@@ -34,11 +34,26 @@
 // before D-REL-5 (2026-10-12) imports its one-file model as
 // `import "Model.js" as Model`: that exact line is the model's import, not a
 // code-behind, so it is neither declared nor refused and stays in the view,
-// and such a tree (a --baseline export) reads as its Service.qml.
+// and such a tree (a --baseline export) reads as its Service.qml. Only such a
+// tree: one that imports no ES module, as every tree before D-REL-5 did. On a
+// text that imports Model.mjs a `Model.js` import is a script import like any
+// other, held to the code-behind's name and refused, never kept unread
+// (D-REL-14 C2, the recheck of 76bff05's proposal).
+//
+// A code-behind is named for its domain: `Service-<domain>.js`, the domain
+// lower-case letters and digits, imported as `Service<Domain>` -- the domain
+// with its first letter upper-cased (`Service-pip.js` as `ServicePip`). The one
+// ES module Service.qml imports is the model, exactly
+// `import "Model.mjs" as Model`: any other `.mjs` import would keep its
+// forwarders as root text and its body unread, so it is refused.
 //
 // The reader refuses rather than guesses, with a kind both engines share:
 //   declaration      a line importing a .js, in either quote, that is not
-//                    exactly `import "<file>.js" as <Qualifier>`
+//                    exactly `import "<file>.js" as <Qualifier>`, or whose
+//                    file and qualifier are not `Service-<domain>.js` and
+//                    `Service<Domain>`
+//   module           a line importing an ES module, in either quote, that is
+//                    not exactly `import "Model.mjs" as Model`
 //   declared-twice   a file or a qualifier declared twice
 //   missing          Service.qml, or a declared code-behind, is not there
 //   encoding         a file that is not UTF-8
@@ -96,8 +111,16 @@ const DECLARATION = /^import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][A-Za-
 const IMPORTS_A_SCRIPT = /^[ \t]*import[ \t]+(?:"[^"]*\.js"|'[^']*\.js')/
 // The model's own import on a tree from before D-REL-5, read whole: the model
 // was Model.js until it became Model.mjs and model/, and a --baseline export
-// of such a tree is read as it is, not refused.
+// of such a tree is read as it is, not refused. Only on a text that imports
+// no ES module (MODULE_IMPORT), which is what such a tree is.
 const MODEL_JS_IMPORT = /^import "Model\.js" as Model\r?$/
+// A code-behind's name and qualifier: `Service-<domain>.js` as
+// `Service<Domain>`, the domain lower-case letters and digits.
+const CODE_BEHIND = /^Service-([a-z][a-z0-9]*)\.js$/
+// Any import of an ES module, in either quote, and the one Service.qml may
+// hold: the model's, exactly.
+const MODULE_IMPORT = /^[ \t]*import[ \t]+(?:"[^"]*\.mjs"|'[^']*\.mjs')/
+const MODEL_MJS_IMPORT = /^import "Model\.mjs" as Model\r?$/
 // A function at the root's two-space indent, matched at a line start.
 const HEADER = /  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{/y
 const COMMENT_LINE = /^[ \t]*\/\//
@@ -124,9 +147,21 @@ class ServiceFilesError extends Error {
 
 function refuse(kind, message) { return new ServiceFilesError(kind, kind + ": " + message) }
 
+// Whether any line of `text` imports an ES module: true of every Service.qml
+// since D-REL-5 (Model.mjs), and of none before it.
+function importsAModule(text) { return text.split("\n").some(l => MODULE_IMPORT.test(l)) }
+
 // Whether `line` imports a classic script that may be a code-behind: any
-// `.js` import, in either quote, but the pre-D-REL-5 model's.
-function importsAScript(line) { return IMPORTS_A_SCRIPT.test(line) && !MODEL_JS_IMPORT.test(line) }
+// `.js` import, in either quote, but the pre-D-REL-5 model's on a text that
+// imports no ES module (`modern` false).
+function importsAScript(line, modern) { return IMPORTS_A_SCRIPT.test(line) && (modern !== false || !MODEL_JS_IMPORT.test(line)) }
+
+// The qualifier a code-behind's name gives it, `Service-pip.js` ->
+// `ServicePip`; null for a name that is not `Service-<domain>.js`.
+function codeBehindQualifier(file) {
+  const m = CODE_BEHIND.exec(file)
+  return m ? "Service" + m[1].slice(0, 1).toUpperCase() + m[1].slice(1) : null
+}
 
 // Whether the text after a code-behind function's closing brace, to the end
 // of its line, is blank or a `//` comment: anything else is code the view
@@ -178,14 +213,17 @@ function matchBrace(text, open) {
 function declarations(text) {
   const out = []
   const lines = text.split("\n")
+  const modern = importsAModule(text)
   for (let n = 0; n < lines.length; n++) {
-    if (!importsAScript(lines[n])) continue
+    if (MODULE_IMPORT.test(lines[n]) && !MODEL_MJS_IMPORT.test(lines[n])) throw refuse("module", "line " + (n + 1) + " imports an ES module and is not the model's `import \"Model.mjs\" as Model`")
+    if (!importsAScript(lines[n], modern)) continue
     const m = DECLARATION.exec(lines[n])
     if (!m) throw refuse("declaration", "line " + (n + 1) + " imports a script and is not `import \"<file>.js\" as <Qualifier>`")
     for (const d of out) {
       if (d.file === m[1]) throw refuse("declared-twice", m[1] + " is declared on lines " + d.line + " and " + (n + 1))
       if (d.qualifier === m[2]) throw refuse("declared-twice", "the qualifier " + m[2] + " is declared on lines " + d.line + " and " + (n + 1))
     }
+    if (codeBehindQualifier(m[1]) !== m[2]) throw refuse("declaration", "line " + (n + 1) + " declares " + m[1] + " as " + m[2] + ", and a code-behind is `import \"Service-<domain>.js\" as Service<Domain>`, the domain lower-case letters and digits")
     out.push({ file: m[1], qualifier: m[2], line: n + 1 })
   }
   return out
@@ -264,8 +302,9 @@ function inlineText(text, files) {
   }
   const out = []
   const lines = text.split("\n")
+  const modern = importsAModule(text)
   for (const line of lines) {
-    if (importsAScript(line)) continue
+    if (importsAScript(line, modern)) continue
     const shape = FORWARDER_SHAPE.exec(line)
     if (shape && byQualifier.has(shape[3])) {
       const m = FORWARDER.exec(line)
@@ -338,7 +377,7 @@ function serviceText(where) {
   return inlineText(text, files)
 }
 
-module.exports = { SERVICE, ServiceFilesError, matchBrace, declarations, functionSpans, inlineText, servicePath, serviceNames, serviceFiles, serviceText }
+module.exports = { SERVICE, ServiceFilesError, matchBrace, declarations, codeBehindQualifier, functionSpans, inlineText, servicePath, serviceNames, serviceFiles, serviceText }
 
 if (require.main === module) {
   const [verb, where] = process.argv.slice(2)
