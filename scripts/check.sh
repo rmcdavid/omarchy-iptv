@@ -1974,7 +1974,8 @@ step "service split guard (scripts/split-service.py --check)"
 # forwarder left at its old place; the readers (scripts/service_files.py and
 # tests/service-files.js) are the one list of them. This proves the tree as it
 # stands: whatever the readers refuse, and on top of their verdict a name
-# declared twice at the root, a Service*.js that Service.qml does not import,
+# declared twice at the root, any script (*.js, *.mjs) beside Service.qml
+# that it does not import as a code-behind, the model's own excepted,
 # a qualifier named outside its forwarders, `this` or `arguments` in a
 # code-behind, a code-behind naming its own function unqualified, and a
 # root.N that is no member of the root -- the member check qmllint stopped
