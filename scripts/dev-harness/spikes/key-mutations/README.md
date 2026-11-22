@@ -107,3 +107,12 @@ once, as the read's own finish now does, so each still takes the read away
 and nothing else. Re-run through node after the re-make (3727 checks):
 `r25a-keep-landed` 24 failures, `r26a-no-read` 82, `r27a-no-wait` 31. None
 was re-run live through --tree.
+
+D-STATE-11 (2026-11-21, lane-state11; re-made by the lead at merge, when
+the gate's predicate found them) re-made `r25a-keep-landed.patch` and
+`r25d-a7-no-inflight-half.patch`, whose context the `statePrivateTold`
+clear beside each `stateSaveFailed = false` moved. The same lines in a
+moved context, the same decisions. Re-run through node after the re-make
+(4047 checks): `r25a-keep-landed` 24 failures, as at D-SINK-103's re-make;
+`r25d-a7-no-inflight-half` 0, as F-HARNESS-33 records it. Neither was
+re-run live through --tree.

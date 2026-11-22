@@ -2275,7 +2275,7 @@ function statePrivateRefusalNotice(why, path) {
     fix = "Make your own account its owner with chown, run as root."
   } else if (w === "unconfirmed") {
     what = "could not be made private (mode 600) before a save"
-    fix = "Keep it, or the file its symbolic link points to, on a filesystem that keeps Unix permissions: a FAT or SMB mount without them, and some FUSE mounts, cannot hold mode 600."
+    fix = "Keep it, or the file its symbolic link points to, where its mode can be set to 600: not on a read-only mount, a FAT or SMB mount without Unix permissions or some FUSE mounts, and not marked immutable (chattr +i)."
   }
   return { title: STATE_BLOCK_TITLE_MID, body: file + " " + what + ". " + STATE_REFUSED_UNSAVED + " " + fix }
 }

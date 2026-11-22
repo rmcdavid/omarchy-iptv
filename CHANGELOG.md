@@ -144,10 +144,17 @@ after the shell starts, and you start the channel again yourself.
 - **If `state.json` is a symbolic link that the shell would save to a
   different file than the one it reads** -- a relative target that climbs
   with `..` out of a folder that is itself a link, or a target name that is
-  not UTF-8 -- the plugin now stops saving and says it could not write
-  `state.json`, instead of silently saving to a file it never reads back.
-  Point the link at your state file with an absolute path that has no `..`
-  in it. (D-STATE-9)
+  not UTF-8 -- the plugin now stops saving and says why and how to fix it,
+  instead of silently saving to a file it never reads back. Point the link
+  at your state file with an absolute path that has no `..` in it.
+  (D-STATE-9, D-STATE-11)
+- **When a save is refused because `state.json` belongs to another
+  account, or because it cannot be made private** (on a filesystem
+  without Unix permissions, for example), a notification
+  titled "Saving has stopped" now says which, once, and how to fix it.
+  What you change meanwhile is kept: fix it with the shell running and
+  your next change saves everything, with no restart. Before, the guide
+  said only "Could not write state.json". (D-STATE-11)
 - **Playing a channel right after Stop no longer fails with "The player is
   busy"**: the new channel starts once the old player has finished
   closing, and is no longer lost if the old player closes between two
@@ -171,6 +178,16 @@ after the shell starts, and you start the channel again yourself.
   when the shell started -- now starts that channel fresh, instead of
   sending it to the player being shut down, where it was lost behind a
   false "stopped unexpectedly" message. (D-PLY-73)
+- **A Stop pressed while the plugin is still checking on the player** --
+  after an earlier stop, while the shell is starting up, or after a start
+  that hung -- now looks again and stops a player that is still playing,
+  instead of leaving it playing behind a bar that shows nothing. (D-PLY-75)
+- **A channel picked in the half-second after the plugin finds an idle or
+  stalled player now plays and shows in the bar**, instead of being
+  dropped without a word or blamed on the earlier start. (D-PLY-76)
+- **Running one of the helper's `player` commands yourself in a terminal
+  no longer lets an older stop from the guide end the player of a channel
+  started after it.** (D-PLY-77)
 - **Starting, changing channel, pausing or seeking on a player that
   answers too slowly now gives up within its own time limit** and says
   "mpv did not answer", instead of waiting a minute or more, and a start

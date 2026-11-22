@@ -1170,9 +1170,10 @@ ck "P6 the socket file was unlinked" '[[ ! -e "$SOCK" ]]'
 echo "== P10 a stop that the lock record would supersede still ends the player"
 # Found in the live pass: `player stop` is detached, so a `superseded`
 # refusal is invisible to the service, and anything that leaves a higher
-# --seq in the lock file (a terminal `omarchy-iptv player stop`, another
-# launcher) made every later stop a silent no-op - the UI went idle with the
-# player still playing. The service must notice and finish the job.
+# --seq in the lock file (another launcher, or a typed `--seq` as below; a
+# terminal `omarchy-iptv player stop` runs on `--seq 0` and, since D-PLY-77,
+# leaves the record as it was) made every later stop a silent no-op - the UI
+# went idle with the player still playing. The service must notice and finish the job.
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P10 no player to stop"
 cache=$(ipc activeCache)

@@ -23137,3 +23137,67 @@ comments in Service.qml and player-scenario.sh (lane-ply7576's files); the
 3926a4b commit message (left, so the reviewed commit keeps its id); the
 refused card never withdrawn once saving resumes (the existing pattern of
 the no-write notice, not new here).
+
+## The lead's follow-ups to the ply7576 and state11 lanes (2026-11-21)
+
+Both lanes merged into dev (613b7e9 and 0c74f38). Fixing all four rows
+rather than accepting them was the lead's call under the owner's standing
+authority of 2026-11-09; how each was fixed is the lanes' proposal,
+accepted as below.
+
+- **lane-ply7576, rechecked pushable.** The in-flight carry the lane took
+  from the review of 8504ba8 (its finding 3) is accepted as the lead's
+  call, with its cost as the D-PLY-75 row states it. The recheck's one nit
+  is accepted and not filed: an unreadable probe answer that an intent
+  overtook now returns before the `playerPending` clear, so a play queued
+  behind it goes out as a zap first (`zap,start` with no player up, `zap`
+  with one), exactly as a readable stale answer always has; where no
+  player is up that is one more helper call of about 130 ms.
+- **D-PLY-78** stays P4 and open (its row).
+- **lane-state11, the recheck of deafb9a: one must-fix, settled by the
+  lead in 98c51d6.** A typed `--seq` above `SEQ_MAX` left a record that
+  reads as none and so wiped the shell's recorded seq, reopening D-PLY-77's
+  race for that verb. Taken: the recheck's option (b), `seq_arg` refusing
+  at the parse a `--seq` above 2,147,483,647, the most the shell's int can
+  send, naming the option and never the value. `LockTest` (run through
+  `unittest discover -s tests -p test_player.py -k LockTest`, heavy lock,
+  scratch TMPDIR and XDG_RUNTIME_DIR): the new
+  `test_d_ply_77_a_seq_the_shell_cannot_send_is_refused_at_the_parse` is
+  1 of 10 red on deafb9a's helper (the typed start adopted the player and
+  the typed stop stopped it) and 10 / 0 on the fix. What stays is stated
+  on the D-PLY-77 row: a `--seq` of 2,147,483,646 or 2,147,483,647 still
+  resets the record, the shell's only way back from the top of its counter.
+- **The `unconfirmed` fix sentence** now names a read-only mount and an
+  immutable file as well as a filesystem without Unix permissions (the
+  review's nit; model/state.mjs, tests/fixtures/state-notices.json and
+  UX-SOURCES 5.10 together, with a dated bracket there).
+- **README**: the lane's proposed text is taken under the paragraph on a
+  target that cannot be made private, with its example sentence checked
+  against `Model.statePrivateRefusalNotice`'s output, and the **Saved
+  sources not loaded** bullet names the split link among its causes.
+- **Records corrected at merge**: the D-STATE-9 row (its notice now reaches
+  a save over a file that loads); ARCHITECTURE-PLAYER 4.4 step 4 (the
+  record keeps the higher seq); the stopSettleTimer and stopLookTimer
+  comments in Service.qml and P10's comment in player-scenario.sh, which
+  said a terminal `player stop` leaves a higher `--seq` behind (it never
+  did). 3926a4b's message is left as it is, so the reviewed commit keeps
+  its id; the D-PLY-77 row draws the line between the lead's call and the
+  lane's proposal correctly. The refused card is not withdrawn once saving
+  resumes, as the no-write notice's card is not; not filed.
+- **Two key-mutation patches re-made.** The first gate over the merged
+  tree failed its harness predicate "all nineteen key-mutation patches still
+  apply": `r25a-keep-landed` and `r25d-a7-no-inflight-half` sat on context
+  that D-STATE-11's `statePrivateTold` clears moved (neither lane ran
+  check.sh). Re-made on the same decisions; node over each, 4047 checks:
+  24 failures and 0, as D-SINK-103's re-make and F-HARNESS-33 record them.
+  Noted in the key-mutations README and beside the predicate.
+- **Filed**: F-HARNESS-120 (the player world's other launcher still writes
+  a record of 0, harsher than the helper since D-PLY-77) and D-REL-14
+  (Service.qml at 444,947 of the 448 KiB `release.py check` allows; a
+  split is due).
+- **The owner's cache.** The review's qml probe ran without a decoy HOME
+  and wrote one bytecode file into `~/.cache/QtProject/Qml Runtime/qmlcache/`.
+  The lead read it (its only path string names the review's scratch
+  probe), found it the only file there dated that day, and removed that
+  one literal path; the settle had removed its own 20 the same way. Every
+  later brief gives a qml probe a decoy HOME and XDG folders.

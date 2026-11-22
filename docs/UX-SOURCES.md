@@ -2503,7 +2503,15 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
      |---|---|---|
      | `split-link` | `is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8` (item 1's own) | `Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it.` |
      | `not-owned` | `belongs to another account, so it cannot be made private before a save` | `Make your own account its owner with chown, run as root.` |
-     | `unconfirmed` | `could not be made private (mode 600) before a save` | `Keep it, or the file its symbolic link points to, on a filesystem that keeps Unix permissions: a FAT or SMB mount without them, and some FUSE mounts, cannot hold mode 600.` |
+     | `unconfirmed` | `could not be made private (mode 600) before a save` | `Keep it, or the file its symbolic link points to, where its mode can be set to 600: not on a read-only mount, a FAT or SMB mount without Unix permissions or some FUSE mounts, and not marked immutable (chattr +i).` |
+
+     [2026-11-21, the lead's call under the owner's standing authority of
+     2026-11-09, from the review of lane-state11: `state private` answers
+     `unconfirmed` for a read-only mount (EROFS) and an immutable file
+     (EPERM), when the file's mode is not already 600, as well as for a
+     filesystem without Unix permissions, so the `unconfirmed` fix names
+     all three; it named only the last (read in bin/helper/10-state.py, not
+     run on such a mount).]
 
    - the guide's persist line once, as before.
    What does NOT change, on purpose: the guide draws no no-write surface,

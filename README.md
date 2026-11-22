@@ -1373,7 +1373,9 @@ Nothing inside the plugin directory is written at runtime.
   sentence where it would otherwise show its setup form: the file that holds
   your sources is there but could not be read -- its permissions, something
   other than a file at that path, a symbolic link that leads nowhere (at the
-  file, or at its folder), a file where its folder should be, or contents
+  file, or at its folder), a symbolic link the shell would save to a
+  different file than the one it reads, a file where its folder should be,
+  or contents
   that are not a state file -- or
   the plugin's start-up check of it did not answer within 15 seconds and was
   stopped. (A read of the file before a save that simply does not answer
@@ -1450,7 +1452,22 @@ Nothing inside the plugin directory is written at runtime.
   is never written: every save fails, the guide says so once (`Could not
   write state.json`) and the shell's journal names each refusal, so keep
   `state.json` on a filesystem with Unix permissions (up to and including
-  0.19.1 a file on such a mount was saved at the mount's mode). Up to and including 0.13.6 the helper's `state` commands replaced
+  0.19.1 a file on such a mount was saved at the mount's mode). So is a
+  `state.json` link whose relative target climbs with `..` out of a folder
+  that is itself a symbolic link, or whose target is not UTF-8: the shell's
+  writer reads such a link as text and would save to a different file than
+  the one the plugin reads. For another account's file, a mode that cannot
+  be set to 0600, and such a link, a notification titled **Saving has
+  stopped** also says which, once, for example
+  `/home/you/.local/state/omarchy-iptv/state.json belongs to another
+  account, so it cannot be made private before a save. Sources, favorites
+  and other changes made now are held in this session only: once this is
+  fixed, the next change made here saves them all, without a restart, and
+  they are dropped if the shell is stopped first. Make your own account its
+  owner with chown, run as root.` (for the link: `Point it at the file that
+  holds your state with an absolute path in UTF-8 that has no .. in it.`).
+  Fix it with the shell running: a restart before the next change drops
+  what was changed meanwhile. Up to and including 0.13.6 the helper's `state` commands replaced
   such a link with a plain file, and in the test that measured it the
   running shell then noticed none of the later changes to the file. While
   the shell is running, it notices AT ONCE a change made THROUGH the link:

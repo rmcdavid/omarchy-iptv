@@ -1,8 +1,8 @@
 diff --git a/Service.qml b/Service.qml
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2568,8 +2568,8 @@ Item {
-       root.stateSaveFailed = false
+@@ -2947,8 +2947,8 @@
+       root.statePrivateTold = ""   // D-STATE-11: the episode is over
        root.recentSaves = []
      }
 +    // MUTATION (lane A, round 15): a7 -- the in-flight half of the re-save decision deleted

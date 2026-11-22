@@ -7313,8 +7313,10 @@ Item {
     // It is also where a stop that did NOT take is caught. `player stop` is
     // detached, so its reply is unobservable by construction, and it aborts
     // as `superseded` whenever the lock record holds a higher `--seq` than
-    // ours - which a terminal `omarchy-iptv player stop` (the documented
-    // uninstall escape hatch) or any other launcher leaves behind. Found
+    // ours - which another launcher, or a person typing a `--seq`, leaves
+    // behind (a terminal `omarchy-iptv player stop`, the documented uninstall
+    // escape hatch, runs on `--seq 0`, which is never superseded and, since
+    // D-PLY-77, leaves the record's seq where it was). Found
     // live: the UI went idle while the player kept playing. One probe
     // re-reads the record, and applyProbe() then stops it with a sequence
     // that is past whatever is recorded.
@@ -7354,10 +7356,11 @@ Item {
   Timer {
     // The review of 9d604cf (F-PLY-3, PLY-STOP-07): the backstop above waits
     // out the stop's own worst case since D-PLY-40, and a stop the lock
-    // record SUPERSEDED -- another launcher's higher --seq, a terminal
-    // `omarchy-iptv player stop` -- is refused at once and leaves the player
-    // playing, which the old 5 s backstop caught at 5 s and the 18.25 s one
-    // would catch at 18.25 s. So this looks at the old moment and acts only
+    // record SUPERSEDED -- another launcher's higher --seq, or a typed one
+    // such as player-scenario's P10 `--seq 9999` -- is refused at once and
+    // leaves the player playing, which the old 5 s backstop caught at 5 s
+    // and the 18.25 s one would catch at 18.25 s. So this looks at the old
+    // moment and acts only
     // on that case: the probe (stopConfirmLook) stops the player when the
     // record is past this stop's sequence, and changes nothing while the
     // record is the stop's own (it is laddering) or older (it is waiting for

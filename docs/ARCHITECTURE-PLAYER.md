@@ -493,6 +493,11 @@ shell from before ignores the fields.**
    nothing is spawned.
 4. Helper: acquire the lock (4.2). Read the record; if `record.seq > N`, release
    and report `superseded` (4.10). Else write our record.
+   [2026-11-21, D-PLY-77: our record's seq is the HIGHER of ours and the
+   recorded one, so a verb on the CLI's default `--seq 0` leaves it where it
+   was; a recorded seq above `SEQ_MAX` (2,147,483,645, the highest the
+   shell's int counter can count above) reads as none, and a `--seq` above
+   2,147,483,647 is refused at the parse.]
 5. Helper: `find_player()` - scan `/proc/[0-9]*/cmdline`, split on NUL, match the
    exact token `--input-ipc-server=<abspath>`, require
    `stat("/proc/<pid>").st_uid == os.getuid()`, read `/proc/<pid>/stat` field 22

@@ -2012,6 +2012,9 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # write through `state private` as the read's finish does, so each still
 # removes the read and nothing else (node over each, QA-RESULTS
 # "D-SINK-103").
+# D-STATE-11 (2026-11-21, the lead at merge) re-made r25a-keep-landed and
+# r25d-a7-no-inflight-half, whose context the statePrivateTold clear moved
+# -- the same decisions (node over each: 24 failures and 0, as before).
 is "all nineteen key-mutation patches still apply to this tree (git apply --check)" \
    "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval r27a-no-wait r27a-wait-never-released; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
 is "and the key-mutations folder holds exactly those nineteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "19"
