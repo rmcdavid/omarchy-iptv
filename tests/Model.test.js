@@ -20290,8 +20290,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // adopted a player the observer never reached, refused after the
     // backstop or inside the settle (10 s after the stop), nothing attached.
     // Red on 81afa9f and on b2d5a6f in every row: nothing asked. The pins:
-    // the lock's own refusals (`superseded`, `busy`: the verb held no lock,
-    // so touched no player) ask nothing, and a refusal with a play made
+    // `busy` and `superseded` (raised before the verb adopts or spawns
+    // anything: `busy` when it cannot take the lock, `superseded` from the
+    // record it reads as it takes it) ask nothing, and a refusal with a play made
     // after the stop waiting sends that play as its own start (D-PLY-71);
     // green on both.
     const refusedOf = (code, seq) => JSON.stringify({ ok: false, kind: "player.start", error: { code, message: "refused" }, id: Y.id, seq })

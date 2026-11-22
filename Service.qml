@@ -3853,7 +3853,8 @@ Item {
     // D-PLY-78: one a later stop withdrew, nothing named, may have left a
     // player that stop gave up on (the start held the lock past its wait):
     // its watchdog's stop, or a refusal after it adopted one (the helper
-    // stops only its own spawn). Not the lock's own refusals: it held none.
+    // stops only its own spawn). Not `busy` (no lock) or `superseded` (the
+    // record read as it took the lock): both come before any adopt or spawn.
     if (withdrawn && root.nowPlaying === null && code !== "superseded" && code !== "busy") root.lookForWithdrawn()
     root.playerPending = false
     var reason = Model.statusReason(status)

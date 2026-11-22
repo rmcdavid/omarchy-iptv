@@ -1801,13 +1801,15 @@ watchdog stops it with nothing named (D-PLY-35's `helper_timeout`), which
 read the stop's own ladder as having ended whatever it left: after the
 settle at once, inside it by the settle's backstop (`stopOlderStartOk`),
 as for an older start's ok. And so is its refusal with nothing named,
-unless it is one of the lock's own (`superseded`, `busy`, raised before the
-verb holds the lock): the helper stops only a spawn of its own on a
+unless it is `busy` or `superseded`, raised before the verb adopts or
+spawns anything (`busy` when it cannot take the lock, `superseded` from
+the record it reads as it takes it): the helper stops only a spawn of its own on a
 refusal, never a player it adopted (the review of b2d5a6f). A start
 issued after the stop, or one answering with a play made after the stop
 waiting, is not this case and is unchanged. Held by the service harness
-and by the seeded world with slow players; not watched on a real
-player.]**
+and by the seeded world with slow players, the refusal half by the
+harness alone (the world refuses a start only `busy` or `superseded`);
+not watched on a real player.]**
 
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
