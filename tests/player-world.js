@@ -51,6 +51,13 @@
 //     record below the stop and does nothing; the backstop's probe finds the
 //     player and the shell stops it itself. The next action then also waits
 //     out that backstop, so it lands around the shell's own stop.
+//   - A stop's probe in flight (D-PLY-75), when a sequence asks for it
+//     (`windowP`, with `contestP`): after a contested stop, with that chance,
+//     the next action lands instead 1 to 250 ms after that stop's 5 s look
+//     or its backstop sends its probe (drawn, half each), while that probe
+//     is usually still out (it answers 60 to 300 ms after it is sent). The
+//     plain schedule reaches that window about once in a few hundred
+//     sequences (lane-ply73's seed 226 of 300).
 //   - `status` (the control slot): the live player's stash, or not running.
 //     Asked once, by the health tick's own block (h.fireTimer), after a
 //     sequence whose last action is a play: ruling CL6 lets the label and the
@@ -68,7 +75,12 @@
 // launcher that supersedes a stop with a higher --seq, writes a channel or
 // starts a player (a second Service object's, a terminal `player start`'s);
 // a player that does not answer, will not verify or cannot be identified
-// (the node suite's D-PLY-73 table holds the shell's stop of each); and any
+// (the node suite's D-PLY-73 table holds the shell's stop of each), and so
+// no probe that finds a player idle and re-reads it 500 ms later: the world
+// has no shell restart and no reattach, and its one way to an idle player
+// under the observer is a start stopped by its 58.25 s watchdog after its
+// spawn bound, which its starts never reach (the node suite's D-PLY-76 rows
+// hold a play or a stop inside that re-read); and any
 // real timing -- every interval here is drawn from the ranges written in it.
 // Time is the harness's clock. The shell's Timers that the settle reads run
 // from their own blocks (h.driveTimer), playerSocketTimer as the repeating
@@ -408,6 +420,9 @@ function playerWorld(h, o) {
 // sequence without it is the one it always was). With `contestP`, each user
 // stop is contested by another launcher with that chance (the header), and
 // the next action waits out the backstop too; likewise no draw without it.
+// With `windowP` as well, that next action lands inside the contested stop's
+// look's or backstop's probe with that chance (the header); no draw without
+// it either.
 function playerSequence(h, o) {
   const opts = o || {}
   const w = playerWorld(h, opts)
@@ -420,8 +435,12 @@ function playerSequence(h, o) {
     // After a contested stop the next action waits out the stop's backstop
     // too, so it lands around the stop the shell then issues itself.
     const wait = contested ? w.between(h.root.stopSettleMs, h.root.stopSettleMs + 4000) : 0
+    // D-PLY-75: or inside that stop's look's or backstop's probe, which goes
+    // out a stop's look interval or its backstop's after the stop.
+    const inProbe = contested && opts.windowP && w.rnd() < opts.windowP
+      ? (w.rnd() < 0.5 ? h.root.stopLookMs : h.root.stopSettleMs) + w.between(1, 250) : 0
     contested = false
-    w.advance(gap + wait)
+    w.advance(inProbe > 0 ? inProbe : gap + wait)
     if (opts.restartP && k > 0 && w.rnd() < opts.restartP) {
       w.note("HEALTH restart")
       h.root.restartPlayer()

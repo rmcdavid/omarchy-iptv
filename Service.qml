@@ -950,6 +950,11 @@ Item {
   // stop then laddered it or was refused (`busy` behind that very start's
   // lock) nothing here can see when no socket is attached, so the backstop
   // probes for it (stopSettleTimer) rather than leave it unobserved.
+  // D-PLY-75: stop() also sets it when a question about a player was open
+  // as it was pressed -- a confirmation pending, a re-read owed
+  // (`probeRetried`), a probe in flight, or, while the settle before it
+  // still ran, this flag or a stop the shell issued itself (`stopByShell`)
+  // -- so that stop's look and backstop ask it again.
   property bool stopOlderStartOk: false
   // D-PLY-69: the intent number the player slot's start or restart went out
   // with, and whether a stop was still settling then (issuePlayerSession).
@@ -987,6 +992,11 @@ Item {
   // it - a play from the guide, or over IPC one frame after the shell came
   // back - is the newer word and must not be overruled by the older answer.
   property int probeSeq: 0
+  // D-PLY-76: `playSeq` as it stood when an ambiguous answer armed the one
+  // re-read (probeRetryTimer). An intent issued since -- a play, a stop --
+  // is the newer word over that answer as much as over a probe in flight,
+  // so the re-read is not sent (probeOverruled).
+  property int probeRetrySeq: 0
   property bool reconcilePending: false     // resolve nowPlaying once the cache lands
   // D-SINK-16: this shell adopted a player that was not verifying the stream's
   // certificate, the probe has migrated it, and the channel it is already
@@ -1000,7 +1010,9 @@ Item {
   property int playerSocketError: 0         // last QLocalSocket::LocalSocketError, diagnostics only
   // A stop whose EOF never came, so the ladder did not end the player. The
   // stop is detached and its reply is by design unobservable, so this is
-  // the only way to notice one that was refused (4.9, 4.10).
+  // the only way to notice one that was refused (4.9, 4.10). D-PLY-75: a
+  // stop pressed while it is set takes it over (stop()), since that stop
+  // makes the answer stale.
   property bool stopConfirmPending: false
   // The review of 9d604cf (F-PLY-3): that probe is the early look's
   // (stopLookTimer), which stops the player only when the lock record shows
@@ -1017,6 +1029,12 @@ Item {
   // the backstop's restart(), so the backstop reads what the settle it ends
   // was opened with.
   property bool stopFromBackstop: false
+  // D-PLY-75: the settle running was opened by a stop the shell issued itself
+  // (stopUnadoptedPlayer), always over a player a probe or an adoption found
+  // up. Read only by stop(): a user's stop pressed while it settles inherits
+  // that player, so its look and backstop look for it even with nothing
+  // attached. Set there, cleared by stop().
+  property bool stopByShell: false
   // Whose failure has already been toasted for this play. `player start`'s
   // own first-load window and socket EOF are two independent detectors of
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
@@ -1422,10 +1440,43 @@ Item {
     // Stop hunting for a socket, but keep an attached one: its EOF is how
     // we learn the ladder finished (and is what clears `stopping`).
     root.playerWanted = false
+    // D-PLY-75: a question the stop before this one still had open is this
+    // stop's now. A confirmation probe in flight -- the 5 s look's or the
+    // backstop's, after a user's stop or one the shell issued -- answers
+    // stale once this stop moves `playSeq`, and applyProbe drops a stale
+    // answer before the branch that clears the two flags; an answer that
+    // was unreadable has left `stopConfirmPending` set as well, and so has
+    // a backstop whose probe the busy slot refused (stopSettleTimer does
+    // not read runPlayerProbe's answer: the flag waits for the slot's next
+    // probe answer). Left set, they made this stop's look and backstop
+    // skip, both returning while a confirmation is pending, so a player
+    // that outlived the earlier stop and this one played on under an idle
+    // bar. Two more questions were forgotten here the same way while the
+    // earlier settle still ran: a start from before the earlier stop whose
+    // player its backstop was still to look for (stopOlderStartOk), and the
+    // player a stop the shell issued itself was laddering (stopByShell) --
+    // with nothing attached this stop had no way to learn that either
+    // outlived it. And so were two that no stop opened (the review of
+    // 8504ba8): the re-read a probe that found a player idle still owes
+    // (`probeRetried`, while its 500 ms run or its probe is out), which
+    // this stop overrules (probeRetryTimer) and which was then the only
+    // look at that player; and any probe in flight -- the reattach's at a
+    // shell start, D-PLY-35's of a start its watchdog stopped, the hunt's
+    // -- whose answer this stop makes stale, so that the player it would
+    // have found was looked for by nothing. So the flags are cleared, and
+    // when any of those questions was open this stop's own look and
+    // backstop look even with nothing attached, as after an older start's
+    // ok: at most two probes, each finding nothing when this stop took.
+    var asking = root.stopConfirmPending || root.probeRetried
+      || (playerProc.running && root.playerKind === "probe")
+      || (root.stopping && (root.stopOlderStartOk || root.stopByShell))
+    root.stopConfirmPending = false
+    root.stopConfirmLook = false
+    root.stopByShell = false
     root.playSeq += 1
     root.stopSeq = root.playSeq
     root.stopAt = Date.now()
-    root.stopOlderStartOk = false
+    root.stopOlderStartOk = asking
     // D-PLY-73: the user's stop is looked at by its backstop whatever the
     // settle before it was.
     root.stopFromBackstop = false
@@ -3914,9 +3965,32 @@ Item {
     root.noteSessionOutcome("attached")
   }
 
+  // A probe's answer, or the re-read an ambiguous one armed, that an intent
+  // issued since has overtaken (4.10, section 15): that intent owns the
+  // outcome. The stale branch of applyProbe below, and since D-PLY-76 the
+  // re-read that has not gone out yet (probeRetryTimer) and, since the
+  // review of 8504ba8, an unreadable answer to a probe the intent overtook.
+  function probeOverruled() {
+    root.probeRetried = false
+    // D-PLY-35: and a stopped start's, whose player the newer one adopts.
+    root.timedOutPlay = null
+  }
+
   function applyProbe(text) {
     var probe = Model.parsePlayerProbe(text)
     if (!probe.valid) {
+      // The review of 8504ba8: an intent issued after this probe went out is
+      // the newer word over an answer it cannot read as much as over one it
+      // can (the readable answers' staleness test below, asked here with no
+      // record to resync from).
+      // This branch used to run first and act regardless: a play made while
+      // D-PLY-35's probe was out lost its `nowPlaying`, its observer and its
+      // hunt to the stopped start's failure, and the only card named that
+      // start, so the play then played unobserved under an idle bar.
+      if (Model.probeVerdict(0, root.probeSeq, root.playSeq).stale) {
+        root.probeOverruled()
+        return
+      }
       // Garbage, a truncated line or an error reply is not evidence of a
       // player; the 10 s poll and the next play() both recover.
       root.playerPending = false
@@ -3926,6 +4000,11 @@ Item {
         root.stopConfirmPending = false
         root.stopConfirmLook = false
       }
+      // The review of 8504ba8 (rule 15): and an answer that cannot be read
+      // is no re-read of the ambiguous one before it. Left set, the next
+      // idle answer, however much later -- a start's spawn found by
+      // D-PLY-35's probe -- was taken for the re-read and stopped at once.
+      root.probeRetried = false
       // D-PLY-35: and when this probe was looking for what a stopped start
       // left, it has found nothing it can name, so that start fails here.
       root.settleTimedOutPlay(false)
@@ -3941,9 +4020,7 @@ Item {
       // Everything below is about a world the user has since moved on from;
       // the play they issued owns the outcome, and drainPendingPlay() is
       // about to deliver it.
-      root.probeRetried = false
-      // D-PLY-35: and a stopped start's, whose player the newer one adopts.
-      root.timedOutPlay = null
+      root.probeOverruled()
       return
     }
     if (root.stopConfirmPending) {
@@ -4049,6 +4126,7 @@ Item {
       if (!root.probeRetried) {
         root.probeRetried = true
         root.probeRetryMigrated = migrated
+        root.probeRetrySeq = root.playSeq
         probeRetryTimer.restart()
         return
       }
@@ -4395,6 +4473,9 @@ Item {
     // issued inside the user's, and its ladder needs a whole bound from
     // here, not what is left of the user's (the review of 241a226).
     root.stopFromBackstop = false
+    // D-PLY-75: a user's stop pressed while this settles inherits the
+    // player this stop ladders (stop()).
+    root.stopByShell = true
     stopSettleTimer.restart()
     // D-PLY-35: when the reattach probe was looking for what a stopped start
     // left, this is what it found, and that start failed.
@@ -7202,7 +7283,9 @@ Item {
     // answered ok while it settled (stopOlderStartOk) is looked for too,
     // with nothing attached: its player was up, and a stop refused `busy`
     // behind that start's own lock left it playing unobserved under an idle
-    // bar. One probe: a stop that took finds nothing.
+    // bar. One probe: a stop that took finds nothing. D-PLY-75: and so when
+    // the stop took over a question about a player that was open as it was
+    // pressed (stop() sets stopOlderStartOk then).
     //
     // D-PLY-73: a stop the shell issues itself (stopUnadoptedPlayer) opens
     // a settle of its own, and this backstop looks at it once as it looks at
@@ -7286,10 +7369,36 @@ Item {
     // The single re-read of an ambiguous probe (4.5): an idle or stashless
     // player is either a racing start or a foreign one, and 500 ms tells
     // them apart without a second guess.
+    //
+    // D-PLY-76: unless an intent was issued since the answer that armed it
+    // (probeRetrySeq). A play made in these 500 ms with the observer on that
+    // idle player was zapped into it, and the re-read, going out after the
+    // play and so not stale, still read it idle before the zap had loaded:
+    // the shell stopped the player and cleared `nowPlaying`, and the zap's
+    // ok and the player's EOF then named nothing -- the play dropped with no
+    // card. A stop made in them was followed by this re-read, which found a
+    // player that outlived the stop and adopted it or stopped it -- with the
+    // observer attached a second stop over the one the stop was laddering,
+    // and with nothing attached (a reattach) the only look at that player.
+    // Now that answer is overruled as a stale one is: the play or the stop
+    // owns the outcome (the zap feeds a player of this build, the helper's
+    // build gate routes any other to a start; the stop takes the owed
+    // re-read over, stop() reading `probeRetried`, so its own look and
+    // backstop look for that player even with nothing attached -- the
+    // review of 8504ba8). A re-read already out when the intent comes is
+    // stale, as before. Asked of the sequence
+    // alone, not of `probeRetried`: the observer attaching meanwhile resets
+    // that (onPlayerAttached), and a play made after it was the same zap.
     id: probeRetryTimer
     interval: root.playerProbeRetryMs
     repeat: false
-    onTriggered: root.runPlayerProbe()
+    onTriggered: {
+      if (root.playSeq !== root.probeRetrySeq) {
+        root.probeOverruled()
+        return
+      }
+      root.runPlayerProbe()
+    }
   }
 
   Timer {

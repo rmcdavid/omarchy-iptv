@@ -1739,6 +1739,47 @@ for. And `drainPendingPlay` drops a queued id that is no longer
 `nowPlaying`'s: every writer queues the id `nowPlaying` holds, so such an id
 was superseded by a play that went out itself.]**
 
+**[Amended 2026-11-21, D-PLY-75 (lane-ply7576, the ply7576 branch): a stop
+takes over the question the settle before it left open. A stop pressed
+while the look's or the backstop's probe of the stop before it was in
+flight made that answer stale, and applyProbe drops a stale answer before
+it clears the confirmation; an unreadable or timed-out answer to the
+backstop's left it set too. Both looks of the new stop then skipped, and
+with nothing attached they had no reason to look anyway, since `stop()`
+reset the older start's question (`stopOlderStartOk`). So a player that
+outlived both stops -- each refused or superseded by another launcher --
+played on under an idle bar. Now `stop()` clears the confirmation, and when
+one was pending, a re-read was still owed or any probe was in flight (the
+review of 8504ba8: the reattach's at a shell start, D-PLY-35's, the hunt's,
+each answering stale once the stop moves the sequence), or the settle it
+replaces was still running over an older
+start's player nothing had looked for or over the player a stop the shell
+issued itself was laddering (`stopByShell`), its own look and backstop look
+for it even with nothing attached: at most two probes, each finding nothing
+when the stop took. A stale answer is still acted on by nothing. A user's
+stop made after the shell's own last stop has settled to its bound, with
+nothing attached, still looks for nothing (D-PLY-73's last stop). Held by
+the service harness and the seeded world aimed at those windows; not
+watched on a real player.]**
+
+**[Amended 2026-11-21, D-PLY-76 (lane-ply7576): the sequence also overrules
+the one 500 ms re-read of a probe that found a player idle (4.5). The re-read
+went out after a play made inside those 500 ms, so its answer was not stale,
+and while the play's zap had not loaded it still read the player idle: the
+shell stopped the player the zap was going into, and the play was dropped
+with no card. An ambiguous answer now records `playSeq` as it arms the
+re-read (`probeRetrySeq`), and when an intent has been issued since, the
+re-read is not sent and that answer ends as a stale one ends
+(`probeOverruled`): the play owns the outcome, and a stop takes the owed
+re-read over (`stop()` carries `probeRetried`), so its own look and backstop
+look for that player even with nothing attached -- the review of 8504ba8,
+since the first build left a stop at a reattach with no look at all. From
+the same review: an unreadable answer to a probe an intent has overtaken is
+overruled as a stale one is (applyProbe's invalid branch ran before the
+staleness test and settled D-PLY-35's stopped start as failed over the newer
+play), and an unreadable answer it does act on owes no further re-read. Held
+by the service harness; not watched on a real player.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
 **[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older
