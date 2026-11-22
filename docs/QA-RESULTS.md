@@ -24115,8 +24115,9 @@ Crash journal 89 at the start and at the end of lane-fix-relsplit1's work.
 
 ## D-REL-14: the splitter and its guards (lane-relsplit2, 2026-11-22)
 
-C2 of D-REL-14's plan, on branch relsplit-2 from ab3d287, five commits; no
-shipped file changes (no ALLOWLIST file in `git diff --name-only
+C2 of D-REL-14's plan, on branch relsplit-2 from ab3d287, five commits and
+the record that writes this one (2a4ab03; the fix pass after it is the next
+subsection); no shipped file changes (no ALLOWLIST file in `git diff --name-only
 ab3d287..HEAD`; release.py check reads 43 files, Service.qml 446,973 B).
 Everything reads the code-behinds from the readers, never a second list (the
 lead's call (e) on the D-REL-14 row). The prototype split tree below is Part
@@ -24251,7 +24252,8 @@ release.py as a literal, each followed by `code_behinds_of` it, through the
 readers, as (path, importer)). The nine guards read through it; theme names,
 Qt revisions and model members judge a code-behind under Service.qml's
 imports (model members: a `--file Service.qml` brings its code-behinds) and
-report import problems once, on Service.qml. Model members' IMPORT_MODEL and
+report import problems once, on Service.qml (Qt revisions only since the fix
+pass in the next subsection: on 2a4ab03 it repeated one per code-behind). Model members' IMPORT_MODEL and
 IMPORT_SCRIPT and theme names' IMPORT_PATH (which Qt revisions also reads)
 take either quote (the lead's call (e)). The text format guard refuses
 `createQmlObject` in shipped code (F-GATE-26).
@@ -24327,7 +24329,8 @@ a judge that skips its cases it is red ("printed no site or case count").
   (wedgeAndRespawn, the logo deadlines) read the inline view, whose code is
   the same either way.
 - Text the text format guard cannot see: `createQmlObject` and `textFormat`
-  assignments, none in the shipped QML today.
+  assignments, none in the shipped QML today (the assignments filed as
+  F-GATE-28 by the fix pass).
 
 **Counts on the final tree.** Node 4068 (ab3d287 4065); python 2981 by
 discovery (2942: split_service 17, release 4, theme names 4, model members
@@ -24353,3 +24356,195 @@ whose file counts rise by the new files. Still the lead's or later lanes':
 the cage-runnable arm that plays through the service (Part A), call (c)'s
 patch rule for C4, call (d) before a release, and F-GATE-27 if a moved
 function binds a metric through `Commons.Style`.
+
+## D-REL-14: the fix pass on 2a4ab03 (lane-fix-relsplit2, 2026-11-22)
+
+Three read-only rechecks of 2a4ab03 (the splitter, the harness, the guards)
+reported four must-fix findings and eleven should-fix findings and nits. This
+pass verified each must-fix finding before fixing it, and all four held. It
+added four commits on branch relsplit-2 and this record, and rewrote none of
+the lane's six. No shipped file changed: release.py check reads 43 files, and
+Service.qml is still 446,973 B. The prototype is Part A's cutter run again
+over 9ed04be, and all five outputs passed `sha256sum -c`. It was placed in a
+clone of the branch.
+
+**1. The readers: a line terminator they cannot see** (commit "Refuse a line
+end the readers cannot see in a code-behind").
+- The finding: JavaScript ends a `//` comment at CR, U+2028 and U+2029, and
+  the readers split at "\n" only, so `// x<CR>root.y = 1` was a comment to
+  them and a statement to the engine. Both engines now refuse any of the
+  three anywhere in a code-behind as `stray`. A CR directly before an LF still
+  reads.
+- Four shared cases were added (51 in all): a lone CR in a loose comment,
+  after a closing brace, and in a leading comment block, and U+2028 and
+  U+2029 in a comment.
+- On 2a4ab03's readers all four are wrong, in node and in python.
+- Mutants:
+  - lone-CR rule off: 3 wrong in each engine;
+  - U+2028/9 rule off: 1 wrong in each;
+  - every CR refused: 3 wrong in each (the three existing CRLF cases).
+- The rule sits after the declarations' check, so a tree with no
+  code-behind (every tag) never reaches it.
+
+**2. The splitter** (commit "Never let a cut overwrite a file, and judge what
+the splitter missed").
+- **Must-fix: --cut overwrote an untracked file.** In a clone with an
+  untracked `Service-rewind.js` holding `function wip()`, a cut of the
+  prototype's map is now refused as `tree`, and the file is untouched. On
+  2a4ab03 the cut wrote over it and printed `verify ok`. A new code-behind's
+  path must now be empty. The test (an untracked Service-demo.js) is red on
+  2a4ab03, and on a mutant that skips the path check.
+- `undeclared` now covers any `*.js` or `*.mjs` beside Service.qml that it
+  does not import as a code-behind. Before, it covered only `Service*.js`.
+  The model's own files are exempt: Model.mjs, and Model.js only on a text
+  that imports no ES module. qmllint resolves a `/* c */ import "zap.js"
+  as Zap` (the recheck ran it), and the readers do not see that line.
+- `function-twice` is now also read from the inline view. A header at the
+  root's indent inside another code-behind function is nested to the engine,
+  but the view holds it twice.
+- `root?.["N"]` and `root?.[expr]` are read as `root["N"]` and
+  `root[expr]`.
+- A CRLF Service.qml is now refused naming its CR line ends. Before, the
+  refusal said no module exports `Item`.
+- The cut's domain rule is now `code_behind_qualifier`, and its argument
+  rule is the readers' FORWARDER applied to the forwarder it would write. The
+  copies are gone.
+- Eight new cases (32 in all; check.sh's exact floor is raised to 32).
+  - On 2a4ab03's judge: 7 wrong. The eighth is the clean case with Model.mjs
+    beside the service, which must read.
+  - Mutants of the new judge:
+    - scripts read as `.js` only: 1 wrong;
+    - as `Service*` only: 3 wrong;
+    - the model not exempt: 1 wrong;
+    - Model.js always exempt: 1 wrong;
+    - the view's functions unread: 1 wrong;
+    - `?.[` unread: 3 wrong.
+- tests/test_split_service.py now has 21 tests (17 before).
+  - New tests: a script beside the fixture (zap.js and helpers.mjs refused,
+    Model.mjs clean), the CRLF message, the untracked-file cut, and a
+    `stays(x = 1)` cut refused as `name`.
+  - On 2a4ab03's script, 6 fail and the case loop errors (it has no
+    scripts_beside).
+  - Under "the argument check dropped", the argument test fails. Under "the
+    model not exempt", 5 tests fail.
+- On the prototype:
+  - --check is clean: 5 files, 4 code-behinds, 44 root functions, 160
+    forwarders, 2,267 sites, 32 of 32 cases.
+  - `--verify --from-git 9ed04be` matches byte for byte (446,973 B).
+  - `--cut --map domains.json` writes Service.qml byte-identical to the
+    cutter's, and each code-behind identical after its header (173 B
+    longer, as before).
+
+**3. The harness** (commit "Pin the code-behinds' scope and serviceSet's
+reading with a check each").
+- **Must-fix: nothing pinned the shared scope.** The moved fetchLogos names
+  the id logoFetchProc bare. The first C2 check now calls it, unstubbed, on
+  the split boot and on the one-file boot, and expects `["false", "false"]`.
+  On the recheck's narrow-scope mutant the split boot answers
+  `threw logoFetchProc is not defined`: 4069 checks, 1 failure.
+- **Must-fix: nothing pinned serviceSet's reading.** A new check reads it
+  from disk:
+  - over the readers' fixture, from its root and from Service.qml's own
+    path;
+  - over a cut of this tree written as files, which boots and answers the
+    IPC status as the one text does;
+  - over a split Service.qml copied without its code-behind, which is
+    refused as `missing`.
+- Mutants:
+  - files keyed by path with the verdict dropped: 4069 checks, 1 failure
+    (every field wrong);
+  - the verdict dropped alone: 1 failure (`lone` "returned").
+- The comment above fileSet now says that shapes only --check refuses (the
+  sibling call among them) still boot here, and read otherwise.
+- Node: 4068 -> 4069.
+
+**4. The guards** (commit "Refuse a shipped script no guard reads, and report
+an import problem once").
+- **Must-fix: Qt revisions repeated an import problem.** On the guards'
+  fixture tree with `import NoSuchModuleAtAll` added to Service.qml, the
+  guard printed the problem twice (on Service.qml and on Service-demo.js).
+  It now prints it once, on Service.qml, as the theme name guard already
+  did. The new test is red on 2a4ab03's guard.
+- The same lane record, "report import problems once, on Service.qml",
+  stands as written for theme names and model members. It is true for Qt
+  revisions since this commit.
+- shipped_code now raises when ALLOWLIST ships a `.js` that Service.qml
+  does not declare, or a `.mjs` other than the model (Model.mjs,
+  model/*.mjs). The recheck's Guide-extra.js tree had passed all nine
+  guards. The guards now fail closed in one line, and the colour guard's run
+  of it is in the test.
+- test_release has three new tests (120 in all). One of them changed an old
+  test's synthetic `x.mjs` to `Model.mjs`.
+  - Two are red on 2a4ab03.
+  - The third, "a declared code-behind on the allowlist reads", fails under
+    the mutant "no code-behind counted" (2 failures, 2 errors in the
+    shipped_code tests).
+  - The "model/ exempt" mutant gives 2 errors.
+- The trim and model regex guards now print one line instead of a
+  traceback when the readers refuse the service. Each has a new test, red on
+  2a4ab03.
+- The three `allowlisted_qml` readers nothing called are deleted (theme
+  names, text format, trim), with the `ast` imports only they used.
+- Every guard over this tree prints byte for byte what it printed on
+  ab3d287. Over the prototype every guard reads the one-file totals across
+  7 files, as the table above gives.
+
+**Filed: F-GATE-28** (open, P4). The text format guard passes a Text's format
+changed after the Text is made. I measured each shape in the guards'
+fixture code-behind on this branch, and each reads rc 0, "1 Text block(s) in
+2 file(s)":
+- `item.textFormat = Text.RichText`
+- `root["textFormat"] = Text.AutoText`
+- `createObject(root, { textFormat: Text.StyledText })`
+
+`createQmlObject` stays refused. The lane's search above named this gap
+without an id.
+
+**Not taken, with reasons.**
+- `root_members` reads a `property` line at the root's indent inside a
+  nested object as a root member. That layout is malformed, and a fix needs
+  a depth-aware reader.
+- The count of uses of the root whole (2, both `createObject(root, ...)`)
+  is still printed and not refused. A refusal of every other use would
+  forbid `x.parent = root` and similar, which is a design call (proposal).
+- A python twin of serviceSet: python's tree_inputs reads the same files,
+  and the node check above pins serviceSet.
+- The headers nested at the root's indent are refused in split-service's
+  judge rather than in the readers. The readers' function_spans is shared by
+  every reader, and the judge is what the gate runs. The harness would boot
+  such a tree, as it boots a sibling call.
+
+**Searched (rule 15).**
+- Writes the cut makes: only the loop after cut_texts. Service.qml and REV's
+  code-behinds are compared with REV, and new files are now held to an empty
+  path.
+- Other guards that report an importer's problem per code-behind:
+  - model members: aliases read from the importer, and its "found no
+    reference" only for the importer itself;
+  - theme names: `own`.
+  - Cleared.
+- Other guards that raise out of main on a refused service: colour, metric,
+  theme, Qt revisions and text format catch it; model members prints one
+  line. Only trim and model regex did not.
+- Other readers that see only part of a JavaScript line: the harness's
+  rootFunctions and the readers' spans read the code-behind whole, and the
+  new refusal stands before both. qa_service_files goes through
+  service_files.py.
+- Other `allowlisted_qml` callers: `git grep` finds none but this record.
+
+**Counts on the final tree.**
+- Node 4069 (ab3d287 4065, 2a4ab03 4068).
+- Python 2991 by discovery (2942; 2a4ab03 2981):
+  - split_service 21
+  - release 120
+  - Qt revisions 39
+  - trim 7
+  - model regex 14
+- qa-lib-test 793 passed, 0 failed (ab3d287 792), with check.sh's raised
+  case floor in place.
+- The two gate steps, cut out of check.sh and run alone under `env -i`, are
+  green: 2,267 sites and 32 of 32 cases; chno 16 checks.
+- check-defect-ledger 789 rows, 0 problems; check-board-staleness 0
+  disagreements.
+- Crash journal 89 at the start and at the end; no qml, qmltestrunner or
+  quickshell process was started.
