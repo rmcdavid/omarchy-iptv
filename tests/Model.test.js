@@ -20332,6 +20332,49 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       REFUSED_SHAPES.flatMap(shape => ["superseded", "busy"].map(code => [shape, code, [], 0, null, false, []]))
         .concat([["cold-after", "ipc_error", ["start:" + Z.id], 0, Z.id, false, []]]))
 
+    // ---- D-PLY-79 (2026-11-22): the question does not outlive the settle a newer start ended ----
+    //
+    // A withdrawn start refused inside the stop's settle raises the
+    // backstop's question (stopOlderStartOk, D-PLY-78), and so does an older
+    // start's ok there (the review of 9d604cf). A start issued AFTER the stop
+    // that answers ok then ends the settle early (D-PLY-40: stopAt 0, both
+    // timers stopped) -- and left the flag set with `stopping` false, so no
+    // backstop was left to ask it or clear it. The next settle to open
+    // without resetting it, a stop the shell issues itself
+    // (stopUnadoptedPlayer), then spent its backstop's probe on the stale
+    // question with nothing attached. The newer start ran under the player
+    // lock after the older verb left it: whatever that verb left, it
+    // adopted or laddered, so the question is answered and the flag goes
+    // with the settle. `refused`: the recheck of 160115e's
+    // quickInsideThenPlay; `ok`: the same staleness since 9d604cf. Red on
+    // c236b9d in both rows: flag true, one probe.
+    checkCall("D-PLY-79: a newer start's ok that ends a stop's settle early ends the older start's question with it -- the flag is cleared, and a later stop the shell issues itself, with nothing attached, asks nothing at its backstop", () => ["refused", "ok"].map(how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      h.root.play(Y.id, true, "")
+      h.drain()
+      const ySeq = h.root.playSeq
+      h.root.stop()
+      h.drain()
+      h.elapse(1000)
+      exit(h, how === "refused" ? refusedOf("ipc_error", ySeq) : okStartSeq(Y.id, ySeq))
+      const raised = [h.root.stopping === true, h.root.stopOlderStartOk]
+      h.root.play(Z.id, true, "")
+      h.drain()
+      exit(h, okStartSeq(Z.id, h.root.playSeq))
+      const ended = [h.root.stopping === true, h.root.stopOlderStartOk, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      // The shell's own stop, nothing attached: a probe that finds a player
+      // which does not answer (D-PLY-73 opens its settle).
+      h.root.runPlayerProbe()
+      exit(h, survivorProbe(0, { responsive: false }))
+      const shellStop = [h.root.stopping === true, h.root.socketAttached()]
+      const before = asks.length
+      h.elapse(h.root.stopSettleMs + 100)
+      return [how, raised, ended, shellStop, asks.slice(before)]
+    }), ["refused", "ok"].map(how => [how, [true, true], [false, false, Z.id], [true, false], []]))
+
     // Pins, green on 81afa9f: a start issued AFTER the stop answering past
     // that stop's backstop plays and is named, nothing looked for; and a
     // start from before the stop answering then, with a play made after the

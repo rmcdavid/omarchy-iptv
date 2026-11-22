@@ -3724,6 +3724,11 @@ Item {
         root.stopAt = 0
         stopSettleTimer.stop()
         stopLookTimer.stop()
+        // D-PLY-79: and the backstop's question goes with its backstop.
+        // This start ran after whatever an older verb left, and adopted
+        // or laddered it; left set, the flag was asked by the next settle
+        // that does not reset it (stopUnadoptedPlayer's).
+        root.stopOlderStartOk = false
       } else if (root.stopping) {
         // The review of 9d604cf: a start issued before the stop. Its player
         // was up; whether the stop laddered it or was refused behind this
