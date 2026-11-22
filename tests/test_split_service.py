@@ -6,7 +6,10 @@ service's files, the move that cuts them, and the round trip back.
   * --check's own cases (tests/fixtures/service-split/check-cases.json), one
     by one, and every refusal kind it names among them;
   * --check over the readers' fixture (tests/fixtures/service-split/), a
-    real one-code-behind layout;
+    real one-code-behind layout, and that layout with a script beside it
+    that Service.qml does not import as a code-behind (refused) and with the
+    model's own beside it (clean); a CRLF Service.qml is refused for its line
+    ends, by name;
   * --inline prints the readers' view, and nothing else;
   * --verify --from-git: the inline view against the commit a move was cut
     from, byte for byte, red on a one-byte mutant of a code-behind;
@@ -15,11 +18,15 @@ service's files, the move that cuts them, and the round trip back.
     service (its inline view, the one-file text on a split tree too) cut for
     three functions verifies and goes red on a one-byte mutant; a cut
     appended to a code-behind REV already holds; and the cuts it refuses,
-    writing nothing.
+    writing nothing -- among them a function whose arguments are not plain
+    names, and a tree holding an untracked file at a new code-behind's path.
 
 Rule 11: each refusal kind's case is wrong on a one-decision mutant of the
-judge, and the round trip on a one-byte mutant; docs/QA-RESULTS.md "D-REL-14:
-the splitter and its guards" has the counts.
+judge, and the round trip on a one-byte mutant; and the fix pass on 2a4ab03's
+eight new cases, the untracked-file cut, the plain-argument cut, the script
+beside the fixture and the CRLF message are each red on 2a4ab03's script or a
+one-decision mutant; docs/QA-RESULTS.md "D-REL-14: the splitter and its
+guards" has the counts.
 
 Run: python3 -m unittest discover -s tests -p test_split_service.py
 """
@@ -135,7 +142,7 @@ class Cases(unittest.TestCase):
         cache = {}
         for case in self.cases:
             with self.subTest(case=case["name"]):
-                present = case.get("present", sorted(n for n in case["files"] if n.startswith("Service")))
+                present = case.get("present", ss.scripts_beside(case["files"]))
                 problems, counts = ss.judge(case["service"], case["files"], present, QML_DIR, cache)
                 want = case["expect"]
                 if "refusal" in want:
@@ -145,7 +152,7 @@ class Cases(unittest.TestCase):
                     self.assertEqual(problems, [])
                     for key, value in want.get("counts", {}).items():
                         self.assertEqual(counts[key], value, key)
-        self.assertEqual(len(self.cases), 24)
+        self.assertEqual(len(self.cases), 32)
 
     def test_every_refusal_kind_has_a_case(self):
         kinds = set(c["expect"].get("refusal") for c in self.cases)
@@ -161,6 +168,38 @@ class ReadersFixture(unittest.TestCase):
         rc, out = run("--check", "--root", FIXTURE, "--qml-dir", QML_DIR, "--no-self-test")
         self.assertEqual(rc, 0, out)
         self.assertIn("(2 file(s), 1 code-behind(s), 3 root function(s), 4 forwarder(s)", out)
+
+    def copy(self):
+        tmp = tempfile.mkdtemp(prefix="omarchy-iptv-split-service-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for name in ("Service.qml", "Service-demo.js"):
+            shutil.copyfile(os.path.join(FIXTURE, name), os.path.join(tmp, name))
+        return tmp
+
+    def test_a_script_beside_it_that_it_does_not_import_is_refused_and_the_models_own_is_not(self):
+        # A comment before `import` hides the line from the readers, and QML
+        # loads the script all the same; only its presence can be judged.
+        for name, text, want in (("zap.js", "function zap() { return root.notAMember }\n", "undeclared"),
+                                 ("helpers.mjs", "export function h() { return 1 }\n", "undeclared"),
+                                 ("Model.mjs", "export function hostsOf(x) { return x }\n", None)):
+            with self.subTest(name=name):
+                tmp = self.copy()
+                write(os.path.join(tmp, name), text)
+                rc, out = run("--check", "--root", tmp, "--qml-dir", QML_DIR, "--no-self-test")
+                if want is None:
+                    self.assertEqual(rc, 0, out)
+                else:
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("split-service: %s: %s is beside Service.qml" % (want, name), out)
+
+    def test_a_crlf_service_is_refused_for_its_line_ends(self):
+        tmp = self.copy()
+        for name in ("Service.qml", "Service-demo.js"):
+            path = os.path.join(tmp, name)
+            write(path, raw(path).replace("\n", "\r\n"))
+        rc, out = run("--check", "--root", tmp, "--qml-dir", QML_DIR, "--no-self-test")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("member: Service.qml has CR line ends", out)
 
     def test_inline_prints_the_view_and_nothing_else(self):
         done = subprocess.run([sys.executable, "-I", SCRIPT, "--inline", "--root", FIXTURE], capture_output=True,
@@ -289,6 +328,21 @@ class Cut(unittest.TestCase):
         finally:
             ss.service_files.inline_text = real
         self.assertEqual(caught.exception.kind, "round-trip")
+
+    def test_an_untracked_file_at_a_new_code_behinds_path_is_refused(self):
+        # No file of REV's, so the tree check above never compares it: the
+        # cut must find the path empty, or it overwrites what nothing can
+        # recover.
+        self.repo = Repo({"Service.qml": raw(os.path.join(FIXTURE, "inline.txt"))})
+        write(os.path.join(self.repo.dir, "Service-demo.js"), "  function wip() {\n    return 1\n  }\n")
+        self.refused("tree", "--domain", "demo", "bump")
+        self.assertIn("function wip()", self.repo.read("Service-demo.js"))
+
+    def test_a_function_whose_arguments_are_not_plain_names_is_not_cut(self):
+        text = raw(os.path.join(FIXTURE, "inline.txt"))
+        self.assertEqual(text.count("  function stays(x) {\n"), 1)
+        self.repo = Repo({"Service.qml": text.replace("  function stays(x) {\n", "  function stays(x = 1) {\n")})
+        self.refused("name", "--domain", "demo", "stays")
 
     def test_a_tree_that_differs_from_rev_is_refused(self):
         self.repo = Repo({"Service.qml": raw(os.path.join(FIXTURE, "inline.txt"))})

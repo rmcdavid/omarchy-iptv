@@ -34,9 +34,19 @@ MODES (exactly one):
             is not there, ...) and, on top of their verdict, for
               function-twice  a name declared twice at the root's indent of
                               Service.qml, forwarders included -- two
-                              code-behinds holding one name is this
-              undeclared      a `Service*.js` beside Service.qml that it
-                              does not import
+                              code-behinds holding one name is this -- or of
+                              the inline view: a header at the root's indent
+                              inside another code-behind function, which the
+                              engine nests and the view reads twice
+              undeclared      a script (`*.js`, `*.mjs`) beside Service.qml
+                              that it does not import as a code-behind, but
+                              the model's own (Model.mjs, and Model.js on a
+                              tree from before D-REL-5): a spelling of an
+                              import the readers do not see loads it all the
+                              same (`/* c */ import "x.js" as X`). A script
+                              another QML file imports is refused here too,
+                              until a split of that file teaches this judge
+                              its importer
               qualifier       a code-behind's qualifier named anywhere but in
                               its forwarders and its import: a body that
                               calls `ServicePip.F(` past the root is code the
@@ -51,7 +61,8 @@ MODES (exactly one):
                               the root's forwarder is the engine's scope
                               order, and `Qt.callLater` deduplicates by the
                               function it is handed; say `root.F`
-              member          a `root.N` (or `root?.N`, `root["N"]`) in
+              member          a `root.N` (or `root?.N`, `root["N"]`,
+                              `root?.["N"]`) in
                               Service.qml or a code-behind where N is no
                               member of the root: its properties and
                               aliases, their change signals, its signals and
@@ -64,7 +75,8 @@ MODES (exactly one):
                               check it did, made a refusal, over every file;
                               ids are no members (`root.<id>` reads
                               undefined)
-              unjudged        `root[<expression>]`: whatever it reads, no
+              unjudged        `root[<expression>]` or `root?.[<expression>]`:
+                              whatever it reads, no
                               reading of the source can say
               scan            the tokenizer lost its place in a file
   --verify  --from-git REV: the inline view equals REV's byte for byte --
@@ -83,7 +95,8 @@ MODES (exactly one):
             declarations in name order. It writes nothing unless the result
             passes --check's judge and its inline view equals REV's
             (`round-trip`), and it refuses a tree whose service files differ
-            from REV's (`tree`), so nothing uncommitted is overwritten; then it
+            from REV's, or that holds anything at a new code-behind's path
+            (`tree`), so nothing uncommitted is overwritten; then it
             runs --verify against REV. Refused too: a name that is no root
             function, a forwarder, or named twice, a header whose arguments
             are not plain names, code after a closing brace (`name`), a
@@ -107,7 +120,6 @@ Python 3 standard library only; ASCII only.
 """
 
 import argparse
-import glob
 import importlib.util
 import json
 import os
@@ -131,8 +143,6 @@ ROOT_ELEMENT = re.compile(r'^([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*) \{[ \
 ROOT_ID = re.compile(r'^  id: ([A-Za-z_][A-Za-z0-9_]*)[ \t]*\r?$', re.M)
 PROPERTY = re.compile(r'^  (?:(?:readonly|required|default) )*property [A-Za-z_][A-Za-z0-9_.<>]* ([A-Za-z_][A-Za-z0-9_]*)', re.M)
 SIGNAL = re.compile(r'^  signal ([A-Za-z_][A-Za-z0-9_]*)', re.M)
-PLAIN_ARGS = re.compile(r'(?:[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*)?')
-DOMAIN = re.compile(r'[a-z][a-z0-9]*')
 
 
 def _load(name, filename):
@@ -190,6 +200,9 @@ def type_members(text, type_name, qml_dir, cache):
     except theme.Unreadable as error:
         raise Problem('member', 'the root type\'s members are unreadable: %s' % error)
     c = by_export.get(type_name.split('.')[-1])
+    if c is None and '\r' in text:
+        raise Problem('member', 'Service.qml has CR line ends, and its imports are read from LF-ended lines only, '
+                      'so no module it imports is read and its root type %s is unknown' % type_name)
     if c is None:
         raise Problem('member', 'no module Service.qml imports exports its root type %s' % type_name)
     out, seen = set(), set()
@@ -236,9 +249,13 @@ def member_sites(text, rid, label):
         if nxt is not None and nxt.kind == 'punct' and nxt.text in ('.', '?.') and after is not None \
                 and after.kind == 'ident':
             sites.append((after.line, after.col, after.text))
-        elif nxt is not None and nxt.kind == 'punct' and nxt.text == '[':
-            if after is not None and after.kind == 'str' and k + 3 < len(toks) and toks[k + 3].text == ']':
-                sites.append((after.line, after.col, after.text))
+        elif nxt is not None and nxt.kind == 'punct' and (nxt.text == '[' or (
+                nxt.text == '?.' and after is not None and after.kind == 'punct' and after.text == '[')):
+            # `root[...]`, and `root?.[...]`, whose index opens a token later.
+            at = k + 2 if nxt.text == '[' else k + 3
+            key = toks[at] if at < len(toks) else None
+            if key is not None and key.kind == 'str' and at + 1 < len(toks) and toks[at + 1].text == ']':
+                sites.append((key.line, key.col, key.text))
             else:
                 problems.append(Problem('unjudged', '%s:%d:%d: `%s[...]` is indexed by an expression, which no '
                                         'reading of the source can judge' % (label, t.line, t.col, rid)))
@@ -306,22 +323,28 @@ def code_problems(label, text, qualifiers, own, allowed_lines=()):
 def judge(service, files, present, qml_dir, cache=None):
     """(problems, counts) for one service: `service` is Service.qml's text,
     `files` the declared code-behinds that are there (name -> text),
-    `present` every `Service*.js` name beside Service.qml."""
+    `present` every script name (`*.js`, `*.mjs`) beside Service.qml."""
     cache = {} if cache is None else cache
     counts = {'files': 1, 'code_behinds': 0, 'root_functions': 0, 'forwarders': 0, 'moved': 0,
               'sites': 0, 'values': 0}
     try:
-        service_files.inline_text(service, files)
+        view = service_files.inline_text(service, files)
         decls = service_files.declarations(service)
         root_spans = service_files.function_spans(service, 'Service.qml')
+        # The view's own functions: a header at the root's indent inside a
+        # code-behind function is a nested function to the engine, so its
+        # forwarder finds nothing, and the view holds it twice.
+        service_files.function_spans(view, 'the inline view')
     except service_files.ServiceFilesError as error:
         return [Problem(error.kind, 'refused by the readers: %s' % error)], counts
     problems = []
     declared = set(file for file, _q, _n in decls)
     qualifiers = set(q for _f, q, _n in decls)
-    for name in sorted(set(present) - declared):
-        problems.append(Problem('undeclared', '%s is beside Service.qml and Service.qml does not import it: a '
-                                'code-behind nothing loads, or one the readers cannot see' % name))
+    model = set(['Model.mjs'] + ([] if service_files.imports_a_module(service) else ['Model.js']))
+    for name in sorted(set(present) - declared - model):
+        problems.append(Problem('undeclared', '%s is beside Service.qml and Service.qml does not import it as a '
+                                'code-behind: a script nothing loads, or one loaded by a spelling the readers '
+                                'cannot see' % name))
     forwarders = forwarder_lines(service, qualifiers)
     problems += code_problems('Service.qml', service, qualifiers, None, forwarders)
     own_of = {}
@@ -356,7 +379,7 @@ def judge(service, files, present, qml_dir, cache=None):
 
 def tree_inputs(root):
     """(Service.qml's text, the declared code-behinds that are there, every
-    Service*.js beside it), read through the readers' own paths."""
+    script beside it), read through the readers' own paths."""
     svc = service_files.service_path(root)
     service = read(svc)
     files = {}
@@ -367,8 +390,14 @@ def tree_inputs(root):
     for path in service_files.service_files(svc)[1:] if decls else []:
         if os.path.exists(path):
             files[os.path.basename(path)] = read(path)
-    present = sorted(os.path.basename(p) for p in glob.glob(os.path.join(os.path.dirname(svc), 'Service*.js')))
+    present = scripts_beside(os.listdir(os.path.dirname(svc) or '.'))
     return service, files, present
+
+
+def scripts_beside(names):
+    """The script files among the names beside Service.qml: `*.js` and
+    `*.mjs`, which a QML file may import; the judge sets the model's apart."""
+    return sorted(n for n in names if n.endswith(('.js', '.mjs')))
 
 
 def self_test(qml_dir, cases_path=CASES):
@@ -378,7 +407,7 @@ def self_test(qml_dir, cases_path=CASES):
         cases = json.load(fh)['cases']
     wrong, cache = [], {}
     for case in cases:
-        present = case.get('present', sorted(n for n in case['files'] if n.startswith('Service')))
+        present = case.get('present', scripts_beside(case['files']))
         problems, counts = judge(case['service'], case['files'], present, qml_dir, cache)
         want = case['expect']
         if 'refusal' in want:
@@ -469,7 +498,13 @@ def verify(root, rev, out=None):
 # --- the cut ----------------------------------------------------------------
 
 def qualifier_of(domain):
+    """The qualifier of `Service-<domain>.js`, by the readers' own rule;
+    None for a domain that is not lower-case letters and digits."""
     return service_files.code_behind_qualifier('Service-%s.js' % domain)
+
+
+def forwarder_text(name, args, qualifier):
+    return '  function %s(%s) { return %s.%s(%s) }' % (name, args, qualifier, name, args)
 
 
 def cut_texts(service, rev_files, moves, qml_dir):
@@ -486,7 +521,7 @@ def cut_texts(service, rev_files, moves, qml_dir):
     declared = dict((q, f) for f, q, _n in decls)
     seen, plan = set(), []
     for domain, names in moves:
-        if not DOMAIN.fullmatch(domain):
+        if qualifier_of(domain) is None:
             raise Problem('domain', '`%s` is not a domain: lower-case letters and digits' % domain)
         if not names:
             raise Problem('domain', 'the domain %s names no function' % domain)
@@ -501,7 +536,9 @@ def cut_texts(service, rev_files, moves, qml_dir):
             fw = service_files.FORWARDER.fullmatch(last)
             if fw and fw.group(3) in declared:
                 raise Problem('name', '%s is a forwarder already' % name)
-            if not PLAIN_ARGS.fullmatch(args):
+            # The forwarder the move would leave, held to the readers' exact
+            # form: its arguments plain names, its own header's.
+            if not service_files.FORWARDER.fullmatch(forwarder_text(name, args, 'Q')):
                 raise Problem('name', '%s takes (%s): a forwarder passes plain names only' % (name, args))
             eol = service.find('\n', close)
             if not service_files.tail_reads(service[close + 1:len(service) if eol == -1 else eol]):
@@ -513,7 +550,7 @@ def cut_texts(service, rev_files, moves, qml_dir):
     for domain, name, args, start, end in plan:
         q = qualifier_of(domain)
         out.append(service[cursor:start])
-        out.append('  function %s(%s) { return %s.%s(%s) }' % (name, args, q, name, args))
+        out.append(forwarder_text(name, args, q))
         cursor = end
     out.append(service[cursor:])
     new_service = ''.join(out)
@@ -550,8 +587,7 @@ def cut_texts(service, rev_files, moves, qml_dir):
     if after != before:
         at, line = first_difference(after.encode('utf-8'), before.encode('utf-8'))
         raise Problem('round-trip', 'the cut\'s inline view differs from REV\'s at byte %d (line %d)' % (at, line))
-    present = sorted(n for n in files if n.startswith('Service'))
-    problems, _counts = judge(new_service, files, present, qml_dir)
+    problems, _counts = judge(new_service, files, scripts_beside(files), qml_dir)
     if problems:
         raise Problem(problems[0].kind, 'the cut is refused by --check: %s' % problems[0])
     files[service_files.SERVICE] = new_service
@@ -568,6 +604,14 @@ def cut(root, rev, moves, qml_dir, out=None):
                 raise Problem('tree', '%s differs from %s:%s; commit or stash first, so the cut overwrites nothing '
                               'uncommitted' % (path, rev, name))
         written = cut_texts(service, rev_files, moves, qml_dir)
+        # A new code-behind's path must be empty: an untracked or ignored
+        # file there is no file of REV's, and writing would lose it.
+        for name in sorted(written):
+            if name == service_files.SERVICE or name in rev_files:
+                continue
+            if os.path.lexists(os.path.join(root, name)):
+                raise Problem('tree', '%s is there and is no file of %s\'s service; move it away first, so the cut '
+                              'overwrites nothing uncommitted' % (os.path.join(root, name), rev))
     except (Problem, service_files.ServiceFilesError, UnicodeDecodeError) as error:
         out.write('split-service: %s\n' % error)
         return 1

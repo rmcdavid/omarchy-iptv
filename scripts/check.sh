@@ -1523,13 +1523,15 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # (scripts/split-service.py --check) judges every `root.N` site in the
 # service's files against the root's members -- 2,267 on this tree, all in
 # Service.qml while no code-behind ships, and the same 2,267 over Part A's
-# four-code-behind prototype of 9ed04be -- and then runs its own 24 cases, so
-# the step goes red when the judge stops judging even on a tree with nothing
-# split. The site floor sits a little under the count, as the metric guard's
-# does, so a refactor that folds a few references away is not a red gate
-# and a judge that reads none is; the case floor is exact.
+# four-code-behind prototype of 9ed04be -- and then runs its own cases, 24 at
+# first and 32 since the fix pass on 2a4ab03 (any script beside Service.qml
+# that it does not import, a header nested at the root's indent, root?.[...]),
+# so the step goes red when the judge stops judging even on a tree with
+# nothing split. The site floor sits a little under the count, as the metric
+# guard's does, so a refactor that folds a few references away is not a red
+# gate and a judge that reads none is; the case floor is exact.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
-SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-24}
+SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
