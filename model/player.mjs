@@ -1133,8 +1133,16 @@ function playerDeathKind(context) {
 //   recover   the same, and we no longer know WHAT is playing, so read it
 //             back out of the player's own stash - the identical path a
 //             shell restart takes (4.5), which is why it needs no new rule
+//   confirm   D-PLY-78: a start or restart issued before the last stop
+//             (`withdrawn`), answering with nothing named once that stop's
+//             settle is over. Its player is one that stop gave up on (the
+//             verb held the lock past its wait), so it is looked for as the
+//             stop's backstop looks and stopped if it is there, never
+//             recovered: recovered, it was adopted and named after the stop.
+//             Inside the settle the backstop looks (`abandoned`).
 function playerSessionFollowUp(context) {
   var ctx = context || {}
+  if (ctx.withdrawn === true && ctx.stopping !== true && ctx.nowPlaying !== true) return "confirm"
   if (ctx.attached === true) return "attached"
   if (ctx.stopping === true || ctx.userStopped === true) return "abandoned"
   return ctx.nowPlaying === true ? "hunt" : "recover"

@@ -58,6 +58,12 @@
 //     is usually still out (it answers 60 to 300 ms after it is sent). The
 //     plain schedule reaches that window about once in a few hundred
 //     sequences (lane-ply73's seed 226 of 300).
+//   - A slow player (D-PLY-78), when a sequence asks for it (`slowP`): with
+//     that chance a start's or a restart's lock section first runs 6.15 to
+//     24 s (a player slow to answer its requests, D-PLY-39's regime, inside
+//     the verb's own bound), so a stop pressed in it gives up on the lock
+//     and the verb can answer after that stop's backstop. No draw without
+//     it.
 //   - `status` (the control slot): the live player's stash, or not running.
 //     Asked once, by the health tick's own block (h.fireTimer), after a
 //     sequence whose last action is a play: ruling CL6 lets the label and the
@@ -188,8 +194,12 @@ function playerWorld(h, o) {
     const v = { kind: verb, seq: Number(argOf(c, "--seq")), id: argOf(c, "--id"), issue: ++w.issued, slot: "player" }
     w.slot = v
     note("issue " + verb + (v.id ? " " + v.id : "") + (verb !== "probe" ? " @" + v.seq : ""))
-    if (verb === "start" || verb === "restart") at(between(30, 300), "lock wanted", () => wantLock(v))
-    else if (verb === "probe") at(between(60, 300), "probe answers", () => reply(v, probeReply()))
+    if (verb === "start" || verb === "restart") {
+      at(between(30, 300), "lock wanted", () => wantLock(v))
+      // D-PLY-78 (`slowP`): a slow player keeps this verb's lock section
+      // past a stop's lock wait. No draw without it.
+      if (opts.slowP && rnd() < opts.slowP) v.slowMs = between(LOCK_WAIT + 100, 24000)
+    } else if (verb === "probe") at(between(60, 300), "probe answers", () => reply(v, probeReply()))
     else at(20, "unknown verb", () => reply(v, JSON.stringify({ ok: false, kind: "player." + verb, error: { code: "not_implemented", message: "not modelled" } })))
   }
 
@@ -280,6 +290,18 @@ function playerWorld(h, o) {
       return
     }
     w.record = v.seq
+    if (v.slowMs > 0) {
+      const ms = v.slowMs
+      v.slowMs = 0
+      note(v.kind + " @" + v.seq + " holds the lock " + ms + " ms over a slow player")
+      at(ms, "slow requests answered", () => { if (!v.dead) work(v) })
+      return
+    }
+    work(v)
+  }
+
+  // What a verb does once it holds the lock and its seq stands.
+  function work(v) {
     const p = w.player && w.player.alive ? w.player : null
     if (v.kind === "stop") {
       if (!p) { note("stop @" + v.seq + " finds nothing"); release(5); return }
@@ -422,7 +444,7 @@ function playerWorld(h, o) {
 // the next action waits out the backstop too; likewise no draw without it.
 // With `windowP` as well, that next action lands inside the contested stop's
 // look's or backstop's probe with that chance (the header); no draw without
-// it either.
+// it either. `slowP` is drawn per start or restart (the header).
 function playerSequence(h, o) {
   const opts = o || {}
   const w = playerWorld(h, opts)

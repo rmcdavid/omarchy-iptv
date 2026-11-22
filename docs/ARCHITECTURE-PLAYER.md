@@ -1785,6 +1785,25 @@ staleness test and settled D-PLY-35's stopped start as failed over the newer
 play), and an unreadable answer it does act on owes no further re-read. Held
 by the service harness; not watched on a real player.]**
 
+**[Amended 2026-11-21, D-PLY-78 (lane-ply78, the ply78 branch): a start or
+restart issued before the user's stop whose lock section outlasted that
+stop's 6.05 s lock wait (a player slow to answer is enough) outlived the
+stop, which gave up, and could answer ok after the stop's 18.25 s backstop
+had ended `stopping` and cleared `userStopped`. Read then as the shell's own
+player to recover, it was adopted and the stopped channel named. Such an
+ok -- its seq below `stopSeq`, nothing named, no settle running -- is now
+looked for through the stop's confirmation (`Model.playerSessionFollowUp`'s
+`confirm`, `lookForWithdrawn`), which stops the player if it is there, as
+the backstop's own probe does, and that stop is the last the shell sends.
+So is that start's reply when its watchdog stops it with nothing named
+(D-PLY-35's `helper_timeout`), which read the stop's own ladder as having
+ended whatever it left: after the settle at once, inside it by the
+settle's backstop (`stopOlderStartOk`), as for an older start's ok. A start
+issued after the stop, or one answering with a play made after the stop
+waiting, is not this case and is unchanged. Held by the service harness
+and by the seeded world with slow players; not watched on a real
+player.]**
+
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
 **[2026-11-18: except D-PLY-69, open: stop, play, stop, play while an older
