@@ -860,8 +860,11 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // same fixture and cases through scripts/service_files.py, and each engine
 // runs the other's CLI. Rule 11: seen red with a reader that drops the
 // code-behind (serviceText returning Service.qml's own text) and with one
-// that lists none (serviceFiles returning Service.qml alone); the counts are
-// in docs/QA-RESULTS.md, "D-REL-14: the service readers".
+// that lists none (serviceFiles returning Service.qml alone), and the ten
+// later shared cases and the regular-file door on a27b90c's reader or a
+// one-decision mutant; the counts are in docs/QA-RESULTS.md, "D-REL-14: the
+// service readers" and, for the later ones, "The review of a27b90c,
+// settled".
 ;(function () {
   const fs = require("fs"), path = require("path"), cp = require("child_process")
   const SF = serviceReader
@@ -933,7 +936,23 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
       if (!got) wrong.push(c.name)
     }
     return [C.length, wrong]
-  }, [22, []])
+  }, [32, []])
+
+  // IPTV_SERVICE_QML names a mutant copy, and a rule-11 copy need not end in
+  // `.qml`: the readers take any regular file as the service's file (on
+  // a27b90c the node reader joined Service.qml onto it and threw ENOTDIR).
+  checkCall("D-REL-14 (fixture): a regular file of any name is the service's file, its code-behind read beside it, in both engines", () => {
+    const work = fs.mkdtempSync(path.join(require("os").tmpdir(), "omarchy-iptv-service-door-"))
+    try {
+      fs.copyFileSync(path.join(FIX, "Service.qml"), path.join(work, "svc.mutant"))
+      fs.copyFileSync(path.join(FIX, "Service-demo.js"), path.join(work, "Service-demo.js"))
+      const file = path.join(work, "svc.mutant"), inline = raw(path.join(FIX, "inline.txt"))
+      const t = py("text", file), n = py("names", file)
+      return { names: SF.serviceNames(file), text: SF.serviceText(file) === inline, py: [t.status, t.stdout === inline, n.stdout] }
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true })
+    }
+  }, { names: ["svc.mutant", "Service-demo.js"], text: true, py: [0, true, "svc.mutant\nService-demo.js\n"] })
 
   checkCall("D-REL-14: the reader's brace matcher ends every root function of the service exactly where tests/service-harness.js ends it", () => {
     const H = require("./service-harness.js")

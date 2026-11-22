@@ -23291,10 +23291,13 @@ L2593-3071 on 9ed04be), the state-private and state-mode functions
 three helpers, runHelper, str, hostForRecord, resultField, probeRecord,
 withKey, withoutKey, and nine more; every property, signal, change handler
 and object. No moved body names `this`, `arguments`, `Qt.resolvedUrl`,
-`callee` or `caller`; every argument list is plain names; every
-`Qt.callLater` in moved code passes `root.F`, so the forwarder keeps the
-dedup. A separate inliner (python, its own brace matcher) put the prototype
-back together: equal to `git show 9ed04be:Service.qml` byte for byte
+`callee` or `caller`; every argument list is plain names; seven of the eight
+`Qt.callLater` calls in moved code pass `root.F`, so the forwarder keeps
+their dedup, and the eighth, adoptActive's, passes a fresh
+`function() { root.persistActive(key) }`, as on 9ed04be, which is
+deduplicated neither before the move nor after it. A separate inliner
+(python, its own brace matcher) put the prototype back together: equal to
+`git show 9ed04be:Service.qml` byte for byte
 (sha256 917ac8e9...cd11e1, 446,973 B). Red on two mutants: one body byte
 (`pipSequenceWatchdog.stop()` to `.start()`, cmp differs at byte 114883) and
 one forwarder's call arguments swapped (refused).
@@ -23315,15 +23318,21 @@ the guide through an asynchronous Loader, the bar through an asynchronous
 "-d" arms add one line to `Component.onDestruction` that calls moved
 functions through their forwarders.
 
-| arm | root | plugin files | warnings from plugin files | JS errors | interceptor | ipc status | start-up | probe | disable |
+| arm | root | plugin files | warnings from plugin files | JS errors | interceptor, for the plugin's files | ipc status | start-up | probe | disable |
 |---|---|---|---|---|---|---|---|---|---|
 | base-A | pragma | 43 | 0 | 0 | the 3 QML entry points only | ready, 3 channels | adopted the entry, channels.json written | 9/9 | orphan check started |
 | base-B | none | 43 | 0 | 0 | none | same | same | 9/9 | same |
-| proto-A | pragma | 47 | 0 | 0 | the 3 QML entry points only; no line names a .js | same | same | 9/9 | same |
+| proto-A | pragma | 47 | 0 | 0 | the 3 QML entry points only; no intercept is for a plugin .js (Service.qml's line dumps its text, the four imports with it) | same | same | 9/9 | same |
 | proto-B | none | 47 | 0 | 0 | none | same | same | 9/9 | same |
 | base-d-A, base-d-B | A, B | 43 | 0 | 0 | as base | same | same | 9/9 | the destruction line ran, `Q:none` |
 | proto-d-A, proto-d-B | A, B | 47 | 0 | 0 | as proto | same | same | 9/9 | the destruction line ran, `Q:function`: the code-behinds alive in onDestruction |
 
+- "Warnings from plugin files" leaves out, by the summary's own filter,
+  quickshell.qmlscanner's `Module path "<plugin dir>" is outside of the
+  config folder`, which every A arm logs once, in both trees, and no B arm
+  logs. "Interceptor" counts intercepts for the plugin's files: the host
+  root's own files (shell.qml, Commons, Ui, services, the host's own .js
+  among them) are intercepted in every arm, B included.
 - The probe called, through the service, functions moved into each
   code-behind (seekState, pipConfig with `Commons` in a code-behind,
   sourcesReady, activeSourceSummary, logoSurvey, socketAttached,
@@ -23338,9 +23347,11 @@ functions through their forwarders.
 - Under the pragma the load patch serves only the three QML entry points
   (compiled as `qs:///...`); the four .js files compile from `file://`, as
   Model.mjs and model/*.mjs do.
-- scripts/dev-harness/shell.qml's `file://` load of the prototype (key-scenario's
-  shell arm, ten loads): 0 lines naming a code-behind, 0 TypeError,
-  ReferenceError or "not a function".
+- scripts/dev-harness/shell.qml's `file://` load of the prototype
+  (key-scenario's shell arm, 78 loads in each tree's run: 78 `Launching
+  config` lines, all of the harness root's shell.qml, and 78 `service
+  loaded`, in each kept harness.log): 0 lines naming a code-behind, 0
+  TypeError, ReferenceError or "not a function".
 - qmllint 6.12 (`--json`) on Service.qml: 433 entries on the base, 139 on the
   prototype, so the moved bodies are no longer linted; a forwarder naming a
   member its code-behind lacks draws `Member "pipRefusX" not found` (139 to 140).
@@ -23381,25 +23392,63 @@ Service-sources.js closed. A downgrade deletes the four .js files, then
 rewrites Service.qml. The owner's global git configuration sets no
 `checkout.workers`.
 
-**Also seen, no id filed (the lead's to decide).**
-- The judge's rewind region holds 36 functions, 20 of them source switching,
-  probing, reconcile and cache jobs (beginSwitch through
-  activeSourceSummary); rewind proper is 16 functions and 8,747 B, not about
-  41 KB, which C3's first move should be re-measured on.
+**Also seen (no id filed by this lane; what each became since is in
+brackets).**
+- The judge's rewind region, from the `// ---- M5-01 LIVE REWIND` banner to
+  the helpers banner (L5734-6546 on 9ed04be, L5698-6510 on 81afa9f), holds 36
+  functions: 21 of the sources' (source switching, probing, reconcile and
+  cache jobs, beginSwitch through activeSourceSummary) and 15 of rewind's
+  (seekState through issueQueuedTracks). Rewind's 16th, togglePause, sits
+  just above the banner (L5726 on 9ed04be). Rewind's 16 total 8,747 B with
+  their comment blocks, not about 41 KB, which C3's first move should be
+  re-measured on. (Counted on both trees against the cutter's domain list;
+  an earlier version of this line said 20 and 16.) [C3's first move takes the
+  whole region: the lead's call (b) in "The review of a27b90c, settled",
+  below.]
 - Through createObject's property map alone the rig's barConfig reached the
   service with its layout arrays as sequences `Array.isArray` refuses, so
   `Model.findBarEntry` returned `{}` and the service read no entry, in both
   trees; assigning barConfig from script, as the host's syncPluginApis does,
   fixed the rig. The host's createScopedPluginShell passes `barConfig` in
   that map, so a freshly created service may read default settings until the
-  next syncPluginApis. Not measured on the host.
+  next syncPluginApis. Not measured on the host. [Filed as D-HOST-15 and
+  read in the host and the service: a state write from those defaults is
+  reachable, so P2; "The review of a27b90c, settled", below.]
 - key-scenario.sh's PRIVATE segment (B42/B43) points a guide URL at
   epg.example.test, and the helper asked the resolver for that name five
-  times a run, fifteen across the three runs; whether a query left the
-  machine was not observed. A literal 127.0.0.1 guide URL would avoid it.
+  times a run: five `could not reach epg.example.test` lines in each of the
+  two kept harness.logs (base and prototype; the third run's log was not
+  kept). Whether a query left the machine was not observed. A literal
+  127.0.0.1 guide URL would avoid it.
 - With `checkout.workers` above 1 (a user's own git configuration)
   Service.qml can be written before the code-behinds close, so D-REL-9's
-  ordering argument holds at git's default only.
+  ordering argument holds at git's default only. [Measured or answered before
+  the first release that ships a code-behind: the lead's call (d), below.]
+
+**Not measured, so the go covers the mechanism and not these.**
+- The host's own plugin registry. Root A's lines 1-13 are the host's
+  shell.qml header byte for byte (the rig compares them), but below them is
+  the rig's own body, which reproduces ensureService, panelLoader and
+  loadPluginWidget (read against the host's shell.qml) with the host's
+  PluginShellApi type and the rig's own callbacks. No PluginRegistry,
+  `_syncServices` or `rescanPlugins` ran.
+- A reload. The rig set `QS_DISABLE_FILE_WATCHER=1`, so no arm reloaded.
+  The code-behinds compile from `file://`, outside the load patch, which
+  serves only the three QML entry points, so a reload after a release that
+  changes one could pair a Service.qml and a code-behind of two builds,
+  D-REL-6's mixed-version shape. Reasoned, not measured.
+- Any player. No arm and no scenario started one. The rig ran start-up's
+  probes (runWhichMpv, runPlayerProbe, with no player to find) and the reads
+  socketAttached and channelByNumber; key-scenario's kept logs name mpv only
+  in the socket's path and the `mpvArgs` settings key. So the player
+  code-behind (55 functions, 114,017 B), with its socket attach, play and
+  line handling, is unmeasured live.
+- rewind-scenario.sh as committed cannot run in a cage: it refuses to start
+  without wtype (L80, L382) and asks the desk's own lock (L379). So C3's
+  stated proof, "rewind-scenario and key-scenario live in the cage", cannot
+  be met as written, and C3 and C4 need a cage-runnable arm that plays
+  through the service, which is the lead's to name. tls-scenario's
+  windowless arm is not one: by its own header it starts no shell or harness.
 
 Crash journal 88 at the start, after every arm and run, and at the end; no
 crash card. The owner's ~/.cache/QtProject and ~/.cache/quickshell listings
@@ -23408,7 +23457,20 @@ of the owner's was reachable from the private runtime (`quickshell ipc`
 listed only the nested instance), and a stub hyprctl and a stub
 omarchy-notification-send first on PATH recorded 0 notices.
 
-### Part B: the readers, and every reader of Service.qml's text converted
+### Part B: the readers, and which readers of Service.qml's text were converted
+
+Every test and harness reader of Service.qml's text was converted but one,
+scripts/qa-sources-scenarios.sh's `qa_defines_function`, which a forwarder
+still satisfies; tests/test_host_load_patch.py was converted by the settle
+(below). Two more read every root QML file's text for objects, which stay in
+Service.qml, and need no conversion: test_host_motion.py (animations) and
+tests/a11y/fidelity.py's L7 sweep (accessibility declarations). The gate's
+guards that read the ALLOWLIST's `.qml` entries, and their tests, are left
+for C2's `shipped_code`; the lists are below. (An earlier version of this
+heading and of the D-REL-14 row said every reader was converted, and the
+settle's first draft said every one but qa_defines_function while
+test_host_load_patch.py, red on a split tree, was still listed as path
+only.)
 
 **The readers.** tests/service-files.js (node) and scripts/service_files.py
 (python), the two agreeing byte for byte:
@@ -23419,12 +23481,18 @@ omarchy-notification-send first on PATH recorded 0 notices.
   contiguous `//` lines directly above `  function F(` through the closing
   brace's line), which is the one-file Service.qml a split is cut from, so a
   text pin never moves;
-- a refusal by kind, never a guess: a script import in any other form, a
-  file or qualifier declared twice, a missing file, bytes that are not UTF-8,
-  a function declared twice or unclosed in a code-behind, a forwarder-shaped
-  line for a declared qualifier that is not exactly its function's, a
-  forwarder for a function the code-behind lacks, two forwarders for one, a
-  code-behind function no forwarder names.
+- a refusal by kind, never a guess: a script import in any other form
+  (either quote), a file or qualifier declared twice, a missing file, bytes
+  that are not UTF-8, a function declared twice or unclosed in a code-behind,
+  a code-behind line outside every function that is neither blank nor a `//`
+  comment (`stray`), a forwarder-shaped line for a declared qualifier that is
+  not exactly its function's (its arguments plain names, the function's own),
+  a forwarder for a function the code-behind lacks, two forwarders for one, a
+  code-behind function no forwarder names. So the view holds every line of
+  every code-behind but blank lines and loose `//` comments, and runs as the
+  forwarders run.
+- `where` is a plugin root, a path ending in `.qml`, or any regular file
+  (an `IPTV_SERVICE_QML` mutant copy may be named anything).
 - Both read lines split at "\n" only and keep a "\r" as text (no
   universal-newline translation, which the python readers' `read_text` had
   applied: the same bytes on any tree but a CRLF one, where they now read
@@ -23439,9 +23507,14 @@ code-behind (Service-demo.js: four moved functions, among them a regular
 expression, a template literal, a block comment and a string that each hold
 a brace, a banner comment directly attached, a nested function), inline.txt
 (its expected view, which is also the one-file text it was cut from), and
-cases.json (22 cases: two code-behinds in declaration order, a CRLF
+cases.json (32 cases: two code-behinds in declaration order, a CRLF
 checkout, a root comment above a forwarder, a last line with no newline,
-and every refusal). Both engines run all of it.
+blank and loose-comment lines outside the functions, and every refusal,
+among them a forwarder passing a default, a pattern or arguments not its
+function's, a single-quoted import, and five kinds of stray line: a
+top-level statement, a function at no indent, `function g (y)`, a header
+whose default holds parentheses, a `.pragma` line). Both engines run all of
+it.
 
 **Readers of Service.qml's text, found by shape** (every hit of
 `Service.qml` under tests/ and scripts/, 469 lines on 9ed04be, and the readers that do
@@ -23455,7 +23528,9 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
   the seams in chno-, id-rotate- and pip-scenario.sh (27 seam lines and 2
   absent lines now name `@service`, which `seam` counts over
   qa_service_text, so the scenarios' floors and qa-lib-test's line counts are
-  unchanged).
+  unchanged); and, by the settle, tests/test_host_load_patch.py's
+  HostLoadPatchCase, whose probes copy Service.qml's header (red on a split
+  tree before it: "The review of a27b90c, settled", below).
 - Converted to the files: the lastPersistFailure sweep in Model.test.js and
   test_pip.py's stand-in sweep ("no shipped source names it", "every file a
   stand-in could hide in"); pip-scenario.sh's two `absent` lines (over every
@@ -23472,17 +23547,26 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
   `git archive` export of a baseline; the 19 key-mutation and 8
   chno-mutation patches (`git apply`); tests/test_release.py and
   tests/test_defect_ledger.py (synthetic trees); test_shipped_copy.py
-  (ALLOWLIST-driven, `.js` among its extensions); test_host_load_patch.py
-  (the load patch serves only the QML entry points, measured above);
-  test_host_motion.py (animations are objects, which stay in Service.qml);
-  the host's own notifications Service.qml in test_host_notify_codes.py,
+  (ALLOWLIST-driven, `.js` among its extensions); the host's own
+  notifications Service.qml in test_host_notify_codes.py,
   test_notify_hosts.py and test_host_text_format.py; comments and prose.
+  (test_host_load_patch.py and test_host_motion.py were listed here; the
+  first copies Service.qml's header into a probe and is converted, the second
+  reads text and is below.)
+- Text read, no conversion needed, its subject on the root: test_host_motion.py
+  (every root `*.qml`'s animations; review 1 saw it green on a split tree) and
+  tests/a11y/fidelity.py's L7 sweep, `ungraded_surfaces` (every root `.qml`'s
+  accessibility declarations; read, not run on a split tree). Both look for
+  objects, which stay in Service.qml.
 - Guards, left for C2's `shipped_code` (lane 2): check-model-members,
   -model-regex, -trim-shapes, -text-format, -theme-names, -color-literals,
   -metric-literals, -qt-revisions and -readme-notices (each reads ALLOWLIST's
   `.qml` entries), and their tests (test_color_literals, test_metric_literals,
-  test_qt_revisions, test_theme_names, test_model_members). check-defect-ledger
-  and the marketplace and double-encoding scans read every tracked file.
+  test_qt_revisions L423 and L448, test_theme_names L119, test_model_members,
+  whose `mistyped` cases rewrite Service.qml's own text: the review of
+  a27b90c saw it go red on a split tree, on `'Model.MAX_CHNO_LABEL)' not
+  found`). check-defect-ledger and the marketplace and double-encoding scans
+  read every tracked file.
 - Outside this lane's files, a reader not converted:
   scripts/qa-sources-scenarios.sh's `qa_defines_function "$ROOT/Service.qml"
   switchSource`, which a forwarder line still satisfies.
@@ -23499,7 +23583,8 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
    1.2 s), and the final run, with nothing beside it, was 2941 OK.
 2. The engines agree: on this tree (names `Service.qml`, text equal to the
    file) and on the fixture (names and text), each through the other's CLI,
-   in both suites; on all 22 shared cases.
+   in both suites; on all 22 shared cases (32 since the settle: "The review
+   of a27b90c, settled", below).
 3. The round trip closes: the fixture's view is inline.txt byte for byte,
    from the root and from Service.qml's own path; inline.txt cut again by the
    reader's own function spans is the fixture's Service.qml byte for byte,
@@ -23520,8 +23605,10 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
      test_state's deadline test an error;
    - qa-lib.sh: `qa_service_files` printing Service.qml alone, 5 of 790 red
      (the fixture's names, the copy, the CRLF copy, both slow trees: "0
-     same differs"); `qa_service_text` as `cat Service.qml`, 4 red; 9ed04be's
-     qa-lib.sh, 15 of the 17 new red, all but the two extractions, which go
+     same differs"; 6 since the settle, in "The review of a27b90c,
+     settled", below); `qa_service_text` as
+     `cat Service.qml`, 4 red; 9ed04be's qa-lib.sh, 15 of the 17 new red,
+     all but the two extractions, which go
      red on a renamed `stage_slow_tree` or a changed end line instead; 9ed04be's
      key- and rewind-scenario.sh under the new suite, the two slow-tree checks
      red ("0 same differs").
@@ -23555,4 +23642,156 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
 - Also green: split-helper.py --check, split-model.mjs --check,
   check-defect-ledger, check-board-staleness, the marketplace, double-encoding
   and SR-register scans, and every ALLOWLIST guard above. Crash journal 88 at
-  the start and at the end.
+  the start and at the end of lane-relsplit1's work; the settle's wait loop
+  later raised it to 89 ("The review of a27b90c, settled", below).
+
+## The review of a27b90c, settled (lane-settle-relsplit1 and lane-settle2-relsplit1, 2026-11-22)
+
+Two reviews of a27b90c ("Read the service as the files Service.qml declares
+(D-REL-14)") and a read-only recheck of the first settle. lane-settle-relsplit1
+wrote the fixes (the forwarder, stray, quote and file-door refusals in both
+readers, the ten new shared cases, the corrected records above) and stopped
+before committing, when its own wait loop crashed bash (below).
+lane-settle2-relsplit1 committed them, with the recheck's three remaining
+items: tests/test_host_load_patch.py converted, this record, and the commit
+message's tense. Commit "Refuse what the service's inline view would misread
+(D-REL-14)". No shipped file changes.
+
+**The counts, re-run by lane-settle2-relsplit1 on the final tree** (each run
+under the heavy lock, at nice 10):
+- The 32 shared cases, run through each engine's `inlineText` /
+  `inline_text` (the recheck's run/cases.js and run/cases.py): 0 wrong in node
+  and 0 in python on the settle's readers; 9 wrong in each on a27b90c's, the
+  nine new refusals. The tenth new case, blank and loose-comment lines that
+  must still read, is green on both.
+- One-decision mutants of the settle's readers (the recheck's mut/), the same
+  in both engines: the stray check off, 5 wrong (the five stray cases); the
+  own-arguments check off, 1; `//` lines counted as stray, 11; the double
+  quote only, 1.
+- The regular-file door, over a copy of Service.qml named `svc-mutant.copy`:
+  a27b90c's node reader throws ENOTDIR and its python reader
+  NotADirectoryError (Errno 20); both settle readers read it, 446,973
+  characters.
+- `node tests/Model.test.js`: 4065 checks, 0 failures (a27b90c 4064).
+- tests/test_service_files.py: Ran 15, OK. The five converted python files:
+  test_pip 37, test_manifest 14,
+  test_state 116, test_plugin_id 3 and test_census_dates 5, all OK, under
+  check.sh's bwrap wrap.
+- `bash scripts/qa-lib-test.sh` (a short TMPDIR and XDG_RUNTIME_DIR, the
+  display variables unset): 790 passed, 0 failed; with `qa_service_files` printing
+  Service.qml alone, 784 passed, 6 failed, the re-pointed check among the six.
+- python: 2942 tests by discovery (`unittest.defaultTestLoader.discover`),
+  against 2927 on 9ed04be. The full suite was not run here; it is the lead's
+  gate's.
+
+**tests/test_host_load_patch.py, converted (the recheck's finding 2).**
+HostLoadPatchCase read each ALLOWLIST `.qml` as text (`cls.texts`), cut its
+header with `split_header`, and `observe()` wrote that header, imports and
+all, above a probe body into a temporary tree holding only Model.mjs and
+model/. A split Service.qml's header names its code-behinds, which that tree
+does not hold. It now reads Service.qml through `service_files.service_text`:
+the inline view keeps the QtQuick and qs imports, drops the script
+declarations, and holds the moved bodies' theme expressions. Every other
+`.qml` is read as before. Rule 11, with every qml the test starts under gdb
+(`handle all nopass`, `run`, `kill`, debuginfod off) through a monkeypatched
+`subprocess.run` (the recheck's hlp/drive.py, reused), a fresh
+QML_DISK_CACHE_PATH and the test's own decoy HOME:
+- On the prototype split tree (a scratch copy of this tree carrying Part
+  A's cutter output, whose five files hash equal to the measurement lane's
+  prototype.sha256, and whose inline view is 9ed04be's Service.qml byte for
+  byte): the test as it was, 12 run, 2 failed -- the two that observe the
+  shipped QML, with the rewrite and without it, each on `Service.qml (shipped)
+  did not load: .../ProbeServiceShipped.qml:15:1: Script
+  file:///.../tree/Service-pip.js unavailable`; converted, 12 run, 0 failed.
+- On this tree: 12 run, 0 failed, before the change and after it.
+
+**Where test_host_motion.py and the a11y sweep belong.** Part B listed
+test_host_motion.py under "Path only". It reads every root `*.qml`'s text for
+its animations; animations are objects, which stay in Service.qml, so it needs
+no conversion, and review 1 saw it green on a split tree. This settle's own
+search (every hit of `Service.qml` under tests/ and scripts/, every `*.qml`
+glob and every ALLOWLIST-driven list) found one more of that kind:
+tests/a11y/fidelity.py's L7 sweep (`ungraded_surfaces`) reads every root
+`.qml` for accessibility declarations, objects too (read, not run on a split
+tree). Both are now listed as such in Part B. With test_host_load_patch.py
+converted, every test and harness reader of Service.qml's text is converted
+but qa-sources-scenarios.sh's `qa_defines_function`, beside those two that
+need none; the guards and their tests stay C2's.
+
+**The lead's calls**, recorded here and on the D-REL-14 row:
+- (a) The lead's call under the owner's standing authority of 2026-11-09:
+  the layout is classic-JS code-behinds imported by Service.qml, as planned.
+  Part A answered go: both roots loaded the four-code-behind prototype with 0
+  warnings from the plugin's files and 0 JS errors, every moved function the
+  probe and start-up reached ran, and key-scenario.sh live read 141 passed,
+  0 failed on the base and on the prototype, name for name. Child components
+  are not pursued.
+- (b) The lead's call under the owner's standing authority of 2026-11-09:
+  C3's first move takes the whole M5-01 region as measured on 9ed04be --
+  rewind's 16 functions (8,747 B by the readers' spans) into
+  Service-rewind.js and the region's 21 source-switching functions
+  (beginSwitch through activeSourceSummary) into Service-sources.js -- and
+  re-measures the sizes with the readers in its own commit. The plan's
+  "rewind, about 41 KB" was the region's size, not rewind's.
+- (c) The lead's call under the owner's standing authority of 2026-11-09:
+  C4's patch-context rule counts all thirty mutation patches (19 key-, 8
+  chno-, 3 open-mutation), not only the 19: applyOrder and tuneByNumber stay
+  on the root unless C4 regenerates flip-refetches.patch and
+  unknown-plays.patch in the same commit, red first.
+- (d) The lead's call under the owner's standing authority of 2026-11-09:
+  before the first release that ships a code-behind, two things are measured
+  or answered, never assumed -- a hot reload across a version change with
+  code-behinds, in a nested cage (D-REL-6's case: the host's load patch
+  serves only the three QML entry points, so a code-behind compiles from
+  file:// beside QML that may come from a cache); and D-REL-9's write order,
+  which Part A measured holds only at git's default checkout.workers=1 (at 4
+  workers Service.qml was written before two code-behinds closed).
+- (e) The lead's call under the owner's standing authority of 2026-11-09: C2
+  (lane 2) takes the code-behind list from scripts/service_files.py and
+  qa_service_files, never a second list; the harness's bootService refuses
+  what the readers refuse (rule 10); and check-model-members.py and
+  check-theme-names.py, which read only double-quoted path imports, learn the
+  single-quoted form.
+
+**D-HOST-15, filed.** Part A's rig handed its barConfig to the service's
+shell object through createObject's property map and the layout arrays
+arrived as sequences `Array.isArray` refuses (Part A, "Also seen"). Read in
+the host (omarchy 4.5.0-3, /usr/share/omarchy/shell, read only): ensureService
+(shell.qml:930) creates the service with `comp.createObject(null)` (:952) and
+then assigns `inst.shell = shell.pluginShellFor(manifest)` (:958);
+createScopedPluginShell (:602) makes that PluginShellApi with `barConfig:
+shell.publicBarConfig()` in createObject's map (:633, :638; the type declares
+`property var barConfig: ({})`, services/PluginShellApi.qml:17). Only
+syncPluginApis (:886) assigns it from script (:904), and it runs on the
+registry's pluginsChanged, BEFORE `_syncServices` creates the service
+(:1081-1085), and on the bar widget registry's change (:1089-1092); the
+host's `onBarConfigChanged` (:130-133) reaches the bar alone. Read in the
+service, what the window can write: no bar entry, because
+`Model.barEntryWritable` walks the same arrays and refuses, so writeOwnedEntry
+logs that there is no writable entry; but state.json, yes, if the state file
+loads inside the window. Its onLoaded trims recents to the default
+maxRecents, 10 (`Model.trimRecents`), and the next save writes that; and its
+`reconcile(true)` is the first reconcile (the earlier one from onShellChanged
+returns before the state loads), so on an install whose state lacks the
+migration marker `Model.adoptActiveSource` sets the marker over an entry read
+as empty and adoptActive saves it. The entry's playlistUrl, once the real
+barConfig arrives, is then a retired setting: refused, reported and stripped,
+never migrated. So the row is P2, open: read in a rig and in the code, not
+measured on the host. What it needs is on the row.
+
+**The crash.** The crash journal rose from 88 to 89 at 10:25:32 CST, during
+lane-settle-relsplit1's work: bash pid 2046977, SIGSEGV with si_code SI_USER,
+re-raised by bash itself inside termsig_handler -> procsub_clear ->
+procsub_search (the journal's stack trace), when timeout's SIGTERM reached a
+wait loop the lane had built from `read -t 10` over a process substitution
+(`until [ -f <rc file> ]; do read -t 10 < <(:; exec cat /dev/zero >/dev/null);
+done`, under `timeout 580`, waiting for a backgrounded python suite). Nothing
+of the plugin, the helper or a player was involved. A core is stored under
+/var/lib/systemd/coredump (root-owned, aged out by systemd-tmpfiles after two
+weeks), and the host's crash watcher likely posted a card on the owner's
+desktop. The lead's rule since: wait on a pid with `timeout <secs> tail
+--pid=<pid> -f /dev/null`, or on a file with `inotifywait`, and nothing
+else.
+
+Crash journal 89 at the start and at the end of lane-settle2-relsplit1's
+work.

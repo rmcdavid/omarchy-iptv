@@ -20,10 +20,11 @@ directly:
                         the one-file Service.qml the split was cut from, so
                         a text pin never moves.
 
-`where` is a plugin root or the path of a Service.qml; code-behinds are read
-from that file's directory, as the QML engine resolves them. While
-Service.qml declares no code-behind, service_files is [Service.qml] and
-service_text is its text exactly.
+`where` is a plugin root, or the path of the service's file: a path ending in
+`.qml`, or any regular file (IPTV_SERVICE_QML may name a mutant copy called
+anything); code-behinds are read from that file's directory, as the QML
+engine resolves them. While Service.qml declares no code-behind,
+service_files is [Service.qml] and service_text is its text exactly.
 
 Its twin is tests/service-files.js, and the two agree byte for byte: one
 shared fixture (tests/fixtures/service-split/) runs in both, and each
@@ -32,11 +33,12 @@ read as the node reader reads it: lines split at "\\n" only, a "\\r" kept as
 text (no universal-newline translation, which pathlib's read_text applies),
 and bytes that are not UTF-8 refused rather than replaced. A refusal is a
 ServiceFilesError whose `kind` is one of the node reader's: declaration,
-declared-twice, missing, encoding, function-twice, unbalanced, not-exact,
-no-function, forwarded-twice, unforwarded (tests/service-files.js says what
-each means). The inline view is a reading, not a check of the layout: what
-a code-behind may hold is scripts/split-service.py --check's to judge
-(D-REL-14's C2).
+declared-twice, missing, encoding, function-twice, unbalanced, stray,
+not-exact, no-function, forwarded-twice, unforwarded (tests/service-files.js
+says what each means). So the view holds every line of every code-behind
+but its blank lines and loose `//` comments, and runs as the forwarders do
+(their arguments plain names, the function's own); the rest of the layout is
+scripts/split-service.py --check's to judge (D-REL-14's C2).
 
 CLI: `service_files.py names|files|text <where>` prints the file names
 (relative to Service.qml's directory), the paths, or the inline view; exit 1
@@ -52,11 +54,17 @@ import sys
 SERVICE = 'Service.qml'
 
 DECLARATION = re.compile(r'import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][A-Za-z0-9_]*)\r?')
-IMPORTS_A_SCRIPT = re.compile(r'[ \t]*import[ \t]+"[^"]*\.js"')
+# Either quote: QML takes both, and DECLARATION (double quotes) refuses the
+# single, so no spelling drops a code-behind in silence.
+IMPORTS_A_SCRIPT = re.compile(r'[ \t]*import[ \t]+(?:"[^"]*\.js"|\'[^\']*\.js\')')
 HEADER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{')
 COMMENT_LINE = re.compile(r'[ \t]*//')
+BLANK_LINE = re.compile(r'[ \t]*\r?')
 FORWARDER_SHAPE = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\.')
-FORWARDER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\.\1\(\2\) \}\r?')
+# The exact form's arguments are plain names: a default or a pattern repeated
+# in the call is an assignment or an object there, not the value passed.
+FORWARDER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(((?:[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*)?)\) '
+                       r'\{ return ([A-Z][A-Za-z0-9_]*)\.\1\(\2\) \}\r?')
 # The node reader's rule for a "/" that opens a regular-expression literal,
 # and JavaScript's `\s`, written as code points so this file stays ASCII.
 REGEX_AFTER = set('(,=:[!&|?{};+-*%<>~^\n')
@@ -150,10 +158,12 @@ def declarations(text):
     return out
 
 
-def function_spans(text, label=''):
+def function_spans(text, label='', found=None):
     """Every function at the two-space indent of `text`, by name (in file
     order), as its text: the contiguous `//` lines directly above the header,
-    through the end of the closing brace's line, its newline not included."""
+    through the end of the closing brace's line, its newline not included.
+    `found`, when given, gets one (name, args, start, end) a function: its
+    header's argument text and the span's offsets, end exclusive."""
     out = {}
     at = 0
     while True:
@@ -172,12 +182,33 @@ def function_spans(text, label=''):
             eol = text.find('\n', close)
             if m.group(1) in out:
                 raise ServiceFilesError('function-twice', '%s declares %s twice' % (label or 'the text', m.group(1)))
-            out[m.group(1)] = text[start:len(text) if eol == -1 else eol]
+            end = len(text) if eol == -1 else eol
+            out[m.group(1)] = text[start:end]
+            if found is not None:
+                found.append((m.group(1), m.group(2), start, end))
         nl = text.find('\n', at)
         if nl == -1:
             break
         at = nl + 1
     return out
+
+
+def stray_line(text, found):
+    """The first line (1-based) of a code-behind's `text` outside every span
+    in `found` that is neither blank nor a `//` comment; 0 when there is
+    none. Such a line is code the inline view would drop."""
+    at = 0
+    n = 1
+    while True:
+        nl = text.find('\n', at)
+        line = text[at:len(text) if nl == -1 else nl]
+        if not BLANK_LINE.fullmatch(line) and not COMMENT_LINE.match(line) \
+                and not any(start <= at < end for _name, _args, start, end in found):
+            return n
+        if nl == -1:
+            return 0
+        at = nl + 1
+        n += 1
 
 
 def inline_text(text, files):
@@ -191,7 +222,13 @@ def inline_text(text, files):
         body = files.get(file)
         if not isinstance(body, str):
             raise ServiceFilesError('missing', '%s is declared (line %d) and is not there' % (file, line))
-        by_qualifier[qualifier] = (file, function_spans(body, file), set())
+        found = []
+        spans = function_spans(body, file, found)
+        stray = stray_line(body, found)
+        if stray:
+            raise ServiceFilesError('stray', '%s line %d is outside every function and is neither blank nor a // comment'
+                                    % (file, stray))
+        by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e in found), set())
     out = []
     for line in text.split('\n'):
         if IMPORTS_A_SCRIPT.match(line):
@@ -202,16 +239,19 @@ def inline_text(text, files):
             if not m:
                 raise ServiceFilesError('not-exact', '`%s` calls %s and is not `function F(args) { return %s.F(args) }`'
                                         % (line.strip(), shape.group(3), shape.group(3)))
-            file, spans, used = by_qualifier[m.group(3)]
+            file, spans, own_args, used = by_qualifier[m.group(3)]
             if m.group(1) not in spans:
                 raise ServiceFilesError('no-function', '%s is forwarded to %s, which has no such function' % (m.group(1), file))
             if m.group(1) in used:
                 raise ServiceFilesError('forwarded-twice', '%s of %s has two forwarders' % (m.group(1), file))
+            if own_args.get(m.group(1)) != m.group(2):
+                raise ServiceFilesError('not-exact', '`%s` takes (%s) and %s in %s takes (%s)'
+                                        % (line.strip(), m.group(2), m.group(1), file, own_args.get(m.group(1))))
             used.add(m.group(1))
             out.append(spans[m.group(1)])
             continue
         out.append(line)
-    for file, spans, used in by_qualifier.values():
+    for file, spans, _own_args, used in by_qualifier.values():
         left = [name for name in spans if name not in used]
         if left:
             raise ServiceFilesError('unforwarded', '%s holds %s, which no forwarder names' % (file, ', '.join(left)))
@@ -231,8 +271,10 @@ def read_text(path):
 
 
 def service_path(where):
+    """A path ending in `.qml`, or any regular file, is the service's file;
+    anything else is a plugin root holding Service.qml."""
     where = str(where)
-    return where if where.endswith('.qml') else os.path.join(where, SERVICE)
+    return where if where.endswith('.qml') or os.path.isfile(where) else os.path.join(where, SERVICE)
 
 
 def service_names(where):

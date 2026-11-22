@@ -19,8 +19,14 @@ cut from). This file holds the Python reader to:
 
 Rule 11: seen red with a reader that drops the code-behind (service_text
 returning Service.qml's own text) and with one that lists no code-behind
-(service_files returning Service.qml alone); docs/QA-RESULTS.md, "D-REL-14:
-the service readers (lane-relsplit1, 2026-11-22)", has the counts.
+(service_files returning Service.qml alone); and, by the settle of a27b90c,
+the ten later shared cases (a forwarder passing a default, a pattern or
+arguments not its function's, a single-quoted import, five kinds of stray
+code-behind line, and blank and loose-comment lines that must still read)
+and the regular-file door, each red on a27b90c's reader or on a one-decision
+mutant. docs/QA-RESULTS.md has the counts: "D-REL-14: the service readers
+(lane-relsplit1, 2026-11-22)" for the first and "The review of a27b90c,
+settled" for the later ones.
 
 Run: python3 -m unittest discover -s tests -p test_service_files.py
 """
@@ -128,6 +134,20 @@ class Fixture(unittest.TestCase):
             service_files.service_text(os.path.join(FIXTURE, "no-such-dir"))
         self.assertEqual(caught.exception.kind, "missing")
 
+    def test_a_regular_file_of_any_name_is_the_service_file(self):
+        # IPTV_SERVICE_QML names a mutant copy, and a rule-11 copy need not
+        # end in `.qml`: on a27b90c this reader joined Service.qml onto it
+        # and raised NotADirectoryError, outside every refusal kind.
+        with tempfile.TemporaryDirectory(prefix="omarchy-iptv-service-door-") as tmp:
+            shutil.copyfile(os.path.join(FIXTURE, "Service.qml"), os.path.join(tmp, "svc.mutant"))
+            shutil.copyfile(os.path.join(FIXTURE, "Service-demo.js"), os.path.join(tmp, "Service-demo.js"))
+            where = os.path.join(tmp, "svc.mutant")
+            self.assertEqual(service_files.service_names(where), ["svc.mutant", "Service-demo.js"])
+            self.assertEqual(service_files.service_files(where), [where, os.path.join(tmp, "Service-demo.js")])
+            self.assertEqual(service_files.service_text(where), self.inline)
+            done = node("text", where)
+            self.assertEqual((done.returncode, done.stdout), (0, self.inline.encode("utf-8")), done.stderr)
+
     def test_bytes_that_are_not_utf8_are_refused_not_replaced(self):
         with tempfile.TemporaryDirectory(prefix="omarchy-iptv-service-files-") as tmp:
             with open(os.path.join(tmp, "Service.qml"), "wb") as fh:
@@ -154,7 +174,7 @@ class SharedCases(unittest.TestCase):
                     self.assertEqual(service_files.inline_text(case["service"], case["files"]), case["expect"]["text"])
                 if "declarations" in case:
                     self.assertEqual([[f, q] for f, q, _n in service_files.declarations(case["service"])], case["declarations"])
-        self.assertEqual(seen, 22)
+        self.assertEqual(seen, 32)
 
 
 class TheTwoReadersAgree(unittest.TestCase):

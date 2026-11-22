@@ -489,9 +489,12 @@ section "qa_service_files / qa_service_text / D-REL-14: the service is the files
 # library without the two functions (127, nothing printed) is red there too,
 # never green on a "nothing is printed" line of its own.
 SVF="$ROOT/tests/fixtures/service-split"
-is "on this tree qa_service_files names exactly the files scripts/service_files.py names" \
-   "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')" \
-   "$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import service_files; print("".join(n + " " for n in service_files.service_names(sys.argv[1])), end="")' "$ROOT")"
+# The shell's list against the OTHER engine's, path for path, where the list
+# is not Service.qml alone (qa_service_files is python's reader behind a
+# wrapper, so a check against python would only test the wrapper).
+is "on the shared fixture qa_service_files names, path for path, the files tests/service-files.js names" \
+   "$(qa_service_files "$SVF" | tr '\n' ' ')" \
+   "$(node -e 'const SF = require(process.argv[1]); process.stdout.write(SF.serviceFiles(process.argv[2]).map(f => f + " ").join(""))' "$ROOT/tests/service-files.js" "$SVF")"
 is "and that is Service.qml alone: this tree declares no code-behind" \
    "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml 0"
 ck "on this tree qa_service_text is Service.qml, byte for byte" 'qa_service_text "$ROOT" | cmp -s - "$ROOT/Service.qml"'
@@ -4106,7 +4109,10 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # clip-scenario.sh's settle() did: the first failed, settled at half size.
 # 773 -> 790 on 2026-11-22 (D-REL-14, lane-relsplit1): qa_service_files and
 # qa_service_text's thirteen over this tree, the shared fixture, a broken
-# copy and a CRLF copy, and the two slow trees' four. Red where qa-lib.sh
+# copy and a CRLF copy, and the two slow trees' four (the first of the
+# thirteen, which compared the shell with the python reader it wraps over
+# this tree, was pointed at the node reader over the fixture by the settle of
+# a27b90c: same count). Red where qa-lib.sh
 # lacks the two functions: fifteen of the seventeen failed, all but the two
 # extractions, which read no library and fail on a renamed function or a
 # changed end line instead; the slow trees' two also red on 9ed04be's

@@ -241,6 +241,106 @@
    "expect": {
     "refusal": "unbalanced"
    }
+  },
+  {
+   "name": "a forwarder whose argument carries a default is refused: repeated in the call it is an assignment",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x = 1) { return ServiceA.a(x = 1) }\n}\n",
+   "files": {
+    "Service-a.js": "  function a(x = 1) {\n    return x\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder with a destructured argument is refused: repeated in the call it is a new object",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a({ k }) { return ServiceA.a({ k }) }\n}\n",
+   "files": {
+    "Service-a.js": "  function a({ k }) {\n    return k\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder whose arguments are not its function's own is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "  function a(x, y) {\n    return y\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a script imported in single quotes is refused, never read past",
+   "service": "import 'Service-a.js' as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a code-behind statement outside every function is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\nvar argv = [\"curl\", \"--url\"]\n\n// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a code-behind function at no indent is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n\nfunction g(y) {\n  return y\n}\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a code-behind function spelled with a space before its parenthesis is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n\n  function g (y) {\n    return y\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a code-behind header whose default holds parentheses is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n\n  function g(y = Math.max(1, 2)) {\n    return y\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a .pragma line in a code-behind is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": ".pragma library\n// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "blank lines holding spaces or a CR and loose // comments outside the functions read, and drop from the view",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n   \n\t\r\n\n    // a loose note, indented\n\n// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n\n// the end\n"
+   },
+   "expect": {
+    "text": "Item {\n  // a returns one\n  function a(x) {\n    return 1\n  }\n}\n"
+   }
   }
  ]
 }

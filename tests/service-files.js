@@ -25,28 +25,38 @@
 //                        brace's line. That is the one-file Service.qml the
 //                        split was cut from, so a text pin never moves.
 //
-// `where` is a plugin root, or the path of a Service.qml (IPTV_SERVICE_QML
-// names one), whose code-behinds are read from the same directory, as the
+// `where` is a plugin root, or the path of the service's file: a path ending
+// in `.qml`, or any regular file (IPTV_SERVICE_QML may name a mutant copy
+// called anything). Its code-behinds are read from the same directory, as the
 // QML engine resolves them. While Service.qml declares no code-behind -- true
 // of every tree up to and including this reader's own commit -- serviceFiles
 // is [Service.qml] and serviceText is the file's text exactly.
 //
 // The reader refuses rather than guesses, with a kind both engines share:
-//   declaration      a line importing a .js that is not exactly
-//                    `import "<file>.js" as <Qualifier>`
+//   declaration      a line importing a .js, in either quote, that is not
+//                    exactly `import "<file>.js" as <Qualifier>`
 //   declared-twice   a file or a qualifier declared twice
 //   missing          Service.qml, or a declared code-behind, is not there
 //   encoding         a file that is not UTF-8
 //   function-twice   a code-behind declares one function twice
 //   unbalanced       a code-behind function with no closing brace
+//   stray            a code-behind line outside every function that is
+//                    neither blank nor a `//` comment: a top-level statement,
+//                    a function at another indent or spelled
+//                    `function F (`, a header whose arguments hold a ")" --
+//                    anything the view would otherwise drop in silence
 //   not-exact        a line shaped `  function F(...) { return Q.` for a
-//                    declared Q that is not exactly F's forwarder
+//                    declared Q that is not exactly F's forwarder: the call
+//                    repeats the header's arguments, those are plain names
+//                    (`a, b`, so the forwarder passes what it was given), and
+//                    they are F's own in the code-behind
 //   no-function      a forwarder whose code-behind has no such function
 //   forwarded-twice  two forwarders for one function
 //   unforwarded      a code-behind function no forwarder names
-// The inline view is a reading, not a check of the layout: what a code-behind
-// may hold, and the forwarder's exact form, are scripts/split-service.py
-// --check's to judge (D-REL-14's C2).
+// So the view holds every line of every code-behind but its blank lines and
+// loose `//` comments, and runs as the forwarders do. The rest of the layout
+// (what a moved body may name, `.import` and `.pragma` beyond their being
+// stray) is scripts/split-service.py --check's to judge (D-REL-14's C2).
 //
 // Its twin in Python is scripts/service_files.py. The two agree byte for byte
 // on every input, held by one shared fixture both run
@@ -72,15 +82,22 @@ const SERVICE = "Service.qml"
 // QML reads that line as the same import.
 const DECLARATION = /^import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][A-Za-z0-9_]*)\r?$/
 // Any line that imports a classic script must read as a declaration: a
-// spelling this reader did not see would drop a code-behind in silence.
-const IMPORTS_A_SCRIPT = /^[ \t]*import[ \t]+"[^"]*\.js"/
+// spelling this reader did not see would drop a code-behind in silence. QML
+// takes either quote (qmllint 6.12 resolves `import 'x.js' as X`), so both
+// are seen here and DECLARATION, double quotes only, refuses the single.
+const IMPORTS_A_SCRIPT = /^[ \t]*import[ \t]+(?:"[^"]*\.js"|'[^']*\.js')/
 // A function at the root's two-space indent, matched at a line start.
 const HEADER = /  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{/y
 const COMMENT_LINE = /^[ \t]*\/\//
+const BLANK_LINE = /^[ \t]*\r?$/
 // A forwarder: the shape first (so a near miss for a declared qualifier is
-// refused, never kept as a root function), then the exact form.
+// refused, never kept as a root function), then the exact form, whose
+// arguments are plain names: a default (`a = 1`) or a pattern (`{ k }`)
+// repeated in the call is an assignment or an object there, not the value
+// the forwarder was given, so the shell would run something the view does
+// not show.
 const FORWARDER_SHAPE = /^  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\./
-const FORWARDER = /^  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\.\1\(\2\) \}\r?$/
+const FORWARDER = /^  function ([A-Za-z_][A-Za-z0-9_]*)\(((?:[A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*)?)\) \{ return ([A-Z][A-Za-z0-9_]*)\.\1\(\2\) \}\r?$/
 // After one of these a "/" opens a regular-expression literal (the harness's
 // own rule, character for character).
 const REGEX_AFTER = /[(,=:[!&|?{};+\-*%<>~^\n]/
@@ -156,7 +173,9 @@ function declarations(text) {
 // Every function at the two-space indent of `text`, by name, as its text:
 // the contiguous `//` lines directly above the header, through the end of
 // the closing brace's line (its "\n" not included). A Map, in file order.
-function functionSpans(text, label) {
+// `found`, when given, gets one { name, args, start, end } a function: its
+// header's argument text and the span's offsets in `text`, end exclusive.
+function functionSpans(text, label, found) {
   const out = new Map()
   let at = 0
   for (;;) {
@@ -175,13 +194,29 @@ function functionSpans(text, label) {
       }
       const eol = text.indexOf("\n", close)
       if (out.has(m[1])) throw refuse("function-twice", (label || "the text") + " declares " + m[1] + " twice")
-      out.set(m[1], text.slice(start, eol === -1 ? text.length : eol))
+      const end = eol === -1 ? text.length : eol
+      out.set(m[1], text.slice(start, end))
+      if (found) found.push({ name: m[1], args: m[2], start, end })
     }
     const nl = text.indexOf("\n", at)
     if (nl === -1) break
     at = nl + 1
   }
   return out
+}
+
+// The first line (1-based) of a code-behind's `text` that lies outside every
+// span in `found` and is neither blank nor a `//` comment; 0 when there is
+// none. Such a line is code the inline view would drop.
+function strayLine(text, found) {
+  let at = 0
+  for (let n = 1; ; n++) {
+    const nl = text.indexOf("\n", at)
+    const line = text.slice(at, nl === -1 ? text.length : nl)
+    if (!BLANK_LINE.test(line) && !COMMENT_LINE.test(line) && !found.some(f => at >= f.start && at < f.end)) return n
+    if (nl === -1) return 0
+    at = nl + 1
+  }
 }
 
 // The inline view of a Service.qml text over its code-behinds' texts, given
@@ -194,7 +229,11 @@ function inlineText(text, files) {
   for (const d of decls) {
     const body = get(d.file)
     if (typeof body !== "string") throw refuse("missing", d.file + " is declared (line " + d.line + ") and is not there")
-    byQualifier.set(d.qualifier, { file: d.file, spans: functionSpans(body, d.file), used: new Set() })
+    const found = []
+    const spans = functionSpans(body, d.file, found)
+    const stray = strayLine(body, found)
+    if (stray) throw refuse("stray", d.file + " line " + stray + " is outside every function and is neither blank nor a // comment")
+    byQualifier.set(d.qualifier, { file: d.file, spans, args: new Map(found.map(f => [f.name, f.args])), used: new Set() })
   }
   const out = []
   const lines = text.split("\n")
@@ -207,6 +246,7 @@ function inlineText(text, files) {
       const cb = byQualifier.get(m[3])
       if (!cb.spans.has(m[1])) throw refuse("no-function", m[1] + " is forwarded to " + cb.file + ", which has no such function")
       if (cb.used.has(m[1])) throw refuse("forwarded-twice", m[1] + " of " + cb.file + " has two forwarders")
+      if (cb.args.get(m[1]) !== m[2]) throw refuse("not-exact", "`" + line.trim() + "` takes (" + m[2] + ") and " + m[1] + " in " + cb.file + " takes (" + cb.args.get(m[1]) + ")")
       cb.used.add(m[1])
       out.push(cb.spans.get(m[1]))
       continue
@@ -237,7 +277,15 @@ function readText(file) {
   }
 }
 
-function servicePath(where) { return /\.qml$/.test(String(where)) ? String(where) : path.join(String(where), SERVICE) }
+// A path ending in `.qml`, or any regular file, is the service's file;
+// anything else is a plugin root holding Service.qml.
+function servicePath(where) {
+  const p = String(where)
+  if (/\.qml$/.test(p)) return p
+  let st = null
+  try { st = fs.statSync(p) } catch (error) { st = null }
+  return st && st.isFile() ? p : path.join(p, SERVICE)
+}
 
 // The file names, relative to Service.qml's directory: its own first.
 function serviceNames(where) {
