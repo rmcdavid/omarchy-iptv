@@ -2171,16 +2171,15 @@ class LockTest(PlayerTestCase):
             return [sent] + stop(sent)
 
         outcome = []
-        for typed in ("100000000000", "2147483647", "2147483646"):
+        # (A typed 100000000000 is refused at the parse since the recheck:
+        # the next test.)
+        for typed in ("2147483647", "2147483646"):
             shell["seq"] = 7
             typed_stop = stop(typed)    # a person's typed stop
             resync()
             outcome.append([typed, typed_stop, shell_stop()])
-        # Before: 100000000000 resynced the shell to 1215752193, below the
-        # record, and its stop was superseded; 2147483647 and 2147483646 left
-        # it sending --seq 0.
-        self.assertEqual(outcome, [["100000000000", [0, None], ["8", 0, None]],
-                                   ["2147483647", [0, None], ["8", 0, None]],
+        # Before: 2147483647 and 2147483646 left it sending --seq 0.
+        self.assertEqual(outcome, [["2147483647", [0, None], ["8", 0, None]],
                                    ["2147483646", [0, None], ["8", 0, None]]],
                          "a record the shell cannot count above is read as none: the shell counts on from its own seq")
         # The top of the range: a typed SEQ_MAX is honoured; the shell
@@ -2195,6 +2194,45 @@ class LockTest(PlayerTestCase):
         trail.append(stop("1"))
         self.assertEqual(trail, [[0, None], ["2147483647", 0, None], ["0", 0, None], ["2", 0, None], [1, "superseded"]],
                          "ordered again once the shell's counter has wrapped")
+
+
+    # D-PLY-77's recheck (2026-11-21): a typed seq above what the shell's
+    # counter can send was honoured, and the record it left read as none, so
+    # it wiped the shell's recorded seq and an older stop of the shell's,
+    # still waiting for the lock, passed after it and laddered a newer
+    # start's player -- D-PLY-77's own race. It is refused at the parse.
+    def test_d_ply_77_a_seq_the_shell_cannot_send_is_refused_at_the_parse(self):
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        pid = helper.find_player(self.sock)[0]["pid"]
+        refused = []
+        for typed in ("2147483648", "100000000000"):
+            for verb in (["player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                          "--id", "t:bbc1.uk", "--ipc-timeout", "1", "--lock-timeout", "1",
+                          "--spawn-timeout", "4", "--first-load-timeout", "1", "--seq", typed],
+                         ["player", "stop", "--socket", self.sock, "--ipc-timeout", "1", "--seq", typed]):
+                err = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                        code = helper.main(verb)
+                except SystemExit as caught:
+                    code = caught.code
+                # D-SINK-106: the option is named, the value never.
+                refused.append([verb[1], code, "(--seq)" in err.getvalue(), typed in err.getvalue()])
+        # Before the recheck: [start, 0, False, False] and [stop, 0, False,
+        # False] -- the typed start adopted the player, the typed stop
+        # stopped it.
+        self.assertEqual(refused, [["start", 2, True, False], ["stop", 2, True, False]] * 2)
+        self.assertEqual([record["pid"] for record in helper.find_player(self.sock)], [pid])
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+        # The row's sequence with a typed seq: the older stop @13 is still
+        # superseded, because the refused verb recorded nothing.
+        code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--seq", "13", "--ipc-timeout", "1")
+        self.assertEqual([code, (payload.get("error") or {}).get("code"), [record["pid"] for record in helper.find_player(self.sock)]],
+                         [1, "superseded", [pid]])
+        # The largest the shell sends is still taken.
+        self.assertEqual(helper.seq_arg("2147483647"), 2147483647)
+        self.assertEqual(helper.seq_arg("-3"), -3)
 
 
 class SpawnFailureTest(PlayerTestCase):
