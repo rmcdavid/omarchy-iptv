@@ -960,7 +960,8 @@ Item {
   // (`probeRetried`), a probe in flight, or, while the settle before it
   // still ran, this flag or a stop the shell issued itself (`stopByShell`)
   // -- so that stop's look and backstop ask it again. D-PLY-78: and such a
-  // start stopped by its watchdog with nothing named (lookForWithdrawn).
+  // start refused or stopped by its watchdog, nothing named
+  // (lookForWithdrawn).
   property bool stopOlderStartOk: false
   // D-PLY-69: the intent number the player slot's start or restart went out
   // with, and whether a stop was still settling then (issuePlayerSession).
@@ -3652,9 +3653,9 @@ Item {
   }
 
   // D-PLY-78: the player of a start or restart issued before the last stop,
-  // answering ok or stopped by its watchdog with nothing named. A verb that
-  // held the lock past the stop's wait outlived that stop, which gave up, so
-  // its player is looked for: inside the settle by the backstop
+  // answering ok, refused or stopped by its watchdog with nothing named. A
+  // verb that held the lock past the stop's wait outlived that stop, which
+  // gave up, so its player is looked for: inside the settle by the backstop
   // (stopOlderStartOk), after it at once, as the backstop looks
   // (applyProbe's confirmation stops it if it is there). After the settle the
   // ok was read as the shell's own player to recover, adopted and named.
@@ -3850,8 +3851,10 @@ Item {
       return
     }
     // D-PLY-78: one a later stop withdrew, nothing named, may have left a
-    // player that stop gave up on (the start held the lock past its wait).
-    if (code === "helper_timeout" && withdrawn) root.lookForWithdrawn()
+    // player that stop gave up on (the start held the lock past its wait):
+    // its watchdog's stop, or a refusal after it adopted one (the helper
+    // stops only its own spawn). Not the lock's own refusals: it held none.
+    if (withdrawn && root.nowPlaying === null && code !== "superseded" && code !== "busy") root.lookForWithdrawn()
     root.playerPending = false
     var reason = Model.statusReason(status)
     if (code === "superseded") {

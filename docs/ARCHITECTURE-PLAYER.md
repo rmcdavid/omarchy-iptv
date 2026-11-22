@@ -1794,11 +1794,16 @@ player to recover, it was adopted and the stopped channel named. Such an
 ok -- its seq below `stopSeq`, nothing named, no settle running -- is now
 looked for through the stop's confirmation (`Model.playerSessionFollowUp`'s
 `confirm`, `lookForWithdrawn`), which stops the player if it is there, as
-the backstop's own probe does, and that stop is the last the shell sends.
-So is that start's reply when its watchdog stops it with nothing named
-(D-PLY-35's `helper_timeout`), which read the stop's own ladder as having
-ended whatever it left: after the settle at once, inside it by the
-settle's backstop (`stopOlderStartOk`), as for an older start's ok. A start
+the backstop's own probe does, and that stop is the last the shell sends;
+an answer it cannot read leaves the question pending for the slot's next
+probe, as the backstop's own does. So is that start's reply when its
+watchdog stops it with nothing named (D-PLY-35's `helper_timeout`), which
+read the stop's own ladder as having ended whatever it left: after the
+settle at once, inside it by the settle's backstop (`stopOlderStartOk`),
+as for an older start's ok. And so is its refusal with nothing named,
+unless it is one of the lock's own (`superseded`, `busy`, raised before the
+verb holds the lock): the helper stops only a spawn of its own on a
+refusal, never a player it adopted (the review of b2d5a6f). A start
 issued after the stop, or one answering with a play made after the stop
 waiting, is not this case and is unchanged. Held by the service harness
 and by the seeded world with slow players; not watched on a real

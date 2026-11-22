@@ -18850,15 +18850,20 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [replayed, h.root.timedOutPlay, toasts(h), h.root.nowPlaying ? h.root.nowPlaying.id : null]
     }, [true, null, [], Y.id])
 
-    checkCall("D-PLY-35: a stopped start the user has since stopped is not looked for and not told (the stop's own ladder ends whatever it left); its reason is recorded as the timeout it was", () => {
+    // D-PLY-78 (the review of b2d5a6f): a stop that gave up on the start's
+    // lock ends nothing that start left, so the stop's own look asks for it.
+    checkCall("D-PLY-35: a stopped start the user has since stopped is not looked for at once and not told; its reason is recorded as the timeout it was, and the stop's own look then asks for what it left (D-PLY-78)", () => {
       const h = bootPlayer()
       playing(h)
       stopped(h)
+      h.driveTimer("stopLookTimer")
       h.root.stop()
       h.drain()
       exit(h, "")
-      return [said(h), slotVerb(h), h.ids.playerProc.running]
-    }, [[null, [], [], [], "Helper timed out"], "start", false])
+      const atOnce = [said(h), slotVerb(h), h.ids.playerProc.running]
+      h.elapse(h.root.stopLookMs)
+      return atOnce.concat([[slotVerb(h), h.ids.playerProc.running]])
+    }, [[null, [], [], [], "Helper timed out"], "start", false, ["probe", true]])
 
     checkCall("D-PLY-35: a play made while an earlier stop is still settling is a new intent -- its start, stopped by the watchdog, is looked for like any other", () => {
       const h = bootPlayer()
@@ -20099,10 +20104,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // superseded: the record past the stop) and nothing was attached. Now
     // stop() carries a probe in flight as it carries a pending
     // confirmation. Red on f74ee09 and on 8504ba8 in both rows. The pin: a
-    // START in flight at the stop is not a probe -- refused, it leaves no
-    // player to look for (an older start's ok raises its own question,
-    // stopOlderStartOk), and the look and the backstop ask nothing, as
-    // before; green on both, red when the carry asks of the slot alone.
+    // START in flight at the stop is not a probe -- refused `busy`, it
+    // touched no player (an older start's ok, or a later refusal, raises its
+    // own question, stopOlderStartOk: D-PLY-78), and the look and the
+    // backstop ask nothing, as before; green on both, red when the carry
+    // asks of the slot alone.
     const IN_FLIGHT = ["reattach", "timed-out-start", "start-refused"]
     const inFlightAtStop = how => {
       const h = withThree(bootPlayer())
@@ -20273,6 +20279,57 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       }
       return [how, atExit, asks.slice(atExit.length), stopsIssued(h).length - before, h.root.nowPlaying, h.root.stopping === true, toasts(h)]
     }), [["after", ["start:" + X.id, "probe"], [], 1, null, false, []], ["inside", ["start:" + X.id], ["probe"], 1, null, false, []]])
+
+    // The review of b2d5a6f (rule 15): and a withdrawn start REFUSED with
+    // nothing named. The helper stops only a spawn of its own on a refusal
+    // (D-PLY-57), never a player it adopted, and player_foreign,
+    // tls_unverified, the relay registration's not_running and an ipc_error
+    // come after the adoption. `kept-after`: a start over the observed
+    // player (`kept` above), refused after the backstop, whose own probe the
+    // busy slot refused; `cold-after` and `cold-inside`: a cold start that
+    // adopted a player the observer never reached, refused after the
+    // backstop or inside the settle (10 s after the stop), nothing attached.
+    // Red on 81afa9f and on b2d5a6f in every row: nothing asked. The pins:
+    // the lock's own refusals (`superseded`, `busy`: the verb held no lock,
+    // so touched no player) ask nothing, and a refusal with a play made
+    // after the stop waiting sends that play as its own start (D-PLY-71);
+    // green on both.
+    const refusedOf = (code, seq) => JSON.stringify({ ok: false, kind: "player.start", error: { code, message: "refused" }, id: Y.id, seq })
+    const lateRefusal = (shape, code, queued) => {
+      const v = shape === "kept-after" ? ladderingVerb("unanswered-zap") : null
+      const h = v ? v.h : withThree(bootPlayer())
+      if (!v) {
+        h.root.play(Y.id, true, "")
+        h.drain()
+      }
+      const seq = h.root.playSeq
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      h.root.stop()
+      h.drain()
+      h.elapse(shape === "cold-inside" ? 10000 : PB.watchdogMs.stop + 2000)
+      if (queued) {
+        h.root.play(Z.id, true, "")
+        h.drain()
+      }
+      const before = stopsIssued(h).length
+      exit(h, refusedOf(code, seq))
+      for (let i = 0; i < 3; i++) {
+        if (h.ids.playerProc.running) exit(h, slotVerb(h) === "probe" ? probeSeq(seq, { stash: STASH_OF(Y.id, seq), claimed: true }) : okStartSeq(Z.id, h.root.playSeq))
+        h.elapse(PB.watchdogMs.stop)
+      }
+      return [shape, code, asks, stopsIssued(h).length - before, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.stopping === true, toasts(h)]
+    }
+    const REFUSED_SHAPES = ["kept-after", "cold-after", "cold-inside"]
+    const AFTER_ADOPTION = ["ipc_error", "tls_unverified", "player_foreign", "not_running"]
+    checkCall("D-PLY-78 (the review of b2d5a6f): a withdrawn start refused after it adopted a player, with nothing named, is looked for -- at once after the stop's settle, by that settle's backstop inside it -- and the player it left stopped, no card", () =>
+      REFUSED_SHAPES.flatMap(shape => AFTER_ADOPTION.map(code => lateRefusal(shape, code))),
+      REFUSED_SHAPES.flatMap(shape => AFTER_ADOPTION.map(code => [shape, code, ["probe"], 1, null, false, []])))
+    checkCall("D-PLY-78 (the review of b2d5a6f, pin): a withdrawn start's lock refusals ask nothing, and a refusal with a play made after the stop waiting sends that play as its own start, nothing probed or stopped", () =>
+      REFUSED_SHAPES.flatMap(shape => ["superseded", "busy"].map(code => lateRefusal(shape, code))).concat([lateRefusal("cold-after", "ipc_error", true)]),
+      REFUSED_SHAPES.flatMap(shape => ["superseded", "busy"].map(code => [shape, code, [], 0, null, false, []]))
+        .concat([["cold-after", "ipc_error", ["start:" + Z.id], 0, Z.id, false, []]]))
 
     // Pins, green on 81afa9f: a start issued AFTER the stop answering past
     // that stop's backstop plays and is named, nothing looked for; and a
