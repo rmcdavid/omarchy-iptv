@@ -55,14 +55,24 @@ implicit import; BarWidget.qml's root `BarWidget` is the host kit's, which
 Qt resolves past the file itself), and JavaScript globals, which every
 import outranks.
 
+A code-behind of Service.qml (D-REL-14) has no imports of its own and runs
+under Service.qml's: it is judged under them, its unqualified host-kit names
+against what Service.qml's unqualified imports export, while the import
+problems themselves (a directory import, an unreadable module, a dead kit
+import) are reported once, on Service.qml.
+
+A quoted import is read in either quote (`import 'x'`), as QML reads it:
+this read double quotes only until D-REL-14's C2, so a single-quoted
+directory import passed unseen.
+
 Usage: check-theme-names.py [--root ROOT] [--host SHELL_DIR] [--qml-dir DIR] [FILE ...]
-With no FILE, the .qml entries of ALLOWLIST in scripts/release.py. Exit 0
+With no FILE, scripts/release.py's shipped_code: the .qml entries of
+ALLOWLIST and the code-behinds Service.qml declares. Exit 0
 and a summary line when nothing collides; 1 and one line per problem
 otherwise. Python 3 standard library only.
 """
 
 import argparse
-import ast
 import importlib.util
 import os
 import re
@@ -83,8 +93,11 @@ IMPORT_MODULE = re.compile(
     r"^[ \t]*import[ \t]+(?P<uri>[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)"
     r"(?:[ \t]+(?P<major>\d+)(?:\.(?P<minor>\d+))?)?"
     r"(?:[ \t]+as[ \t]+(?P<alias>[A-Za-z_$][\w$]*))?[ \t]*;?[ \t]*(?://.*)?$", re.M)
+# Either quote: QML takes both (`import 'Model.mjs' as M` loads, measured on
+# Qt 6.11.2 for release.py's RUNTIME_REF), and a reading of one quote only
+# passes the other unseen.
 IMPORT_PATH = re.compile(
-    r'^[ \t]*import[ \t]+"(?P<path>[^"\n]*)"(?:[ \t]+(?P<version>\d+(?:\.\d+)?))?'
+    r'^[ \t]*import[ \t]+(?P<q>["\'])(?P<path>(?:(?!(?P=q))[^\n])*)(?P=q)(?:[ \t]+(?P<version>\d+(?:\.\d+)?))?'
     r'(?:[ \t]+as[ \t]+(?P<alias>[A-Za-z_$][\w$]*))?[ \t]*;?[ \t]*(?://.*)?$', re.M)
 EXPORT = re.compile(r'"(?P<module>[A-Za-z_][\w.]*)/(?P<name>[A-Za-z_]\w*) (?P<major>\d+)\.(?P<minor>\d+)"')
 
@@ -102,15 +115,19 @@ def repo_root():
     return os.path.dirname(HERE)
 
 
-def allowlisted_qml(root):
-    """The .qml entries of ALLOWLIST in <root>/scripts/release.py, read as a
-    literal with ast so nothing in release.py runs."""
-    path = os.path.join(root, "scripts", "release.py")
-    tree = ast.parse(read(path), path)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "ALLOWLIST" for t in node.targets):
-            return [os.path.join(root, e) for e in ast.literal_eval(node.value) if e.endswith(".qml")]
-    raise ValueError("%s has no ALLOWLIST assignment" % path)
+_rspec = importlib.util.spec_from_file_location("release", os.path.join(HERE, "release.py"))
+release = importlib.util.module_from_spec(_rspec)
+_rspec.loader.exec_module(release)
+
+
+def shipped_code(root):
+    """release.py's shipped_code(root): [(path, importer)] for every shipped
+    file of code, the code-behinds after Service.qml. Raises ValueError when
+    the allowlist or the service's readers refuse."""
+    try:
+        return release.shipped_code(root)
+    except release.service_files.ServiceFilesError as error:
+        raise ValueError("the service's files are refused by its readers: %s" % error)
 
 
 def within(version, limit):
@@ -255,13 +272,16 @@ def spread_before(toks, k):
     return k >= 3 and all(toks[k - j].kind == "punct" and toks[k - j].text == "." for j in (1, 2, 3))
 
 
-def judge(path, text, kit, qml_dir, label=None):
+def judge(path, text, kit, qml_dir, label=None, importer_text=None):
     """(problems, uses) for one QML file: every complaint, and every
-    unqualified host-kit use it judged as (line, col, name)."""
+    unqualified host-kit use it judged as (line, col, name). A code-behind
+    passes its importer's text as `importer_text`: its names are judged
+    under those imports, whose own problems are its importer's to report."""
     label = label or os.path.basename(path)
+    own = importer_text is None
     problems = []
-    unqualified, _aliases, directories = file_imports(text)
-    for line, where in directories:
+    unqualified, _aliases, directories = file_imports(text if own else importer_text)
+    for line, where in directories if own else ():
         problems.append("%s:%d: an unqualified directory import (\"%s\") brings in names no type file lists; "
                         "this guard cannot judge them" % (label, line, where))
     exported = {}
@@ -271,13 +291,15 @@ def judge(path, text, kit, qml_dir, label=None):
             kit_imported = True
             continue
         if uri.startswith("qs."):
-            problems.append("%s: imports %s, a host module this guard does not read" % (label, uri))
+            if own:
+                problems.append("%s: imports %s, a host module this guard does not read" % (label, uri))
             continue
         try:
             for name, module in module_names(uri, limit, qml_dir).items():
                 exported.setdefault(name, set()).add(module)
         except Unreadable as error:
-            problems.append("%s: %s" % (label, error))
+            if own:
+                problems.append("%s: %s" % (label, error))
     try:
         uses = unqualified_uses(text, set(kit))
     except members.ScanError as error:
@@ -289,7 +311,7 @@ def judge(path, text, kit, qml_dir, label=None):
                             "qualify it -- `import %s as %s`, then `%s.%s`"
                             % (label, line, col, name, kit[name], ", ".join(sorted(exported[name])), name,
                                kit[name], kit[name].split(".")[-1], kit[name].split(".")[-1], name))
-    if kit_imported and not uses:
+    if own and kit_imported and not uses:
         problems.append("%s imports %s unqualified and the scanner found no unqualified use of their names: it "
                         "read nothing, or the import is dead" % (label, " / ".join(HOST_KIT)))
     return problems, uses
@@ -303,20 +325,25 @@ def main(argv=None):
     ap.add_argument("file", nargs="*")
     args = ap.parse_args(argv)
     root = args.root or repo_root()
-    files = args.file or allowlisted_qml(root)
+    try:
+        files = [(path, path) for path in args.file] or shipped_code(root)
+    except (OSError, ValueError, SyntaxError) as error:
+        print("theme name guard: the shipped code cannot be listed: %s" % error)
+        return 1
     try:
         kit = host_kit_names(args.host)
     except Unreadable as error:
         print("theme name guard: the host kit is unreadable: %s" % error)
         return 1
     problems, total, judged = [], 0, 0
-    for path in files:
+    for path, importer in files:
         try:
             text = read(path)
+            importer_text = None if importer == path else read(importer)
         except (OSError, UnicodeDecodeError) as error:
             problems.append("%s: unreadable: %s" % (path, error))
             continue
-        p, uses = judge(path, text, kit, args.qml_dir)
+        p, uses = judge(path, text, kit, args.qml_dir, importer_text=importer_text)
         problems += p
         total += len(uses)
         judged += 1

@@ -520,6 +520,8 @@ const clone = x => JSON.parse(JSON.stringify(x))
 // a Util.qml that declares none, which is 4.0.x.
 const fs = require("fs")
 const path = require("path")
+// D-REL-14: the service's readers, which judge a file set before it boots.
+const serviceReader = require("./service-files.js")
 const HarnessLib = require(path.join(__dirname, "../scripts/dev-harness/harness-lib.js"))
 const HOST_SHELL = "/usr/share/omarchy/shell"
 function hostBarSections(utilText) {
@@ -854,22 +856,55 @@ function helperPrivate(file) {
   return { code: 0, raises, reply: line({ ok: true, kind: "state", action: "private", file: how }) }
 }
 
+// D-REL-14 C2: the service bootService runs is a FILE SET, as the engine loads
+// it -- { service: Service.qml's own text, files: each code-behind's text by
+// name }, what tests/service-files.js's serviceSet(where) returns -- or, as
+// before the split, one string: Service.qml's text, or its inline view. The
+// readers judge it first, and what they refuse is refused here (rule 10: a
+// split the shell would not load does not boot either): a string that still
+// declares a code-behind is a split Service.qml without its files, refused
+// as `missing`. Then each code-behind's functions are compiled, in the SAME
+// scope as the root's, into the object its qualifier names (extras[Q]), and
+// Service.qml's own functions -- the forwarders among them -- onto the root,
+// as before. So what runs is the forwarder and the code-behind, not their
+// inline view: a forwarder is called as the shell calls it, and STUBBED and
+// unstub act on the root's member, the forwarder, as they always did. What
+// only scripts/split-service.py --check refuses beyond the readers (a
+// code-behind naming its own function unqualified, among others) still
+// boots here, and reads otherwise: such a name resolves to the root's member
+// -- the forwarder, or a STUBBED stand-in -- where the engine may reach the
+// sibling itself. The gate's "service split guard" holds that shape, not
+// this harness.
+function fileSet(svc) {
+  if (typeof svc === "string") return { service: svc, files: {} }
+  if (svc && typeof svc === "object" && typeof svc.service === "string" && svc.files && typeof svc.files === "object") {
+    return { service: svc.service, files: svc.files instanceof Map ? Object.fromEntries(svc.files) : svc.files }
+  }
+  throw new Error("service-harness: bootService takes Service.qml's text or a file set { service, files }")
+}
+
 // D-PLY-69: what bootService reads out of a tree's text depends on the text
 // alone, so it is read once per text -- a seeded sweep boots the service a
 // few hundred times (tests/player-world.js), and the read was a third of a
 // boot. Nothing below writes to what it returns; every compile is still per
-// boot, in that boot's own scope.
+// boot, in that boot's own scope. A file set is read once per set object.
 const PARSED = new Map()
-function parsedText(serviceText) {
-  let v = PARSED.get(serviceText)
-  if (v === undefined) {
-    v = { fns: rootFunctions(serviceText), props: rootProperties(serviceText), ipc: ipcFunctions(serviceText) }
-    PARSED.set(serviceText, v)
-  }
+const PARSED_SETS = new WeakMap()
+function parsedSet(svc) {
+  const cached = typeof svc === "string" ? PARSED.get(svc) : (svc && typeof svc === "object" ? PARSED_SETS.get(svc) : undefined)
+  if (cached !== undefined) return cached
+  const set = fileSet(svc)
+  serviceReader.inlineText(set.service, set.files)
+  const behinds = serviceReader.declarations(set.service).map(d => ({ qualifier: d.qualifier, file: d.file, fns: rootFunctions(set.files[d.file]) }))
+  const v = { set, fns: rootFunctions(set.service), props: rootProperties(set.service), ipc: ipcFunctions(set.service), behinds }
+  if (typeof svc === "string") PARSED.set(svc, v)
+  else PARSED_SETS.set(svc, v)
   return v
 }
 
-function bootService(serviceText, Model, o) {
+function bootService(svc, Model, o) {
+  const parsed = parsedSet(svc)
+  const serviceText = parsed.set.service
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], detachedRuns: [], turns: 0, cacheHang: false,
               notifyRuns: [], notifyServer: null, notifyHang: false, allowDetachedNotice: 0,
@@ -890,7 +925,6 @@ function bootService(serviceText, Model, o) {
     return JSON.stringify({ ok: true, kind: "cache", action: verb }) + "\n"
   }
   const ids = makeIds(h)
-  const parsed = parsedText(serviceText)
   const fns = parsed.fns
   const props = parsed.props
   const values = {}
@@ -912,6 +946,8 @@ function bootService(serviceText, Model, o) {
     resolvedUrl(x) { return { toString() { return String(x) } } }
   }
   const extras = Object.assign({ root, Model, console: quiet, Qt, Date: FakeDate }, ids)
+  // D-REL-14 C2: each code-behind's qualifier, filled once `compile` exists.
+  for (const b of parsed.behinds) extras[b.qualifier] = {}
   const scope = new Proxy({}, {
     has(t, k) { return typeof k === "string" && (k in extras || Object.prototype.hasOwnProperty.call(root, k)) },
     get(t, k) { if (k === Symbol.unscopables) return undefined; return k in extras ? extras[k] : root[k] },
@@ -971,6 +1007,9 @@ function bootService(serviceText, Model, o) {
   }
   // Signals are recorded.
   for (const m of serviceText.matchAll(/^  signal ([A-Za-z_][A-Za-z0-9_]*)\(/gm)) root[m[1]] = (...a) => h.signals.push([m[1]].concat(a))
+  for (const b of parsed.behinds) {
+    for (const name in b.fns) extras[b.qualifier][name] = compile(b.fns[name].args, b.fns[name].body, name)
+  }
   for (const name in fns) {
     if (name in STUBBED) continue
     root[name] = compile(fns[name].args, fns[name].body, name)
@@ -1437,11 +1476,11 @@ function notificationServer() {
 
 // A shell restart over what the last one left: the host's stored entry and
 // the state file's bytes, the clock running on.
-function restartService(serviceText, Model, h, o) {
+function restartService(svc, Model, h, o) {
   // F-HARNESS-100: on the same kit, with the entry where it was.
   const stored = h.host.storedEntry()
   const bare = typeof stored === "string"
-  return bootService(serviceText, Model, Object.assign({ entry: bare ? {} : (() => { const e = clone(stored); delete e.id; return e })(),
+  return bootService(svc, Model, Object.assign({ entry: bare ? {} : (() => { const e = clone(stored); delete e.id; return e })(),
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000,
                                                           section: h.host.section, bare, barSections: h.host.barSections }, o || {}))
 }

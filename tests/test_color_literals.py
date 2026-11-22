@@ -8,16 +8,27 @@ exception comment is green, and the words and calls that are not literals
 stay green. Rule 11: the guard is new, so each decision in it is shown by a
 case that goes red or green on that decision alone, and the mutants at the
 foot break the guard itself.
+
+D-REL-14 C2: the files are release.py's shipped_code, so the ones these tests
+mutate are derived from it, a code-behind among them once one ships (a line
+put into its first function, tests/split_fixture.py), and a colour literal
+put into the guards' fixture code-behind is red (ab3d287's guard, which read
+ALLOWLIST's .qml entries alone, passed it).
 """
 import importlib.util
 import io
 import os
 import re
+import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHIPPED = ("Guide.qml", "BarWidget.qml", "Service.qml")
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
+
+SHIPPED = tuple(os.path.relpath(entry.path, ROOT) for entry in split_fixture.shipped(ROOT))
 
 _spec = importlib.util.spec_from_file_location(
     "check_color_literals", os.path.join(ROOT, "scripts", "check-color-literals.py"))
@@ -53,56 +64,86 @@ class TheTree(unittest.TestCase):
         with redirect_stdout(out):
             code = guard.main(["--root", ROOT])
         self.assertEqual(code, 0, out.getvalue())
-        m = re.search(r"colour literal guard: (\d+) colour literal\(s\) read in 3 file\(s\) \((\d+) no-paint, (\d+) excused\), 0 problem",
-                      out.getvalue())
+        m = re.search(r"colour literal guard: (\d+) colour literal\(s\) read in %d file\(s\) \((\d+) no-paint, (\d+) excused\), 0 problem"
+                      % len(SHIPPED), out.getvalue())
         self.assertIsNotNone(m, out.getvalue())
         # The seven "transparent" fills F-GATE-17 counted: a scanner that
         # stopped seeing literals would be green on anything.
         self.assertGreaterEqual(int(m.group(1)), 7)
         self.assertEqual(m.group(1), m.group(2))
 
-    def test_the_allowlist_names_the_three_files_these_tests_mutate(self):
-        names = sorted(os.path.basename(p) for p in guard.theme.allowlisted_qml(ROOT))
-        self.assertEqual(names, sorted(SHIPPED))
+    def test_the_files_these_tests_mutate_are_the_allowlists_qml_and_the_services_code_behinds(self):
+        qml = [e for e in split_fixture.release.ALLOWLIST if e.endswith(".qml")]
+        behinds = split_fixture.release.service_files.service_names(ROOT)[1:]
+        self.assertEqual(sorted(SHIPPED), sorted(qml + behinds))
+        self.assertGreaterEqual(len(qml), 3)
 
     def test_each_kind_of_literal_in_each_shipped_file_is_red(self):
         cases = (
-            ('color: "#ff0000"', '"#ff0000"'),
-            ('property string tintHex: "#80ff0000"', '"#80ff0000"'),
-            ('property color flag: "white"', '"white"'),
-            ('property var ink: "black"', '"black"'),
-            ('property color warm: "tomato"', '"tomato"'),
-            ("property color mixed: Qt.rgba(1, 0.5, 0, 1)", "Qt.rgba(...) of numbers"),
-            ("property color dim: Qt.darker('red', 1.2)", '"red"'),
+            ('color: "#ff0000"', 'item.color = "#ff0000"', '"#ff0000"'),
+            ('property string tintHex: "#80ff0000"', 'var tintHex = "#80ff0000"', '"#80ff0000"'),
+            ('property color flag: "white"', 'item.color = "white"', '"white"'),
+            ('property var ink: "black"', 'var ink = "black"', '"black"'),
+            ('property color warm: "tomato"', 'item.warmColor = "tomato"', '"tomato"'),
+            ("property color mixed: Qt.rgba(1, 0.5, 0, 1)", "item.color = Qt.rgba(1, 0.5, 0, 1)", "Qt.rgba(...) of numbers"),
+            ("property color dim: Qt.darker('red', 1.2)", "item.color = Qt.darker('red', 1.2)", '"red"'),
         )
         for name in SHIPPED:
             base = read(name)
-            for line, shown in cases:
-                with self.subTest(file=name, line=line):
-                    found, _ = problems(inside_root(base, [line]))
+            for qml, js, shown in cases:
+                with self.subTest(file=name, line=qml):
+                    found, _ = problems(split_fixture.into_code(name, base, qml, js))
                     self.assertEqual(len(found), 1, found)
                     self.assertIn(shown, found[0])
                     self.assertIn("CONVENTION-EXCEPTION", found[0])
 
     def test_the_same_literals_under_an_exception_comment_are_green(self):
+        # A code-behind takes the same lines as statements, at its first
+        # function's indent (D-REL-14 C2).
+        def put(name, base, lines):
+            qml = "\n  ".join(lines)
+            js = "\n    ".join(l.replace("property color flag: ", "item.color = ") for l in lines)
+            return split_fixture.into_code(name, base, qml, js)
         for name in SHIPPED:
             base = read(name)
             with self.subTest(file=name, where="line above"):
-                found, counts = problems(inside_root(base, [
+                found, counts = problems(put(name, base, [
                     "// CONVENTION-EXCEPTION: a probe's fixed colour, outside the theme",
                     'property color flag: "#ff0000"']))
                 self.assertEqual(found, [])
                 self.assertEqual(counts["excused"], 1)
             with self.subTest(file=name, where="top of a comment run"):
-                found, counts = problems(inside_root(base, [
+                found, counts = problems(put(name, base, [
                     "// CONVENTION-EXCEPTION: the reason starts here",
                     "// and runs on for a second line.",
                     'property color flag: "white"']))
                 self.assertEqual(found, [])
             with self.subTest(file=name, where="own line"):
-                found, _ = problems(inside_root(base, [
+                found, _ = problems(put(name, base, [
                     'property color flag: "black"  // CONVENTION-EXCEPTION: ink for a test card']))
                 self.assertEqual(found, [])
+
+
+class ACodeBehind(unittest.TestCase):
+    """D-REL-14 C2: a code-behind is read through shipped_code."""
+
+    def run_tree(self, mutant=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp, mutant)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = guard.main(["--root", tmp])
+            return code, out.getvalue()
+
+    def test_the_fixture_is_green_and_its_code_behind_read(self):
+        code, out = self.run_tree()
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 colour literal(s) read in 2 file(s) (2 no-paint, 0 excused), 0 problem(s)", out)
+
+    def test_a_colour_literal_in_a_code_behind_is_red(self):
+        code, out = self.run_tree('item.color = "#ff0000"')
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r'Service-demo\.js:\d+:\d+: the colour literal "#ff0000"')
 
 
 class WhatAnExceptionCovers(unittest.TestCase):

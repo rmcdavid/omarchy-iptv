@@ -60,6 +60,38 @@ class ModelRegexGuardTest(unittest.TestCase):
         self.assertEqual(literals, int(theirs.split(" file(s), ")[1].split(" ")[0]))
         self.assertGreaterEqual(built, 1)
 
+    def test_a_refused_service_is_one_line_and_no_traceback(self):
+        # The fix pass on 2a4ab03, as the trim guard's: one line, not a
+        # traceback, for a service its readers refuse (a qualifier that is
+        # not its file's).
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import split_fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp)
+            path = os.path.join(tmp, "Service.qml")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertEqual(text.count('import "Service-demo.js" as ServiceDemo\n'), 1)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text.replace('import "Service-demo.js" as ServiceDemo\n', 'import "Service-demo.js" as Demo\n'))
+            done = run("--root", tmp)
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertNotIn("Traceback", done.stdout + done.stderr)
+        self.assertRegex(done.stdout, r"^model regex guard: the files cannot be read: .*declaration")
+
+    def test_a_code_behind_is_read_and_a_super_linear_regex_there_is_refused(self):
+        # D-REL-14 C2: the files are the trim guard's, release.py's
+        # shipped_code among them (red on ab3d287's guard).
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import split_fixture
+        for mutant, rc in ((None, 0), ("var r = /a+a+b/", 1)):
+            with tempfile.TemporaryDirectory() as tmp:
+                split_fixture.tree(tmp, mutant)
+                done = run("--root", tmp)
+                self.assertEqual(done.returncode, rc, done.stdout)
+                if rc:
+                    self.assertRegex(done.stdout, r"Service-demo\.js:\d+: .*super-linear shape")
+
     def test_the_known_bad_shape_is_refused_in_a_literal_and_in_a_built_pattern(self):
         for line in ['var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):\\/\\/([^\\/?#]*)([^?#]*)(\\?[^#]*)?(#.*)?$/)',
                      'var r = /\\[\\s*not\\s*24\\s*[-/]?\\s*7\\s*\\]/',

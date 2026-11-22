@@ -55,13 +55,21 @@ unqualified. No shipped file uses a qualified QtQuick import today.
 `import "Model.mjs" as Model` is a JavaScript import, not a QtQuick one, and
 is not refused.
 
-WHAT IT SCANS. With no arguments, the `.qml` entries of ALLOWLIST in
-scripts/release.py -- what main ships -- so a new shipped QML file is covered
-the day it is added to the artifact and never by somebody remembering. The
-list is read with `ast`, not by importing release.py, so this check runs no
-code from the file it reads. For its own tests the check also accepts an
-explicit list of QML files, and `--root DIR` points the ALLOWLIST derivation
-at another tree.
+WHAT IT SCANS. With no arguments, scripts/release.py's shipped_code: the
+`.qml` entries of ALLOWLIST -- what main ships -- and the code-behinds
+Service.qml declares (D-REL-14), so a new shipped QML file is covered the day
+it is added to the artifact and never by somebody remembering. ALLOWLIST is
+read out of the scanned tree's own release.py with `ast`, so this check runs
+no code from the tree it reads. For its own tests the check also accepts an
+explicit list of files, and `--root DIR` points the derivation at another
+tree.
+
+QML BUILT FROM A STRING IS REFUSED. `Qt.createQmlObject("... Text { ... }",
+parent)` makes a Text out of a string literal, which the scan below masks
+like every string, so a Text made that way would pass unread whatever its
+format. No shipped file calls it; a call, in a `.qml` or a code-behind, is
+reported with its line (D-REL-14's C2, where imperative code moved into
+code-behinds made it the one way code there could make a Text).
 
 HOW IT READS QML. The scan is brace-aware and masks `//` and `/* */`
 comments, the insides of string literals (double-quoted, single-quoted and
@@ -91,7 +99,6 @@ the check that none has started to.
 Python 3 standard library only. ASCII only.
 """
 
-import ast
 import os
 import re
 import sys
@@ -115,6 +122,9 @@ REGEX_PRECEDERS = set(':=(,[{;!?&|+-*%<>^~')
 REGEX_KEYWORDS = set(['return', 'typeof', 'case', 'throw', 'in', 'instanceof',
                       'void', 'delete', 'do', 'else', 'new', 'yield', 'await'])
 TEXT_FORMAT_RE = re.compile(r'(?<![A-Za-z0-9_.])textFormat\s*:\s*([^\n]*)')
+# A component made from a string, matched in the masked source: the string
+# itself is blanked, so a Text inside it is unseen.
+FROM_STRING_RE = re.compile(r'(?<![A-Za-z0-9_$])createQmlObject\s*\(')
 PLAIN = 'Text.PlainText'
 STYLED = 'Text.StyledText'
 
@@ -123,21 +133,18 @@ def repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def allowlisted_qml(root):
-    """The .qml entries of ALLOWLIST in <root>/scripts/release.py, read as a
-    literal with ast so nothing in release.py runs."""
-    path = os.path.join(root, 'scripts', 'release.py')
-    with open(path, 'r', encoding='utf-8') as handle:
-        tree = ast.parse(handle.read(), path)
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        if 'ALLOWLIST' not in names:
-            continue
-        entries = ast.literal_eval(node.value)
-        return [os.path.join(root, e) for e in entries if e.endswith('.qml')]
-    raise ValueError('%s has no ALLOWLIST assignment' % path)
+def shipped_code(root):
+    """release.py's shipped_code(root) as paths, the code-behinds after
+    Service.qml. Raises ValueError when the service's readers refuse it."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location('release', os.path.join(here, 'release.py'))
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    try:
+        return [entry.path for entry in release.shipped_code(root)]
+    except release.service_files.ServiceFilesError as error:
+        raise ValueError("the service's files are refused by its readers: %s" % error)
 
 
 def regex_opens_at(out):
@@ -332,6 +339,12 @@ def check_file(path):
                          'or "%s.Label {" evade this guard, which scans '
                          'unqualified Text and Label only; import it '
                          'unqualified' % (module, alias, alias, alias)))
+    for m in FROM_STRING_RE.finditer(masked):
+        problems.append((line_of(masked, m.start()),
+                         'createQmlObject builds QML out of a string, which '
+                         'this guard masks unread, so a Text made there could '
+                         'carry any textFormat; declare the element in a '
+                         'shipped .qml instead'))
     blocks = text_blocks(masked)
     for open_line, segments in blocks:
         found = []
@@ -388,7 +401,7 @@ def main(argv=None):
     if not files:
         root = root or repo_root()
         try:
-            files = allowlisted_qml(root)
+            files = shipped_code(root)
         except (IOError, OSError, ValueError, SyntaxError) as error:
             print('cannot derive the shipped QML list from %s: %s'
                   % (os.path.join(root, 'scripts', 'release.py'), error))

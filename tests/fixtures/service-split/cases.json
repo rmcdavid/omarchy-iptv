@@ -396,6 +396,148 @@
      "ServiceA"
     ]
    ]
+  },
+  {
+   "name": "a code-behind not named Service-<domain>.js is refused, however exactly it is declared and forwarded",
+   "service": "import QtQuick\nimport \"Helpers.js\" as Helpers\nItem {\n  function a(x) { return Helpers.a(x) }\n}\n",
+   "files": {
+    "Helpers.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a qualifier that is not its file's Service<Domain> is refused",
+   "service": "import \"Service-pip.js\" as ServicePlayer\nItem {\n  function a(x) { return ServicePlayer.a(x) }\n}\n",
+   "files": {
+    "Service-pip.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a domain that is not lower-case letters and digits is refused: a capital",
+   "service": "import \"Service-Pip.js\" as ServicePip\nItem {\n  function a(x) { return ServicePip.a(x) }\n}\n",
+   "files": {
+    "Service-Pip.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a domain holding a hyphen is refused: its qualifier could not be a name",
+   "service": "import \"Service-pip-x.js\" as ServicePipX\nItem {\n  function a(x) { return ServicePipX.a(x) }\n}\n",
+   "files": {
+    "Service-pip-x.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a Model.js import on a text that imports Model.mjs is a script like any other, and refused, never kept unread",
+   "service": "import \"Model.mjs\" as Model\nimport \"Model.js\" as Model\nItem {\n  function a(x) { return Model.a(x) }\n}\n",
+   "files": {
+    "Model.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "an ES module other than the model is refused: its forwarders would stay as root text and its body unread",
+   "service": "import \"Model.mjs\" as Model\nimport \"Service-a.mjs\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.mjs": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "module"
+   }
+  },
+  {
+   "name": "the model imported in single quotes is refused: the one module import is exactly the model's",
+   "service": "import 'Model.mjs' as Model\nItem {\n  function a(x) { return Model.a(x) }\n}\n",
+   "files": {},
+   "expect": {
+    "refusal": "module"
+   }
+  },
+  {
+   "name": "the model imported under another name is refused",
+   "service": "import \"Model.mjs\" as M\nItem {\n  function a(x) { return M.a(x) }\n}\n",
+   "files": {},
+   "expect": {
+    "refusal": "module"
+   }
+  },
+  {
+   "name": "a .import line in a code-behind is refused: a code-behind runs in the component's scope or not at all",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n.import \"Other.js\" as Other\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "the model's import and a code-behind named for its domain read: Service-<domain>.js as Service<Domain>, digits allowed",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-pip2.js\" as ServicePip2\nItem {\n  function a(x) { return ServicePip2.a(x) }\n}\n",
+   "files": {
+    "Service-pip2.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "text": "import QtQuick\nimport \"Model.mjs\" as Model\nItem {\n  function a(x) {\n    return 1\n  }\n}\n"
+   },
+   "declarations": [
+    [
+     "Service-pip2.js",
+     "ServicePip2"
+    ]
+   ]
+  },
+  {
+   "name": "a loose comment line in a code-behind holding a lone CR is refused: JavaScript ends the comment there and runs what follows",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n// loose\rroot.paused = true; var leaked = 1\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a lone CR in the comment after a code-behind function's closing brace is refused",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  } //\r  root.paused = true\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a lone CR in a code-behind function's leading comment block is refused: the code after it sits outside the function in the file",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\rroot.paused = true\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "U+2028 and U+2029 in a code-behind's comment are refused, as line terminators JavaScript reads",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n// loose\u2028root.paused = true\n// and\u2029var leaked = 1\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
   }
  ]
 }

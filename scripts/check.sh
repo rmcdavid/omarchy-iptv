@@ -11,6 +11,11 @@
 #   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
 #                                the parts under model/ are what the script
 #                                writes, and no initializer reads another part)
+#   4c. service split guard      (scripts/split-service.py --check: Service.qml
+#                                and the code-behinds it declares are a layout
+#                                the inline view vouches for, every root.N is a
+#                                member of the root, and its own cases run;
+#                                D-REL-14)
 #   5. QML spec                  (qmltestrunner on tests/Model.spec.qml)
 #   6. harness predicates        (scripts/qa-lib-test.sh)
 #   6b. chno-entry preflight     (scripts/dev-harness/chno-entry-scenario.sh check-tree)
@@ -18,6 +23,8 @@
 #                                the player's relay observed at the sinks, a
 #                                real headless mpv inside `unshare -rn`;
 #                                D-SINK-102)
+#   6d. chno preflight           (scripts/dev-harness/chno-scenario.sh check-tree:
+#                                the channel-number seams; F-HARNESS-122)
 #   7. ASCII check on code files (glyphs are allowed in .qml only) and the
 #                                control-byte check. BOTH scan the working
 #                                TREE, not the index: `git ls-files --cached
@@ -1375,6 +1382,15 @@ QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
 CHNO_ENTRY_MIN=${CHNO_ENTRY_MIN:-21}
+# The M2-03 channel-number preflight (scripts/dev-harness/chno-scenario.sh
+# check-tree, F-HARNESS-122): 15 seams over the service, the model, the bar,
+# the manifest and the harness, plus its own "ran every check" line. It was
+# never in this gate, though its comment said so, and its nowPlaying seam
+# read stale for 24 days (432b710 moved the reply into Model.ipcNowPlaying on
+# 2026-10-29) with nothing to say so; 9ed04be's scenario on 9ed04be reads 14
+# passed, 1 failed, which is red here. In the gate since 2026-11-22, the
+# lead's call under the owner's standing authority of 2026-11-09.
+CHNO_PREFLIGHT_MIN=${CHNO_PREFLIGHT_MIN:-16}
 # The M2-05 picture-in-picture preflight: 34 seams (integration added the
 # four the scenario's header reserved for a merged lane V1, and four more for
 # PIP15's single dispatch spelling and the snapshot key's one name), the
@@ -1503,6 +1519,19 @@ OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 # per-file proxy emptied for rtmps (a direct connection, as an FFmpeg that
 # stopped handing rtmps's TLS the option would make): 3 of the 4.
 RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
+# D-REL-14 (C2, 2026-11-22, lane-relsplit2): the service split guard
+# (scripts/split-service.py --check) judges every `root.N` site in the
+# service's files against the root's members -- 2,267 on this tree, all in
+# Service.qml while no code-behind ships, and the same 2,267 over Part A's
+# four-code-behind prototype of 9ed04be -- and then runs its own cases, 24 at
+# first and 32 since the fix pass on 2a4ab03 (any script beside Service.qml
+# that it does not import, a header nested at the root's indent, root?.[...]),
+# so the step goes red when the judge stops judging even on a tree with
+# nothing split. The site floor sits a little under the count, as the metric
+# guard's does, so a refactor that folds a few references away is not a red
+# gate and a judge that reads none is; the case floor is exact.
+SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
+SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -1939,6 +1968,35 @@ else
   bad "helper split"; cat "$CHECK_TMP/split-helper.log"
 fi
 
+step "service split guard (scripts/split-service.py --check)"
+# D-REL-14. Service.qml's functions move by domain into classic-JS
+# code-behinds, Service-<domain>.js, each reached through a one-line
+# forwarder left at its old place; the readers (scripts/service_files.py and
+# tests/service-files.js) are the one list of them. This proves the tree as it
+# stands: whatever the readers refuse, and on top of their verdict a name
+# declared twice at the root, a Service*.js that Service.qml does not import,
+# a qualifier named outside its forwarders, `this` or `arguments` in a
+# code-behind, a code-behind naming its own function unqualified, and a
+# root.N that is no member of the root -- the member check qmllint stopped
+# making once a body moved, and only ever warned about. Then the script's
+# own cases, so the judge is seen judging on a tree with nothing split.
+split_service_log=$CHECK_TMP/split-service.log
+if python3 "$ROOT/scripts/split-service.py" --check --root "$ROOT" --qml-dir "$QML_IMPORTS" >"$split_service_log" 2>&1; then
+  split_sites=$(grep -oE '[0-9]+ root member site\(s\) judged' "$split_service_log" | head -1 | grep -oE '^[0-9]+')
+  split_cases=$(grep -oE 'self-test [0-9]+ of [0-9]+ cases' "$split_service_log" | head -1 | grep -oE '^self-test [0-9]+' | grep -oE '[0-9]+')
+  if [[ -z $split_sites || -z $split_cases ]]; then
+    cat "$split_service_log"; bad "service split guard printed no site or case count"
+  elif (( split_sites < SERVICE_SPLIT_SITES_MIN )); then
+    cat "$split_service_log"; bad "service split guard judged $split_sites root member site(s), expected at least $SERVICE_SPLIT_SITES_MIN"
+  elif (( split_cases < SERVICE_SPLIT_CASES_MIN )); then
+    cat "$split_service_log"; bad "service split guard ran $split_cases of its own cases, expected at least $SERVICE_SPLIT_CASES_MIN"
+  else
+    ok "service split guard ($(sed -n 's/^split-service: check ok (\(.*\))$/\1/p' "$split_service_log" | head -1))"
+  fi
+else
+  cat "$split_service_log"; bad "service split guard"
+fi
+
 step "qmltestrunner tests/Model.spec.qml"
 if [[ -x "$QT_BIN/qmltestrunner" ]]; then
   qml_log="$CHECK_TMP/qmltest.log"
@@ -2030,6 +2088,27 @@ if bash "$ROOT/scripts/dev-harness/chno-entry-scenario.sh" check-tree >"$chno_lo
   fi
 else
   bad "chno-entry preflight"; cat "$chno_log"
+fi
+
+step "scripts/dev-harness/chno-scenario.sh check-tree (M2-03, F-HARNESS-122)"
+# The channel-number seams the live half of M2-03 drives: the service's index,
+# its resolver and tuneByNumber, the IPC verb, status and nowPlaying handing
+# the number to the model's reply, the bar's number, the manifest's three
+# settings and the harness's two verbs. Like chno-entry's above it needs no
+# display and no quickshell and proves the code present, never working; it
+# is here because outside the gate one of its seams read stale for 24 days.
+chno_pre_log="$CHECK_TMP/chno-scenario.log"
+if bash "$ROOT/scripts/dev-harness/chno-scenario.sh" check-tree >"$chno_pre_log" 2>&1; then
+  chno_pre_checks=$(grep -c '^PASS' "$chno_pre_log")
+  if (( chno_pre_checks < CHNO_PREFLIGHT_MIN )); then
+    bad "chno preflight ran $chno_pre_checks checks, expected at least $CHNO_PREFLIGHT_MIN"
+    cat "$chno_pre_log"
+  else
+    ok "chno preflight ($chno_pre_checks checks)"
+    if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$chno_pre_log"; fi
+  fi
+else
+  bad "chno preflight"; cat "$chno_pre_log"
 fi
 
 step "scripts/dev-harness/pip-scenario.sh check-tree (M2-05)"

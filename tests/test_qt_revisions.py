@@ -13,17 +13,26 @@ and the shipped tree: green as it stands, red with a hidden member or type
 written into each shipped file. Rule 11: the guard is new, so
 its decisions were broken one at a time and each mutant turned tests here
 red (docs/QA-RESULTS.md, "D-HOST-10").
+
+D-REL-14 C2: the shipped files are release.py's shipped_code, so the tree's
+count and the files mutated here are derived from it, a code-behind among
+them once one ships, judged under its importer's imports; and a hidden
+member written into the guards' fixture code-behind is red (ab3d287's guard
+read ALLOWLIST's .qml entries alone and passed it).
 """
 import importlib.util
 import io
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
 QML_DIR = "/usr/lib/qt6/qml"
 QUICKSHELL = os.environ.get("OMARCHY_IPTV_QUICKSHELL", "/usr/bin/quickshell")
 
@@ -412,16 +421,26 @@ class Installed(unittest.TestCase):
         self.assertEqual((self.rewrite[0].pattern, self.rewrite[1]), (theirs[0].pattern, theirs[1]))
         self.assertEqual(guard.PRAGMA, other.PRAGMA)
 
+    def code(self):
+        """(name, importer's text or None) for every shipped file of code."""
+        out = []
+        for entry in split_fixture.shipped(ROOT):
+            imp = None if entry.importer == entry.path else self.shipped(os.path.relpath(entry.importer, ROOT))
+            out.append((os.path.relpath(entry.path, ROOT), imp))
+        return out
+
     def test_the_tree_is_green(self):
         out = io.StringIO()
         with redirect_stdout(out):
             rc = guard.main(["--root", ROOT, "--qml-dir", QML_DIR, "--quickshell", QUICKSHELL])
         self.assertEqual(rc, 0, out.getvalue())
-        self.assertRegex(out.getvalue(), r"^qt revision guard: 3 file\(s\), 3 read as the host's rewrite pins them")
+        n = len(self.code())
+        self.assertGreaterEqual(n, 3)
+        self.assertRegex(out.getvalue(), r"^qt revision guard: %d file\(s\), %d read as the host's rewrite pins them" % (n, n))
 
     def test_every_shipped_file_is_one_the_rewrite_reaches(self):
-        for name in ("Guide.qml", "Service.qml", "BarWidget.qml"):
-            _, (_types, _hidden, changed) = guard.judge(name, self.shipped(name), self.rewrite, QML_DIR)
+        for name, imp in self.code():
+            _, (_types, _hidden, changed) = guard.judge(name, self.shipped(name), self.rewrite, QML_DIR, importer_text=imp)
             self.assertTrue(changed, name)
 
     def test_what_the_row_measured_is_what_the_installed_type_files_say(self):
@@ -445,14 +464,55 @@ class Installed(unittest.TestCase):
             self.skipTest("the installed Qt has nothing past the host's pin")
         member = sorted(n for n in self.scope.hidden if not n.startswith("on") and not n.endswith("Changed"))[0]
         type_name = sorted(self.scope.types)[0]
-        for name in ("Guide.qml", "Service.qml", "BarWidget.qml"):
+        for name, imp in self.code():
             text = self.shipped(name)
-            self.assertEqual(guard.judge(name, text, self.rewrite, QML_DIR)[0], [], name)
-            for line, word in (("property var probeA: root.%s" % member, member),
-                               ("property var probeB: %s" % type_name, type_name)):
-                problems, _ = guard.judge(name, self.inside_root(text, line), self.rewrite, QML_DIR)
+            self.assertEqual(guard.judge(name, text, self.rewrite, QML_DIR, importer_text=imp)[0], [], name)
+            for line, js, word in (("property var probeA: root.%s" % member, "var probeA = root.%s" % member, member),
+                                   ("property var probeB: %s" % type_name, "var probeB = %s" % type_name, type_name)):
+                problems, _ = guard.judge(name, split_fixture.into_code(name, text, line, js), self.rewrite, QML_DIR,
+                                          importer_text=imp)
                 self.assertEqual(len(problems), 1, "%s + %s: %r" % (name, line, problems))
                 self.assertIn("`%s`" % word, problems[0])
+
+    def run_tree(self, mutant=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp, mutant)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = guard.main(["--root", tmp, "--qml-dir", QML_DIR, "--quickshell", QUICKSHELL])
+            return rc, out.getvalue()
+
+    def test_the_fixture_code_behind_is_read_under_its_importers_imports(self):
+        rc, out = self.run_tree()
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"^qt revision guard: 2 file\(s\), 2 read as the host's rewrite pins them")
+
+    def test_an_unreadable_import_is_reported_once_on_the_importer(self):
+        # The fix pass on 2a4ab03: a code-behind runs under Service.qml's
+        # imports, so a problem with them is Service.qml's, reported once
+        # (2a4ab03's guard reported it again for every code-behind).
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp)
+            path = os.path.join(tmp, "Service.qml")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertEqual(text.count("import QtQuick\n"), 1)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text.replace("import QtQuick\n", "import QtQuick\nimport NoSuchModuleAtAll\n"))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = guard.main(["--root", tmp, "--qml-dir", QML_DIR, "--quickshell", QUICKSHELL])
+        lines = [line for line in out.getvalue().splitlines() if "NoSuchModuleAtAll" in line]
+        self.assertEqual(rc, 1, out.getvalue())
+        self.assertEqual(len(lines), 1, out.getvalue())
+        self.assertTrue(lines[0].startswith("Service.qml: NoSuchModuleAtAll"), lines[0])
+
+    def test_a_hidden_member_in_a_code_behind_is_red(self):
+        if "mutabilityGroup" not in self.scope.hidden:
+            self.skipTest("the installed Qt hides no mutabilityGroup from the host's pin")
+        rc, out = self.run_tree("item.mutabilityGroup = 0")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out, r"Service-demo\.js:\d+:\d+: `mutabilityGroup` is the name of a member Qt added after")
 
 
 if __name__ == "__main__":

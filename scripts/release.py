@@ -36,6 +36,8 @@ Python 3 standard library only. Every subprocess is an argv list.
 """
 
 import argparse
+import ast
+import collections
 import datetime
 import json
 import os
@@ -50,6 +52,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
+import service_files  # noqa: E402  the service's files, read from Service.qml (D-REL-14)
 
 RELEASE_BRANCH = 'main'
 DEV_BRANCH = 'dev'
@@ -251,6 +254,73 @@ def bare_helper_invocations(text, subcommands):
     # invisible to a per-line scan. The reported line is where the name is.
     return [(text.count('\n', 0, m.start()) + 1, ' '.join(m.group(0).split()))
             for m in pattern.finditer(text)]
+
+
+# ------------------------------------------------------- shipped code ----
+#
+# D-REL-14 (C2). The gate's guards of the shipped QML -- model members, model
+# regex, trim shapes, README notices, theme names, colour and metric
+# literals, Qt revisions, text format -- each read ALLOWLIST's `.qml` entries,
+# and a function moved out of Service.qml into a code-behind would leave all
+# of them. So they read shipped_code(root): those entries, each followed by
+# the code-behinds it declares (scripts/service_files.py, the one list of
+# them, read from Service.qml's own imports), and each with the file whose
+# imports it runs under: itself for a `.qml`, Service.qml for a code-behind,
+# which has no imports of its own. ALLOWLIST is read out of <root>'s own
+# release.py as a literal (ast), so a guard pointed at another tree runs no
+# code of that tree; on this tree it is ALLOWLIST.
+
+ShippedCode = collections.namedtuple('ShippedCode', 'path importer')
+
+
+def allowlist_of(root):
+    """ALLOWLIST of <root>/scripts/release.py, read as a literal."""
+    path = os.path.join(root, 'scripts', 'release.py')
+    with open(path, encoding='utf-8') as fh:
+        tree = ast.parse(fh.read(), path)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'ALLOWLIST' for t in node.targets):
+            return list(ast.literal_eval(node.value))
+    raise ValueError('%s has no ALLOWLIST assignment' % path)
+
+
+def code_behinds_of(path):
+    """The code-behinds a shipped `.qml` declares: Service.qml's, through the
+    service's readers (a ServiceFilesError when they refuse it), and none for
+    any other file, which no reader of the service reads."""
+    if os.path.basename(path) != service_files.SERVICE:
+        return []
+    return service_files.service_files(path)[1:]
+
+
+def shipped_code(root):
+    """[ShippedCode(path, importer)]: ALLOWLIST's `.qml` entries in its order,
+    each followed by its code-behinds (code_behinds_of).
+
+    Every other script ALLOWLIST ships must be one a guard reads, or this
+    raises ValueError rather than leave it out: a `.js` only as a code-behind
+    Service.qml declares (a `.js` another QML file imports is read by no guard
+    of the shipped code until a split of that file teaches code_behinds_of
+    its importer), and a `.mjs` only as the model, Model.mjs and model/*.mjs,
+    which the model guards read themselves."""
+    out = []
+    allowlist = allowlist_of(root)
+    for rel in allowlist:
+        if not rel.endswith('.qml'):
+            continue
+        path = os.path.join(root, rel)
+        out.append(ShippedCode(path, path))
+        out.extend(ShippedCode(cb, path) for cb in code_behinds_of(path))
+    behinds = set(os.path.normpath(os.path.relpath(e.path, root)) for e in out if e.path != e.importer)
+    for rel in allowlist:
+        norm = os.path.normpath(rel)
+        if rel.endswith('.js') and norm not in behinds:
+            raise ValueError('ALLOWLIST ships %s, which is no code-behind Service.qml declares, so no guard of the '
+                             'shipped code reads it' % rel)
+        if rel.endswith('.mjs') and norm != 'Model.mjs' and os.path.dirname(norm) != 'model':
+            raise ValueError('ALLOWLIST ships %s, which is not the model (Model.mjs, model/*.mjs), so no guard of the '
+                             'shipped code reads it' % rel)
+    return out
 
 
 class ReleaseError(Exception):

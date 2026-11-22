@@ -20,9 +20,10 @@ const result = runProtoPaths(Model)
 // names, applied the way the FileView applies it, then the lookups the service
 // makes with ids that come from state.json and from IPC `play`.
 const H = createRequire(import.meta.url)("./service-harness.js")
-// D-REL-14: the service as the files Service.qml declares, read as one text.
-const svcText = createRequire(import.meta.url)("./service-files.js").serviceText(path.join(path.dirname(modelPath), "Service.qml"))
-const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+// D-REL-14: the service as the files Service.qml declares, booted as the
+// shell loads them (C2: the code-behinds compiled beside the forwarders).
+const svcSet = createRequire(import.meta.url)("./service-files.js").serviceSet(path.join(path.dirname(modelPath), "Service.qml"))
+const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
 const service = { errors: [] }
 try {
   service.indexBefore = PROTO_KEYS.map(k => h.root.channelIndex[k] === undefined)

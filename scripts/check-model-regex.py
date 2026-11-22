@@ -58,7 +58,8 @@ the parser cannot read is a problem, not a pass. One sample character at a
 time is the only input a pattern is ever run on here.
 
 WHAT IT SCANS. The same files as scripts/check-trim-shapes.py (Model.mjs,
-model/*.mjs, every .qml in ALLOWLIST), through its own scanner, so the two
+model/*.mjs, every .qml in ALLOWLIST and the code-behinds Service.qml
+declares: release.py's shipped_code, D-REL-14), through its own scanner, so the two
 guards cannot drift on what a regex literal is. Lines that are comments are
 not code and are not read. `--root DIR` scans another tree (the red run
 against the code before D-PERF-11); FILE arguments scan exactly those files.
@@ -309,9 +310,13 @@ def main(argv):
             root = os.path.abspath(args.pop(0))
         else:
             files.append(os.path.abspath(a))
-    if not files:
-        files = trim.scanned_files(root)
-    problems, literals, built = scan(files)
+    try:
+        if not files:
+            files = trim.scanned_files(root)
+        problems, literals, built = scan(files)
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError) as error:
+        print("model regex guard: the files cannot be read: %s" % error)
+        return 1
     for p in problems:
         print(p)
     print("model regex guard: %d file(s), %d regex literal(s), %d built, %d problem(s)"

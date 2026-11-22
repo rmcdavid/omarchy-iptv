@@ -9,6 +9,12 @@ TheRealLinter: every Model-member position the real qmllint reports, in each
 file the gate lints, must be one the scanner found. The guard never consults
 qmllint; that case is the scanner's fidelity check, and it refuses to pass
 blind when qmllint reports no position at all.
+
+D-REL-14 C2: Service.qml's code-behinds are read with it, each under its
+imports, so a mistyped member is looked for in the file of the service that
+holds it, and a mistyped member in the guards' fixture code-behind is red;
+and an import of the model, or of a script it is handed to, in single quotes
+is read as one (both red on ab3d287's guard).
 """
 
 import importlib.util
@@ -30,6 +36,8 @@ cmm = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cmm)
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 import model_files  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, 'tests'))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
 
 QMLLINT = os.path.join(os.environ.get('QT_BIN', '/usr/lib/qt6/bin'), 'qmllint')
 QML_IMPORTS = os.environ.get('QML_IMPORTS', '/usr/lib/qt6/qml')
@@ -187,6 +195,20 @@ class Judge(unittest.TestCase):
             problems, _ = cmm.problems_for(head + bad, NAMES, 'shell.qml')
             self.assertEqual(1, len(problems), (bad, problems))
 
+    def test_a_single_quoted_import_of_the_model_is_read(self):
+        problems, count = cmm.problems_for("import QtQuick\nimport 'Model.mjs' as Model\n"
+                                           "Item { property int a: Model.zzBogusMember }\n", NAMES, 'X.qml')
+        self.assertEqual(1, count)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn('`Model.zzBogusMember`', problems[0])
+
+    def test_the_model_handed_to_a_single_quoted_script_import_is_reported_not_red(self):
+        head = HEAD + "import 'harness-lib.js' as Lib\n"
+        body = 'Item { function f(e) { return Lib.entryKey(Model, Model.redactUrls(e)) } }\n'
+        problems, refs, handed = cmm.judge(head + body, NAMES, 'shell.qml')
+        self.assertEqual(([], 1), (problems, len(refs)))
+        self.assertEqual([(4, 44, 'Lib.entryKey')], handed)
+
     def test_a_scanner_that_lost_its_place_is_red(self):
         for body, what in (('Item { property string a: "never closed }\n', 'newline inside a quoted string'),
                            ('Item { property string a: Model.redactUrls(1) }\n/* never closed\n', 'block comment'),
@@ -254,9 +276,17 @@ class TheRealSources(unittest.TestCase):
         self.names = model_files.public_names(ROOT)
 
     def mistyped(self, rel, needle, replacement):
-        text = read(os.path.join(ROOT, rel))
+        # D-REL-14 C2: the service is its files, so the needle is looked for
+        # in the one of them that holds it, judged under Service.qml's imports.
+        path = os.path.join(ROOT, rel)
+        files = [path] + [cb for cb in split_fixture.release.code_behinds_of(path)]
+        holder = next((f for f in files if needle in read(f)), path)
+        text = read(holder)
         self.assertIn(needle, text, rel)
-        return cmm.problems_for(text.replace(needle, replacement, 1), self.names, os.path.basename(rel))
+        importer = None if holder == path else read(path)
+        problems, _refs, _handed = cmm.judge(text.replace(needle, replacement, 1), self.names,
+                                             os.path.basename(holder), importer)
+        return problems, len(_refs)
 
     def test_every_file_the_gate_lints_is_clean_and_read(self):
         files = linted_files()
@@ -265,6 +295,24 @@ class TheRealSources(unittest.TestCase):
             problems, refs, _ = cmm.judge(read(path), self.names, os.path.basename(path))
             self.assertEqual([], problems, path)
             self.assertGreater(len(refs), 0, path)
+            # D-REL-14 C2: and each code-behind it declares, under its imports.
+            for cb in split_fixture.release.code_behinds_of(path):
+                problems, _refs, _ = cmm.judge(read(cb), self.names, os.path.basename(cb), read(path))
+                self.assertEqual([], problems, cb)
+
+    def test_the_fixture_code_behind_is_judged_under_its_importers_imports(self):
+        for mutant, rc, line in ((None, 0, "Service-demo.js: 1 Model reference(s) in code, each a name Model.mjs "
+                                           "exports (%d names), judged under Service.qml's imports" % len(self.names)),
+                                 ("item.bogus = Model.zzBogusMember(text)", 1, "`Model.zzBogusMember` is not a name")):
+            with tempfile.TemporaryDirectory() as tmp:
+                split_fixture.tree(tmp, mutant)
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    got = cmm.main(['--root', ROOT, '--file', os.path.join(tmp, 'Service.qml')])
+                self.assertEqual(rc, got, buf.getvalue())
+                self.assertIn(line, buf.getvalue())
+                if rc:
+                    self.assertRegex(buf.getvalue(), r"Service-demo\.js:\d+:\d+: `Model\.zzBogusMember`")
 
     def test_through_main_as_the_gate_calls_it(self):
         buf = io.StringIO()

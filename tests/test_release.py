@@ -1708,6 +1708,123 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class ShippedCodeTest(unittest.TestCase):
+    """D-REL-14 C2: shipped_code(root), the files of code the gate's guards
+    of the shipped QML read -- ALLOWLIST's .qml entries, each followed by the
+    code-behinds it declares, with the file whose imports each runs under.
+    Rule 11: each test is red on ab3d287, which had no shipped_code."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, 'tests'))
+        import split_fixture
+        self.fixture = split_fixture
+
+    def test_on_this_tree_it_is_the_allowlists_qml_and_the_services_code_behinds(self):
+        got = [(os.path.relpath(e.path, ROOT), os.path.relpath(e.importer, ROOT)) for e in release.shipped_code(ROOT)]
+        want = []
+        for rel in release.ALLOWLIST:
+            if rel.endswith('.qml'):
+                want.append((rel, rel))
+                if rel == 'Service.qml':
+                    want += [(n, rel) for n in release.service_files.service_names(ROOT)[1:]]
+        self.assertEqual(got, want)
+        self.assertGreaterEqual(len(got), 3)
+
+    def test_a_code_behind_follows_its_service_and_runs_under_its_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            got = [(os.path.basename(e.path), os.path.basename(e.importer)) for e in release.shipped_code(tmp)]
+        self.assertEqual(got, [('Service.qml', 'Service.qml'), ('Service-demo.js', 'Service.qml')])
+
+    def test_the_allowlist_is_the_roots_own_read_as_a_literal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, 'scripts'))
+            with open(os.path.join(tmp, 'scripts', 'release.py'), 'w') as fh:
+                fh.write('import sys\nsys.exit(3)\nALLOWLIST = ("Only.qml", "Model.mjs")\n')
+            with open(os.path.join(tmp, 'Only.qml'), 'w') as fh:
+                fh.write('import QtQuick\nItem {}\n')
+            self.assertEqual([os.path.basename(e.path) for e in release.shipped_code(tmp)], ['Only.qml'])
+            with open(os.path.join(tmp, 'scripts', 'release.py'), 'w') as fh:
+                fh.write('LIST = ()\n')
+            with self.assertRaises(ValueError):
+                release.shipped_code(tmp)
+
+    def test_only_the_service_declares_code_behinds_and_a_refused_service_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            with open(os.path.join(tmp, 'Guide.qml'), 'w') as fh:
+                fh.write('import QtQuick\nimport "Service-demo.js" as ServiceDemo\nItem {}\n')
+            self.assertEqual(release.code_behinds_of(os.path.join(tmp, 'Guide.qml')), [])
+            os.remove(os.path.join(tmp, 'Service-demo.js'))
+            # The readers' file list still names it; its text is refused.
+            self.assertEqual([os.path.basename(p) for p in release.code_behinds_of(os.path.join(tmp, 'Service.qml'))],
+                             ['Service-demo.js'])
+            with open(os.path.join(tmp, 'Service.qml'), 'a') as fh:
+                fh.write('import "Helpers.js" as Helpers\n')
+            with self.assertRaises(release.service_files.ServiceFilesError):
+                release.shipped_code(tmp)
+
+
+class ShippedCodeReadsEveryScriptTest(unittest.TestCase):
+    """The fix pass on 2a4ab03: shipped_code yields ALLOWLIST's .qml and the
+    code-behinds Service.qml declares, so a script another QML file imports
+    was shipped and read by no guard of the shipped code -- six violations in
+    a Guide.qml script passed all nine (the recheck of 2a4ab03). Every
+    script on ALLOWLIST must now be one some guard reads, or shipped_code
+    raises: a .js as a declared code-behind, a .mjs as the model. Red on
+    2a4ab03's shipped_code, which returned the list."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, 'tests'))
+        import split_fixture
+        self.fixture = split_fixture
+
+    def tree_with(self, tmp, extra, entry):
+        self.fixture.tree(tmp)
+        for name, text in extra.items():
+            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
+            with open(os.path.join(tmp, name), 'w') as fh:
+                fh.write(text)
+        path = os.path.join(tmp, 'scripts', 'release.py')
+        with open(path) as fh:
+            text = fh.read()
+        self.assertEqual(text.count('    "Model.mjs",\n'), 1)
+        with open(path, 'w') as fh:
+            fh.write(text.replace('    "Model.mjs",\n', '    "Model.mjs",\n    "%s",\n' % entry))
+
+    def test_a_script_another_qml_file_imports_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {'Guide.qml': 'import QtQuick\nimport "Guide-extra.js" as GuideExtra\nItem {}\n',
+                                 'Guide-extra.js': 'function f(s) { return s.trimEnd() }\n'}, 'Guide-extra.js')
+            with self.assertRaises(ValueError) as caught:
+                release.shipped_code(tmp)
+            self.assertIn('Guide-extra.js', str(caught.exception))
+            # And a guard that lists through it fails closed, in one line.
+            done = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'scripts', 'check-color-literals.py'),
+                                   '--root', tmp], capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(done.returncode, 0, done.stdout)
+            self.assertIn('Guide-extra.js', done.stdout + done.stderr)
+            self.assertNotIn('Traceback', done.stdout + done.stderr)
+
+    def test_an_es_module_that_is_not_the_model_is_refused_and_the_models_parts_are_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {'lib/x.mjs': 'export const x = 1\n'}, 'lib/x.mjs')
+            with self.assertRaises(ValueError) as caught:
+                release.shipped_code(tmp)
+            self.assertIn('lib/x.mjs', str(caught.exception))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {}, 'model/core.mjs')
+            self.assertEqual([os.path.basename(e.path) for e in release.shipped_code(tmp)],
+                             ['Service.qml', 'Service-demo.js'])
+
+    def test_a_declared_code_behind_on_the_allowlist_reads(self):
+        # The guards' fixture tree ships its code-behind, as C3's will.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            self.assertIn('Service-demo.js', release.allowlist_of(tmp))
+            self.assertEqual(len(release.shipped_code(tmp)), 2)
+
+
 class ChangelogHeadingTest(unittest.TestCase):
     """The join the 0.8.0 cut did not have.
 

@@ -55,8 +55,15 @@ carry no revision for values); a member reached from Model.mjs or another
 script file; whether Qt applies a revision to an object no import names,
 such as `Qt.styleHints` (read as hidden, the strict reading; not measured).
 
+A code-behind of Service.qml (D-REL-14) has no imports of its own: it is
+read under Service.qml's, as written and as rewritten, so a member it names
+is judged by what the host loads Service.qml at, and it counts as a file the
+rewrite reaches when Service.qml is one. An import that cannot be read is
+reported once, on Service.qml, and leaves its code-behinds unjudged.
+
 Usage: check-qt-revisions.py [--root ROOT] [--qml-dir DIR] [--quickshell BIN] [FILE ...]
-With no FILE, the .qml entries of ALLOWLIST in scripts/release.py. Exit 0
+With no FILE, scripts/release.py's shipped_code: the .qml entries of
+ALLOWLIST and the code-behinds Service.qml declares. Exit 0
 and a summary line when nothing hidden is used; 1 and one line per problem
 otherwise. Python 3 standard library only.
 """
@@ -422,14 +429,20 @@ def element_opened(toks, k):
     return toks[j].text
 
 
-def judge(path, text, rewrite, qml_dir, cache=None, label=None):
+def judge(path, text, rewrite, qml_dir, cache=None, label=None, importer_text=None):
     """(problems, counts) for one QML file. counts is (type names hidden,
-    member names hidden, whether the rewrite changed an import)."""
+    member names hidden, whether the rewrite changed an import). A
+    code-behind passes its importer's text: its imports are those."""
     label = label or os.path.basename(path)
     cache = {} if cache is None else cache
+    head = text if importer_text is None else importer_text
     try:
-        scope = Scope(text, rewrite, qml_dir, cache)
+        scope = Scope(head, rewrite, qml_dir, cache)
     except Unreadable as error:
+        # A code-behind's imports are its importer's, whose own judgement
+        # reports this, once; the code-behind is not judged without them.
+        if importer_text is not None:
+            return [], (0, 0, False)
         return ["%s: %s" % (label, error)], (0, 0, False)
     try:
         toks = members.tokens(text)
@@ -440,7 +453,7 @@ def judge(path, text, rewrite, qml_dir, cache=None, label=None):
     # A named import is searched before every type, so a name an import
     # line declares as its alias is that alias wherever the file writes it.
     declared = set(m.group("alias") for pattern in (theme.IMPORT_MODULE, theme.IMPORT_PATH)
-                   for m in pattern.finditer(text) if m.group("alias"))
+                   for m in pattern.finditer(head) if m.group("alias"))
     version = rewrite[1].split(" ", 1)[1]
     problems = []
     for k, t in enumerate(toks):
@@ -488,7 +501,11 @@ def main(argv=None):
     ap.add_argument("file", nargs="*")
     args = ap.parse_args(argv)
     root = args.root or theme.repo_root()
-    files = args.file or theme.allowlisted_qml(root)
+    try:
+        files = [(path, path) for path in args.file] or theme.shipped_code(root)
+    except (OSError, ValueError, SyntaxError) as error:
+        print("qt revision guard: the shipped code cannot be listed: %s" % error)
+        return 1
     if not os.path.isfile(args.quickshell):
         print("qt revision guard: no quickshell at %s, so the version the host loads a plugin at cannot be read"
               % args.quickshell)
@@ -500,13 +517,14 @@ def main(argv=None):
         return 0
     problems, cache = [], {}
     judged, types, hidden, changed = 0, 0, 0, 0
-    for path in files:
+    for path, importer in files:
         try:
             text = read(path)
+            importer_text = None if importer == path else read(importer)
         except (OSError, UnicodeDecodeError) as error:
             problems.append("%s: unreadable: %s" % (path, error))
             continue
-        p, (n_types, n_hidden, was_changed) = judge(path, text, rewrite, args.qml_dir, cache)
+        p, (n_types, n_hidden, was_changed) = judge(path, text, rewrite, args.qml_dir, cache, importer_text=importer_text)
         problems += p
         judged += 1
         types, hidden = max(types, n_types), max(hidden, n_hidden)

@@ -28,17 +28,18 @@ An alternative anchored at `^` is tried at one position only, so `^\\s+$` and
 `/^[0-9]+$/` pass. Lines that are comments (`//`, `*`) are not code and are
 not read.
 
-WHAT IT SCANS. Model.mjs, model/*.mjs and every .qml entry of ALLOWLIST in
-scripts/release.py (read with ast, nothing in release.py runs). `--root DIR`
-scans another tree (the red run against the code before the change); FILE
-arguments scan exactly those files.
+WHAT IT SCANS. Model.mjs, model/*.mjs and scripts/release.py's shipped_code:
+every .qml entry of ALLOWLIST and the code-behinds Service.qml declares
+(D-REL-14), ALLOWLIST read with ast out of the scanned tree's own release.py,
+so no code of that tree runs. `--root DIR` scans another tree (the red run
+against the code before the change); FILE arguments scan exactly those files.
 
 Exit 0 and one summary line ("trim shape guard: N file(s), M regex
 literal(s), 0 problem(s)") when clean; exit 1 with file:line: reason for each
 problem otherwise. ASCII only (CLAUDE.md rule 8). Not shipped.
 """
-import ast
 import glob
+import importlib.util
 import os
 import re
 import sys
@@ -52,19 +53,22 @@ def repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def allowlisted_qml(root):
-    path = os.path.join(root, "scripts", "release.py")
-    with open(path, "r", encoding="utf-8") as handle:
-        tree = ast.parse(handle.read(), path)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and "ALLOWLIST" in [t.id for t in node.targets if isinstance(t, ast.Name)]:
-            return [os.path.join(root, e) for e in ast.literal_eval(node.value) if e.endswith(".qml")]
-    raise ValueError("%s has no ALLOWLIST assignment" % path)
+def shipped_code(root):
+    """release.py's shipped_code(root), as paths: the code-behinds after
+    Service.qml. Raises ValueError when the service's readers refuse it."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("release", os.path.join(here, "release.py"))
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    try:
+        return [entry.path for entry in release.shipped_code(root)]
+    except release.service_files.ServiceFilesError as error:
+        raise ValueError("the service's files are refused by its readers: %s" % error)
 
 
 def scanned_files(root):
     files = [os.path.join(root, "Model.mjs")] + sorted(glob.glob(os.path.join(root, "model", "*.mjs")))
-    return files + allowlisted_qml(root)
+    return files + shipped_code(root)
 
 
 def regex_literals(line):
@@ -194,9 +198,13 @@ def main(argv):
             root = os.path.abspath(args.pop(0))
         else:
             files.append(os.path.abspath(a))
-    if not files:
-        files = scanned_files(root)
-    problems, literals = scan(files)
+    try:
+        if not files:
+            files = scanned_files(root)
+        problems, literals = scan(files)
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError) as error:
+        print("trim shape guard: the files cannot be read: %s" % error)
+        return 1
     for p in problems:
         print(p)
     print("trim shape guard: %d file(s), %d regex literal(s), %d problem(s)" % (len(files), literals, len(problems)))

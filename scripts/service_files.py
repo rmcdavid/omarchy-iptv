@@ -28,7 +28,20 @@ service_files is [Service.qml] and service_text is its text exactly. A tree
 from before D-REL-5 (2026-10-12) imports its one-file model as
 `import "Model.js" as Model`; that exact line is the model's import, not a
 code-behind, so it is neither declared nor refused and stays in the view,
-and such a tree -- a `--baseline` export -- reads as its Service.qml.
+and such a tree -- a `--baseline` export -- reads as its Service.qml. Only
+such a tree: one that imports no ES module, as every tree before D-REL-5 did.
+On a text that imports Model.mjs a `Model.js` import is a script import like
+any other, so it is held to the code-behind's name and refused, never kept
+unread (D-REL-14 C2, the recheck of 76bff05's proposal).
+
+A code-behind is named for its domain: `Service-<domain>.js`, the domain
+lower-case letters and digits, imported as `Service<Domain>` -- the domain
+with its first letter upper-cased (`Service-pip.js` as `ServicePip`). The
+one ES module Service.qml imports is the model, exactly
+`import "Model.mjs" as Model`; any other `.mjs` import is refused (kind
+`module`), because it is neither a code-behind the view reads in nor text
+the view can vouch for: its forwarders would stay as root text and its body
+unread.
 
 Its twin is tests/service-files.js, and the two agree byte for byte: one
 shared fixture (tests/fixtures/service-split/) runs in both, and each
@@ -37,11 +50,14 @@ read as the node reader reads it: lines split at "\\n" only, a "\\r" kept as
 text (no universal-newline translation, which pathlib's read_text applies),
 and bytes that are not UTF-8 refused rather than replaced. A refusal is a
 ServiceFilesError whose `kind` is one of the node reader's: declaration,
-declared-twice, missing, encoding, function-twice, unbalanced, stray,
+module, declared-twice, missing, encoding, function-twice, unbalanced, stray,
 not-exact, no-function, forwarded-twice, unforwarded (tests/service-files.js
 says what each means; `stray` includes text after a function's closing
 brace on its line that is neither blank nor a `//` comment, which the
-harness, reading a function from its header to its brace, would drop). So
+harness, reading a function from its header to its brace, would drop, and a
+line terminator JavaScript reads and these readers do not -- a CR not
+directly before an LF, U+2028 or U+2029 -- anywhere in a code-behind, since
+`// x<CR>root.y = 1` is a comment here and a statement to the engine). So
 the view holds every line of every code-behind but its blank lines and
 loose `//` comments, and runs as the forwarders do
 (their arguments plain names, the function's own); the rest of the layout is
@@ -66,10 +82,22 @@ DECLARATION = re.compile(r'import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][
 IMPORTS_A_SCRIPT = re.compile(r'[ \t]*import[ \t]+(?:"[^"]*\.js"|\'[^\']*\.js\')')
 # The model's own import on a tree from before D-REL-5, read whole: the model
 # was Model.js until it became Model.mjs and model/, and a --baseline export
-# of such a tree is read as it is, not refused.
+# of such a tree is read as it is, not refused. Only on a text that imports
+# no ES module (MODULE_IMPORT), which is what such a tree is.
 MODEL_JS_IMPORT = re.compile(r'import "Model\.js" as Model\r?')
+# A code-behind's name and qualifier: `Service-<domain>.js` as
+# `Service<Domain>`, the domain lower-case letters and digits.
+CODE_BEHIND = re.compile(r'Service-([a-z][a-z0-9]*)\.js')
+# Any import of an ES module, in either quote, and the one Service.qml may
+# hold: the model's, exactly.
+MODULE_IMPORT = re.compile(r'[ \t]*import[ \t]+(?:"[^"]*\.mjs"|\'[^\']*\.mjs\')')
+MODEL_MJS_IMPORT = re.compile(r'import "Model\.mjs" as Model\r?')
 HEADER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{')
 COMMENT_LINE = re.compile(r'[ \t]*//')
+# A line terminator JavaScript reads and this reader does not: a CR not
+# directly before an LF, U+2028, U+2029 (written as code points, so this file
+# stays ASCII). JavaScript ends a `//` comment at any of them.
+JS_ONLY_TERMINATOR = re.compile('\r(?!\n)|[%s%s]' % (chr(0x2028), chr(0x2029)))
 BLANK_LINE = re.compile(r'[ \t]*\r?')
 FORWARDER_SHAPE = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\.')
 # The exact form's arguments are plain names: a default or a pattern repeated
@@ -83,10 +111,24 @@ JS_SPACE = set(chr(c) for c in (0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680
                                 0x202f, 0x205f, 0x3000, 0xfeff)) | set(chr(c) for c in range(0x2000, 0x200b))
 
 
-def imports_a_script(line):
+def imports_a_module(text):
+    """Whether any line of `text` imports an ES module: true of every
+    Service.qml since D-REL-5 (Model.mjs), and of none before it."""
+    return any(MODULE_IMPORT.match(line) for line in text.split('\n'))
+
+
+def imports_a_script(line, modern=True):
     """Whether `line` imports a classic script that may be a code-behind:
-    any `.js` import, in either quote, but the pre-D-REL-5 model's."""
-    return bool(IMPORTS_A_SCRIPT.match(line)) and not MODEL_JS_IMPORT.fullmatch(line)
+    any `.js` import, in either quote, but the pre-D-REL-5 model's on a text
+    that imports no ES module (`modern` false)."""
+    return bool(IMPORTS_A_SCRIPT.match(line)) and (modern or not MODEL_JS_IMPORT.fullmatch(line))
+
+
+def code_behind_qualifier(file):
+    """The qualifier a code-behind's name gives it, `Service-pip.js` ->
+    `ServicePip`; None for a name that is not `Service-<domain>.js`."""
+    m = CODE_BEHIND.fullmatch(file)
+    return None if m is None else 'Service' + m.group(1)[:1].upper() + m.group(1)[1:]
 
 
 def tail_reads(text):
@@ -167,8 +209,12 @@ def match_brace(text, open_at):
 def declarations(text):
     """[(file, qualifier, line)] in order."""
     out = []
+    modern = imports_a_module(text)
     for n, line in enumerate(text.split('\n'), 1):
-        if not imports_a_script(line):
+        if MODULE_IMPORT.match(line) and not MODEL_MJS_IMPORT.fullmatch(line):
+            raise ServiceFilesError('module', 'line %d imports an ES module and is not the model\'s '
+                                    '`import "Model.mjs" as Model`' % n)
+        if not imports_a_script(line, modern):
             continue
         m = DECLARATION.fullmatch(line)
         if not m:
@@ -178,6 +224,10 @@ def declarations(text):
                 raise ServiceFilesError('declared-twice', '%s is declared on lines %d and %d' % (file, at, n))
             if qualifier == m.group(2):
                 raise ServiceFilesError('declared-twice', 'the qualifier %s is declared on lines %d and %d' % (qualifier, at, n))
+        if code_behind_qualifier(m.group(1)) != m.group(2):
+            raise ServiceFilesError('declaration', 'line %d declares %s as %s, and a code-behind is '
+                                    '`import "Service-<domain>.js" as Service<Domain>`, the domain lower-case '
+                                    'letters and digits' % (n, m.group(1), m.group(2)))
         out.append((m.group(1), m.group(2), n))
     return out
 
@@ -253,6 +303,11 @@ def inline_text(text, files):
         body = files.get(file)
         if not isinstance(body, str):
             raise ServiceFilesError('missing', '%s is declared (line %d) and is not there' % (file, line))
+        term = JS_ONLY_TERMINATOR.search(body)
+        if term:
+            raise ServiceFilesError('stray', '%s line %d holds a line terminator JavaScript reads and this reader does '
+                                    'not (a CR not before an LF, U+2028 or U+2029)'
+                                    % (file, body.count('\n', 0, term.start()) + 1))
         found = []
         spans = function_spans(body, file, found)
         stray = stray_line(body, found)
@@ -261,8 +316,9 @@ def inline_text(text, files):
                                     % (file, stray))
         by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e, _c in found), set())
     out = []
+    modern = imports_a_module(text)
     for line in text.split('\n'):
-        if imports_a_script(line):
+        if imports_a_script(line, modern):
             continue
         shape = FORWARDER_SHAPE.match(line)
         if shape and shape.group(3) in by_qualifier:
