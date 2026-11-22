@@ -860,11 +860,13 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // same fixture and cases through scripts/service_files.py, and each engine
 // runs the other's CLI. Rule 11: seen red with a reader that drops the
 // code-behind (serviceText returning Service.qml's own text) and with one
-// that lists none (serviceFiles returning Service.qml alone), and the ten
+// that lists none (serviceFiles returning Service.qml alone), the ten
 // later shared cases and the regular-file door on a27b90c's reader or a
-// one-decision mutant; the counts are in docs/QA-RESULTS.md, "D-REL-14: the
-// service readers" and, for the later ones, "The review of a27b90c,
-// settled".
+// one-decision mutant, and the last five (code after a closing brace, a
+// comment after one, a tree before D-REL-5 importing Model.js) on 9b80fcb's
+// reader or a one-decision mutant; the counts are in docs/QA-RESULTS.md,
+// "D-REL-14: the service readers", "The review of a27b90c, settled" and
+// "The rechecks of 76bff05 and the harness commits, settled".
 ;(function () {
   const fs = require("fs"), path = require("path"), cp = require("child_process")
   const SF = serviceReader
@@ -936,7 +938,7 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
       if (!got) wrong.push(c.name)
     }
     return [C.length, wrong]
-  }, [32, []])
+  }, [37, []])
 
   // IPTV_SERVICE_QML names a mutant copy, and a rule-11 copy need not end in
   // `.qml`: the readers take any regular file as the service's file (on

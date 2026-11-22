@@ -524,6 +524,18 @@ for svf in Service.qml Service-demo.js inline.txt; do sed 's/$/\r/' "$SVF/$svf" 
 is "a CRLF copy of the fixture names the same files" \
    "$(qa_service_files "$SVC" | sed "s#^$SVC/##" | tr '\n' ' ')" "Service.qml Service-demo.js "
 ck "and its view is the CRLF inline.txt, CR for CR" 'qa_service_text "$SVC" | cmp -s - "$SVC/inline.txt"'
+# F-HARNESS-123: a --baseline export from before D-REL-5 (2026-10-12) imports
+# its one-file model as `import "Model.js" as Model`. That is the model, not
+# a code-behind: on 9b80fcb's readers the import read as a declaration and
+# every seam over the service read "cannot be read" (chno-scenario's
+# check-tree over the pre-M2-03 export, 87a31f7).
+SVO="$TMP/service-before-rel5"
+mkdir -p "$SVO"
+printf 'import QtQuick\nimport "Model.js" as Model\nItem {\n  function a(x) { return Model.a(x) }\n}\n' >"$SVO/Service.qml"
+printf 'function a(x) {\n  return x\n}\n' >"$SVO/Model.js"
+is "a tree from before D-REL-5, its model Model.js, is Service.qml alone: the model's import is no code-behind" \
+   "$(qa_service_files "$SVO" | sed "s#^$SVO/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml 0"
+ck "and its text is its Service.qml, byte for byte" 'qa_service_text "$SVO" | cmp -s - "$SVO/Service.qml"'
 # The two slow trees stage the service whole: key-scenario.sh's
 # stage_slow_tree and rewind-scenario.sh's R16 tree, each taken out of its
 # scenario and run over a plugin tree whose service has a code-behind (the
@@ -4117,7 +4129,11 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # extractions, which read no library and fail on a renamed function or a
 # changed end line instead; the slow trees' two also red on 9ed04be's
 # scenarios, which staged Service.qml alone ("0 same differs").
-EXPECTED=790
+# 790 -> 792 on 2026-11-22 (F-HARNESS-123, lane-fix-relsplit1): a tree from
+# before D-REL-5, whose Service.qml imports Model.js, is Service.qml alone and
+# reads as its text. Red on 9b80fcb's service_files.py, which read the
+# model's import as a code-behind: both failed.
+EXPECTED=792
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

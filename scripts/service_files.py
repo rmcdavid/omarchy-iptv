@@ -24,7 +24,11 @@ directly:
 `.qml`, or any regular file (IPTV_SERVICE_QML may name a mutant copy called
 anything); code-behinds are read from that file's directory, as the QML
 engine resolves them. While Service.qml declares no code-behind,
-service_files is [Service.qml] and service_text is its text exactly.
+service_files is [Service.qml] and service_text is its text exactly. A tree
+from before D-REL-5 (2026-10-12) imports its one-file model as
+`import "Model.js" as Model`; that exact line is the model's import, not a
+code-behind, so it is neither declared nor refused and stays in the view,
+and such a tree -- a `--baseline` export -- reads as its Service.qml.
 
 Its twin is tests/service-files.js, and the two agree byte for byte: one
 shared fixture (tests/fixtures/service-split/) runs in both, and each
@@ -35,8 +39,11 @@ and bytes that are not UTF-8 refused rather than replaced. A refusal is a
 ServiceFilesError whose `kind` is one of the node reader's: declaration,
 declared-twice, missing, encoding, function-twice, unbalanced, stray,
 not-exact, no-function, forwarded-twice, unforwarded (tests/service-files.js
-says what each means). So the view holds every line of every code-behind
-but its blank lines and loose `//` comments, and runs as the forwarders do
+says what each means; `stray` includes text after a function's closing
+brace on its line that is neither blank nor a `//` comment, which the
+harness, reading a function from its header to its brace, would drop). So
+the view holds every line of every code-behind but its blank lines and
+loose `//` comments, and runs as the forwarders do
 (their arguments plain names, the function's own); the rest of the layout is
 scripts/split-service.py --check's to judge (D-REL-14's C2).
 
@@ -57,6 +64,10 @@ DECLARATION = re.compile(r'import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][
 # Either quote: QML takes both, and DECLARATION (double quotes) refuses the
 # single, so no spelling drops a code-behind in silence.
 IMPORTS_A_SCRIPT = re.compile(r'[ \t]*import[ \t]+(?:"[^"]*\.js"|\'[^\']*\.js\')')
+# The model's own import on a tree from before D-REL-5, read whole: the model
+# was Model.js until it became Model.mjs and model/, and a --baseline export
+# of such a tree is read as it is, not refused.
+MODEL_JS_IMPORT = re.compile(r'import "Model\.js" as Model\r?')
 HEADER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{')
 COMMENT_LINE = re.compile(r'[ \t]*//')
 BLANK_LINE = re.compile(r'[ \t]*\r?')
@@ -70,6 +81,19 @@ FORWARDER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(((?:[A-Za-z_][A-Za
 REGEX_AFTER = set('(,=:[!&|?{};+-*%<>~^\n')
 JS_SPACE = set(chr(c) for c in (0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680, 0x2028, 0x2029,
                                 0x202f, 0x205f, 0x3000, 0xfeff)) | set(chr(c) for c in range(0x2000, 0x200b))
+
+
+def imports_a_script(line):
+    """Whether `line` imports a classic script that may be a code-behind:
+    any `.js` import, in either quote, but the pre-D-REL-5 model's."""
+    return bool(IMPORTS_A_SCRIPT.match(line)) and not MODEL_JS_IMPORT.fullmatch(line)
+
+
+def tail_reads(text):
+    """Whether the text after a code-behind function's closing brace, to
+    the end of its line, is blank or a `//` comment: anything else is code
+    the view would place after a root function and the harness would drop."""
+    return bool(BLANK_LINE.fullmatch(text) or COMMENT_LINE.match(text))
 
 
 class ServiceFilesError(Exception):
@@ -144,7 +168,7 @@ def declarations(text):
     """[(file, qualifier, line)] in order."""
     out = []
     for n, line in enumerate(text.split('\n'), 1):
-        if not IMPORTS_A_SCRIPT.match(line):
+        if not imports_a_script(line):
             continue
         m = DECLARATION.fullmatch(line)
         if not m:
@@ -162,8 +186,9 @@ def function_spans(text, label='', found=None):
     """Every function at the two-space indent of `text`, by name (in file
     order), as its text: the contiguous `//` lines directly above the header,
     through the end of the closing brace's line, its newline not included.
-    `found`, when given, gets one (name, args, start, end) a function: its
-    header's argument text and the span's offsets, end exclusive."""
+    `found`, when given, gets one (name, args, start, end, close) a
+    function: its header's argument text, the span's offsets, end
+    exclusive, and its closing brace's offset."""
     out = {}
     at = 0
     while True:
@@ -185,7 +210,7 @@ def function_spans(text, label='', found=None):
             end = len(text) if eol == -1 else eol
             out[m.group(1)] = text[start:end]
             if found is not None:
-                found.append((m.group(1), m.group(2), start, end))
+                found.append((m.group(1), m.group(2), start, end, close))
         nl = text.find('\n', at)
         if nl == -1:
             break
@@ -194,16 +219,22 @@ def function_spans(text, label='', found=None):
 
 
 def stray_line(text, found):
-    """The first line (1-based) of a code-behind's `text` outside every span
-    in `found` that is neither blank nor a `//` comment; 0 when there is
-    none. Such a line is code the inline view would drop."""
+    """The first line (1-based) of a code-behind's `text` that holds text
+    outside every span in `found` that is neither blank nor a `//` comment:
+    a whole line outside them, or a span's closing line whose text after the
+    closing brace is not (tail_reads); 0 when there is none. Such text is
+    code the inline view would drop, or place where the harness drops it."""
     at = 0
     n = 1
     while True:
         nl = text.find('\n', at)
-        line = text[at:len(text) if nl == -1 else nl]
-        if not BLANK_LINE.fullmatch(line) and not COMMENT_LINE.match(line) \
-                and not any(start <= at < end for _name, _args, start, end in found):
+        stop = len(text) if nl == -1 else nl
+        line = text[at:stop]
+        if any(start <= at < end for _name, _args, start, end, _close in found):
+            if any(at <= close < stop and not tail_reads(text[close + 1:stop])
+                   for _name, _args, _start, _end, close in found):
+                return n
+        elif not BLANK_LINE.fullmatch(line) and not COMMENT_LINE.match(line):
             return n
         if nl == -1:
             return 0
@@ -226,12 +257,12 @@ def inline_text(text, files):
         spans = function_spans(body, file, found)
         stray = stray_line(body, found)
         if stray:
-            raise ServiceFilesError('stray', '%s line %d is outside every function and is neither blank nor a // comment'
+            raise ServiceFilesError('stray', '%s line %d holds text outside every function that is neither blank nor a // comment'
                                     % (file, stray))
-        by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e in found), set())
+        by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e, _c in found), set())
     out = []
     for line in text.split('\n'):
-        if IMPORTS_A_SCRIPT.match(line):
+        if imports_a_script(line):
             continue
         shape = FORWARDER_SHAPE.match(line)
         if shape and shape.group(3) in by_qualifier:

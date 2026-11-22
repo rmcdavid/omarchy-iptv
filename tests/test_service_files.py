@@ -24,9 +24,14 @@ the ten later shared cases (a forwarder passing a default, a pattern or
 arguments not its function's, a single-quoted import, five kinds of stray
 code-behind line, and blank and loose-comment lines that must still read)
 and the regular-file door, each red on a27b90c's reader or on a one-decision
-mutant. docs/QA-RESULTS.md has the counts: "D-REL-14: the service readers
-(lane-relsplit1, 2026-11-22)" for the first and "The review of a27b90c,
-settled" for the later ones.
+mutant; and, by the fix pass on 76bff05, five more (code after a code-behind
+function's closing brace on its line, twice; spaces, a CR or a comment there,
+which must still read; a tree from before D-REL-5 importing Model.js, alone
+and beside a code-behind), red on 9b80fcb's reader or a one-decision mutant.
+docs/QA-RESULTS.md has the counts: "D-REL-14: the service readers
+(lane-relsplit1, 2026-11-22)" for the first, "The review of a27b90c,
+settled" for the next, and "The rechecks of 76bff05 and the harness commits,
+settled" for the last five.
 
 Run: python3 -m unittest discover -s tests -p test_service_files.py
 """
@@ -174,7 +179,7 @@ class SharedCases(unittest.TestCase):
                     self.assertEqual(service_files.inline_text(case["service"], case["files"]), case["expect"]["text"])
                 if "declarations" in case:
                     self.assertEqual([[f, q] for f, q, _n in service_files.declarations(case["service"])], case["declarations"])
-        self.assertEqual(seen, 32)
+        self.assertEqual(seen, 37)
 
 
 class TheTwoReadersAgree(unittest.TestCase):

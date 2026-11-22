@@ -617,9 +617,11 @@ default this repo) has the seams the live half drives. It exists because a
 harness pointed at a tree without the verb answers `no_verb` or an empty
 string, and half the live checks would then be VACUOUS rather than red. It
 is also how a lane without the display shows the scenario detecting the
-feature's absence: run it against an export of the pre-change tree and it
-fails 12 of its 14 checks. It proves the code is present, never that it
-works.
+feature's absence: run it against an export of the pre-change tree (87a31f7)
+and it fails 13 of its 15 checks, every one the plugin's tree answers, each
+for want of the seam; the two that pass are the harness's own (12 of 14
+until F-HARNESS-122 made the nowPlaying seam two, 2026-11-22). It proves the
+code is present, never that it works.
 
 #### Driving digit entry (the four verbs of ruling CN23)
 

@@ -341,6 +341,61 @@
    "expect": {
     "text": "Item {\n  // a returns one\n  function a(x) {\n    return 1\n  }\n}\n"
    }
+  },
+  {
+   "name": "code after a code-behind function's closing brace on its line is refused: the harness reads a function from its header to its brace",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }; root.leak = 1\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a one-line code-behind function with a statement after its closing brace is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  function a(x) { return 1 } Qt.callLater(function () { root.leak = 1 })\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a closing brace followed by spaces, a CR or a // comment reads, the comment kept in the view",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n  function b(y) { return ServiceA.b(y) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  } // one\n\n  function b(y) { return y }  \r\n"
+   },
+   "expect": {
+    "text": "Item {\n  function a(x) {\n    return 1\n  } // one\n  function b(y) { return y }  \r\n}\n"
+   }
+  },
+  {
+   "name": "a tree from before D-REL-5 imports its model as Model.js: that import is the model's, no code-behind, and the text is read as it is",
+   "service": "import QtQuick\nimport \"Model.js\" as Model\nItem {\n  function a(x) { return Model.a(x) }\n}\n",
+   "files": {},
+   "expect": {
+    "text": "import QtQuick\nimport \"Model.js\" as Model\nItem {\n  function a(x) { return Model.a(x) }\n}\n"
+   },
+   "declarations": []
+  },
+  {
+   "name": "the Model.js import beside a code-behind stays on the root while the code-behind is read in",
+   "service": "import \"Model.js\" as Model\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return Model.one(x)\n  }\n"
+   },
+   "expect": {
+    "text": "import \"Model.js\" as Model\nItem {\n  // a returns one\n  function a(x) {\n    return Model.one(x)\n  }\n}\n"
+   },
+   "declarations": [
+    [
+     "Service-a.js",
+     "ServiceA"
+    ]
+   ]
   }
  ]
 }

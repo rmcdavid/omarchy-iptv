@@ -30,7 +30,11 @@
 // called anything). Its code-behinds are read from the same directory, as the
 // QML engine resolves them. While Service.qml declares no code-behind -- true
 // of every tree up to and including this reader's own commit -- serviceFiles
-// is [Service.qml] and serviceText is the file's text exactly.
+// is [Service.qml] and serviceText is the file's text exactly. A tree from
+// before D-REL-5 (2026-10-12) imports its one-file model as
+// `import "Model.js" as Model`: that exact line is the model's import, not a
+// code-behind, so it is neither declared nor refused and stays in the view,
+// and such a tree (a --baseline export) reads as its Service.qml.
 //
 // The reader refuses rather than guesses, with a kind both engines share:
 //   declaration      a line importing a .js, in either quote, that is not
@@ -44,7 +48,11 @@
 //                    neither blank nor a `//` comment: a top-level statement,
 //                    a function at another indent or spelled
 //                    `function F (`, a header whose arguments hold a ")" --
-//                    anything the view would otherwise drop in silence
+//                    anything the view would otherwise drop in silence; and
+//                    text after a function's closing brace on its line that
+//                    is neither blank nor a `//` comment (`  }; x()`), which
+//                    the view would place after a root function and the
+//                    harness, reading a function from header to brace, drop
 //   not-exact        a line shaped `  function F(...) { return Q.` for a
 //                    declared Q that is not exactly F's forwarder: the call
 //                    repeats the header's arguments, those are plain names
@@ -86,6 +94,10 @@ const DECLARATION = /^import "([A-Za-z0-9_][A-Za-z0-9_.-]*\.js)" as ([A-Z][A-Za-
 // takes either quote (qmllint 6.12 resolves `import 'x.js' as X`), so both
 // are seen here and DECLARATION, double quotes only, refuses the single.
 const IMPORTS_A_SCRIPT = /^[ \t]*import[ \t]+(?:"[^"]*\.js"|'[^']*\.js')/
+// The model's own import on a tree from before D-REL-5, read whole: the model
+// was Model.js until it became Model.mjs and model/, and a --baseline export
+// of such a tree is read as it is, not refused.
+const MODEL_JS_IMPORT = /^import "Model\.js" as Model\r?$/
 // A function at the root's two-space indent, matched at a line start.
 const HEADER = /  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{/y
 const COMMENT_LINE = /^[ \t]*\/\//
@@ -111,6 +123,15 @@ class ServiceFilesError extends Error {
 }
 
 function refuse(kind, message) { return new ServiceFilesError(kind, kind + ": " + message) }
+
+// Whether `line` imports a classic script that may be a code-behind: any
+// `.js` import, in either quote, but the pre-D-REL-5 model's.
+function importsAScript(line) { return IMPORTS_A_SCRIPT.test(line) && !MODEL_JS_IMPORT.test(line) }
+
+// Whether the text after a code-behind function's closing brace, to the end
+// of its line, is blank or a `//` comment: anything else is code the view
+// would place after a root function and the harness would drop.
+function tailReads(text) { return BLANK_LINE.test(text) || COMMENT_LINE.test(text) }
 
 // The index of the "}" matching the "{" at `open`, skipping strings,
 // comments and regular-expression literals; -1 when there is none.
@@ -158,7 +179,7 @@ function declarations(text) {
   const out = []
   const lines = text.split("\n")
   for (let n = 0; n < lines.length; n++) {
-    if (!IMPORTS_A_SCRIPT.test(lines[n])) continue
+    if (!importsAScript(lines[n])) continue
     const m = DECLARATION.exec(lines[n])
     if (!m) throw refuse("declaration", "line " + (n + 1) + " imports a script and is not `import \"<file>.js\" as <Qualifier>`")
     for (const d of out) {
@@ -173,8 +194,9 @@ function declarations(text) {
 // Every function at the two-space indent of `text`, by name, as its text:
 // the contiguous `//` lines directly above the header, through the end of
 // the closing brace's line (its "\n" not included). A Map, in file order.
-// `found`, when given, gets one { name, args, start, end } a function: its
-// header's argument text and the span's offsets in `text`, end exclusive.
+// `found`, when given, gets one { name, args, start, end, close } a function:
+// its header's argument text, the span's offsets in `text`, end exclusive,
+// and its closing brace's offset.
 function functionSpans(text, label, found) {
   const out = new Map()
   let at = 0
@@ -196,7 +218,7 @@ function functionSpans(text, label, found) {
       if (out.has(m[1])) throw refuse("function-twice", (label || "the text") + " declares " + m[1] + " twice")
       const end = eol === -1 ? text.length : eol
       out.set(m[1], text.slice(start, end))
-      if (found) found.push({ name: m[1], args: m[2], start, end })
+      if (found) found.push({ name: m[1], args: m[2], start, end, close })
     }
     const nl = text.indexOf("\n", at)
     if (nl === -1) break
@@ -205,15 +227,20 @@ function functionSpans(text, label, found) {
   return out
 }
 
-// The first line (1-based) of a code-behind's `text` that lies outside every
-// span in `found` and is neither blank nor a `//` comment; 0 when there is
-// none. Such a line is code the inline view would drop.
+// The first line (1-based) of a code-behind's `text` that holds text outside
+// every span in `found` that is neither blank nor a `//` comment: a whole
+// line outside them, or a span's closing line whose text after the closing
+// brace is not (tailReads); 0 when there is none. Such text is code the
+// inline view would drop, or place where the harness drops it.
 function strayLine(text, found) {
   let at = 0
   for (let n = 1; ; n++) {
     const nl = text.indexOf("\n", at)
-    const line = text.slice(at, nl === -1 ? text.length : nl)
-    if (!BLANK_LINE.test(line) && !COMMENT_LINE.test(line) && !found.some(f => at >= f.start && at < f.end)) return n
+    const stop = nl === -1 ? text.length : nl
+    const line = text.slice(at, stop)
+    if (found.some(f => at >= f.start && at < f.end)) {
+      if (found.some(f => f.close >= at && f.close < stop && !tailReads(text.slice(f.close + 1, stop)))) return n
+    } else if (!BLANK_LINE.test(line) && !COMMENT_LINE.test(line)) return n
     if (nl === -1) return 0
     at = nl + 1
   }
@@ -232,13 +259,13 @@ function inlineText(text, files) {
     const found = []
     const spans = functionSpans(body, d.file, found)
     const stray = strayLine(body, found)
-    if (stray) throw refuse("stray", d.file + " line " + stray + " is outside every function and is neither blank nor a // comment")
+    if (stray) throw refuse("stray", d.file + " line " + stray + " holds text outside every function that is neither blank nor a // comment")
     byQualifier.set(d.qualifier, { file: d.file, spans, args: new Map(found.map(f => [f.name, f.args])), used: new Set() })
   }
   const out = []
   const lines = text.split("\n")
   for (const line of lines) {
-    if (IMPORTS_A_SCRIPT.test(line)) continue
+    if (importsAScript(line)) continue
     const shape = FORWARDER_SHAPE.exec(line)
     if (shape && byQualifier.has(shape[3])) {
       const m = FORWARDER.exec(line)

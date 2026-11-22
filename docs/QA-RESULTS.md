@@ -23760,11 +23760,15 @@ need none; the guards and their tests stay C2's.
 shell object through createObject's property map and the layout arrays
 arrived as sequences `Array.isArray` refuses (Part A, "Also seen"). Read in
 the host (omarchy 4.5.0-3, /usr/share/omarchy/shell, read only): ensureService
-(shell.qml:930) creates the service with `comp.createObject(null)` (:952) and
-then assigns `inst.shell = shell.pluginShellFor(manifest)` (:958);
-createScopedPluginShell (:602) makes that PluginShellApi with `barConfig:
-shell.publicBarConfig()` in createObject's map (:633, :638; the type declares
-`property var barConfig: ({})`, services/PluginShellApi.qml:17). Only
+(shell.qml:930) creates the service with `comp.createObject(manifest.__isFirstParty
+&& !authenticationService ? serviceHost : null)` (:952), null for this plugin,
+and then assigns `inst.shell = shell.pluginShellFor(manifest)` (:958);
+createScopedPluginShell (:602) returns a PluginShellApi it already holds for
+the plugin's id with the same profile as it is (:606-609), and otherwise makes
+one with `barConfig: shell.publicBarConfig()` in createObject's map (:633,
+:638; the type declares `property var barConfig: ({})`,
+services/PluginShellApi.qml:17), so the window is open only for a freshly
+made object. Only
 syncPluginApis (:886) assigns it from script (:904), and it runs on the
 registry's pluginsChanged, BEFORE `_syncServices` creates the service
 (:1081-1085), and on the bar widget registry's change (:1089-1092); the
@@ -23777,18 +23781,38 @@ maxRecents, 10 (`Model.trimRecents`), and the next save writes that; and its
 `reconcile(true)` is the first reconcile (the earlier one from onShellChanged
 returns before the state loads), so on an install whose state lacks the
 migration marker `Model.adoptActiveSource` sets the marker over an entry read
-as empty and adoptActive saves it. The entry's playlistUrl, once the real
-barConfig arrives, is then a retired setting: refused, reported and stripped,
-never migrated. So the row is P2, open: read in a rig and in the code, not
-measured on the host. What it needs is on the row.
+as empty and adoptActive saves it. Whether that loses the migration turns on
+an order [corrected by lane-fix-relsplit1, 2026-11-22, from the recheck of
+76bff05: this said the playlistUrl, once the real barConfig arrived, was then
+refused and stripped, never migrated]: `reconcile` asks the LANDED state
+(`migrating: !Model.entryMigratedOf(root.landedState)`, Service.qml:6214),
+which moves only at a load and in stateFile's onSaved, while the marker sits
+in memory from the moment adoptActive runs. So a real barConfig that arrives
+(syncPluginApis, onSettingsChanged, reconcile) before the marker's save lands
+finds the playlistUrl unseen and still migrating, and `Model.reconcileAction`
+answers "adopt": it is migrated as before. Only when that save lands first --
+after the start-up `state init`'s exit, the helper's `state private` answer,
+the read before the write and the write itself, inside a window the next
+registry or bar-widget change closes -- is the playlistUrl refused, reported
+and stripped as a retired setting instead. So the row stays P2, on the
+recents half, which needs only the load inside the window and any later save
+and loses a user's recents past 10; the migration half is the less
+reachable. Open: read in a rig and in the code, not measured on the host.
+What it needs is on the row, which since this correction also logs whether
+ensureService was handed an API the host already held, the order of the
+marker's onSaved against the first syncPluginApis, and state.json's sources
+once the real barConfig has been applied.
 
 **The crash.** The crash journal rose from 88 to 89 at 10:25:32 CST, during
 lane-settle-relsplit1's work: bash pid 2046977, SIGSEGV with si_code SI_USER,
 re-raised by bash itself inside termsig_handler -> procsub_clear ->
 procsub_search (the journal's stack trace), when timeout's SIGTERM reached a
 wait loop the lane had built from `read -t 10` over a process substitution
-(`until [ -f <rc file> ]; do read -t 10 < <(:; exec cat /dev/zero >/dev/null);
-done`, under `timeout 580`, waiting for a backgrounded python suite). Nothing
+(`until [ -f <rc file> ]; do read -t 10 < <(:; exec cat /dev/zero >/dev/null)
+2>/dev/null || true; done`, the journal's COREDUMP_CMDLINE but for the rc
+file's path, run as `bash -c`; under `timeout 580` by the lane's own account,
+which the journal cannot confirm, its parent being gone; waiting for a
+backgrounded python suite). Nothing
 of the plugin, the helper or a player was involved. A core is stored under
 /var/lib/systemd/coredump (root-owned, aged out by systemd-tmpfiles after two
 weeks), and the host's crash watcher likely posted a card on the owner's
@@ -23958,3 +23982,129 @@ others are. It is 15 greps, needs no display and writes no file (the arm was
 written for a gate), and it is the only preflight that holds the bar's and the
 IPC reply's channel-number seams. config-mode-scenario's check-tree could
 follow, if its C1 is given a decoy config rather than the developer's own.
+
+## The rechecks of 76bff05 and the harness commits, settled (lane-fix-relsplit1, 2026-11-22)
+
+Two read-only rechecks of relsplit-1 at 9b80fcb: one of 76bff05's readers and
+records, one of the two harness commits (823dfd6, 9b80fcb). Five of their
+findings were marked to fix. Each was verified before anything changed, and
+all five held. Re-measuring the dev-harness README's count for one of them
+found a sixth, filed as F-HARNESS-123 and fixed in the same commit, "Refuse
+code after a code-behind's closing brace, and read a tree from before D-REL-5
+(D-REL-14, F-HARNESS-123)". No shipped file changes.
+
+**1. D-HOST-15's migration half is conditional** (verified by reading
+Service.qml's reconcile, adoptActive, stateFile's onLoaded and onSaved, and
+model/source-records.mjs's reconcileAction and adoptActiveSource). `reconcile`
+asks the LANDED state, not memory, and the marker lands only with its save,
+so a real barConfig that arrives before then is still a migration input and
+is adopted. "D-HOST-15, filed" above and the row now say so, and P2 stands on
+the recents half. The recheck's nits on the same row are taken too: the
+host's cached-API branch (shell.qml:606-609), :952's call as written, and,
+in the measurement, which API ensureService was handed, the order of the
+marker's onSaved against the first syncPluginApis, and state.json's sources
+once the real barConfig is applied.
+
+**2. Code after a code-behind function's closing brace** (verified by
+running both committed readers). A closing line `  }; root.leak = 1`, a
+closing line `  } Qt.callLater(function() { root.leak = 1 })` and a one-line
+`  function a(x) { return 1 }; root.leak = 1` were each accepted by 76bff05's
+readers in both engines, the statement in the view, where the harness's
+`rootFunctions` keeps only the text between the braces. Now both readers
+judge the text after each span's closing brace to the end of its line:
+blank (spaces, tabs, a CR) or a `//` comment reads, and anything else is
+`stray`. Five shared cases join the fixture (37 in all), two of them this
+finding's, one that spaces, a CR or a comment after a brace still read, and
+two of F-HARNESS-123's:
+- the fixed readers: 0 wrong of 37 in node and 0 in python;
+- 9b80fcb's readers: 4 wrong in each, the two tails accepted and the two
+  Model.js cases refused;
+- one-decision mutants of the fixed readers, the same in both engines: the
+  tail check off, 2 wrong; a comment after a brace refused, 1; the Model.js
+  exemption off, 2.
+The prototype split tree (Part A's cutter over a 9ed04be export, its five
+files equal to the measurement lane's prototype.sha256) still reads, its
+inline view 9ed04be's Service.qml byte for byte in both engines: cut.js
+refuses any text after a brace, so no prototype function has one.
+
+**3. key-scenario's b.m3u hint is refused, not fetched** (verified by
+calling the model). `Model.resolveEpgUrl` with b's rewritten hint
+`http://127.0.0.1:9/guide.xml.gz` and a local playlist path answers url ""
+and no origin, and `Model.epgHintRowState` answers refused `local`; the
+name it replaced was adopted, origin playlist. So b's guide is refused before
+any fetch, as a.m3u's is, which is why commit 823dfd6's run read 15 `could not
+reach` lines rather than Part A's 18: b's three fetches stopped happening. No
+check reads it. The fixture comment says so now, B42's comment no longer says
+every other URL is a literal, and the guard reads a bare hint as well as a
+quoted one, as the helper's parse_attrs does. The guard block, taken out of
+the scenario and run in a child bash over the scenario's own fixtures:
+passes; exits 2 with the rewrite removed; exits 2 with a bare
+`x-tvg-url=http://epg.other.test/x.xml` on c.m3u's header, where 9b80fcb's
+guard passed (exit 0).
+
+**4. The dev-harness README's chno count, and F-HARNESS-123** (verified and
+re-measured). The README said chno-scenario's check-tree "fails 12 of its 14
+checks" against an export of the pre-change tree, 87a31f7 (93c34e9's commit
+message names it). Over that export, with a private runtime, tmp and HOME and
+the display variables unset:
+- 9ed04be's scenario: 3 passed, 12 failed, as the README said;
+- 9b80fcb's scenario and readers: 3 passed, 13 failed, but seven of the
+  thirteen read "the service in ... cannot be read": the readers took
+  `import "Model.js" as Model`, the model's import until D-REL-5, for a
+  code-behind and refused the tree (`function-twice: Model.js declares fail
+  twice`). That is F-HARNESS-123;
+- the fixed readers: 3 passed, 13 failed, every failure `matched 0`, the two
+  harness seams and the floor check passing. The README says 13 of its 15.
+Both readers now take that exact line as the model's import, neither
+declared nor refused, kept in the view. Over the Service.qml of every v* tag
+and of 87a31f7, 2d7df1f, f275bde and 9ed04be (50 trees, each alone in a
+directory), the fixed readers read every one byte for byte in both engines;
+9b80fcb's refused 38 (v0.1.0 to v0.13.5 and the three baselines, `missing`
+there, Model.js not beside them). qa-lib-test.sh gains two checks, a tree
+from before D-REL-5 is Service.qml alone and reads as its text: 792 passed, 0
+failed, and 790 passed, 2 failed (both of them, `Service.qml Model.js 0`) over
+a scratch copy of this tree carrying 9b80fcb's service_files.py.
+
+**5. F-HARNESS-121's row said every other URL was 127.0.0.1:9** (verified by
+reading the scenario: its slow server's URLs are on their own port, and b, c
+and d carry channel and logo names). The row is corrected; 823dfd6's message
+keeps the sentence, which only a rewrite could change.
+
+**The rest of the rechecks' items, taken or not.**
+- B42 and B43 shown red again since their guide URL became a literal (the
+  recheck's should-fix): `key-scenario.sh live --only PRIVATE --baseline
+  7c1784c` from this tree, run-key.sh's way (the heavy lock, nice 10,
+  private-bus.sh, the scenario's own nested headless cage, the display
+  variables unset, a private runtime and tmp): 15 passed, 2 failed, B42
+  `exposed:2 final:600 span:247.4 0/state.json:644` and B43 `exposed:1
+  final:600 span:240.3`, as on 2026-11-14 (16.0 s, key-20261122-130714-2383440);
+  `--only PRIVATE` on this tree 17 passed, 0 failed (17.7 s,
+  key-20261122-130804-2385254). Each harness.log: 0 `Name or service not
+  known`, 0 `Temporary failure in name resolution`, 2 `could not reach`
+  (127.0.0.1), no example.test.
+- key-scenario.sh check-tree on the final tree: 12 passed, 0 failed.
+- The crash record's quoted loop now carries its `2>/dev/null || true`,
+  matched against the journal's COREDUMP_CMDLINE, and says the `timeout 580`
+  is the lane's own account.
+- The D-REL-14 row's call (d) is worded as the call was given ("two things
+  are measured or answered, never assumed").
+- The siblings the recheck named are on F-HARNESS-121's row.
+- Not taken: a code-behind imported as an ES module (`.mjs`) is seen by
+  neither reader (a nit). Model.mjs is a legitimate `.mjs` import, so it is
+  left for C2's --check or a narrow refusal of any other `.mjs` import.
+
+**The counts on the final tree**, each heavy one under the heavy lock at nice
+10:
+- `node tests/Model.test.js`: 4065 checks, 0 failures (no check added; the
+  shared-case check now expects 37).
+- python by discovery: 2942, unchanged; the full suite was not run here, it
+  is the lead's gate's. Run under check.sh's bwrap wrap: test_service_files
+  15, test_pip 37, test_manifest 14, test_state 116, test_plugin_id 3,
+  test_census_dates 5, all OK.
+- tests/test_host_load_patch.py, every qml under gdb through the recheck's
+  drive.py monkeypatch (lane-settle2-relsplit1's drive_case.py), a fresh
+  QML_DISK_CACHE_PATH, HOME and XDG folders: 12 run, 0 failed.
+- `bash scripts/qa-lib-test.sh`: 792 passed, 0 failed.
+- chno-scenario.sh check-tree: 16 passed, 0 failed.
+
+Crash journal 89 at the start and at the end of lane-fix-relsplit1's work.
