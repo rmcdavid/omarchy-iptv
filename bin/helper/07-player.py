@@ -1600,15 +1600,76 @@ def read_lock_file(sock_path: str) -> dict[str, Any]:
     return document if isinstance(document, dict) else {}
 
 
+# The highest intent number the lock record honours (D-PLY-77's review,
+# 2026-11-21): 2**31 - 3. The shell holds its counter in a QML `int`
+# (Service.qml playSeq), which wraps past 2**31 - 1, and it resyncs to the
+# record + 1 (Model.probeVerdict) and issues the record + 2, so this is the
+# highest record it can count above (measured through the shipping Model on
+# an int property: a record of 2147483645 resyncs to 2147483646 and issues
+# 2147483647; one of 2147483646 resyncs to 2147483647 and its next intent
+# wraps to `--seq 0`, seqArg's word (model/privacy.mjs) for 0 or less). The
+# shell's own last two intents lie above this, so they are not refused at
+# the parse; a record above it is read as none, as a negative one is.
+SEQ_MAX = 2147483645
+
+# The highest `--seq` the CLI takes (D-PLY-77's recheck, 2026-11-21): 2**31 -
+# 1, the most the shell's int counter can send. A larger one was typed by a
+# person, and taken it would run and then leave a record that reads as none,
+# wiping the shell's recorded seq, so that an older stop of the shell's still
+# waiting for the lock laddered a newer start's player: D-PLY-77's own race.
+# It is refused at the parse instead, so it neither runs nor records. What
+# stays: a `--seq` of 2147483646 or 2147483647 (the shell's own intents
+# there are reachable only after a typed record of 2147483644 or more) still
+# leaves a record that reads as none, as a seq-0 verb did before D-PLY-77,
+# because that reset is the shell's only way back from the top of its
+# counter.
+SEQ_ARG_MAX = 2147483647
+
+
+def seq_arg(text: str) -> int:
+    """argparse's `type` for --seq: an int, as before, refused (without
+    echoing it, D-SINK-106) above SEQ_ARG_MAX. 0 or less is taken as it
+    always was: never superseded, and it lowers no record."""
+    value = int(text)
+    if value > SEQ_ARG_MAX:
+        raise argparse.ArgumentTypeError("above the highest intent number the shell sends")
+    return value
+
+
 def record_seq(record: dict[str, Any]) -> int:
+    """The record's seq, or 0 (none) for anything that is not one a shell
+    can count above: not an integer, below 0, or above SEQ_MAX. So a seq
+    past what the shell's counter can count above -- a typed `--seq
+    2147483646` or `2147483647`, since the parse refuses anything higher
+    (seq_arg) -- is honoured by its own verb's check_seq and then leaves a
+    record that reads as none: it resets the shell's recorded seq, as a
+    seq-0 verb did before D-PLY-77, so an older stop of the shell's still
+    waiting for the lock passes after it. A shell that counts past SEQ_MAX
+    records its last two intents the same way, its wrapped intents (`--seq
+    0`) then leave 0 (write_lock_record) and its next probe resyncs it to
+    1."""
     value = record.get("seq")
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > SEQ_MAX:
         return 0
     return value
 
 
 def write_lock_record(fd: int, seq: int, verb: str) -> None:
-    payload = json.dumps({"schema": 1, "seq": int(seq), "verb": verb, "at": int(time.time())})
+    """The record a verb leaves under the lock: the HIGHER of its own seq
+    and the one recorded (D-PLY-77, 2026-11-21). A verb on the CLI's default
+    `--seq 0` -- `omarchy-iptv player stop` typed in a terminal -- is never
+    superseded (check_seq), and it used to write its 0 here, so a stop of the
+    shell's issued before a start that had recorded a higher seq, still
+    waiting for the lock, passed check_seq after it and laddered that start's
+    player. Every seq above 0 that passes check_seq is already at least the
+    record's, so only a seq-0 verb is changed: it leaves the record's seq
+    where it was. Its readers ask the highest intent the lock has seen: the
+    probe's `seq`, which the shell resyncs its playSeq above, and the stop
+    look's comparison with the stop's seq; nothing reads `verb` or `at`.
+    The recorded one is read through record_seq, so one above SEQ_MAX counts
+    as none and the verb's own seq replaces it, a seq-0 verb's included."""
+    seq = max(int(seq), record_seq(read_lock_record(fd)))
+    payload = json.dumps({"schema": 1, "seq": seq, "verb": verb, "at": int(time.time())})
     try:
         os.lseek(fd, 0, os.SEEK_SET)
         os.truncate(fd, 0)

@@ -22700,3 +22700,440 @@ Lane-ply7576 on the ply7576 branch (off dev f74ee09). Fixing both rather than ac
 - **Node, 4,029 to 4,033 checks, 0 failures on the tree** (heavy lock, `nice -n 10`, about 104 s). Four new: "D-PLY-75 (the review of 8504ba8)", the reattach's probe and D-PLY-35's in flight at a superseded stop with nothing attached, plus the pin that a start in flight, refused, asks nothing; and three titled "D-PLY-76 (the review of 8504ba8 ...)": a stop inside the re-read (six rows), an unreadable answer to D-PLY-35's probe after a play (timed out, garbage, a readable control, a no-play pin), and an unreadable re-read (empty, garbage). On 8504ba8's Service.qml 4 of 4,033 red: the four new; the attached rows, the control and both pins green. On f74ee09's, 8 of 4,033 red: those four and the lane's four (the D-PLY-75 windows, its rule-15 table, its world and D-PLY-76's check). Every existing check green unchanged on the tree, D-PLY-39, -40, -43, -69, -71, -72 and -73 among them.
 - **Single-decision mutants, each through the whole node suite**, 7 of 7 red. MA, `probeRetried` not carried: 1 red (the stop inside the re-read, its three unattached rows). MB, the in-flight term dropped: 1 (D-PLY-75's new check, both rows). MB2, the in-flight term asked of the slot alone, without `playerKind === "probe"`: 1 (its pin). MC, the invalid branch's staleness test dropped: 1 (the unreadable answer after a play). MC2, the overrule reduced to a bare return: 1 (the same check: `timedOutPlay` left set). MC3, the staleness test inverted: 3 (the same check, D-PLY-35's "the reattach probe itself stopped at ITS bound" and the 9d604cf review's "an unreadable look leaves the backstop its own probe"). MD, `probeRetried` not cleared on an unreadable answer: 1 (the unreadable re-read).
 - **`scripts/check-defect-ledger.py`, `scripts/release.py check`, `scripts/split-helper.py --check` and `node scripts/split-model.mjs --check`** green on the tree; no new id. Crash journal 88 before and after. Not watched on a real player.
+
+## D-STATE-11: a save refused over a file that loads is told (lane-state11, 2026-11-21)
+
+Fixing it rather than accepting it is the lead's call under the owner's
+standing authority of 2026-11-09; how, below, is this lane's proposal.
+Branch `state11`, cut from dev f74ee09. Crash journal 88 before the lane's
+first run and 88 after its last.
+
+**The defect, as read and shown.** `state private` runs before every write
+(D-SINK-103). Over a `state.json` that LOADS -- the kernel reads it fine --
+its refusal never begins the no-write mode, which is a load's answer
+(`stateLoadDecision`). `finishStatePrivate` took the refusal to
+`noteStateWriteFailed`: `sourcesPersistFailed("state_write_failed")` once
+per episode, which the guide shows only while it is open (`showPersistFailed`
+returns when it is not), and a journal line with the word. On f74ee09,
+through the shipping Service.qml with the shipping helper's own reply over a
+real split layout (below), the user is given `state_write_failed` and
+nothing else: no card, no line naming the cause or the fix.
+
+**What was decided, and why not the row's two options.**
+- Not the block (`finishStatePrivate` blocking with `reply.why`). Built as a
+  mutant (M7 below) and run through the suite: a block over a file that
+  loads is lifted by the next save's own read (`stateLoadArrived` ->
+  `liftStateBlock`, which also resets `stateBlockTold`), so every later
+  refused save re-tells it -- two cards after the second refusal, three
+  after the fix and one more refusal -- and its sentence is the mid-session
+  block's, which says "then run omarchy restart shell" (a restart is the one
+  way the held changes are lost) and that changes are dropped "if the file
+  comes back by itself first" (the failed-save flag prevents exactly that).
+- Not the persist line alone with a sentence of its own: the guide shows it
+  only while it is open, and a first refusal from a save made with the guide
+  closed tells nothing, after which the episode's flag silences every later
+  one.
+- Built: a notice of its own, NOT a block. `tellStateSaveRefused(why)` runs
+  after `noteStateWriteFailed` and, when `Model.statePrivateRefusalTell(why,
+  statePrivateTold)` says so, posts `Model.statePrivateRefusalNotice` on the
+  no-write notice's kind (`stateUnreadable`, id 74017; `notifyArgv` takes
+  `refused: true`) and writes `Model.statePrivateRefusalJournal`. Told once
+  per failure episode and cause: `statePrivateTold` holds the word told and
+  is cleared where `stateSaveFailed` is -- `onSaved`'s landed write, and
+  `mergeForeignText`'s merge that leaves nothing unsaved (D-SRC-43).
+- The copy (fixture `refused`): title `Saving has stopped`; body `<path>
+  <what>. <unsaved> <fix>`; `<unsaved>` is `Sources, favorites and other
+  changes made now are held in this session only: once this is fixed, the
+  next change made here saves them all, without a restart, and they are
+  dropped if the shell is stopped first.`; the fix names no restart. The
+  split link's `<what>` is the start notice's (`STATE_SPLIT_LINK_WHAT`, one
+  sentence for one cause).
+
+**What each case does now** (all pinned through the shipping Service.qml):
+- A reload of the file, the view's own or a save's read: nothing applied
+  over memory (`reloadDisposition`'s `save-failed`: ignored when the text is
+  the disk as known, merged when another program wrote it); no card.
+- A second refused save: no second card, its own journal line with the
+  word, refused by the helper as every save is while the cause stands.
+- The link fixed while the shell runs: the next save reads, `state private`
+  confirms, and the write carries everything held (three favourites toggled
+  across the episode, all on disk at 0600); no restart. A refusal after that
+  is a new episode, told again.
+- Another cause in the same episode (the link pointed at another account's
+  file, say): told, and its card goes out on the same kind.
+
+**Rule 15, the other refusal words** (read in bin/helper/10-state.py
+`state_private`, `state_private_open`, `state_private_refusal`):
+- `not-owned`: another account's file this account can read (0644, put back
+  as root). Loads, every save refused, fixable while the shell runs (chown).
+  Same treatment, `<what>` `belongs to another account, so it cannot be made
+  private before a save`, fix `Make your own account its owner with chown,
+  run as root.`
+- `unconfirmed`: mode 600 could not be set or read back (a FAT or SMB mount
+  without Unix permissions, some FUSE mounts; a chmod refused). Loads, every
+  save refused. Same treatment, fix `Keep it, or the file its symbolic link
+  points to, on a filesystem that keeps Unix permissions: ...`.
+- `not-a-file`, `unreachable`: over a file that just loaded through the
+  same path, only a change of the path between the save's read and the run
+  gets there (the O_PATH open fails where the read would, the create path
+  needs nothing at the path); the next read meets that change and blocks
+  with its own no-write notice, which names what is there. Not told here.
+- A refusal with no word (`refused`), no reply, `timeout`, `still-running`:
+  nothing at the path to name. Not told here.
+
+**Tests.** tests/Model.test.js, 12 new checks, 4,022 -> 4,034 on the tree,
+0 failures:
+- 2 model checks beside the fixture's R27e checks: the `refused` bodies word
+  for word both ways, the second sentence once in each, no restart in any
+  fix, the split link's `<what>` the start's, no notice and no journal line
+  for eleven other words, the journal line the title then the body; and the
+  tell table.
+- 10 service checks beside the D-SINK-103 ones: the row's case (the shipping
+  helper's reply, exit 1 `split-link`, over a real split layout made in a
+  0700 scratch folder -- the state folder a link, `state.json ->
+  ../wide/state.json`, a folder at the literal location -- the target file
+  and the literal folder untouched), the six-word rule-15 table, another
+  cause in one episode, the merge's end of the episode, and D-SINK-69's
+  sweep for the refused notice (a URL as the reason sends no card; a URL in
+  the path puts none of its parts on the argv).
+- The fixture check's red: with `split-link` added to the fixture's
+  `bodies.start` and not to `decided`, `R27e / R28e: the notice fixture
+  covers every reason ...` was red (got the start keys with `split-link`,
+  want them without), in a run of 4,022 whose one other failure was the
+  D-SINK-103 assertion re-levelled here: `a state private that does not
+  confirm (not-owned, a refusal)` asserted that no journal line matching
+  "made private" names a path, and the not-owned notice's line (`... cannot
+  be made private before a save ...`) names the state file's path, as the
+  no-write notice's journal line does. Its filter now leaves out the
+  notice's own line, dated in the test; every other line it read is read.
+- On f74ee09 (a git archive with this branch's tests/Model.test.js and
+  fixture): 12 of 4,034 red. The row's case reads `[0, true, "",
+  ["state_write_failed"], [], [], undefined]` there: nothing written,
+  `state_write_failed`, no card, no line. The four rule-15 checks that must
+  send no card are red there only for the missing `statePrivateTold`
+  (`<undefined>` for `""`); M5 holds them.
+
+Mutants, one decision each, in a scratch copy of the tree, through the whole
+suite (4,034):
+
+| mutant | red |
+|---|---|
+| M1 `finishStatePrivate` does not call `tellStateSaveRefused` | 5 |
+| M2 the tell ignores the word told (every refusal told) | 5 |
+| M3 a landed write keeps the word told | 1 (the row's case: the refusal after the fix untold) |
+| M4 the merge that leaves nothing unsaved keeps it | 1 (the merge check) |
+| M5 `STATE_PRIVATE_TOLD` widened with `not-a-file` and `unreachable` | 5 |
+| M6 `notifyArgv`'s refused branch takes the block's copy | 5 |
+| M7 the row's first option: `blockStateWrites(why)` instead of the notice | 5 |
+| M8 once per episode, not per cause | 1 (another cause in one episode) |
+| M9 the refused notice takes the mid-session block's second sentence | 5 |
+
+Also run: `node scripts/split-model.mjs --relink` and `--check` (five
+public names added to `Model.mjs`'s state block, its one hand edit, as
+c37d81c added D-SINK-103's; the private `STATE_SPLIT_LINK_WHAT` and the
+manifest's generated lists by `--relink`); `scripts/check-model-members.py`
+over Service.qml and Guide.qml; qmllint 6.12.0 under gdb over Service.qml,
+432 entries against 430 on f74ee09, the two new `missing-property` lines
+being the two new `Model` members (the known baseline); `python3
+scripts/check-defect-ledger.py`.
+
+**Rule 15, the search.** The shape is "a refusal that ends a save, told
+only by the guide's persist line, over a file that loads".
+- Every caller of `noteStateWriteFailed`: `finishStatePrivate` (this fix)
+  and `stateFile`'s `onSaveFailed`. A QSaveFile failure carries only Qt's
+  error enum, no cause at the path to name, and its known causes over a
+  file that loads (a 0500 folder, a full disk) are not ones a word from it
+  separates. Cleared, not changed.
+- `finishStatePrivate`'s other refusal, the no-write mode a load set while
+  the run was out: told by that load's own block. Cleared.
+- Every other `sourcesPersistFailed` reason (`config_unsafe`,
+  `persist_failed`): the host's settings file, not state.json, outside this
+  lane. Not searched further.
+- Not watched: no display and no real notification server were used; the
+  card's rendering is UNVERIFIED.
+
+## D-PLY-77: the lock record keeps the higher seq (lane-state11, 2026-11-21)
+
+Fixing it rather than accepting it is the lead's call under the owner's
+standing authority of 2026-11-09; which fix, this lane's proposal, after
+reading every reader of the record. Branch `state11`, the commit after
+D-STATE-11's. Crash journal 88 before and after.
+
+**Every reader of the record, read before choosing.** The record is
+`player.lock`'s JSON (`schema`, `seq`, `verb`, `at`), written only by
+`write_lock_record`, from `player start|restart` and `player stop`, each
+under the lock and after `check_seq` (bin/helper/08-player-verbs.py).
+- `check_seq` (07-player.py): refuses `superseded` a verb whose seq is
+  above 0 and below the record's. A seq-0 verb -- the CLI's default for
+  `player stop`, `start` and `restart` (11-cli.py), what a person types --
+  is never refused, so `omarchy-iptv player stop`, the documented escape
+  hatch, always works.
+- `player probe` reports `record_seq(read_lock_file())` as `seq`, read
+  without the lock. The shell reads it in `applyProbe`:
+  `Model.probeVerdict` resyncs `playSeq` to `max(playSeq, record + 1)`,
+  and the stop confirmation's look returns early while `probe.seq` is not
+  above `stopSeq` (the stop laddering or still waiting) and otherwise stops
+  a surviving player.
+- `play` stamps the stash with the record's seq (06-failed.py, ruling CL4:
+  `play` has no `--seq`). Nothing compares a stash's `seq` (the model parses
+  it in `playerStash`; no reader in the model or Service.qml).
+- Nothing reads the record's `verb` or `at`.
+- The start's reply `seq` that the shell compares with `stopSeq`
+  (D-PLY-40) is the verb's own argument, not the record.
+
+**Which fix is safe.** The row's two candidates are one change for the
+seq: every seq above 0 that passes `check_seq` is at least the record's, so
+"keep the higher" differs from "write the verb's" only for a seq-0 verb,
+which then leaves the recorded seq where it was. Built as "keep the
+higher", inside `write_lock_record` (`max(seq, record_seq(read_lock_record
+(fd)))`), so no caller can lower it; the record's `verb` and `at` still say
+which verb held the lock last. What a record left high by an EARLIER shell
+does to a new one, read: the new shell's start-up reattach probe is its
+first player verb (Service.qml's start-up, `runPlayerProbe` after the pip
+probe), and its answer resyncs `playSeq` above the record before any
+`play()` is issued from the slot (a play made meanwhile waits for the
+probe, `drainPendingPlay`); a detached stop issued before that answer is
+superseded by the higher record, exactly as on f74ee09 when no terminal
+verb intervened, and the look or the backstop's probe then resyncs and
+stops the player (D-PLY-73's path). So the fix changes nothing for a record
+an earlier shell left; it removes the one way the record went DOWN, which
+only a seq-0 verb had, by accident. For the stop confirmation the record
+is now monotonic, which is what its comparison assumes: a record above the
+stop's seq means a later intent was recorded. The other option the review
+named implicitly -- refusing a seq-0 verb below the record -- is not safe:
+it breaks the escape hatch (mutant P3 below). Cost: a record a person
+raised with a typed `--seq` is no longer lowered by the next seq-0 verb; the
+shell's probe resyncs above it as above any record, until the runtime
+folder or the lock file goes.
+[2026-11-21, the review of 3926a4b: true only for a record the shell can
+count above, and false at the bound of its 32-bit counter; corrected in
+"D-STATE-11 and D-PLY-77: the review of 3926a4b settled", below.]
+
+**Tests.** tests/test_player.py `LockTest`, 3 new (7 in the class, 4 + 3):
+- `test_d_ply_77_the_record_keeps_the_higher_seq`: 14 then a seq-0 stop
+  reads 14 with `verb` "stop"; 20 raises it; an unreadable record reads 0
+  and is replaced by 5, which a seq-0 verb keeps.
+- `test_d_ply_77_a_terminal_verb_does_not_let_an_older_stop_ladder_a_newer_start`:
+  the row's sequence in the order the lock grants it -- the stub player
+  started `--seq 14`, a terminal `player start` with no `--seq` adopting it,
+  then the shell's stop `--seq 13` -- answers `superseded` and leaves the
+  player; the probe then reads 14.
+- `test_d_ply_77_a_terminal_stop_is_still_never_superseded`: after `--seq
+  14`, `player stop` with no `--seq` stops the player, and the record stays
+  14.
+- On f74ee09's helper (a git archive with this branch's test file): 3 of 7
+  red. The row's case reads `[0, None, []]` there -- the stop @13 passed and
+  laddered the player of start @14 -- against `[1, "superseded", [pid]]`;
+  the escape hatch's stop still stops the player there, and its test is red
+  only for the record (0 for 14).
+
+Mutants, one decision each, in a scratch copy, the stub resealed, against
+`LockTest`:
+
+| mutant | red |
+|---|---|
+| P1 `write_lock_record` writes the verb's own seq (f74ee09's) | 3 |
+| P2 it keeps the LOWER | 5 (the three new and the two record tests the class had) |
+| P3 the other way out: f74ee09's write, and `check_seq` refusing a seq-0 verb below the record | 3 (the escape hatch's stop refused; the row's case's terminal start refused) |
+
+Also run: `scripts/split-helper.py --seal` and `--check`; tests/test_player.py
+whole, 174 / 0; test_local_refusals, test_player_bounds,
+test_stream_host_names, test_relay_player, test_stream_label_zone,
+test_stream_lookup, test_state and test_state_literal_link, 306 / 0.
+
+**Rule 15, the search.** The shape is "an ordering value a later write can
+lower".
+- Writers of the lock record: `write_lock_record` alone, from its two
+  callers. Fixed in the writer.
+- The stash's `seq` (`player_stash`): a seq-0 start writes 0 there, and
+  `play` writes the record's. No reader orders by it. Cleared, not changed.
+- The shell's counters: `playSeq` moves by `+= 1` and the probe's resync is
+  a max (`Model.probeVerdict`); `stopSeq` is taken from it. Cleared.
+  [2026-11-21, the review of 3926a4b: not cleared at the int's bound --
+  `playSeq` is a QML `int`, which wraps; corrected below, `SEQ_MAX`.]
+- `play` carries no seq (CL4); `player restart` is `player start`'s path.
+  Cleared.
+- The node world double (tests/player-world.js, outside this lane's files):
+  its other launcher still sets `w.record = 0`, the helper as it was. It is
+  off unless a sequence asks for it (`contestP`), and with the fix it is
+  harsher than the helper, not more forgiving; a proposal to the lead.
+- Not watched on a real player or a terminal beside a running shell.
+
+## D-STATE-11 and D-PLY-77: the review of 3926a4b settled (lane-settle-state11, 2026-11-21)
+
+The review of the state11 branch at 3926a4b upheld two must-fix findings,
+both verified here before any change. Fixing them is the lead's brief; how,
+this lane's proposal. Branch `state11`, one commit after 3926a4b. Crash
+journal 88 before and after.
+
+**D-STATE-11: the two notices on one id.** The refused notice
+(`tellStateSaveRefused`) and the no-write notice (`blockStateWrites`) both
+go out on 74017, so whichever is posted second replaces the first on screen.
+- The review's sequence, re-run through the shipping Service.qml on 3926a4b
+  with the reviewer's scenario: a save refused `split-link` and told (card
+  1); another program makes state.json unparsable, and the block's card
+  replaces it (card 2, "... is not a valid state file ... then run omarchy
+  restart shell"); the file loads again and the block lifts; the next save
+  refused `split-link` tells nothing, because `statePrivateTold` still holds
+  it (`stateSaveFailed` stays true, so the episode never ended). Two cards
+  in all: the user is left with a cause that has cleared and advice to
+  restart, which drops what memory holds. Confirmed.
+- Rule 15, the other order, shown the same way on 3926a4b: a save's
+  `state private` is out when another program makes the file unparsable;
+  the block's card goes out; then the run answers `split-link`, and
+  `finishStatePrivate`'s refusal branch (which runs before its check of the
+  no-write mode) tells it, replacing the block's card while every write is
+  stopped for the block's cause. Cards: block, then split-link.
+- The only two posts on 74017 are these (grep of `notify("stateUnreadable"`
+  in Service.qml, and `stateUnreadable: 74017` in model/build.mjs); no other
+  card can replace either.
+- Fixed: `blockStateWrites` clears `statePrivateTold` beside
+  `stateBlockTold = true`, where it posts its card; `tellStateSaveRefused`
+  returns before telling or marking anything while `stateWriteBlocked` is
+  set. A run that answers during a block still fails its save as before
+  (the persist line once per episode, the journal word, memory held).
+
+tests/Model.test.js, 2 new service checks beside the D-STATE-11 ones,
+4,034 -> 4,036, 0 failures on the tree:
+- The review's sequence: cards `split-link, block, split-link`, two refused
+  journal lines, the favourites held in memory. On 3926a4b: `split-link,
+  block`, one line, `statePrivateTold` still `split-link` during the block.
+- The other order: during the block one card, `block`, no refused line,
+  nothing told, the persist line once; after the lift the refusal told
+  (`block, split-link`). On 3926a4b: `block, split-link` during the block.
+- On 3926a4b's Service.qml with this test file: 2 of 4,036 red, the two
+  new.
+
+Mutants, one decision each, in a scratch copy, through the whole suite:
+
+| mutant | red |
+|---|---|
+| MA the block's card does not clear the word told | 1 (the review's sequence) |
+| MB the refusal is told while the no-write mode stands | 1 (the other order) |
+| MC that guard placed after the word is marked told | 1 (the other order: untold after the lift) |
+
+**The D-SINK-103 assertion, narrowed** (the review's nit). Its re-levelled
+filter left the refused notice's journal line out of the credential half as
+well as the path half. Now every `made private` line is held to `p4ss`, and
+only the path half leaves the notice's line out. Shown with a mutant (ME)
+whose `tellStateSaveRefused` journals the sources beside the notice: under
+3926a4b's filter 1 of 4,034 red, the exact-line split-link check, the
+D-SINK-103 check green; under this one 4 of 4,036 red, the D-SINK-103 check
+among them (`true` for `false`).
+
+**D-PLY-77: the record's bound.** The review's finding was right on both
+counts.
+- The CLI's `--seq` is `type=int` with no bound (bin/helper/11-cli.py, the
+  `player_session` parent and `player stop`); `player_start` and
+  `player_stop` take `max(0, int(args.seq))`.
+- The shell's counter, measured under gdb (`handle all nopass`, offscreen,
+  a decoy HOME and XDG folders, the Qt 6.12 runtime, `/usr/lib/qt6/bin/qml`)
+  on an `int` property as Service.qml declares `playSeq`, through the
+  shipping `Model.probeVerdict` and `Model.playerStopArgv` (whose `--seq` is
+  `seqArg`'s), starting from a current seq of 7:
+
+| record | resync | next three intents sent |
+|---|---|---|
+| 2,147,483,644 | 2,147,483,645 | 2147483646, 2147483647, 0 |
+| 2,147,483,645 | 2,147,483,646 | 2147483647, 0, 0 |
+| 2,147,483,646 | 2,147,483,647 | 0, 0, 0 |
+| 2,147,483,647 | -2,147,483,648 | 0, 0, 0 |
+| 100,000,000,000 | 1,215,752,193 | 1215752194, 1215752195, 1215752196 |
+
+  and plain assignment: 2,147,483,646 and 2,147,483,647 kept,
+  2,147,483,648 read -2,147,483,648, 100,000,000,000 read 1,215,752,192 --
+  the reviewer's figures.
+- So on 3926a4b a typed 100,000,000,000 left the shell below the record,
+  every verb superseded, and a typed 2,147,483,646 or more left it sending
+  `--seq 0`, which the kept record never let down. On f74ee09 that wrapped
+  seq-0 verb wrote 0, and the next probe resynced to 1.
+
+Fixed: `SEQ_MAX` = 2,147,483,645 in bin/helper/07-player.py, the highest
+record the shell can resync above and issue its next intent over (the
+second row), and `record_seq` reads a record above it as none, as it reads
+a negative one. What each case does now:
+- A typed seq above `SEQ_MAX` (100,000,000,000; 2,147,483,647): its own
+  verb is checked against the record as before and runs; the record it
+  leaves reads as none, so the next verb's seq replaces it and the shell's
+  probe resyncs to `max(current, 1)`: the shell counts on from its own seq.
+- A typed seq at or below `SEQ_MAX`: honoured as any record, the shell
+  resyncs above it. Near the top, the shell's intents above `SEQ_MAX` (at
+  most two before its int wraps) record as none, its wrapped intents
+  (`--seq 0`) leave 0, and its next probe resyncs it to 1. Ordering is lost
+  from the first intent above `SEQ_MAX` until that probe: f74ee09's
+  behaviour at the top of the range, restored.
+- Not refused at the parse: the shell's own last two intents,
+  2,147,483,646 and 2,147,483,647, lie above `SEQ_MAX`, and a refusal there
+  would fail its verbs.
+- The review's example bound, 2**31 - 2 (2,147,483,646), loops: a record
+  there resyncs the shell to 2,147,483,647, its next intent wraps to
+  `--seq 0`, the kept record stays, and every probe resyncs it to the top
+  again (mutant Q2).
+
+tests/test_player.py `LockTest`, 2 new (9 in the class):
+- `test_d_ply_77_a_record_the_shell_cannot_count_above_reads_as_none`:
+  records of 2,147,483,645 / 2,147,483,646 / 2,147,483,647 /
+  100,000,000,000 read `[2147483645, 0, 0, 0]`; a verb's seq 5 replaces one
+  above the bound; a typed 100,000,000,000 then a seq-0 verb leave 0.
+- `test_d_ply_77_the_shell_is_never_left_below_a_typed_seq_or_unable_to_count`:
+  through the CLI, the shell's counter a stand-in for the measured int
+  (wrap past 2**31 - 1, resync `max(current, record + 1)`, an intent
+  `+= 1`, sent as "0" at 0 or less). After a typed stop at each of
+  100,000,000,000, 2,147,483,647 and 2,147,483,646 the shell's next stop
+  goes out at 8 and runs. At the top: a typed 2,147,483,645, then the shell
+  sends 2147483647, 0 and 2, all run, and a stale stop at 1 is superseded.
+- On 3926a4b's helper with this file: 2 of 9 red. The first reads the
+  records back whole. The second: the shell's stop after the typed
+  100,000,000,000 goes out at 1,215,752,194 and reads `superseded`, and
+  every later typed stop is superseded by that record. The top-of-range
+  trail alone, run as a scratch script on a fresh runtime folder: on
+  3926a4b the shell sends `2147483647, 0, 0` (never ordered again); on the
+  tree `2147483647, 0, 2`.
+
+Mutants, one decision each, in a scratch copy, the stub resealed, against
+`LockTest`:
+
+| mutant | red |
+|---|---|
+| Q2 `SEQ_MAX` = 2,147,483,646 (the review's example) | 2 (a typed 2,147,483,646 leaves the shell sending "0") |
+| Q3 `SEQ_MAX` = 2,147,483,644 (a pin on the exact bound) | 2 |
+| Q4 a record above the bound read as the bound, not as none | 2 |
+
+Also run, on the tree as committed: `scripts/split-helper.py --seal` and
+`--check`; `node scripts/split-model.mjs --check`; `python3
+scripts/release.py check`; `python3 scripts/check-defect-ledger.py`;
+`scripts/check-model-members.py` over Service.qml and Guide.qml;
+tests/Model.test.js 4,036 / 0; tests/test_player.py whole 176 / 0; and
+test_local_refusals, test_player_bounds, test_stream_host_names,
+test_relay_player, test_stream_label_zone, test_stream_lookup, test_state
+and test_state_literal_link, 306 / 0. (A first run of those eight under the
+lane's long scratch path as TMPDIR failed 22, each on the relay's socket
+path being too long for `sun_path`; with a short TMPDIR under
+/tmp/claude-1000 they pass. An environment artifact, not a finding.)
+docs/UX-SOURCES.md item 10 gains a dated bracket with both rules.
+
+**Rule 15, the searches.**
+- Every post on the 74017 id: the two above. Cleared.
+- Every place a word told is kept or cleared (`statePrivateTold`): set by
+  `tellStateSaveRefused`, cleared by `onSaved`'s landed write, by
+  `mergeForeignText`'s merge that leaves nothing unsaved, and now by the
+  block's card. `liftStateBlock` clears `stateBlockTold` only; with the two
+  changes it needs nothing more (the block's card already cleared the word,
+  and no refusal is marked told during a block). Cleared.
+- Every reader of the record's seq: `check_seq`, `write_lock_record`,
+  `player probe`'s `seq`, `play`'s stash stamp; all through `record_seq`,
+  so all take the bound. The start's reply `seq` is the verb's own
+  argument. Cleared.
+- Every other integer the shell holds from a helper reply and counts from:
+  `stopSeq`, `sessionSeq`, `probeSeq` and `previousPlayingSeq` are taken
+  from `playSeq`, never from a reply.
+  Cleared; not changed (Service.qml's player paths are not this lane's).
+- Not watched: no display, no real notification server, no real player.
+
+The review's other findings, and why not here: D-STATE-9's row (the lead's
+at merge); the `unconfirmed` fix sentence for a read-only mount or an
+immutable file (the owner's copy; text proposed to the lead); the player
+comments in Service.qml and player-scenario.sh (lane-ply7576's files); the
+3926a4b commit message (left, so the reviewed commit keeps its id); the
+refused card never withdrawn once saving resumes (the existing pattern of
+the no-write notice, not new here).

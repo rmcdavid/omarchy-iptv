@@ -2056,6 +2056,184 @@ class LockTest(PlayerTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload["seq"], 41)
 
+    # D-PLY-77 (2026-11-21): a verb on the CLI's default `--seq 0` -- typed in
+    # a terminal -- used to write its 0 into the record, so a stop of the
+    # shell's issued BEFORE a start that recorded a higher seq, and still
+    # waiting for the lock, passed check_seq afterwards and laddered that
+    # start's player. The record now keeps the higher seq.
+    def terminal_start(self):
+        """`omarchy-iptv player start` as a person types it: no --seq."""
+        return run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                   "--id", "t:bbc1.uk", "--ipc-timeout", "1", "--lock-timeout", "1",
+                   "--spawn-timeout", "4", "--first-load-timeout", "1")
+
+    def test_d_ply_77_the_record_keeps_the_higher_seq(self):
+        os.makedirs(self.runtime, 0o700)
+        fd = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, fd)
+        read = lambda: helper.read_lock_record(fd)
+        helper.write_lock_record(fd, 14, "start")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual([helper.record_seq(read()), read().get("verb")], [14, "stop"],
+                         "a seq-0 verb leaves the recorded seq where it was")
+        helper.write_lock_record(fd, 20, "start")
+        self.assertEqual(helper.record_seq(read()), 20, "a higher seq still raises it")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.truncate(fd, 0)
+        os.write(fd, b"not a record")
+        helper.write_lock_record(fd, 5, "start")
+        self.assertEqual(helper.record_seq(read()), 5, "an unreadable record reads as 0 and is replaced")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual(helper.record_seq(read()), 5)
+
+    def test_d_ply_77_a_terminal_verb_does_not_let_an_older_stop_ladder_a_newer_start(self):
+        # The row's sequence, in the order the lock grants it: the shell's
+        # start @14 runs and records 14; a terminal `player start` (seq 0)
+        # runs and adopts the player; the shell's stop @13, issued before the
+        # start and kept waiting, runs last.
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        pid = helper.find_player(self.sock)[0]["pid"]
+        code, payload, _, stderr = self.terminal_start()
+        self.assertEqual([code, payload["spawned"]], [0, False], stderr)
+        code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--seq", "13", "--ipc-timeout", "1")
+        # Before D-PLY-77: [0, None, []] -- the stop passed and laddered it.
+        self.assertEqual([code, (payload.get("error") or {}).get("code"), [record["pid"] for record in helper.find_player(self.sock)]],
+                         [1, "superseded", [pid]], "the older stop must not touch the player of the newer start")
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+        # And the shell's probe reads the record the start left, so its
+        # playSeq resyncs above 14 (Model.probeVerdict).
+        code, payload, _, _ = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual([code, payload["seq"]], [0, 14])
+
+    def test_d_ply_77_a_terminal_stop_is_still_never_superseded(self):
+        # The documented escape hatch: `omarchy-iptv player stop` with no
+        # --seq stops the player whatever the record holds, and leaves the
+        # record's seq for the shell to resync above.
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        code, payload, _, stderr = run("player", "stop", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual([code, payload.get("running")], [0, False], stderr)
+        self.assertFalse(helper.find_player(self.sock))
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+
+    # D-PLY-77's review (2026-11-21): with the higher seq kept, a typed seq
+    # the shell cannot count above stayed in the record for the life of the
+    # runtime folder. The shell's counter is a QML int: it resyncs to the
+    # record + 1 and issues the record + 2, and past 2**31 - 1 it wraps (a
+    # typed 100000000000 resynced it to 1215752193, below the record, so its
+    # every verb was superseded; a typed 2147483647 wrapped it negative, so
+    # its every verb went as --seq 0 and, kept, never lowered the record).
+    # SEQ_MAX is the highest record it can count above; one above reads as
+    # none.
+    def test_d_ply_77_a_record_the_shell_cannot_count_above_reads_as_none(self):
+        os.makedirs(self.runtime, 0o700)
+        fd = helper.acquire_lock(helper.player_lock_path(self.sock), 1.0)
+        self.addCleanup(helper.release_lock, fd)
+        read = lambda: helper.record_seq(helper.read_lock_record(fd))
+        seen = []
+        for seq in (2147483645, 2147483646, 2147483647, 100000000000):
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.truncate(fd, 0)
+            os.write(fd, json.dumps({"schema": 1, "seq": seq, "verb": "stop", "at": 0}).encode("utf-8"))
+            seen.append(read())
+        self.assertEqual(seen, [2147483645, 0, 0, 0], "the highest record the shell can count above, then none")
+        helper.write_lock_record(fd, 5, "start")
+        self.assertEqual(read(), 5, "a verb's seq replaces a record above the bound")
+        helper.write_lock_record(fd, 100000000000, "stop")
+        helper.write_lock_record(fd, 0, "stop")
+        self.assertEqual([read(), helper.read_lock_record(fd).get("seq")], [0, 0],
+                         "a typed seq past the shell's counter outlives its verb in no record")
+
+    def test_d_ply_77_the_shell_is_never_left_below_a_typed_seq_or_unable_to_count(self):
+        # Through the CLI, with the shell's verbs as its counter sends them.
+        # The counter is a stand-in for Service.qml's `property int playSeq`
+        # as measured under gdb on Qt 6.12 through the shipping Model
+        # (QA-RESULTS "D-STATE-11 and D-PLY-77: the review of 3926a4b
+        # settled"): the resync is Model.probeVerdict's max(current, record +
+        # 1) assigned to an int, which wraps past 2**31 - 1; an intent is
+        # `+= 1`, sent by seqArg (model/privacy.mjs) as itself above 0 and as
+        # "0" otherwise. No player runs: `player stop` checks, records and
+        # answers running false.
+        wrap = lambda n: (n + 2 ** 31) % 2 ** 32 - 2 ** 31
+        shell = {"seq": 7}
+
+        def resync():
+            shell["seq"] = wrap(max(shell["seq"], run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")[1]["seq"] + 1))
+
+        def stop(seq):
+            code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--ipc-timeout", "1", "--seq", seq)
+            return [code, (payload.get("error") or {}).get("code")]
+
+        def shell_stop():
+            shell["seq"] = wrap(shell["seq"] + 1)
+            sent = str(shell["seq"]) if shell["seq"] > 0 else "0"
+            return [sent] + stop(sent)
+
+        outcome = []
+        # (A typed 100000000000 is refused at the parse since the recheck:
+        # the next test.)
+        for typed in ("2147483647", "2147483646"):
+            shell["seq"] = 7
+            typed_stop = stop(typed)    # a person's typed stop
+            resync()
+            outcome.append([typed, typed_stop, shell_stop()])
+        # Before: 2147483647 and 2147483646 left it sending --seq 0.
+        self.assertEqual(outcome, [["2147483647", [0, None], ["8", 0, None]],
+                                   ["2147483646", [0, None], ["8", 0, None]]],
+                         "a record the shell cannot count above is read as none: the shell counts on from its own seq")
+        # The top of the range: a typed SEQ_MAX is honoured; the shell
+        # resyncs to 2147483646 and issues 2147483647, which records as none;
+        # its counter then wraps to --seq 0, which leaves 0, and its next
+        # probe resyncs it to 1, so its next stop is ordered over a stale one.
+        shell["seq"] = 7
+        trail = [stop("2147483645")]
+        for _ in range(3):
+            resync()
+            trail.append(shell_stop())
+        trail.append(stop("1"))
+        self.assertEqual(trail, [[0, None], ["2147483647", 0, None], ["0", 0, None], ["2", 0, None], [1, "superseded"]],
+                         "ordered again once the shell's counter has wrapped")
+
+
+    # D-PLY-77's recheck (2026-11-21): a typed seq above what the shell's
+    # counter can send was honoured, and the record it left read as none, so
+    # it wiped the shell's recorded seq and an older stop of the shell's,
+    # still waiting for the lock, passed after it and laddered a newer
+    # start's player -- D-PLY-77's own race. It is refused at the parse.
+    def test_d_ply_77_a_seq_the_shell_cannot_send_is_refused_at_the_parse(self):
+        code, _, _, stderr = self.player_start("--seq", "14")
+        self.assertEqual(code, 0, stderr)
+        pid = helper.find_player(self.sock)[0]["pid"]
+        refused = []
+        for typed in ("2147483648", "100000000000"):
+            for verb in (["player", "start", "--socket", self.sock, "--cache-dir", self.cache,
+                          "--id", "t:bbc1.uk", "--ipc-timeout", "1", "--lock-timeout", "1",
+                          "--spawn-timeout", "4", "--first-load-timeout", "1", "--seq", typed],
+                         ["player", "stop", "--socket", self.sock, "--ipc-timeout", "1", "--seq", typed]):
+                err = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                        code = helper.main(verb)
+                except SystemExit as caught:
+                    code = caught.code
+                # D-SINK-106: the option is named, the value never.
+                refused.append([verb[1], code, "(--seq)" in err.getvalue(), typed in err.getvalue()])
+        # Before the recheck: [start, 0, False, False] and [stop, 0, False,
+        # False] -- the typed start adopted the player, the typed stop
+        # stopped it.
+        self.assertEqual(refused, [["start", 2, True, False], ["stop", 2, True, False]] * 2)
+        self.assertEqual([record["pid"] for record in helper.find_player(self.sock)], [pid])
+        self.assertEqual(helper.record_seq(helper.read_lock_file(self.sock)), 14)
+        # The row's sequence with a typed seq: the older stop @13 is still
+        # superseded, because the refused verb recorded nothing.
+        code, payload, _, _ = run("player", "stop", "--socket", self.sock, "--seq", "13", "--ipc-timeout", "1")
+        self.assertEqual([code, (payload.get("error") or {}).get("code"), [record["pid"] for record in helper.find_player(self.sock)]],
+                         [1, "superseded", [pid]])
+        # The largest the shell sends is still taken.
+        self.assertEqual(helper.seq_arg("2147483647"), 2147483647)
+        self.assertEqual(helper.seq_arg("-3"), -3)
+
 
 class SpawnFailureTest(PlayerTestCase):
     def test_a_player_that_never_binds_is_reaped_by_the_helper_that_created_it(self):

@@ -1959,6 +1959,7 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    | a symbolic link at the path whose target is missing or is not a regular file, as the helper's start-up check found it (`link`, round 14, R24b; round 17, R27e: point it back) | `is a symbolic link whose target is missing or is not a regular file` | `Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell.` |
    | something that is not a folder where the state FOLDER, or one above it, should be (`not-a-dir`, round 14, R24b; `<path>` is then the folder's, `/home/you/.local/state/omarchy-iptv`) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
    | a symbolic link at the state FOLDER, or at one above it, that leads nowhere or to something that is not a folder (`folder-link`, round 15, R25c, D-SRC-32; `<path>` is the folder's; round 17, R27e: point it back) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell.` |
+   | a symbolic link at the path that the shell's writer would save to another file than the one it is read from -- a relative target that climbs with `..` out of a folder that is itself a symbolic link, or a target that is not UTF-8 -- as the helper's start-up check found it (`split-link`, D-STATE-9, 2026-11-21; this row at a start that could not load the file; over a file that LOADS, item 10) | `is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8` | `Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it, then run omarchy restart shell.` |
    | the start-up check -- since round 14 the `mkdir` before it too (R24d) -- did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
    | ~~mid-session, the read before a save did not answer within 2 s, was asked once more, and did not answer again (`read-timeout`, round 17, R27a, D-SINK-22 window c)~~ **WITHDRAWN 2026-10-20 (round 18, R28a, and kept withdrawn by round 19, R29a): a read that does not answer is not this mode (item 9); the reason is gone from the model, and a load failure a read answers with blocks under that load's own row** | ~~`did not answer when it was read before a save (twice, 2 seconds each)`~~ | ~~`The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell.`~~ |
    | any other failure (`io-error`) | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
@@ -2468,6 +2469,73 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    not answer made a new silent loss, so the lead withdrew both: no
    schedule, no 74019 (retired, not reused), no notice, no
    `read-timeout`.]
+
+10. NOT this mode either (D-STATE-11, 2026-11-21): **a save `state private`
+   refuses over a `state.json` that loads.** Since D-SINK-103 every write
+   waits for the helper's `state private`, and it refuses a file it cannot
+   make private first. Three of its refusals name a cause that stands while
+   the shell runs and that the user can fix while it runs: a link the
+   shell's writer would save to another file (`split-link`, D-STATE-9's
+   guard), another account's file (`not-owned`), and a mode 600 that will
+   not hold (`unconfirmed`: a FAT or SMB mount without Unix permissions,
+   some FUSE mounts). Such a file LOADS -- the kernel reads it -- so the
+   no-write mode, which is a load's answer, never begins, and until D-STATE-11
+   the only telling was the guide's `Could not write state.json · check
+   ~/.local/state/omarchy-iptv`, shown only while the guide is open, and a
+   journal word. Now, once per failure episode and cause
+   (`Service.tellStateSaveRefused`, `Model.statePrivateRefusalTell`; an
+   episode ends when a write lands, or at a merge that leaves nothing
+   unsaved):
+   - a desktop notification on item 1's id and kind (`-u critical -r
+     74017`), so a no-write block that follows replaces its card, titled
+     `Saving has stopped`, and the same words on the console:
+     `Model.statePrivateRefusalNotice(why, path)` and
+     `Model.statePrivateRefusalJournal`, held verbatim by the `refused`
+     section of `tests/fixtures/state-notices.json`. The body is `<path>
+     <what>. <unsaved> <fix>`, and `<unsaved>` is a sentence of its own
+     (`Model.STATE_REFUSED_UNSAVED`): `Sources, favorites and other changes
+     made now are held in this session only: once this is fixed, the next
+     change made here saves them all, without a restart, and they are
+     dropped if the shell is stopped first.` The fix names no restart,
+     because a restart is the one way the held changes are lost:
+
+     | Word | `<what>` | `<fix>` |
+     |---|---|---|
+     | `split-link` | `is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8` (item 1's own) | `Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it.` |
+     | `not-owned` | `belongs to another account, so it cannot be made private before a save` | `Make your own account its owner with chown, run as root.` |
+     | `unconfirmed` | `could not be made private (mode 600) before a save` | `Keep it, or the file its symbolic link points to, on a filesystem that keeps Unix permissions: a FAT or SMB mount without them, and some FUSE mounts, cannot hold mode 600.` |
+
+   - the guide's persist line once, as before.
+   What does NOT change, on purpose: the guide draws no no-write surface,
+   the Sources header keeps its count, the Add rows stay, and a source verb
+   is not refused -- the change is made in memory and held, as after any
+   failed write. Memory stands: the failed-save flag keeps a reload of the
+   file from being applied over it (one that equals what the disk held is
+   ignored, another program's write is merged). Every later save still
+   reads the file and asks `state private`, which refuses each while the
+   cause stands -- a second refusal for the same cause tells nothing more,
+   one for another cause in the same episode is told and replaces the card
+   -- and confirms the first after the fix, whose write carries everything
+   held. Nothing needs a restart. The other refusal words are told as
+   before, and why: `not-a-file` and `unreachable` over a file that just
+   loaded mean the path changed between the save's read and the run, and
+   the next read meets that change and blocks with its own row of item 1;
+   a refusal with no word, no reply, the watchdog's `timeout` and
+   `still-running` name nothing at the path to fix. Pinned in node through
+   the shipping `Service.qml`, with the shipping helper's own reply over a
+   real split layout (`D-STATE-11 (through Service, ...)`); not watched on
+   a display.
+   [2026-11-21, the review of 3926a4b: the two cards on the one id. A
+   no-write block that begins mid-episode replaces the refused card, and the
+   refusal it replaced counts as told no longer: once the block lifts (the
+   file loads again), the next save refused for the same cause is told
+   again, rather than leaving the block's card, whose cause has cleared and
+   whose fix is a restart. And while the no-write mode stands no refusal is
+   told: a save whose `state private` was out when the block began answers
+   after the block's card, which names the cause that stops every write, so
+   that card stands and the refusal is told after the lift if it still
+   holds. Pinned by the two `D-STATE-11 (through Service, the review of
+   3926a4b)` checks.]
 
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;

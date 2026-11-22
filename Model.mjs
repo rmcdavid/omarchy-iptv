@@ -90,7 +90,9 @@ export {
   stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
   STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
   STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  stateBlockedHeader, STATE_PRIVATE_TOLD, STATE_REFUSED_UNSAVED,
+  statePrivateRefusalNotice, statePrivateRefusalJournal,
+  statePrivateRefusalTell
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,

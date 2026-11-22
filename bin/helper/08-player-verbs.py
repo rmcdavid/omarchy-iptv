@@ -1235,7 +1235,9 @@ def stand_down_note(seq: int, target: dict[str, Any], newer: dict[str, Any]) -> 
     player lock across its whole spawn and stamps the lock record with its own
     seq before taking it; ruling CL4 withholds `--seq` from `play`, so the zap
     that beats it here stamps the stash with `record_seq(read_lock_file())` -
-    which, inside that window, can only be the start's own number read back.
+    which, inside that window, can only be the start's own number read back
+    [2026-11-21, D-PLY-77: or, for a start on the CLI's default `--seq 0`,
+    the higher seq recorded before it, which that start now leaves there].
     Five live stand-downs printed `(intent 662 over 662)`, `(654 over 654)`
     and so on, 5/5. There is no second intent number to print, and a
     diagnostic that cannot vary is an assertion that cannot fail.
