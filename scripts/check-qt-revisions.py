@@ -58,7 +58,8 @@ such as `Qt.styleHints` (read as hidden, the strict reading; not measured).
 A code-behind of Service.qml (D-REL-14) has no imports of its own: it is
 read under Service.qml's, as written and as rewritten, so a member it names
 is judged by what the host loads Service.qml at, and it counts as a file the
-rewrite reaches when Service.qml is one.
+rewrite reaches when Service.qml is one. An import that cannot be read is
+reported once, on Service.qml, and leaves its code-behinds unjudged.
 
 Usage: check-qt-revisions.py [--root ROOT] [--qml-dir DIR] [--quickshell BIN] [FILE ...]
 With no FILE, scripts/release.py's shipped_code: the .qml entries of
@@ -438,6 +439,10 @@ def judge(path, text, rewrite, qml_dir, cache=None, label=None, importer_text=No
     try:
         scope = Scope(head, rewrite, qml_dir, cache)
     except Unreadable as error:
+        # A code-behind's imports are its importer's, whose own judgement
+        # reports this, once; the code-behind is not judged without them.
+        if importer_text is not None:
+            return [], (0, 0, False)
         return ["%s: %s" % (label, error)], (0, 0, False)
     try:
         toks = members.tokens(text)

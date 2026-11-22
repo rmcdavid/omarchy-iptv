@@ -73,7 +73,6 @@ otherwise. Python 3 standard library only.
 """
 
 import argparse
-import ast
 import importlib.util
 import os
 import re
@@ -129,17 +128,6 @@ def shipped_code(root):
         return release.shipped_code(root)
     except release.service_files.ServiceFilesError as error:
         raise ValueError("the service's files are refused by its readers: %s" % error)
-
-
-def allowlisted_qml(root):
-    """The .qml entries of ALLOWLIST in <root>/scripts/release.py, read as a
-    literal with ast so nothing in release.py runs."""
-    path = os.path.join(root, "scripts", "release.py")
-    tree = ast.parse(read(path), path)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "ALLOWLIST" for t in node.targets):
-            return [os.path.join(root, e) for e in ast.literal_eval(node.value) if e.endswith(".qml")]
-    raise ValueError("%s has no ALLOWLIST assignment" % path)
 
 
 def within(version, limit):

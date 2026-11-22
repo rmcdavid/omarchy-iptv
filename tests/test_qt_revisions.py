@@ -487,6 +487,26 @@ class Installed(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertRegex(out, r"^qt revision guard: 2 file\(s\), 2 read as the host's rewrite pins them")
 
+    def test_an_unreadable_import_is_reported_once_on_the_importer(self):
+        # The fix pass on 2a4ab03: a code-behind runs under Service.qml's
+        # imports, so a problem with them is Service.qml's, reported once
+        # (2a4ab03's guard reported it again for every code-behind).
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp)
+            path = os.path.join(tmp, "Service.qml")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertEqual(text.count("import QtQuick\n"), 1)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text.replace("import QtQuick\n", "import QtQuick\nimport NoSuchModuleAtAll\n"))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = guard.main(["--root", tmp, "--qml-dir", QML_DIR, "--quickshell", QUICKSHELL])
+        lines = [line for line in out.getvalue().splitlines() if "NoSuchModuleAtAll" in line]
+        self.assertEqual(rc, 1, out.getvalue())
+        self.assertEqual(len(lines), 1, out.getvalue())
+        self.assertTrue(lines[0].startswith("Service.qml: NoSuchModuleAtAll"), lines[0])
+
     def test_a_hidden_member_in_a_code_behind_is_red(self):
         if "mutabilityGroup" not in self.scope.hidden:
             self.skipTest("the installed Qt hides no mutabilityGroup from the host's pin")

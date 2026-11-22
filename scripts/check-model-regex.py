@@ -310,9 +310,13 @@ def main(argv):
             root = os.path.abspath(args.pop(0))
         else:
             files.append(os.path.abspath(a))
-    if not files:
-        files = trim.scanned_files(root)
-    problems, literals, built = scan(files)
+    try:
+        if not files:
+            files = trim.scanned_files(root)
+        problems, literals, built = scan(files)
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError) as error:
+        print("model regex guard: the files cannot be read: %s" % error)
+        return 1
     for p in problems:
         print(p)
     print("model regex guard: %d file(s), %d regex literal(s), %d built, %d problem(s)"

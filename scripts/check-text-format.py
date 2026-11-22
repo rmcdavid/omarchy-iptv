@@ -99,7 +99,6 @@ the check that none has started to.
 Python 3 standard library only. ASCII only.
 """
 
-import ast
 import os
 import re
 import sys
@@ -146,23 +145,6 @@ def shipped_code(root):
         return [entry.path for entry in release.shipped_code(root)]
     except release.service_files.ServiceFilesError as error:
         raise ValueError("the service's files are refused by its readers: %s" % error)
-
-
-def allowlisted_qml(root):
-    """The .qml entries of ALLOWLIST in <root>/scripts/release.py, read as a
-    literal with ast so nothing in release.py runs."""
-    path = os.path.join(root, 'scripts', 'release.py')
-    with open(path, 'r', encoding='utf-8') as handle:
-        tree = ast.parse(handle.read(), path)
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        if 'ALLOWLIST' not in names:
-            continue
-        entries = ast.literal_eval(node.value)
-        return [os.path.join(root, e) for e in entries if e.endswith('.qml')]
-    raise ValueError('%s has no ALLOWLIST assignment' % path)
 
 
 def regex_opens_at(out):

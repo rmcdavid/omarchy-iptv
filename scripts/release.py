@@ -295,14 +295,31 @@ def code_behinds_of(path):
 
 def shipped_code(root):
     """[ShippedCode(path, importer)]: ALLOWLIST's `.qml` entries in its order,
-    each followed by its code-behinds (code_behinds_of)."""
+    each followed by its code-behinds (code_behinds_of).
+
+    Every other script ALLOWLIST ships must be one a guard reads, or this
+    raises ValueError rather than leave it out: a `.js` only as a code-behind
+    Service.qml declares (a `.js` another QML file imports is read by no guard
+    of the shipped code until a split of that file teaches code_behinds_of
+    its importer), and a `.mjs` only as the model, Model.mjs and model/*.mjs,
+    which the model guards read themselves."""
     out = []
-    for rel in allowlist_of(root):
+    allowlist = allowlist_of(root)
+    for rel in allowlist:
         if not rel.endswith('.qml'):
             continue
         path = os.path.join(root, rel)
         out.append(ShippedCode(path, path))
         out.extend(ShippedCode(cb, path) for cb in code_behinds_of(path))
+    behinds = set(os.path.normpath(os.path.relpath(e.path, root)) for e in out if e.path != e.importer)
+    for rel in allowlist:
+        norm = os.path.normpath(rel)
+        if rel.endswith('.js') and norm not in behinds:
+            raise ValueError('ALLOWLIST ships %s, which is no code-behind Service.qml declares, so no guard of the '
+                             'shipped code reads it' % rel)
+        if rel.endswith('.mjs') and norm != 'Model.mjs' and os.path.dirname(norm) != 'model':
+            raise ValueError('ALLOWLIST ships %s, which is not the model (Model.mjs, model/*.mjs), so no guard of the '
+                             'shipped code reads it' % rel)
     return out
 
 

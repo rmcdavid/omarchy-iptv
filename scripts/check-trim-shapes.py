@@ -38,7 +38,6 @@ Exit 0 and one summary line ("trim shape guard: N file(s), M regex
 literal(s), 0 problem(s)") when clean; exit 1 with file:line: reason for each
 problem otherwise. ASCII only (CLAUDE.md rule 8). Not shipped.
 """
-import ast
 import glob
 import importlib.util
 import os
@@ -52,16 +51,6 @@ REGEX_OPENERS = "(,=:!&|?{};[+-*%<>~^"
 
 def repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def allowlisted_qml(root):
-    path = os.path.join(root, "scripts", "release.py")
-    with open(path, "r", encoding="utf-8") as handle:
-        tree = ast.parse(handle.read(), path)
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and "ALLOWLIST" in [t.id for t in node.targets if isinstance(t, ast.Name)]:
-            return [os.path.join(root, e) for e in ast.literal_eval(node.value) if e.endswith(".qml")]
-    raise ValueError("%s has no ALLOWLIST assignment" % path)
 
 
 def shipped_code(root):
@@ -209,9 +198,13 @@ def main(argv):
             root = os.path.abspath(args.pop(0))
         else:
             files.append(os.path.abspath(a))
-    if not files:
-        files = scanned_files(root)
-    problems, literals = scan(files)
+    try:
+        if not files:
+            files = scanned_files(root)
+        problems, literals = scan(files)
+    except (OSError, ValueError, SyntaxError, UnicodeDecodeError) as error:
+        print("trim shape guard: the files cannot be read: %s" % error)
+        return 1
     for p in problems:
         print(p)
     print("trim shape guard: %d file(s), %d regex literal(s), %d problem(s)" % (len(files), literals, len(problems)))

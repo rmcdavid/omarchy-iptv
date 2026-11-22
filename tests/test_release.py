@@ -1740,7 +1740,7 @@ class ShippedCodeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, 'scripts'))
             with open(os.path.join(tmp, 'scripts', 'release.py'), 'w') as fh:
-                fh.write('import sys\nsys.exit(3)\nALLOWLIST = ("Only.qml", "x.mjs")\n')
+                fh.write('import sys\nsys.exit(3)\nALLOWLIST = ("Only.qml", "Model.mjs")\n')
             with open(os.path.join(tmp, 'Only.qml'), 'w') as fh:
                 fh.write('import QtQuick\nItem {}\n')
             self.assertEqual([os.path.basename(e.path) for e in release.shipped_code(tmp)], ['Only.qml'])
@@ -1763,6 +1763,66 @@ class ShippedCodeTest(unittest.TestCase):
                 fh.write('import "Helpers.js" as Helpers\n')
             with self.assertRaises(release.service_files.ServiceFilesError):
                 release.shipped_code(tmp)
+
+
+class ShippedCodeReadsEveryScriptTest(unittest.TestCase):
+    """The fix pass on 2a4ab03: shipped_code yields ALLOWLIST's .qml and the
+    code-behinds Service.qml declares, so a script another QML file imports
+    was shipped and read by no guard of the shipped code -- six violations in
+    a Guide.qml script passed all nine (the recheck of 2a4ab03). Every
+    script on ALLOWLIST must now be one some guard reads, or shipped_code
+    raises: a .js as a declared code-behind, a .mjs as the model. Red on
+    2a4ab03's shipped_code, which returned the list."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, 'tests'))
+        import split_fixture
+        self.fixture = split_fixture
+
+    def tree_with(self, tmp, extra, entry):
+        self.fixture.tree(tmp)
+        for name, text in extra.items():
+            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
+            with open(os.path.join(tmp, name), 'w') as fh:
+                fh.write(text)
+        path = os.path.join(tmp, 'scripts', 'release.py')
+        with open(path) as fh:
+            text = fh.read()
+        self.assertEqual(text.count('    "Model.mjs",\n'), 1)
+        with open(path, 'w') as fh:
+            fh.write(text.replace('    "Model.mjs",\n', '    "Model.mjs",\n    "%s",\n' % entry))
+
+    def test_a_script_another_qml_file_imports_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {'Guide.qml': 'import QtQuick\nimport "Guide-extra.js" as GuideExtra\nItem {}\n',
+                                 'Guide-extra.js': 'function f(s) { return s.trimEnd() }\n'}, 'Guide-extra.js')
+            with self.assertRaises(ValueError) as caught:
+                release.shipped_code(tmp)
+            self.assertIn('Guide-extra.js', str(caught.exception))
+            # And a guard that lists through it fails closed, in one line.
+            done = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'scripts', 'check-color-literals.py'),
+                                   '--root', tmp], capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(done.returncode, 0, done.stdout)
+            self.assertIn('Guide-extra.js', done.stdout + done.stderr)
+            self.assertNotIn('Traceback', done.stdout + done.stderr)
+
+    def test_an_es_module_that_is_not_the_model_is_refused_and_the_models_parts_are_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {'lib/x.mjs': 'export const x = 1\n'}, 'lib/x.mjs')
+            with self.assertRaises(ValueError) as caught:
+                release.shipped_code(tmp)
+            self.assertIn('lib/x.mjs', str(caught.exception))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.tree_with(tmp, {}, 'model/core.mjs')
+            self.assertEqual([os.path.basename(e.path) for e in release.shipped_code(tmp)],
+                             ['Service.qml', 'Service-demo.js'])
+
+    def test_a_declared_code_behind_on_the_allowlist_reads(self):
+        # The guards' fixture tree ships its code-behind, as C3's will.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            self.assertIn('Service-demo.js', release.allowlist_of(tmp))
+            self.assertEqual(len(release.shipped_code(tmp)), 2)
 
 
 class ChangelogHeadingTest(unittest.TestCase):
