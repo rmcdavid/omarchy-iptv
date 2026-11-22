@@ -3770,6 +3770,45 @@ is "DISPLAY :7 naming a regular file: no display" "$(dr DISPLAY=:7 QA_X11_SOCKET
 is "a host-form DISPLAY cannot be judged and keeps the theme" "$(dr DISPLAY=remote.test:10.0 XDG_RUNTIME_DIR="$DR/empty")" "0"
 is "an X display beside an absent Wayland one is enough" "$(dr DISPLAY=:7 QA_X11_SOCKET_DIR="$DR/x11" XDG_RUNTIME_DIR="$DR/empty" WAYLAND_DISPLAY=wl-other)" "0"
 
+section "qa_rss_settled / F-HARNESS-66: a pause in the middle of a start is not the end of it"
+# A stand-in of this suite's own, never a Qt process: it takes 80 MB, says
+# so in a file, holds for 0.9 s (the pause a starting probe makes), takes
+# 80 MB more and sleeps under a bound. The predicate is called the moment
+# the pause begins, which is where clip-scenario's two-sample settle()
+# answered. Killed by the pid this suite recorded.
+RS=$TMP/rss; mkdir -p "$RS"
+rs_kb() { awk '/^VmRSS:/ { print $2 }' "/proc/$1/status" 2>/dev/null; }
+rs_start() {
+  python3 -I -c 'import sys, time
+a = b"x" * (80 << 20)
+open(sys.argv[1], "w").close()
+time.sleep(float(sys.argv[2]))
+b = b"y" * (80 << 20)
+time.sleep(30)' "$1" "$2" &
+  RS_PID=$!
+  local i
+  for ((i = 0; i < 100; i++)); do [[ -e $1 ]] && break; sleep 0.05; done
+}
+rs_start "$RS/paused" 0.9
+qa_rss_settled "$RS_PID"; rs_rc=$?
+rs_now=$(rs_kb "$RS_PID")
+is "a start that pauses for 0.9 s at half its size is settled only at its whole size" \
+   "$rs_rc $(( ${rs_now:-0} > 150000 ? 1 : 0 ))" "0 1"
+is "and a floor above that size is never reached: 1, inside its bound" \
+   "$(qa_rss_settled "$RS_PID" 2 3 400000; echo $?)" "1"
+kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
+is "a pid that is gone: 1, at once" "$(qa_rss_settled "$RS_PID" 2 34; echo $?)" "1"
+# One that never stops: 3 MB more every 100 ms, so no two samples 300 ms
+# apart sit within 512 KB, and the wait gives up after its four reads.
+python3 -I -c 'import time
+k = []
+for i in range(60):
+    k.append(b"z" * (3 << 20)); time.sleep(0.1)' &
+RS_PID=$!
+sleep 0.3
+is "a size that keeps moving: 1 after its bounded reads" "$(qa_rss_settled "$RS_PID" 2 4; echo $?)" "1"
+kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -3992,7 +4031,10 @@ is "an X display beside an absent Wayland one is enough" "$(dr DISPLAY=:7 QA_X11
 # 754 -> 769 on 2026-11-18 (F-HARNESS-105): qa_display_reachable's fifteen,
 # each under `env -i` with only the variables it names. Red on fdba6be's
 # qa-lib.sh, which lacks the function: all fifteen failed.
-EXPECTED=769
+# 769 -> 773 on 2026-11-22 (F-HARNESS-66): qa_rss_settled's four, over
+# stand-ins of the suite's own. Red where it asks for two samples, as
+# clip-scenario.sh's settle() did: the first failed, settled at half size.
+EXPECTED=773
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

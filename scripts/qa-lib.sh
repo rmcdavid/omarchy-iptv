@@ -1699,3 +1699,38 @@ qa_transcript_sync() {
     "$secs" "$QA_TRANSCRIPT" >&2
   return 1
 }
+
+# qa_rss_settled <pid> [need] [tries] [floor_kb]
+#   A bounded wait for a process's resident size to stop moving: 0 once
+#   <need> samples in a row (default 5), taken 300 ms apart, all sit above
+#   <floor_kb> (default 0) and within 512 KB of the first of them; 1 when
+#   <tries> samples (default 34, about 10 s) were read without that, or the
+#   pid is gone. It prints nothing: the caller says what a 1 means.
+#
+#   F-HARNESS-66. clip-scenario.sh's own settle() asked for TWO samples, one
+#   300 ms pause, and a starting Qt probe pauses for longer than that in the
+#   middle of its start: traced 2026-11-22 at 50 ms under the gate's cage,
+#   a cold first probe sat at 120 to 126 MB from 0.7 s to 1.7 s and ended
+#   at 271 MB, and a warm one pauses near 120 MB for 0.2 s. Two samples
+#   inside that pause read as settled, and the growth measured from there
+#   was the probe's own start. <need> is how long the size must hold, not
+#   how many reads are taken: 5 is four pauses, 1.2 s. It cannot say that a
+#   start is over -- only the watched process can -- so a caller that has a
+#   marker of that waits for the marker first and settles after it.
+qa_rss_settled() {
+  local pid=$1 need=${2:-5} tries=${3:-34} floor=${4:-0} first="" run=0 v i
+  for ((i = 0; i < tries; i++)); do
+    (( i > 0 )) && sleep 0.3
+    v=$(awk '/^VmRSS:/ { print $2 }' "/proc/$pid/status" 2>/dev/null)
+    [[ $v =~ ^[0-9]+$ ]] || return 1
+    if (( run > 0 && v > floor && v - first < 512 && first - v < 512 )); then
+      run=$((run + 1))
+    elif (( v > floor )); then
+      first=$v; run=1
+    else
+      run=0
+    fi
+    (( run >= need )) && return 0
+  done
+  return 1
+}

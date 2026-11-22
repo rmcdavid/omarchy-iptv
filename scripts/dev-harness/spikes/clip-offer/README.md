@@ -65,7 +65,10 @@ What `clip-scenario.sh` re-measures: the probe arm of every live run over
 on a display of its own, read from cage's child (it was `wayland-0` every
 time; never assumed); a virtual keyboard held on the seat (`wtype -s`); each
 probe started with `QT_QPA_PLATFORM=wayland` on that display, its RSS left
-to settle (two samples 300 ms apart within 512 KB), then the offer of
+to settle (two samples 300 ms apart within 512 KB; since 2026-11-22 the
+scenario waits for the probe's first drawn frame and then for five such
+samples, F-HARNESS-66, because a starting probe pauses near 120 MB before
+it has drawn anything), then the offer of
 `text/plain` from `wl-copy --foreground` on the same display and about 2 s
 of samples. The first measurement sampled at 100 ms (20 samples); the
 scenario now samples at 20 ms (50 samples, about 40 ms a turn with the read

@@ -407,17 +407,19 @@ cage_stop() {
 }
 
 rss_kb() { awk '/VmRSS/ { print $2 }' "/proc/$1/status" 2>/dev/null; }
-# Bounded (10 s): two samples 300 ms apart within 512 KB of each other, and
-# past the toolkit's startup, so a growth measured from here is the offer's
-# and not Qt mapping its first window (the lead's no-field row grew 52 MB at
-# startup and nothing after; measured at the catchpoint, not assumed).
+# Bounded (10 s unless told): `need` samples 300 ms apart (2 unless told),
+# all within 512 KB of the first and past the toolkit's first 50 MB, so a
+# growth measured from here is the offer's and not Qt mapping its first
+# window (the lead's no-field row grew 52 MB at startup and nothing after;
+# measured at the catchpoint, not assumed). The wait itself is
+# qa_rss_settled (scripts/qa-lib.sh), where scripts/qa-lib-test.sh drives
+# it over a stand-in that pauses mid-start. The shell arm keeps the two
+# samples it was measured with; the probes ask for five, after their first
+# frame (probe(), F-HARNESS-66).
 settle() {
-  local pid=$1 a b i
-  for ((i = 0; i < 33; i++)); do
-    a=$(rss_kb "$pid"); sleep 0.3; b=$(rss_kb "$pid")
-    [[ -n $a && -n $b && $a -gt 50000 ]] && (( b - a < 512 && a - b < 512 )) && return 0
-  done
-  echo "   (rss of $pid never settled within 10 s; the growth below is measured anyway)"
+  local pid=$1 need=${2:-2} tries=${3:-34}
+  qa_rss_settled "$pid" "$need" "$tries" 50000 && return 0
+  echo "   (rss of $pid never settled within $(( (tries - 1) * 3 / 10 )) s; the growth below is measured anyway)"
   return 1
 }
 # The foreign producer: `bytes` of one letter (A unless given) as text/plain
@@ -473,21 +475,50 @@ end = after[-1][0] if after else 0.0
 print("%d %d %d %d %d" % (b // 1024, peak // 1024, (peak - b) // 1024, round(last * 1000), round(end * 1000)))
 PYRPT
 }
-# One probe: start it on the nested display, settle, offer, sample 2 s (50
-# samples 20 ms apart, each a read of /proc, about 40 ms a turn), kill by
-# pid. Leaves "before peak growth" in MB in
+# One probe: start it on the nested display, wait for its first frame,
+# settle, offer, sample 2 s (50 samples 20 ms apart, each a read of /proc,
+# about 40 ms a turn), kill by pid. Leaves "before peak growth" in MB in
 # PROBE_RESULT. In the main shell for the same reason as cage_stop, and so
 # that an interrupted run's cleanup knows the probe's and the producer's pids.
+#
+# F-HARNESS-66: the RSS alone cannot say a start is over. A starting probe
+# pauses near 120 MB before it has drawn anything (a cold first one for a
+# second, traced 2026-11-22), settle() took that pause for the end, and P4
+# then read the rest of the start, +144 and +155 MB, as the offer's growth.
+# So the probe says it has drawn: Qt's own render-loop timing category is
+# turned on for the probes (their files stay the lead's, byte for byte) and
+# its gui-thread line "Frame prepared" follows the first frame that was
+# really swapped. The wait for it is bounded at 5 s, and the settle after
+# it at five samples inside 2.7 s, because a probe quits itself at 9 s. A
+# probe that drew no frame in that time, or is gone before the offer, is
+# NOT measured: its growth reads `no-frame` or `gone`, which no band
+# accepts, rather than a number that is its own start (or, for a probe
+# that is gone, a vacuous 0).
 PROBE_RESULT=""
 probe() {
-  local name=$1 before
+  local name=$1 before i drew=0
   PROBE_PID=""
-  WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 "$QML_BIN" "$SPIKE/$name.qml" >"$WORK/$name.log" 2>&1 &
+  WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 \
+    QT_LOGGING_RULES='qt.scenegraph.time.renderloop.debug=true' \
+    "$QML_BIN" "$SPIKE/$name.qml" >"$WORK/$name.log" 2>&1 &
   PROBE_PID=$!
-  settle "$PROBE_PID"
+  for ((i = 0; i < 100; i++)); do
+    grep -qa 'Frame prepared' "$WORK/$name.log" 2>/dev/null && { drew=1; break; }
+    kill -0 "$PROBE_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  (( drew )) && settle "$PROBE_PID" 5 10
   before=$(rss_kb "$PROBE_PID")
   producer_start $((OFFER_MB * 1024 * 1024))
-  PROBE_RESULT=$(sample_peak "$PROBE_PID" 50 "$before")
+  if (( ! drew )); then
+    echo "   ($name.qml drew no frame within 5 s of its start; it is not measured)"
+    PROBE_RESULT="0 0 no-frame"
+  elif [[ ! $before =~ ^[0-9]+$ ]]; then
+    echo "   ($name.qml was gone before the offer; it is not measured)"
+    PROBE_RESULT="0 0 gone"
+  else
+    PROBE_RESULT=$(sample_peak "$PROBE_PID" 50 "$before")
+  fi
   if [[ $name == readonly ]]; then
     # P2 rides on this offer, after the sampling window: wl-paste takes
     # keyboard focus for the duration of its read, which is an event the
@@ -496,6 +527,12 @@ probe() {
   fi
   kill_pid "$PROBE_PID"; PROBE_PID=""
   producer_stop
+}
+# What a probe that must read nothing answers: its growth under the band,
+# and a probe that was not measured is not under it.
+reads_nothing() {
+  local r=$1
+  if [[ $r =~ ^-?[0-9]+$ ]]; then (( r < PROBE_BAND_MB )) && echo reads-nothing || echo "grew +$r MB"; else echo "not measured: $r"; fi
 }
 
 # ------------------------------------------------------------- the probe arm
@@ -510,13 +547,13 @@ probes() {
   probe nofield;  nf=$PROBE_RESULT; echo "   nofield.qml   before/peak/growth MB: $nf"
   ck "P2 a consumer on the nested display reads the whole offer (bytes)" "$CONSUMER_BYTES" "$((OFFER_MB * 1024 * 1024))"
   r=${ed##* }
-  if [[ $r =~ ^-?[0-9]+$ ]] && (( r >= OFFER_MB )); then verdict="reads-everything (+$r MB, $(python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) / float(sys.argv[2])))' "$r" "$OFFER_MB" 2>/dev/null || true)x the payload)"; else verdict="grew-only-+${r}-MB-on-${OFFER_MB}-MB"; fi
+  if [[ $r =~ ^-?[0-9]+$ ]] && (( r >= OFFER_MB )); then verdict="reads-everything (+$r MB, $(python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) / float(sys.argv[2])))' "$r" "$OFFER_MB" 2>/dev/null || true)x the payload)"; elif [[ $r =~ ^-?[0-9]+$ ]]; then verdict="grew-only-+${r}-MB-on-${OFFER_MB}-MB"; else verdict="not-measured:$r"; fi
   ck "P3 the editable probe reads everything (the rig's control: offers are delivered)" "${verdict%% *}" "reads-everything"
   [[ ${verdict%% *} == reads-everything ]] && echo "   P3 detail: $verdict"
   r=${rd##* }
-  ck "P4 the read-only probe reads nothing (grew less than ${PROBE_BAND_MB} MB)" "$([[ $r =~ ^-?[0-9]+$ ]] && (( r < PROBE_BAND_MB )) && echo reads-nothing || echo "grew +$r MB")" "reads-nothing"
+  ck "P4 the read-only probe reads nothing (grew less than ${PROBE_BAND_MB} MB)" "$(reads_nothing "$r")" "reads-nothing"
   r=${nf##* }
-  ck "P5 the no-field probe reads nothing (grew less than ${PROBE_BAND_MB} MB)" "$([[ $r =~ ^-?[0-9]+$ ]] && (( r < PROBE_BAND_MB )) && echo reads-nothing || echo "grew +$r MB")" "reads-nothing"
+  ck "P5 the no-field probe reads nothing (grew less than ${PROBE_BAND_MB} MB)" "$(reads_nothing "$r")" "reads-nothing"
   cage_stop
   ck "P6 probes, producer, keyboard and compositor gone, socket removed" "$STOP_VERDICT" "gone"
   echo "== probe arm done ($(elapsed) s)"
