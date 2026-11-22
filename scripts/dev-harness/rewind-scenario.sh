@@ -784,8 +784,16 @@ echo "== R16 ruling D10: a seek run is not busy for the health tick (F-RWD-18)"
 SLOW_TREE="$WORK/slow-tree"
 mkdir -p "$SLOW_TREE/bin"
 staged=1
-for f in manifest.json Service.qml Guide.qml BarWidget.qml; do
+for f in manifest.json Guide.qml BarWidget.qml; do
   cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0
+done
+# D-REL-14: the service is every file qa_service_files names -- Service.qml
+# and the code-behinds its `import "<file>.js"` lines declare -- each beside
+# it, where the engine looks for them (Service.qml alone before the split).
+mapfile -t service_files < <(qa_service_files "$PLUGIN_ROOT")
+(( ${#service_files[@]} > 0 )) || staged=0
+for f in "${service_files[@]}"; do
+  cp "$f" "$SLOW_TREE/${f#"$PLUGIN_ROOT/"}" 2>/dev/null || staged=0
 done
 # The model is every file qa_model_files names (Model.mjs and its parts since
 # D-REL-5, or a pre-split tree's Model.js), each at its own relative path.

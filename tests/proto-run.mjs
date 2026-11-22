@@ -6,7 +6,6 @@
 // which is what this looks for, would otherwise leak into every later check
 // of the suite that found it.
 // Usage: node tests/proto-run.mjs [path/to/Model.mjs]
-import fs from "node:fs"
 import path from "node:path"
 import { createRequire } from "node:module"
 import { pathToFileURL, fileURLToPath } from "node:url"
@@ -21,7 +20,8 @@ const result = runProtoPaths(Model)
 // names, applied the way the FileView applies it, then the lookups the service
 // makes with ids that come from state.json and from IPC `play`.
 const H = createRequire(import.meta.url)("./service-harness.js")
-const svcText = fs.readFileSync(path.join(path.dirname(modelPath), "Service.qml"), "utf8")
+// D-REL-14: the service as the files Service.qml declares, read as one text.
+const svcText = createRequire(import.meta.url)("./service-files.js").serviceText(path.join(path.dirname(modelPath), "Service.qml"))
 const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
 const service = { errors: [] }
 try {

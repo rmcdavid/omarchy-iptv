@@ -1554,7 +1554,14 @@ observe_window() {
 stage_slow_tree() {
   local tree=$1 staged=1
   mkdir -p "$tree/bin"
-  for f in manifest.json Service.qml Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$tree/$f" 2>/dev/null || staged=0; done
+  for f in manifest.json Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$tree/$f" 2>/dev/null || staged=0; done
+  # D-REL-14: the service is every file qa_service_files names -- Service.qml
+  # and the code-behinds its `import "<file>.js"` lines declare -- each beside
+  # it, where the engine looks for them (Service.qml alone before the split).
+  local -a service_files=(); local sf
+  mapfile -t service_files < <(qa_service_files "$PLUGIN_ROOT")
+  (( ${#service_files[@]} > 0 )) || staged=0
+  for sf in "${service_files[@]}"; do cp "$sf" "$tree/${sf#"$PLUGIN_ROOT/"}" 2>/dev/null || staged=0; done
   # The model is every file qa_model_files names (Model.mjs and its parts since
   # D-REL-5, or a pre-split tree's Model.js), each at its own relative path:
   # rewind-scenario.sh's R16 stages its slow tree the same way.
@@ -2292,7 +2299,12 @@ shell_arm() {
     python3 -I "$HERE/mode-observer.py" "$obs" "$P_MARK" "${folders[@]}" >"$obs.log" 2>&1 &
     obs_pid=$!
     for ((i = 0; i < 50; i++)); do [[ -s $obs ]] && break; sleep 0.1; done
-    res=$(ipc updateSource "$KA" "{\"epgUrl\": \"http://u:$P_MARK@epg.example.test/x.xml\"}")
+    # A literal address: the save is what is watched, and the guide fetch
+    # it starts (a URL the user typed, so its first hop may be loopback)
+    # fails at once, 127.0.0.1:9 refusing the connection. The host name
+    # this held was asked of the resolver in each of the two cases
+    # (F-HARNESS-121).
+    res=$(ipc updateSource "$KA" "{\"epgUrl\": \"http://u:$P_MARK@127.0.0.1:9/x.xml\"}")
     # Bounded: until the target holds the credential (6 s), then settled.
     for ((i = 0; i < 60; i++)); do grep -q "$P_MARK" "$target" 2>/dev/null && break; sleep 0.1; done
     wait_settled || true
@@ -3611,6 +3623,27 @@ cp "$ROOT/tests/fixtures/basic.m3u" "$WORK/fixtures/b.m3u"
 python3 "$ROOT/scripts/gen-playlist.py" --channels 7 --groups 2 --seed 2 --out "$WORK/fixtures/c.m3u" >/dev/null 2>&1
 python3 "$ROOT/scripts/gen-playlist.py" --channels 11 --groups 3 --seed 3 --out "$WORK/fixtures/d.m3u" >/dev/null 2>&1
 A="$WORK/fixtures/a.m3u"; B="$WORK/fixtures/b.m3u"; C="$WORK/fixtures/c.m3u"; D="$WORK/fixtures/d.m3u"
+# F-HARNESS-121: b.m3u is tests/fixtures/basic.m3u, whose guide hint names
+# epg.example.test, and the service fetches a hint with no click whenever b
+# is active, so every run asked the resolver for that name three times. The
+# hint is a literal here, as a.m3u's is, and a local playlist's hint at an
+# address that is not global is refused before any fetch
+# (Model.epgHintVerdict, D-SINK-40): b's guide is refused, not fetched, and
+# nothing is looked up. The channel and logo hosts b, c and d name under
+# example.test stay names, and nothing in this scenario looks them up: no
+# player starts, a remote playlist's channels are judged by their form at
+# the parse (a literal would put d's channels off its slow server's own
+# port, and Q's add then commits no record: measured), and the segments that
+# turn logos on (L, U, Y, B12) do it over a or c, whose logos are a literal
+# and none. A fixture whose guide hint names a host stops the run before
+# anything starts; the guard reads a hint quoted or bare, as the helper's
+# parse_attrs does.
+sed -E -i 's#(url-tvg|x-tvg-url)="(https?://)[A-Za-z0-9.-]+\.example\.test(:[0-9]+)?#\1="\2127.0.0.1:9#g' "$B"
+if grep -ohE '(url-tvg|x-tvg-url)="?[a-z]+://[^/" ]+' "$A" "$B" "$C" "$D" | sed -E 's#^[^=]*="?[a-z]+://##; s#^.*@##' \
+     | grep -qvE '^127\.0\.0\.1(:[0-9]+)?$'; then
+  echo "key-scenario: a fixture playlist's guide hint still names a host, which the run would ask the resolver for (F-HARNESS-121)" >&2
+  exit 2
+fi
 EPG="http://u:p@127.0.0.1:9/epg.xml?token=abc&kind=x"
 # Round 8: a value the plugin REFUSES (ftp://, with a credential P2 scans
 # for) and a second guide URL, the one an add form carries (A2).

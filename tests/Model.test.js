@@ -841,7 +841,136 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 // that from -- the same pattern the player lane uses on Service.qml further
 // down this file. `qmlBlock` takes an element from its `id:` to the next one.
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
-const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
+// D-REL-14: the service is read as the files Service.qml declares, never as
+// Service.qml alone. tests/service-files.js serves its INLINE view -- each
+// forwarder read as the function it forwards to, which is the one-file
+// Service.qml -- so every pin in this file reads the text it always read
+// whichever file now holds a function; and its FILES, for a reader that
+// names each file. Every `svcText` below comes from serviceText too.
+const serviceReader = require("./service-files.js")
+const serviceSource = serviceReader.serviceText(require("path").join(__dirname, "../Service.qml"))
+
+// ---- D-REL-14: the service readers ----
+//
+// On this tree Service.qml declares no code-behind, so the service's files
+// are Service.qml alone and its one text is the file's, byte for byte: no
+// reader converted to it reads anything but what it read before. The shared
+// fixture (tests/fixtures/service-split/) has one code-behind; its view is
+// inline.txt and the round trip closes. tests/test_service_files.py runs the
+// same fixture and cases through scripts/service_files.py, and each engine
+// runs the other's CLI. Rule 11: seen red with a reader that drops the
+// code-behind (serviceText returning Service.qml's own text) and with one
+// that lists none (serviceFiles returning Service.qml alone), the ten
+// later shared cases and the regular-file door on a27b90c's reader or a
+// one-decision mutant, and the last five (code after a closing brace, a
+// comment after one, a tree before D-REL-5 importing Model.js) on 9b80fcb's
+// reader or a one-decision mutant; the counts are in docs/QA-RESULTS.md,
+// "D-REL-14: the service readers", "The review of a27b90c, settled" and
+// "The rechecks of 76bff05 and the harness commits, settled".
+;(function () {
+  const fs = require("fs"), path = require("path"), cp = require("child_process")
+  const SF = serviceReader
+  const ROOT = path.join(__dirname, "..")
+  const FIX = path.join(__dirname, "fixtures", "service-split")
+  const raw = f => fs.readFileSync(f, "utf8")
+  const py = (verb, where) => {
+    const r = cp.spawnSync("python3", ["-I", path.join(ROOT, "scripts", "service_files.py"), verb, where], { encoding: "utf8", timeout: 60000 })
+    return { status: r.status, stdout: r.stdout }
+  }
+
+  checkCall("D-REL-14: on this tree the service is Service.qml alone, and its one text is the file's, byte for byte, from the root or from Service.qml's own path", () => ({
+    files: SF.serviceFiles(ROOT).map(f => path.relative(ROOT, f)), names: SF.serviceNames(ROOT),
+    same: SF.serviceText(ROOT) === raw(path.join(ROOT, "Service.qml")), viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource
+  }), { files: ["Service.qml"], names: ["Service.qml"], same: true, viaPath: true })
+
+  checkCall("D-REL-14: the node and python readers agree on this tree, names and text", () => {
+    const n = py("names", ROOT), t = py("text", ROOT)
+    return { names: [n.status, n.stdout], text: [t.status, t.stdout === SF.serviceText(ROOT)] }
+  }, { names: [0, "Service.qml\n"], text: [0, true] })
+
+  checkCall("D-REL-14 (fixture): the service is Service.qml and its one code-behind, and its one text is inline.txt, byte for byte, from the root or from Service.qml's own path", () => {
+    const inline = raw(path.join(FIX, "inline.txt"))
+    return { names: SF.serviceNames(FIX), files: SF.serviceFiles(FIX).map(f => path.relative(FIX, f)),
+             root: SF.serviceText(FIX) === inline, viaPath: SF.serviceText(path.join(FIX, "Service.qml")) === inline }
+  }, { names: ["Service.qml", "Service-demo.js"], files: ["Service.qml", "Service-demo.js"], root: true, viaPath: true })
+
+  checkCall("D-REL-14 (fixture): a pin on a moved function's body reads it where its forwarder stands, its comment block with it, and no forwarder or declaration is read", () => {
+    const view = SF.serviceText(FIX)
+    return [view.includes("    if (root.count > 3) tick.stop()\n"),
+            view.includes("  // The first moved function. Its comment block moves with it,\n  // both lines of it.\n  function bump(by) {"),
+            view.includes("ServiceDemo"), view.includes("  function stays(x) {\n    return root.str(x) + root.label\n  }")]
+  }, [true, true, false, true])
+
+  checkCall("D-REL-14 (fixture): the round trip closes -- inline.txt cut again by the reader's own function spans is the fixture's Service.qml, and each moved span is the code-behind's own", () => {
+    const inline = raw(path.join(FIX, "inline.txt"))
+    const moved = SF.functionSpans(raw(path.join(FIX, "Service-demo.js")), "Service-demo.js")
+    const whole = SF.functionSpans(inline, "inline.txt")
+    let cut = inline
+    const own = []
+    for (const [name, span] of moved) {
+      own.push(whole.get(name) === span && cut.split(span).length === 2)
+      const args = /  function [A-Za-z_][A-Za-z0-9_]*\(([^)]*)\) \{/.exec(span)[1]
+      cut = cut.split(span).join("  function " + name + "(" + args + ") { return ServiceDemo." + name + "(" + args + ") }")
+    }
+    const anchor = 'import "Model.mjs" as Model\n'
+    const anchored = cut.split(anchor).length === 2
+    cut = cut.split(anchor).join(anchor + 'import "Service-demo.js" as ServiceDemo\n')
+    return { moved: [...moved.keys()].sort(), own, anchored, closes: cut === raw(path.join(FIX, "Service.qml")) }
+  }, { moved: ["bump", "last", "pattern", "quoted"], own: [true, true, true, true], anchored: true, closes: true })
+
+  checkCall("D-REL-14 (fixture): the node and python readers agree on the fixture, names and text", () => {
+    const n = py("names", FIX), t = py("text", FIX)
+    return { names: [n.status, n.stdout], text: [t.status, t.stdout === SF.serviceText(FIX)] }
+  }, { names: [0, "Service.qml\nService-demo.js\n"], text: [0, true] })
+
+  checkCall("D-REL-14 (shared cases): every case of tests/fixtures/service-split/cases.json, the view byte for byte or the refusal by its kind", () => {
+    const C = JSON.parse(raw(path.join(FIX, "cases.json"))).cases
+    const wrong = []
+    for (const c of C) {
+      let got
+      try {
+        const text = SF.inlineText(c.service, c.files)
+        got = c.expect.text !== undefined && text === c.expect.text
+        if (c.declarations) got = got && JSON.stringify(SF.declarations(c.service).map(d => [d.file, d.qualifier])) === JSON.stringify(c.declarations)
+      } catch (e) {
+        got = c.expect.refusal !== undefined && e instanceof SF.ServiceFilesError && e.kind === c.expect.refusal
+      }
+      if (!got) wrong.push(c.name)
+    }
+    return [C.length, wrong]
+  }, [37, []])
+
+  // IPTV_SERVICE_QML names a mutant copy, and a rule-11 copy need not end in
+  // `.qml`: the readers take any regular file as the service's file (on
+  // a27b90c the node reader joined Service.qml onto it and threw ENOTDIR).
+  checkCall("D-REL-14 (fixture): a regular file of any name is the service's file, its code-behind read beside it, in both engines", () => {
+    const work = fs.mkdtempSync(path.join(require("os").tmpdir(), "omarchy-iptv-service-door-"))
+    try {
+      fs.copyFileSync(path.join(FIX, "Service.qml"), path.join(work, "svc.mutant"))
+      fs.copyFileSync(path.join(FIX, "Service-demo.js"), path.join(work, "Service-demo.js"))
+      const file = path.join(work, "svc.mutant"), inline = raw(path.join(FIX, "inline.txt"))
+      const t = py("text", file), n = py("names", file)
+      return { names: SF.serviceNames(file), text: SF.serviceText(file) === inline, py: [t.status, t.stdout === inline, n.stdout] }
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true })
+    }
+  }, { names: ["svc.mutant", "Service-demo.js"], text: true, py: [0, true, "svc.mutant\nService-demo.js\n"] })
+
+  checkCall("D-REL-14: the reader's brace matcher ends every root function of the service exactly where tests/service-harness.js ends it", () => {
+    const H = require("./service-harness.js")
+    const mine = SF.functionSpans(serviceSource, "Service.qml"), theirs = H.rootFunctions(serviceSource)
+    const differ = []
+    for (const [name, span] of mine) {
+      const f = theirs[name]
+      const head = f ? "  function " + name + "(" + f.args + ") {" : ""
+      const at = f ? span.indexOf(head) : -1
+      const whole = f ? head + f.body + "}" : ""
+      if (at === -1 || span.slice(at, at + whole.length) !== whole || span.slice(at + whole.length).indexOf("\n") !== -1) differ.push(name)
+    }
+    return { many: mine.size > 150, same: mine.size === Object.keys(theirs).length, differ }
+  }, { many: true, same: true, differ: [] })
+})()
+
 // The helper's text. Since D-REL-7 the helper is bin/omarchy-iptv, a stub,
 // and the parts its generated HELPER_PARTS block names under bin/helper/
 // (one `("NN-x.py", <length>, <crc32>),` entry a line),
@@ -1537,7 +1666,7 @@ check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Mo
 checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of its own", function () {
   // The gap the review named: nothing asserted the argv Service constructs.
   // A literal argv here would be invisible to every test again.
-  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+  const src = serviceReader.serviceText(require("path").join(__dirname, "..", "Service.qml"))
   const code = src.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) }).join("\n")
   return [
     (code.match(/Model\.playlistFetchArgv\(/g) || []).length,
@@ -1636,7 +1765,7 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
   // that function's three lines, and "one place per process" is one
   // runHelper call per process with no `running = true` of its own.
   const fs = require("fs"), path = require("path")
-  const text = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8")
+  const text = serviceReader.serviceText(path.join(__dirname, "..", "Service.qml"))
   const code = text.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) })
   const flat = code.join("\n")
   const sites = []
@@ -1919,7 +2048,7 @@ const SHIPPED_QML = ["BarWidget.qml", "Guide.qml", "Service.qml"]
 function qmlLines() {
   const fs = require("fs"), path = require("path")
   return SHIPPED_QML.reduce(function (acc, name) {
-    const src = fs.readFileSync(path.join(__dirname, "..", name), "utf8")
+    const src = name === "Service.qml" ? serviceReader.serviceText(path.join(__dirname, "..", name)) : fs.readFileSync(path.join(__dirname, "..", name), "utf8")
     return acc.concat(src.split("\n").map(function (l, i) { return { file: name, n: i + 1, text: l } }))
   }, [])
 }
@@ -2796,7 +2925,7 @@ checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address
 }, [[false, true], [false, true], [false, true], [false, true], [false, true], [false, true]])
 checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel list's logo authorities while logos are on, and an empty one while they are off", () => {
   const H = require("./service-harness.js")
-  const svcText = require("fs").readFileSync(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
   // The recheck of round 5's settle (2026-11-17): and the authority of a
   // logo whose tail is refused (`t:e`, a space in its path), because the
   // column test looks a row's authority up before it reads the tail.
@@ -3251,7 +3380,7 @@ checkCall("D-SRC-45 / D-LOGO-12: the no_cache refusal names nothing, and a summa
   const fs = require("fs"), path = require("path")
   const H = require("./service-harness.js")
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/logo-deadlines.json"), "utf8"))
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
 
   checkCall("R30e: the logo deadlines are the shared fixture's", function () {
@@ -4398,7 +4527,7 @@ checkCall("D-PLY-14: no nowPlaying, or a channel with no mark, changes nothing",
 checkCall("D-PLY-14: and the service really asks, in the HEALTHY branch", function () {
   // Rule 14: the arithmetic above is worth nothing if the QML never calls it,
   // and the call has to sit where a healthy check lands rather than anywhere.
-  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+  const src = serviceReader.serviceText(require("path").join(__dirname, "..", "Service.qml"))
   const healthy = src.indexOf("Model.statusHealthy(status)")
   const call = src.indexOf("Model.failedAfterHealthy(")
   // A character budget rather than a structural check, so it is a proxy and
@@ -5189,7 +5318,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
 ;(function () {
   const H = require("./service-harness.js")
   const fs = require("fs"), path = require("path")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const URL = "http://cdn.test/a.m3u"
   const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
@@ -5228,7 +5357,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   const fs = require("fs"), path = require("path")
   const H = require("./service-harness.js")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const F = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-host-withheld.json"), "utf8"))
   const W = "[host withheld]"
   checkCall("D-SINK-109: Model.sourceHostWithheld over the shared source-host-withheld fixture, and which arm holds (urlHostWithheld, addressAtAfterAuthority) as it says",
@@ -9217,7 +9346,7 @@ check("R28e: probeFailureLine -- a commit refusal with its code (too_many, state
   [Model.sourceErrorMessage("too_many"), Model.sourceErrorMessage("state_unreadable"), Model.sourceErrorMessage("unknown_source"), "HTTP 403 Forbidden from tv.example.net", "HTTP 403 Forbidden from tv.example.net"])
 checkCall("R28e (structural): both of the guide's probe-failure lines hand probeFailureLine the result's code, and the cap is ONE decision -- Guide.sourcesFull and Service.canAddSource call Model.sourcesFull and compare against no limit of their own", () => {
   const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
-  const sv = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+  const sv = serviceReader.serviceText(path.join(__dirname, "../Service.qml"))
   // D-SINK-99 (round 4b): the form's line is Model.formProbeFailureLine,
   // which hands probeFailureLine the code it is given.
   return [(g.match(/Model\.(?:probeFailureLine|formProbeFailureLine)\([^\n]*, String\(r\.code \|\| ""\)\)/g) || []).length, (g.match(/Model\.(?:probeFailureLine|formProbeFailureLine)\(/g) || []).length,
@@ -9806,7 +9935,7 @@ function wedgeAndRespawn(serviceText) {
 
 const relaunchTree = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
 check("CL10: one wedge, ONE relaunch and ONE intent - a second one at the healthy player reads 2 here",
-  wedgeAndRespawn(fs.readFileSync(relaunchTree, "utf8")), { intents: 1, seqDelta: 1 })
+  wedgeAndRespawn(serviceReader.serviceText(relaunchTree)), { intents: 1, seqDelta: 1 })
 // The witness stays for a human reading a journal. It is a forward
 // regression guard for trees that already carry it and it can never be
 // rule-11 evidence against the tree the defect was filed on - which is
@@ -11635,7 +11764,7 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
 // that harness's other cases do.
 ;(function () {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const URL = "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
   const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
@@ -16591,7 +16720,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // pendingPlayid in seekCtx() left node 1855/0 and the spec 71/0. This reads
   // the real file and compares the two lists, so the join is a call.
   checkCall("F-RWD-19: the ctx Service.qml builds carries exactly the keys the reducer reads", function () {
-    const src = require("fs").readFileSync(require("path").join(__dirname, "..", "Service.qml"), "utf8")
+    const src = serviceReader.serviceText(require("path").join(__dirname, "..", "Service.qml"))
     const body = src.split("function seekCtx()")[1].split("\n  }")[0]
     const keys = []
     const re = /([A-Za-z_][A-Za-z0-9_]*)\s*:/g
@@ -17630,7 +17759,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const H = require("./service-harness.js")
   const cacheVerb = H.cacheVerb
   const svcPath = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
-  const svcText = fs.readFileSync(svcPath, "utf8")
+  const svcText = serviceReader.serviceText(svcPath)
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const E = "http://e.example.test/xmltv.php?username=u&password=p", F = "http://f.example.test/guide.xml", G = "http://g.example.test/guide.xml"
@@ -23853,7 +23982,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, true)
   checkCall("D-REL-7: Service.qml's own status branch (the harness runs it) takes a damaged helper as 'cannot tell' -- no health strike, no restart through the same broken helper; a real failure is still a strike", () => {
     const H = require("./service-harness.js")
-    const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+    const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
     const run = reply => {
       const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
       let restarts = 0
@@ -24128,7 +24257,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // restarted by the shape), and the resets hand back an empty store.
   checkCall("D-EPG-11 R31b: Service.qml's applyEpgNow loads the new shape unmarked and a legacy file marked, starts no fetch for either, and empties to an empty store", () => {
     const H = require("./service-harness.js")
-    const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+    const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
     const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
     const initial = h.root.epgNow
     const before = h.ids.epgDebounce.restarts
@@ -24509,7 +24638,7 @@ checkCall("R32a' (the recheck's P2): the INVALID refusal of a value with the pre
 }, [false, "invalid", true, true, false, "playlist", true, false, "server", true, true, "", "", true, true, false, true])
 checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text carries the P1's shape reaches the `play failed:` journal line through Service.handleControlResult with the host and no tail of the credential", () => {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
   h.root.playerUp = true
   h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
@@ -24523,7 +24652,7 @@ checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text car
 }, [1, "omarchy-iptv: play failed: Failed to open prov.test and " + Model.HOST_WITHHELD + ".", "Failed to open prov.test and " + Model.HOST_WITHHELD + ".", false])
 checkCall("R32a' (D-SINK-29), THE SINK PATH, the notification: the stream-failure toast Service.raiseStreamFailure raises carries the host and no tail of the credential, whether the reason arrives redacted by the helper (the shipping shape) or raw", () => {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const run = reason => {
     const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
     h.detached.length = 0
@@ -24605,7 +24734,7 @@ checkCall("D-SINK-24 (R32b'): the recheck's `--u:pw@h=1` shape through splitMpvA
 }, ["omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", false])
 checkCall("D-SINK-24: Service.issuePlayerSession's journal line (the harness's console keeps every argument, as the real one does) carries no credential", () => {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false,
     mpvArgs: "--stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test" }, stateText: "", host: "lag" })
   h.warnings.length = 0
@@ -24651,7 +24780,7 @@ checkCall("D-PERF-4: preparedLruNext puts the new entry first and drops its own 
     [{ source: "/c/a", text: "2" }], true, null, null])
 checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one source hold ONE prepared list; a second source shares the LRU; going back to the first hits", () => {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
   const doc = n => JSON.stringify({ version: 1, generatedAt: n, channels: [{ name: "A", group: "G", tvgId: "a", url: "http://c.example.test/a.ts" }] })
   const stamps = () => h.root.preparedLru.map(e => JSON.parse(e.text).generatedAt)
@@ -24673,7 +24802,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
 // (checkCall turns a missing export into one ordinary failure).
 {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
@@ -24894,7 +25023,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const modelDir = path.join(__dirname, "../model")
     const parts = fs.readdirSync(modelDir).filter(f => /\.mjs$/.test(f)).map(f => fs.readFileSync(path.join(modelDir, f), "utf8"))
     const named = []
-    if (/lastPersistFailure/.test(serviceSource)) named.push("Service.qml")
+    serviceReader.serviceFiles(path.join(__dirname, "..")).forEach(f => { if (/lastPersistFailure/.test(fs.readFileSync(f, "utf8"))) named.push(path.basename(f)) })
     if (/lastPersistFailure/.test(guideSource)) named.push("Guide.qml")
     if (/lastPersistFailure/.test(fs.readFileSync(path.join(__dirname, "../Model.mjs"), "utf8"))) named.push("Model.mjs")
     parts.forEach((text, i) => { if (/lastPersistFailure/.test(text)) named.push("model/" + i) })
@@ -25485,7 +25614,7 @@ checkCall("F-UX-7: the refused name is the journal's name (mpvRejectedName), so 
   [[true], [true], [true], [true], [true]])
 checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guide reads carries the refused token, labelled as the player's", () => {
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
   return [h.root.playerArgWarnings, h.compileErrors]
 }, [["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT], []])
@@ -25678,7 +25807,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // spawn says where its URL came from, through the one assignment, reset
   // at every run.
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
   const LAN = "http://me:s3cret@192.168.1.5:9981/playlist", OWN = "http://e.example.test/xmltv.php?username=u&password=p"
@@ -25752,7 +25881,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-p2a-"))
   fs.chmodSync(scratch, 0o700)
@@ -26017,7 +26146,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const H = require("./service-harness.js")
   const HL = require(path.join(__dirname, "../scripts/dev-harness/harness-lib.js"))
   const os = require("os")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const PID = "io.github.rmcdavid.iptv"
   const utilText = fs.readFileSync(path.join(H.HOST_SHELL, "Commons", "Util.qml"), "utf8")
@@ -26311,7 +26440,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const H = require("./service-harness.js")
-  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
   const OT = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/owner-token.json"), "utf8"))
   const TOK = "0123456789abcdef0123456789abcdef", PID = 4242

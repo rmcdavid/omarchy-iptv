@@ -20,6 +20,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 MANIFEST = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 BAR = MANIFEST["barWidget"]
 DEFAULTS = BAR["defaults"]
@@ -183,7 +184,7 @@ class PictureInPictureSettingsTest(unittest.TestCase):
         # Design section 6: "the guide and the service both read the one
         # entry". Through pipOptions, not through settingsFrom, so the three
         # keys have exactly one clamp rather than two that can drift.
-        source = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        source = service_files.service_text(str(ROOT))
         self.assertIn("Model.pipOptions(root.pipConfig())", source)
 
 

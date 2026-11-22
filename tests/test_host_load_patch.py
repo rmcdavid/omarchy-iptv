@@ -64,6 +64,13 @@ the installed qmltypes (rule 10). And qs.Commons is a stand-in whose qmldir
 declares the host's own singleton names as composite singletons, which is the
 registration kind the host's Commons has; its members are a marker, not the
 theme's tokens, because the question is which object a name resolves to.
+
+Service.qml is read as its inline view (scripts/service_files.py, D-REL-14):
+the header keeps every import a probe needs and drops the code-behind
+declarations, whose files the probe's tree does not hold, and the body holds
+the theme expressions of every function a code-behind carries. Read as its
+own text, a split Service.qml's header named a code-behind the probe could
+not load, and every test that observes the shipped QML went red on it.
 """
 import importlib.util
 import json
@@ -71,6 +78,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.parse
@@ -86,11 +94,20 @@ _spec = importlib.util.spec_from_file_location("release", os.path.join(ROOT, "sc
 release = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(release)
 SHIPPED_QML = [f for f in release.ALLOWLIST if f.endswith(".qml")]
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 
 
 def read(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+
+def shipped_text(name):
+    """A shipped QML file's text; Service.qml's is its inline view."""
+    if name == service_files.SERVICE:
+        return service_files.service_text(ROOT)
+    return read(os.path.join(ROOT, name))
 
 
 def root_turns_patch_on(shell_qml):
@@ -449,7 +466,7 @@ class HostLoadPatchCase(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(os.path.join(HOST, "shell.qml")) or not os.path.isdir(os.path.join(HOST, "Commons")):
             raise unittest.SkipTest("no Omarchy shell under %s; the host's load path cannot be checked here" % HOST)
-        cls.texts = {name: read(os.path.join(ROOT, name)) for name in SHIPPED_QML}
+        cls.texts = {name: shipped_text(name) for name in SHIPPED_QML}
 
     def rewrite(self):
         if not os.path.isfile(QUICKSHELL):

@@ -250,11 +250,23 @@ LEGACY_MOVED_ERE='u:(9712e180|36f90b72|402cf731|58b2a668|33db2e82|b170b7bd|f91b6
 #
 # `seam <label> <file> <ere> <at least>`: a POSITIVE count, never a `! grep`
 # (qa_count answers 0 for a missing file, so an absent tree fails here).
+# The file `@service` is the service, not a file (D-REL-14): Service.qml and
+# the code-behinds it declares, counted over qa_service_text's one text,
+# where each forwarder reads as the function it forwards to. So a seam names
+# what the service holds and not which file holds it, a forwarder is never
+# counted beside its function, and a service that cannot be read is a
+# failure, never a count of 0.
 seam() {
   local label=$1 file=$2 ere=$3 want=$4
   checks=$((checks + 1))
-  local got
-  got=$(qa_count "$ere" "$file")
+  local got text
+  if [[ $file == @service ]]; then
+    if ! text=$(qa_service_text "$PLUGIN_ROOT"); then bad "$label (the service in $PLUGIN_ROOT cannot be read)"; return; fi
+    got=$(qa_count "$ere" <(printf '%s\n' "$text"))
+    file="$PLUGIN_ROOT/the service"
+  else
+    got=$(qa_count "$ere" "$file")
+  fi
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
@@ -274,14 +286,14 @@ model_seam() {
 preflight() {
   echo "== preflight: can this tree keep the migration? (plugin: $PLUGIN_ROOT)"
   # The fix (D-ID-3): the map per parsed list, the move at apply, gated on moved.
-  seam "Service.qml derives the id map of every parsed list"    "$PLUGIN_ROOT/Service.qml" 'idRemap: Model\.channelIdRemap\(channels\)' 1
-  seam "Service.qml moves the loaded state onto it at apply"    "$PLUGIN_ROOT/Service.qml" 'Model\.remapStateIds\(root\.userState, remap\)' 1
-  seam "Service.qml writes only when something moved"           "$PLUGIN_ROOT/Service.qml" '^ *if \(!\(moved\.moved > 0\)\) return' 1
+  seam "Service.qml derives the id map of every parsed list"    @service                   'idRemap: Model\.channelIdRemap\(channels\)' 1
+  seam "Service.qml moves the loaded state onto it at apply"    @service                   'Model\.remapStateIds\(root\.userState, remap\)' 1
+  seam "Service.qml writes only when something moved"           @service                   '^ *if \(!\(moved\.moved > 0\)\) return' 1
   # What that calls, and what the helper half still needs (D-ID-1).
   model_seam "the model owns the scheme-1 -> scheme-2 map"             '^function channelIdRemap\(channels\)' 1
   model_seam "the model owns the state move"                           '^function remapStateIds\(state, remap\)' 1
   # R24e (round 14): through Model.fetchStateDir, "" only in the no-write mode.
-  seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, (root\.stateDir|Model\.fetchStateDir\(root\.stateDir, root\.stateWriteBlocked\))\)' 1
+  seam "the active fetch still carries --state-dir"             @service                   'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, (root\.stateDir|Model\.fetchStateDir\(root\.stateDir, root\.stateWriteBlocked\))\)' 1
   # The verbs the live half drives.
   seam "the harness answers state()"                            "$HERE/shell.qml" 'function state\(\): string' 1
   seam "the harness refreshes the active source"                "$HERE/shell.qml" 'function refresh\(\): string' 1

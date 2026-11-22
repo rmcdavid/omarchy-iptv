@@ -126,6 +126,49 @@ qa_helper_parts() {
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
 }
 
+# ------------------------------------------------------------- the service
+
+# qa_service_files <plugin-root>
+# The service's files (D-REL-14), one absolute path per line: Service.qml
+# first, then each code-behind its `import "<file>.js" as <Qualifier>` lines
+# declare, in their order -- Service.qml alone on every tree before the split.
+# The list is read out of Service.qml by scripts/service_files.py, the one
+# reader of it in python (tests/service-files.js is node's, and
+# tests/test_service_files.py proves the two agree), so there is no second
+# list here: a code-behind Service.qml does not declare is one the engine
+# never loads. Exit 1 (and nothing printed) when Service.qml is missing, is
+# not UTF-8, or imports a script in any other form, or when a file it declares
+# is not there: a copy of the tree that leaves a code-behind behind is a
+# service that cannot load. The reader keeps a CR as text and its declaration
+# takes one before the line's end, so a CRLF checkout (F-HARNESS-34's shape)
+# names the same files.
+qa_service_files() {
+  local root=$1 names name lib=${BASH_SOURCE[0]%/*}
+  local -a list=()
+  [[ $lib == "${BASH_SOURCE[0]}" ]] && lib=.
+  names=$(python3 -I "$lib/service_files.py" names "$root" 2>/dev/null) || return 1
+  mapfile -t list <<<"$names"
+  [[ ${#list[@]} -gt 0 && -n ${list[0]} ]] || return 1
+  for name in "${list[@]}"; do [[ -f $root/$name ]] || return 1; done
+  for name in "${list[@]}"; do printf '%s\n' "$root/$name"; done
+}
+
+# qa_service_text <plugin-root>
+# The service as one text (D-REL-14): Service.qml with each declaration line
+# dropped and each forwarder line read as the function it forwards to, with
+# the comment block above it -- the one-file Service.qml a split was cut from,
+# and Service.qml's own text, byte for byte, while it declares nothing. So a
+# seam names what the service holds, not which file holds it. Printed as is
+# by scripts/service_files.py, which reads every file whole before it writes
+# a byte: exit 1 and nothing printed when it refuses (a declared code-behind
+# missing, a forwarder it cannot read as one), so a count over its output is
+# never a count over nothing.
+qa_service_text() {
+  local lib=${BASH_SOURCE[0]%/*}
+  [[ $lib == "${BASH_SOURCE[0]}" ]] && lib=.
+  python3 -I "$lib/service_files.py" text "$1" 2>/dev/null
+}
+
 # ------------------------------------------------------------- sentinels
 
 # The tooling must never answer a question with the same value a healthy run
