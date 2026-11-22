@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import signal
+import sys
 import tempfile
 import unittest
 
@@ -15,6 +16,8 @@ from helper_loader import load_helper
 
 helper = load_helper()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 HELPER_PATH = ROOT / "bin" / "omarchy-iptv"
 # The session vectors are shared with tests/Model.test.js (CLAUDE.md: a rule
 # written twice gets one fixture).
@@ -1992,7 +1995,7 @@ class StateInitDeadlineTest(unittest.TestCase):
     def test_the_deadline_is_past_the_services_bound(self):
         # 15 s watchdog + 2 s kill grace in Service.qml (stateInitTimeoutMs,
         # stateInitKillGraceMs): the self-bound must never pre-empt them.
-        svc = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        svc = service_files.service_text(str(ROOT))
         import re
         timeout = int(re.search(r"stateInitTimeoutMs: (\d+) \* 1000", svc).group(1))
         grace = int(re.search(r"stateInitKillGraceMs: (\d+) \* 1000", svc).group(1))

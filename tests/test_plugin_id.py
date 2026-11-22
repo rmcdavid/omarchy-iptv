@@ -33,9 +33,12 @@ prose.
 import json
 import os
 import re
+import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 
 # (file, pattern with ONE capture group for the id, expected match count)
 SITES = [
@@ -69,6 +72,9 @@ SITES = [
 
 
 def read(rel):
+    if rel == 'Service.qml':
+        # D-REL-14: the service as one text, whichever file holds a site.
+        return service_files.service_text(ROOT)
     with open(os.path.join(ROOT, rel), encoding='utf-8') as fh:
         return fh.read()
 

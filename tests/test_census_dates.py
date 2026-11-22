@@ -28,6 +28,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The figures: the frozen list (1,453 rows, 2026-10-03), the live list of
@@ -60,9 +62,12 @@ OPEN = {
 
 def shipped_sources():
     """The shipped sources a comment can live in: the helper's parts, the
-    model's parts and aggregator, and the QML."""
+    model's parts and aggregator, the QML, and every code-behind the service
+    declares."""
     paths = sorted(ROOT.glob("bin/helper/*.py")) + sorted(ROOT.glob("model/*.mjs"))
     paths += [ROOT / "Model.mjs"] + sorted(ROOT.glob("*.qml"))
+    # D-REL-14: and every code-behind Service.qml declares, under its own name.
+    paths += [pathlib.Path(p) for p in service_files.service_files(str(ROOT))[1:]]
     return [p for p in paths if p.is_file()]
 
 

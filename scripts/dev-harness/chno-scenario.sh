@@ -188,23 +188,35 @@ wait_for() {   # wait_for <want> <secs> <cmd...>: bounded, and it SAYS it gave u
 # file fails here instead of passing an absence test. The bound is a MINIMUM
 # on purpose: this asks whether the seam exists, and an exact count would go
 # red on a rename that changes nothing about the answer.
+# The file `@service` is the service, not a file (D-REL-14): Service.qml and
+# the code-behinds it declares, counted over qa_service_text's one text,
+# where each forwarder reads as the function it forwards to. So a seam names
+# what the service holds and not which file holds it, a forwarder is never
+# counted beside its function, and a service that cannot be read is a
+# failure, never a count of 0.
 seam() {
   local label=$1 file=$2 ere=$3 want=$4
   checks=$((checks + 1))
-  local got
-  got=$(qa_count "$ere" "$file")
+  local got text
+  if [[ $file == @service ]]; then
+    if ! text=$(qa_service_text "$PLUGIN_ROOT"); then bad "$label (the service in $PLUGIN_ROOT cannot be read)"; return; fi
+    got=$(qa_count "$ere" <(printf '%s\n' "$text"))
+    file="$PLUGIN_ROOT/the service"
+  else
+    got=$(qa_count "$ere" "$file")
+  fi
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
 preflight() {
   echo "== preflight: can this tree answer the live half? (plugin: $PLUGIN_ROOT)"
-  seam "Service.qml declares the channel-number index"      "$PLUGIN_ROOT/Service.qml"  '^ *property var chnoIndex' 1
-  seam "Service.qml resolves a number to a channel"         "$PLUGIN_ROOT/Service.qml"  '^ *function channelByNumber\(text\)' 1
-  seam "Service.qml has the tuneByNumber the harness calls" "$PLUGIN_ROOT/Service.qml"  '^ *function tuneByNumber\(text\)' 1
-  seam "Service.qml exposes the IPC channel verb"           "$PLUGIN_ROOT/Service.qml"  'function channel\(n: string\): string' 1
-  seam "status carries hasNumbers"                          "$PLUGIN_ROOT/Service.qml"  'hasNumbers: root\.chnoIndex' 1
-  seam "nowPlaying carries the number"                      "$PLUGIN_ROOT/Service.qml"  'chno: root\.nowPlayingChno' 1
-  seam "channelOrder re-derives the list"                   "$PLUGIN_ROOT/Service.qml"  'onChannelOrderChanged' 1
+  seam "Service.qml declares the channel-number index"      @service                    '^ *property var chnoIndex' 1
+  seam "Service.qml resolves a number to a channel"         @service                    '^ *function channelByNumber\(text\)' 1
+  seam "Service.qml has the tuneByNumber the harness calls" @service                    '^ *function tuneByNumber\(text\)' 1
+  seam "Service.qml exposes the IPC channel verb"           @service                    'function channel\(n: string\): string' 1
+  seam "status carries hasNumbers"                          @service                    'hasNumbers: root\.chnoIndex' 1
+  seam "nowPlaying carries the number"                      @service                    'chno: root\.nowPlayingChno' 1
+  seam "channelOrder re-derives the list"                   @service                    'onChannelOrderChanged' 1
   seam "BarWidget.qml knows the playing number"             "$PLUGIN_ROOT/BarWidget.qml" 'nowPlayingChno' 3
   seam "BarWidget.qml can hide it"                          "$PLUGIN_ROOT/BarWidget.qml" 'barShowChannelNumber' 1
   seam "the manifest declares channelOrder"                 "$PLUGIN_ROOT/manifest.json" '"channelOrder"' 2

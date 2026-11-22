@@ -1,0 +1,54 @@
+// tests/fixtures/service-split/Service.qml -- NOT a service. The one shared
+// fixture of the service readers (D-REL-14): tests/service-files.js and
+// scripts/service_files.py both read this directory as a plugin root, and
+// inline.txt is the inline view they must both return, byte for byte, which
+// is also the one-file text the split was cut from (the readers' tests cut it
+// again and compare). Service-demo.js is its one code-behind.
+pragma ComponentBehavior: Bound
+import QtQuick
+import "Model.mjs" as Model
+
+Item {
+  id: root
+  property int count: 0
+  readonly property string label: "{ not a brace }"
+
+  Timer {
+    id: tick
+    interval: 10
+    onTriggered: root.bump(1)
+  }
+
+  // Stays on the root: no code-behind holds it.
+  function str(v) { return v === undefined || v === null ? "" : String(v) }
+
+  // Stays too: a one-line call into the model is no forwarder, because the
+  // model is no declared code-behind.
+  function hosts(list) { return Model.hostsOf(list) }
+
+  // The first moved function. Its comment block moves with it,
+  // both lines of it.
+  function bump(by) {
+    root.count += by
+    if (root.count > 3) tick.stop()
+    return root.count
+  }
+
+  function quoted(a, b) {
+    // A brace in a string, a template or a block comment opens no block.
+    var s = "}" + '{' + `${a}}` /* } */
+    return s + b
+  }
+  // ---- a banner the next function carries, directly attached
+  function pattern(text) {
+    var re = /[}{]\/+/g
+    function count(m) { return "{" + m.length + "}" }
+    return text.replace(re, count)
+  }
+
+  function stays(x) {
+    return root.str(x) + root.label
+  }
+
+  function last() { return root.str(root.label) }
+}

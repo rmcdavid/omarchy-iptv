@@ -481,6 +481,76 @@ else
 fi
 chmod 600 "$HUNREAD/bin/omarchy-iptv"
 
+# ============================== qa_service_files / qa_service_text (D-REL-14)
+
+section "qa_service_files / qa_service_text / D-REL-14: the service is the files Service.qml declares, read whole or not at all"
+
+# Each refusal below reads a status and what was printed in one string, so a
+# library without the two functions (127, nothing printed) is red there too,
+# never green on a "nothing is printed" line of its own.
+SVF="$ROOT/tests/fixtures/service-split"
+is "on this tree qa_service_files names exactly the files scripts/service_files.py names" \
+   "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')" \
+   "$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import service_files; print("".join(n + " " for n in service_files.service_names(sys.argv[1])), end="")' "$ROOT")"
+is "and that is Service.qml alone: this tree declares no code-behind" \
+   "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml 0"
+ck "on this tree qa_service_text is Service.qml, byte for byte" 'qa_service_text "$ROOT" | cmp -s - "$ROOT/Service.qml"'
+is "on the shared fixture it names Service.qml, then its one code-behind" \
+   "$(qa_service_files "$SVF" | sed "s#^$SVF/##" | tr '\n' ' ')" "Service.qml Service-demo.js "
+ck "and qa_service_text is the fixture's inline.txt, byte for byte" 'qa_service_text "$SVF" | cmp -s - "$SVF/inline.txt"'
+SVT="$TMP/service-tree"
+mkdir -p "$SVT" && cp "$SVF/Service.qml" "$SVF/Service-demo.js" "$SVT/"
+is "a copy holding both files is read like the fixture" \
+   "$(qa_service_files "$SVT" | sed "s#^$SVT/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml Service-demo.js 0"
+rm "$SVT/Service-demo.js"
+is "a declared code-behind that is not there is refused (1), and nothing is printed" \
+   "$(qa_service_files "$SVT"; printf '%s' "$?")" "1"
+is "and the text is refused the same way" "$(qa_service_text "$SVT"; printf '%s' "$?")" "1"
+rm "$SVT/Service.qml"
+is "a root with no Service.qml at all is refused by qa_service_files" "$(qa_service_files "$SVT"; printf '%s' "$?")" "1"
+is "and by qa_service_text" "$(qa_service_text "$SVT"; printf '%s' "$?")" "1"
+sed 's/{ return ServiceDemo\.bump(by) }/{ return ServiceDemo.bump(by, 1) }/' "$SVF/Service.qml" >"$SVT/Service.qml"
+cp "$SVF/Service-demo.js" "$SVT/"
+is "a forwarder that is not exactly its function's is refused, never kept as root text" \
+   "$(qa_service_text "$SVT"; printf '%s' "$?")" "1"
+# F-HARNESS-34's shape: a CRLF checkout. QML reads the same imports there, so
+# the files are the same and the view is inline.txt, CR for CR.
+SVC="$TMP/service-crlf"
+mkdir -p "$SVC"
+for svf in Service.qml Service-demo.js inline.txt; do sed 's/$/\r/' "$SVF/$svf" >"$SVC/$svf"; done
+is "a CRLF copy of the fixture names the same files" \
+   "$(qa_service_files "$SVC" | sed "s#^$SVC/##" | tr '\n' ' ')" "Service.qml Service-demo.js "
+ck "and its view is the CRLF inline.txt, CR for CR" 'qa_service_text "$SVC" | cmp -s - "$SVC/inline.txt"'
+# The two slow trees stage the service whole: key-scenario.sh's
+# stage_slow_tree and rewind-scenario.sh's R16 tree, each taken out of its
+# scenario and run over a plugin tree whose service has a code-behind (the
+# fixture's two files beside this tree's model, helper and other entry
+# points). On 9ed04be's scenarios, which copied Service.qml by name, the
+# code-behind was left behind: "0 same differs".
+STP="$TMP/stage-plugin"
+mkdir -p "$STP/bin/helper" "$STP/model"
+cp "$ROOT/manifest.json" "$ROOT/Guide.qml" "$ROOT/BarWidget.qml" "$STP/"
+cp "$ROOT/bin/omarchy-iptv" "$STP/bin/omarchy-iptv"
+while IFS= read -r svf; do cp "$svf" "$STP/${svf#"$ROOT/"}"; done < <(qa_model_files "$ROOT"; qa_helper_parts "$ROOT")
+cp "$SVF/Service.qml" "$SVF/Service-demo.js" "$STP/"
+staged_whole() {   # staged_whole <staged tree>: each service file's verdict
+  local svf
+  for svf in Service.qml Service-demo.js; do cmp -s "$STP/$svf" "$1/$svf" && printf 'same ' || printf 'differs '; done
+}
+KSC="$ROOT/scripts/dev-harness/key-scenario.sh"
+st "stage_slow_tree is taken out of key-scenario.sh whole" 0 qa_extract "$KSC" '^stage_slow_tree\(\) \{' '^\}$'
+qa_extract "$KSC" '^stage_slow_tree\(\) \{' '^\}$' >"$TMP/stage-key.sh" || : >"$TMP/stage-key.sh"
+is "stage_slow_tree stages every file of the service, each byte for byte" \
+   "$( ( PLUGIN_ROOT=$STP HERE=$ROOT/scripts/dev-harness; . "$TMP/stage-key.sh"; stage_slow_tree "$TMP/staged-key" >/dev/null 2>&1; printf '%s ' "$?"; staged_whole "$TMP/staged-key" ) )" \
+   "0 same same "
+RSC="$ROOT/scripts/dev-harness/rewind-scenario.sh"
+st "R16's slow tree is taken out of rewind-scenario.sh whole" 0 qa_extract "$RSC" '^SLOW_TREE="\$WORK/slow-tree"$' '^chmod \+x "\$SLOW_TREE/bin/omarchy-iptv"'
+qa_extract "$RSC" '^SLOW_TREE="\$WORK/slow-tree"$' '^chmod \+x "\$SLOW_TREE/bin/omarchy-iptv"' >"$TMP/stage-rewind.sh" || : >"$TMP/stage-rewind.sh"
+mkdir -p "$TMP/rewind-work"
+is "and R16's slow tree stages every file of the service, each byte for byte" \
+   "$( ( PLUGIN_ROOT=$STP HERE=$ROOT/scripts/dev-harness WORK=$TMP/rewind-work; staged=0; . "$TMP/stage-rewind.sh" >/dev/null 2>&1; printf '%s ' "$(( 1 - staged ))"; staged_whole "$TMP/rewind-work/slow-tree" ) )" \
+   "0 same same "
+
 # ======================================================== qa_tree_count (A2)
 
 section "qa_tree_count / A2: 'no writes in the plugin dir' for a dir that is not there"
@@ -4034,7 +4104,14 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # 769 -> 773 on 2026-11-22 (F-HARNESS-66): qa_rss_settled's four, over
 # stand-ins of the suite's own. Red where it asks for two samples, as
 # clip-scenario.sh's settle() did: the first failed, settled at half size.
-EXPECTED=773
+# 773 -> 790 on 2026-11-22 (D-REL-14, lane-relsplit1): qa_service_files and
+# qa_service_text's thirteen over this tree, the shared fixture, a broken
+# copy and a CRLF copy, and the two slow trees' four. Red where qa-lib.sh
+# lacks the two functions: fifteen of the seventeen failed, all but the two
+# extractions, which read no library and fail on a renamed function or a
+# changed end line instead; the slow trees' two also red on 9ed04be's
+# scenarios, which staged Service.qml alone ("0 same differs").
+EXPECTED=790
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -245,11 +245,23 @@ foreign() {
 # `seam <label> <file> <ere> <at least>`: a POSITIVE count, never a `! grep`.
 # qa_count answers 0 for a missing or unreadable file, so a tree without the
 # file fails here instead of passing an absence test.
+# The file `@service` is the service, not a file (D-REL-14): Service.qml and
+# the code-behinds it declares, counted over qa_service_text's one text,
+# where each forwarder reads as the function it forwards to. So a seam names
+# what the service holds and not which file holds it, a forwarder is never
+# counted beside its function, and a service that cannot be read is a
+# failure, never a count of 0.
 seam() {
   local label=$1 file=$2 ere=$3 want=$4
   checks=$((checks + 1))
-  local got
-  got=$(qa_count "$ere" "$file")
+  local got text
+  if [[ $file == @service ]]; then
+    if ! text=$(qa_service_text "$PLUGIN_ROOT"); then bad "$label (the service in $PLUGIN_ROOT cannot be read)"; return; fi
+    got=$(qa_count "$ere" <(printf '%s\n' "$text"))
+    file="$PLUGIN_ROOT/the service"
+  else
+    got=$(qa_count "$ere" "$file")
+  fi
   if (( got >= want )); then ok "$label"; else bad "$label (matched $got, wanted at least $want in ${file#"$PLUGIN_ROOT/"})"; fi
 }
 
@@ -280,48 +292,59 @@ model_absent() {
 # is really there. Never `seam ... 0`, which passes against anything at all,
 # including a file that does not exist. The positive probe first is what
 # makes the negative mean something: a non-empty file, then no match.
+# `@service` here is every file the service is made of (qa_service_files,
+# D-REL-14): an absence holds over each, a code-behind's own header and the
+# lines between its functions included, which the inline view leaves out.
 absent() {
   local label=$1 file=$2 ere=$3
   checks=$((checks + 1))
-  if [[ ! -s $file ]]; then
-    bad "$label (no such file, or empty: ${file#"$PLUGIN_ROOT/"} - an absence test over nothing proves nothing)"
-    return
+  local -a files=("$file")
+  local f got where=${file#"$PLUGIN_ROOT/"}
+  if [[ $file == @service ]]; then
+    where="the service"
+    mapfile -t files < <(qa_service_files "$PLUGIN_ROOT")
+    if (( ${#files[@]} == 0 )); then bad "$label (the service in $PLUGIN_ROOT cannot be read - an absence test over nothing proves nothing)"; return; fi
   fi
-  local got
-  got=$(qa_count "$ere" "$file")
-  if (( got == 0 )); then ok "$label"; else bad "$label (matched $got in ${file#"$PLUGIN_ROOT/"}, wanted none)"; fi
+  for f in "${files[@]}"; do
+    if [[ ! -s $f ]]; then
+      bad "$label (no such file, or empty: ${f#"$PLUGIN_ROOT/"} - an absence test over nothing proves nothing)"
+      return
+    fi
+  done
+  got=$(qa_count_multi "$ere" "${files[@]}")
+  if (( got == 0 )); then ok "$label"; else bad "$label (matched $got in $where, wanted none)"; fi
 }
 
 preflight() {
   echo "== preflight: can this tree drive picture in picture? (plugin: $PLUGIN_ROOT)"
   # The service's two entry points and the verb a user runs.
-  seam "the service answers the guide's p key"            "$PLUGIN_ROOT/Service.qml" '^ *function togglePip\(\)' 1
-  seam "the service has one entry point for both surfaces" "$PLUGIN_ROOT/Service.qml" '^ *function requestPip\(mode\)' 1
-  seam "the plugin declares the pip IPC verb"             "$PLUGIN_ROOT/Service.qml" 'function pip\(mode: string\): string' 1
+  seam "the service answers the guide's p key"            @service                   '^ *function togglePip\(\)' 1
+  seam "the service has one entry point for both surfaces" @service                   '^ *function requestPip\(mode\)' 1
+  seam "the plugin declares the pip IPC verb"             @service                   'function pip\(mode: string\): string' 1
   # Read-then-act (PIP10): the compositor is read, and the two toggling steps
   # are behind that read.
-  seam "the service reads the compositor"                 "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "clients"\]' 1
-  seam "and reads the monitor it will place the box on"   "$PLUGIN_ROOT/Service.qml" 'command: \["hyprctl", "-j", "monitors"\]' 1
+  seam "the service reads the compositor"                 @service                   'command: \["hyprctl", "-j", "clients"\]' 1
+  seam "and reads the monitor it will place the box on"   @service                   'command: \["hyprctl", "-j", "monitors"\]' 1
   model_seam "the float step is behind a live read"             'if \(l\.floating !== true\) steps\.push' 1
   model_seam "the pin step is behind a live read"               'if \(l\.pinned !== true\) steps\.push' 1
   # Verification is the definition of success (PIP11).
-  seam "success is a readback, in one place"              "$PLUGIN_ROOT/Service.qml" '^ *function pipCheck\(live\)' 1
+  seam "success is a readback, in one place"              @service                   '^ *function pipCheck\(live\)' 1
   model_seam "and the comparison it makes"                      '^function pipVerify\(live, intent, expected\)' 1
-  seam "a dispatch step reports nothing but its text"     "$PLUGIN_ROOT/Service.qml" '^ *function pipNoteStep\(text, exitCode\)' 1
+  seam "a dispatch step reports nothing but its text"     @service                   '^ *function pipNoteStep\(text, exitCode\)' 1
   # The pure layer the service calls instead of carrying (M2-05-02), and the
   # guide key that reaches it. These four are the seams this file's header
   # asked for once lane V1 had merged.
   model_seam "the model owns the plan"                           '^function pipPlan\(' 1
   model_seam "the model owns the geometry"                       '^function pipGeometry\(' 1
   seam "Guide.qml routes the p key"                       "$PLUGIN_ROOT/Guide.qml" 'togglePip\(\)' 1
-  absent "no stand-in survives integration"               "$PLUGIN_ROOT/Service.qml" 'STAND-?IN'
+  absent "no stand-in survives integration"               @service                   'STAND-?IN'
   # PIP15: one spelling, chosen from the compositor's own answer, no second
   # arm to fall back to.
-  seam "the dispatch spelling is chosen once"             "$PLUGIN_ROOT/Service.qml" 'root\.pipProvider = /configProvider' 1
+  seam "the dispatch spelling is chosen once"             @service                   'root\.pipProvider = /configProvider' 1
   model_absent "and no fallback spelling ships"                 '"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
-  absent "nor a second builder inside the service"        "$PLUGIN_ROOT/Service.qml" 'pipLegacyDispatch|"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
+  absent "nor a second builder inside the service"        @service                   'pipLegacyDispatch|"(tagwindow|togglefloating|resizewindowpixel|movewindowpixel|alterzorder)"'
   # Addressing, the snapshot, and the mpv half.
-  seam "the window is narrowed by the player pid"         "$PLUGIN_ROOT/Service.qml" 'pipFindWindow\(text, root\.playerPid, root\.pipClass\)' 1
+  seam "the window is narrowed by the player pid"         @service                   'pipFindWindow\(text, root\.playerPid, root\.pipClass\)' 1
   # D-PIP-5: and so is focus, which was the one verb 4.2's rule was never
   # applied to. With a user's own mpv of the same app id open it focused the
   # stranger 3 times out of 3. The class selector is removed rather than
@@ -329,20 +352,20 @@ preflight() {
   model_seam "focus names the window the pid resolved"          '^function focusPlayerArgv\(address\)' 1
   model_absent "and no class selector survives in the builder"  'PIP_CLASS_SELECTOR'
   model_seam "the snapshot lives in the player"                 'PIP_SNAPSHOT_KEY = "user-data/omarchy-iptv-pip"' 1
-  seam "and the service asks for it by that one name"     "$PLUGIN_ROOT/Service.qml" 'Model\.PIP_SNAPSHOT_KEY' 1
-  seam "and is read back after a shell restart"           "$PLUGIN_ROOT/Service.qml" '^ *function pipRequestSnapshot\(sock\)' 1
+  seam "and the service asks for it by that one name"     @service                   'Model\.PIP_SNAPSHOT_KEY' 1
+  seam "and is read back after a shell restart"           @service                   '^ *function pipRequestSnapshot\(sock\)' 1
   # D-PIP-4 / 4.7 step 3. The snapshot above says what the window WAS; this
   # says what it IS, and without it the plugin reported `off` for as long as
   # the user did not press the key. Three seams because it is three things:
   # a read, the two places a player becomes ours, and a pure decision.
-  seam "and what it IS is re-derived, not remembered"     "$PLUGIN_ROOT/Service.qml" '^ *function pipApplyPeek\(text\)' 1
-  seam "that read runs when a player becomes ours"        "$PLUGIN_ROOT/Service.qml" 'root\.pipPeek\(\)' 2
+  seam "and what it IS is re-derived, not remembered"     @service                   '^ *function pipApplyPeek\(text\)' 1
+  seam "that read runs when a player becomes ours"        @service                   'root\.pipPeek\(\)' 2
   model_seam "and the derivation is pure, so a test can call it" '^function pipDeriveState\(' 1
   model_seam "a channel change cannot resize the box"           'PIP_MPV_RESIZE_PROP' 4
-  seam "status carries the verified state"                "$PLUGIN_ROOT/Service.qml" 'available: root\.pipAvailable' 1
+  seam "status carries the verified state"                @service                   'available: root\.pipAvailable' 1
   # Bounds (CLAUDE.md rule 3).
-  seam "one bound per compositor round trip"              "$PLUGIN_ROOT/Service.qml" 'id: pipStepWatchdog' 1
-  seam "and one on the whole sequence"                    "$PLUGIN_ROOT/Service.qml" 'id: pipSequenceWatchdog' 1
+  seam "one bound per compositor round trip"              @service                   'id: pipStepWatchdog' 1
+  seam "and one on the whole sequence"                    @service                   'id: pipSequenceWatchdog' 1
   # The harness itself, and the stub it drives the service against.
   seam "the harness declares the pip verb"                "$HERE/shell.qml" 'function pip\(mode: string\): string' 1
   seam "the harness drives the guide key through the service" "$HERE/shell.qml" 'function pipKey\(\): string' 1

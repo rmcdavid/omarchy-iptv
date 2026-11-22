@@ -1,0 +1,246 @@
+{
+ "comment": [
+  "D-REL-14: the service readers' shared cases. tests/service-files.js (the node case \"D-REL-14: the service readers\")",
+  "and scripts/service_files.py (tests/test_service_files.py) each run every case: `service` is a Service.qml text,",
+  "`files` the code-behinds it may declare, by name. `expect.text` is the inline view, byte for byte; `expect.refusal`",
+  "is the kind both readers must refuse with; `declarations`, where given, the [file, qualifier] pairs in order.",
+  "Generated with every newline and CR written by code point, so the strings are exactly what they say."
+ ],
+ "cases": [
+  {
+   "name": "no declaration: the text as it is, and a forwarder-shaped line for a qualifier nobody declared stays",
+   "service": "import QtQuick\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {},
+   "expect": {
+    "text": "import QtQuick\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n"
+   },
+   "declarations": []
+  },
+  {
+   "name": "two code-behinds, each forwarder answered by its own, the declarations in their order",
+   "service": "import QtQuick\nimport \"Service-b.js\" as ServiceB\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n  function b(x) { return ServiceB.b(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n",
+    "Service-b.js": "// b\n\n  // b doubles\n  function b(x) { return x * 2 }\n"
+   },
+   "expect": {
+    "text": "import QtQuick\nItem {\n  // a returns one\n  function a(x) {\n    return 1\n  }\n  // b doubles\n  function b(x) { return x * 2 }\n}\n"
+   },
+   "declarations": [
+    [
+     "Service-b.js",
+     "ServiceB"
+    ],
+    [
+     "Service-a.js",
+     "ServiceA"
+    ]
+   ]
+  },
+  {
+   "name": "a CRLF checkout reads as the same view, every CR kept",
+   "service": "import QtQuick\r\nimport \"Service-a.js\" as ServiceA\r\nItem {\r\n  function a(x) { return ServiceA.a(x) }\r\n}\r\n",
+   "files": {
+    "Service-a.js": "// a code-behind\r\n\r\n  // a returns one\r\n  function a(x) {\r\n    return 1\r\n  }\r\n"
+   },
+   "expect": {
+    "text": "import QtQuick\r\nItem {\r\n  // a returns one\r\n  function a(x) {\r\n    return 1\r\n  }\r\n}\r\n"
+   },
+   "declarations": [
+    [
+     "Service-a.js",
+     "ServiceA"
+    ]
+   ]
+  },
+  {
+   "name": "a root comment directly above a forwarder stays on the root, above the moved block",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  // the root says so\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "text": "Item {\n  // the root says so\n  // a returns one\n  function a(x) {\n    return 1\n  }\n}\n"
+   }
+  },
+  {
+   "name": "a code-behind whose last line has no newline: its last function runs to the end of the file",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a\n\n  function a(x) { return 2 }"
+   },
+   "expect": {
+    "text": "Item {\n  function a(x) { return 2 }\n}\n"
+   }
+  },
+  {
+   "name": "a declaration with a lowercase qualifier is refused",
+   "service": "import \"Service-a.js\" as serviceA\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a declaration carrying a trailing comment is refused",
+   "service": "import \"Service-a.js\" as ServiceA // pip\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "an indented import of a script is refused",
+   "service": "  import \"Service-a.js\" as ServiceA\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a declaration naming another directory is refused",
+   "service": "import \"service/a.js\" as ServiceA\nItem {\n}\n",
+   "files": {
+    "service/a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "an import of a script with no qualifier is refused",
+   "service": "import \"Service-a.js\"\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "a file declared twice is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nimport \"Service-a.js\" as ServiceB\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declared-twice"
+   }
+  },
+  {
+   "name": "a qualifier declared twice is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nimport \"Service-b.js\" as ServiceA\nItem {\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n",
+    "Service-b.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "declared-twice"
+   }
+  },
+  {
+   "name": "a declared code-behind that is not there is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {},
+   "expect": {
+    "refusal": "missing"
+   }
+  },
+  {
+   "name": "a forwarder whose call adds an argument is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x, 1) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder with its arguments swapped is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x, y) { return ServiceA.a(y, x) }\n}\n",
+   "files": {
+    "Service-a.js": "  function a(x, y) {\n    return x - y\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder spelled with other spacing is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x)}\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder that calls another function is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.b(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "a forwarder for a function its code-behind lacks is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n  function c() { return ServiceA.c() }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "no-function"
+   }
+  },
+  {
+   "name": "two forwarders for one function are refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "forwarded-twice"
+   }
+  },
+  {
+   "name": "a code-behind function no forwarder names is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n\n  function orphan() {\n    return 0\n  }\n"
+   },
+   "expect": {
+    "refusal": "unforwarded"
+   }
+  },
+  {
+   "name": "a code-behind declaring one function twice is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n// a code-behind\n\n  // a returns one\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "function-twice"
+   }
+  },
+  {
+   "name": "a code-behind function with no closing brace is refused",
+   "service": "import \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "  function a(x) {\n    return \"}\"\n"
+   },
+   "expect": {
+    "refusal": "unbalanced"
+   }
+  }
+ ]
+}

@@ -23267,3 +23267,292 @@ lane-settle-ply78 on the ply78 branch, after the review of b2d5a6f (the D-PLY-78
 **Red first.** One check in tests/Model.test.js through the service harness, two rows: the older start refused inside the settle (the recheck's `quickInsideThenPlay`) and the older start answering ok there (the same staleness since 9d604cf). Each: play, stop, the older reply one second in, a second play, its ok; then a probe that finds a player which does not answer, so the shell issues its own stop with nothing attached, and that settle's backstop. On c236b9d both rows read the flag true after the settle ended and one `probe` at the shell's backstop; on the fix, false and none. Node 4056 checks, 0 failures.
 
 **Rule 15, read and left.** The settle is ended in four more places. The backstop and handlePlayerGone's two branches clear the flag; `stop()` overwrites it. applyProbe's adoption of a player (the reattach path: `stopAt = 0`, `stopSettleTimer.stop()`) does not. No way to reach it with the flag set was found: the probes that can adopt inside a settle are a watchdog-stopped start's, whose 58.25 s watchdog outlasts the 18.25 s backstop that clears the flag first, and the stop's own look and backstop, which take the confirmation branch. So it is left as it is, with no check that could go red for it.
+
+## D-REL-14: the service readers (lane-relsplit1, 2026-11-22)
+
+Two parts in one workflow, on 9ed04be. Part A measured whether a code-behind
+layout loads the host's way, wrote nothing in the repository, and answered
+**go**. Part B is the commit "Read the service as the files Service.qml
+declares (D-REL-14)", which changes no shipped file.
+
+### Part A: the host's load of a code-behind, measured
+
+**The prototype.** A throwaway cutter (node, using the harness's own
+`matchBrace`) moved 160 of 9ed04be's 204 top-level functions, byte for byte
+with the contiguous `//` lines above each, into four code-behinds, and left a
+one-line forwarder `  function F(a) { return ServiceQ.F(a) }` at each old
+place. The domains: pip 23 functions (19,907 B, file 20,062 B), player 55
+(113,795 B; file 114,017 B), rewind 16 (8,747 B; file 8,891 B), sources 66
+(90,241 B; file 90,486 B). Service.qml went from 446,973 B to 226,862 B, the
+forwarders 12,407 B of it. What stayed on the root, by choice (44
+functions): the state machine (startStateInit through settleEntryFlush,
+L2593-3071 on 9ed04be), the state-private and state-mode functions
+(requestStateMode through tellStateSaveRefused, L5383-5532), notify and its
+three helpers, runHelper, str, hostForRecord, resultField, probeRecord,
+withKey, withoutKey, and nine more; every property, signal, change handler
+and object. No moved body names `this`, `arguments`, `Qt.resolvedUrl`,
+`callee` or `caller`; every argument list is plain names; every
+`Qt.callLater` in moved code passes `root.F`, so the forwarder keeps the
+dedup. A separate inliner (python, its own brace matcher) put the prototype
+back together: equal to `git show 9ed04be:Service.qml` byte for byte
+(sha256 917ac8e9...cd11e1, 446,973 B). Red on two mutants: one body byte
+(`pipSequenceWatchdog.stop()` to `.start()`, cmp differs at byte 114883) and
+one forwarder's call arguments swapped (refused).
+
+**The rig.** A nested headless cage (cage 0.3.1, pixman, no input devices)
+on `scripts/dev-harness/private-bus.sh`, under `env -u DISPLAY -u
+WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, a
+private runtime and tmp, the heavy lock and nice; the installed quickshell
+0.3.2.r7.g2b4501a-1 under gdb (core-dumping signals nopass, then kill). Root
+A is the host's shell.qml lines 1-13 byte for byte, `//@ pragma
+OmarchyLoadPatch` included, over a copy of /usr/share/omarchy/shell; root B
+the same without that line. The plugin in a decoy HOME's plugin folder,
+ALLOWLIST files only (plus the four code-behinds); the service through
+`Qt.createComponent(..., Component.PreferSynchronous)` and `createObject`,
+the guide through an asynchronous Loader, the bar through an asynchronous
+`createComponent`, as the host loads each; a bar entry carrying a
+`playlistUrl` to a local three-channel M3U, so start-up migrates it. The
+"-d" arms add one line to `Component.onDestruction` that calls moved
+functions through their forwarders.
+
+| arm | root | plugin files | warnings from plugin files | JS errors | interceptor | ipc status | start-up | probe | disable |
+|---|---|---|---|---|---|---|---|---|---|
+| base-A | pragma | 43 | 0 | 0 | the 3 QML entry points only | ready, 3 channels | adopted the entry, channels.json written | 9/9 | orphan check started |
+| base-B | none | 43 | 0 | 0 | none | same | same | 9/9 | same |
+| proto-A | pragma | 47 | 0 | 0 | the 3 QML entry points only; no line names a .js | same | same | 9/9 | same |
+| proto-B | none | 47 | 0 | 0 | none | same | same | 9/9 | same |
+| base-d-A, base-d-B | A, B | 43 | 0 | 0 | as base | same | same | 9/9 | the destruction line ran, `Q:none` |
+| proto-d-A, proto-d-B | A, B | 47 | 0 | 0 | as proto | same | same | 9/9 | the destruction line ran, `Q:function`: the code-behinds alive in onDestruction |
+
+- The probe called, through the service, functions moved into each
+  code-behind (seekState, pipConfig with `Commons` in a code-behind,
+  sourcesReady, activeSourceSummary, logoSurvey, socketAttached,
+  channelByNumber) and two root ones (statusSummary, str).
+- Start-up ran moved functions with Quickshell objects in reach:
+  runConfigShield, runWhichMpv, runPipProbe and runPlayerProbe from
+  onCompleted (`Quickshell.processId`, `Quickshell.env`); adoptActive's
+  migration warning came from Service-sources.js; runPlaylistHelper ran on
+  playlistProc with `Model.fetchEnvironment`, and the helper wrote
+  channels.json; writeOwnedEntry (`Commons.Util.barSections`) handed the
+  entry to `updateEntryInline` and took `playlistUrl` off it.
+- Under the pragma the load patch serves only the three QML entry points
+  (compiled as `qs:///...`); the four .js files compile from `file://`, as
+  Model.mjs and model/*.mjs do.
+- scripts/dev-harness/shell.qml's `file://` load of the prototype (key-scenario's
+  shell arm, ten loads): 0 lines naming a code-behind, 0 TypeError,
+  ReferenceError or "not a function".
+- qmllint 6.12 (`--json`) on Service.qml: 433 entries on the base, 139 on the
+  prototype, so the moved bodies are no longer linted; a forwarder naming a
+  member its code-behind lacks draws `Member "pipRefusX" not found` (139 to 140).
+- Patches: all 19 key-mutation and all 3 open-mutation patches apply to the
+  prototype (`git apply --check`); 6 of the 8 chno-mutation patches do.
+  flip-refetches.patch's context is applyOrder's last lines and
+  unknown-plays.patch's is inside tuneByNumber, so a move keeps those two
+  functions on the root or regenerates the two patches.
+
+**key-scenario.sh live**, run the way the release step runs it (each tree's
+own scratch copy under private-bus.sh, the scenario's own nested headless
+cage, the same `env -u` set), with one change in both copies:
+stage_slow_tree also copied `Service-*.js`. Each scratch tree also got a git
+repository holding only a `v0.13.6` tag whose bin/omarchy-iptv is the real
+tag's file (sha256 746c7010...); without it the base read 139 passed, 2
+failed, G4 `notag` and G5 after it.
+
+| tree | result | time | load |
+|---|---|---|---|
+| base, 9ed04be | 141 passed, 0 failed | 598.5 s | 1.06 to 2.02 |
+| prototype | 141 passed, 0 failed | 598.0 s | 1.40 to 1.74 |
+
+The two PASS lists match name for name. rewind-scenario.sh was not run: as
+committed it starts no cage of its own, targets `$WAYLAND_DISPLAY`, refuses
+to start without wtype, and R13 sends 20 keys through wtype into the guide,
+which the lane's brief forbade and a headless cage without a keyboard or
+layer-shell cannot take. It stays a desk run, or needs a cage-aware rewrite.
+
+**git's write order** for the new names, in a scratch repository going from
+the 9ed04be allowlist commit to the split commit, watched with inotifywait:
+at git's default `checkout.workers=1`, both `git checkout` and `git merge
+--ff-only` (the update's verb) create and close Service-pip.js,
+Service-player.js, Service-rewind.js and Service-sources.js first, then
+delete and re-create Service.qml (index order: `-` is 0x2D, before `.`).
+With `-c checkout.workers=4 -c checkout.thresholdForParallelism=1` the
+order interleaves: Service.qml was created before Service-player.js and
+Service-sources.js closed. A downgrade deletes the four .js files, then
+rewrites Service.qml. The owner's global git configuration sets no
+`checkout.workers`.
+
+**Also seen, no id filed (the lead's to decide).**
+- The judge's rewind region holds 36 functions, 20 of them source switching,
+  probing, reconcile and cache jobs (beginSwitch through
+  activeSourceSummary); rewind proper is 16 functions and 8,747 B, not about
+  41 KB, which C3's first move should be re-measured on.
+- Through createObject's property map alone the rig's barConfig reached the
+  service with its layout arrays as sequences `Array.isArray` refuses, so
+  `Model.findBarEntry` returned `{}` and the service read no entry, in both
+  trees; assigning barConfig from script, as the host's syncPluginApis does,
+  fixed the rig. The host's createScopedPluginShell passes `barConfig` in
+  that map, so a freshly created service may read default settings until the
+  next syncPluginApis. Not measured on the host.
+- key-scenario.sh's PRIVATE segment (B42/B43) points a guide URL at
+  epg.example.test, and the helper asked the resolver for that name five
+  times a run, fifteen across the three runs; whether a query left the
+  machine was not observed. A literal 127.0.0.1 guide URL would avoid it.
+- With `checkout.workers` above 1 (a user's own git configuration)
+  Service.qml can be written before the code-behinds close, so D-REL-9's
+  ordering argument holds at git's default only.
+
+Crash journal 88 at the start, after every arm and run, and at the end; no
+crash card. The owner's ~/.cache/QtProject and ~/.cache/quickshell listings
+(path, size and mtime, 1,942 lines) were identical before and after; nothing
+of the owner's was reachable from the private runtime (`quickshell ipc`
+listed only the nested instance), and a stub hyprctl and a stub
+omarchy-notification-send first on PATH recorded 0 notices.
+
+### Part B: the readers, and every reader of Service.qml's text converted
+
+**The readers.** tests/service-files.js (node) and scripts/service_files.py
+(python), the two agreeing byte for byte:
+- `serviceFiles` / `service_files`: Service.qml, then each code-behind its
+  `import "<file>.js" as <Qualifier>` lines declare, in order;
+- `serviceText` / `service_text`: the INLINE view, each declaration line
+  dropped and each forwarder line replaced by its function's text (the
+  contiguous `//` lines directly above `  function F(` through the closing
+  brace's line), which is the one-file Service.qml a split is cut from, so a
+  text pin never moves;
+- a refusal by kind, never a guess: a script import in any other form, a
+  file or qualifier declared twice, a missing file, bytes that are not UTF-8,
+  a function declared twice or unclosed in a code-behind, a forwarder-shaped
+  line for a declared qualifier that is not exactly its function's, a
+  forwarder for a function the code-behind lacks, two forwarders for one, a
+  code-behind function no forwarder names.
+- Both read lines split at "\n" only and keep a "\r" as text (no
+  universal-newline translation, which the python readers' `read_text` had
+  applied: the same bytes on any tree but a CRLF one, where they now read
+  what node reads). The node reader's brace matcher is service-harness.js's
+  `scan`, copied so the reader loads nothing else, and held to it below.
+- `qa_service_files` and `qa_service_text` in scripts/qa-lib.sh ask the
+  python reader (one reader per engine, no third in shell): exit 1 and
+  nothing printed on a refusal or a declared file that is not there.
+
+**The shared fixture**, tests/fixtures/service-split/: a Service.qml with one
+code-behind (Service-demo.js: four moved functions, among them a regular
+expression, a template literal, a block comment and a string that each hold
+a brace, a banner comment directly attached, a nested function), inline.txt
+(its expected view, which is also the one-file text it was cut from), and
+cases.json (22 cases: two code-behinds in declaration order, a CRLF
+checkout, a root comment above a forwarder, a last line with no newline,
+and every refusal). Both engines run all of it.
+
+**Readers of Service.qml's text, found by shape** (every hit of
+`Service.qml` under tests/ and scripts/, 469 lines on 9ed04be, and the readers that do
+not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
+- Converted to the inline view: tests/Model.test.js's 26 reads (the
+  `serviceSource` constant, 17 `svcText` reads through `IPTV_SERVICE_QML`,
+  `relaunchTree`, `svcPath`, `sv`, four `src`/`text` reads, the
+  D-RUNG-4 inventory's `qmlLines`); tests/proto-run.mjs's service boot;
+  tests/test_pip.py `SERVICE`; tests/test_manifest.py; tests/test_state.py
+  (the deadline bound); tests/test_plugin_id.py (its Service.qml site);
+  the seams in chno-, id-rotate- and pip-scenario.sh (27 seam lines and 2
+  absent lines now name `@service`, which `seam` counts over
+  qa_service_text, so the scenarios' floors and qa-lib-test's line counts are
+  unchanged).
+- Converted to the files: the lastPersistFailure sweep in Model.test.js and
+  test_pip.py's stand-in sweep ("no shipped source names it", "every file a
+  stand-in could hide in"); pip-scenario.sh's two `absent` lines (over every
+  file qa_service_files names: a code-behind's own header is in no inline
+  view); test_census_dates.py's shipped sources (a census block in a
+  code-behind is reported under that file's own name); key-scenario.sh's
+  stage_slow_tree and rewind-scenario.sh's R16 slow tree (they copied
+  Service.qml by name and would have left a code-behind behind).
+- No reader: tests/player-world.js drives a booted harness and reads no
+  file; tests/service-harness.js takes the text it is handed (lane 2's).
+- Path only, left: run.sh and scripts/dev-harness/shell.qml load Service.qml
+  in place over `file://` (the engine resolves its imports, measured above);
+  the existence checks in key-, logo-, open- and rewind-scenario.sh; every
+  `git archive` export of a baseline; the 19 key-mutation and 8
+  chno-mutation patches (`git apply`); tests/test_release.py and
+  tests/test_defect_ledger.py (synthetic trees); test_shipped_copy.py
+  (ALLOWLIST-driven, `.js` among its extensions); test_host_load_patch.py
+  (the load patch serves only the QML entry points, measured above);
+  test_host_motion.py (animations are objects, which stay in Service.qml);
+  the host's own notifications Service.qml in test_host_notify_codes.py,
+  test_notify_hosts.py and test_host_text_format.py; comments and prose.
+- Guards, left for C2's `shipped_code` (lane 2): check-model-members,
+  -model-regex, -trim-shapes, -text-format, -theme-names, -color-literals,
+  -metric-literals, -qt-revisions and -readme-notices (each reads ALLOWLIST's
+  `.qml` entries), and their tests (test_color_literals, test_metric_literals,
+  test_qt_revisions, test_theme_names, test_model_members). check-defect-ledger
+  and the marketplace and double-encoding scans read every tracked file.
+- Outside this lane's files, a reader not converted:
+  scripts/qa-sources-scenarios.sh's `qa_defines_function "$ROOT/Service.qml"
+  switchSource`, which a forwarder line still satisfies.
+
+**Proofs.**
+1. Counts against 9ed04be, both run in this worktree under the heavy lock:
+   node 4056 to 4064 (the 8 new checks titled D-REL-14; the other 4056 the
+   same names, compared sorted), python 2927 to 2941 (the 14 of
+   tests/test_service_files.py; skipped 1 before and after), qa-lib-test 773
+   to 790 (17 new). The QML spec was not run: no file it loads changed (its
+   floor is 111). No floor in scripts/check.sh lowered or touched. One
+   python run made beside the three preflights below failed
+   test_epg's 2 s bound at 2,187 ms; alone it passed three times (1.1 to
+   1.2 s), and the final run, with nothing beside it, was 2941 OK.
+2. The engines agree: on this tree (names `Service.qml`, text equal to the
+   file) and on the fixture (names and text), each through the other's CLI,
+   in both suites; on all 22 shared cases.
+3. The round trip closes: the fixture's view is inline.txt byte for byte,
+   from the root and from Service.qml's own path; inline.txt cut again by the
+   reader's own function spans is the fixture's Service.qml byte for byte,
+   and each moved span is the code-behind's own; a CRLF copy reads CR for CR.
+   The node reader's brace matcher ends all 204 root functions of the tree's
+   Service.qml where service-harness.js's ends them.
+4. Rule 11, mutant readers, each one decision:
+   - node, `serviceText` returning Service.qml's own text whatever it
+     declares (drops the code-behind): 3 of 4064 red, all fixture checks (the
+     view, the moved-body pin, the agreement on the fixture text);
+     `serviceFiles` and `serviceNames` listing Service.qml alone: 1 red (the
+     fixture's files); `serviceText` returning "" on a tree with no
+     declarations: 77 FAIL lines and the suite aborted (a top-level harness
+     boot threw), so the converted readers are joined to it;
+   - python, the same three: test_service_files.py 5 of 14 red, 3 of 14
+     red, and for the empty text 2 of 14 plus test_manifest 1 of 14,
+     test_pip 15 failures and 1 error of 37, test_plugin_id 1 of 3,
+     test_state's deadline test an error;
+   - qa-lib.sh: `qa_service_files` printing Service.qml alone, 5 of 790 red
+     (the fixture's names, the copy, the CRLF copy, both slow trees: "0
+     same differs"); `qa_service_text` as `cat Service.qml`, 4 red; 9ed04be's
+     qa-lib.sh, 15 of the 17 new red, all but the two extractions, which go
+     red on a renamed `stage_slow_tree` or a changed end line instead; 9ed04be's
+     key- and rewind-scenario.sh under the new suite, the two slow-tree checks
+     red ("0 same differs").
+   - Real code, split in scratch: twelve of the tree's own functions
+     (handlePipInfoExit, pipApplyClients, pipRequestSnapshot, notePlayerPid,
+     focusPlayer, pipCheck, pipApplyPeek, togglePip, requestPip and
+     pipNoteStep into a Service-pip.js; adoptIdScheme and applyChannels into
+     a Service-ids.js), cut by the reader's own spans with forwarders, beside
+     a copy of the tree's model and other QML. Both readers read it back as
+     the tree's Service.qml, byte for byte. Through
+     `OMARCHY_IPTV_PLUGIN_ROOT`, the converted preflights read it as they read
+     the tree (pip 41 of 41, id-rotate 14 of 14, chno 14 and the same 1),
+     where 9ed04be's preflights, which grep Service.qml alone, read pip 37 and
+     4 failed (the provider spelling, the pid-narrowed window, the snapshot
+     key, `root.pipPeek()` at 1 of 2) and id-rotate 11 and 3 failed (all three
+     D-ID-3 seams). With `// STAND-IN-M2-05-V1` added to Service-pip.js's
+     header, which no inline view holds, the converted absence is red ("matched
+     1 in the service") and 9ed04be's passed it.
+5. `bash scripts/qa-lib-test.sh`: 790 passed, 0 failed, "all nineteen
+   key-mutation patches still apply" and "all eight chno-mutation patches
+   still apply" among them.
+6. `python3 scripts/release.py check`: 43 files, 22 runtime sources, the
+   largest Service.qml at 446,973 of 458,752 bytes: no shipped file changed.
+7. Every edited `.py`, `.js` and `.mjs` file, the fixture and the edited
+   shell scripts are ASCII.
+- The three preflights on the tree: pip 41 of 41 and id-rotate 14 of 14, as
+  on 9ed04be, line for line; chno 14 passed and 1 failed, as on 9ed04be
+  ("nowPlaying carries the number" looks for `chno: root.nowPlayingChno`,
+  which moved into `Model.ipcNowPlaying`; chno-scenario's preflight is not in
+  the gate), only the message now naming "the service".
+- Also green: split-helper.py --check, split-model.mjs --check,
+  check-defect-ledger, check-board-staleness, the marketplace, double-encoding
+  and SR-register scans, and every ALLOWLIST guard above. Crash journal 88 at
+  the start and at the end.

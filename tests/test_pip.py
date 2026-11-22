@@ -41,8 +41,10 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+import service_files  # noqa: E402  the service as the files Service.qml declares (D-REL-14)
 STUB = ROOT / "scripts" / "dev-harness" / "stub-hyprctl.py"
-SERVICE = (ROOT / "Service.qml").read_text(encoding="utf-8")
+# The service as one text: each forwarder read as the function it forwards to.
+SERVICE = service_files.service_text(str(ROOT))
 MODEL = model_files.model_source(str(ROOT))
 GUIDE = (ROOT / "Guide.qml").read_text(encoding="utf-8")
 
@@ -596,7 +598,8 @@ class ServiceShapeTest(unittest.TestCase):
         # build is fine, leaving one is not, and integration proves it with a
         # grep. This is that grep, run over every file a stand-in could hide
         # in rather than over the one it was known to be in.
-        for name in ["Service.qml", "Guide.qml", "BarWidget.qml"] + model_files.model_paths(str(ROOT)):
+        # D-REL-14: every file the service is made of, each code-behind too.
+        for name in service_files.service_names(str(ROOT)) + ["Guide.qml", "BarWidget.qml"] + model_files.model_paths(str(ROOT)):
             text = (ROOT / name).read_text(encoding="utf-8")
             for marker in ("STANDIN_", "STAND-IN-M2-05-V1"):
                 self.lacks(text, marker, "%s still carries a stand-in" % name)
