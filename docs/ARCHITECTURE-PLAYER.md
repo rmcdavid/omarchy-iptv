@@ -1749,7 +1749,10 @@ with nothing attached they had no reason to look anyway, since `stop()`
 reset the older start's question (`stopOlderStartOk`). So a player that
 outlived both stops -- each refused or superseded by another launcher --
 played on under an idle bar. Now `stop()` clears the confirmation, and when
-one was pending, or the settle it replaces was still running over an older
+one was pending, a re-read was still owed or any probe was in flight (the
+review of 8504ba8: the reattach's at a shell start, D-PLY-35's, the hunt's,
+each answering stale once the stop moves the sequence), or the settle it
+replaces was still running over an older
 start's player nothing had looked for or over the player a stop the shell
 issued itself was laddering (`stopByShell`), its own look and backstop look
 for it even with nothing attached: at most two probes, each finding nothing
@@ -1767,8 +1770,15 @@ shell stopped the player the zap was going into, and the play was dropped
 with no card. An ambiguous answer now records `playSeq` as it arms the
 re-read (`probeRetrySeq`), and when an intent has been issued since, the
 re-read is not sent and that answer ends as a stale one ends
-(`probeOverruled`): the play, or a stop, owns the outcome. Held by the
-service harness; not watched on a real player.]**
+(`probeOverruled`): the play owns the outcome, and a stop takes the owed
+re-read over (`stop()` carries `probeRetried`), so its own look and backstop
+look for that player even with nothing attached -- the review of 8504ba8,
+since the first build left a stop at a reattach with no look at all. From
+the same review: an unreadable answer to a probe an intent has overtaken is
+overruled as a stale one is (applyProbe's invalid branch ran before the
+staleness test and settled D-PLY-35's stopped start as failed over the newer
+play), and an unreadable answer it does act on owes no further re-read. Held
+by the service harness; not watched on a real player.]**
 
 While `stopping` is true, `play()` always takes the `startPlayer()` branch and
 never the IPC branch, so a zap can never be written to a dying socket
