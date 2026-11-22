@@ -14,12 +14,19 @@ import importlib.util
 import io
 import os
 import re
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHIPPED = ("Guide.qml", "BarWidget.qml", "Service.qml")
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
+
+# D-REL-14 C2: release.py's shipped_code, a code-behind among them once one
+# ships; a test that mutates each puts a line into a code-behind's first
+# function (tests/split_fixture.py).
+SHIPPED = tuple(os.path.relpath(entry.path, ROOT) for entry in split_fixture.shipped(ROOT))
 
 _spec = importlib.util.spec_from_file_location(
     "check_metric_literals", os.path.join(ROOT, "scripts", "check-metric-literals.py"))
@@ -68,8 +75,8 @@ class TheTree(Cases):
         with redirect_stdout(out):
             code = guard.main(["--root", ROOT])
         self.assertEqual(code, 0, out.getvalue())
-        m = re.search(r"metric literal guard: (\d+) metric binding\(s\) read in 3 file\(s\) "
-                      r"\((\d+) hardcoded number\(s\), (\d+) excused\), 0 problem", out.getvalue())
+        m = re.search(r"metric literal guard: (\d+) metric binding\(s\) read in %d file\(s\) "
+                      r"\((\d+) hardcoded number\(s\), (\d+) excused\), 0 problem" % len(SHIPPED), out.getvalue())
         self.assertIsNotNone(m, out.getvalue())
         # A scanner that stopped seeing bindings would be green on anything:
         # the guide alone binds well over a hundred metrics.
@@ -80,9 +87,10 @@ class TheTree(Cases):
         for name in SHIPPED:
             base = read(name)
             self.assertEqual(guard.judge(name, base)[0], [], name)
-            for line, metric, number in (("property int probeGap: 7", "probeGap", "7"),
-                                         ("property real probeRadius: Style.cornerRadius + 3", "probeRadius", "3")):
-                found, _ = guard.judge(name, inside_root(base, [line]))
+            for line, js, metric, number in (("property int probeGap: 7", "item.probeGap = 7", "probeGap", "7"),
+                                             ("property real probeRadius: Style.cornerRadius + 3",
+                                              "item.probeRadius = Style.cornerRadius + 3", "probeRadius", "3")):
+                found, _ = guard.judge(name, split_fixture.into_code(name, base, line, js))
                 self.assertEqual(len(found), 1, "%s + %s: %r" % (name, line, found))
                 self.assertIn("%s:" % name, found[0])
                 self.assertIn("`%s` is given the number %s " % (metric, number), found[0])
@@ -94,6 +102,28 @@ class TheTree(Cases):
         found, counts = guard.judge("Guide.qml", text)
         self.assertEqual(found, [])
         self.assertEqual(counts["excused"], 1)
+
+
+class ACodeBehind(unittest.TestCase):
+    """D-REL-14 C2: a code-behind is read through shipped_code."""
+
+    def run_tree(self, mutant=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp, mutant)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = guard.main(["--root", tmp])
+            return code, out.getvalue()
+
+    def test_the_fixture_is_green_and_its_code_behind_read(self):
+        code, out = self.run_tree()
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 metric binding(s) read in 2 file(s) (0 hardcoded number(s), 0 excused), 0 problem(s)", out)
+
+    def test_a_hardcoded_metric_in_a_code_behind_is_red(self):
+        code, out = self.run_tree("item.radius = 4")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"Service-demo\.js:\d+:\d+: `radius` is given the number 4 ")
 
 
 class WhatIsRefused(Cases):

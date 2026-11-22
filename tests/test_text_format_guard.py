@@ -21,6 +21,12 @@ case (f2, f2b) now drives both directions and a non-Text child: the one
 direction it used to drive went red under the depth mutation only through a
 duplicate-line artifact, while the two added fixtures pass a depth-blind
 scanner outright (exit 0), measured 2026-10-02.
+
+D-REL-14 C2: the no-argument list is release.py's shipped_code, the
+code-behinds Service.qml declares among it, so the tree's file count is
+derived from it (g); a Text built from a string by Qt.createQmlObject, which
+the scan masks like every string, is refused in a .qml and in the guards'
+fixture code-behind (g4, i), both red on ab3d287's guard.
 """
 
 import os
@@ -32,6 +38,8 @@ import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tests'))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
 GUARD = os.path.join(ROOT, 'scripts', 'check-text-format.py')
 
 HEAD = 'import QtQuick\n\nItem {\n'
@@ -363,7 +371,31 @@ class GuardCase(unittest.TestCase):
     def test_g_real_tree_passes(self):
         status, out = run([], cwd=ROOT)
         self.assertEqual(status, 0, out)
-        self.assertIn(' in 3 file(s)', out)
+        self.assertIn(' in %d file(s)' % len(split_fixture.shipped(ROOT)), out)
+
+    # (g4) D-REL-14 C2: a code-behind is read through shipped_code, and the
+    # one way its code could make a Text -- from a string -- is refused.
+    def test_g4_a_code_behind_is_read_and_a_text_built_from_a_string_there_is_red(self):
+        split_fixture.tree(self.tmp)
+        status, out = run(['--root', self.tmp])
+        self.assertEqual(status, 0, out)
+        self.assertIn('1 Text block(s) in 2 file(s)', out)
+        shutil.rmtree(self.tmp)
+        os.makedirs(self.tmp)
+        split_fixture.tree(self.tmp, 'Qt.createQmlObject("import QtQuick; Text { text: \'x\' }", root)')
+        status, out = run(['--root', self.tmp])
+        self.assertEqual(status, 1, out)
+        self.assertRegex(out, r'Service-demo\.js:\d+: createQmlObject builds QML out of a string')
+
+    # (i) and in a .qml, where a string handed to it is masked the same way.
+    def test_i_create_qml_object_in_a_qml_file_is_red(self):
+        path = self.write('C.qml', HEAD + '  Text {\n    textFormat: Text.PlainText\n  }\n'
+                          '  function make() { return Qt.createQmlObject("import QtQuick; Text { text: n }", root) }\n'
+                          '  // createQmlObject( in a comment is no call\n' + TAIL)
+        status, out = run([path])
+        self.assertEqual(status, 1, out)
+        self.assertIn('C.qml:7: createQmlObject builds QML out of a string', out)
+        self.assertIn('1 problem(s)', out)
 
     # (g2) the no-argument list is derived from ALLOWLIST in
     # scripts/release.py, so a shipped file is covered because it ships, not

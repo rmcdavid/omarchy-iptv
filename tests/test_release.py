@@ -1708,6 +1708,63 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class ShippedCodeTest(unittest.TestCase):
+    """D-REL-14 C2: shipped_code(root), the files of code the gate's guards
+    of the shipped QML read -- ALLOWLIST's .qml entries, each followed by the
+    code-behinds it declares, with the file whose imports each runs under.
+    Rule 11: each test is red on ab3d287, which had no shipped_code."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, 'tests'))
+        import split_fixture
+        self.fixture = split_fixture
+
+    def test_on_this_tree_it_is_the_allowlists_qml_and_the_services_code_behinds(self):
+        got = [(os.path.relpath(e.path, ROOT), os.path.relpath(e.importer, ROOT)) for e in release.shipped_code(ROOT)]
+        want = []
+        for rel in release.ALLOWLIST:
+            if rel.endswith('.qml'):
+                want.append((rel, rel))
+                if rel == 'Service.qml':
+                    want += [(n, rel) for n in release.service_files.service_names(ROOT)[1:]]
+        self.assertEqual(got, want)
+        self.assertGreaterEqual(len(got), 3)
+
+    def test_a_code_behind_follows_its_service_and_runs_under_its_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            got = [(os.path.basename(e.path), os.path.basename(e.importer)) for e in release.shipped_code(tmp)]
+        self.assertEqual(got, [('Service.qml', 'Service.qml'), ('Service-demo.js', 'Service.qml')])
+
+    def test_the_allowlist_is_the_roots_own_read_as_a_literal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, 'scripts'))
+            with open(os.path.join(tmp, 'scripts', 'release.py'), 'w') as fh:
+                fh.write('import sys\nsys.exit(3)\nALLOWLIST = ("Only.qml", "x.mjs")\n')
+            with open(os.path.join(tmp, 'Only.qml'), 'w') as fh:
+                fh.write('import QtQuick\nItem {}\n')
+            self.assertEqual([os.path.basename(e.path) for e in release.shipped_code(tmp)], ['Only.qml'])
+            with open(os.path.join(tmp, 'scripts', 'release.py'), 'w') as fh:
+                fh.write('LIST = ()\n')
+            with self.assertRaises(ValueError):
+                release.shipped_code(tmp)
+
+    def test_only_the_service_declares_code_behinds_and_a_refused_service_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fixture.tree(tmp)
+            with open(os.path.join(tmp, 'Guide.qml'), 'w') as fh:
+                fh.write('import QtQuick\nimport "Service-demo.js" as ServiceDemo\nItem {}\n')
+            self.assertEqual(release.code_behinds_of(os.path.join(tmp, 'Guide.qml')), [])
+            os.remove(os.path.join(tmp, 'Service-demo.js'))
+            # The readers' file list still names it; its text is refused.
+            self.assertEqual([os.path.basename(p) for p in release.code_behinds_of(os.path.join(tmp, 'Service.qml'))],
+                             ['Service-demo.js'])
+            with open(os.path.join(tmp, 'Service.qml'), 'a') as fh:
+                fh.write('import "Helpers.js" as Helpers\n')
+            with self.assertRaises(release.service_files.ServiceFilesError):
+                release.shipped_code(tmp)
+
+
 class ChangelogHeadingTest(unittest.TestCase):
     """The join the 0.8.0 cut did not have.
 

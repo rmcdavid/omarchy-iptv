@@ -44,6 +44,22 @@ class TrimGuardTest(unittest.TestCase):
         model_parts = len([n for n in os.listdir(os.path.join(ROOT, "model")) if n.endswith(".mjs")])
         self.assertGreaterEqual(files, 1 + model_parts + 3)
 
+    def test_a_code_behind_is_read_and_a_trim_v4_lacks_there_is_refused(self):
+        # D-REL-14 C2: the files are release.py's shipped_code, a code-behind
+        # of Service.qml among them (red on ab3d287's guard, which read
+        # ALLOWLIST's .qml entries alone).
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import split_fixture
+        parts = len([n for n in os.listdir(os.path.join(ROOT, "model")) if n.endswith(".mjs")])
+        for mutant, rc in ((None, 0), ("text = text.trimEnd()", 1)):
+            with tempfile.TemporaryDirectory() as tmp:
+                split_fixture.tree(tmp, mutant)
+                done = run("--root", tmp)
+                self.assertEqual(done.returncode, rc, done.stdout)
+                self.assertIn("trim shape guard: %d file(s)" % (1 + parts + 2), done.stdout)
+                if rc:
+                    self.assertRegex(done.stdout, r"Service-demo\.js:\d+: .*trimEnd")
+
     def test_each_quadratic_trim_shape_is_refused(self):
         for line in ['var a = s.replace(/\\s+$/, "")',
                      'var a = s.replace(/^\\s+|\\s+$/g, "")',

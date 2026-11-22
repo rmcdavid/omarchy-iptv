@@ -10,17 +10,26 @@ name the host kit also exports, built as a copy of the installed type files.
 Rule 11: on rel-0160 (968d097), before Guide.qml and BarWidget.qml were
 qualified, the guard printed 25 problems (Guide.qml 24, BarWidget.qml 1) and
 exited 1.
+
+D-REL-14 C2: the shipped files are release.py's shipped_code, so the tree's
+count and the code-behinds mutated here are derived from it, each judged
+under Service.qml's imports; an unqualified Color in the guards' fixture
+code-behind is red; and a directory import in single quotes is red, which
+the double-quote-only reading passed (red on ab3d287's guard, both).
 """
 import importlib.util
 import io
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import split_fixture  # noqa: E402  the shipped code, and a split tree (D-REL-14)
 HOST = os.path.join(os.environ.get("OMARCHY_PATH", "/usr/share/omarchy"), "shell")
 QML_DIR = "/usr/lib/qt6/qml"
 
@@ -75,7 +84,7 @@ class ThemeNameGuard(unittest.TestCase):
         m = re.match(r"^theme name guard: (\d+) unqualified host-kit use\(s\) in (\d+) file\(s\)", out)
         self.assertIsNotNone(m, out)
         self.assertGreater(int(m.group(1)), 200, "the scanner stopped seeing the files' Style and Util uses")
-        self.assertEqual(3, int(m.group(2)))
+        self.assertEqual(len(split_fixture.shipped(ROOT)), int(m.group(2)))
 
     def test_the_host_kit_and_the_imports_are_read_from_the_installed_files(self):
         # omarchy 4.5.0-3's Commons/qmldir (2026-11-06, F-GATE-21): ten
@@ -120,6 +129,33 @@ class ThemeNameGuard(unittest.TestCase):
         problems, _ = self.judge("Service.qml", text)
         self.assertEqual(1, len(self.collisions(problems)), problems)
         self.assertIn("Service.qml:", problems[0])
+
+    def test_an_unqualified_color_in_each_code_behind_is_red(self):
+        # D-REL-14 C2: none ships yet, so this loops over nothing until the
+        # first move; then each code-behind is judged under Service.qml's
+        # imports, which hold no qs.Commons unqualified, as above.
+        for entry in split_fixture.shipped(ROOT):
+            if entry.importer == entry.path:
+                continue
+            name = os.path.relpath(entry.path, ROOT)
+            text = split_fixture.into_code(name, read(name), "", "var probeTint = Color.accent")
+            problems, _ = guard.judge(name, text, self.kit, QML_DIR, importer_text=read(os.path.relpath(entry.importer, ROOT)))
+            self.assertEqual(1, len(self.collisions(problems)), (name, problems))
+
+    def run_tree(self, mutant=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            split_fixture.tree(tmp, mutant)
+            return self.run_main("--root", tmp, "--host", HOST, "--qml-dir", QML_DIR)
+
+    def test_the_fixture_code_behind_is_read_under_its_importers_imports(self):
+        status, out = self.run_tree()
+        self.assertEqual(0, status, out)
+        self.assertIn(" in 2 file(s)", out)
+
+    def test_an_unqualified_color_in_a_code_behind_is_red(self):
+        status, out = self.run_tree("item.color = Color.accent")
+        self.assertEqual(1, status, out)
+        self.assertRegex(out, r"Service-demo\.js:\d+:\d+: `Color` is qs\.Commons's, and QtQuick also exports")
 
     # ---- where a use can hide --------------------------------------------
 
@@ -291,6 +327,12 @@ class ThemeNameGuard(unittest.TestCase):
 
     def test_an_unqualified_directory_import_is_red(self):
         problems, _ = self.judge("X.qml", 'import QtQuick\nimport "parts"\nimport qs.Commons\n'
+                                          "\nItem {\n  width: Style.space(1)\n}\n")
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn('directory import ("parts")', problems[0])
+
+    def test_an_unqualified_directory_import_in_single_quotes_is_red(self):
+        problems, _ = self.judge("X.qml", "import QtQuick\nimport 'parts'\nimport qs.Commons\n"
                                           "\nItem {\n  width: Style.space(1)\n}\n")
         self.assertEqual(1, len(problems), problems)
         self.assertIn('directory import ("parts")', problems[0])

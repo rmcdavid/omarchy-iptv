@@ -49,7 +49,9 @@ refused, `scaled(n)` called with a variable is not followed). A ternary
 broken so that its middle operand starts a line reads that operand as a
 name, and misses, as the colour guard's does.
 
-With no FILE, the .qml entries of ALLOWLIST in scripts/release.py. Exit 0
+With no FILE, scripts/release.py's shipped_code: the .qml entries of
+ALLOWLIST and the code-behinds Service.qml declares (D-REL-14), whose
+assignments are read by the same tokenizer and held to the same rule. Exit 0
 clean, 1 on a problem, 2 when a file or the allowlist cannot be read.
 """
 import argparse
@@ -284,7 +286,7 @@ def main(argv=None):
     parser.add_argument("files", nargs="*")
     args = parser.parse_args(argv)
     try:
-        files = args.files or theme.allowlisted_qml(args.root)
+        files = args.files or [entry.path for entry in theme.shipped_code(args.root)]
     except (OSError, ValueError, SyntaxError) as exc:
         print("metric literal guard: cannot read the allowlist: %s" % exc)
         return 2

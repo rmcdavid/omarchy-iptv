@@ -58,7 +58,8 @@ the parser cannot read is a problem, not a pass. One sample character at a
 time is the only input a pattern is ever run on here.
 
 WHAT IT SCANS. The same files as scripts/check-trim-shapes.py (Model.mjs,
-model/*.mjs, every .qml in ALLOWLIST), through its own scanner, so the two
+model/*.mjs, every .qml in ALLOWLIST and the code-behinds Service.qml
+declares: release.py's shipped_code, D-REL-14), through its own scanner, so the two
 guards cannot drift on what a regex literal is. Lines that are comments are
 not code and are not read. `--root DIR` scans another tree (the red run
 against the code before D-PERF-11); FILE arguments scan exactly those files.

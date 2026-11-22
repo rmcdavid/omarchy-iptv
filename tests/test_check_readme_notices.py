@@ -12,6 +12,11 @@ Seen red on the tree: on a9d20f9 the checker names README.md:767
 `Playlist warning:` and README.md:776 `Guide data warning:` (2 problems over
 28 quotes) -- the plugin never shows either prefix alone, so the README now
 quotes them elided, `Playlist warning: ...`, and the tree reads 0 problems.
+
+D-REL-14 C2: the shipped code files are release.py's shipped_code, so a
+notice only a code-behind of Service.qml says joins, and changing it there is
+red (on ab3d287's checker, which read ALLOWLIST's .qml and .mjs entries, the
+quote matched nothing).
 """
 import io
 import os
@@ -98,6 +103,26 @@ class SyntheticTree(unittest.TestCase):
         self.assertIn('README.md:5: skipped `SUPER + SHIFT + T` (a key chord)', out)
         self.assertIn('README.md:5: skipped `OMARCHY_IPTV_URL=... python3 ...` (a command)', out)
         self.assertIn('readme notices: 7 quote(s) in 1 file(s), 5 joined (4 exact, 0 composed, 1 elided), 2 skipped, 4 shipped code file(s), 0 composed string(s), 0 problem(s)', out)
+
+    def test_a_notice_only_a_code_behind_says_joins_and_changing_it_there_is_red(self):
+        sys.path.insert(0, os.path.join(ROOT, 'tests'))
+        import split_fixture
+        self.write('scripts/release.py', RELEASE.replace('    "Guide.qml",\n',
+                                                         '    "Guide.qml",\n    "Service.qml",\n    "Service-demo.js",\n'))
+        for name in ('Service.qml', 'Service-demo.js'):
+            shutil.copyfile(os.path.join(split_fixture.GUARDS, name), os.path.join(self.dir, name))
+        self.write('README.md', README + 'The demo card says `Demo notice only the code-behind says`.\n')
+        rc, out = self.run_checker()
+        self.assertEqual(rc, 0, out)
+        self.assertIn('8 quote(s) in 1 file(s), 6 joined (5 exact, 0 composed, 1 elided), 2 skipped, '
+                      '6 shipped code file(s)', out)
+        demo = os.path.join(self.dir, 'Service-demo.js')
+        with io.open(demo, encoding='utf-8') as fh:
+            text = fh.read()
+        self.write('Service-demo.js', text.replace('"Demo notice only the code-behind says"', '"Demo notice reworded"'))
+        rc, out = self.run_checker()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('`Demo notice only the code-behind says` matches no shipped string', out)
 
     def test_a_quote_the_plugin_no_longer_shows_is_red_and_named(self):
         self.write('Guide.qml', GUIDE.replace('"Set a playlist first"', '"Add a playlist first"'))

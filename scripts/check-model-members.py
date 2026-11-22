@@ -66,12 +66,23 @@ import each other by name and are judged by node and by `split-model.mjs
 --check`. It is not a substitute for the node suite or the QML spec, which
 call the model for real.
 
+A code-behind of Service.qml (D-REL-14) has no imports of its own and runs
+under Service.qml's, so a `--file` that is Service.qml is judged with every
+code-behind it declares (scripts/release.py's code_behinds_of, through the
+service's readers), each under Service.qml's aliases and reported under its
+own name; a code-behind that names the model nowhere is not red, since the
+import is its importer's, judged there. Both quotes are read in an import
+(`import 'Model.mjs' as M` loads): this read double quotes only until
+D-REL-14's C2, and a file importing the model in single quotes was judged as
+importing nothing.
+
 Usage: check-model-members.py --root ROOT --file FILE [--file FILE ...]
 Exit 0 and one summary line per file when every reference is a known name;
 1 and one line per problem otherwise. Python 3 standard library only.
 """
 
 import argparse
+import importlib.util
 import os
 import re
 import sys
@@ -80,15 +91,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_files  # noqa: E402
 
 # `import "Model.mjs" as Model`, `import "../Model.mjs" as Model`: the alias
-# is whatever the file names it, read from the import itself.
+# is whatever the file names it, read from the import itself, in either quote.
 IMPORT_MODEL = re.compile(
-    r'^[ \t]*import[ \t]+"(?:[^"\n]*/)?Model\.mjs"[ \t]+as[ \t]+(?P<alias>[A-Za-z_$][A-Za-z0-9_$]*)',
+    r'^[ \t]*import[ \t]+(?:"(?:[^"\n]*/)?Model\.mjs"|\'(?:[^\'\n]*/)?Model\.mjs\')[ \t]+as[ \t]+'
+    r'(?P<alias>[A-Za-z_$][A-Za-z0-9_$]*)',
     re.M)
 
 # Any other script a QML file imports by alias: `import "harness-lib.js" as
 # HarnessLib`. A call into one of these may be handed the model as a value.
 IMPORT_SCRIPT = re.compile(
-    r'^[ \t]*import[ \t]+"(?P<path>[^"\n]*\.m?js)"[ \t]+as[ \t]+(?P<alias>[A-Za-z_$][A-Za-z0-9_$]*)',
+    r'^[ \t]*import[ \t]+(?:"(?P<path>[^"\n]*\.m?js)"|\'(?P<path1>[^\'\n]*\.m?js)\')[ \t]+as[ \t]+'
+    r'(?P<alias>[A-Za-z_$][A-Za-z0-9_$]*)',
     re.M)
 
 IDENT = re.compile(r'[A-Za-z_$][A-Za-z0-9_$]*')
@@ -329,8 +342,9 @@ def _handed_to(toks, k, libraries):
     return '%s.%s' % (lib.text, fn.text)
 
 
-def references(text):
-    """(refs, handed, unjudged) for one QML file.
+def references(text, head=None):
+    """(refs, handed, unjudged) for one QML file, its aliases read from
+    `head` when given (a code-behind's importer) and from `text` otherwise.
 
     refs are (line, col, name) for every `<Alias>.<name>`, `<Alias>?.<name>`
     and `<Alias>["<name>"]` in code, col at the name as qmllint reports it.
@@ -339,8 +353,8 @@ def references(text):
     members that script uses are judged where that script is run, not here.
     unjudged are (line, col, why) for every other use of the alias in code.
     Raises ScanError when the scanner loses its place."""
-    names = set(aliases(text))
-    libraries = set(script_aliases(text))
+    names = set(aliases(text if head is None else head))
+    libraries = set(script_aliases(text if head is None else head))
     refs, handed, unjudged = [], [], []
     if not names:
         return refs, handed, unjudged
@@ -373,15 +387,17 @@ def references(text):
     return refs, handed, unjudged
 
 
-def judge(qml_text, names, label):
+def judge(qml_text, names, label, importer_text=None):
     """(problems, refs, handed) for one QML file: every complaint, the
-    references it judged and the hand-overs to another script it did not."""
+    references it judged and the hand-overs to another script it did not.
+    A code-behind passes its importer's text: its aliases are those."""
     known = set(names)
-    alias_names = aliases(qml_text or '')
+    own = importer_text is None
+    alias_names = aliases((qml_text if own else importer_text) or '')
     if not alias_names:
         return [], [], []
     try:
-        refs, handed, unjudged = references(qml_text)
+        refs, handed, unjudged = references(qml_text, None if own else importer_text)
     except ScanError as error:
         return ['%s: the scanner lost its place at %s, so nothing after it is judged; '
                 'fix the source or teach the scanner the form' % (label, error)], [], []
@@ -389,7 +405,7 @@ def judge(qml_text, names, label):
                 % (label, line, col, name) for line, col, name in refs if name not in known]
     problems += ['%s:%d:%d: Model.mjs is %s; this guard cannot judge that use'
                  % (label, line, col, why) for line, col, why in unjudged]
-    if not refs:
+    if own and not refs:
         problems.append('%s imports Model.mjs as %s and the scanner found no reference to it: '
                         'it read nothing, or the import is dead; re-measure before trusting it'
                         % (label, ', '.join(alias_names)))
@@ -400,6 +416,14 @@ def problems_for(qml_text, names, label):
     """Every complaint about one QML file, and how many references it judged."""
     problems, refs, _ = judge(qml_text, names, label)
     return problems, len(refs)
+
+
+def _release():
+    spec = importlib.util.spec_from_file_location('release', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                         'release.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def main(argv=None):
@@ -415,16 +439,31 @@ def main(argv=None):
         return 1
     status = 0
     summaries = []
+    release = _release()
+    # Each --file, then, for a Service.qml, each code-behind it declares,
+    # judged under its imports.
+    pairs = []
     for path in args.file:
+        pairs.append((path, path))
+        try:
+            pairs.extend((cb, path) for cb in release.code_behinds_of(path))
+        except release.service_files.ServiceFilesError as error:
+            print('model members: %s: the service\'s files are refused by its readers: %s' % (path, error))
+            status = 1
+    for path, importer in pairs:
         try:
             with open(path, encoding='utf-8') as fh:
                 qml_text = fh.read()
+            importer_text = None
+            if importer != path:
+                with open(importer, encoding='utf-8') as fh:
+                    importer_text = fh.read()
         except (OSError, UnicodeDecodeError) as error:
             print('model members: %s is unreadable: %s' % (path, error))
             status = 1
             continue
         label = os.path.basename(path)
-        problems, refs, handed = judge(qml_text, names, label)
+        problems, refs, handed = judge(qml_text, names, label, importer_text)
         for p in problems:
             print(p)
         if problems:
@@ -432,6 +471,8 @@ def main(argv=None):
         else:
             summary = ('%s: %d Model reference(s) in code, each a name Model.mjs exports (%d names)'
                        % (label, len(refs), len(names)))
+            if importer_text is not None:
+                summary += ", judged under %s's imports" % os.path.basename(importer)
             if handed:
                 summary += '; handed whole to %s, judged where that runs' % ', '.join(
                     '%s at %d' % (callee, line) for line, _, callee in handed)

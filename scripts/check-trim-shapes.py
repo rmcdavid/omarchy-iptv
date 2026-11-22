@@ -28,10 +28,11 @@ An alternative anchored at `^` is tried at one position only, so `^\\s+$` and
 `/^[0-9]+$/` pass. Lines that are comments (`//`, `*`) are not code and are
 not read.
 
-WHAT IT SCANS. Model.mjs, model/*.mjs and every .qml entry of ALLOWLIST in
-scripts/release.py (read with ast, nothing in release.py runs). `--root DIR`
-scans another tree (the red run against the code before the change); FILE
-arguments scan exactly those files.
+WHAT IT SCANS. Model.mjs, model/*.mjs and scripts/release.py's shipped_code:
+every .qml entry of ALLOWLIST and the code-behinds Service.qml declares
+(D-REL-14), ALLOWLIST read with ast out of the scanned tree's own release.py,
+so no code of that tree runs. `--root DIR` scans another tree (the red run
+against the code before the change); FILE arguments scan exactly those files.
 
 Exit 0 and one summary line ("trim shape guard: N file(s), M regex
 literal(s), 0 problem(s)") when clean; exit 1 with file:line: reason for each
@@ -39,6 +40,7 @@ problem otherwise. ASCII only (CLAUDE.md rule 8). Not shipped.
 """
 import ast
 import glob
+import importlib.util
 import os
 import re
 import sys
@@ -62,9 +64,22 @@ def allowlisted_qml(root):
     raise ValueError("%s has no ALLOWLIST assignment" % path)
 
 
+def shipped_code(root):
+    """release.py's shipped_code(root), as paths: the code-behinds after
+    Service.qml. Raises ValueError when the service's readers refuse it."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("release", os.path.join(here, "release.py"))
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    try:
+        return [entry.path for entry in release.shipped_code(root)]
+    except release.service_files.ServiceFilesError as error:
+        raise ValueError("the service's files are refused by its readers: %s" % error)
+
+
 def scanned_files(root):
     files = [os.path.join(root, "Model.mjs")] + sorted(glob.glob(os.path.join(root, "model", "*.mjs")))
-    return files + allowlisted_qml(root)
+    return files + shipped_code(root)
 
 
 def regex_literals(line):

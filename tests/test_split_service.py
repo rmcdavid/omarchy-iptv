@@ -12,9 +12,10 @@ service's files, the move that cuts them, and the round trip back.
     from, byte for byte, red on a one-byte mutant of a code-behind;
   * --cut: the readers' fixture cut again from its inline.txt is the
     fixture, file for file (but a new code-behind's header); this tree's
-    Service.qml cut for three functions verifies and goes red on a one-byte
-    mutant; a cut appended to a code-behind REV already holds; and the cuts
-    it refuses, writing nothing.
+    service (its inline view, the one-file text on a split tree too) cut for
+    three functions verifies and goes red on a one-byte mutant; a cut
+    appended to a code-behind REV already holds; and the cuts it refuses,
+    writing nothing.
 
 Rule 11: each refusal kind's case is wrong on a one-decision mutant of the
 judge, and the round trip on a one-byte mutant; docs/QA-RESULTS.md "D-REL-14:
@@ -110,11 +111,12 @@ class ThisTree(unittest.TestCase):
     def test_check_is_clean_and_judges_every_member_site(self):
         problems, counts = ss.judge(*ss.tree_inputs(ROOT), qml_dir=QML_DIR)
         self.assertEqual(problems, [])
-        self.assertEqual((counts["files"], counts["code_behinds"], counts["forwarders"]), (1, 0, 0))
-        # The root's member sites in Service.qml: 2,267 on ab3d287. A judge
-        # that stopped reading them would pass anything.
+        self.assertEqual(counts["files"], 1 + counts["code_behinds"])
+        # The root's member sites in the service's files: 2,267 on ab3d287,
+        # all in Service.qml, and the same over Part A's four-code-behind
+        # prototype. A judge that stopped reading them would pass anything.
         self.assertGreater(counts["sites"], 2000)
-        self.assertGreater(counts["root_functions"], 150)
+        self.assertGreater(counts["root_functions"] + counts["forwarders"], 150)
 
     def test_the_gate_command_is_clean_and_runs_its_own_cases(self):
         rc, out = run("--check", "--root", ROOT, "--qml-dir", QML_DIR)
@@ -227,7 +229,7 @@ class Cut(unittest.TestCase):
                          body_after_header(raw(os.path.join(FIXTURE, "Service-demo.js"))))
 
     def test_this_trees_service_cut_for_three_functions_verifies_and_a_mutant_is_red(self):
-        self.repo = Repo({"Service.qml": raw(os.path.join(ROOT, "Service.qml"))})
+        self.repo = Repo({"Service.qml": ss.service_files.service_text(ROOT)})
         rev = git(self.repo.dir, "rev-parse", "HEAD").strip()
         rc, out = self.cut("--domain", "pip", "togglePip", "requestPip", "pipConfig")
         self.assertEqual(rc, 0, out)
@@ -254,7 +256,7 @@ class Cut(unittest.TestCase):
         self.assertEqual(after, before, "a refused cut wrote a file")
 
     def test_the_cuts_it_refuses_write_nothing(self):
-        self.repo = Repo({"Service.qml": raw(os.path.join(ROOT, "Service.qml"))})
+        self.repo = Repo({"Service.qml": ss.service_files.service_text(ROOT)})
         self.refused("name", "--domain", "pip", "noSuchFunction")
         self.refused("name", "--domain", "pip", "togglePip", "togglePip")
         self.refused("domain", "--domain", "Pip", "togglePip")

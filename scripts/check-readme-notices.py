@@ -18,10 +18,12 @@ rule and EVERY skip is printed with its reason: a quote this script stops
 looking at is visible on the gate's log, never silently exempt.
 
 WHAT JOINS. A notice joins when it is
-  exact:    equal to a string literal in a shipped code file -- the .qml and
-            .mjs entries of ALLOWLIST in scripts/release.py and the helper's
-            stub and parts (bin/omarchy-iptv, bin/helper/*.py); comments and
-            python docstrings are not copy and are not read;
+  exact:    equal to a string literal in a shipped code file -- the .mjs
+            entries of ALLOWLIST in scripts/release.py, its shipped_code (the
+            .qml entries and the code-behinds Service.qml declares, D-REL-14)
+            and the helper's stub and parts (bin/omarchy-iptv,
+            bin/helper/*.py); comments and python docstrings are not copy and
+            are not read;
   composed: equal to what a named composer returns with the shipping
             constants -- `Model.sourceErrorMessage(code, {})` over every key
             the sources table declares, run through node against the real
@@ -42,6 +44,7 @@ to read (default README.md under the root). ASCII only (CLAUDE.md rule 8).
 Not shipped.
 """
 import ast
+import importlib.util
 import io
 import json
 import os
@@ -70,8 +73,19 @@ def allowlist(root):
     return []
 
 
+def release_module():
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("release", os.path.join(here, "release.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def shipped_code_files(root):
-    files = [f for f in allowlist(root) if f.endswith((".qml", ".mjs"))]
+    """Repo-relative: release.py's shipped_code (the .qml entries and the
+    code-behinds after Service.qml), the model's .mjs entries, the helper."""
+    code = [os.path.relpath(entry.path, root) for entry in release_module().shipped_code(root)]
+    files = code + [f for f in allowlist(root) if f.endswith(".mjs")]
     helper = [f for f in allowlist(root) if f.startswith("bin/")]
     return files + helper
 
