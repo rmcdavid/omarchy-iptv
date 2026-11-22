@@ -992,8 +992,14 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // boot it. Rule 11: red on ab3d287's harness, which reads a file set as a
 // string, and on one-decision mutants of this one (the readers' verdict
 // skipped, the code-behinds left uncompiled, the inline view compiled in
-// place of the files); docs/QA-RESULTS.md "D-REL-14: the splitter and its
-// guards" has the counts.
+// place of the files); and, by the fix pass on 2a4ab03, the moved fetchLogos
+// called for real (it names the id logoFetchProc bare, so it is red on a
+// harness that compiles a code-behind in a scope of its own), and
+// serviceSet read from disk -- the readers' fixture, a cut of this tree
+// written as files, and a split Service.qml copied without its code-behind
+// -- red on a serviceSet that keys the files by path or drops its own
+// verdict; docs/QA-RESULTS.md "D-REL-14: the splitter and its guards" has
+// the counts.
 ;(function () {
   const H = require("./service-harness.js")
   const SF = serviceReader
@@ -1041,8 +1047,43 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
     }
     hs.unstub("fetchLogos")
     out.unstubbed = /return ServiceSources\.fetchLogos\(\)/.test(String(hs.root.fetchLogos))
+    // Called for real: the moved body names the id logoFetchProc bare, which
+    // only the root's own scope holds (the shell runs a code-behind there).
+    h1.unstub("fetchLogos")
+    const logos = (h) => { try { return JSON.stringify(h.root.fetchLogos()) } catch (e) { return "threw " + e.message } }
+    out.logos = [logos(hs), logos(h1)]
     return out
-  }, { readsBack: true, forwarder: true, status: true, source: true, disk: true, stubbed: true, unstubbed: true })
+  }, { readsBack: true, forwarder: true, status: true, source: true, disk: true, stubbed: true, unstubbed: true, logos: ["false", "false"] })
+
+  checkCall("D-REL-14 C2 (serviceSet): the file set is read from disk as the files Service.qml declares, by name -- the readers' fixture from its root and from Service.qml's own path, and a cut of this tree written as files, which boots and answers as the one text does -- and a split Service.qml copied without its code-behind is refused as missing", () => {
+    const fs = require("fs"), path = require("path")
+    const FIX = path.join(__dirname, "fixtures", "service-split")
+    const raw = f => fs.readFileSync(f, "utf8")
+    const canon = s => JSON.stringify({ service: s.service, files: Object.keys(s.files).sort().map(k => [k, s.files[k]]) })
+    const want = canon({ service: raw(path.join(FIX, "Service.qml")), files: { "Service-demo.js": raw(path.join(FIX, "Service-demo.js")) } })
+    const work = fs.mkdtempSync(path.join(require("os").tmpdir(), "omarchy-iptv-service-set-"))
+    try {
+      const set = cutSet(serviceSource, MOVES)
+      fs.mkdirSync(path.join(work, "split"))
+      fs.writeFileSync(path.join(work, "split", "Service.qml"), set.service)
+      for (const f in set.files) fs.writeFileSync(path.join(work, "split", f), set.files[f])
+      fs.mkdirSync(path.join(work, "lone"))
+      fs.copyFileSync(path.join(FIX, "Service.qml"), path.join(work, "lone", "Service.qml"))
+      const got = SF.serviceSet(path.join(work, "split"))
+      const status = (svc) => { try { return H.bootService(svc, Model, OPTS).ipc.status() } catch (e) { return "threw " + e.message } }
+      let lone
+      try { SF.serviceSet(path.join(work, "lone")); lone = "returned" } catch (e) { lone = e instanceof SF.ServiceFilesError ? e.kind : "threw: " + e.message }
+      return {
+        fixture: canon(SF.serviceSet(FIX)) === want,
+        viaPath: canon(SF.serviceSet(path.join(FIX, "Service.qml"))) === want,
+        split: canon(got) === canon(set),
+        boots: status(got) === status(serviceSource),
+        lone
+      }
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true })
+    }
+  }, { fixture: true, viaPath: true, split: true, boots: true, lone: "missing" })
 
   checkCall("D-REL-14 C2 (harness, rule 10): what the readers refuse does not boot -- a forwarder whose arguments are swapped, and a split Service.qml handed over without its code-behinds", () => {
     const set = cutSet(serviceSource, MOVES)

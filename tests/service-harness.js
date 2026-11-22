@@ -868,7 +868,13 @@ function helperPrivate(file) {
 // Service.qml's own functions -- the forwarders among them -- onto the root,
 // as before. So what runs is the forwarder and the code-behind, not their
 // inline view: a forwarder is called as the shell calls it, and STUBBED and
-// unstub act on the root's member, the forwarder, as they always did.
+// unstub act on the root's member, the forwarder, as they always did. What
+// only scripts/split-service.py --check refuses beyond the readers (a
+// code-behind naming its own function unqualified, among others) still
+// boots here, and reads otherwise: such a name resolves to the root's member
+// -- the forwarder, or a STUBBED stand-in -- where the engine may reach the
+// sibling itself. The gate's "service split guard" holds that shape, not
+// this harness.
 function fileSet(svc) {
   if (typeof svc === "string") return { service: svc, files: {} }
   if (svc && typeof svc === "object" && typeof svc.service === "string" && svc.files && typeof svc.files === "object") {
