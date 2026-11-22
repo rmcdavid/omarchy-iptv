@@ -23419,7 +23419,9 @@ brackets).**
   times a run: five `could not reach epg.example.test` lines in each of the
   two kept harness.logs (base and prototype; the third run's log was not
   kept). Whether a query left the machine was not observed. A literal
-  127.0.0.1 guide URL would avoid it.
+  127.0.0.1 guide URL would avoid it. [Filed as F-HARNESS-121: two of the
+  five came from B42/B43 and three from b.m3u's guide hint; both are literals
+  since, and a live run reads no lookup line ("F-HARNESS-121", below).]
 - With `checkout.workers` above 1 (a user's own git configuration)
   Service.qml can be written before the code-behinds close, so D-REL-9's
   ordering argument holds at git's default only. [Measured or answered before
@@ -23795,3 +23797,106 @@ else.
 
 Crash journal 89 at the start and at the end of lane-settle2-relsplit1's
 work.
+
+## F-HARNESS-121: key-scenario asks the resolver for no name (lane-settle2-relsplit1, 2026-11-22)
+
+**What asked.** Part A's two kept harness.logs each hold five `could not reach
+epg.example.test: Name or service not known` lines. Part A put all five on the
+PRIVATE segment; this lane's first run, with only B42/B43's guide URL made a
+literal, still held three, each a few seconds after a shell start with b.m3u
+active. So two came from B42 and B43 (the in-app save of
+`http://u:<mark>@epg.example.test/x.xml`, which starts a guide fetch) and
+three from b.m3u, a copy of tests/fixtures/basic.m3u, whose
+`url-tvg="http://epg.example.test/guide.xml.gz"` the service fetches with no
+click whenever b is the active source.
+
+**The fix**, in scripts/dev-harness/key-scenario.sh only: B42/B43 save
+`http://u:<mark>@127.0.0.1:9/x.xml`, the same credential shape (B42 and B43
+need a save that carries the mark; nothing in them reads the host or the
+fetch's error), and the fixture block rewrites b's guide hint to
+`http://127.0.0.1:9/guide.xml.gz` and stops the run (exit 2, before anything
+starts) if any fixture's guide hint still names a host. The channel and logo
+hosts b, c and d name under example.test stay names, on purpose: the second
+run below made every one a literal, and Q and B37, which add d served from a
+slow server on 127.0.0.1:<port>, then committed nothing, because the parse
+refuses a remote playlist's channel on this machine unless it is on the
+playlist's own host and port. Nothing in the scenario looks those names up: no
+player starts, a channel is judged by its form at the parse, and every segment
+that turns logos on (L, U, Y, B12) does so over a or c, whose logos are a
+literal and none.
+
+**key-scenario.sh live**, run as Part A ran it (the tree's scratch copy with
+a v0.13.6 tag holding the real tag's helper, private-bus.sh, the scenario's
+own nested headless cage, `env -u DISPLAY -u WAYLAND_DISPLAY -u
+HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME`, a private runtime and
+tmp, the heavy lock, nice 10):
+- First, B42/B43's URL a literal and nothing else: 141 passed, 0 failed
+  (604.3 s, load 0.19 to 1.91), and harness.log still held 3 `could not reach
+  epg.example.test: Name or service not known` lines (18 `could not reach` in
+  all, the other 15 `127.0.0.1: Connection refused`), each after a start with
+  b active.
+- Second, every host in b, c and d a literal as well: 138 passed, 3 failed --
+  Q1 and Q2 (`active: on:norecord`) and B37 (`probe:Playlist has no
+  channels`); 0 name lines, 13 `127.0.0.1: Connection refused`.
+- Third, the fix as committed (B42/B43 and b's hint): 141 passed, 0 failed
+  (600.0 s, load 1.50 to 3.59), "the scenario ran every check it has (140)",
+  the 140 lettered names equal to Part A's prototype run name for name, no
+  wording changed. harness.log: `Name or service not known` 0, `Temporary
+  failure in name resolution` 0, `could not reach` 15, every one `127.0.0.1:
+  Connection refused`, and no line naming example.test; 78 `Launching config`
+  lines, as Part A's. Crash journal 89 before and after each run. The
+  harness.logs, gzipped, are kept with this lane's evidence.
+
+**Siblings (rule 15)**, every scenario and harness script under scripts/ that
+names a host that is not a literal (a grep for URLs and dotted names under
+scripts/, fixtures included), each classified by reading, none run:
+- scripts/dev-harness/sources-scenario.sh: LOOKS UP A NAME. Its live arm
+  copies tests/fixtures/basic.m3u and adds it in-app (`ipc addSource`), waits
+  for it to become the active source and loads its 3 channels, so its guide
+  hint is fetched as key-scenario's b.m3u was. Its `ftp://h.test/x` is refused
+  by the scheme rule before any lookup, and its gen-10k.m3u's stream and logo
+  names are never fetched (no player, logos off).
+- scripts/qa-live.sh: looks up names BY DESIGN. It is the live-shell runbook
+  against a real provider (its PLAYLIST_URL and EPG_URL are public
+  addresses), printed unless `--apply`, desk only, in no gate.
+- scripts/dev-harness/logo-scenario.sh: no lookup. T1 hands
+  `https://logos.example.test:8443/...` to the helper's
+  `logo_dimension_refusal`, which composes a sentence and fetches nothing; the
+  live arm's W segment names logos-a.invalid and logos-b.invalid and plants
+  every logo first, so `logos --fetch` announces each from the cached-file
+  branch, a stat, with no request.
+- scripts/qa-sources-scenarios.sh: no lookup. Its `h.test`, `h .test` and
+  `provider.test` vectors are refused by the validators (scheme, form, length,
+  a path or query on the Xtream server, an empty user or password) before any
+  probe; the gen-10k list it serves from 127.0.0.1:8765 is parsed, never played
+  (its playback variant plays harness.m3u), and logos stay off.
+- scripts/qa-lib-test.sh: data only. Its `h.test`, `host`, `example.test`,
+  `remote.test` and `example.invalid` strings are handed to predicates
+  (qa_answer_lacks, QA_URL_PAST_HOST_ERE, sources_reply_clean), to a
+  served-fixture template that is refused and writes nothing, to
+  qa_display_reachable as a host-form DISPLAY (judged without a connection),
+  and to git as a commit e-mail.
+- scripts/dev-harness/id-rotate-scenario.sh: data only (`t:hotel.test` and
+  `t:india.test` are channel ids).
+- scripts/dev-harness/chno-entry-scenario.sh: no lookup. Its live arm adds
+  gen-playlist's realistic nonumbers.m3u (stream, logo and referrer names
+  under example.test) and only types digits into it; its plays are of the
+  served 127.0.0.1 fixture, before it.
+- scripts/gen-playlist.py: names hosts under .test for its consumers, saying
+  "nothing can be fetched by accident"; a lookup still reaches the resolver.
+  Its consumers are the scenarios above and scripts/qa-filter-bench.py, which
+  parses only.
+- scripts/dev-harness/private-bus.sh: data only (the D-Bus configuration's
+  DOCTYPE URL, which dbus-daemon does not fetch).
+- Spikes, run by hand only: resolver-overrun/inner.py looks up
+  `nonexistent.example` on purpose, inside a network namespace whose
+  resolver is its own sink on 127.0.0.1:53 (a stub, no real lookup);
+  epg-oracle/schedule_oracle.py, process-environment.qml and
+  state-private/shell.qml hold names as data (a redaction case, an
+  environment value, a state record).
+- No name in run.sh, shell.qml, harness-lib.js, the harness fixtures, or the
+  tls- and relay-scenarios' certificates beyond `DNS:localhost` and
+  `DNS:127.0.0.1` in a subjectAltName, which nothing resolves.
+
+So the row stays open, for sources-scenario.sh's live arm (and qa-live.sh,
+whose lookups are its purpose).
