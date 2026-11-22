@@ -188,6 +188,10 @@ after the shell starts, and you start the channel again yourself.
 - **Running one of the helper's `player` commands yourself in a terminal
   no longer lets an older stop from the guide end the player of a channel
   started after it.** (D-PLY-77)
+- **Stopping playback while a slow player was still starting a channel no
+  longer leaves a channel playing after the stop**, whether the one being
+  started or the one that was playing before it, and the bar no longer
+  names a channel you stopped. (D-PLY-78)
 - **Starting, changing channel, pausing or seeking on a player that
   answers too slowly now gives up within its own time limit** and says
   "mpv did not answer", instead of waiting a minute or more, and a start
