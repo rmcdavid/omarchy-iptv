@@ -926,6 +926,11 @@ is "the chno check-tree floor matches the preflight it actually has" \
    "$cdeclared_tree" "$(qa_count '^ *seam ' "$CS")"
 is "the chno live floor matches the assertions that scenario actually has" \
    "$cdeclared_live" "$(( $(qa_count '^ *(check|seam) ' "$CS") + 2 ))"
+# F-HARNESS-122: and since its check-tree half joined the gate (2026-11-22),
+# check.sh's floor for it is that half's floor plus its "ran every check"
+# line, as each preflight's floor in check.sh is held below.
+is "check.sh's chno preflight floor matches the scenario's own" \
+   "$(grep -oE 'CHNO_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( cdeclared_tree + 1 ))"
 # A floor is only worth having if the runner it guards can be seen going red.
 # The scenario's verdict is the same arithmetic the player's is, so drive it
 # here with the chno numbers rather than trusting that it reads the same.
@@ -4133,7 +4138,10 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # before D-REL-5, whose Service.qml imports Model.js, is Service.qml alone and
 # reads as its text. Red on 9b80fcb's service_files.py, which read the
 # model's import as a code-behind: both failed.
-EXPECTED=792
+# 792 -> 793 on 2026-11-22 (F-HARNESS-122, lane-relsplit2): check.sh's floor
+# for chno-scenario's check-tree, which joined the gate that day, is the
+# scenario's own plus one. Red on ab3d287's check.sh, which has no such floor.
+EXPECTED=793
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
