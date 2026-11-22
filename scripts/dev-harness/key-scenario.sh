@@ -3636,10 +3636,10 @@ A="$WORK/fixtures/a.m3u"; B="$WORK/fixtures/b.m3u"; C="$WORK/fixtures/c.m3u"; D=
 # port, and Q's add then commits no record: measured), and the segments that
 # turn logos on (L, U, Y, B12) do it over a or c, whose logos are a literal
 # and none. A fixture whose guide hint names a host stops the run before
-# anything starts; the guard reads a hint quoted or bare, as the helper's
-# parse_attrs does.
+# anything starts; the guard reads a hint quoted or bare and in any case,
+# as the helper's parse_attrs does.
 sed -E -i 's#(url-tvg|x-tvg-url)="(https?://)[A-Za-z0-9.-]+\.example\.test(:[0-9]+)?#\1="\2127.0.0.1:9#g' "$B"
-if grep -ohE '(url-tvg|x-tvg-url)="?[a-z]+://[^/" ]+' "$A" "$B" "$C" "$D" | sed -E 's#^[^=]*="?[a-z]+://##; s#^.*@##' \
+if grep -ohiE '(url-tvg|x-tvg-url)="?[a-z]+://[^/" ]+' "$A" "$B" "$C" "$D" | sed -E 's#^[^=]*="?[a-z]+://##I; s#^.*@##' \
      | grep -qvE '^127\.0\.0\.1(:[0-9]+)?$'; then
   echo "key-scenario: a fixture playlist's guide hint still names a host, which the run would ask the resolver for (F-HARNESS-121)" >&2
   exit 2

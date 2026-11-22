@@ -1593,6 +1593,14 @@ This project is built by role lanes running in separate git worktrees.
    names the pid that holds the port; kill that. Wait on a pid, a file, or a marker the watched process writes; kill
    by pid. If a pattern is unavoidable, anchor it and exclude your own pid,
    and say in a comment why the anchor is load-bearing.
+   Never build a sleep from `read -t` over a process substitution or a
+   pipe. A lane waited with `read -t 10 < <(:; exec cat /dev/zero)` under
+   `timeout`, and when timeout's SIGTERM landed bash segfaulted in its own
+   process-substitution cleanup, a core and a crash card on the owner's
+   desktop (crash journal 88 -> 89, 2026-11-22; QA-RESULTS "The review of
+   a27b90c, settled"). Wait on a pid with `timeout N tail --pid=PID -f
+   /dev/null`, on a file with `timeout N inotifywait -qq -e
+   create,moved_to DIR`, or split the work into foreground pieces.
 4. No shims at merge. Stubbing a dependency to build is fine; leaving one is
    not. Integration proves zero stubs with a grep and a green `check.sh`.
 4b. **Lanes get their own worktree, or they get no `git add -A`.** Three lanes

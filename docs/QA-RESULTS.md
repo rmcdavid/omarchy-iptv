@@ -23869,7 +23869,11 @@ tmp, the heavy lock, nice 10):
   wording changed. harness.log: `Name or service not known` 0, `Temporary
   failure in name resolution` 0, `could not reach` 15, every one `127.0.0.1:
   Connection refused`, and no line naming example.test; 78 `Launching config`
-  lines, as Part A's. Crash journal 89 before and after each run. The
+  lines, as Part A's. [Why 18 fell to 15 rather than staying 18: b's
+  rewritten hint is refused before any fetch, a local playlist's hint to an
+  address that is not global (D-SINK-40), so its three fetches stopped
+  rather than failing; item 3 of "The rechecks of 76bff05 and the harness
+  commits, settled" below.] Crash journal 89 before and after each run. The
   harness.logs, gzipped, are kept with this lane's evidence.
 
 **Siblings (rule 15)**, every scenario and harness script under scripts/ that
