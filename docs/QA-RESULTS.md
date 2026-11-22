@@ -23640,7 +23640,8 @@ not name it: `*.qml` globs, ALLOWLIST-driven lists, harness boots):
   on 9ed04be, line for line; chno 14 passed and 1 failed, as on 9ed04be
   ("nowPlaying carries the number" looks for `chno: root.nowPlayingChno`,
   which moved into `Model.ipcNowPlaying`; chno-scenario's preflight is not in
-  the gate), only the message now naming "the service".
+  the gate), only the message now naming "the service". [Filed as
+  F-HARNESS-122 and re-pointed since: "F-HARNESS-122", below.]
 - Also green: split-helper.py --check, split-model.mjs --check,
   check-defect-ledger, check-board-staleness, the marketplace, double-encoding
   and SR-register scans, and every ALLOWLIST guard above. Crash journal 88 at
@@ -23900,3 +23901,60 @@ scripts/, fixtures included), each classified by reading, none run:
 
 So the row stays open, for sources-scenario.sh's live arm (and qa-live.sh,
 whose lookups are its purpose).
+
+## F-HARNESS-122: chno-scenario's nowPlaying seam, where the code lives now (lane-settle2-relsplit1, 2026-11-22)
+
+**The stale seam.** chno-scenario.sh's preflight checked "nowPlaying carries
+the number" by finding `chno: root\.nowPlayingChno` in the service. 432b710
+("Show a provider's name and group under the row's rule everywhere",
+2026-10-29) moved the reply into `Model.ipcNowPlaying(np, chno)`
+(model/view.mjs), which the service calls as
+`Model.ipcNowPlaying(root.nowPlaying, root.nowPlayingChno)`; `git log -S` on
+the old string names that commit. So `check-tree` has read 14 passed, 1
+failed since then. Nothing saw it: scripts/check.sh runs the check-tree arms of
+chno-entry-, pip-, id-rotate-, logo-, clip-, open-, key- and relay-scenario,
+and not chno-scenario's or config-mode-scenario's, and chno-scenario.sh's own
+comment said the gate ran its preflight on every commit, which no version of
+check.sh has done (`git log -G` over check.sh finds no such line).
+
+**The fix**, in chno-scenario.sh only: `seam` takes `@model`, the model's
+files through `qa_model_count` (a tree with no readable model is a failure,
+never 0), beside `@service`; the one seam is two, the service handing the
+number to the reply (`Model\.ipcNowPlaying\(root\.nowPlaying,
+root\.nowPlayingChno\)`, over the inline view) and the model's reply carrying
+it (`return \{ id: np\.id, .*chno: chno`); the floors go from 14 to 15
+(check-tree) and 45 to 46 (live), by the footer's own recipes, which
+qa-lib-test.sh holds; and the comment no longer says the gate runs it.
+
+**Red first**, each run of `check-tree` with a private runtime, tmp, HOME and
+harness directory and the display variables unset:
+- 9ed04be's scenario on 9ed04be: 14 passed, 1 failed ("nowPlaying carries the
+  number (matched 0, wanted at least 1 in the service)"); a27b90c's scenario on
+  the branch: the same.
+- The new scenario: 16 passed, 0 failed on the branch, on 9ed04be (through
+  OMARCHY_IPTV_PLUGIN_ROOT) and on the prototype split tree (Part A's cutter,
+  its hashes equal to the measurement lane's), where the old one reads 14 and
+  1.
+- Mutants, one decision each, in scratch copies: chno dropped from
+  ipcNowPlaying's reply, 15 passed, 1 failed ("the nowPlaying reply carries the
+  number (matched 0, wanted at least 1 in the model)"); the service passing
+  `null` for the number, 15 passed, 1 failed ("nowPlaying hands the number to
+  the reply"). The old seam is red on both for the reason it was red before.
+
+**The other preflight the gate does not run (rule 15).** Every scenario with a
+check-tree arm: chno-entry-, pip-, id-rotate-, logo-, clip-, open-, key- and
+relay-scenario are in the gate; chno-scenario and config-mode-scenario are
+not. argv-, m3-, player-, rewind-, sources-, text- and tls-scenario have no
+check-tree arm (tls-scenario's `--rig-only` is a windowless live arm, not
+run). config-mode-scenario.sh check-tree on 9ed04be read 11 passed, 0 failed,
+with HOME pointed at a decoy holding a shell.json for its C1 (a first run with
+an empty decoy read C1 `no-real-config`, 10 passed, 1 failed: the decoy's
+doing, not a stale seam). So no other stale seam was found and no other row is
+filed.
+
+**Proposed, the lead's to take:** put chno-scenario.sh check-tree in the gate
+beside chno-entry-scenario's, with its floor read from the scenario as the
+others are. It is 15 greps, needs no display and writes no file (the arm was
+written for a gate), and it is the only preflight that holds the bar's and the
+IPC reply's channel-number seams. config-mode-scenario's check-tree could
+follow, if its C1 is given a decoy config rather than the developer's own.

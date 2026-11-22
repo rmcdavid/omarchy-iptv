@@ -193,7 +193,9 @@ wait_for() {   # wait_for <want> <secs> <cmd...>: bounded, and it SAYS it gave u
 # where each forwarder reads as the function it forwards to. So a seam names
 # what the service holds and not which file holds it, a forwarder is never
 # counted beside its function, and a service that cannot be read is a
-# failure, never a count of 0.
+# failure, never a count of 0. The file `@model` is the model the same way
+# (D-REL-5: Model.mjs and the parts under model/ it names, through
+# qa_model_count), and a tree with no readable model is a failure too.
 seam() {
   local label=$1 file=$2 ere=$3 want=$4
   checks=$((checks + 1))
@@ -202,6 +204,9 @@ seam() {
     if ! text=$(qa_service_text "$PLUGIN_ROOT"); then bad "$label (the service in $PLUGIN_ROOT cannot be read)"; return; fi
     got=$(qa_count "$ere" <(printf '%s\n' "$text"))
     file="$PLUGIN_ROOT/the service"
+  elif [[ $file == @model ]]; then
+    if ! got=$(qa_model_count "$ere" "$PLUGIN_ROOT"); then bad "$label (no model in $PLUGIN_ROOT)"; return; fi
+    file="$PLUGIN_ROOT/the model"
   else
     got=$(qa_count "$ere" "$file")
   fi
@@ -215,7 +220,11 @@ preflight() {
   seam "Service.qml has the tuneByNumber the harness calls" @service                    '^ *function tuneByNumber\(text\)' 1
   seam "Service.qml exposes the IPC channel verb"           @service                    'function channel\(n: string\): string' 1
   seam "status carries hasNumbers"                          @service                    'hasNumbers: root\.chnoIndex' 1
-  seam "nowPlaying carries the number"                      @service                    'chno: root\.nowPlayingChno' 1
+  # F-HARNESS-122: the reply is composed by the model since 432b710, so the
+  # claim is two seams: the service hands the number over, and the reply the
+  # model composes carries it.
+  seam "nowPlaying hands the number to the reply"           @service                    'Model\.ipcNowPlaying\(root\.nowPlaying, root\.nowPlayingChno\)' 1
+  seam "the nowPlaying reply carries the number"            @model                      'return \{ id: np\.id, .*chno: chno' 1
   seam "channelOrder re-derives the list"                   @service                    'onChannelOrderChanged' 1
   seam "BarWidget.qml knows the playing number"             "$PLUGIN_ROOT/BarWidget.qml" 'nowPlayingChno' 3
   seam "BarWidget.qml can hide it"                          "$PLUGIN_ROOT/BarWidget.qml" 'barShowChannelNumber' 1
@@ -359,9 +368,10 @@ case ${1:-live} in
     # F-M3-1 half (b): the transcript covers the WHOLE run, preflight
     # included, because the summary at the bottom counts both halves and a
     # transcript that holds only one of them cannot be summarised from. It is
-    # NOT opened on the check-tree path: scripts/check.sh runs that half on
-    # every commit, and a gate step may neither print a path nobody asked for
-    # nor leave a file behind.
+    # NOT opened on the check-tree path, which is written to run as a gate
+    # step, and a gate step may neither print a path nobody asked for nor
+    # leave a file behind. (This said scripts/check.sh runs that half on every
+    # commit; it never has, and a seam went stale unseen: F-HARNESS-122.)
     qa_transcript_start chno || exit 2
     preflight
     live
@@ -377,9 +387,9 @@ esac
 # check() and seam() do not match, and the floor's own bump lands after the
 # count is taken). Never lower it to make a run green.
 if [[ ${1:-live} == check-tree ]]; then
-  EXPECTED_CHECKS=14
+  EXPECTED_CHECKS=15
 else
-  EXPECTED_CHECKS=45
+  EXPECTED_CHECKS=46
 fi
 ran=$checks
 checks=$((checks + 1))
