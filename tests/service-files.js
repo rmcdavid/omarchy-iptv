@@ -17,6 +17,10 @@
 //                        each code-behind its `import "<file>.js" as <Q>`
 //                        lines declare, in their order: the real files, for
 //                        a reader that judges each file or copies the tree.
+//   serviceSet(where)    the FILE SET tests/service-harness.js boots:
+//                        { service: Service.qml's own text, files: each
+//                        declared code-behind's text, by name }, refused as
+//                        serviceText refuses (node only: the harness is)
 //   serviceText(where)   the INLINE view: Service.qml with each declaration
 //                        line dropped and each forwarder line replaced by
 //                        its function's text from the code-behind -- the
@@ -364,6 +368,21 @@ function serviceFiles(where) {
   return [svc].concat(declarations(readText(svc)).map(d => path.join(path.dirname(svc), d.file)))
 }
 
+// The file set: Service.qml's own text and each declared code-behind that is
+// there, by name. Refused here, as serviceText refuses, so a caller learns of
+// a broken tree where it reads it; the harness asks the readers again.
+function serviceSet(where) {
+  const svc = servicePath(where)
+  const service = readText(svc)
+  const files = {}
+  for (const d of declarations(service)) {
+    const file = path.join(path.dirname(svc), d.file)
+    if (fs.existsSync(file)) files[d.file] = readText(file)
+  }
+  inlineText(service, files)
+  return { service, files }
+}
+
 function serviceText(where) {
   const svc = servicePath(where)
   const text = readText(svc)
@@ -377,7 +396,7 @@ function serviceText(where) {
   return inlineText(text, files)
 }
 
-module.exports = { SERVICE, ServiceFilesError, matchBrace, declarations, codeBehindQualifier, functionSpans, inlineText, servicePath, serviceNames, serviceFiles, serviceText }
+module.exports = { SERVICE, ServiceFilesError, matchBrace, declarations, codeBehindQualifier, functionSpans, inlineText, servicePath, serviceNames, serviceFiles, serviceSet, serviceText }
 
 if (require.main === module) {
   const [verb, where] = process.argv.slice(2)

@@ -846,7 +846,9 @@ const guideSource = require("fs").readFileSync(require("path").join(__dirname, "
 // forwarder read as the function it forwards to, which is the one-file
 // Service.qml -- so every pin in this file reads the text it always read
 // whichever file now holds a function; and its FILES, for a reader that
-// names each file. Every `svcText` below comes from serviceText too.
+// names each file. Every `svcText` below comes from serviceText too, and
+// every `svcSet` a harness boots from serviceSet (D-REL-14 C2: the files as
+// the shell loads them, the code-behinds compiled beside the forwarders).
 const serviceReader = require("./service-files.js")
 const serviceSource = serviceReader.serviceText(require("path").join(__dirname, "../Service.qml"))
 
@@ -973,6 +975,92 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
     }
     return { many: mine.size > 150, same: mine.size === Object.keys(theirs).length, differ }
   }, { many: true, same: true, differ: [] })
+})()
+
+// ---- D-REL-14 C2: the harness boots the file set ----
+//
+// tests/service-harness.js's bootService takes the FILE SET the readers name
+// (serviceSet: Service.qml's own text and each code-behind's), judges it with
+// the readers first, and compiles each code-behind's functions in the root's
+// own scope under its qualifier and Service.qml's forwarders onto the root,
+// as the shell loads them; a string is Service.qml's text as before. These
+// cut this tree's own Service.qml into two code-behinds by the readers' own
+// spans (the cut reads back as the tree's text, or the checks say so) and
+// boot it. Rule 11: red on ab3d287's harness, which reads a file set as a
+// string, and on one-decision mutants of this one (the readers' verdict
+// skipped, the code-behinds left uncompiled, the inline view compiled in
+// place of the files); docs/QA-RESULTS.md "D-REL-14: the splitter and its
+// guards" has the counts.
+;(function () {
+  const H = require("./service-harness.js")
+  const SF = serviceReader
+  const OPTS = { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" }
+  const MOVES = [["status", ["nowPlayingSummary", "statusSummary"]], ["sources", ["sourceResult", "sourcesReady", "fetchLogos"]]]
+  // The readers' own spans of `text`, each moved whole into Service-<domain>.js
+  // and left as its forwarder, the declarations after the model's import.
+  function cutSet(text, moves) {
+    const found = []
+    SF.functionSpans(text, "Service.qml", found)
+    const at = new Map(found.map(f => [f.name, f]))
+    const plan = []
+    for (const [domain, names] of moves) {
+      for (const n of names) plan.push({ file: "Service-" + domain + ".js", q: SF.codeBehindQualifier("Service-" + domain + ".js"), f: at.get(n) })
+    }
+    plan.sort((a, b) => a.f.start - b.f.start)
+    let service = "", cursor = 0
+    const files = {}
+    for (const p of plan) {
+      service += text.slice(cursor, p.f.start) + "  function " + p.f.name + "(" + p.f.args + ") { return " + p.q + "." + p.f.name + "(" + p.f.args + ") }"
+      cursor = p.f.end
+      files[p.file] = (files[p.file] === undefined ? "// cut for the harness's own checks\n\n" : files[p.file] + "\n\n") + text.slice(p.f.start, p.f.end)
+    }
+    service += text.slice(cursor)
+    for (const k in files) files[k] += "\n"
+    const anchor = 'import "Model.mjs" as Model\n'
+    const decls = [...new Set(plan.map(p => 'import "' + p.file + '" as ' + p.q + "\n"))].sort().join("")
+    return { service: service.split(anchor).join(anchor + decls), files }
+  }
+  const refusal = (svc) => {
+    try { H.bootService(svc, Model, OPTS); return "booted" } catch (e) { return e instanceof SF.ServiceFilesError ? e.kind : "threw: " + e.message }
+  }
+
+  checkCall("D-REL-14 C2 (harness): a file set cut from this tree's Service.qml reads back as its text, boots with its forwarders on the root, and answers the IPC status, a source call and the state file as the one text does", () => {
+    const set = cutSet(serviceSource, MOVES)
+    const hs = H.bootService(set, Model, OPTS), h1 = H.bootService(serviceSource, Model, OPTS)
+    const call = (h) => JSON.stringify(h.root.addSource({ url: "ftp://h.test/x" }))
+    const out = {
+      readsBack: SF.inlineText(set.service, set.files) === serviceSource,
+      forwarder: /return ServiceStatus\.statusSummary\(\)/.test(String(hs.root.statusSummary)),
+      status: hs.ipc.status() === h1.ipc.status(),
+      source: call(hs) === call(h1),
+      disk: hs.stateFile.disk === h1.stateFile.disk,
+      stubbed: String(hs.root.fetchLogos) === String(h1.root.fetchLogos)
+    }
+    hs.unstub("fetchLogos")
+    out.unstubbed = /return ServiceSources\.fetchLogos\(\)/.test(String(hs.root.fetchLogos))
+    return out
+  }, { readsBack: true, forwarder: true, status: true, source: true, disk: true, stubbed: true, unstubbed: true })
+
+  checkCall("D-REL-14 C2 (harness, rule 10): what the readers refuse does not boot -- a forwarder whose arguments are swapped, and a split Service.qml handed over without its code-behinds", () => {
+    const set = cutSet(serviceSource, MOVES)
+    const fw = "{ return ServiceSources.sourceResult(ok, code, message, id, field) }"
+    return {
+      fwFound: set.service.split(fw).length === 2,
+      swapped: refusal({ service: set.service.split(fw).join("{ return ServiceSources.sourceResult(ok, code, id, message, field) }"), files: set.files }),
+      bare: refusal(set.service),
+      whole: refusal(set)
+    }
+  }, { fwFound: true, swapped: "not-exact", bare: "missing", whole: "booted" })
+
+  checkCall("D-REL-14 C2 (harness): a decision changed in a code-behind changes what the booted service answers", () => {
+    const set = cutSet(serviceSource, MOVES)
+    const was = "      channels: root.channels.length,\n"
+    const files = Object.assign({}, set.files)
+    const found = files["Service-status.js"].split(was).length === 2
+    files["Service-status.js"] = files["Service-status.js"].split(was).join("      channels: root.channels.length + 1,\n")
+    const mutated = H.bootService({ service: set.service, files }, Model, OPTS), whole = H.bootService(set, Model, OPTS)
+    return { found, channels: [JSON.parse(whole.ipc.status()).channels, JSON.parse(mutated.ipc.status()).channels] }
+  }, { found: true, channels: [0, 1] })
 })()
 
 // The helper's text. Since D-REL-7 the helper is bin/omarchy-iptv, a stub,
@@ -2930,6 +3018,8 @@ checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address
 checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel list's logo authorities while logos are on, and an empty one while they are off", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
   // The recheck of round 5's settle (2026-11-17): and the authority of a
   // logo whose tail is refused (`t:e`, a space in its path), because the
   // column test looks a row's authority up before it reads the tail.
@@ -2939,7 +3029,7 @@ checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel li
                     { id: "t:d", name: "D", url: "http://s.example.test/d.ts" },
                     { id: "t:e", name: "E", url: "http://s.example.test/e.ts", logo: "https://192.168.1.20/e f.png" }]
   const read = showLogos => {
-    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: showLogos }, stateText: "", host: "lag" })
+    const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: showLogos }, stateText: "", host: "lag" })
     h.root.channels = channels
     const map = h.root.logoAuthorityHosts
     return Object.keys(map).sort().map(k => [k, map[k]])
@@ -5323,13 +5413,15 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   const H = require("./service-harness.js")
   const fs = require("fs"), path = require("path")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const URL = "http://cdn.test/a.m3u"
   const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
   const rec = { key, url: URL, epgUrl: "", kind: "http", label: "cdn.test", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 1, groupCount: 1 }
   const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: key, entryMigrated: true }) + "\n"
   const reattach = function (group, inPlaylist) {
-    const h = H.bootService(svcText, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
+    const h = H.bootService(svcSet, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
     const channels = M.prepareChannels([{ id: "t:p.test", name: "P", group: group, url: "http://s.example.test/p.ts", chno: "101" }])
     h.root.channels = channels
     const index = M.keyedMap()
@@ -5362,6 +5454,8 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   const H = require("./service-harness.js")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const F = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-host-withheld.json"), "utf8"))
   const W = "[host withheld]"
   checkCall("D-SINK-109: Model.sourceHostWithheld over the shared source-host-withheld fixture, and which arm holds (urlHostWithheld, addressAtAfterAuthority) as it says",
@@ -5395,7 +5489,7 @@ checkCall("D-SINK-74: 20,000 digits before the scheme's only letters are crossed
   function boot(url, epgUrl) {
     const rec = record(url, { epgUrl: epgUrl || "", labelCustom: false, label: "cdn.test" })
     const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: rec.key, entryMigrated: true }) + "\n"
-    return { h: H.bootService(svcText, M, { entry: { sourceKey: rec.key, showLogos: false }, stateText: text, host: "lag" }), rec }
+    return { h: H.bootService(svcSet, M, { entry: { sourceKey: rec.key, showLogos: false }, stateText: text, host: "lag" }), rec }
   }
   checkCall("D-SINK-109: through Service.qml's own bindings and functions -- sourceHost (the guide's loading, empty and failure lines and the IPC status), statusHost's fallback, a timed-out fetch's status for the playlist and the guide, and the probe signal's host (the Sources list's probe failure line) -- a typo and a dotted-username source read `[host withheld]`; an ordinary one names its host",
     () => [[TYPO, TYPO], [DOTTED, ""], [PLAIN, "http://epg.test/g.xml"]].map(pair => {
@@ -11769,6 +11863,8 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
 ;(function () {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const URL = "http://cdn.test/get.php?username=qqqqqq&password=zzzzzz"
   const key = M.sourceKey(M.normalizeSourceUrl(URL, { origin: "cli" }))
@@ -11777,7 +11873,7 @@ check("D-A11Y-1 fieldAccessibleValue: an unknown field, an empty value and no fo
     () => LABELS.map(function (label) {
       const rec = { key, url: URL, epgUrl: "", kind: "http", label, labelCustom: true, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }
       const text = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: key, entryMigrated: true }) + "\n"
-      const h = H.bootService(svcText, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
+      const h = H.bootService(svcSet, M, { entry: { sourceKey: key, showLogos: false }, stateText: text, host: "lag" })
       const st = h.root.statusSummary()
       const stored = (h.root.userState.sources || []).map(function (r) { return r.label })
       return [h.compileErrors.length, stored[0] === label, st.activeSource ? st.activeSource.label : null, (st.sources || []).map(function (s) { return s.label }),
@@ -17764,6 +17860,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const cacheVerb = H.cacheVerb
   const svcPath = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
   const svcText = serviceReader.serviceText(svcPath)
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(svcPath)
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const E = "http://e.example.test/xmltv.php?username=u&password=p", F = "http://f.example.test/guide.xml", G = "http://g.example.test/guide.xml"
@@ -17777,8 +17875,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const migratedText = (sources, activeKey, extra) => stateText(sources, activeKey, Object.assign({ entryMigrated: true }, extra || {}))
   // A state 0.13.5 wrote: sources, no activeKey key at all, no marker.
   const oldText = (sources) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: ["t:bbc1.uk"], recents: [], sources }) + "\n"
-  const boot = (entry, text, mode, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: mode }, o || {}))
-  const restart = (h, o) => H.restartService(svcText, M, h, o)
+  const boot = (entry, text, mode, o) => H.bootService(svcSet, M, Object.assign({ entry, stateText: text, host: mode }, o || {}))
+  const restart = (h, o) => H.restartService(svcSet, M, h, o)
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k)
   const retired = e => ["playlistUrl", "epgUrl"].filter(k => has(e, k))
   const epgOf = (st, key) => { const r = st.sources.find(x => x.key === key); return r ? r.epgUrl : "<no record>" }
@@ -21961,7 +22059,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       for (const k of KNOWN_0136) if (has(doc, k)) downgraded[k] = doc[k]
       const entry = JSON.parse(JSON.stringify(h.storedEntry())); delete entry.id
       entry.playlistUrl = B   // 0.13.6's persistActive writes the active URL
-      const up = H.bootService(svcText, M, { entry, stateText: JSON.stringify(downgraded) + "\n", host: mode, clock: h.clock + 60000 })
+      const up = H.bootService(svcSet, M, { entry, stateText: JSON.stringify(downgraded) + "\n", host: mode, clock: h.clock + 60000 })
       return { migrated, reupgrade: [up.root.activeSourceKey === KB, marked(up), retired(up.storedEntry()), up.file().sources.length, reports(up)] }
     }, { migrated: [true, true, []], reupgrade: [true, true, [], 2, []] })
   }
@@ -22146,7 +22244,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.host.externalSet("epgUrl", E); h.drain()
       const entry = JSON.parse(JSON.stringify(h.storedEntry())); delete entry.id
       entry.epgUrl = E
-      const next = H.bootService(svcText, M, { entry, stateText: h.stateFile.disk, host: mode, clock: h.clock + 60000 })
+      const next = H.bootService(svcSet, M, { entry, stateText: h.stateFile.disk, host: mode, clock: h.clock + 60000 })
       return [reports(h), name(epgOf(next.file(), KA)), reports(next), retired(next.storedEntry())]
     }, [["epgUrl:retired"], "F", ["epgUrl:retired"], []])
     // round 10's `switchtoggle`: a CLI switch to an EXISTING source after a
@@ -23987,8 +24085,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("D-REL-7: Service.qml's own status branch (the harness runs it) takes a damaged helper as 'cannot tell' -- no health strike, no restart through the same broken helper; a real failure is still a strike", () => {
     const H = require("./service-harness.js")
     const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+    // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+    const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
     const run = reply => {
-      const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+      const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
       let restarts = 0
       h.root.restartPlayer = () => { restarts++ }
       h.root.healthFailures = 1
@@ -24262,7 +24362,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("D-EPG-11 R31b: Service.qml's applyEpgNow loads the new shape unmarked and a legacy file marked, starts no fetch for either, and empties to an empty store", () => {
     const H = require("./service-harness.js")
     const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
-    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+    const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+    const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
     const initial = h.root.epgNow
     const before = h.ids.epgDebounce.restarts
     h.root.applyEpgNow(tricky)
@@ -24643,7 +24745,9 @@ checkCall("R32a' (the recheck's P2): the INVALID refusal of a value with the pre
 checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text carries the P1's shape reaches the `play failed:` journal line through Service.handleControlResult with the host and no tail of the credential", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
-  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
   h.root.playerUp = true
   h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
   h.root.previousPlaying = null
@@ -24657,8 +24761,10 @@ checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text car
 checkCall("R32a' (D-SINK-29), THE SINK PATH, the notification: the stream-failure toast Service.raiseStreamFailure raises carries the host and no tail of the credential, whether the reason arrives redacted by the helper (the shipping shape) or raw", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const run = reason => {
-    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
     h.detached.length = 0
     h.root.raiseStreamFailure({ id: "t:x", name: "X" }, reason)
     const argv = h.detached.filter(a => a.join(" ").indexOf("did not play") !== -1)
@@ -24739,7 +24845,9 @@ checkCall("D-SINK-24 (R32b'): the recheck's `--u:pw@h=1` shape through splitMpvA
 checkCall("D-SINK-24: Service.issuePlayerSession's journal line (the harness's console keeps every argument, as the real one does) carries no credential", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
-  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false,
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false,
     mpvArgs: "--stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test" }, stateText: "", host: "lag" })
   h.warnings.length = 0
   // The harness has no player socket timer; the journal line is written
@@ -24785,7 +24893,9 @@ checkCall("D-PERF-4: preparedLruNext puts the new entry first and drops its own 
 checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one source hold ONE prepared list; a second source shares the LRU; going back to the first hits", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
-  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
   const doc = n => JSON.stringify({ version: 1, generatedAt: n, channels: [{ name: "A", group: "G", tvgId: "a", url: "http://c.example.test/a.ts" }] })
   const stamps = () => h.root.preparedLru.map(e => JSON.parse(e.text).generatedAt)
   const A = "/cache/sources/aaaaaaaa", B = "/cache/sources/bbbbbbbb"
@@ -24807,6 +24917,8 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
 {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
@@ -24814,7 +24926,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   const KA = keyOf(A), KB = keyOf(B), KNEW = DRAWN_KEY
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }, extra || {})) + "\n"
-  const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
+  const boot = (entry, text, o) => H.bootService(svcSet, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
   const okStatus = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
   const failedStatus = JSON.stringify({ ok: false, kind: "playlist", error: { code: "helper_damaged", part: "05-ipc-logos.py", message: "part missing" } })
 
@@ -25619,7 +25731,9 @@ checkCall("F-UX-7: the refused name is the journal's name (mpvRejectedName), so 
 checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guide reads carries the refused token, labelled as the player's", () => {
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
-  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
   return [h.root.playerArgWarnings, h.compileErrors]
 }, [["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT], []])
 
@@ -25812,12 +25926,14 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // at every run.
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
   const LAN = "http://me:s3cret@192.168.1.5:9981/playlist", OWN = "http://e.example.test/xmltv.php?username=u&password=p"
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "tvh", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
-  const boot = (sources) => H.bootService(svcText, M, { entry: { sourceKey: keyOf(LAN), showLogos: false }, stateText: stateText(sources, keyOf(LAN)), host: "lag" })
+  const boot = (sources) => H.bootService(svcSet, M, { entry: { sourceKey: keyOf(LAN), showLogos: false }, stateText: stateText(sources, keyOf(LAN)), host: "lag" })
   // The URL and its provenance, which is what these checks are about: since
   // D-SINK-48 the same environment also carries the run's private arguments
   // (OMARCHY_IPTV_ARGS), which the lane-p2a block below checks on its own.
@@ -25886,6 +26002,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-p2a-"))
   fs.chmodSync(scratch, 0o700)
@@ -25893,7 +26011,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const PL = "http://me:s3cret@provider.example.test/get.php?username=me&password=s3cret"
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "p", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
-  const boot = () => H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: false }, stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
+  const boot = () => H.bootService(svcSet, M, { entry: { sourceKey: keyOf(PL), showLogos: false }, stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
 
   // D-SINK-50: `python3 -I`, from the one builder, everywhere.
   checkCall("D-SINK-50: every helper argv builder in the model starts `python3 -I <helper>`", () => {
@@ -25976,7 +26094,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // the first.
   checkCall("D-SINK-48 (service): no spawn's command carries a source key, a channel id, a scope or a user token -- the zap, the player start and restart, the playlist and guide runs, the probe, the dead-channel mark, the logo run and the cache jobs -- and each still reaches the helper whole", () => {
     const SCOPE = "g:Sports http://u:s3cret@cdn.test/x", ID = "u:1a2b3c4d", TOKEN = "--ytdl-raw-options=proxy=http://alice:S3cretPw@proxy.test:3128"
-    const h = H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: true, mpvArgs: TOKEN + " --volume=50" },
+    const h = H.bootService(svcSet, M, { entry: { sourceKey: keyOf(PL), showLogos: true, mpvArgs: TOKEN + " --volume=50" },
                                           stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
     const runs = []
     const watch = (name) => {
@@ -26151,6 +26269,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const HL = require(path.join(__dirname, "../scripts/dev-harness/harness-lib.js"))
   const os = require("os")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const PID = "io.github.rmcdavid.iptv"
   const utilText = fs.readFileSync(path.join(H.HOST_SHELL, "Commons", "Util.qml"), "utf8")
@@ -26367,7 +26487,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const rec = { key: KA, url: A, epgUrl: "", kind: "http", label: "a.example.test", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }
   const stateText = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources: [rec], activeKey: KA, entryMigrated: true }) + "\n"
   const serviceRun = (o) => {
-    const h = H.bootService(svcText, M, Object.assign({ entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag" }, o))
+    const h = H.bootService(svcSet, M, Object.assign({ entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag" }, o))
     const r = h.root
     const seen = { settings: [r.settings.showLogos, r.settings.refreshMinutes, r.settings.mpvArgs, r.settings.channelOrder], pip: r.pipConfig().pipCorner || "<none>" }
     const ok = r.setShowLogos(false); h.drain()
@@ -26402,7 +26522,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // guide, one journal line, nothing handed to the host -- rather than
   // judged writable and lost to the host's `false` as "already stored".
   checkCall("D-HOST-11 (service, 4.0.x kit, the entry in centerEnd): what that host cannot find is not read, and the logo toggle is refused, not lost: the defaults, false to the guide, one journal line, no write", () => {
-    const h = H.bootService(svcText, M, { entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag", section: "centerEnd", barSections: undefined })
+    const h = H.bootService(svcSet, M, { entry: Object.assign({ sourceKey: KA }, ENTRY), stateText, host: "lag", section: "centerEnd", barSections: undefined })
     const r = h.root
     const seen = [r.settings.showLogos, r.settings.refreshMinutes, r.settings.mpvArgs, r.settings.channelOrder]
     const ok = r.setShowLogos(true); h.drain()
@@ -26413,7 +26533,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // persist_failed's sentence (Guide.qml's logo key), and the journal line --
   // because the host cannot store it; nothing is handed to the host.
   checkCall("D-HOST-11 (service, bare string in centerEnd): the defaults are read and the logo toggle is refused, not lost: false to the guide, one journal line, no write", () => {
-    const h = H.bootService(svcText, M, { entry: {}, stateText, host: "lag", section: "centerEnd", bare: true })
+    const h = H.bootService(svcSet, M, { entry: {}, stateText, host: "lag", section: "centerEnd", bare: true })
     const before = h.root.showLogos
     const ok = h.root.setShowLogos(true); h.drain()
     return [before, ok, h.host.writes.length, h.warnings.filter(w => /no writable bar entry for the logo setting/.test(w)).length, h.storedEntry()]
@@ -26445,6 +26565,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const H = require("./service-harness.js")
   const svcText = serviceReader.serviceText(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
+  // D-REL-14 C2: the harness boots the files Service.qml declares, as the shell loads them.
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"))
   const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
   const OT = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/owner-token.json"), "utf8"))
   const TOK = "0123456789abcdef0123456789abcdef", PID = 4242
@@ -26523,8 +26645,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   }
   const verbOf = (command) => command[command.indexOf("player") + 1]
   checkCall("D-PLY-64 (service): one Service object passes ONE token, its own, on the probe, the start, the restart and its orphan check, beside this shell's pid, on no command but the orphan check's; a second Service object in the same shell draws another", () => {
-    const h1 = withRandom(() => H.bootService(svcText, M, { host: "lag" }))
-    const h2 = withRandom(() => H.bootService(svcText, M, { host: "lag" }))
+    const h1 = withRandom(() => H.bootService(svcSet, M, { host: "lag" }))
+    const h2 = withRandom(() => H.bootService(svcSet, M, { host: "lag" }))
     const one = sessions(h1), two = sessions(h2)
     const mine = String(h1.root.ownerToken), theirs = String(h2.root.ownerToken)
     return { verbs: one.map(r => verbOf(r.command)),
@@ -26537,7 +26659,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
        secondPassed: [true, true, true, true], tokens: [true, true, true, true], compileErrors: [] })
 
   checkCall("D-PLY-64 (service): the orphan check is launched as a plain command list -- the one execDetached form measured to start -- carrying the object's own token on it, with no private value and no environment: of what it carries, helperSpawn would move the token alone", () => {
-    const h = H.bootService(svcText, M, { host: "lag" })
+    const h = H.bootService(svcSet, M, { host: "lag" })
     const runs = sessions(h)
     const orphan = runs[runs.length - 1]
     return { verb: verbOf(orphan.command), flag: orphan.command.filter(a => a === "--args-from-env").length,
