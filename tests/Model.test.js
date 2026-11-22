@@ -18850,15 +18850,20 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [replayed, h.root.timedOutPlay, toasts(h), h.root.nowPlaying ? h.root.nowPlaying.id : null]
     }, [true, null, [], Y.id])
 
-    checkCall("D-PLY-35: a stopped start the user has since stopped is not looked for and not told (the stop's own ladder ends whatever it left); its reason is recorded as the timeout it was", () => {
+    // D-PLY-78 (the review of b2d5a6f): a stop that gave up on the start's
+    // lock ends nothing that start left, so the stop's own look asks for it.
+    checkCall("D-PLY-35: a stopped start the user has since stopped is not looked for at once and not told; its reason is recorded as the timeout it was, and the stop's own look then asks for what it left (D-PLY-78)", () => {
       const h = bootPlayer()
       playing(h)
       stopped(h)
+      h.driveTimer("stopLookTimer")
       h.root.stop()
       h.drain()
       exit(h, "")
-      return [said(h), slotVerb(h), h.ids.playerProc.running]
-    }, [[null, [], [], [], "Helper timed out"], "start", false])
+      const atOnce = [said(h), slotVerb(h), h.ids.playerProc.running]
+      h.elapse(h.root.stopLookMs)
+      return atOnce.concat([[slotVerb(h), h.ids.playerProc.running]])
+    }, [[null, [], [], [], "Helper timed out"], "start", false, ["probe", true]])
 
     checkCall("D-PLY-35: a play made while an earlier stop is still settling is a new intent -- its start, stopped by the watchdog, is looked for like any other", () => {
       const h = bootPlayer()
@@ -19670,13 +19675,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the shell's own. On d3a9511: (1) on seeds 7, 26, 122, 139, 147 and
     // 152, (3) on seed 2, (2b) on 51 seeds (41 of them D-PLY-71's card, the
     // rest a card for the player the later stop laddered). About 5 s.
-    const worldSweep = (count, steps, restartP, contestP, windowP) => {
+    const worldSweep = (count, steps, restartP, contestP, windowP, slowP) => {
       const PW = require("./player-world.js")
       const red = { one: [], two: [], twoB: [], three: [], quiet: [] }
       for (let seed = 1; seed <= count; seed++) {
         const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
         h.detached.length = 0
-        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP, contestP, windowP,
+        const v = PW.playerSequence(h, { seed, steps, channels: [X.id, Y.id, Z.id], settleMs: 60000, sourceKey: KA, restartP, contestP, windowP, slowP,
                                          lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
         if (v.one.length > 0) red.one.push(seed)
         if (v.two !== "") red.two.push(seed)
@@ -19923,14 +19928,41 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
     // The seeded world with a contested stop (the header's `contestP`: after
     // a user's stop, a 30% chance that another launcher's verb reaches the
-    // lock at once and holds it past the stop's wait, recording 0 as a
-    // terminal verb does, and the next action waits out the backstop). 150
-    // sequences of 16 steps. On 085a49d: (1) on seeds 25, 31, 52, 63, 71,
-    // 92, 100, 108, 121, 141, 145 and 146 -- each a play zapped into the
-    // player the backstop's own stop then laddered -- and (2b) on 25, 100,
-    // 108, 121 and 141, that player's "stopped unexpectedly". About 5 s.
+    // lock at once and holds it past the stop's wait, on a terminal verb's
+    // --seq 0, which leaves the record where it was since D-PLY-77, and the
+    // next action waits out the backstop). 150 sequences of 16 steps. On
+    // 085a49d: (1) on seeds 25, 31, 52, 63, 71, 92, 100, 108, 121, 141, 145
+    // and 146 -- each a play zapped into the player the backstop's own stop
+    // then laddered -- and (2b) on 25, 100, 108, 121 and 141, that player's
+    // "stopped unexpectedly"; the same seeds with the launcher writing a
+    // record of 0, as the world did before F-HARNESS-120. About 5 s.
     checkCall("D-PLY-73 (seeded world, with contested stops): 150 sequences of plays and stops, some refused by another launcher holding the lock -- no zap into a player a stop then ladders, the shell's own stops included; no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
       worldSweep(150, 16, 0, 0.3), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // F-HARNESS-120: the world's other launcher records what the helper
+    // records. Since D-PLY-77 write_lock_record keeps the higher of a verb's
+    // seq and the recorded one, so a terminal verb on --seq 0 leaves the
+    // record where it was; the world wrote 0, which let an older stop of the
+    // shell's reaching the lock after it pass the seq check and ladder the
+    // player of a start recorded above it -- D-PLY-77's own sequence (the
+    // helper's LockTest: a player at 14, a terminal verb, the shell's stop at
+    // 13). Red with the world before this change: the record 0, the stop
+    // passing and the player laddered.
+    checkCall("F-HARNESS-120: the world's other launcher leaves the lock record where it was, as the helper's write_lock_record does since D-PLY-77 -- a stop of the shell's below that record, reaching the lock after it, is superseded and leaves the player playing", () => {
+      const PW = require("./player-world.js")
+      const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
+      const w = PW.playerWorld(h, { seed: 1, sourceKey: KA, lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
+      const p = { pid: 4314, alive: true, bound: true, channel: X.id, zapped: false, entries: 1 }
+      w.players.push(p)
+      w.player = p
+      w.record = 14
+      w.contest()
+      w.advance(2 * (M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs))
+      const kept = w.record
+      h.ids.Quickshell.execDetached(M.helperArgv(h.root.helperPath, M.playerStopArgv(h.root.socketPath, 13)))
+      w.advance(10000)
+      return [kept, w.record, p.alive, w.stops.map(s => s.laddered), w.quiet()]
+    }, [14, 14, true, [0], true])
 
     // ---- D-PLY-75 (2026-11-21): a stop takes over the question the settle before it left open ----
     //
@@ -20072,10 +20104,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // superseded: the record past the stop) and nothing was attached. Now
     // stop() carries a probe in flight as it carries a pending
     // confirmation. Red on f74ee09 and on 8504ba8 in both rows. The pin: a
-    // START in flight at the stop is not a probe -- refused, it leaves no
-    // player to look for (an older start's ok raises its own question,
-    // stopOlderStartOk), and the look and the backstop ask nothing, as
-    // before; green on both, red when the carry asks of the slot alone.
+    // START in flight at the stop is not a probe -- refused `busy`, it
+    // touched no player (an older start's ok, or a later refusal, raises its
+    // own question, stopOlderStartOk: D-PLY-78), and the look and the
+    // backstop ask nothing, as before; green on both, red when the carry
+    // asks of the slot alone.
     const IN_FLIGHT = ["reattach", "timed-out-start", "start-refused"]
     const inFlightAtStop = how => {
       const h = withThree(bootPlayer())
@@ -20165,6 +20198,179 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // seeds 49, 258, 264, 268 and 291. About 6 s.
     checkCall("D-PLY-75 (seeded world, a stop inside a stop's probe): 300 sequences of plays, stops, health restarts and contested stops, the next action after a contested stop landing while its look's or backstop's probe is out -- nothing playing after a last stop, no zap into a player a stop then ladders, no last play dropped in silence or told falsely", () =>
       worldSweep(300, 4, 0.15, 0.6, 0.9), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // ---- D-PLY-78 (2026-11-21): a start from before the stop answering after its backstop ----
+    //
+    // The backstop (18.25 s) ends `stopping` and clears `userStopped`. A
+    // start or restart issued before the user's stop whose lock section
+    // outlasted the stop's 6.05 s lock wait (the stop gave up: no ladder of
+    // its own, so no EOF of it) and that answered ok after the backstop read
+    // as the shell's own player to recover, and the recover probe adopted
+    // it: the stopped channel played on, named. Now such an ok (`withdrawn`,
+    // nothing named, no settle running) is looked for through applyProbe's
+    // confirmation (Model.playerSessionFollowUp's `confirm`), which stops
+    // the player it finds; that stop's settle runs to its bound and asks
+    // nothing more. One row per way the verb went out: a cold start; a start
+    // that adopted the player the observer was on (`kept`: still attached at
+    // the ok, the backstop's own probe refused by the busy slot, so on
+    // 81afa9f nothing asked at all); and D-PLY-72's laddering verbs, each
+    // with its own rung's EOF delivered. Red on 81afa9f in every row.
+    checkCall("D-PLY-78: Model.playerSessionFollowUp answers `confirm` for a withdrawn start or restart with nothing named and no settle running, the observer on a player or not, and every other answer as before", () => [
+      { withdrawn: true }, { withdrawn: true, attached: true }, { withdrawn: true, userStopped: true },
+      { withdrawn: true, stopping: true }, { withdrawn: true, nowPlaying: true }, { withdrawn: true, attached: true, nowPlaying: true },
+      { withdrawn: false }, { withdrawn: "yes" }, { withdrawn: true, attached: true, stopping: true }
+    ].map(c => M.playerSessionFollowUp(Object.assign({ attached: false, stopping: false, userStopped: false, nowPlaying: false }, c))),
+    ["confirm", "confirm", "confirm", "abandoned", "hunt", "attached", "recover", "recover", "attached"])
+    const LATE = ["cold", "kept"].concat(LADDERING)
+    const lateOk = how => {
+      let v
+      if (how === "cold") {
+        const h = withThree(bootPlayer())
+        h.root.play(X.id, true, "")
+        h.drain()
+        v = { h, dying: null, kind: "start", id: X.id, seq: h.root.playSeq }
+      } else v = ladderingVerb(how === "kept" ? "unanswered-zap" : how)
+      const h = v.h
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      h.root.stop()
+      h.drain()
+      if (how !== "kept" && v.dying) eofOf(h, v.dying)
+      h.elapse(PB.watchdogMs.stop + 2000)
+      const mid = [h.root.stopping === true, h.root.userStopped === true]
+      exit(h, JSON.stringify(Object.assign(JSON.parse(okVerb(v.kind, v.id, v.seq)), how === "kept" ? { spawned: false } : {})))
+      const afterOk = asks.slice()
+      const before = stopsIssued(h).length
+      if (h.ids.playerProc.running) exit(h, probeSeq(v.seq, { stash: STASH_OF(v.id, v.seq), claimed: true }))
+      const shell = [stopsIssued(h).length - before, h.root.nowPlaying ? h.root.nowPlaying.id : null]
+      h.elapse(2 * PB.watchdogMs.stop)
+      return [how, mid, afterOk, shell, asks.slice(afterOk.length), h.root.stopping === true, toasts(h)]
+    }
+    checkCall("D-PLY-78: a start or restart issued before the user's stop, answering ok after that stop's backstop with nothing named, is looked for and its player stopped, never recovered -- a cold start, one that adopted the observed player, and every verb that ladders the player it finds; the shell's stop then settles to its bound and asks nothing more, no card", () =>
+      LATE.map(lateOk), LATE.map(how => [how, [false, false], ["probe"], [1, null], [], false, []]))
+
+    // The same question for the reply a withdrawn start gives when its
+    // watchdog stops it (D-PLY-35's `helper_timeout`) with nothing named --
+    // read as the stop's own ladder having ended whatever it left, which is
+    // not so when the start held the lock past that stop's wait: after the
+    // stop's settle it is looked for at once (`after`), and inside it (a
+    // stop pressed 45 s into the start) by the settle's backstop, as an
+    // older start's ok is (`inside`). Red on 81afa9f in both rows: nothing
+    // asked, nothing stopped.
+    checkCall("D-PLY-78 (rule 15): a withdrawn start its watchdog stopped, with nothing named, is looked for too -- at once after the stop's settle, by that settle's backstop inside it -- and the player it left stopped", () => ["after", "inside"].map(how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      h.root.play(X.id, true, "")
+      h.drain()
+      const xSeq = h.root.playSeq, t0 = h.clock
+      if (how === "inside") h.elapse(PB.watchdogMs.start - 13000)
+      h.root.stop()
+      h.drain()
+      h.elapse(PB.watchdogMs.start - (h.clock - t0))
+      exit(h, "")
+      const atExit = asks.slice()
+      const before = stopsIssued(h).length
+      for (let i = 0; i < 2; i++) {
+        if (h.ids.playerProc.running) exit(h, probeSeq(xSeq, { stash: STASH_OF(X.id, xSeq), claimed: true }))
+        h.elapse(PB.watchdogMs.stop)
+      }
+      return [how, atExit, asks.slice(atExit.length), stopsIssued(h).length - before, h.root.nowPlaying, h.root.stopping === true, toasts(h)]
+    }), [["after", ["start:" + X.id, "probe"], [], 1, null, false, []], ["inside", ["start:" + X.id], ["probe"], 1, null, false, []]])
+
+    // The review of b2d5a6f (rule 15): and a withdrawn start REFUSED with
+    // nothing named. The helper stops only a spawn of its own on a refusal
+    // (D-PLY-57), never a player it adopted, and player_foreign,
+    // tls_unverified, the relay registration's not_running and an ipc_error
+    // come after the adoption. `kept-after`: a start over the observed
+    // player (`kept` above), refused after the backstop, whose own probe the
+    // busy slot refused; `cold-after` and `cold-inside`: a cold start that
+    // adopted a player the observer never reached, refused after the
+    // backstop or inside the settle (10 s after the stop), nothing attached.
+    // Red on 81afa9f and on b2d5a6f in every row: nothing asked. The pins:
+    // `busy` and `superseded` (raised before the verb adopts or spawns
+    // anything: `busy` when it cannot take the lock, `superseded` from the
+    // record it reads as it takes it) ask nothing, and a refusal with a play made
+    // after the stop waiting sends that play as its own start (D-PLY-71);
+    // green on both.
+    const refusedOf = (code, seq) => JSON.stringify({ ok: false, kind: "player.start", error: { code, message: "refused" }, id: Y.id, seq })
+    const lateRefusal = (shape, code, queued) => {
+      const v = shape === "kept-after" ? ladderingVerb("unanswered-zap") : null
+      const h = v ? v.h : withThree(bootPlayer())
+      if (!v) {
+        h.root.play(Y.id, true, "")
+        h.drain()
+      }
+      const seq = h.root.playSeq
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h)
+      h.root.stop()
+      h.drain()
+      h.elapse(shape === "cold-inside" ? 10000 : PB.watchdogMs.stop + 2000)
+      if (queued) {
+        h.root.play(Z.id, true, "")
+        h.drain()
+      }
+      const before = stopsIssued(h).length
+      exit(h, refusedOf(code, seq))
+      for (let i = 0; i < 3; i++) {
+        if (h.ids.playerProc.running) exit(h, slotVerb(h) === "probe" ? probeSeq(seq, { stash: STASH_OF(Y.id, seq), claimed: true }) : okStartSeq(Z.id, h.root.playSeq))
+        h.elapse(PB.watchdogMs.stop)
+      }
+      return [shape, code, asks, stopsIssued(h).length - before, h.root.nowPlaying ? h.root.nowPlaying.id : null, h.root.stopping === true, toasts(h)]
+    }
+    const REFUSED_SHAPES = ["kept-after", "cold-after", "cold-inside"]
+    const AFTER_ADOPTION = ["ipc_error", "tls_unverified", "player_foreign", "not_running"]
+    checkCall("D-PLY-78 (the review of b2d5a6f): a withdrawn start refused after it adopted a player, with nothing named, is looked for -- at once after the stop's settle, by that settle's backstop inside it -- and the player it left stopped, no card", () =>
+      REFUSED_SHAPES.flatMap(shape => AFTER_ADOPTION.map(code => lateRefusal(shape, code))),
+      REFUSED_SHAPES.flatMap(shape => AFTER_ADOPTION.map(code => [shape, code, ["probe"], 1, null, false, []])))
+    checkCall("D-PLY-78 (the review of b2d5a6f, pin): a withdrawn start's lock refusals ask nothing, and a refusal with a play made after the stop waiting sends that play as its own start, nothing probed or stopped", () =>
+      REFUSED_SHAPES.flatMap(shape => ["superseded", "busy"].map(code => lateRefusal(shape, code))).concat([lateRefusal("cold-after", "ipc_error", true)]),
+      REFUSED_SHAPES.flatMap(shape => ["superseded", "busy"].map(code => [shape, code, [], 0, null, false, []]))
+        .concat([["cold-after", "ipc_error", ["start:" + Z.id], 0, Z.id, false, []]]))
+
+    // Pins, green on 81afa9f: a start issued AFTER the stop answering past
+    // that stop's backstop plays and is named, nothing looked for; and a
+    // start from before the stop answering then, with a play made after the
+    // stop waiting, puts that play on its player (the CL5 repair), named,
+    // no stop -- `nowPlaying` set, so not this question.
+    checkCall("D-PLY-78 (pin): after the stop's backstop, a start issued after the stop plays and is named, and a withdrawn start's ok with a play made after the stop waiting zaps that play into its player, named -- nothing probed, nothing stopped, no card", () => ["after", "queued"].map(how => {
+      const h = withThree(bootPlayer())
+      h.driveTimer("stopSettleTimer")
+      h.driveTimer("stopLookTimer")
+      const asks = slotAsks(h), zaps = zapsOf(h)
+      let seq = 0
+      if (how === "queued") {
+        h.root.play(X.id, true, "")
+        h.drain()
+        seq = h.root.playSeq
+      }
+      h.root.stop()
+      h.drain()
+      h.root.play(how === "queued" ? Y.id : X.id, true, "")
+      h.drain()
+      if (how === "after") seq = h.root.playSeq
+      const stops = stopsIssued(h).length
+      h.elapse(PB.watchdogMs.stop + 2000)
+      exit(h, okStartSeq(X.id, seq))
+      h.elapse(2 * PB.watchdogMs.stop)
+      return [how, asks, zaps, stopsIssued(h).length - stops, h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h)]
+    }), [["after", ["start:" + X.id], [], 0, X.id, []], ["queued", ["start:" + X.id], ["play:" + Y.id], 0, Y.id, []]])
+
+    // The seeded world with slow players (the header's `slowP`: with that
+    // chance a start's or a restart's lock section runs 6.15 to 24 s, past a
+    // stop's lock wait, so a stop pressed in it gives up and the verb can
+    // answer after that stop's backstop), with the health path's restarts;
+    // 300 sequences of 4 steps. On 81afa9f: (3) on seeds 3, 34, 50, 64, 67,
+    // 119, 129, 131, 139, 140, 165, 173, 229, 233, 245 and 300, each a start
+    // or restart from before the last stop adopted after its backstop.
+    // The world's starts never reach their watchdog, so the rule-15 row
+    // above is the harness's alone. About 6 s.
+    checkCall("D-PLY-78 (seeded world, slow players): 300 sequences of plays, stops and health restarts, half the starts and restarts holding the lock past a stop's wait -- nothing playing after a last stop, no zap into a player a stop then ladders, no last play dropped in silence or told falsely", () =>
+      worldSweep(300, 4, 0.15, 0, 0, 0.5), { one: [], two: [], twoB: [], three: [], quiet: [] })
   }
 
   // ---- restart on adoption (owner, 2026-10-31 and 2026-11-01), through Service.qml (N5) ----

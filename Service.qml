@@ -959,7 +959,9 @@ Item {
   // as it was pressed -- a confirmation pending, a re-read owed
   // (`probeRetried`), a probe in flight, or, while the settle before it
   // still ran, this flag or a stop the shell issued itself (`stopByShell`)
-  // -- so that stop's look and backstop ask it again.
+  // -- so that stop's look and backstop ask it again. D-PLY-78: and such a
+  // start refused or stopped by its watchdog, nothing named
+  // (lookForWithdrawn).
   property bool stopOlderStartOk: false
   // D-PLY-69: the intent number the player slot's start or restart went out
   // with, and whether a stop was still settling then (issuePlayerSession).
@@ -3650,6 +3652,23 @@ Item {
       && (root.sessionInStop || root.sessionOverPlayer) && root.sessionSeq < root.stopSeq
   }
 
+  // D-PLY-78: the player of a start or restart issued before the last stop,
+  // answering ok, refused or stopped by its watchdog with nothing named. A
+  // verb that held the lock past the stop's wait outlived that stop, which
+  // gave up, so its player is looked for: inside the settle by the backstop
+  // (stopOlderStartOk), after it at once, as the backstop looks
+  // (applyProbe's confirmation stops it if it is there). After the settle the
+  // ok was read as the shell's own player to recover, adopted and named.
+  function lookForWithdrawn() {
+    if (root.stopping) {
+      root.stopOlderStartOk = true
+      return
+    }
+    root.stopConfirmPending = true
+    root.stopConfirmLook = false
+    root.runPlayerProbe()
+  }
+
   // The player slot: its own Process with its own watchdog, so a cold start
   // can never starve a `play` or a `status` on controlProc (F1).
   function runPlayer(kind, args) {
@@ -3766,15 +3785,20 @@ Item {
         attached: root.socketAttached(),
         stopping: root.stopping,
         userStopped: root.userStopped,
-        nowPlaying: root.nowPlaying !== null
+        nowPlaying: root.nowPlaying !== null,
+        // D-PLY-78: `withdrawn` above, spelled from root (CL10's check runs
+        // this branch alone)
+        withdrawn: root.sessionSeq < root.stopSeq
       })
-      if (follow === "attached" || follow === "abandoned") {
+      if (follow === "attached" || follow === "abandoned" || follow === "confirm") {
         // Already observed, or a stop really did overtake this start - the
         // two legitimately interleave, because the helper releases the lock
         // before its first-load window precisely so a stop ladder can get
         // in. Do not hunt for a socket that is being torn down; that would
         // be twelve journal lines for a player nobody wants any more.
         root.playerPending = false
+        // D-PLY-78: and after that stop's settle, its player is looked for.
+        if (follow === "confirm") root.lookForWithdrawn()
       } else {
         // The player is up but the observer has not attached yet: keep the
         // birth edge rather than blinking the bar to idle, bounded by the
@@ -3816,7 +3840,8 @@ Item {
       // left. A player carrying this shell's stash is adopted; anything else
       // ends in settleTimedOutPlay(false), told as the start's own failure.
       // The intent alone gates it: a stop withdraws it (stop() clears
-      // `nowPlaying` and its own ladder ends whatever the start left), and a
+      // `nowPlaying` and its own ladder ends whatever the start left, unless
+      // it gave up on the lock: D-PLY-78 below), and a
       // play after a stop is a new intent even while that stop settles.
       console.warn("omarchy-iptv: player " + kind + " was stopped by its watchdog; looking for the player it may have left")
       root.timedOutPlay = { kind: kind, intent: root.nowPlaying }
@@ -3825,6 +3850,12 @@ Item {
       if (!root.runPlayerProbe()) root.settleTimedOutPlay(false)
       return
     }
+    // D-PLY-78: one a later stop withdrew, nothing named, may have left a
+    // player that stop gave up on (the start held the lock past its wait):
+    // its watchdog's stop, or a refusal after it adopted one (the helper
+    // stops only its own spawn). Not `busy` (no lock) or `superseded` (the
+    // record read as it took the lock): both come before any adopt or spawn.
+    if (withdrawn && root.nowPlaying === null && code !== "superseded" && code !== "busy") root.lookForWithdrawn()
     root.playerPending = false
     var reason = Model.statusReason(status)
     if (code === "superseded") {
