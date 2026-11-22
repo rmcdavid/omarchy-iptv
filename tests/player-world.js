@@ -45,12 +45,15 @@
 //     right after a user's stop, with that chance, another launcher's verb
 //     wants the lock at once and, once it has it, holds it past a stop's
 //     wait (the lock wait plus 0.1 to 2.5 s, drawn: which real verb holds it
-//     that long is not claimed), records 0 as a terminal verb's default
-//     --seq does, and leaves the player as it is. A user's stop it reaches
-//     the lock before gives up and the player plays on; the 5 s look reads a
-//     record below the stop and does nothing; the backstop's probe finds the
-//     player and the shell stops it itself. The next action then also waits
-//     out that backstop, so it lands around the shell's own stop.
+//     that long is not claimed), runs on a terminal verb's default --seq 0,
+//     which leaves the record's seq where it was, as the helper does since
+//     D-PLY-77 (F-HARNESS-120: it wrote 0 until then, a record the helper
+//     no longer produces), and leaves the player as it is. A user's stop it
+//     reaches the lock before gives up and the player plays on; the 5 s
+//     look reads a record below the stop and does nothing; the backstop's
+//     probe finds the player and the shell stops it itself. The next action
+//     then also waits out that backstop, so it lands around the shell's own
+//     stop.
 //   - A stop's probe in flight (D-PLY-75), when a sequence asks for it
 //     (`windowP`, with `contestP`): after a contested stop, with that chance,
 //     the next action lands instead 1 to 250 ms after that stop's 5 s look
@@ -276,10 +279,12 @@ function playerWorld(h, o) {
     w.holder = v
     if (v.kind === "foreign") {
       // Another launcher's verb (`contest`): a terminal `omarchy-iptv player`
-      // verb's --seq defaults to 0, which check_seq never refuses and
-      // write_lock_record records; it leaves the player as it is.
-      w.record = 0
-      note("another launcher's verb holds the lock for " + v.holdMs + " ms (record 0)")
+      // verb's --seq defaults to 0, which check_seq never refuses, and
+      // write_lock_record keeps the higher of it and the recorded seq
+      // (D-PLY-77, F-HARNESS-120), so the record stays; it leaves the player
+      // as it is.
+      w.record = Math.max(w.record, v.seq)
+      note("another launcher's verb holds the lock for " + v.holdMs + " ms (record " + w.record + ")")
       release(v.holdMs)
       return
     }

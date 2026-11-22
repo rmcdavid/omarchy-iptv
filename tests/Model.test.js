@@ -19923,14 +19923,41 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
     // The seeded world with a contested stop (the header's `contestP`: after
     // a user's stop, a 30% chance that another launcher's verb reaches the
-    // lock at once and holds it past the stop's wait, recording 0 as a
-    // terminal verb does, and the next action waits out the backstop). 150
-    // sequences of 16 steps. On 085a49d: (1) on seeds 25, 31, 52, 63, 71,
-    // 92, 100, 108, 121, 141, 145 and 146 -- each a play zapped into the
-    // player the backstop's own stop then laddered -- and (2b) on 25, 100,
-    // 108, 121 and 141, that player's "stopped unexpectedly". About 5 s.
+    // lock at once and holds it past the stop's wait, on a terminal verb's
+    // --seq 0, which leaves the record where it was since D-PLY-77, and the
+    // next action waits out the backstop). 150 sequences of 16 steps. On
+    // 085a49d: (1) on seeds 25, 31, 52, 63, 71, 92, 100, 108, 121, 141, 145
+    // and 146 -- each a play zapped into the player the backstop's own stop
+    // then laddered -- and (2b) on 25, 100, 108, 121 and 141, that player's
+    // "stopped unexpectedly"; the same seeds with the launcher writing a
+    // record of 0, as the world did before F-HARNESS-120. About 5 s.
     checkCall("D-PLY-73 (seeded world, with contested stops): 150 sequences of plays and stops, some refused by another launcher holding the lock -- no zap into a player a stop then ladders, the shell's own stops included; no last play dropped in silence or told falsely, nothing playing after a last stop", () =>
       worldSweep(150, 16, 0, 0.3), { one: [], two: [], twoB: [], three: [], quiet: [] })
+
+    // F-HARNESS-120: the world's other launcher records what the helper
+    // records. Since D-PLY-77 write_lock_record keeps the higher of a verb's
+    // seq and the recorded one, so a terminal verb on --seq 0 leaves the
+    // record where it was; the world wrote 0, which let an older stop of the
+    // shell's reaching the lock after it pass the seq check and ladder the
+    // player of a start recorded above it -- D-PLY-77's own sequence (the
+    // helper's LockTest: a player at 14, a terminal verb, the shell's stop at
+    // 13). Red with the world before this change: the record 0, the stop
+    // passing and the player laddered.
+    checkCall("F-HARNESS-120: the world's other launcher leaves the lock record where it was, as the helper's write_lock_record does since D-PLY-77 -- a stop of the shell's below that record, reaching the lock after it, is superseded and leaves the player playing", () => {
+      const PW = require("./player-world.js")
+      const h = withThree(boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { bound: 1e7 }))
+      const w = PW.playerWorld(h, { seed: 1, sourceKey: KA, lockWaitMs: M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs })
+      const p = { pid: 4314, alive: true, bound: true, channel: X.id, zapped: false, entries: 1 }
+      w.players.push(p)
+      w.player = p
+      w.record = 14
+      w.contest()
+      w.advance(2 * (M.PLAYER_BOUNDS.lockMs + M.PLAYER_BOUNDS.lockPollMs))
+      const kept = w.record
+      h.ids.Quickshell.execDetached(M.helperArgv(h.root.helperPath, M.playerStopArgv(h.root.socketPath, 13)))
+      w.advance(10000)
+      return [kept, w.record, p.alive, w.stops.map(s => s.laddered), w.quiet()]
+    }, [14, 14, true, [0], true])
 
     // ---- D-PLY-75 (2026-11-21): a stop takes over the question the settle before it left open ----
     //
