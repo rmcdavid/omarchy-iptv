@@ -54,7 +54,10 @@ module, declared-twice, missing, encoding, function-twice, unbalanced, stray,
 not-exact, no-function, forwarded-twice, unforwarded (tests/service-files.js
 says what each means; `stray` includes text after a function's closing
 brace on its line that is neither blank nor a `//` comment, which the
-harness, reading a function from its header to its brace, would drop). So
+harness, reading a function from its header to its brace, would drop, and a
+line terminator JavaScript reads and these readers do not -- a CR not
+directly before an LF, U+2028 or U+2029 -- anywhere in a code-behind, since
+`// x<CR>root.y = 1` is a comment here and a statement to the engine). So
 the view holds every line of every code-behind but its blank lines and
 loose `//` comments, and runs as the forwarders do
 (their arguments plain names, the function's own); the rest of the layout is
@@ -91,6 +94,10 @@ MODULE_IMPORT = re.compile(r'[ \t]*import[ \t]+(?:"[^"]*\.mjs"|\'[^\']*\.mjs\')'
 MODEL_MJS_IMPORT = re.compile(r'import "Model\.mjs" as Model\r?')
 HEADER = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{')
 COMMENT_LINE = re.compile(r'[ \t]*//')
+# A line terminator JavaScript reads and this reader does not: a CR not
+# directly before an LF, U+2028, U+2029 (written as code points, so this file
+# stays ASCII). JavaScript ends a `//` comment at any of them.
+JS_ONLY_TERMINATOR = re.compile('\r(?!\n)|[%s%s]' % (chr(0x2028), chr(0x2029)))
 BLANK_LINE = re.compile(r'[ \t]*\r?')
 FORWARDER_SHAPE = re.compile(r'  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{ return ([A-Z][A-Za-z0-9_]*)\.')
 # The exact form's arguments are plain names: a default or a pattern repeated
@@ -296,6 +303,11 @@ def inline_text(text, files):
         body = files.get(file)
         if not isinstance(body, str):
             raise ServiceFilesError('missing', '%s is declared (line %d) and is not there' % (file, line))
+        term = JS_ONLY_TERMINATOR.search(body)
+        if term:
+            raise ServiceFilesError('stray', '%s line %d holds a line terminator JavaScript reads and this reader does '
+                                    'not (a CR not before an LF, U+2028 or U+2029)'
+                                    % (file, body.count('\n', 0, term.start()) + 1))
         found = []
         spans = function_spans(body, file, found)
         stray = stray_line(body, found)

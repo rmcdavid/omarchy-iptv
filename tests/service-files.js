@@ -71,7 +71,12 @@
 //                    text after a function's closing brace on its line that
 //                    is neither blank nor a `//` comment (`  }; x()`), which
 //                    the view would place after a root function and the
-//                    harness, reading a function from header to brace, drop
+//                    harness, reading a function from header to brace, drop;
+//                    and a line terminator JavaScript reads that this reader,
+//                    splitting at "\n" only, does not -- a CR not directly
+//                    before an LF, U+2028 or U+2029 -- anywhere in a
+//                    code-behind, because `// x<CR>root.y = 1` is a comment
+//                    here and a comment then a statement to the engine
 //   not-exact        a line shaped `  function F(...) { return Q.` for a
 //                    declared Q that is not exactly F's forwarder: the call
 //                    repeats the header's arguments, those are plain names
@@ -128,6 +133,10 @@ const MODEL_MJS_IMPORT = /^import "Model\.mjs" as Model\r?$/
 // A function at the root's two-space indent, matched at a line start.
 const HEADER = /  function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\) \{/y
 const COMMENT_LINE = /^[ \t]*\/\//
+// A line terminator JavaScript reads and this reader does not: a CR not
+// directly before an LF, U+2028, U+2029 (built from code points, so this
+// file stays ASCII). JavaScript ends a `//` comment at any of them.
+const JS_ONLY_TERMINATOR = new RegExp("\\r(?!\\n)|[" + String.fromCharCode(0x2028, 0x2029) + "]")
 const BLANK_LINE = /^[ \t]*\r?$/
 // A forwarder: the shape first (so a near miss for a declared qualifier is
 // refused, never kept as a root function), then the exact form, whose
@@ -298,6 +307,8 @@ function inlineText(text, files) {
   for (const d of decls) {
     const body = get(d.file)
     if (typeof body !== "string") throw refuse("missing", d.file + " is declared (line " + d.line + ") and is not there")
+    const term = JS_ONLY_TERMINATOR.exec(body)
+    if (term) throw refuse("stray", d.file + " line " + (body.slice(0, term.index).split("\n").length) + " holds a line terminator JavaScript reads and this reader does not (a CR not before an LF, U+2028 or U+2029)")
     const found = []
     const spans = functionSpans(body, d.file, found)
     const stray = strayLine(body, found)

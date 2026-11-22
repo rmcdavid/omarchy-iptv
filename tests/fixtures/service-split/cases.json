@@ -498,6 +498,46 @@
      "ServicePip2"
     ]
    ]
+  },
+  {
+   "name": "a loose comment line in a code-behind holding a lone CR is refused: JavaScript ends the comment there and runs what follows",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n// loose\rroot.paused = true; var leaked = 1\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a lone CR in the comment after a code-behind function's closing brace is refused",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  function a(x) {\n    return 1\n  } //\r  root.paused = true\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "a lone CR in a code-behind function's leading comment block is refused: the code after it sits outside the function in the file",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n  // a returns one\rroot.paused = true\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "U+2028 and U+2029 in a code-behind's comment are refused, as line terminators JavaScript reads",
+   "service": "import QtQuick\nimport \"Service-a.js\" as ServiceA\nItem {\n  function a(x) { return ServiceA.a(x) }\n}\n",
+   "files": {
+    "Service-a.js": "// a code-behind\n\n// loose\u2028root.paused = true\n// and\u2029var leaked = 1\n  function a(x) {\n    return 1\n  }\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
   }
  ]
 }
