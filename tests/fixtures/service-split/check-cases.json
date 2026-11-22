@@ -1,0 +1,269 @@
+{
+ "comment": [
+  "D-REL-14: scripts/split-service.py --check's own cases, which --check runs after the tree (its self-test) and",
+  "tests/test_split_service.py runs one by one. `service` is a Service.qml text, `files` the code-behinds there by",
+  "name, `present` every Service*.js beside it (default: the names in `files` that start with Service).",
+  "`expect.refusal` is the kind of the first problem; `expect.counts`, for a clean service, the counts it must",
+  "report (a judge that stopped reading reads fewer). Generated with every newline written by code point."
+ ],
+ "cases": [
+  {
+   "name": "the layout as the readers read it, judged clean: one code-behind, its two forwarders, a root function, the root's own members, a change signal, and members of Item and QObject",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root.countChanged.connect(root.str)\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "counts": {
+     "code_behinds": 1,
+     "forwarders": 2,
+     "root_functions": 1,
+     "sites": 11
+    }
+   }
+  },
+  {
+   "name": "a one-file service, as every tree has been until the first move: nothing to judge but the root's own members",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) {\n    root.count += by\n    return root.count\n  }\n}\n",
+   "files": {},
+   "expect": {
+    "counts": {
+     "code_behinds": 0,
+     "forwarders": 0,
+     "root_functions": 2,
+     "sites": 2
+    }
+   }
+  },
+  {
+   "name": "the readers' refusal is --check's: a code-behind statement outside every function",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\nroot.count = 1\n"
+   },
+   "expect": {
+    "refusal": "stray"
+   }
+  },
+  {
+   "name": "the readers' refusal is --check's: a forwarder with its arguments swapped",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\nimport \"Service-two.js\" as ServiceTwo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n  function pair(a, b) { return ServiceTwo.pair(b, a) }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n",
+    "Service-two.js": "// two\n\n  function pair(a, b) { return a - b }\n"
+   },
+   "expect": {
+    "refusal": "not-exact"
+   }
+  },
+  {
+   "name": "the readers' refusal is --check's: a code-behind function no forwarder names",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "unforwarded"
+   }
+  },
+  {
+   "name": "the readers' refusal is --check's: a declared code-behind that is not there",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {},
+   "expect": {
+    "refusal": "missing"
+   }
+  },
+  {
+   "name": "the readers' refusal is --check's: a script that is not a code-behind's name",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Helpers.js\" as Helpers\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return Helpers.bump(by) }\n}\n",
+   "files": {
+    "Helpers.js": "  function bump(by) { return by }\n"
+   },
+   "expect": {
+    "refusal": "declaration"
+   }
+  },
+  {
+   "name": "one name in two code-behinds is two forwarders of one name on the root: refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\nimport \"Service-two.js\" as ServiceTwo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n  function last() { return ServiceTwo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n",
+    "Service-two.js": "// two\n\n  function last() { return 2 }\n"
+   },
+   "expect": {
+    "refusal": "function-twice"
+   }
+  },
+  {
+   "name": "a code-behind beside Service.qml that it does not import is refused: nothing loads it, and no reader sees it",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "present": [
+    "Service-demo.js",
+    "Service-old.js"
+   ],
+   "expect": {
+    "refusal": "undeclared"
+   }
+  },
+  {
+   "name": "a code-behind calling another function through its qualifier, past the root, is refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    ServiceDemo.last()\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "qualifier"
+   }
+  },
+  {
+   "name": "a root function calling a code-behind's qualifier outside its forwarder is refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n  function stays(x) {\n    return ServiceDemo.last() + x\n  }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "qualifier"
+   }
+  },
+  {
+   "name": "`this` in a code-behind is refused: the forwarder calls the function on the code-behind",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    this.count = by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "scope"
+   }
+  },
+  {
+   "name": "`arguments` in a code-behind is refused: the forwarder passes only the names it lists",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (arguments.length > 1) return 0\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "scope"
+   }
+  },
+  {
+   "name": "a code-behind calling one of its own functions unqualified is refused: say root.F",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    last()\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "sibling"
+   }
+  },
+  {
+   "name": "a ternary's branch naming one of its own functions is a reference, and refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    var f = by ? last : null\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "sibling"
+   }
+  },
+  {
+   "name": "an object literal's key that spells one of its own functions names nothing, and reads",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    var o = { last: root.count, bump: 1 }\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "counts": {
+     "sites": 10
+    }
+   }
+  },
+  {
+   "name": "root.N for no member of the root, in a code-behind, is refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root.notAMember = by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "member"
+   }
+  },
+  {
+   "name": "root.N for no member of the root, in Service.qml's own code, is refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n  function stays(x) {\n    return root.notAMember + x\n  }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "member"
+   }
+  },
+  {
+   "name": "an id is no member of the root: root.tick reads undefined, and is refused",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root.tick.stop()\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "member"
+   }
+  },
+  {
+   "name": "root?.N and root[\"N\"] are judged as root.N is",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root?.notAMember\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "member"
+   }
+  },
+  {
+   "name": "root[\"N\"] for a member reads",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root[\"count\"] = 1\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "counts": {
+     "sites": 10
+    }
+   }
+  },
+  {
+   "name": "root indexed by an expression is refused: no reading of the source can judge it",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root[by] = 1\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "unjudged"
+   }
+  },
+  {
+   "name": "a property alias and a declared signal are members, and so are their change signal and the signal",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n  property alias tickInterval: tick.interval\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    root.tickInterval = root.tickIntervalChanged ? 1 : 2\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "counts": {
+     "sites": 11
+    }
+   }
+  },
+  {
+   "name": "the tokenizer losing its place in a code-behind is refused, never read past: a newline in a quoted string, which the readers' brace matcher crosses",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    var s = \"a\nb\"\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "scan"
+   }
+  }
+ ]
+}
