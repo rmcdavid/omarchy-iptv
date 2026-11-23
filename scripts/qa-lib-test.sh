@@ -3992,9 +3992,9 @@ fi
 echo "No selection" >&2; exit 1
 OSP
 chmod 0755 "$OS/bin/"*
-os_run() {   # os_run <out>: one check-tree over the stand-ins
+os_run() {   # os_run <out> [<qml>]: one check-tree over the stand-ins
   env -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
-    CLIP_CAGE_BIN="$OS/bin/cage" CLIP_QML_BIN="$OS/bin/qml" CLIP_OFFER_MB=1 PATH="$OS/bin:$PATH" \
+    CLIP_CAGE_BIN="$OS/bin/cage" CLIP_QML_BIN="${2:-$OS/bin/qml}" CLIP_OFFER_MB=1 PATH="$OS/bin:$PATH" \
     XDG_RUNTIME_DIR="$OS/run" TMPDIR="$OS/tmp" OMARCHY_IPTV_HARNESS_DIR="$OS/h" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
     timeout -k 5 60 bash "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$1" 2>&1
@@ -4010,6 +4010,34 @@ is "and a producer that exits before it serves: P2 is red and says so, never a c
    "$(qa_count '^FAIL P2 .*got \[not read: the producer exited before its offer was listed\]' "$OS/quit.out") $(qa_count '^FAIL P2 .*got \[0\]' "$OS/quit.out") $(cat "$OS/quit.out.rc")" \
    "1 0 1"
 rm -f "$OS/quit"
+# The warm start (the recheck of 19c6235): a probe whose FIRST start draws
+# only after 8 s, past the 5 s a measured probe is given, and every later
+# start at once -- the shape of a cold page cache, where the arm's first qml
+# start drew at 6.2 s and the next at about 0.5 s. With the warm start the
+# throwaway start pays the 8 s and the read-only probe is measured (P4
+# passes: the stand-in never passes settle's 50 MB floor, so its growth is
+# measured from where it is, as 0); without it P4 reads `no-frame`, as the
+# lead's gate did. A python stand-in that execs, so the scenario's TERM by
+# pid reaches the process that sleeps. P3 is red here (the stand-in reads
+# nothing) and is not what this asks.
+cat >"$OS/bin/qml-cold" <<OSQ
+#!/bin/bash
+exec python3 -I -c '
+import os, sys, time
+if not os.path.exists(sys.argv[1]):
+    open(sys.argv[1], "w").close()
+    time.sleep(8)
+sys.stderr.write("qt.scenegraph.time.renderloop: Frame prepared\\n")
+sys.stderr.flush()
+time.sleep(30)
+' "$OS/drawn"
+OSQ
+chmod 0755 "$OS/bin/qml-cold"
+rm -f "$OS/drawn"
+os_run "$OS/cold.out" "$OS/bin/qml-cold"
+is "clip check-tree, a probe whose first start draws only after 8 s: the warm start takes it, and the read-only probe is measured" \
+   "$(qa_count '^   \(warm start: a throwaway readonly\.qml drew its first frame after [0-9]+ ms; stopped, not measured\)$' "$OS/cold.out") $(qa_count '^   \(readonly\.qml drew its first frame [0-9]+ ms after its start\)$' "$OS/cold.out") $(qa_count '^PASS P4 the read-only probe reads nothing' "$OS/cold.out") $(qa_count 'not measured: no-frame' "$OS/cold.out")" \
+   "1 1 1 0"
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
@@ -4263,7 +4291,12 @@ rm -f "$OS/quit"
 # of 19c6235): qa_offer_listed reads a bound written with a leading zero as
 # decimal, where 09 ended the caller's script, and refuses a producer pid of
 # 0 or one written with a leading zero. Both red on 19c6235's qa-lib.sh.
-EXPECTED=802
+# 802 -> 803 on 2026-11-22 (F-HARNESS-124, lane-fix-fh124, from the recheck
+# of 19c6235): clip-scenario.sh's check-tree over a stand-in probe whose
+# first start draws after 8 s, which only the warm start keeps from P4's
+# `no-frame`. Red on d28039d's scenario and on a mutant without the
+# warm_start call.
+EXPECTED=803
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

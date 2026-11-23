@@ -138,8 +138,10 @@
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
 # transcript, nothing on the user's session, the probe arm alone over a
-# 25 MB offer, about 9 s) and `live` (the default: a transcript, both arms
-# over 100 MB, and the --baseline lever). The gate's offer is a quarter of
+# 25 MB offer, about 12 s, and about 18 s when the probe's files have left
+# the page cache, which the warm start then pays, F-HARNESS-124) and `live`
+# (the default: a transcript, both arms over 100 MB, and the --baseline
+# lever). The gate's offer is a quarter of
 # the live one (DR-B1): a 100 MB editable probe holds about 300 MB while it
 # reads, which on a machine short of memory could be killed mid-read and
 # turn P3 red for the wrong reason; 25 MB keeps the gate's transient under
