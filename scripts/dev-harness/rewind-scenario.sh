@@ -87,7 +87,8 @@
 # reads the same state either way. Without `--cage` the desk arm runs its
 # checks in their order as before, with the two repairs this work found in
 # them (F-HARNESS-127, F-RWD-27) and R7's second `live` press, which only a
-# first press that lands within a step of live but past SHOW_S takes.
+# first press that leaves the readout past SHOW_S with the player within a
+# step of its cache's end takes.
 #
 # Output: one PASS/FAIL line per assertion and a summary, and the run SCANS
 # ITS OWN STDOUT for a URL at the end (R18) rather than claiming not to print
@@ -756,7 +757,6 @@ if qa_leak_scan 'service loaded' "://|$HOST|live\\.m3u8|/rewind/" "$HLOG"; then 
 else bad "R6 harness log: leak or vacuous (status $?)"; fi
 
 echo "== R7 the service readout through the harness and the plugin verbs"
-r7_from=$(rw behindLive)
 ipc live >/dev/null 2>&1
 until_history 24 40 || true
 # Ruling D8: `live` lands as near the edge as the CACHE reaches. R4 and R5
@@ -767,20 +767,26 @@ until_history 24 40 || true
 # of the cage arm that printed it (D-REL-14), at 80% of a core or at 300%. A
 # second press, once the demuxer has caught up, lands where the first was
 # aimed; R7 is about `back`, not this.
-# But only a first press that LANDED gets one: a readout within a step of
-# live, where every short press of the cage's read 2.5 to 3.6 s from about
-# 30. A first press that moved nothing leaves the readout where R5 left it,
-# about 30 s behind, and a second press would hide that (the review of the
-# cage arm, D-REL-14): it gets none, and R7's checks below are judged from
-# there.
+# But only a first press that LANDED gets one, and the PLAYER says whether
+# it did: within a step of its cache's end. The service's readout cannot
+# say. R1 to R5 seek through the helper alone, so before this press it
+# holds whatever the last health tick stored (10.034, R2's, in one run), and
+# a first press that moved nothing would leave it there or at the floor's
+# 30. The player cannot be wrong that way: one that did not move sits at
+# the floor, its full forward cache about 20 s or more ahead of it. A second
+# press would hide a first that did nothing (the review of the cage arm,
+# D-REL-14), so that one gets none, and R7's checks below are judged from
+# where it stayed.
 if ! until_rw behindLive 0 "$SHOW_S" 6; then
-  r7_first=$(rw behindLive)
-  if [[ $(ge "$STEP" "$r7_first") == 0 ]]; then
-    printf '   R7 the first live moved the readout from %s to %s, past %s s; pressing live again\n' "$r7_from" "$r7_first" "$SHOW_S"
+  r7_range=$(probe range "$SOCK")
+  r7_ahead=$(rf 'd["ahead"]' "$r7_range")
+  if [[ $(ge "$STEP" "$r7_ahead") == 0 ]]; then
+    printf '   R7 the first live left the readout at %s, past %s s, the player %s s from its cache end; pressing live again\n' "$(rw behindLive)" "$SHOW_S" "$r7_ahead"
     ipc live >/dev/null 2>&1
     until_rw behindLive 0 "$SHOW_S" 6 || true
   else
-    printf '   R7 the first live left the readout at %s (from %s), not within a step (%s s) of live: no second press\n' "$r7_first" "$r7_from" "$STEP"
+    printf '   R7 the first live left the readout at %s and the player %s s from its cache end (history %s): it did not land, and gets no second press\n' \
+      "$(rw behindLive)" "$r7_ahead" "$(rf 'd["history"]' "$r7_range")"
   fi
 fi
 is "R7 the harness verb back answers" "$(rf 'd["ok"]' "$(ipc back 10)")" "true"
