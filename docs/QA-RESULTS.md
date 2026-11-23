@@ -25858,3 +25858,75 @@ parent.**
 - *Messages that name a file where they compared a view:* split-service's
   verify and the cut's own call to it (one function), and split-helper's and
   split-model's verifies, which compare files and name them.
+
+## D-REL-14: C3 closed (the lead, 2026-11-23)
+
+The final recheck of relsplit-3 at 2cc9552 found one must-fix and two nits.
+Its record is in the workflow's journal, and its evidence is in the
+session's scratch (`lane-recheck2-relsplit3/`). This section holds the
+lead's fix and the lead's calls on what the three lanes left open.
+
+**The must-fix.** f9bd8fb's order check, "and the scenario reads the
+caller's signature above the line that unsets it", was a grep. It found
+the line where `^CALLER_SIGNATURE=` sat and compared that line's place with
+the unset's, but never asked what the line read. The recheck emptied the
+read to `CALLER_SIGNATURE=`, and the extracted block still read 8 of 8.
+That mutant disarms the lock branch of cage_start's live-session refusal:
+qa_target_nested, asked with an empty signature, always answers nested. So
+it is rule 14's shape: the check named a behaviour and tested a string.
+
+**The fix.** The check now runs the scenario's own lines, from its
+`LIVE_DISPLAY=` read down to `(( CAGE )) && unset DISPLAY
+HYPRLAND_INSTANCE_SIGNATURE`, under `env -i` with CAGE=1, a display, a
+signature and an X display handed in. It compares what those lines leave
+behind: the display, the signature, and whether the two variables are
+gone. Run against copies of the scenario:
+
+| tree | reads | verdict |
+|---|---|---|
+| the tip (2cc9552) | `wayland-9\|rcgsig\|unset\|unset` | green |
+| `CALLER_SIGNATURE=` emptied (the recheck's mutant) | `wayland-9\|\|unset\|unset` | red |
+| the read moved below the unset | `wayland-9\|\|unset\|unset` | red |
+| `LIVE_DISPLAY=wayland-1`, the caller's ignored | `wayland-1\|rcgsig\|unset\|unset` | red |
+| the unset keeps the signature (`unset DISPLAY`) | `no range (130..)` | red |
+| bd65241's scenario | `no range (..)` | red |
+
+One check was replaced by one, so qa-lib-test's count stays at 828.
+
+**The nit fixed.** split-service's verify line said "the inline view is
+REV's inline view" for a split REV. It now reads `verify ok (the inline
+view matches REV's inline view byte for byte, N bytes)`, and
+tests/test_split_service.py's two assertions read the same. Earlier
+records in this file quote the old line as it was printed then.
+
+**The nit left open.** The desk arm has not run with R7's new gate. It is
+filed as F-HARNESS-129 below.
+
+**The lead's calls, under the owner's standing authority of 2026-11-09:**
+- **The arm lane's four cage adjustments are kept as built:**
+  - (a) the cage's player draws with `--profile=fast` on one llvmpipe
+    thread;
+  - (b) R7's second `live` press goes only to a player that the socket
+    reads within a step of its cache's end, as 194781e gates it;
+  - (c) R1 and R2's `applied` may be one 40 ms frame off in the cage, and
+    keeps 0.01 on the desk;
+  - (d) R15's 300 ms budget is a named SKIP in the cage, with its
+    measurement printed. It is not given a cage budget, because a
+    software-rendered cage's latency says nothing about the desk's budget.
+    The desk arm keeps that budget.
+- **No node check of the code-behind's rewind writes.** This was the move
+  lane's proposal. R9's mutant reddens the cage arm only, which is
+  F-RWD-19's split: decisions live in the model, and Qt writes live in the
+  service. Every later move keeps one live mutant inside each code-behind
+  it creates, as call (i) did here.
+- **The `live` readout after a press from the floor.** It reads 2.5-3.6 s
+  behind until the demuxer catches up (the arm lane's proposal 6). That is
+  ruling D8 as written and a product question, so it is not filed. The
+  owner is told.
+
+**Filed:**
+- **F-GATE-29**: qmllint no longer reads the moved bodies.
+- **F-HARNESS-128**: key-, logo- and open-scenario's live-session refusals
+  are not driven, and cage_start and cage_stop exist in five copies.
+- **F-HARNESS-129**: the desk arm has not run since three of its checks
+  changed.

@@ -497,7 +497,7 @@ def verify(root, rev, out=None):
         out.write('split-service: the inline view differs from %s at byte %d (line %d of the view; '
                   '%d bytes against %d)\n' % (what, at, line, len(have), len(want)))
         return 1
-    out.write('split-service: verify ok (the inline view is %s byte for byte, %d bytes)\n' % (what, len(have)))
+    out.write('split-service: verify ok (the inline view matches %s byte for byte, %d bytes)\n' % (what, len(have)))
     return 0
 
 

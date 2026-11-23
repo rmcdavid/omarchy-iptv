@@ -3841,9 +3841,24 @@ is "control: a nested display none of those names is driven, with no signature" 
 is "control: and with a signature whose lock names another socket" "$(rcg wayland-8 wayland-3 qasig)" "0|0|gone|accepted"
 # The signature has to be read where the scenario still has it: the cage arm
 # unsets HYPRLAND_INSTANCE_SIGNATURE for everything it starts, and the bare
-# variable is all cage_start would see below that line.
-ck "and the scenario reads the caller's signature above the line that unsets it" \
-   '(( $(tr_line rewind-scenario.sh "^CALLER_SIGNATURE=") > 0 && $(tr_line rewind-scenario.sh "^CALLER_SIGNATURE=") < $(tr_line rewind-scenario.sh "^(( CAGE )) && unset DISPLAY HYPRLAND_INSTANCE_SIGNATURE$") ))'
+# variable is all cage_start would see below that line. So the scenario's own
+# lines, from its LIVE_DISPLAY read down to that unset, run here as the cage
+# arm runs them, and what they leave is compared: a read in the wrong place
+# and a read of the wrong value are both red (the final recheck of
+# relsplit-3: an emptied `CALLER_SIGNATURE=` passed a check of the line's
+# place alone, and disarmed the lock branch of cage_start's refusal).
+caller_reads() {
+  local from to body
+  from=$(tr_line rewind-scenario.sh "^LIVE_DISPLAY=")
+  to=$(tr_line rewind-scenario.sh "^(( CAGE )) && unset DISPLAY HYPRLAND_INSTANCE_SIGNATURE$")
+  [[ -n $from && -n $to ]] && (( from < to )) || { echo "no range ($from..$to)"; return; }
+  body=$(sed -n "${from},${to}p" "$ROOT/scripts/dev-harness/rewind-scenario.sh") || { echo "unread"; return; }
+  env -i PATH="$PATH" CAGE=1 WAYLAND_DISPLAY=wayland-9 HYPRLAND_INSTANCE_SIGNATURE=rcgsig DISPLAY=:9 \
+    bash -c "$body"'
+printf "%s|%s|%s|%s" "$LIVE_DISPLAY" "$CALLER_SIGNATURE" "${HYPRLAND_INSTANCE_SIGNATURE-unset}" "${DISPLAY-unset}"'
+}
+is "and the scenario's own lines keep the caller's display and signature above the line that unsets them" \
+   "$(caller_reads)" "wayland-9|rcgsig|unset|unset"
 fh_case "spikes/first-open/run.sh: refused before it makes its scratch tree" \
   "$FH_CAGE" "$D97" "$FHD-fo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
 FH_HD62=$(sp_path 62 h)
