@@ -25139,9 +25139,10 @@ So shell.qml gains `listKeys <letters> <gapMs>` and `listKeysResult`:
   control characters and number entry, and endNumberEntry. None of these
   applies to a guide open in list mode.
 
-R13 ran in every run: 20 of 20 letters reached the handler, there were 3
-helper runs for 20 presses (coalesced), and the readout was about 40 s behind
-(at least 20 is required). R14 read what it reads on the desk, green
+R13 ran in eight of the nine runs (H was stopped after the cache control,
+before R13; corrected by lane-fix-relsplit3, 2026-11-23): 20 of 20 letters
+reached the handler, there were 3 helper runs for 20 presses (coalesced),
+and the readout was about 40 s behind (at least 20 is required). R14 read what it reads on the desk, green
 throughout. A lost letter counts where the desk counts a refused key: the
 desk's last check, "no keystroke was refused by the focus guard", is "no
 press was lost on its way to the guide's list handler" in the cage.
@@ -25180,7 +25181,11 @@ it stood at that step.
    ruling D8's "as near as the cache reaches" is that far. A second press
    follows when the readout is past SHOW_S, and lands at the edge: 9.954 and
    ~10 after `back 10` in D and E. This is the one behaviour change the desk
-   arm shares, and only a first press that falls short takes it.
+   arm shares, and only a first press that falls short takes it. [2026-11-23,
+   lane-fix-relsplit3: a first press that moved nothing took it too, and R7
+   then read green. The second press now goes only to a first press after
+   which the socket reads the player within a step of its cache's end; "the
+   fix pass on relsplit-3", below.]
 4. **R1 and R2's `applied`**, judged to 0.01 s, read -9.96 in C: one 40 ms
    frame played between the landing and the helper's read. The cage arm's
    bound is one frame (0.05). The desk keeps 0.01.
@@ -25343,7 +25348,12 @@ is 733f84b:Service.qml byte for byte, 446973 bytes)`.
 - Service.qml now has 49,728 B of headroom under the 458,752 B ceiling (it
   had 11,779 B).
 - On the committed tree, `--verify --from-git 733f84b` matches byte for
-  byte. `--check` reads 3 files, 2 code-behinds, 168 root functions, 36
+  byte. Call (g) named bd65241 for the cut and the verify, and the two are
+  the same check: 733f84b changed no service file (`cmp` of the two
+  revisions' Service.qml is silent), and on 6660f73 `--verify --from-git
+  bd65241` reads `verify ok (the inline view is bd65241:Service.qml byte for
+  byte, 446973 bytes)` (run by lane-fix-relsplit3 in a scratch clone,
+  2026-11-23). `--check` reads 3 files, 2 code-behinds, 168 root functions, 36
   forwarders, 2,267 root member sites, 2 uses of the root whole, and 32 of
   32 cases, so the gate's floors (2,200 and 32) stand.
 - ALLOWLIST went from 43 to 45 entries, and test_release's must_ship gained
@@ -25427,15 +25437,17 @@ Rule 11, the pins seen red both ways:
   - qa-lib-test: 818 passed, 2 failed.
 
 **The guards and the qmllint step, as check.sh runs each.**
-- On the moved tree each of the nine guards prints the parent's line byte
-  for byte, apart from the file count:
+- On the moved tree eight of the nine guards print the parent's line byte
+  for byte, apart from the file count (corrected by lane-fix-relsplit3,
+  2026-11-23: this said each of the nine, and the ninth, model members,
+  prints its count split by file, below):
   - text format, theme names, colour literals, Qt revisions and metric
     literals: 3 files become 5;
   - trim shapes and model regex: 22 become 24;
   - README notices: 35 shipped code files become 37.
-- Model members reads 413 references on both trees. On the moved tree they
-  split as Service.qml 360, Service-rewind.js 10 and Service-sources.js 43,
-  each judged under Service.qml's imports.
+- The ninth, model members, reads 413 references on both trees. On the
+  moved tree they split as Service.qml 360, Service-rewind.js 10 and
+  Service-sources.js 43, each judged under Service.qml's imports.
 - split-helper --check, split-model --check, the helper regex guard, the
   harness root's theme names and check-board-staleness (0 disagreements)
   read the same on both trees, and check-defect-ledger reads 795 rows on
@@ -25459,6 +25471,16 @@ Rule 11, the pins seen red both ways:
 
 **The suites read the code-behinds (task 2).** Each mutant below is an
 export of 6660f73 with one line changed, run through the whole node suite.
+The lane kept no diff of them; each one line, re-derived from what this
+section says and found once in 6660f73's file (lane-fix-relsplit3,
+2026-11-23):
+- Service-sources.js, L597 in clearSourceData: `    root.logoHave = ({})`
+  deleted.
+- Service-rewind.js, L19 in seekCtx: `      pendingPlayId: root.pendingPlayId,
+  currentEntryId: root.currentEntryId,` with its key written `pendingPlayid`.
+- Service-rewind.js, L32 in applySeekPlan, the `if (plan.clearReadout) {`
+  branch: `      root.rewind = null` deleted, `      seekThrottle.stop()`
+  kept. This is also run 5's mutant below.
 - **Service-sources.js, clearSourceData without `root.logoHave = ({})`**:
   4,069 checks, 1 failure, "F-M3-18 (a): through Service -- a switch runs
   the REAL clearSourceData: ...". It got `{"x.png":true,"dir":...}` where it
@@ -25517,7 +25539,11 @@ ran from its own tree's copy.
   rewind runs log the same warnings, but for pointer values in the
   socket's retries, of which the moved run logged one more.
 - **The mutant (run 5) proves the live shell runs the code-behind.** It is
-  the cage arm's R9 mutant, now made inside Service-rewind.js:
+  the cage arm's R9 mutant, now made inside Service-rewind.js (its one
+  line is under "The suites read the code-behinds" above; the rig kept
+  neither the tree nor its diff, so that it was 6660f73 with that line
+  changed rests on this record, and the fix pass's runs record each tree's
+  commit, the mutation's diff and the sha256 of every file the run reads):
   applySeekPlan's clearReadout branch keeps `seekThrottle.stop()` and loses
   `root.rewind = null`. Service.qml is the moved tree's byte for byte, and
   the run used the moved tree's own scenario with `--cage --tree` over the
@@ -25563,7 +25589,22 @@ Proof that 9967571 changes only comment lines:
 - So the move commit is compared with its successor without comments, and
   C4's cut verifies against 9967571's view, or its successor's. The script
   that drops the comment lines and compares is kept with this lane's
-  evidence.
+  evidence. [2026-11-23, lane-fix-relsplit3: that evidence is under /tmp,
+  which a reboot clears, so the comparison is here, run from the tree's
+  root over two revisions with the readers' own inline view. It printed
+  `4450 4450 True` for 6660f73 against 9967571, and `4449 4450 False` for
+  9ed04be^ against 6660f73, the last code change to Service.qml (9ed04be
+  added five lines, one of them code):
+  ```
+  python3 -I -c 'import re, subprocess, sys
+  sys.path.insert(0, "scripts"); import service_files as sf
+  def view(rev):
+      show = lambda f: subprocess.run(["git", "show", rev + ":" + f], capture_output=True, check=True).stdout.decode()
+      t = show("Service.qml"); return sf.inline_text(t, {f: show(f) for f, _q, _n in sf.declarations(t)})
+  code = lambda v: [l for l in v.split("\n") if not re.match(r"[ \t]*//", l)]
+  a, b = (code(view(r)) for r in sys.argv[1:3]); print(len(a), len(b), a == b)' 6660f73 9967571
+  ```
+  ]
 
 **Searched (rule 15).**
 - Patches: every `*.patch` under scripts/ and tests/, found by its own
@@ -25597,3 +25638,223 @@ Proof that 9967571 changes only comment lines:
   checkout.workers' write order, before the first release that ships one.
   That is the lead's.
 - C4: player, pip and the rest of sources, togglePause among them.
+
+## D-REL-14: the fix pass on relsplit-3 (lane-fix-relsplit3, 2026-11-23)
+
+Three read-only rechecks of 43a65f2 raised two must-fix findings, both
+against the cage arm, and some smaller ones. This lane verified each one
+first, then fixed the real ones in new commits on branch relsplit-3. It
+rewrote no earlier commit, and it moved, released and pushed nothing.
+
+The commits:
+- f9bd8fb drives the cage arm's refusal of the live session;
+- d3a284f, then 194781e, narrow R7's second press, and d3a284f also
+  corrects two comments;
+- c081f76 makes split-service's verify message name what it compared;
+- b18936a is comment-only, quoting all twelve runs' gaps in R10's comment;
+- this record.
+
+No service file changed: Service.qml, Service-rewind.js and
+Service-sources.js are 43a65f2's byte for byte (`git diff 43a65f2` on them
+is empty). So there is no fix to the move to re-verify. On the tip,
+`--verify --from-git 9967571` reads `verify ok (the inline view is
+9967571's inline view byte for byte, 447137 bytes)` anyway.
+
+**1. F-RWD-27's upper bound (must-fix): real.** The rise R10's arrival
+check judges is the time between two status replies, about 5 to 19 s. A
+reading that counted double would therefore rise about 10 to 38 s, and the
+bound of 21 is red for it only where the real gap is over 10.5 s.
+
+Every run under the new bound read a gap below that:
+- the six before this pass: 7.951 (I), 8.507 (F), 8.535 (the move's
+  mutant), 8.638 (E), 9.401 (the parent) and 9.435 (the move);
+- this pass's six: 7.775 to 9.987.
+
+So a doubled reading passed at every one of them, against the scenario's
+comment ("still catches a reading counting double"). The two ranges
+overlap, so no bound on this one rise can separate them. Fixed in words
+(d3a284f, b18936a, and the F-RWD-27 row): the check is about arrival, not
+rate, and the comment says what 21 does catch.
+
+**2a. The live-session refusal was never shown red (must-fix): real.**
+Nothing drove cage_start's refusal. The fh_case refusals stop above cage,
+the one stand-in case that reaches a cage's display (CORE_CAGE) is
+clip-scenario's, and a caged run's cage reports a nested display.
+
+f9bd8fb adds eight checks to qa-lib-test.sh. They take cage_start and
+cage_stop out of the scenario whole (qa_extract, two checks) and run them
+in a subshell beside a stand-in cage. The stand-in runs the child script
+itself under the display it is told to report, so the child writes that
+display and its pid and becomes `$WORK/cage-child`, as under a real cage,
+and cage_stop ends it by that name through qa_signal_named. REAL_RUNTIME is
+a directory of the suite's own, so no display named there is a real
+socket.
+
+The cases, each read as `<status>|<REFUSING lines>|<cage_stop's
+verdict>|<accepted or refused>`:
+- `wayland-1`, the caller on `wayland-0`: refused, `2|1|gone|refused`.
+- the caller's own display by name: refused.
+- the socket the caller's own Hyprland names in its lock, asked with the
+  caller's signature: refused.
+- two controls, which are driven and must read `0|0|gone|accepted`: a
+  nested name with no signature, and one with a signature whose lock names
+  another socket.
+- an order check: the scenario reads the caller's signature above the line
+  that unsets it, the only place the signature branch can get it.
+
+Red first. All eight are red on bd65241's scenario, which has no
+cage_start. Each of six one-decision mutants of 43a65f2's scenario (whose
+cage_start and top are the tip's) is red exactly where it should be:
+- without `|| $NESTED == wayland-1`: the wayland-1 case;
+- without `$NESTED == "$LIVE_DISPLAY" ||`: the caller's-name case;
+- without the qa_target_nested line: the lock case;
+- with the signature not handed in (`! qa_target_nested ...` bare, which
+  in the cage arm sees none): the lock case;
+- refusing every display (`-n $NESTED ||`): both controls;
+- the signature read below the unset: the order check alone. The cases
+  hand CALLER_SIGNATURE in themselves, which is why that check exists.
+
+The mutants were run through the committed block, extracted from
+qa-lib-test.sh with its own helpers. The whole suite reads 828 passed, 0
+failed on the tip (820 before), in 190 s. Nothing real starts: the
+stand-in's child is a `sleep`, stopped every time (verdict `gone` in every
+case), and no port is bound.
+
+**2b. The cage's final check was never seen red (must-fix): real.** "no
+press was lost on its way to the guide's list handler" read `20 of 20` in
+every transcript that reached R13: eleven, since run H stopped first. It is
+now shown red live, as run mut-held19 below.
+
+The mutant is in the harness shell, one line of heldKeyTurn:
+`if (r.sent < r.keys.length) heldKeyTimer.restart()` becomes
+`... < r.keys.length - 1 ...`, so the guide gets 19 of the 20 letters. The
+run printed `R13 held key through listKeys: started, 19 of 20 reached the
+list handler` and the line `FAIL listKeys answered started and 19 of 20
+presses reached the guide`. Its last check read `FAIL no press was lost on
+its way to the guide's list handler (1 lost, a FAIL line above)`, and
+nothing else failed: 112 passed, 1 failed, 1 skipped (R15).
+
+**3. R7's second press (should-fix): real, in a weaker form than raised.**
+The arm let R7 press `live` again whenever the first press left the
+readout past SHOW_S. A first press that did nothing took that second press
+too.
+
+d3a284f first gated the second press on the readout landing within a step
+(10 s) of live. The first run of this pass showed why the readout is the
+wrong witness. R1 to R5 seek through the helper alone, so before R7 the
+service's readout holds what the last health tick stored: 10.034 there,
+from R2's state, under the step.
+
+194781e asks the player instead. After a press that landed it sits within
+a few seconds of its cache's end: 2.76 s in green-tip2, where the readout
+read 3.502. One that did not move sits at the floor with its full forward
+cache ahead of it: 23.28 s, history 10.68, in mut-r7nofirst2. The second
+press goes only to a player within a step of its cache's end.
+
+The mutant drops R7's first `ipc live`, so the first press lands nowhere:
+- On f9bd8fb (the arm's R7), the second press is taken (`31.123, past 2 s;
+  pressing live again`). R7's first readout check, "service
+  rewind.behindLive ~10", then passes at 8.558. Only the next three checks
+  are red, because the retried press is itself a press from the floor and
+  falls short: R7's text (`0:18 behind live`), R7's "~15" (23.655) and R8.
+  So the run was red, but R7's own readout check was masked. The finding
+  said "R7 reads green"; in this run R7 read green on its first readout and
+  red after it.
+- On 194781e, no second press. Four checks are red: R7's "~10" (40.481),
+  its text, its "~15", and R8.
+- d3a284f's readout gate went red too (the same four, its readout 32.029).
+  Here the health ticks had refreshed the readout during until_history's
+  40 s wait, which a player at the floor takes in full (its history stays
+  under 24: 10.68 above). 194781e needs no tick.
+
+**4. Smaller findings taken.**
+- **split-service --verify named `REV:Service.qml` for a split REV**, with
+  the view's byte count (447,137 against a 409,149 B file). c081f76 names
+  `REV's inline view` when REV declares a code-behind, and REV:Service.qml
+  otherwise. It adds two assertions and one test (python 2999 -> 3000 by
+  discovery). Two tests are red on the old message, and three on a mutant
+  that inverts the choice. test_split_service ran 22 tests, OK.
+- **The C3 record's evidence lives under /tmp.** The comparison that drops
+  `//` lines is now printed in the C3 subsection. It reads `4450 4450
+  True` for 6660f73 against 9967571, and `4449 4450 False` for 9ed04be^
+  against 6660f73 (9ed04be is the last code change to Service.qml). The
+  three node mutants' one-line diffs are there too, re-derived (the move
+  lane kept none). So is the `--verify --from-git bd65241` that call (g)
+  named: run on 6660f73 in a scratch clone, it reads verify ok.
+- **Record slips, corrected in place, each marked:**
+  - R13 ran in eight of the arm's nine runs, not every one.
+  - Eight of the nine guards print the parent's line; model members
+    splits its count by file.
+  - The floor's comment now says the upper-bound grep reads two fewer
+    (109 -> 107), not one.
+
+**Not taken.**
+- *The desk arm is still not run.* This lane holds the nested display
+  only. R7's gate, F-HARNESS-127's read and F-RWD-27's bound change it, and
+  each is seen in the cage alone.
+- *cage_stop's empty-NESTED path* (`left: socket()` after a cage that made
+  no display, on the SKIP-77 path only) is in five copies: the clip, key,
+  logo, open and rewind scenarios. It is cosmetic. One shared qa-lib cage
+  helper would fix all five, which is the arm lane's proposal 5.
+- *A booted node check of the rewind code-behind's writes*, and *qmllint
+  over the code-behinds*, stay the move lane's proposals 2 and 1.
+
+**The runs.** Each was made the release step's way: the heavy lock and
+nice 10; scripts/dev-harness/private-bus.sh; the scenario's own nested
+headless cage; `env -u DISPLAY -u WAYLAND_DISPLAY -u
+HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u
+OMARCHY_IPTV_HARNESS_DIR`; and short private XDG_RUNTIME_DIR and TMPDIR.
+
+Each tree was a `git archive` export of its commit, with the mutation made
+by a script. The rig wrote a `.tree-id` beside the tree: the commit, the
+mutation's diff, and the sha256 of every file the run reads (Service.qml
+7c926b21, Service-rewind.js 0f590ff4, Service-sources.js 67d8da2e and
+bin/omarchy-iptv f8d2933d in all six, 43a65f2's own). The harness shell
+reads cd27f0ef, 78a71e91 for the mutant.
+
+| run | tree | result | time | load (1 min, start to end) | transcript | journal after |
+|---|---|---|---|---|---|---|
+| green-tip | d3a284f | 113 passed, 0 failed, 1 skipped (R15, median 388 ms) | 306 s | 1.42 to 1.18 | rewind-20261123-111832-33426 | 89 |
+| mut-held19 | d3a284f, heldKeyTurn sends 19 of 20 | 112 passed, 1 failed (the last check), 1 skipped | 307 s | 1.09 to 2.61 | rewind-20261123-112340-45517 | 89 |
+| green-tip2 | 194781e | 113 passed, 0 failed, 1 skipped (R15, median 429 ms) | 317 s | 2.48 to 2.78 | rewind-20261123-112849-57560 | 89 |
+| mut-r7nofirst | d3a284f, R7's first press dropped | 109 passed, 4 failed (R7 x3, R8), 1 skipped | 317 s | 2.78 to 2.17 | rewind-20261123-113406-69792 | 89 |
+| mut-r7nofirst2 | 194781e, R7's first press dropped | 109 passed, 4 failed (R7 x3, R8), 1 skipped | 369 s | 2.07 to 4.09 | rewind-20261123-113925-82214 | 89 |
+| mut-r7nofirst-old | f9bd8fb, R7's first press dropped | 110 passed, 3 failed (R7's text and ~15, R8), 1 skipped | 369 s | 4.09 to 3.01 | rewind-20261123-114534-95616 | 89 |
+
+- green-tip2's 114 PASS and SKIP lines, with measured values taken out,
+  are the move's run's (rewind-20261123-093321-4013365), in order.
+- The tip's scenario differs from 194781e's by comment lines only
+  (b18936a), so green-tip2 stands for the tip.
+- Every cage verdict read `gone`. Each run's one card (`Bar setting
+  ignored`) went to the stand-in's log. No runtime, tmp or bus directory
+  was left.
+- The crash journal read 89 at the start, after every run, and at the end.
+
+**Checks at the end, on the tip (b18936a), against the base and the
+parent.**
+- scripts/qa-lib-test.sh: 828 passed, 0 failed (820 on 43a65f2, 819 on
+  bd65241).
+- node tests/Model.test.js: 4,069 checks, 0 failures (4,069 on both).
+- Python by discovery: 3,000 (2,999). The one new test is c081f76's.
+- Fifteen related modules, under bwrap as check.sh runs them: 343 tests,
+  OK. They are test_split_service, test_key_scenario_only,
+  test_harness_home, test_harness_sweepers, test_model_members,
+  test_plugin_id, test_harness_cage_player, test_doc_host_mode,
+  test_defect_ledger, test_board_staleness, test_release,
+  test_service_files, test_harness_window_mode, test_harness_shell_model
+  and test_theme_names.
+
+**Rule 15, searched.**
+- *Readers of a stale service readout as evidence of where the player is:*
+  every `until_rw` and `rw behindLive` in the scenario. R9, R12 and R13 read
+  the readout after a service-issued seek or a zap, whose own reply writes
+  it. Only R7's gate read it after helper-only seeks.
+- *Bounds stated as catching what they cannot:* every `ge` with a constant
+  in the scenario's R10 and R11. Only R10's 21 carried such a claim.
+- *Live-session refusals in the other cage scenarios:* clip-scenario's is
+  driven (CORE_CAGE). key- and logo-scenario's (the same sentence) and
+  open-scenario's (its own, by name only) are not, and are left as found
+  (proposal).
+- *Messages that name a file where they compared a view:* split-service's
+  verify and the cut's own call to it (one function), and split-helper's and
+  split-model's verifies, which compare files and name them.
