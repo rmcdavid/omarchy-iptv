@@ -273,6 +273,16 @@ Consequences you must respect:
   owner's word, and we close none of our requests. A hold that waits on a
   maintainer is re-read by its COMMENTS, not its labels, every time it is
   reported.
+- **A sixth time, decided by the owner on 2026-11-22: `main` is HELD at
+  0.20.0 (1321aff) until a maintainer actions #15671** (approves it or
+  raises a finding on it), for the same reason: a moved `main` makes the
+  pending request stale, and #15671 is the only request that targets our
+  HEAD (its validation and security baseline passed at 1321aff that
+  evening). Asked whether to hold, the owner answered "Yes". `dev` moves
+  freely -- D-REL-14's split goes on there. A finding on #15671 is fixed
+  and released at once, on the owner's word, carrying what `dev` holds.
+  Read #15671's comments, not its labels, whenever this hold is reported
+  (F-M3-28).
 
 ## Standing authority (product owner, 2026-11-09)
 
