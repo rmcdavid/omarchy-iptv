@@ -3786,6 +3786,64 @@ fh_case "open-scenario.sh live: refused above its export and transcript" \
 # cleanup never runs run.sh toward a harness directory it would make.
 fh_case "rewind-scenario.sh --cage: refused above its trap, its export and its transcript" \
   "$FH_CAGE" "$D97" "$FHD-rewind" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" --cage' fh "$ROOT/scripts/dev-harness/rewind-scenario.sh"
+# D-REL-14, the review of the cage arm (lane-fix-relsplit3, 2026-11-23): the
+# arm's refusal of the LIVE session, which no case above reaches (they refuse
+# before cage starts) and no caged run reaches either (its cage reports a
+# nested display). cage_start and cage_stop are taken out of the scenario
+# whole and run in a subshell beside a stand-in cage that runs the child
+# script itself, under the display it is told to report: the child writes
+# that display and its own pid and becomes `$WORK/cage-child`, as under a
+# real cage, so cage_stop ends it by that name. REAL_RUNTIME is a directory
+# of this run's, so no display named here resolves to a real socket, and the
+# caller's display and signature are handed in the way the scenario reads
+# them at its top (LIVE_DISPLAY, CALLER_SIGNATURE). Nothing else starts.
+RCG=$SP/rcage
+mkdir -p "$RCG/bin" "$RCG/rt/hypr/qasig"
+cat >"$RCG/bin/cage" <<'RCGSTUB'
+#!/bin/bash
+[[ ${1-} == -- ]] && shift
+WAYLAND_DISPLAY=$RCG_SHOWN exec "$@"
+RCGSTUB
+chmod 0755 "$RCG/bin/cage"
+# The session's own Hyprland, as qa_target_nested reads it: pid, then the
+# name of its Wayland socket.
+printf '4242\nwayland-7\n' >"$RCG/rt/hypr/qasig/hyprland.lock"
+st "rewind-scenario.sh's cage_start is taken out of it whole" 0 qa_extract "$RSC" '^cage_start\(\) \{$' '^\}$'
+st "and its cage_stop" 0 qa_extract "$RSC" '^cage_stop\(\) \{$' '^\}$'
+qa_extract "$RSC" '^cage_start\(\) \{$' '^\}$' >"$RCG/start.sh" || : >"$RCG/start.sh"
+qa_extract "$RSC" '^cage_stop\(\) \{$' '^\}$' >"$RCG/stop.sh" || : >"$RCG/stop.sh"
+# rcg <display cage reports> <caller's display> <caller's signature>:
+# "<status>|<REFUSING lines naming it>|<cage_stop's verdict>|<accepted or
+# refused>". cage_stop runs on the subshell's exit either way.
+rcg() {
+  local w rc
+  w=$(mktemp -d "$RCG/w.XXXXXX")
+  ( unset WLR_BACKENDS WLR_RENDERER WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+    export PATH="$RCG/bin:$PATH" RCG_SHOWN=$1
+    WORK=$w REAL_RUNTIME=$RCG/rt LIVE_DISPLAY=$2 CALLER_SIGNATURE=$3
+    CAGE_PID="" CAGE_CHILD="" NESTED="" CAGE_VERDICT=""
+    . "$RCG/start.sh"; . "$RCG/stop.sh"
+    trap 'cage_stop; printf "%s\n" "$CAGE_VERDICT" >"$w/verdict"' EXIT
+    cage_start 30 2>"$w/err"
+    : >"$w/accepted"
+  ) >/dev/null 2>&1
+  rc=$?
+  printf '%s|%s|%s|%s\n' "$rc" \
+    "$(qa_count "^REFUSING: cage's child reports display '$1', which is the live session" "$w/err")" \
+    "$(cat "$w/verdict" 2>/dev/null || echo unread)" "$([[ -e $w/accepted ]] && echo accepted || echo refused)"
+}
+is "rewind --cage refuses a nested display named wayland-1, whatever the caller's display, and its cage is gone after" \
+   "$(rcg wayland-1 wayland-0 '')" "2|1|gone|refused"
+is "and the caller's own display, by name" "$(rcg wayland-5 wayland-5 '')" "2|1|gone|refused"
+is "and the socket the caller's own Hyprland names in its lock (qa_target_nested, asked with the caller's signature)" \
+   "$(rcg wayland-7 wayland-3 qasig)" "2|1|gone|refused"
+is "control: a nested display none of those names is driven, with no signature" "$(rcg wayland-7 wayland-3 '')" "0|0|gone|accepted"
+is "control: and with a signature whose lock names another socket" "$(rcg wayland-8 wayland-3 qasig)" "0|0|gone|accepted"
+# The signature has to be read where the scenario still has it: the cage arm
+# unsets HYPRLAND_INSTANCE_SIGNATURE for everything it starts, and the bare
+# variable is all cage_start would see below that line.
+ck "and the scenario reads the caller's signature above the line that unsets it" \
+   '(( $(tr_line rewind-scenario.sh "^CALLER_SIGNATURE=") > 0 && $(tr_line rewind-scenario.sh "^CALLER_SIGNATURE=") < $(tr_line rewind-scenario.sh "^(( CAGE )) && unset DISPLAY HYPRLAND_INSTANCE_SIGNATURE$") ))'
 fh_case "spikes/first-open/run.sh: refused before it makes its scratch tree" \
   "$FH_CAGE" "$D97" "$FHD-fo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
 FH_HD62=$(sp_path 62 h)
@@ -4378,7 +4436,14 @@ is "and what run.sh compares and hands the harness shell is what qa_decimal prin
 # rewind-scenario.sh's cage arm asks qa_cage_runtime_fits above its trap,
 # its export and its transcript. Red on bd65241's scenario (`unknown option:
 # --cage`) and on a mutant without the call.
-EXPECTED=820
+# 820 -> 828 on 2026-11-23 (D-REL-14, the review of the cage arm,
+# lane-fix-relsplit3): the cage arm's refusal of the live session, its three
+# branches and two controls driven through cage_start and cage_stop, the two
+# extractions, and where the caller's signature is read. Red on bd65241's
+# scenario, all eight; each branch red on a mutant without it, the controls
+# on one that refuses every display, the order check on one that reads the
+# signature below the unset.
+EXPECTED=828
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
