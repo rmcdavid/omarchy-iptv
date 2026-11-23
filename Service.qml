@@ -5746,9 +5746,11 @@ Item {
   // F-RWD-19: every DECISION the queue takes is Model.seekQueueStep's, and
   // every reply's meaning for the readout is Model.rewindApply's, so each
   // one is a line a node test drives and a mutation reddens. What is left
-  // here is what Qt owns -- `controlProc.running`, `seekThrottle.running`,
-  // `Date.now()`, property writes, starting the timer, `runControl` and the
-  // signal. Of every branch below a reader can say which of the two it is.
+  // in the service's own rewind functions -- in Service-rewind.js since
+  // D-REL-14, each reached through its forwarder below -- is what Qt owns:
+  // `controlProc.running`, `seekThrottle.running`, `Date.now()`, property
+  // writes, starting the timer, `runControl` and the signal. Of every
+  // branch there a reader can say which of the two it is.
 
   function seekState() { return ServiceRewind.seekState() }
 
