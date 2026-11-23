@@ -909,7 +909,22 @@ timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh                     # h
 timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f  # the pre-rewind tree: every check but R0 red
 timeout -k 10 900 scripts/dev-harness/rewind-scenario.sh --tree /path/to/tree # any prepared tree: how R16 was proven red (F-RWD-18)
 python3 scripts/qa-stub-mpv.py --self-test                                   # the stub's seek semantics, no socket, no display
+# the cage arm (D-REL-14): no display held; under a private bus, with DISPLAY,
+# WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE unset and a short XDG_RUNTIME_DIR
+scripts/dev-harness/private-bus.sh <short-dir> 1400 scripts/dev-harness/rewind-scenario.sh --cage [--tree DIR]
 ```
+
+`--cage` (D-REL-14, 2026-11-23) runs the same 110 checks against a nested
+headless cage the scenario starts itself, as `key-scenario.sh live` does, with
+its own harness directory (`omarchy-iptv-rewind-cage`), the player on run.sh's
+software-GPU lever plus `--profile=fast` and one llvmpipe thread (with its
+default scalers mpv took 180-350% CPU of the two cores), and stand-ins for hyprctl
+and omarchy-notification-send on the shell's PATH. Its seat has no keyboard, so
+R13's held `b` is the harness verb `listKeys`, which hands the guide's own
+list-mode handler one letter every 60 ms. R15's 300 ms budget is printed as a
+SKIP there (the helper waits up to 250 ms for a seek to land, and a
+software-drawn player lands it later), and R1 and R2 allow one 40 ms frame.
+The run's record is QA-RESULTS "D-REL-14: rewind-scenario's cage arm".
 
 `qa-stub-mpv.py` also answers the two TLS properties the way a real player does
 (D-SINK-16): `tls-verify` reads **False** on a player launched without it, not
@@ -1026,7 +1041,9 @@ directory about 60 ms after the switch returned, the rebuilt set one sample
 later. Seen red through `--tree` over a copy of the tree with one line
 changed (the recipe is `spikes/key-mutations/README.md`'s: `git archive HEAD
 | tar -x -C "$cp"`, edit `"$cp/Service.qml"`, run with `--tree "$cp"`, remove
-the copy): `root.logoHave = ({})` deleted from `clearSourceData` -> **37 / 3**,
+the copy; since D-REL-14 `clearSourceData` is in `"$cp/Service-sources.js"`,
+so that is the file this edit takes): `root.logoHave = ({})` deleted from
+`clearSourceData` -> **37 / 3**,
 W2, W3 and W5 (the first sample at B's directory carried A's six names
 tagged for A); the tag made `root.activeCacheDir` instead of
 `Model.logoDirFor(root.activeCacheDir)` -> **36 / 4**, W1, W3, W4 and W6 (a

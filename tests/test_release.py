@@ -38,6 +38,7 @@ _spec.loader.exec_module(release)
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
+import service_files  # noqa: E402  the service's files, as Service.qml declares them (D-REL-14)
 
 # The real model's layout, so the fixture tree has the same files the
 # artifact must carry. The first part holds the fixture's PLUGIN_VERSION.
@@ -63,6 +64,7 @@ def must_ship():
     return {
         'manifest.json', 'README.md', 'LICENSE', 'CHANGELOG.md', 'preview.png',
         'BarWidget.qml', 'Guide.qml', 'Service.qml',
+        'Service-rewind.js', 'Service-sources.js',
         'bin/omarchy-iptv',
         'contrib/bindings.lua', 'contrib/omarchy-menu.jsonc', 'contrib/windows.lua',
     } | set(model_files.model_paths(ROOT)) | set(helper_files.part_paths(ROOT))
@@ -119,7 +121,12 @@ class ReleaseCase(unittest.TestCase):
         self.write('manifest.json', '{"version": "0.9.9", "entryPoints": '
                    '{"barWidget": "BarWidget.qml", "overlay": "Guide.qml", '
                    '"service": "Service.qml"}}\n')
+        # D-REL-14: the real Service.qml declares its code-behinds, and check()
+        # refuses an allowlisted one nothing imports, so the double declares
+        # them too (rule 10).
         self.write('Service.qml', 'import "Model.mjs" as Model\n'
+                   'import "Service-rewind.js" as ServiceRewind\n'
+                   'import "Service-sources.js" as ServiceSources\n'
                    'x: Qt.resolvedUrl("bin/omarchy-iptv")\n')
         self.write('Model.mjs', aggregator(PARTS))
         self.write('bin/omarchy-iptv', helper_stub(HELPER_PARTS))
@@ -1645,7 +1652,10 @@ class ReleaseCase(unittest.TestCase):
     def test_the_real_tree_reaches_the_whole_model(self):
         out = io.StringIO()
         self.assertEqual([], release.check(ROOT, out=out))
-        self.assertIn('%d runtime sources scanned' % (3 + len(model_files.model_paths(ROOT))),
+        # The three entry points, the model's files, and the service's
+        # code-behinds (D-REL-14), each read from its one reader.
+        self.assertIn('%d runtime sources scanned' % (3 + len(model_files.model_paths(ROOT))
+                                                       + len(service_files.service_files(ROOT)) - 1),
                       out.getvalue())
 
     # -- the size ceiling (D-REL-5) -----------------------------------------

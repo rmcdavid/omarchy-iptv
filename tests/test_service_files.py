@@ -8,9 +8,12 @@ text now reads it through the readers: the FILES (Service.qml, then each
 read as its function's text, which is the one-file Service.qml the split was
 cut from). This file holds the Python reader to:
 
-  * this tree, where Service.qml declares nothing: the files are Service.qml
-    alone and the view is its text, byte for byte (so no converted reader
-    read anything but what it read before);
+  * this tree, where Service.qml declares two code-behinds since D-REL-14's
+    C3 (2026-11-23), Service-rewind.js and Service-sources.js: the files are
+    those three, and the view cut again by the code-behinds' own spans is
+    Service.qml, byte for byte (so every converted reader reads the one-file
+    text it read before the move; before C3 these tests pinned the files as
+    Service.qml alone and the view as its text, and the move flipped them);
   * the shared fixture tests/fixtures/service-split/: its view is inline.txt,
     and the round trip closes -- inline.txt cut again by the reader's own
     function spans is the fixture's Service.qml;
@@ -83,12 +86,35 @@ def node(*args):
 
 
 class ThisTree(unittest.TestCase):
-    def test_the_files_are_service_qml_alone(self):
-        self.assertEqual(service_files.service_files(ROOT), [os.path.join(ROOT, "Service.qml")])
-        self.assertEqual(service_files.service_names(ROOT), ["Service.qml"])
+    # D-REL-14 C3: the M5-01 region's functions, rewind's 15 and sources' 21.
+    CODE_BEHINDS = (("Service-rewind.js", "ServiceRewind"), ("Service-sources.js", "ServiceSources"))
 
-    def test_the_view_is_service_qml_byte_for_byte(self):
-        self.assertEqual(service_files.service_text(ROOT), raw(os.path.join(ROOT, "Service.qml")))
+    def test_the_files_are_service_qml_and_its_two_code_behinds(self):
+        names = ["Service.qml", "Service-rewind.js", "Service-sources.js"]
+        self.assertEqual(service_files.service_files(ROOT), [os.path.join(ROOT, n) for n in names])
+        self.assertEqual(service_files.service_names(ROOT), names)
+
+    def test_the_view_cut_again_is_service_qml_byte_for_byte(self):
+        # The fixture's round trip, on this tree: each function a code-behind
+        # holds is the view's own span, once, and replaced by its forwarder,
+        # with the declarations after the model's import, the view is
+        # Service.qml byte for byte.
+        view = service_files.service_text(ROOT)
+        whole = service_files.function_spans(view, "the view")
+        cut, counts = view, []
+        for file, q in self.CODE_BEHINDS:
+            moved = service_files.function_spans(raw(os.path.join(ROOT, file)), file)
+            counts.append(len(moved))
+            for name, span in moved.items():
+                self.assertEqual(whole[name], span, name)
+                self.assertEqual(cut.count(span), 1, name)
+                args = service_files.HEADER.search(span).group(2)
+                cut = cut.replace(span, "  function %s(%s) { return %s.%s(%s) }" % (name, args, q, name, args))
+        anchor = 'import "Model.mjs" as Model\n'
+        self.assertEqual(cut.count(anchor), 1)
+        cut = cut.replace(anchor, anchor + "".join('import "%s" as %s\n' % fq for fq in self.CODE_BEHINDS))
+        self.assertEqual(cut, raw(os.path.join(ROOT, "Service.qml")))
+        self.assertEqual(counts, [15, 21])
 
     def test_a_service_qml_path_reads_the_same_as_its_root(self):
         self.assertEqual(service_files.service_text(os.path.join(ROOT, "Service.qml")), service_files.service_text(ROOT))

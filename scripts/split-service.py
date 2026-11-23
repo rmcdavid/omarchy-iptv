@@ -486,12 +486,18 @@ def verify(root, rev, out=None):
     except (Problem, service_files.ServiceFilesError, UnicodeDecodeError) as error:
         out.write('split-service: %s\n' % error)
         return 1
+    # Name what was compared: REV's Service.qml is the view only while REV
+    # declares no code-behind, and a REV that does is compared by its own
+    # inline view (the review of C3: the message named REV:Service.qml for
+    # both, so a verify against a split commit quoted a byte count that is
+    # not that file's).
+    what = "%s's inline view" % rev if files else '%s:Service.qml' % rev
     if have != want:
         at, line = first_difference(have, want)
-        out.write('split-service: the inline view differs from %s:Service.qml at byte %d (line %d of the view; '
-                  '%d bytes against %d)\n' % (rev, at, line, len(have), len(want)))
+        out.write('split-service: the inline view differs from %s at byte %d (line %d of the view; '
+                  '%d bytes against %d)\n' % (what, at, line, len(have), len(want)))
         return 1
-    out.write('split-service: verify ok (the inline view is %s:Service.qml byte for byte, %d bytes)\n' % (rev, len(have)))
+    out.write('split-service: verify ok (the inline view matches %s byte for byte, %d bytes)\n' % (what, len(have)))
     return 0
 
 

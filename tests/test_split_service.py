@@ -1,8 +1,9 @@
 """scripts/split-service.py (D-REL-14 C2): the judge the gate runs over the
 service's files, the move that cuts them, and the round trip back.
 
-  * --check on this tree, which declares no code-behind: clean, every one of
-    the root's member sites judged (a judge that stopped reading reads 0);
+  * --check on this tree, which declares two code-behinds since D-REL-14's C3
+    (2026-11-23; none before it): clean, every one of the root's member
+    sites judged (a judge that stopped reading reads 0);
   * --check's own cases (tests/fixtures/service-split/check-cases.json), one
     by one, and every refusal kind it names among them;
   * --check over the readers' fixture (tests/fixtures/service-split/), a
@@ -222,6 +223,7 @@ class Verify(unittest.TestCase):
     def test_the_split_verifies_against_the_one_file_commit(self):
         rc, out = run("--verify", "--from-git", self.rev, "--root", self.repo.dir)
         self.assertEqual(rc, 0, out)
+        self.assertIn("the inline view matches %s:Service.qml byte for byte" % self.rev, out)
 
     def test_a_one_byte_mutant_of_a_code_behind_is_red(self):
         path = os.path.join(self.repo.dir, "Service-demo.js")
@@ -236,6 +238,20 @@ class Verify(unittest.TestCase):
         rev = self.repo.commit({})
         rc, out = run("--verify", "--from-git", rev, "--root", self.repo.dir)
         self.assertEqual(rc, 0, out)
+        # A split REV is compared by its inline view, and the message names
+        # that, never REV:Service.qml, whose own bytes are fewer (the review
+        # of C3).
+        self.assertIn("the inline view matches %s's inline view byte for byte" % rev, out)
+        self.assertNotIn("%s:Service.qml" % rev, out)
+
+    def test_a_mutant_against_a_split_commit_names_its_inline_view(self):
+        rev = self.repo.commit({})
+        path = os.path.join(self.repo.dir, "Service-demo.js")
+        write(path, raw(path).replace("root.count += by", "root.count -= by"))
+        rc, out = run("--verify", "--from-git", rev, "--root", self.repo.dir)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("differs from %s's inline view at byte" % rev, out)
+        self.assertNotIn("%s:Service.qml" % rev, out)
 
 
 class Cut(unittest.TestCase):

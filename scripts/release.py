@@ -70,6 +70,15 @@ ALLOWLIST = (
     'BarWidget.qml',
     'Guide.qml',
     'Service.qml',
+    # D-REL-14: the service's code-behinds, classic JavaScript that runs in
+    # Service.qml's own scope, each declared by an import line there and
+    # reached through one-line forwarders (scripts/split-service.py cut them
+    # from the one-file Service.qml when it neared FILE_CEILING). check()
+    # follows Service.qml's imports, so a code-behind missing here is red, and
+    # so is one listed here that nothing imports; shipped_code() hands the
+    # guards each one Service.qml declares.
+    'Service-rewind.js',
+    'Service-sources.js',
     # D-REL-5: the model, as ES modules. Model.mjs re-exports the public names
     # from the parts under model/, which scripts/split-model.mjs cut out of the
     # one-file Model.js when that file outgrew the marketplace scanner's
