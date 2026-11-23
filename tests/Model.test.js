@@ -854,9 +854,13 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 
 // ---- D-REL-14: the service readers ----
 //
-// On this tree Service.qml declares no code-behind, so the service's files
-// are Service.qml alone and its one text is the file's, byte for byte: no
-// reader converted to it reads anything but what it read before. The shared
+// Since D-REL-14's C3 (2026-11-23) this tree's Service.qml declares two
+// code-behinds, Service-rewind.js and Service-sources.js, which hold the
+// M5-01 region's 36 functions: the service's files are those three, and its
+// one text, cut again by the code-behinds' own spans, is Service.qml byte for
+// byte, so every converted reader reads the one-file text it read before the
+// move (before C3 the files were Service.qml alone and the text was the
+// file's: these two checks pinned that, and the move flipped them). The shared
 // fixture (tests/fixtures/service-split/) has one code-behind; its view is
 // inline.txt and the round trip closes. tests/test_service_files.py runs the
 // same fixture and cases through scripts/service_files.py, and each engine
@@ -887,15 +891,32 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
     return { status: r.status, stdout: r.stdout }
   }
 
-  checkCall("D-REL-14: on this tree the service is Service.qml alone, and its one text is the file's, byte for byte, from the root or from Service.qml's own path", () => ({
-    files: SF.serviceFiles(ROOT).map(f => path.relative(ROOT, f)), names: SF.serviceNames(ROOT),
-    same: SF.serviceText(ROOT) === raw(path.join(ROOT, "Service.qml")), viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource
-  }), { files: ["Service.qml"], names: ["Service.qml"], same: true, viaPath: true })
+  checkCall("D-REL-14 C3: on this tree the service is Service.qml and its two code-behinds, rewind's and sources', and its one text cut again by the code-behinds' own spans is Service.qml, byte for byte, read from the root or from Service.qml's own path", () => {
+    const view = SF.serviceText(ROOT), whole = SF.functionSpans(view, "the view")
+    let cut = view
+    const moved = [], own = []
+    for (const [file, q] of [["Service-rewind.js", "ServiceRewind"], ["Service-sources.js", "ServiceSources"]]) {
+      const spans = SF.functionSpans(raw(path.join(ROOT, file)), file)
+      moved.push(spans.size)
+      for (const [name, span] of spans) {
+        own.push(whole.get(name) === span && cut.split(span).length === 2)
+        const args = /  function [A-Za-z_][A-Za-z0-9_]*\(([^)]*)\) \{/.exec(span)[1]
+        cut = cut.split(span).join("  function " + name + "(" + args + ") { return " + q + "." + name + "(" + args + ") }")
+      }
+    }
+    const anchor = 'import "Model.mjs" as Model\n'
+    const anchored = cut.split(anchor).length === 2
+    cut = cut.split(anchor).join(anchor + 'import "Service-rewind.js" as ServiceRewind\nimport "Service-sources.js" as ServiceSources\n')
+    return { files: SF.serviceFiles(ROOT).map(f => path.relative(ROOT, f)), names: SF.serviceNames(ROOT),
+             moved, own: own.length > 0 && own.every(Boolean), anchored, closes: cut === raw(path.join(ROOT, "Service.qml")),
+             viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource }
+  }, { files: ["Service.qml", "Service-rewind.js", "Service-sources.js"], names: ["Service.qml", "Service-rewind.js", "Service-sources.js"],
+       moved: [15, 21], own: true, anchored: true, closes: true, viaPath: true })
 
   checkCall("D-REL-14: the node and python readers agree on this tree, names and text", () => {
     const n = py("names", ROOT), t = py("text", ROOT)
     return { names: [n.status, n.stdout], text: [t.status, t.stdout === SF.serviceText(ROOT)] }
-  }, { names: [0, "Service.qml\n"], text: [0, true] })
+  }, { names: [0, "Service.qml\nService-rewind.js\nService-sources.js\n"], text: [0, true] })
 
   checkCall("D-REL-14 (fixture): the service is Service.qml and its one code-behind, and its one text is inline.txt, byte for byte, from the root or from Service.qml's own path", () => {
     const inline = raw(path.join(FIX, "inline.txt"))

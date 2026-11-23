@@ -1,8 +1,9 @@
 """scripts/split-service.py (D-REL-14 C2): the judge the gate runs over the
 service's files, the move that cuts them, and the round trip back.
 
-  * --check on this tree, which declares no code-behind: clean, every one of
-    the root's member sites judged (a judge that stopped reading reads 0);
+  * --check on this tree, which declares two code-behinds since D-REL-14's C3
+    (2026-11-23; none before it): clean, every one of the root's member
+    sites judged (a judge that stopped reading reads 0);
   * --check's own cases (tests/fixtures/service-split/check-cases.json), one
     by one, and every refusal kind it names among them;
   * --check over the readers' fixture (tests/fixtures/service-split/), a

@@ -1541,6 +1541,9 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # nothing split. The site floor sits a little under the count, as the metric
 # guard's does, so a refactor that folds a few references away is not a red
 # gate and a judge that reads none is; the case floor is exact.
+# D-REL-14 (C3, 2026-11-23, lane-relsplit3-move): the M5-01 region moved into
+# Service-rewind.js and Service-sources.js, and the judge reads the same
+# 2,267 sites across the three files (32 of 32 cases), so both floors stand.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
 SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
