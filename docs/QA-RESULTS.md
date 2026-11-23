@@ -24880,9 +24880,9 @@ Evidence, logs and summaries:
 
 On the owner's word ("let's cut a release and make sure omarchy plugin
 page has the latest release listed - whatever that takes"). The hold on
-`main` at 0.19.1 waited for a maintainer to action #13611; he had, on
-2026-11-16 at 10:51Z, blocking 9e006be on #13611 and at 11:56Z on #12636
-with the two findings he raised on #14290 on 2026-11-14 (D-SINK-102 and
+`main` at 0.19.1 waited for a maintainer to action #13611; he had actioned
+it, on 2026-11-16 at 10:51Z, blocking 9e006be on #13611 (and at 11:56Z on
+#12636) with the two findings he raised on #14290 on 2026-11-14 (D-SINK-102 and
 D-SINK-103). Both are fixed on dev. The catalog read at 2026-11-22T12:33Z
 gives `version` 0.19.1 (read from our HEAD), `repositoryRelease` v0.17.0,
 `verificationCommit` 787a33b: `scripts/build-catalog.mjs` at the
@@ -24925,4 +24925,9 @@ against 0.19.1 measured at about a fifth, D-PLY-65's id). Not taken: a
 proxy asking for Digest authentication (read, not measured), and the
 journal sentence that calls a 0.19.1 player one that "will not verify the
 stream's certificate" (journal text only; it lacks the relay pin), both
-left for after the cut.
+left for after the cut, and the optional wider wording of D-PLY-58's
+example (a source switched in the guide while a channel plays). A
+read-only recheck of the rewritten passages then held them on one
+sentence that had lost its scope (a 0.19.1 player whose channel can be put
+back is replaced, not stopped); that and its five nits are taken in the
+commit after 91eaaca.

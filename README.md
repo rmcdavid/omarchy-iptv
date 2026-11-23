@@ -47,8 +47,8 @@ character no host name may hold before the helper looks it up or hands it
 to the player. 0.19.1 also looks up the server name of a channel from a
 playlist on the internet when you play it, and refuses the channel if the
 name leads to this computer or your local network. 0.20.0 sends the
-player's `http`, `https` and `rtmps` connections through a small relay of the plugin's own that checks
-each one as it is made, so a redirect, an HLS or DASH segment on another
+player's `http`, `https` and `rtmps` connections through a small relay of
+the plugin's own that checks each one as it is made, so a redirect, an HLS or DASH segment on another
 server, or a server name that changes its answer can no longer take a
 channel from a playlist on the internet to this computer or your local
 network, and makes `state.json` private before every save rather than after
@@ -562,11 +562,12 @@ is stopped: as soon as the channel list has loaded when the channel is gone
 from it or belongs to another source, or 15 seconds after the shell starts if
 the list has not loaded by then. Press Enter on a channel and a new player
 starts. A player 0.20.0 or later started, whose channel cannot be put back,
-plays on, sent no channel; your next channel change replaces it, and stopping
-ends it.
+plays on, sent no channel, until you change channel or stop it.
 
-If it cannot be made safe, it is stopped: press Enter on the channel and a
-fresh, verified player starts. A player cannot be made safe when it was
+If its channel cannot be put back and it cannot be made safe, it is stopped:
+press Enter on the channel and a fresh, verified player starts. One whose
+channel can be put back is replaced as above, safe or not. A player cannot be
+made safe when it was
 started by 0.19.1 or earlier, because it does not send its connections
 through the plugin's relay; when it does not accept the change; or when it
 was started by 0.15.0 or earlier and its mpv config holds either of these:
@@ -1141,7 +1142,8 @@ carry channel ids — most do — are not affected at all.
   as a playlist.
 - The player reaches the network through a small relay of the plugin's
   own, run beside it, which checks every `http`, `https` and `rtmps`
-  connection a channel from a playlist on the internet makes -- the stream itself, every redirect, and
+  connection a channel from a playlist on the internet makes -- the stream
+  itself, every redirect, and
   every playlist, segment, key and subtitle of an HLS or DASH stream --
   against the address it actually connects to. So neither a server that
   redirects a channel elsewhere nor a server name that gives one answer
@@ -1169,7 +1171,8 @@ carry channel ids — most do — are not affected at all.
   channel makes -- each redirect, each HLS or DASH segment -- must then be
   to the playlist's own server or to a numeric address. A playlist on this
   computer or your own network is trusted as before, and so is everything
-  its channels connect to: if such a playlist (Threadfin or xTeVe without
+  its channels connect to, except another port on this computer for a playlist
+  served from it: if such a playlist (Threadfin or xTeVe without
   buffering, say) lists your provider's stream addresses unchanged, that
   provider's servers can still redirect the player, or serve it HLS or
   DASH segments, on your local network -- and, when the playlist is on
@@ -1177,7 +1180,8 @@ carry channel ids — most do — are not affected at all.
   `mpv` is a wrapper script of your own, two things stay open: if it runs
   the real player as its child and the relay is killed outright, the
   player is left with nothing to connect through until the plugin's next
-  ten-second check replaces it, and meanwhile another account on this
+  ten-second check replaces it (or stops it, when its channel cannot be put
+  back), and meanwhile another account on this
   computer that takes over the relay's port could receive the player's
   plain-`http` requests, provider credentials included; and a wrapper that
   sets `no_proxy` or `http_proxy` for the real player sends the

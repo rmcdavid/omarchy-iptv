@@ -10,9 +10,10 @@ where the plugin has checked: its `http`, `https` and `rtmps` connections
 go through a relay of the plugin's own, which checks every connection as
 it is made, and its `rtmp`, `rtsp` and `srt` connections go to the address
 the plugin checked.** Up to 0.19.1 such a channel could still send the
-player to this computer or your local network: through a redirect from its server, an HLS or DASH
-playlist, segment or key on another server, or a server name that gave the
-plugin one answer and the player another a moment later. What to do:
+player to this computer or your local network: through a redirect from its
+server, an HLS or DASH playlist, segment or key on another server, or a
+server name that gave the plugin one answer and the player another a
+moment later. What to do:
 **restart the shell** (`omarchy-restart-shell`). If a channel was playing
 when you updated, expect it to reopen once in a new player window; if it
 cannot be put back, the old player is stopped -- as soon as the channel
@@ -271,8 +272,10 @@ under Fixed first: this version does not save to it.
   relay's own port, to your local network or to the internet still plays.
   (D-SINK-102)
 - **The relay looks up every server a channel connects to within 3
-  seconds**, as 0.19.1 looked up the channel's own; a redirect or segment
-  server whose name takes longer fails like a stream that would not open.
+  seconds**, as 0.19.1 looked up the own server of a channel from a
+  playlist on the internet; a server whose name takes longer, the
+  channel's own included when its playlist is on your network, fails like
+  a stream that would not open.
 - **With `--ytdl=yes`, yt-dlp fetches pages itself**, outside the relay's
   checks.
 - **The relay is one more small program per player**, about 25 MB of
@@ -321,7 +324,8 @@ under Fixed first: this version does not save to it.
   requests. And a wrapper that sets `no_proxy` or `http_proxy` for the
   real player sends the connections those name past the relay, unchecked.
 - **A playlist on this computer or your own network is trusted as before,
-  and so is everything its channels connect to**: if such a playlist
+  and so is everything its channels connect to**, except another port on
+  this computer for a playlist served from it: if such a playlist
   (Threadfin or xTeVe without buffering, say) lists your provider's stream
   addresses unchanged, that provider's servers can still redirect the
   player, or serve it HLS or DASH segments, on your local network -- and,
