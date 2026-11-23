@@ -886,10 +886,10 @@ printf '   R10 stored after a further 12 s: %s\n' "$r2"
 # and catches a reading that runs away. It does NOT catch one counting
 # double, which an earlier version of this comment said it did: doubled,
 # the rise is about 10 to 38 s, against 5 to 19 counted once, so it is red
-# only where the real gap is over 10.5 s, and the cage's gaps under this
-# bound were 7.95 to 9.44 s (the review of the cage arm). The two ranges
-# overlap, so no bound on this rise can tell them apart; this check is
-# about arrival, not rate.
+# only where the real gap is over 10.5 s, and every gap the cage measured
+# under this bound read 7.78 to 9.99 s (twelve runs, 2026-11-23; the review
+# of the cage arm). The two ranges overlap, so no bound on this rise can
+# tell them apart; this check is about arrival, not rate.
 ck "R10 and over a window that contains a health tick it rises, so the replies keep arriving ($r0 -> $r2)" \
   '[[ $(ge "$(fdelta "$r0" "$r2")" 2) == 0 && $(ge 21 "$(fdelta "$r0" "$r2")") == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
