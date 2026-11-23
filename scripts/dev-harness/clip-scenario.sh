@@ -431,13 +431,20 @@ settle() {
   return 1
 }
 # The foreign producer: `bytes` of one letter (A unless given) as text/plain
-# on the nested display, never written to disk. `--foreground` keeps wl-copy
-# as our direct child, and `$!` of a background pipeline is its LAST
-# command, so this pid is wl-copy's.
+# on the nested display. `--foreground` keeps wl-copy as our direct child,
+# and `$!` of a background pipeline is its LAST command, so this pid is
+# wl-copy's.
+# F-HARNESS-125: wl-copy copies its input into a buffer of its own,
+# `wl-copy-buffer-XXXXXX/stdin` under TMPDIR, and a wl-copy stopped before
+# it has served its offer leaves that buffer behind, the whole payload:
+# two 25 MiB files in the caller's TMPDIR from one check-tree whose probes
+# drew nothing (measured 2026-11-22), and four were found in /tmp and
+# /tmp/claude-1000. So every producer here gets TMPDIR=$WORK, which
+# cleanup() removes, the buffer with it.
 producer_start() {
   local bytes=$1 letter=${2:-A}
   python3 -c 'import sys; sys.stdout.write(sys.argv[2] * int(sys.argv[1]))' "$bytes" "$letter" \
-    | WAYLAND_DISPLAY=$NESTED wl-copy --foreground --type text/plain >/dev/null 2>"$WORK/wl-copy.err" &
+    | WAYLAND_DISPLAY=$NESTED TMPDIR=$WORK wl-copy --foreground --type text/plain >/dev/null 2>"$WORK/wl-copy.err" &
   PRODUCER_PID=$!
   T_OFFER=$(date +%s.%N)
 }
@@ -767,7 +774,7 @@ shell_arm() {
   # StandardKey.Paste. Small offers, after the measurement window, so that
   # the paste path's own read is never confused with the change-driven one;
   # the paste over the big offer itself is L10, measured on its own.
-  python3 -c 'import sys; sys.stdout.write("C" * 10)' | WAYLAND_DISPLAY=$NESTED wl-copy --foreground --type text/plain >/dev/null 2>&1 &
+  python3 -c 'import sys; sys.stdout.write("C" * 10)' | WAYLAND_DISPLAY=$NESTED TMPDIR=$WORK wl-copy --foreground --type text/plain >/dev/null 2>&1 &
   PRODUCER_PID=$!
   regain_focus
   chord -M shift -k Insert -m shift
@@ -775,7 +782,7 @@ shell_arm() {
   ck "L7 Shift+Insert pastes a 10-byte offer through the process path (key exit $KEY_RC)" "$(field_len) $(field_head)" "13 abc"
   producer_stop
   cap=$(node -e 'console.log(require(process.argv[1]).formCapacity("playlist"))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" 2>/dev/null)
-  python3 -c 'import sys; sys.stdout.write("B" * 5000)' | WAYLAND_DISPLAY=$NESTED wl-copy --foreground --type text/plain >/dev/null 2>&1 &
+  python3 -c 'import sys; sys.stdout.write("B" * 5000)' | WAYLAND_DISPLAY=$NESTED TMPDIR=$WORK wl-copy --foreground --type text/plain >/dev/null 2>&1 &
   PRODUCER_PID=$!
   regain_focus
   chord -M ctrl v -m ctrl

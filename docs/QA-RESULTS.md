@@ -24732,3 +24732,63 @@ more on a cold page cache, which the warm start now pays.
 Evidence, logs and summaries of every run:
 `/tmp/claude-1000/-home-ricky-Projects-omarchy-iptv/1233856c-3686-4499-b93b-4e8f9800403b/scratchpad/lane-fh124/runs/`
 (scratch, not kept).
+
+### F-HARNESS-125: the clip producers' buffers stay in the scenario's work folder (lane-fix-fh124, 2026-11-22)
+
+Branch fh124, the lead's to merge or drop: filed and fixed on the proposal
+of the recheck of 19c6235, which measured it and named no id; not a call
+the lead named. Crash journal 89 before, after every run and at the end.
+
+**The defect.** wl-copy copies what it is to offer into a buffer of its
+own, `wl-copy-buffer-XXXXXX/stdin` under `TMPDIR` (the installed
+wl-clipboard 2.3.0's binary names both), and the file is gone by the time
+the offer is served. clip-scenario.sh stops every producer by its pid, and
+one stopped before it has served leaves the file behind with the whole
+payload in it. A probe that is not measured stops its producer at once, so
+each such turn of the probe arm left one. check.sh's clip step gives the
+scenario no `TMPDIR` of its own, so a red gate leaves them in `/tmp`
+(tmpfs, so memory) or, under a lane's `TMPDIR`, inside the shared
+/tmp/claude-1000 quota. Four were there on 2026-11-22, each 26,214,400
+bytes, 0600 in a 0700 directory: three in `/tmp` from 03:13 and one in
+/tmp/claude-1000 from 17:09, plausibly the lead's gate red on 3157c56.
+They are not deleted here.
+
+**Measured on the real cage** (`clip-scenario.sh check-tree` in its own
+nested headless cage, under the heavy lock, the gate's `env -u` set, a
+private short `TMPDIR` and `XDG_RUNTIME_DIR`, the runner counting
+`wl-copy-buffer-*` in that `TMPDIR` after each run):
+
+| tree | condition | result | left in TMPDIR |
+|---|---|---|---|
+| 6684ef4 | a never-drawing stand-in probe (`CLIP_QML_BIN` a sleep) | 4 / 3 (P3, P4, P5 no-frame) | 2 buffers, from the editable and no-field turns |
+| the fix | the same | 4 / 3 (the same) | nothing |
+| the fix | idle, 2 runs | 7 / 0 each | nothing |
+| the fix | cold page cache, 2 busy loops, 2 runs | 7 / 0 each | nothing |
+
+The read-only turn leaves none since F-HARNESS-124's P2 wait, which lets
+wl-copy serve before it is stopped.
+
+**The fix.** Every producer the scenario starts runs with `TMPDIR=$WORK`:
+`producer_start`, and the shell arm's two small producers for L7 and L8,
+which are fixed by reading (live only, not run). `cleanup()` removes `WORK`
+and the buffer with it. The comment above `producer_start` said the payload
+is never written to disk, and it is, into that buffer; it says so now.
+
+**The suite.** qa-lib-test.sh 803 -> 804. The stand-in wl-copy of the
+F-HARNESS-124 section now copies its input into
+`${TMPDIR:-/tmp}/wl-copy-buffer-<pid>/stdin` and removes it only once it
+serves, as the real one does, and only a run's first producer ever serves,
+so the later ones are always stopped holding their buffers. One check: the
+check-tree over the cold-first stand-in probe, in a `TMPDIR` of its own,
+leaves nothing there. Red on 6684ef4's scenario (`2 2`, two buffers and
+nothing else) and on d28039d's (`3 3`, the read-only turn's too, with no P2
+wait); green on the fix.
+
+**Rule 15.** Other producers: qa-sources-scenarios.sh's seven (SRC-H03 and
+SRC-H04) run without `--foreground`, and the scenario stops none of them by
+a signal: each is replaced by the next offer, and the last keeps the user's
+clipboard, as that script's header says. Whether a background wl-copy
+removes its buffer when another offer replaces it was not measured here (it
+would be on the real display). The spike README's recipe
+(spikes/clip-offer/README.md) is text no script runs. The suites' stand-in
+producers are their own. Nothing else in the tree starts wl-copy.

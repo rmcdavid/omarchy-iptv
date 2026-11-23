@@ -3964,7 +3964,11 @@ is "a producer pid of 0 or written with a leading zero: 2, nothing asked" \
 # serves the offer only while that producer lives and only once it has
 # taken the selection, and answers "No selection" otherwise, as wl-paste
 # does. A 1 MiB offer (CLIP_OFFER_MB). The second run's producer exits
-# without taking it.
+# without taking it. Like the real wl-copy, the stand-in copies its input
+# into a buffer of its own, `wl-copy-buffer-*/stdin` under TMPDIR, and
+# removes it only once it serves, so one stopped before that leaves it
+# behind (F-HARNESS-125); and only a run's first producer ever serves, so
+# the later ones are always stopped holding their buffers.
 OS=$SP/os; mkdir -p "$OS/bin" "$OS/run" "$OS/tmp"
 cat >"$OS/bin/cage" <<'OSC'
 #!/bin/bash
@@ -3977,9 +3981,13 @@ cat >"$OS/bin/wl-copy" <<OSW
 #!/bin/bash
 echo \$\$ >"$OS/producer.pid"
 rm -f "$OS/ready"
-cat >"$OS/offer"
-[[ -e "$OS/quit" ]] && exit 1
+n=\$(( \$(cat "$OS/nprod" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$OS/nprod"
+b=\${TMPDIR:-/tmp}/wl-copy-buffer-\$\$; mkdir -p "\$b"
+cat >"\$b/stdin"
+[[ -e "$OS/quit" ]] && { rm -rf "\$b"; exit 1; }
+(( n > 1 )) && exec sleep 60
 sleep 1.5
+cp "\$b/stdin" "$OS/offer"; rm -rf "\$b"
 : >"$OS/ready"
 exec sleep 60
 OSW
@@ -3992,10 +4000,11 @@ fi
 echo "No selection" >&2; exit 1
 OSP
 chmod 0755 "$OS/bin/"*
-os_run() {   # os_run <out> [<qml>]: one check-tree over the stand-ins
+os_run() {   # os_run <out> [<qml> [<tmpdir>]]: one check-tree over the stand-ins
+  rm -f "$OS/nprod"
   env -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
     CLIP_CAGE_BIN="$OS/bin/cage" CLIP_QML_BIN="${2:-$OS/bin/qml}" CLIP_OFFER_MB=1 PATH="$OS/bin:$PATH" \
-    XDG_RUNTIME_DIR="$OS/run" TMPDIR="$OS/tmp" OMARCHY_IPTV_HARNESS_DIR="$OS/h" \
+    XDG_RUNTIME_DIR="$OS/run" TMPDIR="${3:-$OS/tmp}" OMARCHY_IPTV_HARNESS_DIR="$OS/h" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
     timeout -k 5 60 bash "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$1" 2>&1
   printf '%s\n' "$?" >"$1.rc"
@@ -4034,10 +4043,19 @@ time.sleep(30)
 OSQ
 chmod 0755 "$OS/bin/qml-cold"
 rm -f "$OS/drawn"
-os_run "$OS/cold.out" "$OS/bin/qml-cold"
+mkdir -p "$OS/tmp-cold"
+os_run "$OS/cold.out" "$OS/bin/qml-cold" "$OS/tmp-cold"
 is "clip check-tree, a probe whose first start draws only after 8 s: the warm start takes it, and the read-only probe is measured" \
    "$(qa_count '^   \(warm start: a throwaway readonly\.qml drew its first frame after [0-9]+ ms; stopped, not measured\)$' "$OS/cold.out") $(qa_count '^   \(readonly\.qml drew its first frame [0-9]+ ms after its start\)$' "$OS/cold.out") $(qa_count '^PASS P4 the read-only probe reads nothing' "$OS/cold.out") $(qa_count 'not measured: no-frame' "$OS/cold.out")" \
    "1 1 1 0"
+# F-HARNESS-125: in that run the editable and no-field probes' producers are
+# stopped before they serve, each holding a buffer of the whole offer; a
+# scenario that gives its producers its own work folder as TMPDIR leaves
+# nothing in the caller's, where 6684ef4's left both and d28039d's all
+# three (it has no P2 wait, so the read-only turn's producer is stopped
+# early too).
+is "and the producers stopped before they served leave no buffer in the caller's TMPDIR, nor anything else" \
+   "$(find "$OS/tmp-cold" -name 'wl-copy-buffer-*' | wc -l | tr -d ' ') $(ls -A "$OS/tmp-cold" | wc -l | tr -d ' ')" "0 0"
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
@@ -4296,7 +4314,11 @@ is "clip check-tree, a probe whose first start draws only after 8 s: the warm st
 # first start draws after 8 s, which only the warm start keeps from P4's
 # `no-frame`. Red on d28039d's scenario and on a mutant without the
 # warm_start call.
-EXPECTED=803
+# 803 -> 804 on 2026-11-22 (F-HARNESS-125, lane-fix-fh124): clip-scenario.sh
+# leaves no wl-copy buffer in the caller's TMPDIR from a producer stopped
+# before it served. Red on 6684ef4's scenario (two left) and on d28039d's
+# (three).
+EXPECTED=804
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
