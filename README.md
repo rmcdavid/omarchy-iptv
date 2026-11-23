@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.19.1. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.20.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -46,7 +46,13 @@ no more than its scheme and host, and refuses a host name holding a
 character no host name may hold before the helper looks it up or hands it
 to the player. 0.19.1 also looks up the server name of a channel from a
 playlist on the internet when you play it, and refuses the channel if the
-name leads to this computer or your local network.
+name leads to this computer or your local network. 0.20.0 sends the
+player's connections through a small relay of the plugin's own that checks
+each one as it is made, so a redirect, an HLS or DASH segment on another
+server, or a server name that changes its answer can no longer take a
+channel from a playlist on the internet to this computer or your local
+network, and makes `state.json` private before every save rather than after
+it.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin

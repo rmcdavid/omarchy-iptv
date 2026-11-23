@@ -335,7 +335,10 @@ fail=0
 # 11.0 s against 431 ms, run without the literal shape, which ran that model
 # out of its address space, F-HARNESS-117) and under six single-decision
 # mutants of the bound; the spec runs 111.
-QML_SPEC_MIN=${QML_SPEC_MIN:-111}
+# 2026-11-22, the 0.20.0 cut (the lead): 111 -> 112 -- re-levelled to what
+# the spec runs on the tree being cut, as the release step asks; the spec
+# runs 112.
+QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -771,7 +774,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-111}
 # 8 of the 11 red on 9d604cf and nine single-decision Service.qml mutants red
 # (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing (2026-11-18)", "The
 # settle"); the suite runs 3880.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3880}
+# 2026-11-22, the 0.20.0 cut (the lead): 3880 -> 4069 -- re-levelled to what
+# the suite runs on the tree being cut, as the release step asks; the floor
+# had trailed the suite since the rounds after 2026-11-18 (D-PLY-69..79,
+# D-REL-14's readers and splitter); the suite runs 4069.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4069}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1377,7 +1384,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3880}
 # stand-down's owner claim); 4 of 4 red on 9d604cf and four single-decision
 # helper mutants red (QA-RESULTS "D-PLY-39, -40 and -43: the player's timing
 # (2026-11-18)", "The settle"); the suite counts 2798.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2798}
+# 2026-11-22, the 0.20.0 cut (the lead): 2798 -> 2991 -- re-levelled to what
+# the suite counts on the tree being cut, as the release step asks; the floor
+# had trailed the suite since the rounds after 2026-11-18; the suite counts
+# 2991.
+PY_TESTS_MIN=${PY_TESTS_MIN:-2991}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -2215,7 +2226,7 @@ step "scripts/dev-harness/clip-scenario.sh check-tree (D-CLIP-1)"
 # payload or more, the read-only probe and the no-field window by nothing.
 # Nothing touches the user's session or clipboard; the nested display is
 # read from cage's own child and refused if it names the live one. About
-# 9 s.
+# 12 s idle since F-HARNESS-124's warm start (18 s on a cold page cache).
 #
 # A machine without cage, wl-copy, wl-paste, wtype, python3, node or the
 # qml runtime answers 77 with the reason, and so does a cage that brings up

@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## Unreleased
+## 0.20.0 (2026-11-22)
 
 **The player reaches the network only through a relay of the plugin's
 own, which checks every connection as it is made.** A channel from a
