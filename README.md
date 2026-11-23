@@ -47,7 +47,7 @@ character no host name may hold before the helper looks it up or hands it
 to the player. 0.19.1 also looks up the server name of a channel from a
 playlist on the internet when you play it, and refuses the channel if the
 name leads to this computer or your local network. 0.20.0 sends the
-player's connections through a small relay of the plugin's own that checks
+player's `http`, `https` and `rtmps` connections through a small relay of the plugin's own that checks
 each one as it is made, so a redirect, an HLS or DASH segment on another
 server, or a server name that changes its answer can no longer take a
 channel from a playlist on the internet to this computer or your local
@@ -300,7 +300,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (139 checks, 2026-11-13).
+  branch (141 checks, 2026-11-22).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -555,26 +555,21 @@ on every protection a running player can take:
 - no core dump.
 
 Sometimes its channel cannot be put back: the playlist no longer has it, or
-another source is active. Then the old player plays on, sent no channel. Your
-next channel change replaces it, and stopping ends it.
+another source is active, or the channel list takes more than 15 seconds to
+load. A player 0.19.1 or earlier started does not send its connections
+through the plugin's relay (Limits, below), so it cannot be made safe, and it
+is stopped: as soon as the channel list has loaded when the channel is gone
+from it or belongs to another source, or 15 seconds after the shell starts if
+the list has not loaded by then. Press Enter on a channel and a new player
+starts. A player 0.20.0 or later started, whose channel cannot be put back,
+plays on, sent no channel; your next channel change replaces it, and stopping
+ends it.
 
-The channel list can also take more than 15 seconds to load. What happens then
-depends on what the new shell found:
-
-- If the old player already had every protection, as a player 0.16.0 started
-  does, it plays on, sent no channel, until your next channel change replaces
-  it (Enter on its own channel does too, at live and playing) or you stop.
-- If the new shell had to change the settings that keep certificate
-  verification on, as for a player 0.15.0 or earlier started, the first time
-  a shell of 0.16.0 or later picks it up, it plays on until the list has
-  loaded, and is replaced then if its channel is still there. This holds
-  after a shell restart too, until it is replaced. If the list never loads,
-  it plays on, sent no channel, as above.
-
-If, in any of these cases, it also cannot be made safe, it is stopped: press
-Enter on the channel and a fresh, verified player starts. A player cannot be
-made safe when it does not accept the change, or when it was started by 0.15.0
-or earlier and its mpv config holds either of these:
+If it cannot be made safe, it is stopped: press Enter on the channel and a
+fresh, verified player starts. A player cannot be made safe when it was
+started by 0.19.1 or earlier, because it does not send its connections
+through the plugin's relay; when it does not accept the change; or when it
+was started by 0.15.0 or earlier and its mpv config holds either of these:
 
 - a per-protocol or per-extension profile that sets any of the options the
   plugin now sets after yours (the certificate settings among them);
@@ -1112,7 +1107,9 @@ carry channel ids — most do — are not affected at all.
   own port. A playlist served from this computer (a relay such as Threadfin
   or xTeVe on `127.0.0.1`) may name channels on your network, but its
   channels on this computer must be on the relay's own port; one on another
-  port is another program's, and is skipped. Each skipped channel is
+  port is another program's, and is skipped. Since 0.20.0 a redirect from
+  such a relay to another port on this computer is refused too. Each
+  skipped channel is
   counted in the guide footer's `Playlist warning: ...`. A channel whose
   server name is looked up when you play it -- one from a playlist on the
   internet, or one a relay names by a server name, which is refused if the
@@ -1143,8 +1140,8 @@ carry channel ids — most do — are not affected at all.
   MJPEG, an AVI or MPEG-PS file, a WAV stream) fails with the same sentence
   as a playlist.
 - The player reaches the network through a small relay of the plugin's
-  own, run beside it, which checks every connection a channel from a
-  playlist on the internet makes -- the stream itself, every redirect, and
+  own, run beside it, which checks every `http`, `https` and `rtmps`
+  connection a channel from a playlist on the internet makes -- the stream itself, every redirect, and
   every playlist, segment, key and subtitle of an HLS or DASH stream --
   against the address it actually connects to. So neither a server that
   redirects a channel elsewhere nor a server name that gives one answer
@@ -1167,8 +1164,25 @@ carry channel ids — most do — are not affected at all.
   on this computer or your own network keeps them; `rtsps` was never
   played). If the shell's environment names a web proxy (`http_proxy`),
   the relay sends the player's traffic through it, and a name that proxy
-  looks up differently from this computer is not caught. The relay is one
-  more small program per player, about 22 MB of memory while idle, and it
+  looks up differently from this computer is not caught. Behind a proxy
+  where this computer cannot look names up itself, every connection a
+  channel makes -- each redirect, each HLS or DASH segment -- must then be
+  to the playlist's own server or to a numeric address. A playlist on this
+  computer or your own network is trusted as before, and so is everything
+  its channels connect to: if such a playlist (Threadfin or xTeVe without
+  buffering, say) lists your provider's stream addresses unchanged, that
+  provider's servers can still redirect the player, or serve it HLS or
+  DASH segments, on your local network -- and, when the playlist is on
+  your network rather than on this computer, on this computer too. If your
+  `mpv` is a wrapper script of your own, two things stay open: if it runs
+  the real player as its child and the relay is killed outright, the
+  player is left with nothing to connect through until the plugin's next
+  ten-second check replaces it, and meanwhile another account on this
+  computer that takes over the relay's port could receive the player's
+  plain-`http` requests, provider credentials included; and a wrapper that
+  sets `no_proxy` or `http_proxy` for the real player sends the
+  connections those name past the relay, unchecked. The relay is one
+  more small program per player, about 25 MB of memory while idle, and it
   stops with the player.
 
 ## Picture in picture settings
@@ -1263,7 +1277,8 @@ itself unavailable rather than half working.
 - `~/.local/state/omarchy-iptv/screenshots/` : screenshots you take with the
   player's own `s` key (mode 0600)
 - `$XDG_RUNTIME_DIR/omarchy-iptv/` : the player's private socket (`mpv.sock`)
-  while it is running, a small lock file (`player.lock`, one line, no
+  and its relay's control socket (`mpv.sock.relay`, owner-only) while it is
+  running, a small lock file (`player.lock`, one line, no
   address) used to guarantee only one player exists, `mpv-args.conf` (your
   `mpvArgs` tokens, mode 0600, there only while a player starts: it is
   deleted as soon as the player answers, and not written when you set no
@@ -1340,7 +1355,7 @@ Nothing inside the plugin directory is written at runtime.
   guide's Sources screen.` Once the move is recorded, a guide-data URL set
   on the bar gets **Bar setting ignored**, as above.
 - **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
-  part name): the helper is `bin/omarchy-iptv` and the eleven files under
+  part name): the helper is `bin/omarchy-iptv` and the twelve files under
   `bin/helper/` beside it, and it checks all of them before it does
   anything. One of them is missing, unreadable, empty, cut off, not what
   the release wrote or from another release, or that folder holds a file

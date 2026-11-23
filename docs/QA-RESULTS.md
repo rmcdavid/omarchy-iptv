@@ -24875,3 +24875,54 @@ loops at nice 0, recorded by pid, stopped through a pidfd):
 Evidence, logs and summaries:
 `/tmp/claude-1000/-home-ricky-Projects-omarchy-iptv/1233856c-3686-4499-b93b-4e8f9800403b/scratchpad/lane-fix-fh124/runs/`
 (scratch, not kept).
+
+## The 0.20.0 cut (the lead, 2026-11-22)
+
+On the owner's word ("let's cut a release and make sure omarchy plugin
+page has the latest release listed - whatever that takes"). The hold on
+`main` at 0.19.1 waited for a maintainer to action #13611; he had, on
+2026-11-16 at 10:51Z, blocking 9e006be on #13611 and at 11:56Z on #12636
+with the two findings he raised on #14290 on 2026-11-14 (D-SINK-102 and
+D-SINK-103). Both are fixed on dev. The catalog read at 2026-11-22T12:33Z
+gives `version` 0.19.1 (read from our HEAD), `repositoryRelease` v0.17.0,
+`verificationCommit` 787a33b: `scripts/build-catalog.mjs` at the
+marketplace's 38df1d01 refreshes `repositoryRelease` from GitHub's latest
+Release only on an incremental build, which runs for an approved repository
+or a migration, so the page lists a new release only once a request of ours
+is approved and published (F-M3-27's finding, re-read and unchanged).
+
+**key-scenario live** (the release step: `scripts/dev-harness/key-scenario.sh
+live` from the dev checkout at 5fa737a, under the heavy lock at nice 10,
+`private-bus.sh`, the scenario's own nested headless cage, `env -u DISPLAY
+-u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME
+-u OMARCHY_IPTV_HARNESS_DIR`, short private XDG_RUNTIME_DIR and TMPDIR):
+**141 passed, 0 failed** (140 lettered checks and the floor line), shell
+arm 621.5 s, 19:42:17 to 19:52:39 CST, load 1.41 at the start and 2.91 at
+the end. Transcript `key-20261122-194217-2998466`. Crash journal 89 before
+and after; the checkout clean before and after.
+
+**The pre-cut review** (a read-only workflow, three lenses and a critic,
+over 5fa737a against 0.19.1's cb7ce37) held the cut on the notes, not the
+code: the README's update section said a 0.19.1 player whose channel
+cannot be put back plays on, where this version stops every such player
+(it carries no relay pin, so it reads unsafe); the notes' top paragraph
+and a limitation put that stop at 15 s, which holds only while the list
+has not loaded; the headline said the player reaches the network only
+through the relay, which holds for `http`, `https` and `rtmps`; the notes
+named no change for a loopback playlist's redirect to another port (now
+refused), for a DNS-less proxy network (a channel on the playlist's own
+server that redirects to, or takes segments from, another named server is
+refused now), or for a `state.json` on a filesystem without Unix
+permissions or owned by another account (0.19.1 saved to it; this version
+does not), and the README still counted eleven helper parts. Every
+must-fix was confirmed by calling the shipping code (`Model.olderRestartDisposition`,
+`StreamPolicy.check_proxied` and `StreamPolicy.permits` with stubbed
+resolvers) or by reading both commits, and is taken in the commit after
+5fa737a, with the cheap should-fixes (the wrapper residuals and a local
+playlist's trust in the README's Limits, the relay's control socket in
+Files, the relay's idle memory measured at 25.3 MB, the parse speed-up
+against 0.19.1 measured at about a fifth, D-PLY-65's id). Not taken: a
+proxy asking for Digest authentication (read, not measured), and the
+journal sentence that calls a 0.19.1 player one that "will not verify the
+stream's certificate" (journal text only; it lacks the relay pin), both
+left for after the cut.

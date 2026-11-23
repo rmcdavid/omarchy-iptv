@@ -5,17 +5,23 @@ version lives in `manifest.json`.
 
 ## 0.20.0 (2026-11-22)
 
-**The player reaches the network only through a relay of the plugin's
-own, which checks every connection as it is made.** A channel from a
-playlist on the internet could still send the player to this computer or
-your local network: through a redirect from its server, an HLS or DASH
+**A channel from a playlist on the internet now reaches the network only
+where the plugin has checked: its `http`, `https` and `rtmps` connections
+go through a relay of the plugin's own, which checks every connection as
+it is made, and its `rtmp`, `rtsp` and `srt` connections go to the address
+the plugin checked.** Up to 0.19.1 such a channel could still send the
+player to this computer or your local network: through a redirect from its server, an HLS or DASH
 playlist, segment or key on another server, or a server name that gave the
 plugin one answer and the player another a moment later. What to do:
 **restart the shell** (`omarchy-restart-shell`). If a channel was playing
 when you updated, expect it to reopen once in a new player window; if it
-cannot be put back (it is gone from the list, it belongs to another source,
-or the list has not arrived), the old player is stopped about 15 seconds
-after the shell starts, and you start the channel again yourself.
+cannot be put back, the old player is stopped -- as soon as the channel
+list has loaded when the channel is gone from it or belongs to another
+source, or about 15 seconds after the shell starts when the list has not
+arrived by then -- and you start the channel again yourself. If your
+`state.json`, or the file its link points to, is on a filesystem without
+Unix permissions or owned by another account, read the note on saving
+under Fixed first: this version does not save to it.
 
 ### Fixed
 
@@ -153,8 +159,13 @@ after the shell starts, and you start the channel again yourself.
   without Unix permissions, for example), a notification
   titled "Saving has stopped" now says which, once, and how to fix it.
   What you change meanwhile is kept: fix it with the shell running and
-  your next change saves everything, with no restart. Before, the guide
-  said only "Could not write state.json". (D-STATE-11)
+  your next change saves everything, with no restart. Up to and including
+  0.19.1 such a file was saved anyway -- on a filesystem without Unix
+  permissions at the mount's own mode, and with no check of who owns it --
+  so after this update nothing is saved to it until you fix it, and what
+  you change meanwhile is lost if the shell stops first. Keep `state.json`,
+  or the file its link points to, on a filesystem with Unix permissions,
+  owned by you. (D-STATE-11)
 - **Playing a channel right after Stop no longer fails with "The player is
   busy"**: the new channel starts once the old player has finished
   closing, and is no longer lost if the old player closes between two
@@ -199,7 +210,7 @@ after the shell starts, and you start the channel again yourself.
   (D-PLY-39)
 - **When another program answers the player's socket, the player the
   plugin had just started is closed** instead of being left as an empty
-  black window. (D-PLY-57)
+  black window. (D-PLY-57, D-PLY-65)
 - **An `mpvArgs` setting too long to hand to the player (over 64 KiB) no
   longer stops every channel from starting**; the options that do not fit
   are left out and the guide's footer says so. (D-PLY-50)
@@ -217,13 +228,13 @@ after the shell starts, and you start the channel again yourself.
   the bar label, the glyph colour, the guide's banner and the Sources row
   change at once instead of animating, as the rest of the shell does.
   (D-A11Y-11)
-- **Reading a large playlist is about a quarter faster**, with no change
-  to which channels it keeps or refuses. (F-HARNESS-73)
-
+- **Reading a large playlist is about a fifth faster than in 0.19.1**,
+  with no change to which channels it keeps or refuses. (F-HARNESS-73)
 - **`--http-proxy` in `mpvArgs` is refused**, and so is a
   `--demuxer-lavf-o` token naming `http_proxy`; both were accepted with a
-  warning. An `http-proxy` line in your own mpv config no longer applies to
-  the plugin's player either. Set `http_proxy` (and `no_proxy`) in the
+  warning. An `http-proxy` line, or an `http_proxy` key in
+  `demuxer-lavf-o`, in your own mpv config no longer applies to the
+  plugin's player either. Set `http_proxy` (and `no_proxy`) in the
   environment the shell runs in instead, and the relay sends the player's
   traffic through that proxy. (D-SINK-102)
 - **`mms` and `mmsh` channels from a playlist on the internet are not
@@ -253,9 +264,18 @@ after the shell starts, and you start the channel again yourself.
   own**: if its channel cannot be put back in a new player window, it is
   stopped, where earlier versions let it play on until you changed
   channel.
+- **A playlist served from this computer (a relay such as Threadfin or
+  xTeVe on `127.0.0.1`) can no longer redirect a channel to another port
+  on this computer**: the redirect is refused and the channel fails, as a
+  channel listed on that port already was skipped. A redirect within the
+  relay's own port, to your local network or to the internet still plays.
+  (D-SINK-102)
+- **The relay looks up every server a channel connects to within 3
+  seconds**, as 0.19.1 looked up the channel's own; a redirect or segment
+  server whose name takes longer fails like a stream that would not open.
 - **With `--ytdl=yes`, yt-dlp fetches pages itself**, outside the relay's
   checks.
-- **The relay is one more small program per player**, about 22 MB of
+- **The relay is one more small program per player**, about 25 MB of
   memory while idle, and it stops with the player.
 - **A saved source is dropped when the shell starts if its address holds
   one of the shapes the plugin cannot read in an address, refused above**
@@ -286,15 +306,27 @@ after the shell starts, and you start the channel again yourself.
 - **Through your own web proxy, a server name is checked by the answer
   this computer gets**, and the proxy looks the name up again on its own
   side. Behind a proxy on a network where this computer cannot look names
-  up itself, a channel from a playlist on the internet that is not on the
-  playlist's own server is refused.
+  up itself, a channel from a playlist on the internet plays only while
+  every connection it makes is to the playlist's own server or to a server
+  written as a numeric address: one on another named server is refused, as
+  since 0.19.1, and now so is one on the playlist's own server that
+  redirects to another named server or takes its HLS or DASH segments from
+  one (up to 0.19.1 your proxy followed those).
 - **If you start mpv through a wrapper script of your own that runs the
   real player as its child, and the relay is killed outright**, the player
   plays on with nothing to connect through until the plugin's next
-  ten-second check notices and replaces it (or stops it about 15 seconds
-  later, when its channel cannot be put back); until then another account
-  on this computer that took over the relay's port could receive the
-  player's plain-`http` requests.
+  ten-second check notices and replaces it (or stops it, when its channel
+  cannot be put back); until then another account on this computer that
+  took over the relay's port could receive the player's plain-`http`
+  requests. And a wrapper that sets `no_proxy` or `http_proxy` for the
+  real player sends the connections those name past the relay, unchecked.
+- **A playlist on this computer or your own network is trusted as before,
+  and so is everything its channels connect to**: if such a playlist
+  (Threadfin or xTeVe without buffering, say) lists your provider's stream
+  addresses unchanged, that provider's servers can still redirect the
+  player, or serve it HLS or DASH segments, on your local network -- and,
+  when the playlist is on your network rather than on this computer, on
+  this computer too.
 - **The limitations listed under 0.19.1 still apply**, except the three
   this release closes for playlists on the internet: a name that changes
   its answer, a stream server's redirects, and the servers an HLS or DASH
