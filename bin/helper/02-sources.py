@@ -127,20 +127,158 @@ def looks_like_host(text: str) -> bool:
 # U+FF3C and U+FE68, which the idna codec and NFKD fold to one: 79 code
 # points fold in all.
 HOST_NAME_REFUSED_CHARS = "@%;=&[]\\"
+# D-SINK-117 (2026-11-16): what ASCII a host NAME may hold -- letters,
+# digits, `-`, `.` and `_` -- an allowlist rather than the list of
+# delimiters above, which stays to say why those first eight were refused.
+# Both validators accepted, and the connection layer handed on, a name
+# holding ! " $ ' ( ) * + , < > ^ ` { | } ~, which no DNS name holds, written
+# as itself or as a compatibility character the fold reads as one (U+2474
+# reads `(1)`). The colon keeps its own rule (a port's one colon, or an IPv6
+# literal's). Model.hostNameRefused asks the same allowlist; the shared
+# host-grammar fixture holds both to it over every ASCII character and
+# every code point that folds to one outside it (301).
+HOST_NAME_ASCII = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._")
 # Unicode category Cf, every code point of it, as (first, last): what Python
 # 3.14's unicodedata (Unicode 16.0) and node 26's \p{Cf} (17.0) both answer.
 # Explicit rather than unicodedata.category, so both mirrors refuse one set
 # whatever either engine's Unicode version; each suite holds its table to its
 # engine's category over the whole range (test_host_names.py, Model.test.js)
-# and the fixture pins both ends of every range in both mirrors.
+# and the fixture pins both ends of every range in both mirrors. Since
+# D-SINK-116 the host rule asks HOST_INVISIBLE_RANGES, which holds these;
+# this table stays for the label's fold (label_fold_nfkd), which removes a
+# format character and nothing else.
 HOST_FORMAT_RANGES = ((0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD),
                       (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E),
                       (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064), (0x2066, 0x206F),
                       (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD), (0x110CD, 0x110CD),
                       (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0001, 0xE0001),
                       (0xE0020, 0xE007F))
-_HOST_NAME_REFUSED = frozenset(HOST_NAME_REFUSED_CHARS + URL_SPACE_CHARS).union(
-    chr(code) for first, last in HOST_FORMAT_RANGES for code in range(first, last + 1))
+# D-SINK-116 (2026-11-16): what a host name may not hold because it draws as
+# nothing: Unicode's Cf, its Default_Ignorable_Code_Point property and
+# stringprep's table B.1 (what nameprep maps to nothing), as (first, last),
+# 26 ranges and 4,207 code points. Cf alone, which this rule asked until
+# then, let through the combining grapheme joiner, the variation selectors,
+# the Hangul fillers and the Mongolian free variation selectors, several of
+# which the idna codec maps to nothing, so `cdn<U+034F>.test` was looked up
+# as `cdn.test`, and drawn like it, as a second source. Explicit, in both
+# mirrors: the python suite holds it to unicodedata's Cf, stringprep's B.1
+# and the shared host-grammar fixture's Default_Ignorable list (node's
+# property, which Python's unicodedata does not carry); the node suite holds
+# it to \p{Cf}, \p{Default_Ignorable_Code_Point} and the fixture's B.1.
+HOST_INVISIBLE_RANGES = ((0x00AD, 0x00AD), (0x034F, 0x034F), (0x0600, 0x0605), (0x061C, 0x061C),
+                         (0x06DD, 0x06DD), (0x070F, 0x070F), (0x0890, 0x0891), (0x08E2, 0x08E2),
+                         (0x115F, 0x1160), (0x17B4, 0x17B5), (0x1806, 0x1806), (0x180B, 0x180F),
+                         (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+                         (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFFB),
+                         (0x110BD, 0x110BD), (0x110CD, 0x110CD), (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3),
+                         (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF))
+_HOST_NAME_REFUSED = frozenset(URL_SPACE_CHARS).union(
+    chr(code) for code in range(0x80) if chr(code) not in HOST_NAME_ASCII and code != 0x3A).union(
+    chr(code) for first, last in HOST_INVISIBLE_RANGES for code in range(first, last + 1))
+# D-SINK-115 (2026-11-16): the code points whose compatibility form holds
+# `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD, in Python 3.14
+# (Unicode 16.0), node 26 (17.0) and Qt 6.12's engine. CPython's urlsplit
+# refuses an authority holding one anywhere (urllib.parse._checknetloc,
+# which NFKC-normalizes the whole netloc), so read_authority refuses one
+# before the URL library is asked. Model.DELIMITER_FOLDS is the same table;
+# the shared host-grammar fixture holds both to it, and the python suite
+# holds it to urlsplit itself over every code point.
+DELIMITER_FOLDS = frozenset(chr(code) for code in (
+    0x2047, 0x2048, 0x2049, 0x2100, 0x2101, 0x2105, 0x2106, 0x2A74, 0xFE13, 0xFE16,
+    0xFE55, 0xFE56, 0xFE5F, 0xFE6B, 0xFF03, 0xFF0F, 0xFF1A, 0xFF1F, 0xFF20))
+# D-SINK-119 (2026-11-16): the code points whose NFKC form is not
+# themselves, as (first, last), 256 ranges and 4,965 code points. Python
+# 3.14's unicodedata (Unicode 16.0) and node 26 (17.0) answer the same set
+# but for U+A7F1, which Unicode 17 assigned and folds to `S`, so the table is
+# their union, and the TABLE is the rule, never either engine's normalize. A
+# host name holding one is a look-alike of the name it folds to: the idna
+# codec, whose nameprep applies NFKC, writes `<U+FF43><U+FF44><U+FF4E>.test`,
+# `cdn<U+2024>test` and `cdn<U+FE52>test` as `cdn.test`, and since the first
+# hop of a fetch sends the A-label (a_label_target) such a source would be
+# fetched from that name while its row showed the look-alike. Per code
+# point: a sequence that composes (`e` and U+0301) is not refused, and the
+# codec reads it as its composed form. Model.HOST_NFKC_RANGES is the same
+# table, held to it by the shared host-grammar fixture; the python suite
+# holds it to unicodedata (with U+A7F1 beyond it), the node suite to node's
+# NFKC, and the host-grammar suite Qt's engine to it.
+HOST_NFKC_RANGES = (
+    (0x00A0, 0x00A0), (0x00A8, 0x00A8), (0x00AA, 0x00AA), (0x00AF, 0x00AF), (0x00B2, 0x00B5), (0x00B8, 0x00BA),
+    (0x00BC, 0x00BE), (0x0132, 0x0133), (0x013F, 0x0140), (0x0149, 0x0149), (0x017F, 0x017F), (0x01C4, 0x01CC),
+    (0x01F1, 0x01F3), (0x02B0, 0x02B8), (0x02D8, 0x02DD), (0x02E0, 0x02E4), (0x0340, 0x0341), (0x0343, 0x0344),
+    (0x0374, 0x0374), (0x037A, 0x037A), (0x037E, 0x037E), (0x0384, 0x0385), (0x0387, 0x0387), (0x03D0, 0x03D6),
+    (0x03F0, 0x03F2), (0x03F4, 0x03F5), (0x03F9, 0x03F9), (0x0587, 0x0587), (0x0675, 0x0678), (0x0958, 0x095F),
+    (0x09DC, 0x09DD), (0x09DF, 0x09DF), (0x0A33, 0x0A33), (0x0A36, 0x0A36), (0x0A59, 0x0A5B), (0x0A5E, 0x0A5E),
+    (0x0B5C, 0x0B5D), (0x0E33, 0x0E33), (0x0EB3, 0x0EB3), (0x0EDC, 0x0EDD), (0x0F0C, 0x0F0C), (0x0F43, 0x0F43),
+    (0x0F4D, 0x0F4D), (0x0F52, 0x0F52), (0x0F57, 0x0F57), (0x0F5C, 0x0F5C), (0x0F69, 0x0F69), (0x0F73, 0x0F73),
+    (0x0F75, 0x0F79), (0x0F81, 0x0F81), (0x0F93, 0x0F93), (0x0F9D, 0x0F9D), (0x0FA2, 0x0FA2), (0x0FA7, 0x0FA7),
+    (0x0FAC, 0x0FAC), (0x0FB9, 0x0FB9), (0x10FC, 0x10FC), (0x1D2C, 0x1D2E), (0x1D30, 0x1D3A), (0x1D3C, 0x1D4D),
+    (0x1D4F, 0x1D6A), (0x1D78, 0x1D78), (0x1D9B, 0x1DBF), (0x1E9A, 0x1E9B), (0x1F71, 0x1F71), (0x1F73, 0x1F73),
+    (0x1F75, 0x1F75), (0x1F77, 0x1F77), (0x1F79, 0x1F79), (0x1F7B, 0x1F7B), (0x1F7D, 0x1F7D), (0x1FBB, 0x1FBB),
+    (0x1FBD, 0x1FC1), (0x1FC9, 0x1FC9), (0x1FCB, 0x1FCB), (0x1FCD, 0x1FCF), (0x1FD3, 0x1FD3), (0x1FDB, 0x1FDB),
+    (0x1FDD, 0x1FDF), (0x1FE3, 0x1FE3), (0x1FEB, 0x1FEB), (0x1FED, 0x1FEF), (0x1FF9, 0x1FF9), (0x1FFB, 0x1FFB),
+    (0x1FFD, 0x1FFE), (0x2000, 0x200A), (0x2011, 0x2011), (0x2017, 0x2017), (0x2024, 0x2026), (0x202F, 0x202F),
+    (0x2033, 0x2034), (0x2036, 0x2037), (0x203C, 0x203C), (0x203E, 0x203E), (0x2047, 0x2049), (0x2057, 0x2057),
+    (0x205F, 0x205F), (0x2070, 0x2071), (0x2074, 0x208E), (0x2090, 0x209C), (0x20A8, 0x20A8), (0x2100, 0x2103),
+    (0x2105, 0x2107), (0x2109, 0x2113), (0x2115, 0x2116), (0x2119, 0x211D), (0x2120, 0x2122), (0x2124, 0x2124),
+    (0x2126, 0x2126), (0x2128, 0x2128), (0x212A, 0x212D), (0x212F, 0x2131), (0x2133, 0x2139), (0x213B, 0x2140),
+    (0x2145, 0x2149), (0x2150, 0x217F), (0x2189, 0x2189), (0x222C, 0x222D), (0x222F, 0x2230), (0x2329, 0x232A),
+    (0x2460, 0x24EA), (0x2A0C, 0x2A0C), (0x2A74, 0x2A76), (0x2ADC, 0x2ADC), (0x2C7C, 0x2C7D), (0x2D6F, 0x2D6F),
+    (0x2E9F, 0x2E9F), (0x2EF3, 0x2EF3), (0x2F00, 0x2FD5), (0x3000, 0x3000), (0x3036, 0x3036), (0x3038, 0x303A),
+    (0x309B, 0x309C), (0x309F, 0x309F), (0x30FF, 0x30FF), (0x3131, 0x318E), (0x3192, 0x319F), (0x3200, 0x321E),
+    (0x3220, 0x3247), (0x3250, 0x327E), (0x3280, 0x33FF), (0xA69C, 0xA69D), (0xA770, 0xA770), (0xA7F1, 0xA7F4),
+    (0xA7F8, 0xA7F9), (0xAB5C, 0xAB5F), (0xAB69, 0xAB69), (0xF900, 0xFA0D), (0xFA10, 0xFA10), (0xFA12, 0xFA12),
+    (0xFA15, 0xFA1E), (0xFA20, 0xFA20), (0xFA22, 0xFA22), (0xFA25, 0xFA26), (0xFA2A, 0xFA6D), (0xFA70, 0xFAD9),
+    (0xFB00, 0xFB06), (0xFB13, 0xFB17), (0xFB1D, 0xFB1D), (0xFB1F, 0xFB36), (0xFB38, 0xFB3C), (0xFB3E, 0xFB3E),
+    (0xFB40, 0xFB41), (0xFB43, 0xFB44), (0xFB46, 0xFBB1), (0xFBD3, 0xFD3D), (0xFD50, 0xFD8F), (0xFD92, 0xFDC7),
+    (0xFDF0, 0xFDFC), (0xFE10, 0xFE19), (0xFE30, 0xFE44), (0xFE47, 0xFE52), (0xFE54, 0xFE66), (0xFE68, 0xFE6B),
+    (0xFE70, 0xFE72), (0xFE74, 0xFE74), (0xFE76, 0xFEFC), (0xFF01, 0xFFBE), (0xFFC2, 0xFFC7), (0xFFCA, 0xFFCF),
+    (0xFFD2, 0xFFD7), (0xFFDA, 0xFFDC), (0xFFE0, 0xFFE6), (0xFFE8, 0xFFEE), (0x10781, 0x10785), (0x10787, 0x107B0),
+    (0x107B2, 0x107BA), (0x1CCD6, 0x1CCF9), (0x1D15E, 0x1D164), (0x1D1BB, 0x1D1C0), (0x1D400, 0x1D454), (0x1D456, 0x1D49C),
+    (0x1D49E, 0x1D49F), (0x1D4A2, 0x1D4A2), (0x1D4A5, 0x1D4A6), (0x1D4A9, 0x1D4AC), (0x1D4AE, 0x1D4B9), (0x1D4BB, 0x1D4BB),
+    (0x1D4BD, 0x1D4C3), (0x1D4C5, 0x1D505), (0x1D507, 0x1D50A), (0x1D50D, 0x1D514), (0x1D516, 0x1D51C), (0x1D51E, 0x1D539),
+    (0x1D53B, 0x1D53E), (0x1D540, 0x1D544), (0x1D546, 0x1D546), (0x1D54A, 0x1D550), (0x1D552, 0x1D6A5), (0x1D6A8, 0x1D7CB),
+    (0x1D7CE, 0x1D7FF), (0x1E030, 0x1E06D), (0x1EE00, 0x1EE03), (0x1EE05, 0x1EE1F), (0x1EE21, 0x1EE22), (0x1EE24, 0x1EE24),
+    (0x1EE27, 0x1EE27), (0x1EE29, 0x1EE32), (0x1EE34, 0x1EE37), (0x1EE39, 0x1EE39), (0x1EE3B, 0x1EE3B), (0x1EE42, 0x1EE42),
+    (0x1EE47, 0x1EE47), (0x1EE49, 0x1EE49), (0x1EE4B, 0x1EE4B), (0x1EE4D, 0x1EE4F), (0x1EE51, 0x1EE52), (0x1EE54, 0x1EE54),
+    (0x1EE57, 0x1EE57), (0x1EE59, 0x1EE59), (0x1EE5B, 0x1EE5B), (0x1EE5D, 0x1EE5D), (0x1EE5F, 0x1EE5F), (0x1EE61, 0x1EE62),
+    (0x1EE64, 0x1EE64), (0x1EE67, 0x1EE6A), (0x1EE6C, 0x1EE72), (0x1EE74, 0x1EE77), (0x1EE79, 0x1EE7C), (0x1EE7E, 0x1EE7E),
+    (0x1EE80, 0x1EE89), (0x1EE8B, 0x1EE9B), (0x1EEA1, 0x1EEA3), (0x1EEA5, 0x1EEA9), (0x1EEAB, 0x1EEBB), (0x1F100, 0x1F10A),
+    (0x1F110, 0x1F12E), (0x1F130, 0x1F14F), (0x1F16A, 0x1F16C), (0x1F190, 0x1F190), (0x1F200, 0x1F202), (0x1F210, 0x1F23B),
+    (0x1F240, 0x1F248), (0x1F250, 0x1F251), (0x1FBF0, 0x1FBF9), (0x2F800, 0x2FA1D))
+_HOST_NFKC_CHANGES = frozenset(chr(code) for first, last in HOST_NFKC_RANGES for code in range(first, last + 1))
+# D-SINK-119, the owner's decision of 2026-11-17 ("refuse and drop"): the
+# code points the idna codec writes as ANOTHER name, as (first, last), 14
+# ranges and 67 code points. The table is every code point the rules above
+# accept in a host name (HOST_NFKC_RANGES and the NFKD fold included) whose
+# nameprep form (encodings.idna.nameprep: stringprep's B.1 removal and B.2
+# case folding, then NFKC under Unicode 3.2) differs from its form as
+# lower_host writes it -- the host as both validators store it and the
+# codec is handed it. All 67 are B.2 case folds that NFKC leaves alone:
+# U+00DF and U+1E9E become `ss`, U+0345 becomes U+03B9, U+03C2 becomes
+# U+03C3, and the 63 Greek letters with a subscript or adscript iota
+# (U+1F80 to U+1FFC, capitals included, which lower_host lowers to the
+# small ones) become two letters. Since the first hop sends the A-label
+# (a_label_target), `http://u:p@stra<U+00DF>e.example/` showed that name in
+# Sources while its credentials went to `strasse.example`, which under
+# IDNA2008 can be another registrant's domain; CPython's socket looked the
+# folded name up in every release. The capital sigma U+03A3 is not one:
+# lower_host folds it to U+03C3, which nameprep leaves alone. How NFC
+# composition and HOST_NFKC_RANGES meet it: none of the 67 is in
+# HOST_NFKC_RANGES (which is asked first), every one is its own NFKC form,
+# and the lowered form compared as it stands and compared as its NFC form
+# give the same 67, so the table is per code point as HOST_NFKC_RANGES is,
+# and a sequence nameprep composes (`e` then U+0301) is kept, since the
+# composed form draws the same. The NFKD fold produces none of the 67 from a
+# code point no table refuses (measured over every code point and held by
+# the suite), so the table is asked of the name as written. The python
+# suite recomputes it from nameprep over every code point, a tripwire for a
+# Python upgrade; Model.HOST_CASE_FOLD_RANGES is the same table, held to it
+# by the shared host-grammar fixture in node and in Qt's engine.
+HOST_CASE_FOLD_RANGES = ((0x00DF, 0x00DF), (0x0345, 0x0345), (0x03C2, 0x03C2), (0x1E9E, 0x1E9E),
+                         (0x1F80, 0x1FAF), (0x1FB2, 0x1FB4), (0x1FB7, 0x1FB7), (0x1FBC, 0x1FBC),
+                         (0x1FC2, 0x1FC4), (0x1FC7, 0x1FC7), (0x1FCC, 0x1FCC), (0x1FF2, 0x1FF4),
+                         (0x1FF7, 0x1FF7), (0x1FFC, 0x1FFC))
+_HOST_CASE_FOLDS = frozenset(chr(code) for first, last in HOST_CASE_FOLD_RANGES for code in range(first, last + 1))
 # What an IPv6 literal's zone may hold: _IPV6_LITERAL's `%25[A-Za-z0-9._~-]+`.
 _ZONE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-")
 
@@ -207,30 +345,87 @@ def host_name_refused(text: Any, with_port: bool = False) -> bool:
     backslash, two more, 79: U+FF3C and U+FE68, which both fold to `\\`. A
     colon the fold adds is a colon in the name, never the port's.
     An ASCII name pays nothing, and the fold is asked only of a name the
-    first judgment let through. Model.hostNameRefused folds the same way."""
+    first judgment let through. Model.hostNameRefused folds the same way.
+
+    D-SINK-116 and D-SINK-117 (2026-11-16): the set the code points and the
+    fold are judged by is now every ASCII character but a letter, a digit,
+    `-`, `.` and `_` (HOST_NAME_ASCII; the colon by its count, as before),
+    the reader's whitespace, and HOST_INVISIBLE_RANGES (Cf, Unicode's
+    default-ignorable code points and stringprep's B.1) -- so 286 code
+    points that are not refused themselves fold to one that is, where 79
+    did -- and, with a port, the port is empty or one to five ASCII digits
+    up to 65535 (port_digits).
+
+    D-SINK-119 (2026-11-16): and a name holding a code point whose NFKC
+    form is not itself (HOST_NFKC_RANGES), a look-alike of the name the idna
+    codec writes it as, which the first hop's A-label would now fetch from.
+    Asked of a name that is not ASCII only, before the fold.
+
+    D-SINK-119, the owner's decision of 2026-11-17: and a name holding a
+    code point the idna codec's case folding writes as another name
+    (HOST_CASE_FOLD_RANGES: the sharp s, the final sigma, U+0345 and the
+    Greek letters with a subscript iota), so `stra<U+00DF>e.test`, which the
+    codec writes as `strasse.test`, is refused where it stood as a
+    residual. Asked as written, after the look-alike table; the fold
+    produces none of them from a code point no table refuses."""
     name = str(text or "")
     if _host_name_refused_as_written(name, with_port):
         return True
     if name.isascii():
         return False
+    if not _HOST_NFKC_CHANGES.isdisjoint(name):
+        # D-SINK-119: a look-alike of the name its NFKC form spells.
+        return True
+    if not _HOST_CASE_FOLDS.isdisjoint(name):
+        # D-SINK-119, the owner's decision of 2026-11-17: a name the
+        # codec's case folding writes as another.
+        return True
     import unicodedata
     folded = unicodedata.normalize("NFKD", name)
     return folded != name and (folded.count(":") > name.count(":") or _host_name_refused_as_written(folded, with_port))
 
 
 def _host_name_refused_as_written(name: str, with_port: bool) -> bool:
-    """host_name_refused's judgment of the code points as they stand."""
+    """host_name_refused's judgment of the code points as they stand.
+
+    D-SINK-117 (2026-11-16): `with_port`, the text after a leading IPv6
+    literal's `]`, or after a name's one colon, is a port only when it is
+    empty or one to five ASCII digits of value at most 65535 (port_digits).
+    http.client reads the port with int(), which takes `+443`, `4_43`,
+    ` 443` and Arabic-Indic digits as 443, so a redirect to `cdn.test:+443`
+    or `[2606:4700::1]:4_43` was followed; the validators and the relay's
+    authority reader already refused such a port."""
     if with_port and name.startswith("["):
         close = name.find("]")
         if close != -1 and _ipv6_literal_text(name[1:close]):
-            name = name[close + 1:]
-            if name and not name.startswith(":"):
-                return True
+            rest = name[close + 1:]
+            if rest == "":
+                return False
+            return not rest.startswith(":") or not port_digits(rest[1:])
     elif not with_port and _ipv6_literal_text(name):
         return False
     if name.count(":") > (1 if with_port else 0):
         return True
+    if with_port:
+        name, _, port = name.partition(":")
+        if not port_digits(port):
+            return True
     return not _HOST_NAME_REFUSED.isdisjoint(name)
+
+
+def port_digits(text: str) -> bool:
+    """D-SINK-117: is `text` no port at all ("") or one to five ASCII digits
+    whose value is at most 65535? An index walk over the digits, never
+    str.isdigit (which takes a superscript) and never a `$`-anchored
+    pattern (which takes a trailing newline)."""
+    if text == "":
+        return True
+    if len(text) > 5:
+        return False
+    for ch in text:
+        if not "0" <= ch <= "9":
+            return False
+    return int(text) <= 65535
 
 
 def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
@@ -303,51 +498,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
         return _validation(False, "invalid", "URL is missing the two slashes after the scheme")
     if _URL_SPACE.search(rest):
         return _validation(False, "invalid", "URL contains whitespace")
-    body = rest[2:]
-    cut = _AUTHORITY_END.search(body)
-    authority = body if cut is None else body[:cut.start()]
-    tail = "" if cut is None else body[cut.start():]
-    if "\\" in authority or _ZERO_WIDTH.search(authority):
-        return _validation(False, "invalid", "URL host contains an invalid character")
-    at = authority.rfind("@")
-    userinfo = authority[:at] if at != -1 else ""
-    hostport = authority[at + 1:] if at != -1 else authority
-    # R32a (D-SINK-27, 2026-10-21): the authority ends at the first "/", "?"
-    # or "#" and its userinfo at the LAST "@" within it; an "@" after the
-    # authority is path or query and refuses nothing. The round-2 refusal
-    # that stood here (the mirror of passwordReadAsPort) dropped a stored
-    # Xtream /playlist/<email>/<pass>/m3u_plus link on the first normalize
-    # after the upgrade, and is withdrawn. Mirrors Model.validateSourceUrl.
-    port = ""
-    if hostport.startswith("["):
-        close = hostport.find("]")
-        if close == -1:
-            return _validation(False, "invalid", "unterminated IPv6 literal")
-        host = hostport[:close + 1]
-        if not _IPV6_LITERAL.match(host):
-            return _validation(False, "invalid", "bracket literal is not an IPv6 address")
-        after_host = hostport[close + 1:]
-        if after_host:
-            if not after_host.startswith(":"):
-                return _validation(False, "invalid", "unexpected text after the IPv6 literal")
-            port = after_host[1:]
-    else:
-        colon = hostport.rfind(":")
-        host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
-        # D-SINK-86: and a name holding what no name may hold (`@`, `%`, `;`,
-        # `=`, `&`, a colon, whitespace, a format character); the bracketed
-        # literal above is judged by _IPV6_LITERAL instead.
-        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
-            return _validation(False, "invalid", "URL host contains an invalid character")
-    if host == "":
-        return _validation(False, "invalid", "URL has no host name")
-    host = host.lower()
-    if port != "":
-        if not _ASCII_DIGITS.match(port):
-            return _validation(False, "invalid", "URL port is not a number")
-        port = port.lstrip("0") or "0"
-        if int(port) > 65535:
-            return _validation(False, "invalid", "URL port is above 65535")
+    read = read_authority(rest[2:])
+    if not read["ok"]:
+        return _validation(False, "invalid", AUTHORITY_REFUSALS[read["why"]])
+    host, port, userinfo, tail = read["host"], read["port"], read["userinfo"], read["tail"]
     if port == ("80" if scheme == "http" else "443"):
         port = ""
     hash_at = tail.find("#")
@@ -359,7 +513,141 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     if path == "":
         path = "/"
     url = "%s://%s%s%s%s%s" % (scheme, userinfo + "@" if userinfo else "", host, ":" + port if port else "", path, "?" + query if query else "")
+    # D-SINK-115, the critique's finding 8: the cap is the STORED url's as
+    # well as the text's. Lowering lengthens a host (U+0130 lowers to `i`
+    # and U+0307), so a host of 1,100 of them was accepted at 1,113 units,
+    # stored at 2,213, and dropped as too long by both state readers at the
+    # next load. Model.validateSourceUrl judges the same.
+    if utf16_length(url) > MAX_SOURCE_URL:
+        return _validation(False, "too_long", "source URL longer than %d characters" % MAX_SOURCE_URL)
     return _validation(True, "ok", "", "http", url, host)
+
+
+# D-SINK-115: read_authority's refusals, by `why`, as validate_source_url
+# says them. None names the URL, its host or its user name.
+AUTHORITY_REFUSALS = {
+    "char": "URL host contains an invalid character",
+    "fold_host": "URL host holds a character that reads as /, ?, #, @ or :, which cannot be part of a host name",
+    "fold_userinfo": ("URL user name or password holds a character that reads as /, ?, #, @ or :; "
+                      "write that character percent-encoded as its UTF-8 bytes"),
+    "bracket": "URL user name or password holds [ or ]; write them as %5B and %5D",
+    "literal_open": "unterminated IPv6 literal",
+    "literal": "bracket literal is not an IPv6 address",
+    "literal_after": "unexpected text after the IPv6 literal",
+    "host": "URL host contains an invalid character",
+    # D-SINK-119, the owner's decision of 2026-11-17: a code point of
+    # HOST_CASE_FOLD_RANGES, which the IDNA codec writes as another name.
+    "case_fold": "URL host holds a character that cannot be part of a host name",
+    "empty": "URL has no host name",
+    "port_text": "URL port is not a number",
+    "port_range": "URL port is above 65535",
+}
+
+
+def read_authority(body: str) -> dict[str, Any]:
+    """D-SINK-115 (2026-11-16): the one reading of an http(s) URL's
+    authority, which validate_source_url asks (and the logo reading on the
+    dev branch after it): `body` is the text after `scheme://`, its
+    whitespace and controls already refused. -> {ok, why, userinfo, host,
+    port, tail}: `host` lower-cased (an IPv6 literal with its brackets),
+    `port` without its leading zeros ("" for none), `tail` from the first
+    `/`, `?` or `#` on; `why` one of AUTHORITY_REFUSALS' keys when not ok.
+    Model.readAuthority is the same reading, held to it by the shared
+    source-urls and host-grammar fixtures.
+
+    It refuses what CPython's URL library refuses to read, which the
+    validators accepted until then and every fetch then ended as an
+    internal error quoting the authority, user information included:
+      * a code point whose compatibility form is `/`, `?`, `#`, `@` or `:`
+        anywhere in the authority (DELIMITER_FOLDS; urlsplit's
+        _checknetloc normalizes the whole netloc);
+      * a `[` or `]` in the user information, unless the host is a
+        bracketed literal (urlsplit's _check_bracketed_netloc reads the
+        brackets after the last `@` only then);
+      * a bracketed host that is no IPv6 address (`[::1:]`, `[1:2]`): the
+        pattern's characters and zone, and then ipaddress itself on the text
+        before the zone's `%25`.
+    And, the owner's decision of 2026-11-17 (D-SINK-119), a host name the
+    idna codec's case folding writes as another name, `case_fold`, whose
+    sentence the Sources form shares with `fold_host`.
+    Stricter than CPython where that is simpler: no IPvFuture literal and a
+    zone of the pattern's characters only, which no validator accepted
+    before either. The authority ends at the first ASCII `/`, `?` or `#`,
+    and its user information at the LAST `@` within it (R32a)."""
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    tail = "" if cut is None else body[cut.start():]
+
+    def refused(why: str) -> dict[str, Any]:
+        return {"ok": False, "why": why, "userinfo": "", "host": "", "port": "", "tail": tail}
+
+    if "\\" in authority or _ZERO_WIDTH.search(authority):
+        return refused("char")
+    at = authority.rfind("@")
+    if not authority.isascii():
+        for index, ch in enumerate(authority):
+            if ch in DELIMITER_FOLDS:
+                return refused("fold_userinfo" if index < at else "fold_host")
+    userinfo = authority[:at] if at != -1 else ""
+    hostport = authority[at + 1:] if at != -1 else authority
+    port = ""
+    bracketed = hostport.startswith("[")
+    if bracketed:
+        close = hostport.find("]")
+        if close == -1:
+            return refused("literal_open")
+        host = hostport[:close + 1]
+        if not _ipv6_url_literal(host):
+            return refused("literal")
+        after_host = hostport[close + 1:]
+        if after_host:
+            if not after_host.startswith(":"):
+                return refused("literal_after")
+            port = after_host[1:]
+    else:
+        colon = hostport.rfind(":")
+        host, port = (hostport[:colon], hostport[colon + 1:]) if colon != -1 else (hostport, "")
+        # D-SINK-119, the owner's decision of 2026-11-17: a name the idna
+        # codec's case folding writes as another (HOST_CASE_FOLD_RANGES) says
+        # so, as the delimiter folds do; host_name_refused refuses it too, so
+        # this decides the sentence and never the verdict. Asked first so
+        # both mirrors give one reason for a name that holds more than one.
+        if not host.isascii() and not _HOST_CASE_FOLDS.isdisjoint(host):
+            return refused("case_fold")
+        # D-SINK-86: and a name holding what no name may hold
+        # (host_name_refused); the bracketed literal above is judged by
+        # _ipv6_url_literal instead.
+        if _BARE_HOST_CHARS.search(host) or host_name_refused(host):
+            return refused("host")
+    if not bracketed and ("[" in userinfo or "]" in userinfo):
+        return refused("bracket")
+    if host == "":
+        return refused("empty")
+    if port != "":
+        for ch in port:
+            if not "0" <= ch <= "9":
+                return refused("port_text")
+        port = port.lstrip("0") or "0"
+        if int(port) > 65535:
+            return refused("port_range")
+    # D-SINK-118: lowered as every host is (lower_host), so the shell's
+    # engine, which has no Final_Sigma rule, stores what this stores.
+    return {"ok": True, "why": "", "userinfo": userinfo, "host": lower_host(host), "port": port, "tail": tail}
+
+
+def _ipv6_url_literal(host: str) -> bool:
+    """A URL's bracketed IPv6 literal, brackets included: _IPV6_LITERAL's
+    characters and `%25` zone, and an IPv6 address before the zone, as
+    ipaddress reads one (D-SINK-115: the pattern alone took `[::1:]`,
+    `[1:2]` and `[:::]`, which urlsplit refuses)."""
+    if not _IPV6_LITERAL.match(host):
+        return False
+    import ipaddress
+    try:
+        ipaddress.IPv6Address(host[1:-1].partition("%")[0])
+    except ValueError:
+        return False
+    return True
 
 
 def source_cache_key(url: str) -> str:
@@ -426,10 +714,12 @@ def cut_host_params(hostport: str) -> str:
     alone prints the parameter wherever it prints the host. ONE copy of the
     rule in the helper, shared by every reader that derives a printable host
     from an authority -- `host_port_of` (the Sources row and its default
-    label) and `logo_host` (the consent survey and the logo refusal lines) --
-    mirrored by Model.cutHostParams. The `:` port is NOT cut here: each
-    caller keeps or drops it on its own line, and a bracketed literal is
-    unaffected because none of the three can appear inside the brackets.
+    label) -- mirrored by Model.cutHostParams. The `:` port is NOT cut here,
+    and a bracketed literal is unaffected because none of the three can
+    appear inside the brackets. The consent survey and the logo refusal
+    lines read through `logo_host` and this cut until D-SINK-112
+    (2026-11-16); a logo is now read by logo_contact_host, which counts no
+    host holding one of the three, as no host name may since D-SINK-86.
     A `find` per character rather than a pattern: the helper's regex guard
     holds every compiled pattern to a reviewed table.
     """
@@ -441,7 +731,8 @@ def cut_host_params(hostport: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lower-cased; "" for paths.
+    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lowered by
+    lower_host (D-SINK-118); "" for paths.
 
     D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
     first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
@@ -466,7 +757,7 @@ def host_port_of(url: str) -> str:
     authority = match.group(1)
     at = authority.rfind("@")
     hostport = authority if at == -1 else authority[at + 1:]
-    return cut_host_params(hostport).lower()
+    return lower_host(cut_host_params(hostport))
 
 
 def derive_label(url: str, kind: str) -> str:
@@ -488,24 +779,479 @@ def derive_label(url: str, kind: str) -> str:
 
 
 def label_key(text: Any) -> str:
-    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21)."""
-    return sanitize_input(text, MAX_SOURCE_URL).lower()
+    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21),
+    lowered as a host is (lower_host, D-SINK-118), since a default label is one."""
+    return lower_host(sanitize_input(text, MAX_SOURCE_URL))
 
 
-def unique_label(label: str, existing: list[str]) -> str:
-    """Model.uniqueLabel: " 2", " 3", ... appended while `label` is taken by
-    another source (case-insensitive, SR21); the cap counts code points
-    (SR22). Derived labels only; a typed label is refused instead."""
-    taken = {label_key(item) for item in existing}
+# ------------------------------------------------------------- a label as it reads
+#
+# D-SINK-100 and D-SINK-108 (2026-11-16, round 2 of the security review; the
+# lead's calls under the owner's standing authority of 2026-11-09). The
+# shell reads a source's label through Model.labelSinkText (D-SINK-98): the
+# Sources row, its accessible name, every line that names a source by its
+# label. The helper printed and compared labels as typed, so two sources
+# could READ alike (D-SINK-100) and `state source list` printed a label the
+# guide withholds (D-SINK-108). label_sink_text is a port of the model's
+# reading, function for function, and one fixture holds the two to each
+# other (the shared label-readings fixture, dev branch: vectors, and a digest
+# sweep over every label of up to three of its pieces). Where Unicode
+# differs: NFKD here is Python's (Unicode 16.0 on 3.14) and node's 17.0
+# there, so a character assigned after 16.0 is outside the agreement.
+
+_LABEL_DIGITS = re.compile(r"[0-9]+")
+_LABEL_ADDRESS_NAME = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*")
+_LABEL_HOST_NAME = re.compile(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])")
+_LABEL_LOOSE = re.compile(r"[A-Za-z0-9-]+")
+_LABEL_ZONELESS_IPV6 = re.compile(r"\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*\]")
+_LABEL_TAIL_END = re.compile(r"[?#;]")
+_LABEL_QUERY_LEAD = re.compile(r"[./]")
+_LABEL_QUERY_MARK = re.compile(r"[?;&]")
+_LABEL_SCHEME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+.-")
+_LABEL_LETTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+_LABEL_ESCAPE = re.compile(r"%(2[6Ff]|3[ABDFabdf]|40|5[Cc])|&#([0-9]+);?|&#[xX]([0-9A-Fa-f]+);?"
+                           r"|\\u00([0-9A-Fa-f]{2})|&(colon|sol|commat|quest|amp|equals|semi|bsol);")
+LABEL_ENTITY_NAMES = {"colon": ":", "sol": "/", "commat": "@", "quest": "?", "amp": "&", "equals": "=",
+                      "semi": ";", "bsol": "\\"}
+LABEL_LEAD = "([{<\"'"
+LABEL_TRAIL = ")]}>\"'.,;:!?"
+_LABEL_LINE_TERMINATORS = frozenset("\n\x0b\x0c\r\x85\u2028\u2029")
+
+
+def has_address_line_terminator(text: str) -> bool:
+    """Model.hasAddressLineTerminator: LF, VT, FF, CR, U+0085, U+2028 or
+    U+2029 anywhere."""
+    return any(ch in _LABEL_LINE_TERMINATORS for ch in text)
+
+
+def host_port_split(hostport: str) -> tuple[str, str | None] | None:
+    """Model.hostPortSplit: `host[:port]` cut at the port's `:` (after a
+    bracketed literal's `]`), with a port of digits; None when the host is
+    empty, the port is not digits, or what follows a literal's `]` is not
+    `:` and a port."""
+    host, port = hostport, None
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close == -1:
+            return None
+        host = hostport[:close + 1]
+        tail = hostport[close + 1:]
+        if tail != "":
+            if tail[0] != ":":
+                return None
+            port = tail[1:]
+    else:
+        colon = hostport.find(":")
+        if colon != -1:
+            host, port = hostport[:colon], hostport[colon + 1:]
+    if host == "":
+        return None
+    if port is not None and _LABEL_DIGITS.fullmatch(port) is None:
+        return None
+    return host, port
+
+
+def is_zoneless_ipv6_literal(host: str) -> bool:
+    """Model.isZonelessIpv6Literal: a bracketed IPv6 literal (the
+    validators' shape) with no zone."""
+    return _LABEL_ZONELESS_IPV6.fullmatch(host) is not None
+
+
+def address_accessible_host(hostport: str) -> str:
+    """Model.addressAccessibleHost: `host[:port]` as typed when its host is
+    labels of [A-Za-z0-9-] joined by `.` or a zoneless IPv6 literal, else
+    ""."""
+    split = host_port_split(hostport)
+    if split is None:
+        return ""
+    if split[0].startswith("["):
+        return hostport if is_zoneless_ipv6_literal(split[0]) else ""
+    return hostport if _LABEL_ADDRESS_NAME.fullmatch(split[0]) else ""
+
+
+def is_dotted_quad(host: str) -> bool:
+    """Model.isDottedQuad."""
+    parts = host.split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        if not (1 <= len(part) <= 3) or _LABEL_DIGITS.fullmatch(part) is None or int(part) > 255:
+            return False
+    return True
+
+
+def label_host(hostport: str) -> str:
+    """Model.labelHost: the host a LABEL may name, `host[:port]` as typed,
+    or "": two or more labels, the last starting with a letter and two
+    characters long at least, an IPv4 dotted quad, or a zoneless IPv6
+    literal, each with `:` and digits after it or nothing."""
+    split = host_port_split(hostport)
+    if split is None:
+        return ""
+    host = split[0]
+    if host.startswith("["):
+        return hostport if is_zoneless_ipv6_literal(host) else ""
+    return hostport if _LABEL_HOST_NAME.fullmatch(host) or is_dotted_quad(host) else ""
+
+
+def address_authority_split(value: str) -> tuple[str, str, str] | None:
+    """Model.addressAuthoritySplit: (scheme as typed, authority, the text
+    from the authority's closing `/`, `?` or `#` on) for `scheme://` text,
+    or None."""
+    scheme = _ADDRESS_SCHEME.match(value)
+    if scheme is None:
+        return None
+    body = value[scheme.end():]
+    cut = _AUTHORITY_END.search(body)
+    if cut is None:
+        return None
+    return scheme.group(1), body[:cut.start()], body[cut.start():]
+
+
+def address_authority_parts(value: str) -> dict[str, Any] | None:
+    """Model.addressAuthorityParts (D-SINK-97 rule c): the scheme as typed,
+    whether a userinfo is there, the host[:port] that parsed, and the text
+    from the authority's closing character on; None where rule c gives
+    stars."""
+    if has_address_line_terminator(value):
+        return None
+    split = address_authority_split(value)
+    if split is None:
+        return None
+    scheme, authority, after = split
+    lowered = scheme.lower()
+    if lowered not in SOURCE_SCHEMES:
+        return None
+    if at_after_authority(value) or host_withheld(value):
+        return None
+    if authority == "" and lowered == "file":
+        return {"scheme": scheme, "userinfo": False, "host": "", "after": after}
+    at = authority.rfind("@")
+    host = address_accessible_host(authority[at + 1:])
+    if host == "":
+        return None
+    return {"scheme": scheme, "userinfo": at != -1, "host": host, "after": after}
+
+
+def redaction_finds(text: str) -> bool:
+    """Whether Model.sinkText would CHANGE `text`: the model prints a URL it
+    finds as its host alone and a credential token as HOST_WITHHELD, so it
+    changes the text exactly when it finds either. Not `redact_urls(text) !=
+    text`: the helper prints a named scheme with its host, so `http://cdn.test`
+    comes back as itself here and as `cdn.test` there."""
+    if not redaction_can_change(text):
+        return False
+    reading = UrlReading(text, 0, text.isascii() and text.isprintable(), True)
+    return bool(reading.urls) or bool(credential_spans(text, reading))
+
+
+def label_sink_text(text: Any) -> str:
+    """Model.labelSinkText (D-SINK-98): a label as every sink of the shell
+    draws and hears it. Cut into tokens at U+0020; when any token reads as
+    an address (label_token_reads_as_address), the hosts the address tokens
+    name, joined by a space (each label_token_host's, or HOST_WITHHELD);
+    else HOST_WITHHELD when the model's free-text redactor would change the
+    label (redaction_finds); else the label as it is."""
+    s = "" if text is None else str(text)
+    hosts = [label_token_host(token) for token in s.split(" ")
+             if token != "" and label_token_reads_as_address(token)]
+    if hosts:
+        return " ".join(hosts)
+    return HOST_WITHHELD if redaction_finds(s) else s
+
+
+def label_core(token: str) -> str:
+    """Model.labelCore: the token less its leading run of LABEL_LEAD and
+    its trailing run of LABEL_TRAIL, a zoneless IPv6 literal's brackets
+    kept."""
+    a, b = 0, len(token)
+    while a < b and token[a] in LABEL_LEAD:
+        if token[a] == "[":
+            close = token.find("]", a)
+            if close != -1 and is_zoneless_ipv6_literal(token[a:close + 1]):
+                break
+        a += 1
+    while b > a and token[b - 1] in LABEL_TRAIL:
+        if token[b - 1] == "]":
+            opening = token.rfind("[", 0, b)
+            if opening >= a and is_zoneless_ipv6_literal(token[opening:b]):
+                break
+        b -= 1
+    return token[a:b]
+
+
+def label_token_reads_as_address(token: str) -> bool:
+    """Model.labelTokenReadsAsAddress: a shape clause holds of the token's
+    core, its raw text, the core of its fold, or its fold."""
+    core = label_core(token)
+    if label_shape_reads_as_address(core) or label_shape_reads_as_address(token):
+        return True
+    folded_core = label_core(label_fold(core))
+    if folded_core != core and label_shape_reads_as_address(folded_core):
+        return True
+    folded = label_fold(token)
+    return folded != token and label_shape_reads_as_address(folded)
+
+
+def label_shape_reads_as_address(t: str) -> bool:
+    """Model.labelShapeReadsAsAddress: the clauses scheme and a to e."""
+    return (_ADDRESS_SCHEME.match(t) is not None or label_slash_authority(t) is not None or label_scheme_slash(t)
+            or label_userinfo_at(t) or label_host_path(t) != "" or label_query_param(t))
+
+
+def label_slash_authority(t: str) -> str | None:
+    """Model.labelSlashAuthority (clause a)."""
+    i = t.find("//")
+    while i != -1:
+        rest = t[i + 2:]
+        cut = _AUTHORITY_END.search(rest)
+        auth = rest if cut is None else rest[:cut.start()]
+        if "@" in auth or label_host(auth) != "":
+            return auth
+        i = t.find("//", i + 1)
+    return None
+
+
+def label_scheme_slash(t: str) -> bool:
+    """Model.labelSchemeSlash (clause b): `:` then `/` or a backslash, after
+    a scheme of two or more characters."""
+    i = t.find(":")
+    while i != -1:
+        if t[i + 1:i + 2] in ("/", "\\"):
+            j, letter = i, -1
+            while j > 0 and t[j - 1] in _LABEL_SCHEME_CHARS:
+                j -= 1
+                if t[j] in _LABEL_LETTERS:
+                    letter = j
+            if letter != -1 and i - letter >= 2:
+                return True
+        i = t.find(":", i + 1)
+    return False
+
+
+def label_userinfo_at(t: str) -> bool:
+    """Model.labelUserinfoAt (clause c): an `@` with a `:` before the last
+    `@`."""
+    at = t.rfind("@")
+    return at > 0 and t.rfind(":", 0, at) != -1
+
+
+def label_host_path(t: str) -> str:
+    """Model.labelHostPath (clause d)."""
+    slash = t.find("/")
+    if slash <= 0 or slash + 1 >= len(t):
+        return ""
+    head = t[:slash]
+    host = label_host(head)
+    if host != "":
+        return host
+    at = head.rfind("@")
+    return label_host(head[at + 1:]) if at > 0 else ""
+
+
+def label_query_param(t: str) -> bool:
+    """Model.labelQueryParam (clause e)."""
+    lead = _LABEL_QUERY_LEAD.search(t)
+    if lead is None:
+        return False
+    mark = _LABEL_QUERY_MARK.search(t, lead.start() + 1)
+    return mark is not None and t.rfind("=") > mark.start()
+
+
+def label_fold(token: str) -> str:
+    """Model.labelFold: NFKD less the format characters, the escapes
+    decoded once, NFKD again."""
+    s = label_fold_nfkd(token)
+    decoded = label_decode(s)
+    return s if decoded == s else label_fold_nfkd(decoded)
+
+
+def _label_code_point(digits: str, base: int) -> int:
+    """The number `digits` spells, or 0x110000 when it is past U+10FFFF
+    (read without int() over a long run: a numeric entity's digits are the
+    provider's, and the bound is all that is asked)."""
+    trimmed = digits.lstrip("0") or "0"
+    if len(trimmed) > (7 if base == 10 else 6):
+        return 0x110000
+    return int(trimmed, base)
+
+
+def label_decode(text: str) -> str:
+    """Model.labelDecode: the escapes decoded once, left to right -- the
+    percent escapes %2F %3A %40 %3D %26 %3F %3B and %5C in either case, an
+    HTML numeric entity `&#NN;` or `&#xHH;` (its `;` optional) up to
+    U+10FFFF, a backslash-u00HH, and the HTML names of eight delimiters."""
+    if "%" not in text and "&" not in text and "\\" not in text:
+        return text
+
+    def decode(match: re.Match[str]) -> str:
+        pct, dec, hexa, uni, name = match.groups()
+        if name:
+            return LABEL_ENTITY_NAMES[name]
+        if pct:
+            cp = int(pct, 16)
+        elif dec:
+            cp = _label_code_point(dec, 10)
+        elif hexa:
+            cp = _label_code_point(hexa, 16)
+        else:
+            cp = int(uni, 16)
+        return chr(cp) if 0 <= cp <= 0x10FFFF else match.group(0)
+
+    return _LABEL_ESCAPE.sub(decode, text)
+
+
+def _host_format_code(code: int) -> bool:
+    for first, last in HOST_FORMAT_RANGES:
+        if code < first:
+            return False
+        if code <= last:
+            return True
+    return False
+
+
+def label_fold_nfkd(text: str) -> str:
+    """Model.labelFoldNfkd: NFKD, then every format character
+    (HOST_FORMAT_RANGES, Unicode's Cf) removed; ASCII text as it is."""
+    if text.isascii():
+        return text
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not _host_format_code(ord(ch)))
+
+
+def label_token_host(token: str) -> str:
+    """Model.labelTokenHost: the host an address token names, or
+    HOST_WITHHELD -- its raw reading and, when it holds an escape, its
+    decoded one, which must agree; never from the NFKD fold."""
+    host = label_token_authority(label_core(token), token)
+    decoded = label_decode(token)
+    if decoded == token:
+        return host if host != "" else HOST_WITHHELD
+    other = label_token_authority(label_core(decoded), decoded)
+    if host == "":
+        return other if other != "" else HOST_WITHHELD
+    return host if other == host else HOST_WITHHELD
+
+
+def label_head_is_authority(head: str) -> bool:
+    """Model.labelHeadIsAuthority: the head before a `//` at the token's
+    first `/` is itself an authority on any of its three readings."""
+    for reading in (head, label_decode(head), label_fold(head)):
+        if reading == "":
+            continue
+        if "@" in reading or label_host(reading) != "":
+            return True
+        colon = reading.rfind(":")
+        if colon > 0 and _LABEL_DIGITS.fullmatch(reading[colon + 1:]) and label_loose_name(reading[:colon]):
+            return True
+        if len(reading) > 1 and reading.endswith(".") and label_loose_name(reading):
+            return True
+    return False
+
+
+def label_loose_name(host: str) -> bool:
+    """Model.labelLooseName: labels of [A-Za-z0-9-] joined by single dots,
+    one or more, one trailing `.` allowed."""
+    name = host[:-1] if host.endswith(".") else host
+    if name == "":
+        return False
+    return all(_LABEL_LOOSE.fullmatch(part) is not None for part in name.split("."))
+
+
+def label_token_authority(t: str, whole: str) -> str:
+    """Model.labelTokenAuthority: the host of the LEFTMOST authority of the
+    core `t` (scheme, `//`, a:b@c, host/path), else HOST_WITHHELD, or ""
+    when none applies."""
+    if _ADDRESS_SCHEME.match(t):
+        parts = address_authority_parts(t)
+        return parts["host"] if parts is not None and label_host(parts["host"]) != "" else HOST_WITHHELD
+    slash = t.find("/")
+    head = t if slash == -1 else t[:slash]
+    if slash != -1 and t[slash + 1:slash + 2] == "/":
+        rest = t[slash + 2:]
+        if label_head_is_authority(head):
+            following = rest.find("/")
+            if "@" in (rest if following == -1 else rest[:following]):
+                return HOST_WITHHELD
+            if "@" not in head and label_host(head) == "":
+                return "" if label_decode(head) != head else HOST_WITHHELD
+        else:
+            cut = _AUTHORITY_END.search(rest)
+            auth = rest if cut is None else rest[:cut.start()]
+            if "@" in auth or label_host(auth) != "":
+                return label_host(auth[auth.rfind("@") + 1:]) or HOST_WITHHELD
+    if label_userinfo_at(t):
+        at = head.rfind("@")
+        if at == -1:
+            return HOST_WITHHELD
+        tail = head[at + 1:]
+        end = _LABEL_TAIL_END.search(tail)
+        return label_host(tail if end is None else tail[:end.start()]) or HOST_WITHHELD
+    return label_host_path(t) or label_host_path(whole)
+
+
+def label_read_key(text: Any) -> str:
+    """The key a label READS as (Model.labelReadTaken's): label_key of
+    label_sink_text of the sanitized label."""
+    return label_key(label_sink_text(sanitize_input(text, MAX_SOURCE_URL)))
+
+
+def label_keys(labels: list[Any]) -> tuple[set[str], set[str]]:
+    """(raw keys, read keys) of `labels`, built once (Model.labelKeySets).
+    An empty key takes nothing."""
+    raw: set[str] = set()
+    read: set[str] = set()
+    for label in labels:
+        key = label_key(label)
+        if key != "":
+            raw.add(key)
+        reads = label_read_key(label)
+        if reads != "":
+            read.add(reads)
+    return raw, read
+
+
+def label_keys_add(keys: tuple[set[str], set[str]], label: Any) -> None:
+    """One label added to label_keys' sets."""
+    key = label_key(label)
+    if key != "":
+        keys[0].add(key)
+    reads = label_read_key(label)
+    if reads != "":
+        keys[1].add(reads)
+
+
+def label_keys_take(keys: tuple[set[str], set[str]], label: Any) -> bool:
+    """Whether `label` is taken in label_keys' sets: its raw key is another
+    label's raw key, or it READS as another label reads (D-SINK-100)."""
+    key = label_key(label)
+    if key != "" and key in keys[0]:
+        return True
+    reads = label_read_key(label)
+    return reads != "" and reads in keys[1]
+
+
+def unique_label_over(label: str, keys: tuple[set[str], set[str]]) -> str:
+    """Model.uniqueLabelOver: " 2", " 3", ... appended while `label` is
+    taken in `keys` (label_keys_take); the cap counts code points (SR22)."""
     base = cap_code_points(sanitize_input(label, MAX_SOURCE_URL), MAX_LABEL) or "source"
-    if base.lower() not in taken:
+    if not label_keys_take(keys, base):
         return base
     for suffix in range(2, 1000):
         tail = " %d" % suffix
         candidate = cap_code_points(base, MAX_LABEL - len(tail)) + tail
-        if candidate.lower() not in taken:
+        if not label_keys_take(keys, candidate):
             return candidate
     return base
+
+
+def unique_label(label: str, existing: list[str]) -> str:
+    """Model.uniqueLabel: " 2", " 3", ... appended while `label` is taken by
+    another source -- the same label case-insensitively (SR21), or, since
+    D-SINK-100, one that READS as `label` reads (label_sink_text); the cap
+    counts code points (SR22). Derived labels only; a typed label is
+    refused instead."""
+    return unique_label_over(label, label_keys(existing))
 
 
 _ATTR_QUOTED = re.compile(r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"')
@@ -972,6 +1718,45 @@ def stream_scheme(url: str) -> str:
         return ""
 
 
+def logo_is_web(logo: str) -> bool:
+    """make_channel's logo test: whether BOTH readings of the logo's scheme
+    say http or https -- urlsplit's (stream_scheme) and the one the logo
+    survey, its slot and the fetch read it by, as written (logo_scheme,
+    05-ipc-logos.py; Model.logoScheme in the shell). D-LOGO-30, the lead's
+    call under the owner's standing authority of 2026-11-09: urlsplit
+    deletes a TAB, CR and LF anywhere and strips C0 controls and spaces off
+    the front before it reads a scheme, so `ht<TAB>tp://l.test/a.png` and
+    `<U+0001>http://l.test/a.png` read as http to it and as no scheme to
+    logo_scheme, and the parse stored logos every survey counted refused and
+    no fetch would send. A logo is kept only where the two agree; the
+    as-written reading is the authority (D-SINK-112), and the parse is
+    brought to it. Nothing the parse did not keep before is kept now.
+
+    With no urlsplit where it cannot answer otherwise (F-HARNESS-73, the
+    10,000-channel budget: the split cost about 42 ms of 730). For a
+    `logo` that is ASCII, opens with a character above U+0020 (urlsplit
+    first strips C0 controls and spaces off the front) and holds no TAB,
+    CR, LF, `[` or `]`, urlsplit deletes nothing, raises nothing, and reads
+    the scheme as the text before the first `:` when that is a letter and
+    then scheme characters, lower-cased -- which is logo_scheme's reading
+    too; `http` and `https` are such text, so both readings answer whether
+    the text opens with `http:` or `https:` in any case. Every other logo
+    asks both. LogoSchemeShortcutTest holds the head answer equal to each
+    reading on the shortcut's class, and the whole test equal to the two
+    together, over every ASCII character at every place the readings turn
+    on and every BMP code point in the authority. (What the shortcut may
+    not see is asked as five substring tests, not a pattern: urlsplit
+    deletes a TAB, CR and LF anywhere before it reads a scheme, and raises
+    only over a bracket in the netloc or a netloc that is not ASCII.)
+    logo_scheme is defined in a later part; the parts are one namespace
+    (D-REL-7), so it is called here, never copied."""
+    if (logo.isascii() and logo[:1] > " " and "\t" not in logo and "\n" not in logo and "\r" not in logo
+            and "[" not in logo and "]" not in logo):
+        head = logo[:6].lower()
+        return head[:5] == "http:" or head == "https:"
+    return stream_scheme(logo) in ("http", "https") and logo_scheme(logo) in ("http", "https")
+
+
 def is_stream_url(url: str) -> bool:
     """Allow-listed scheme with a non-empty host; never option-looking (D-QA-07);
     never a form that makes the player LISTEN (D-SINK-42, stream_listen_refusal).
@@ -1154,8 +1939,11 @@ def _listen_refusal(url: str, scheme: str, host: str, params: list[tuple[str, st
 # fold of D-SINK-88 is host_name_refused's own, so every reading has it.
 #
 # The cost (constraint 7, D-PERF-13): _stream_name_refused accepts at once an
-# authority whose host is only ASCII letters, digits and `_.-~` and whose
-# port is ASCII digits or nothing. No reading can refuse it: none of those
+# authority whose host is only ASCII letters, digits and `_.-` and whose
+# port is one to five ASCII digits up to 65535 or nothing (D-SINK-117,
+# 2026-11-16: `~` left the set and the port its any-length digits when the
+# host rule became an allowlist and the port's rule port_digits, which the
+# shortcut's own tests found). No reading can refuse it: none of those
 # characters is one host_name_refused refuses or folds, it holds no bracket
 # and at most one colon, its port is digits, and quote returns it unchanged.
 # It is a shortcut held equal to the readings over every code point
@@ -1193,7 +1981,7 @@ STREAM_QUERY_HOST_SCHEMES = {"udp": 1, "rtp": 2}
 STREAM_QUERY_HOST_PARAMS = frozenset({"sources", "block"})
 # av_get_token's WHITESPACES: what it skips before an entry and trims after.
 _TOKEN_SPACE = " \n\t\r"
-_PLAIN_HOST_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~"
+_PLAIN_HOST_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"
 # A reading of only these is accepted at once. Asked as bytes.translate's
 # deletion, which costs a 4,096-character reading about 4 us where str.strip
 # over the same set cost about 39.
@@ -1218,10 +2006,10 @@ def _stream_name_refused(url: str, netloc: str, scheme: str, params: list[tuple[
 
 def _plain_authority(netloc: str) -> bool:
     """The fast accept: is the host[:port] after the netloc's last `@` only
-    _PLAIN_HOST_CHARS, then at most one colon and ASCII digits? str.strip
-    over a set is quote's own idiom for "only these"."""
+    _PLAIN_HOST_CHARS, then at most one colon and a port port_digits
+    accepts? str.strip over a set is quote's own idiom for "only these"."""
     host, _, port = netloc.rpartition("@")[2].partition(":")
-    return not host.strip(_PLAIN_HOST_CHARS) and not port.strip(_PORT_DIGITS)
+    return not host.strip(_PLAIN_HOST_CHARS) and port_digits(port)
 
 
 def _stream_name_readings(url: str, netloc: str, scheme: str, params: list[tuple[str, str]] | None = None) -> bool:
@@ -1351,6 +2139,20 @@ def _query_entries_refused(reading: str, judged: set[str]) -> bool:
     return False
 
 
+def stream_url_unreadable(url: str) -> bool:
+    """D-SINK-115: is `url` a stream scheme's address (STREAM_SCHEMES, the
+    text before its first `:`) that urlsplit refuses to read? The parse
+    counts it as `name` and play time refuses it with
+    STREAM_HOST_NAME_REFUSAL, where both said it was no stream scheme."""
+    if url.partition(":")[0].lower() not in STREAM_SCHEMES:
+        return False
+    try:
+        urllib.parse.urlsplit(url)
+    except ValueError:
+        return True
+    return False
+
+
 def stream_host_name_refused(url: str) -> bool:
     """D-SINK-87: would the player be handed a host, by any reading of this
     stream URL (_stream_name_refused), in a form host_name_refused refuses?
@@ -1475,7 +2277,8 @@ def stream_label_refused(url: str, host: str, scheme: str, source: dict[str, Any
     return False
 
 
-def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
+def stream_entry_refusal(url: str, source: dict[str, Any],
+                         memo: dict[tuple[str, str], str] | None = None) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
@@ -1484,8 +2287,11 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     D-SINK-41), `port` (the same rule's loopback-relay half, D-SINK-57),
     `name` (the address names a host the player would read in a form
     host_name_refused refuses, D-SINK-87), `zone` (an IPv6 literal whose
-    zone is not a number, D-SINK-91) or `label` (a host of one label from a
-    playlist that is not local, D-SINK-89). `name`, `zone` and `label` are
+    zone is not a number, D-SINK-91), `label` (a host of one label from a
+    playlist that is not local, D-SINK-89) or `remote` (a scheme whose
+    connections nothing here can judge, from a playlist that is not local:
+    STREAM_REMOTE_REFUSED_SCHEMES, D-SINK-102, asked first after the scheme
+    itself, as play time asks it before anything is looked up). `name`, `zone` and `label` are
     asked last, in that order: the rules before them classify a literal and
     look nothing up, so a line two rules refuse keeps the older reason, and
     the parse's host rule still answers row for row as play time's does
@@ -1494,15 +2300,60 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         return "scheme", ""
     try:
         parts = urllib.parse.urlsplit(url)
-        host = parts.hostname or ""
+        host = split_hostname(parts)
     except ValueError:
-        return "scheme", ""
+        # D-SINK-115: a stream scheme whose authority the URL library
+        # refuses to read -- a compatibility character for `/`, `?`, `#`,
+        # `@` or `:`, a bracket in the user information, a bracketed host
+        # that is no IPv6 address -- names a host in a form no host name may
+        # take (`name`), not an unsupported scheme, as it was counted.
+        return ("name" if stream_url_unreadable(url) else "scheme"), ""
     scheme = parts.scheme.lower()
     if scheme not in STREAM_SCHEMES or host == "":
         return "scheme", host
+    if scheme in STREAM_REMOTE_REFUSED_SCHEMES and not source.get("local"):
+        return "remote", host
     params = stream_params(url)
     if _listen_refusal(url, scheme, host, params) != "":
         return "listener", host
+    # F-HARNESS-73: what follows reads the line's scheme, its netloc and the
+    # playlist, and for udp and rtp its query too (reading 3 and their source
+    # entries); so for every other scheme its answer is remembered within
+    # one parse by (scheme, netloc) -- `memo`, parse_m3u's, never a module's
+    # -- and a list naming one host pays for it once (EntryMemoTest). A
+    # netloc longer than PARSE_MEMO_KEY_CHARS is asked every time.
+    if memo is None or scheme in STREAM_QUERY_HOST_SCHEMES or len(parts.netloc) > PARSE_MEMO_KEY_CHARS:
+        return _authority_refusal(url, parts, host, scheme, source, params), host
+    key = (scheme, parts.netloc)
+    refusal = memo.get(key)
+    if refusal is None:
+        refusal = _authority_refusal(url, parts, host, scheme, source, params)
+        if len(memo) < PARSE_MEMO_ENTRIES:
+            memo[key] = refusal
+    return refusal, host
+
+
+# F-HARNESS-73: how many answers each of parse_m3u's memos keeps (the
+# authority's, by scheme and netloc, and the group text's): a list of more
+# distinct ones is asked again past them, so a memo's size is bounded
+# whatever the list holds.
+PARSE_MEMO_ENTRIES = 1024
+# And the longest key either keeps, in characters: a longer netloc or group
+# text is read again each time. A real list's are far shorter. Without it a
+# list built to fill the memos with netlocs up to M3U_MAX_URL (4,096) of
+# characters stored at four bytes each grew the parse's peak by about 15 MiB,
+# and with group texts up to M3U_MAX_GROUP_TEXT (512) by 3; with it, by
+# about 1 and 2 (tracemalloc, the review of 93bd2cf and its settling,
+# 2026-11-18).
+PARSE_MEMO_KEY_CHARS = 256
+
+
+def _authority_refusal(url: str, parts: Any, host: str, scheme: str, source: dict[str, Any],
+                       params: list[tuple[str, str]]) -> str:
+    """stream_entry_refusal's rules after the listening one, for `url`, its
+    urlsplit `parts`, `host` (split_hostname's), `scheme` (lower-cased) and
+    `params` (stream_params'): `local`, `port`, `name`, `zone`, `label` or
+    "". Only udp's and rtp's answers read `url` or `params`."""
     # url_port's reading, from the one urlsplit: the scheme's default stands
     # only for a port the URL does not name. A port that does not parse is no
     # port, never the default -- `http://127.0.0.1:631:80/` is 631 to FFmpeg
@@ -1516,17 +2367,17 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         port = None
     refusal = _host_refusal(host, scheme, source, port)
     if refusal:
-        return refusal, host
+        return refusal
     if _stream_name_refused(url, parts.netloc, scheme, params):
-        return "name", host
+        return "name"
     # Each asked only where it can answer, so a plain line of a local list,
     # the 10,000-channel case, pays two tests and no call: a netloc with no
     # `[` holds no literal, and a local playlist keeps every label.
     if "[" in parts.netloc and stream_zone_refused(parts.netloc):
-        return "zone", host
+        return "zone"
     if not source.get("local") and stream_label_refused(url, host, scheme, source, params):
-        return "label", host
-    return "", host
+        return "label"
+    return ""
 
 
 # D-SINK-41 (2026-10-29). The sign-in headers a playlist may attach only to
@@ -1887,6 +2738,19 @@ def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
     return out
 
 
+def group_reading(group_text: str) -> tuple[tuple[str, ...], dict[str, int], str]:
+    """make_channel's reading of a group text (`group_text`: the cut
+    group-title, or the #EXTGRP it inherits): (its groups, split_groups' and
+    then bound_groups' list; what bound_groups counted, by kind, for the
+    caller's `bounds`; the search fold of the groups joined by a space, or
+    of UNGROUPED when there are none, which search_key_of joins to the
+    name's). A function of the text alone, so parse_m3u keeps it by text
+    (F-HARNESS-73); make_channel adds the counts each time it reads one."""
+    counted: dict[str, int] = {}
+    groups = bound_groups(split_groups(group_text), counted) if group_text else []
+    return tuple(groups), counted, normalize_text(" ".join(groups) if groups else UNGROUPED)
+
+
 def channel_warning(warnings: list[str], bounds: dict[str, int] | None, text: str) -> None:
     """A per-channel warning: kept while fewer than M3U_MAX_CHANNEL_WARNINGS
     have been, counted after that (D-M3U-1's sibling, lane A's OQ-6)."""
@@ -1911,14 +2775,49 @@ def bounded_option(key: str, value: str, store: dict[str, str], bounds: dict[str
         store[key] = value
 
 
+def tvg_id_refused(tvg_id: str) -> bool:
+    """Whether the parse reads a tvg-id as absent: one holding a mark the
+    redactors' reading finds (url_mark_any, D-SINK-80, D-SINK-95), or a `:`
+    with an `@` after it, the token a redactor withholds (D-SINK-96); kept,
+    the row's `t:` id would carry it raw. One function since D-SINK-111
+    (2026-11-16), which asks it of a stored id's tail too."""
+    colon = tvg_id.find(":")
+    return url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0)
+
+
+# D-SINK-111 (2026-11-16): what a helper reply prints in place of a channel
+# id channel_id_withheld refuses. Model.ID_WITHHELD is the mirror, and the
+# shared withheld-ids fixture (dev branch) holds both to it.
+ID_WITHHELD = "[id withheld]"
+
+
+def channel_id_withheld(channel_id: Any) -> bool:
+    """D-SINK-111: whether a reply prints `channel_id` as ID_WITHHELD. A
+    `t:` id is the row's tvg-id, and one the parse refuses today
+    (tvg_id_refused) can still be stored: 0.18.0 and earlier made
+    `t:qqqqqq:zzzzzz@cdn.test` from tvg-id="qqqqqq:zzzzzz@cdn.test" (0.17.0
+    `t:http://...` too), and nothing re-derives a stored favorite, recent,
+    session or player record (remap_state_file maps id scheme 1 alone). A
+    `#n` suffix (suffix_ids) is part of the tail it asks. Every other id is
+    a hash and is never withheld. Since the owner's decision of 2026-11-16
+    both state readers DELETE such an id on load (normalize_state,
+    Model.parseState), so no state reply holds one; what still prints the
+    token is a player's record an older build wrote, a failed.json mark and
+    a reply about a row of a cache written before 0.19.0."""
+    text = channel_id if isinstance(channel_id, str) else ""
+    return text.startswith("t:") and tvg_id_refused(text[2:])
+
+
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
                  warnings: list[str], index: int = 1,
-                 bounds: dict[str, int] | None = None) -> dict[str, Any]:
+                 bounds: dict[str, int] | None = None,
+                 memo: dict[str, tuple[tuple[str, ...], dict[str, int], str]] | None = None) -> dict[str, Any]:
     """One channels.json row. Every provider-controlled text it keeps is
     held to its D-M3U-1 cap (01-core.py); `bounds` counts what was cut or
     dropped, for parse_m3u's warnings. Without `bounds` the caps still
-    apply and only the counting is skipped."""
+    apply and only the counting is skipped. `memo` is parse_m3u's memo of
+    group_reading by group text (F-HARNESS-73), or None."""
     tvg_id = attrs.get("tvg-id", "").strip()
     if len(tvg_id) > M3U_MAX_TVG_ID:
         bound_count(bounds, "tvgId")
@@ -1938,8 +2837,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # D-SINK-95 and D-SINK-96 (2026-11-11): so is a tvg-id holding a mark the
     # redactors' reading finds (url_mark_any), or a `:` with an `@` after it,
     # the token a redactor withholds; kept, the id would carry it raw.
-    colon = tvg_id.find(":")
-    if url_mark_any(tvg_id) >= 0 or (colon >= 0 and tvg_id.find("@", colon + 1) >= 0):
+    if tvg_id_refused(tvg_id):
         tvg_id = ""
     tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
@@ -1949,7 +2847,18 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     # counts it there); a group-title is this entry's own and is cut here.
     group_title = attrs.get("group-title", "").strip()
     group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds, GROUP_SEPARATOR) if group_title else extgrp
-    groups = bound_groups(split_groups(group_text), bounds) if group_text else []
+    # F-HARNESS-73: the groups, what bound_groups counted for them, and their
+    # search fold are one function of the group text (group_reading), so a
+    # list whose channels share a few group texts reads each once a parse.
+    reading = memo.get(group_text) if memo is not None else None
+    if reading is None:
+        reading = group_reading(group_text)
+        if memo is not None and len(memo) < PARSE_MEMO_ENTRIES and len(group_text) <= PARSE_MEMO_KEY_CHARS:
+            memo[group_text] = reading
+    groups = list(reading[0])
+    if bounds is not None:
+        for kind, count in reading[1].items():
+            bounds[kind] = bounds.get(kind, 0) + count
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
     # group string stays searchable through searchKey and `groups`.
@@ -1966,8 +2875,13 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["tvgId"] = tvg_id
     if tvg_name and tvg_name != name:
         channel["tvgName"] = tvg_name
+    # A logo is kept only where urlsplit's reading of its scheme and the
+    # survey's and fetch's as-written reading (logo_scheme) both say http or
+    # https (logo_is_web, D-LOGO-30): a logo the two read differently would
+    # be stored, counted refused by every survey and never fetched. Only a
+    # logo kept so is counted over-length.
     logo = attrs.get("tvg-logo", "").strip()
-    if logo and stream_scheme(logo) in ("http", "https"):
+    if logo and logo_is_web(logo):
         if len(logo) > M3U_MAX_LOGO_URL:
             bound_count(bounds, "logo")
         else:
@@ -2014,7 +2928,7 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["options"] = options
     # The name is folded once, for searchKey and nameKey alike (search_key_of).
     name_key = normalize_text(name)
-    channel["searchKey"] = search_key_of(name_key, " ".join(groups) if groups else group)
+    channel["searchKey"] = join_search_key(name_key, reading[2])
     # F-PERF-1. `searchKey` has been precomputed since M0 precisely so the
     # guide's filter does not fold 10,000 strings on every keystroke. The
     # ranker needs a SECOND fold -- the name alone, to rank a name match above
@@ -2098,10 +3012,17 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     skipped_name = 0
     skipped_zone = 0
     skipped_label = 0
+    skipped_remote = 0
     skipped_listen = 0
     skipped_local = 0
     skipped_port = 0
     dropped_sign_in = 0
+    # F-HARNESS-73: this parse's memos, of the authority's rules by scheme
+    # and netloc (stream_entry_refusal) and of the group text's reading
+    # (make_channel), each a function of its key and this parse's `source`,
+    # so neither outlives the parse.
+    entry_memo: dict[tuple[str, str], str] = {}
+    group_memo: dict[str, tuple[tuple[str, ...], dict[str, int], str]] = {}
 
     if isinstance(text, str):
         if text.startswith("\ufeff"):
@@ -2169,7 +3090,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             vlcopt, kodiprop = {}, {}
             continue
         url = line
-        refusal, host = ("", "") if len(url) > M3U_MAX_URL else stream_entry_refusal(url, playlist)
+        refusal, host = ("", "") if len(url) > M3U_MAX_URL else stream_entry_refusal(url, playlist, entry_memo)
         if len(url) > M3U_MAX_URL:
             bound_count(bounds, "url")
         elif refusal == "scheme":
@@ -2180,6 +3101,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             skipped_zone += 1                 # D-SINK-91: an IPv6 zone that is not a number
         elif refusal == "label":
             skipped_label += 1                # D-SINK-89: one label, from a list that is not local
+        elif refusal == "remote":
+            skipped_remote += 1               # D-SINK-102: mms, mmsh from a list that is not local
         elif refusal == "listener":
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
@@ -2190,7 +3113,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             over_cap += 1
         else:
             attrs, title = pending
-            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds)
+            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds, group_memo)
             dropped_sign_in += drop_sign_in_headers(channel, playlist, host)
             group = channel["group"]
             if group not in seen_groups:
@@ -2220,6 +3143,9 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
         # D-SINK-89: a count, never the host (it may be a username).
         warnings.append(counted_sentence(skipped_label, "%d entry skipped: its address names a host of one label, not the playlist's own, from a playlist that is not on this machine or a local network",
                                          "%d entries skipped: their addresses name hosts of one label, not the playlist's own, from a playlist that is not on this machine or a local network"))
+    if skipped_remote:
+        # D-SINK-102: a count and the fixed words, never a host.
+        warnings.append(counted_sentence(skipped_remote, PARSE_REMOTE_SCHEME_ONE, PARSE_REMOTE_SCHEME_MANY))
     if skipped_listen:
         warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
                                          "%d entries skipped: the streams would listen on this machine for anyone to send to"))
@@ -2523,7 +3449,12 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
         target = state_file_target(path)
     except HelperError:
         return 0
-    raw = read_json(target)
+    # D-STATE-5: through state_json, the shell's reading of the file's two
+    # ends, as every state verb reads it; read_json refused a byte-order mark.
+    try:
+        raw = state_json(read_regular_text(target))
+    except (OSError, ValueError):
+        return 0
     if not isinstance(raw, dict):
         return 0
     remap = channel_id_remap(channels)

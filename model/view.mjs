@@ -140,10 +140,16 @@ function ipcNowPlaying(np, chno) {
 // an 8-bit CSI and U+009D an OSC. Escaped as `\u009b`, the reply is the same
 // JSON value to any parser and carries no control a terminal reads.
 // U+2028 and U+2029 are escaped with them, so the reply is also a valid
-// JavaScript string literal in any engine.
+// JavaScript string literal in any engine. D-SINK-105 (2026-11-16): and the
+// twelve text-direction controls (Unicode's Bidi_Control set) (U+061C, U+200E, U+200F, U+202A..U+202E,
+// U+2066..U+2069), which a terminal reorders a line by; the helper's replies
+// and both status files escape the same set (REPLY_ESCAPE_RANGES), held by
+// the shared reply-escapes fixture (dev branch). The other format
+// characters are left alone: escaping a zero-width joiner would break an
+// emoji in a terminal.
 function ipcJson(value) {
   var text = JSON.stringify(value === undefined ? null : value)
-  return text.replace(/[\u007f-\u009f\u2028\u2029]/g, function (c) {
+  return text.replace(/[\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, function (c) {
     var hex = c.charCodeAt(0).toString(16)
     return "\\u" + "0000".substring(hex.length) + hex
   })
@@ -765,10 +771,34 @@ function keyboardMapKeys(opts) {
   }
   return out
 }
+
+// D-A11Y-11 (2026-11-14): how long one of the plugin's animations runs.
+// Omarchy 4.5.0 runs every shell animation for Style.duration(ms), which is
+// 0 while reduce motion is on (`omarchy toggle animations`; a machine that
+// renders on the CPU), so the host snapped while the plugin's label still
+// slid. `style` is the theme kit's Style, handed in so the node suite can
+// call this; a binding that calls it re-reads when the host's setting
+// changes, because the host function reads its own property inside the
+// binding (the QML spec holds that). The plugin's own number stays wherever
+// the host cannot be asked or answers no duration: 4.0.6 has no such
+// function, and a host may shorten an animation here but never lengthen one.
+function motionMs(style, ms) {
+  var want = Number(ms)
+  if (!(want >= 0) || want === Infinity) return 0
+  want = Math.round(want)
+  var got = want
+  try {
+    if (style && typeof style.duration === "function") got = style.duration(want)
+  } catch (e) {
+    return want
+  }
+  if (typeof got !== "number" || !(got >= 0) || got > want) return want
+  return Math.round(got)
+}
 export {
   barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
   guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
   arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
   hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
-  keyboardMap, keyboardMapKeys
+  keyboardMap, keyboardMapKeys, motionMs
 }

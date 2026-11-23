@@ -25,8 +25,10 @@ BarWidget {
   property int wheelAccumulator: 0
 
   // ---- timing constants (UX.md 5.9)
-  readonly property int labelAnimMs: 180
-  readonly property int glyphAnimMs: 160
+  // D-A11Y-11: the two animation times are the host's answer for them, 0
+  // while Omarchy's reduce motion is on (Model.motionMs).
+  readonly property int labelAnimMs: Model.motionMs(Style, 180)
+  readonly property int glyphAnimMs: Model.motionMs(Style, 160)
   readonly property int resolveMs: 500
   readonly property int resolveTries: 20
 

@@ -262,6 +262,26 @@ RESOLVE_WAIT_SLICE_S = 0.05
 # would be the largest single anonymous mapping a fetch verb makes under
 # limit_memory's RLIMIT_DATA.
 RESOLVE_STACK_BYTES = 1024 * 1024
+# D-SINK-102 (the conformance review of the relay, 2026-11-16): the
+# relay asks lookups from many threads at once, and two things that were
+# safe in a fetch's single thread were not. The process-wide thread stack
+# size is saved, set, used and restored around each lookup's start, so two
+# lookups interleaving could leave it at RESOLVE_STACK_BYTES for good;
+# RESOLVE_LOCK makes the four one step (the relay's own thread starts take
+# it too, so none of them starts inside that window). And a lookup that
+# outlives its bound leaves its thread running on the resolver's own clock:
+# RESOLVE_WORKERS counts the threads whose lookup has not returned, and a
+# caller that passes `limit` (the play-time lookup, stream_resolve, which is
+# the relay's) is refused with ResolveBusy, before any thread, once that
+# many are outstanding. A fetch passes no limit and looks up as before.
+RESOLVE_LOCK = _thread.allocate_lock()
+RESOLVE_WORKERS = {"live": 0}
+RESOLVE_BUSY = "too many host-name lookups are still running; not looked up"
+
+
+class ResolveBusy(OSError):
+    """resolve_within's refusal past its `limit`: no thread was started and
+    nothing was asked of the resolver."""
 
 # D-SINK-86 (the owner, 2026-11-08): the refusal of a host name that holds
 # what no name may hold (host_name_refused, 02-sources.py), asked before any
@@ -271,8 +291,11 @@ RESOLVE_STACK_BYTES = 1024 * 1024
 # `bad_url`, the code of a URL the validator refuses, so the shell's
 # sentence is "Invalid URL" and the logo run counts it with the policy's
 # refusals (06-failed.py).
-HOST_NAME_REFUSAL = ("refused a host name that holds @, %, ;, =, &, a bracket, a backslash, a second colon, "
-                     "whitespace or an invisible format character; not looked up")
+# D-SINK-116 and D-SINK-117 (2026-11-16): the sentence says the rule as it
+# stands, an allowlist of ASCII, the port's digits and the invisible table.
+HOST_NAME_REFUSAL = ("refused a host name that holds a character no host name holds (in ASCII anything but a "
+                     "letter, a digit, -, . or _), a second colon, a port that is not digits, whitespace or an "
+                     "invisible character; not looked up")
 
 
 def refuse_host_name(text: Any, with_port: bool = False) -> None:
@@ -281,7 +304,75 @@ def refuse_host_name(text: Any, with_port: bool = False) -> None:
         raise HelperError("bad_url", HOST_NAME_REFUSAL)
 
 
-def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
+# D-SINK-119 (2026-11-16): the dots other than `.` that the idna codec reads
+# in a host name (encodings.idna's `dots`).
+IDNA_DOTS = "\u3002\uff0e\uff61"
+# A fetch's refusal of a host the codec cannot write in ASCII, after the
+# verb's fixed word (`playlist`, `EPG`); it names no host.
+HOST_IDNA_REFUSAL = "address names a host the IDNA codec cannot write in ASCII; not looked up"
+# D-SINK-119 (the review of round 5's build, 2026-11-17): the connection
+# layer's refusal of a request host that is not ASCII. A first hop is sent as
+# its A-label (a_label_target), so only a later hop reaches it: urllib
+# percent-decodes a redirect's host, `http://b%C3%BCcher.test/x` became the
+# request host `b<U+00FC>cher.test`, and the hop was looked up through the
+# idna codec and sent its Host header as raw Latin-1, or failed before
+# connecting outside Latin-1. Refused rather than rewritten as its A-label,
+# the conservative reading of a design that sent the A-label on the first
+# hop only. `bad_url`, as HOST_NAME_REFUSAL is; it names no host.
+HOST_NOT_ASCII_REFUSAL = ("refused a host name not written in ASCII (a redirect's, which is not rewritten as its "
+                          "A-label); not looked up")
+
+
+def host_a_label(host: Any) -> str | None:
+    """D-SINK-119 (2026-11-16): a host name's A-label -- what the idna
+    codec writes it as, which is what CPython's socket hands the resolver
+    for a str host -- or None when the codec refuses it (a label too long or
+    empty, a bidi rule broken, a private-use character or a noncharacter
+    after nameprep) or the name holds a dot the codec reads that is not `.`
+    (IDNA_DOTS: a look-alike of a dot, which would be fetched from the name
+    it spells). An IPv6 literal, bracketed or not, and "" are returned as
+    they are. An ASCII name is its own A-label when the codec takes it."""
+    text = str(host or "")
+    if text == "" or ":" in text or text.startswith("["):
+        return text
+    for dot in IDNA_DOTS:
+        if dot in text:
+            return None
+    try:
+        return text.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+
+
+def a_label_target(target: str) -> str | None:
+    """D-SINK-119: `target`, an http(s) URL with no user information
+    (split_userinfo's), with its host written as its A-label (host_a_label),
+    so the request's host and its `Host` header are ASCII and name what the
+    lookup asks. urllib hands http.client the host as the header's text,
+    which http.client writes as Latin-1 before it connects: a host outside
+    Latin-1 failed every fetch with no lookup, and a Latin-1 one was looked
+    up as its A-label and sent its raw bytes in the header. None when
+    host_a_label refuses the host; the target unchanged when the host is its
+    own A-label or an IPv6 literal. A ValueError where urlsplit raises one,
+    or where the port is not a number."""
+    parts = urllib.parse.urlsplit(target)
+    netloc = parts.netloc
+    parts.port
+    if "@" in netloc or netloc.startswith("["):
+        return target
+    written = netloc.rpartition(":")[0] if ":" in netloc else netloc
+    ace = host_a_label(written)
+    if ace is None:
+        return None
+    if ace == written:
+        return target
+    start = target.find("//") + 2
+    if start < 2 or target[start:start + len(netloc)] != netloc:
+        raise ValueError("the authority is not where the URL library read it")
+    return target[:start] + ace + netloc[len(written):] + target[start + len(netloc):]
+
+
+def resolve_within(host: str | bytes, port: int, timeout: float, limit: int | None = None) -> list[Any]:
     """getaddrinfo(host, port) for a stream socket, on a daemon thread the
     main thread waits for at most `timeout` seconds (D-SRC-62).
 
@@ -303,7 +394,13 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
     D-SINK-101: a `bytes` host is the play-time lookup's
     (stream_lookup_name): a name that is not ASCII, handed to the resolver
     as the player will hand it, with no idna codec. The refusal reads it as
-    the text it encodes."""
+    the text it encodes.
+
+    D-SINK-102: the stack size's save, set, start and restore are one step
+    under RESOLVE_LOCK, and with `limit` the lookup is refused (ResolveBusy)
+    while that many lookups' threads are still running (RESOLVE_WORKERS),
+    counted and checked under the same lock, so concurrent callers cannot
+    pass it together."""
     refuse_host_name(host.decode("utf-8", "surrogateescape") if isinstance(host, bytes) else host)
     import socket
     import threading
@@ -311,36 +408,48 @@ def resolve_within(host: str | bytes, port: int, timeout: float) -> list[Any]:
 
     def lookup() -> None:
         try:
-            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
-        except (OSError, ValueError, AttributeError):
-            pass
-        try:
-            result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
-        except BaseException as error:         # handed to the main thread whole
-            result.append(error)
+            try:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+            except (OSError, ValueError, AttributeError):
+                pass
+            try:
+                result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+            except BaseException as error:         # handed to the main thread whole
+                result.append(error)
+        finally:
+            with RESOLVE_LOCK:
+                RESOLVE_WORKERS["live"] -= 1
 
-    previous = threading.stack_size()
-    try:
-        threading.stack_size(RESOLVE_STACK_BYTES)
-    except (ValueError, RuntimeError):
-        pass
-    try:
-        worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+    unthreaded: RuntimeError | None = None
+    with RESOLVE_LOCK:
+        if limit is not None and RESOLVE_WORKERS["live"] >= limit:
+            raise ResolveBusy(errno.EAGAIN, RESOLVE_BUSY)
+        previous = threading.stack_size()
         try:
-            worker.start()
-        except RuntimeError as error:
-            # No thread to be had (a memory limit too low for one more
-            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
-            # ceiling): the lookup runs here, under the alarm alone, as it
-            # did before D-SRC-62, and says so once. A verb that is about to
-            # refuse for memory still refuses for memory, not for this.
-            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
-            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
-    finally:
-        try:
-            threading.stack_size(previous)
+            threading.stack_size(RESOLVE_STACK_BYTES)
         except (ValueError, RuntimeError):
             pass
+        try:
+            worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+            RESOLVE_WORKERS["live"] += 1
+            try:
+                worker.start()
+            except RuntimeError as error:
+                RESOLVE_WORKERS["live"] -= 1
+                unthreaded = error
+        finally:
+            try:
+                threading.stack_size(previous)
+            except (ValueError, RuntimeError):
+                pass
+    if unthreaded is not None:
+        # No thread to be had (a memory limit too low for one more
+        # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+        # ceiling): the lookup runs here, under the alarm alone, as it
+        # did before D-SRC-62, and says so once. A verb that is about to
+        # refuse for memory still refuses for memory, not for this.
+        log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(unthreaded).__name__)
+        return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     bound = max(0.0, float(timeout))
     until = time.monotonic() + bound
     while worker.is_alive():
@@ -375,7 +484,8 @@ class DestinationPolicy:
       * never for a logo (`logos`), on any hop.
     Everything else -- a hint's host, a redirect into the LAN from a public
     host, a second LAN host -- is refused before a byte is sent, `local_address`
-    naming the host only (rule 5). And a host of ONE DNS label that the
+    naming no host (rule 5; it named the host until D-SINK-113, 2026-11-16,
+    and a provider's host can be a user name). And a host of ONE DNS label that the
     provider chose is refused before it is even looked up, the playlist's
     own host excepted and a logo never (refuses_name,
     D-SINK-83), `local_address` naming no host.
@@ -427,8 +537,12 @@ class DestinationPolicy:
         # validated, so no provider reaches it; the shape is closed anyway.
         port = (int(port_text) if port_text.isascii() and port_text.isdigit() and len(port_text) <= 5
                 and 0 < int(port_text) < 65536 else None)
-        return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
-                   (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
+        # D-SINK-119: the playlist's host as its A-label, as a fetch's first
+        # hop now asks the connection for it (a_label_target), so "the
+        # playlist's own host" is the same name on both sides of the test.
+        home = (os.environ.get(HOME_HOST_ENV) or "").strip()
+        home = host_a_label(home) or home
+        return cls(label, origin, home, (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
 
     @classmethod
     def for_logos(cls) -> "DestinationPolicy":
@@ -461,14 +575,24 @@ class DestinationPolicy:
         self.last_class = kind
 
     def refusal(self, host: str, first: bool) -> HelperError:
-        where = "a logo" if self.logos else self.label
-        if first and self.origin == ORIGIN_PLAYLIST:
-            how = "is an address on this machine or a local network that the playlist chose"
+        """The refusal of an address permits() refused, naming NO host and
+        no verb (D-SINK-113, 2026-11-16). The host is one the provider
+        chose -- a redirect hop, a guide hint's first hop, a logo -- and for
+        an address whose password holds an unencoded `/` it is the user
+        name, which this sentence printed into the reply, the status file
+        and the journal. The verb's own log line names the verb (`playlist:
+        %s`, `epg: %s`), so a prefix here read twice. `host` stays in the
+        signature: the relay's StreamPolicy overrides this with its own
+        fixed sentence."""
+        if self.logos:
+            sentence = "a logo address is on this machine or a local network"
+        elif first and self.origin == ORIGIN_PLAYLIST:
+            sentence = "the playlist chose an address on this machine or a local network"
         elif first:
-            how = "is an address on this machine or a local network"
+            sentence = "the address is on this machine or a local network"
         else:
-            how = "is an address on this machine or a local network that a redirect chose"
-        return HelperError("local_address", "%s: %s %s; not contacted" % (where, host or "the host", how))
+            sentence = "a redirect chose an address on this machine or a local network"
+        return HelperError("local_address", "%s; not contacted" % sentence)
 
     def refuses_name(self, host: str) -> bool:
         """D-SINK-83 (the owner, 2026-11-05): is `host` one DNS
@@ -496,20 +620,23 @@ class DestinationPolicy:
         search list), so the shell's sentence ("Refused a local address")
         and the logo run's count of policy refusals take it as they take the
         address check's."""
-        where = "a logo" if self.logos else self.label
         who = "the playlist" if first else "a redirect"
-        return HelperError("local_address", "%s: a host name of one label that %s chose is not looked up; not contacted"
-                           % (where, who))
+        return HelperError("local_address", "a host name of one label that %s chose is not looked up; not contacted"
+                           % who)
 
-    def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
+    def check_proxied(self, host: str, port: int, timeout: float, first: bool, resolve: Any = None) -> None:
         """The TARGET of a proxied request, looked up here (see the class).
         D-SINK-86 first: the proxy would make the lookup this one stands
-        for, so a name that holds what no name may hold reaches neither."""
+        for, so a name that holds what no name may hold reaches neither.
+        `resolve` (host, port, timeout) is the lookup, resolve_within when
+        None; the player's relay passes its own (relay_lookup, D-SINK-102),
+        which every fetch never does."""
         refuse_host_name(host)
         if self.refuses_name(host):
             raise self.name_refusal(first)
+        lookup = resolve_within if resolve is None else resolve
         try:
-            kinds = {address_class(found[4][0]) for found in resolve_within(host, port, timeout)}
+            kinds = {address_class(found[4][0]) for found in lookup(host, port, timeout)}
         except (OSError, TimeoutError):
             kinds = set()
         if not kinds:
@@ -517,7 +644,12 @@ class DestinationPolicy:
                     (self.first_host != "" and host_key(host) == self.first_host and self.first_class == "unresolved"):
                 self.connected(host, "unresolved", first, port)
                 return
-            raise HelperError("network", "could not resolve %s to check where it leads through the proxy" % (host or "the host"))
+            # D-SINK-113: naming no host, the target being one the provider
+            # chose (a typed first hop never reaches this raise). The word
+            # `resolve` is what Model.statusReason reads as "Could not
+            # resolve host".
+            raise HelperError("network", "could not resolve the host %s chose, to check where it leads through the proxy"
+                              % ("the playlist" if first else "a redirect"))
         for kind in kinds:
             if not self.permits(host, kind, first, port):
                 raise self.refusal(host, first)
@@ -537,7 +669,8 @@ class DestinationPolicy:
 
 def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
                               source_address: Any = None, policy: DestinationPolicy | None = None,
-                              first: bool = True, proxied: bool = False, **_: Any) -> Any:
+                              first: bool = True, proxied: bool = False, resolve: Any = None,
+                              stagger: float | None = None, in_flight: int = 1, **_: Any) -> Any:
     """socket.create_connection with its lookup under resolve_within, the
     same signature, the same first-address-that-connects loop (D-SRC-62).
     Installed as every connection's `_create_connection` by
@@ -550,7 +683,22 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     BEFORE it is connected to (DestinationPolicy.permits) and one that is not
     allowed is skipped; when none is, the fetch is refused. `proxied` says
     this connection goes to the user's proxy, whose own address is not the
-    destination (the handler checked the target, check_proxied)."""
+    destination (the handler checked the target, check_proxied).
+
+    D-SINK-102: three parameters that only the player's relay passes, so
+    every fetch connects exactly as before. `resolve` (host, port, bound)
+    replaces resolve_within as the lookup (the relay's relay_lookup, which
+    asks the play-time lookup and so the suite's stand-in). `stagger`
+    connects the way FFmpeg's own connect does, which the relay now makes
+    for the player (ff_connect_parallel, libavformat/network.c n9.0.2,
+    READ): every answer is judged first, the permitted
+    ones are tried IPv6 and IPv4 interleaved, up to `in_flight` at once, the
+    next one started `stagger` seconds after the last or as soon as one
+    fails, and the first to connect wins, all within `timeout` of the first
+    attempt (connect_staggered). So a name whose first answer hangs
+    connects through its second within one stagger, where this serial loop
+    waits the whole bound out first (a dead IPv6 answer ahead of a live IPv4
+    one would otherwise outlast the player's watchdog)."""
     import socket
     host, port = address
     bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
@@ -572,7 +720,11 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         # D-SINK-83: before the lookup, not after it -- the
         # lookup is what discloses the name (DestinationPolicy.refuses_name).
         raise policy.name_refusal(first)
-    for family, kind, proto, _, sockaddr in resolve_within(host, port, bound):
+    answers = (resolve_within if resolve is None else resolve)(host, port, bound)
+    if stagger is not None:
+        return connect_staggered(host, port, answers, timeout, bound, source_address, policy, first, proxied,
+                                 float(stagger), max(1, int(in_flight)))
+    for family, kind, proto, _, sockaddr in answers:
         verdict = "global"
         if policy is not None and not proxied:
             verdict = address_class(sockaddr[0])
@@ -602,6 +754,103 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
     raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
 
 
+def connect_staggered(host: str, port: int, answers: list[Any], timeout: Any, bound: float, source_address: Any,
+                      policy: Any, first: bool, proxied: bool, stagger: float, in_flight: int) -> Any:
+    """bounded_create_connection's `stagger` connect (D-SINK-102). Every answer is judged BEFORE any is connected to, as
+    the serial loop judges each before its own connect (a refused one is
+    skipped; none permitted is the policy's refusal); the permitted ones are
+    ordered IPv6 and IPv4 alternately from the first one's family, as
+    FFmpeg's interleave_addrinfo orders them, and tried non-blocking, at
+    most `in_flight` at once, the next started `stagger` seconds after the
+    last start or at once when an attempt fails. The first to connect wins
+    and every other attempt is closed; nothing is started, and every attempt
+    still open is closed, `bound` seconds after the first began. -> the
+    socket, blocking again and with `timeout` as its timeout when that is a
+    number, as the serial loop leaves it."""
+    import select
+    import socket
+    judged: list[tuple[Any, ...]] = []
+    refused = False
+    for family, kind, proto, _, sockaddr in answers:
+        verdict = "global"
+        if policy is not None and not proxied:
+            verdict = address_class(sockaddr[0])
+            if not policy.permits(host, verdict, first, port):
+                refused = True
+                continue
+        judged.append((family, kind, proto, sockaddr, verdict))
+    if not judged:
+        if refused and policy is not None:
+            raise policy.refusal(host, first)
+        raise OSError(errno.EADDRNOTAVAIL, "getaddrinfo returned an empty list")
+    lead = [entry for entry in judged if entry[0] == judged[0][0]]
+    other = [entry for entry in judged if entry[0] != judged[0][0]]
+    order = [entry for pair in zip(lead, other) for entry in pair]
+    order += lead[len(other):] + other[len(lead):]
+    deadline = time.monotonic() + bound
+    poller = select.poll()
+    flying: dict[int, tuple[Any, str]] = {}
+    error: OSError | None = None
+    winner: tuple[Any, str] | None = None
+    next_start = time.monotonic()
+    try:
+        while winner is None and (order or flying):
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if order and len(flying) < in_flight and (not flying or now >= next_start):
+                family, kind, proto, sockaddr, verdict = order.pop(0)
+                sock = None
+                try:
+                    sock = socket.socket(family, kind, proto)
+                    if source_address:
+                        sock.bind(source_address)
+                    sock.setblocking(False)
+                    code = sock.connect_ex(sockaddr)
+                except OSError as failure:
+                    if sock is not None:
+                        sock.close()
+                    error = failure
+                    continue
+                if code == 0:
+                    winner = (sock, verdict)
+                    break
+                if code not in (errno.EINPROGRESS, errno.EALREADY, errno.EAGAIN):
+                    sock.close()
+                    error = OSError(code, os.strerror(code))
+                    continue
+                flying[sock.fileno()] = (sock, verdict)
+                poller.register(sock.fileno(), select.POLLOUT)
+                next_start = now + stagger
+                continue
+            wait = deadline - now
+            if order and len(flying) < in_flight:
+                wait = min(wait, next_start - now)
+            for fd, _ in poller.poll(max(0, int(wait * 1000)) + 1):
+                sock, verdict = flying.pop(fd)
+                poller.unregister(fd)
+                code = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if code == 0 and winner is None:
+                    winner = (sock, verdict)
+                    continue
+                sock.close()
+                if code:
+                    error = OSError(code, os.strerror(code))
+                    next_start = time.monotonic()
+    finally:
+        for sock, _ in flying.values():
+            sock.close()
+    if winner is None:
+        raise error if error is not None else TimeoutError(errno.ETIMEDOUT, "timed out")
+    sock, verdict = winner
+    sock.setblocking(True)
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+        sock.settimeout(timeout)
+    if policy is not None and not proxied:
+        policy.connected(host, verdict, first, port)
+    return sock
+
+
 def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> list[Any]:
     """The HTTP and HTTPS handlers every opener of this helper is built
     with: the stdlib's, opening the stdlib's connection classes with their
@@ -621,12 +870,19 @@ def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> l
     connection object exists, so neither the resolver nor http.client's own
     host check, whose InvalidURL quotes the host (and, for `user:pass@host`,
     the password as a port), ever sees a host the rule refuses. Behind a
-    proxy that host is the proxy's, and check_proxied judges the target."""
+    proxy that host is the proxy's, and check_proxied judges the target.
+
+    D-SINK-119 (the review of round 5's build, 2026-11-17): and a host that
+    is not ASCII is refused (HOST_NOT_ASCII_REFUSAL). Every first hop is
+    sent as its A-label, so only a later hop, whose host urllib
+    percent-decoded from a redirect's Location, reaches it."""
     import http.client
     import urllib.request
 
     def connection_class(base: Any, req: Any) -> Any:
         refuse_host_name(req.host, with_port=True)
+        if not str(req.host).isascii():
+            raise HelperError("bad_url", HOST_NOT_ASCII_REFUSAL)
         if policy is None:
             create = bounded_create_connection
         else:
@@ -939,20 +1195,44 @@ def read_http_source(url: str, timeout: float, label: str = "playlist",
     `policy`'s, the environment's when none is given (D-SINK-40); the
     caller that passes one reads back what the hops connected to."""
     import urllib.request
-    host = source_host(url)
-    target, auth = split_userinfo(url)
+    # D-SINK-109: the host every sentence below names (make_opener's, the
+    # response's, the deadline's, D-SINK-40's) is the shown one; nothing
+    # here decides by it.
+    host = shown_source_host(url)
+    # D-SINK-115 (2026-11-16): an address the URL library refuses to read --
+    # a compatibility character for `/`, `?`, `#`, `@` or `:`, a bracket in
+    # the user information, a bracketed host that is no IPv6 address -- is
+    # `bad_url` with a sentence that names nothing. Both validators refuse
+    # it now; an older shell, a stored record or a hint can still hand one
+    # over, and its ValueError reached main() as an internal error whose
+    # text quoted the authority, user information included.
+    try:
+        target, auth = split_userinfo(url)
+        # D-SINK-119 (2026-11-16): the host as its A-label, the name the
+        # lookup asks, so the request's host and its Host header are ASCII.
+        aced = a_label_target(target)
+    except ValueError:
+        raise HelperError("bad_url", "%s address cannot be read as a URL; not fetched" % label) from None
+    if aced is None:
+        raise HelperError("bad_url", "%s %s" % (label, HOST_IDNA_REFUSAL))
+    target = aced
     if policy is None:
         policy = DestinationPolicy.from_environment(label)
     if auth and policy.origin == ORIGIN_PLAYLIST:
         # D-SINK-40: a URL the PROVIDER chose never makes this machine send a
         # credential it also chose (the model refuses such a hint before it
         # is fetched; this is the same rule where the header is built).
-        raise HelperError("bad_url", "%s address %s carries a password the playlist chose; not used" % (label, host))
+        # D-SINK-113: naming no host, as fetch_bytes' refusals of a URL the
+        # playlist chose name none: the host is the provider's choice.
+        raise HelperError("bad_url", "%s address the playlist chose carries a password; not used" % label)
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
     if auth:
         import base64
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(target, headers=headers)
+    try:
+        request = urllib.request.Request(target, headers=headers)
+    except ValueError:
+        raise HelperError("bad_url", "%s address cannot be read as a URL; not fetched" % label) from None
     opener = make_opener(label, host, policy)
     budget = http_deadline(timeout)
     deadline = time.monotonic() + budget
@@ -1417,20 +1697,186 @@ def read_json(path: str) -> Any:
         return None
 
 
-def emit(payload: Any) -> None:
-    text = json.dumps(payload, ensure_ascii=False) + "\n"
+# D-SINK-105 (2026-11-16): the code points every helper reply and both
+# status files write as a JSON escape: DEL and the C1 controls, the line and
+# paragraph separators -- Model.ipcJson's set since F-SINK-16 -- and the
+# twelve text-direction controls (Unicode's Bidi_Control set) (U+061C, U+200E, U+200F, U+202A..U+202E,
+# U+2066..U+2069). json.dumps with ensure_ascii=False wrote them raw, so a
+# reply or a pasted status file put U+009B, an 8-bit CSI, and a direction
+# override into a terminal. Inside a JSON string only, where an escape is
+# the same value to every parser. The other format characters stay as they
+# are: escaping a zero-width joiner would break an emoji. The shared
+# reply-escapes fixture (dev branch) holds this list and Model.ipcJson's.
+REPLY_ESCAPE_RANGES = ((0x7F, 0x9F), (0x2028, 0x2029), (0x061C, 0x061C), (0x200E, 0x200F),
+                       (0x202A, 0x202E), (0x2066, 0x2069))
+_REPLY_ESCAPES = {code: "%su%04x" % (chr(92), code) for low, high in REPLY_ESCAPE_RANGES
+                  for code in range(low, high + 1)}
+
+
+def reply_text(payload: Any, separators: tuple[str, str] | None = None) -> str:
+    """The JSON text of a reply or a status file: json.dumps with
+    ensure_ascii=False, every REPLY_ESCAPE_RANGES code point written as its
+    escape (D-SINK-105), and a lone surrogate as its own when one is held
+    (D-STATE-8: asked of the text and not of the stream, whose error
+    handler is the locale's; under C it is surrogateescape, which writes
+    some halves as raw bytes that are not UTF-8)."""
+    text = json.dumps(payload, ensure_ascii=False, separators=separators).translate(_REPLY_ESCAPES)
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
-        # D-STATE-8, the reply's half: a verb that prints what a JSON file
-        # held (`state show`, and every state verb's reply) met the same half
-        # pair on stdout, after its write had landed, and answered `internal`.
-        # Asked of the text and not of the stream, whose error handler is the
-        # locale's: under C it is surrogateescape, which writes some halves
-        # as raw bytes that are not UTF-8. A reply is small; the write of a
-        # whole cache file (write_json_atomic) pays for no such check.
         text = escape_half_pairs(text)
-    sys.stdout.write(text)
+    return text
+
+
+# D-SINK-104 (2026-11-16): the reply boundary. Every field a helper reply or
+# a status file prints that holds provider text, text the user typed, or a
+# channel id, by its path, with `[]` for each element of a list, and the
+# reading it is printed through. One table for every kind of reply, read by
+# emit, write_status and write_status_quietly, so a verb added later prints
+# its fields this way the day it uses a path here. The readings:
+#   text   shown_text: as the guide shows it, an address as its host,
+#          a credential withheld, no control left (D-SINK-110);
+#   scope  the zap ring's scope, kept only when shown_text leaves it
+#          unchanged, else "": a reattach scopes the ring exactly as before
+#          (Service.reconcileNowPlaying falls back to the channel's first
+#          group, which is that scope), except when the playing channel is
+#          no longer in the playlist and its group's name reads as an
+#          address, holds a credential or a control: then zapping does
+#          nothing until another channel is chosen;
+#   label  label_sink_text: a source's label as the Sources list reads it
+#          (D-SINK-108);
+#   id     a channel id, ID_WITHHELD when channel_id_withheld refuses it
+#          (D-SINK-111): in the state verbs' replies and the `failed`
+#          verb's marks, which the shell does not read (it reads
+#          failed.json itself, Model.parseFailed), and in the player's
+#          record (`stash.id`) of any reply kind REPLY_KEPT does not name.
+#          An error reply's `id` is read in error_payload.
+# Printed as held, through no reading (REPLY_KEPT and the replies below),
+# because the shell reads each of them: the record id of the `player probe`
+# reply, which the shell restores the playing channel from at a reattach
+# and looks up in its channel list (the reconcile, the restart on adoption,
+# D-SINK-16's owed reload, the relaunch and the play retry); the record id
+# of the `status` reply, which the health tick compares with the playing
+# channel, clearing a stale failure mark on it (D-PLY-14) and its repair
+# count only when they agree (Model.reconcileVerdict); and the `id` of an
+# ok `play` or `player start` reply and that start's `playing.id`, which
+# the shell matches against the channel it asked for (Model.replyTarget,
+# sessionIntentRepair). Withheld, the probe's id lost the channel at every
+# shell restart and stopped an older player the shell would have restarted
+# onto it (the settle round's review), and the status's kept a stale
+# failure mark on the playing channel (the settle round's recheck, both
+# 2026-11-16). Each prints such an id only while a cache written before
+# 0.19.0 still holds the row.
+# They were printed raw until then: the state verbs' hidden groups, saved
+# searches and recents, last-played and session names; the playlist and
+# guide warnings that name a channel; the play and start replies' name; and
+# the player's record (its stash), which the status and probe replies print.
+# A `clipboard` reply is never read: its text is the user's paste, which
+# the reply hands back as it is. What is NOT here, stated: every host a
+# reply names (D-SINK-109's `sourceHost`). The player status reply's
+# `pathHost`, which named the playing address's host with no withhold rule,
+# was dropped on 2026-11-16 (D-SINK-114): no shell code read it.
+REPLY_READINGS = (
+    ("error.message", "text"),
+    ("warnings[]", "text"),
+    ("name", "text"),
+    ("playing.name", "text"),
+    ("firstLoad.reason", "text"),
+    ("firstLoad.fileError", "text"),
+    ("stash.name", "text"),
+    ("stash.group", "text"),
+    ("stash.launchedFrom", "scope"),
+    ("mediaTitle", "text"),
+    ("tracks[].lang", "text"),
+    ("tracks[].title", "text"),
+    ("tracks[].codec", "text"),
+    ("state.recents[].name", "text"),
+    ("state.lastPlayed.name", "text"),
+    ("state.session.name", "text"),
+    ("state.hiddenGroups[]", "text"),
+    ("state.savedSearches[].query", "text"),
+    ("state.sources[].label", "label"),
+    ("stash.id", "id"),
+    ("state.favorites[]", "id"),
+    ("state.recents[].id", "id"),
+    ("state.lastPlayed.id", "id"),
+    ("state.session.id", "id"),
+    ("failed[].id", "id"),
+)
+
+# The paths a kind of reply prints as held (above): the record id of the
+# probe reply, which the shell restores the playing channel from, and of the
+# status reply, which its health tick compares.
+REPLY_KEPT = {"player.probe": ("stash.id",), "status": ("stash.id",)}
+
+
+def scope_reading(value: str) -> str:
+    """The `scope` reading: the zap ring's scope as it is when shown_text
+    leaves it unchanged, else "" (D-SINK-104). `g:Sports@HD` reads as a
+    credential token, so it is "" too. A reattach scopes the ring exactly as
+    before, because it falls back to the channel's first group, which is
+    that same scope; except when the playing channel is no longer in the
+    playlist and its group's name reads as an address, holds a credential
+    or a control: then zapping does nothing until another channel is
+    chosen."""
+    return value if shown_text(value) == value else ""
+
+
+def id_reading(value: str) -> str:
+    """The `id` reading (D-SINK-111)."""
+    return ID_WITHHELD if channel_id_withheld(value) else value
+
+
+_REPLY_READERS = {"text": shown_text, "scope": scope_reading, "id": id_reading, "label": label_sink_text}
+
+
+def _reading_tree(readings: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    tree: dict[str, Any] = {}
+    for path, reading in readings:
+        node = tree
+        steps = []
+        for part in path.split("."):
+            steps.extend([part[:-2], "[]"] if part.endswith("[]") else [part])
+        for step in steps[:-1]:
+            node = node.setdefault(step, {})
+        node[steps[-1]] = reading
+    return tree
+
+
+def _read_reply(value: Any, tree: Any) -> Any:
+    if isinstance(tree, str):
+        return _REPLY_READERS[tree](value) if isinstance(value, str) else value
+    if "[]" in tree:
+        return [_read_reply(item, tree["[]"]) for item in value] if isinstance(value, list) else value
+    if not isinstance(value, dict):
+        return value
+    out = dict(value)
+    for key, sub in tree.items():
+        if key in out:
+            out[key] = _read_reply(out[key], sub)
+    return out
+
+
+_REPLY_TREE = _reading_tree(REPLY_READINGS)
+_REPLY_KIND_TREES = {kind: _reading_tree(tuple(entry for entry in REPLY_READINGS if entry[0] not in kept))
+                     for kind, kept in REPLY_KEPT.items()}
+
+
+def shown_reply(payload: Any) -> Any:
+    """`payload` with every REPLY_READINGS field read as the table says,
+    copying only the containers on a listed path that the payload holds; a
+    `clipboard` reply is returned as it is (D-SINK-104), and a path its kind
+    keeps (REPLY_KEPT) is printed as held."""
+    if not isinstance(payload, dict) or payload.get("kind") == "clipboard":
+        return payload
+    kind = payload.get("kind")
+    return _read_reply(payload, _REPLY_KIND_TREES.get(kind, _REPLY_TREE) if isinstance(kind, str) else _REPLY_TREE)
+
+
+def emit(payload: Any) -> None:
+    """One reply on stdout, through the reply boundary (shown_reply,
+    D-SINK-104) and its escapes (reply_text, D-SINK-105)."""
+    sys.stdout.write(reply_text(shown_reply(payload)) + "\n")
     sys.stdout.flush()
 
 
@@ -1438,16 +1884,27 @@ def error_payload(kind: str, error: HelperError, **extra: Any) -> dict[str, Any]
     payload: dict[str, Any] = {
         "ok": False,
         "kind": kind,
-        "error": {"code": error.code, "message": redact_urls(error.message)},
+        "error": {"code": error.code, "message": shown_text(error.message)},
     }
     payload.update(error.extra)
     payload.update(extra)
+    # D-SINK-111: the id the shell asked for, which a refusal echoes and
+    # nothing reads back.
+    if isinstance(payload.get("id"), str):
+        payload["id"] = id_reading(payload["id"])
     return payload
+
+
+def write_status(path: str, status: dict[str, Any]) -> None:
+    """A fetch's status file (playlist-status.json, epg-status.json), through
+    the reply boundary as a reply is (D-SINK-104, D-SINK-105), at 0600 in
+    its 0700 folder; an OSError is the caller's."""
+    write_text_atomic(path, reply_text(shown_reply(status), (",", ":")) + "\n")
 
 
 def write_status_quietly(path: str, status: dict[str, Any]) -> None:
     try:
-        write_json_atomic(path, status)
+        write_status(path, status)
     except OSError as io_error:
         log("could not write %s: %s" % (os.path.basename(path), io_error))
 
@@ -1522,12 +1979,15 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             text = None
             if not parsed["channels"]:
                 if not parsed["isPlaylist"]:
-                    raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
-                raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
+                    raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % shown_source_host(url))
+                raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % shown_source_host(url))
             now = int(time.time())
             document = {
                 "version": 1,
                 "generatedAt": now,
+                # Data, not a sentence: cached_source reads it at play time,
+                # so it keeps the RFC host (D-SINK-109 prints the shown one
+                # in the reply and the status file).
                 "sourceHost": source_host(url),
                 "epgUrlHint": parsed["epgUrlHint"],
                 # D-SINK-40: the class the user-typed URL's first hop connected
@@ -1574,14 +2034,14 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # opens the temporary file, and removes the file when a write fails,
         # so channels.json is the previous run's or absent.
         text = parsed = document = None
-        error = memory_refusal("playlist", source_host(url) if url else "", held)
+        error = memory_refusal("playlist", shown_source_host(url) if url else "", held)
     if error is None:
         assert parsed is not None
         groups = {channel["group"] for channel in parsed["channels"]}
         status = {
             "ok": True,
             "kind": "playlist",
-            "sourceHost": source_host(url),
+            "sourceHost": shown_source_host(url),
             "fetchedAt": now,
             "durationMs": int((time.monotonic() - started) * 1000),
             "channelCount": len(parsed["channels"]),
@@ -1599,7 +2059,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         # judge, so the run fails as the first write's failure does. A
         # folder made a link to nothing in between is R25c's (D-SRC-73).
         try:
-            write_json_atomic(status_path, status)
+            write_status(status_path, status)
         except FolderUnusable:
             raise
         except OSError as io_error:
@@ -1636,7 +2096,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     stale = os.path.isfile(channels_path)
     status = error_payload(
         "playlist", error,
-        sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
+        sourceHost=shown_source_host(url) if url else "",   # no URL is not a "local file"
         # D-STATE-4's sibling: json.dumps wrote a previous 1e400 as `Infinity`.
         fetchedAt=(coerce_int(previous.get("fetchedAt")) or None) if isinstance(previous, dict) else None,
         stale=stale,

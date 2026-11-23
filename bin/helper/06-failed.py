@@ -665,13 +665,21 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
                 continue
             # Hosts and codes only, never the URL (rule 5).
             reasons[failure.code] = reasons.get(failure.code, 0) + 1
-            # D-SINK-40: `local_address` is the policy's too -- a logo, or a
-            # hop of one, aimed at this machine or a local network; and so are
-            # `logo_host`, a host of one label, never looked up (D-SINK-83),
-            # `logo_url`, a URL that runs into another attribute (F1), and
-            # `bad_url`, a host name holding what no name may hold, refused
-            # by the connection layer before its lookup (D-SINK-86; nothing
-            # else on a logo's path answers that code).
+            # D-SINK-40: `local_address` is the policy's too -- a hop of a
+            # logo aimed at this machine or a local network; and so are
+            # `logo_host`, an address the survey's own reading counts
+            # refused (logo_contact_host: since D-SINK-112, 2026-11-16, one
+            # label, user information, an absorbed attribute, a literal that
+            # is not global, an address the source validator refuses, a
+            # request target that is not printable ASCII), `logo_url` and
+            # `logo_userinfo`, which only an older helper answered, and
+            # `bad_url`, the connection layer's refusal of a redirect hop
+            # before its lookup: a host name holding what no name may hold
+            # or a port that is not one to five digits (D-SINK-86, -117), or
+            # a host not written in ASCII (D-SINK-119). No first hop answers
+            # it: since the review of round 5's build (2026-11-17) the
+            # reading refuses a port padded past five characters, the one
+            # shape a first hop was refused for there.
             if failure.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                                 "logo_type", "logo_bytes", "logo_too_large",
                                 "logo_dimensions", "logo_scans", "logo_chunks", "local_address",
@@ -760,10 +768,18 @@ def load_channels(directory: str) -> list[dict[str, Any]]:
 
 
 def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
+    """The cached channel whose id is `wanted`.
+
+    D-SINK-107 (2026-11-16): the refusal names no id. The sentence reaches
+    the journal (the verb's own log line, and the shell's `failed:` line
+    over the reply), and an id is not always a name: a `u:` id is an
+    unkeyed 32-bit hash of the stream's address, credentials and all, and a
+    `t:` id an older parse made can hold a credential whole (D-SINK-111).
+    The reply's own `id` field still says which channel was asked for."""
     for channel in channels:
         if isinstance(channel, dict) and channel.get("id") == wanted:
             return channel
-    raise HelperError("unknown_channel", "channel %s is not in the playlist cache" % wanted)
+    raise HelperError("unknown_channel", "the channel asked for is not in the playlist cache")
 
 
 def header_values(headers: dict[str, Any]) -> tuple[str, str, list[str]]:
@@ -813,6 +829,7 @@ def neutral_header_properties(user_agent: str) -> list[tuple[str, Any]]:
     return [("user-agent", user_agent), ("referrer", ""), ("http-header-fields", [])]
 
 
+@verb_deadline("play")
 def cmd_play(args: argparse.Namespace) -> int:
     """Zap an already-running player. The wire sequence and the reply shape
     are unchanged (requirement 2); the body is `apply_channel()`, shared
@@ -850,11 +867,16 @@ def cmd_play(args: argparse.Namespace) -> int:
                                  source_key_of(cache_dir(args.cache_dir)), since or int(time.time()),
                                  record_seq(read_lock_file(sock)), verb="play")
         entry_id = apply_channel(client, target, stash=stash, label="play")
-        payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["name"]}
+        payload: dict[str, Any] = {"ok": True, "kind": "play", "id": args.id or None, "name": target["shown"]}
         if session:
             # Additive, and tied to the additive flags: without --scope /
             # --since the reply is byte-identical to v0.2.1's.
             payload["entryId"] = entry_id
+            # D-PLY-66: the load's relay, for the shell's question when this
+            # entry's open fails after the reply (relay_handle).
+            handle = relay_handle(target)
+            if handle is not None:
+                payload["relay"] = handle
         emit(payload)
         return EXIT_OK
     except HelperError as error:
@@ -892,6 +914,30 @@ def unlink_stale_socket(path: str) -> bool:
     return False
 
 
+def status_relay(client: MpvIpc, sock_path: str) -> bool | None:
+    """Whether the relay of the player this connection reaches answers as
+    its own (D-PLY-67): True or False for a player this build launched, None
+    for any other and when the player's identity cannot be read.
+
+    The health tick's question. A player of this build is pinned to its
+    relay's port; when the relay is gone (killed outright under a user's
+    `mpv` wrapper whose child is the real player, D-PLY-55) nothing of ours
+    holds that port, and whatever binds it next receives the player's
+    plain-http requests. The probe, the orphan check and a zap already read
+    such a player as older (player_verdict); until this field the tick's
+    `status` did not ask, so with no zap the interval had no bound. A read:
+    nothing is set and nothing is stopped here, and relay_status asks again
+    for RELAY_IPC_S before it answers None, so a relay still starting is
+    not read as gone. None is "cannot tell", never "gone": another build's
+    player is the reattach's to replace, not the tick's."""
+    peer = player_peer(client)
+    verdict, port = launch_reading(peer, sock_path)
+    if verdict != "current":
+        return None
+    return relay_status(sock_path, peer, port) is not None
+
+
+@verb_deadline("status")
 def cmd_status(args: argparse.Namespace) -> int:
     path = socket_path(args.socket)
     client = MpvIpc(path, args.ipc_timeout)
@@ -903,10 +949,12 @@ def cmd_status(args: argparse.Namespace) -> int:
                 log("status: removed stale socket file")
             raise
         values: dict[str, Any] = {}
-        for prop in ("media-title", "path", "pause", "idle-active", "mpv-version", USER_DATA_STASH):
+        # D-SINK-114: `path` is no longer asked. Its one use was `pathHost`
+        # (below), and asking it put the credentialed address in this
+        # process's reply buffer for nothing.
+        for prop in ("media-title", "pause", "idle-active", "mpv-version", USER_DATA_STASH):
             ok, data = client.try_command("get_property", prop)
             values[prop] = data if ok else None
-        path_value = values["path"]
         stash = values[USER_DATA_STASH] if isinstance(values[USER_DATA_STASH], dict) else None
         emit({
             "ok": True,
@@ -917,8 +965,13 @@ def cmd_status(args: argparse.Namespace) -> int:
             # which is a sink (rule 5), so it is redacted like every other
             # provider string -- it had gone out verbatim since M2-02 and no
             # consumer in the shell reads it (F-SINK-12, from the review).
-            "mediaTitle": redact_urls(values["media-title"]) if isinstance(values["media-title"], str) else None,
-            "pathHost": (url_host(path_value) or ("local file" if path_value.startswith("/") else "")) if isinstance(path_value, str) and path_value else None,
+            # D-SINK-104: and since 2026-11-16 as shown_text reads it, the
+            # reading the boundary gives every reply's provider text.
+            "mediaTitle": shown_text(values["media-title"]) if isinstance(values["media-title"], str) else None,
+            # D-SINK-114 (2026-11-16): no `pathHost`. It printed the playing
+            # address's host with no withhold rule, so an address whose
+            # password holds an unencoded `/` printed its user name, and no
+            # shell code read it.
             "paused": bool(values["pause"]) if values["pause"] is not None else None,
             "idle": bool(values["idle-active"]) if values["idle-active"] is not None else None,
             "mpvVersion": values["mpv-version"] if isinstance(values["mpv-version"], str) else None,
@@ -932,6 +985,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             # runs, so "behind live" re-syncs every ten seconds with no new
             # process. Null until the player has a position (design 2.2).
             "rewind": read_rewind(client, stash, paused=bool(values["pause"]) if values["pause"] is not None else None),
+            # D-PLY-67, additive and asked last, after every question to the
+            # player: whether this build's player still has its relay. true,
+            # false, or null when that cannot be said (status_relay).
+            "relay": status_relay(client, path),
         })
         return EXIT_OK
     except HelperError as error:

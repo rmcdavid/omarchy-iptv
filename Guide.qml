@@ -347,7 +347,10 @@ Item {
   })
 
   // ---- timing constants, in one place (UX.md 5.9)
-  readonly property int bannerFadeMs: 140
+  // D-A11Y-11: the two animation times are the host's answer for them, 0
+  // while Omarchy's reduce motion is on (Model.motionMs).
+  readonly property int bannerFadeMs: Model.motionMs(Style, 140)
+  readonly property int rowTintMs: Model.motionMs(Style, 60)
   readonly property int transientMs: 3000
   readonly property int filterDebounceMs: 40
   readonly property int filterDebounceThreshold: 2000
@@ -487,8 +490,14 @@ Item {
   // the feature existed. Asked of the rows ON SCREEN, so a group holding no
   // logos does not reserve a column for them, and asked of the logo URL
   // rather than the fetched file, so the column does not appear and disappear
-  // underneath the user while the fetch runs.
-  readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir)
+  // underneath the user while the fetch runs. D-SINK-112 (the review of
+  // round 5's build and its recheck, 2026-11-17): with the service's map of
+  // what each logo authority names, so a keystroke reads, of each row on
+  // screen until one counts, its scheme and authority as written and looks
+  // the authority up, and reads the rest of the address (its tail, then the
+  // source validator) only of a row whose authority names a host.
+  readonly property bool logoColumn: Model.logoColumnShown(root.currentRows, root.showLogos, root.logoDir,
+                                                           root.serviceReady ? root.service.logoAuthorityHosts : null)
   readonly property int logoWidth: root.logoColumn ? Style.space(22) : 0
   // ---- channel wall (M2-13). The same rows, presented as tiles.
   //
@@ -621,7 +630,7 @@ Item {
     if (!root.inSources || !root.probing || root.formActive) return ""
     var id = root.serviceReady && root.service.probingId !== undefined ? String(root.service.probingId || "") : ""
     var view = root.findSourceView(id)
-    return view ? Model.fetchingLine(view.host, view.kind) : ""
+    return view ? Model.sourcesProbeLine(view) : ""
   }
   // D-SRC-06: a configured URL the validator refused (CLI, SR8) renders the
   // UX 5.4 sentence alone, no host and no `r` hint (nothing to retry).
@@ -3549,7 +3558,7 @@ Item {
                 height: root.groupEntryHeight
                 radius: root.cornerRadius
                 color: pinnedMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-                Behavior on color { ColorAnimation { duration: 60 } }
+                Behavior on color { ColorAnimation { duration: root.rowTintMs } }
                 Accessible.ignored: !visible
                 Accessible.role: Accessible.Button
                 Accessible.name: Model.sourcesRowAccessibleName(root.sourceCount)

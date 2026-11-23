@@ -186,7 +186,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         if payload["changed"]:
             log("config shield: %s %s -> %s" % (result["file"], result["modeBefore"], result["modeAfter"]))
     else:
-        payload["error"] = {"code": result["code"], "message": redact_urls(result["message"])}
+        payload["error"] = {"code": result["code"], "message": shown_text(result["message"])}
         log("config shield: %s (%s, mode %s)" % (result["message"], result["verdict"], result["modeBefore"]))
     emit(payload)
     return EXIT_OK if payload["ok"] else EXIT_ERROR
@@ -372,9 +372,134 @@ def cmd_clipboard(args: argparse.Namespace) -> int:
 
 
 # -------------------------------------------------------------- parser
+#
+# D-SINK-106 (2026-11-16). argparse's own error() printed the message it was
+# handed, and that message quotes what did not parse: an unknown flag with
+# the value after it (`unrecognized arguments: --retired-flag g:...`), a
+# number it could not read (`invalid int value: '...'`), a choice, an
+# ambiguous prefix with its `=value`. The shell hands `player start` and
+# `player restart` their private arguments in OMARCHY_IPTV_ARGS (D-SINK-47,
+# -48) and writes the helper's stderr to the journal, so a usage error was a
+# way for a value the argv was kept free of to reach it whole. Every parser
+# of this helper is a HelperArgumentParser (add_subparsers builds each verb's
+# with the class of the parser it hangs off; the `parents` parsers only lend
+# their actions), and its error() names the kind of error from argparse's
+# own templates and at most USAGE_ERROR_MAX_NAMES option strings this
+# parser's tree DEFINES that the message holds as whole words -- never a
+# value, an unknown option-shaped token included. Exit 2 and no stdout reply,
+# as before.
+USAGE_ERROR_MAX_NAMES = 3
+# (how argparse's message starts once its `argument <name>: ` is cut, what
+# the line says). The phrase printed is always this table's, never the
+# message's, so a value cannot choose it.
+USAGE_ERROR_KINDS = (
+    ("unrecognized arguments:", "unrecognized arguments"),
+    ("invalid choice:", "invalid choice"),
+    ("the following arguments are required:", "the following arguments are required"),
+    ("one of the arguments ", "one of these arguments is required"),
+    ("ambiguous option:", "ambiguous option"),
+    ("not allowed with argument ", "these options cannot be given together"),
+    ("expected ", "an option is missing its value"),
+    ("ignored explicit argument ", "an option that takes no value was given one"),
+    ("unexpected option string:", "unexpected option string"),
+)
+USAGE_ERROR_DEFAULT_KIND = "the arguments did not parse"
+
+
+def defined_option_strings(parser: argparse.ArgumentParser) -> frozenset[str]:
+    """Every option string `parser` and the verbs under it define."""
+    names: set[str] = set()
+    seen: set[int] = set()
+    pending = [parser]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        for action in current._actions:
+            names.update(action.option_strings)
+            if isinstance(action, argparse._SubParsersAction):
+                pending.extend(action.choices.values())
+    return frozenset(names)
+
+
+def usage_error_kind(message: str) -> str:
+    """What kind of usage error argparse's `message` reports, as one of
+    USAGE_ERROR_KINDS' fixed phrases. Read from where its template starts
+    (after `argument <name>: `, whose name is the action's own), so a value
+    later in the message cannot pick another phrase."""
+    text = message
+    if text.startswith("argument "):
+        cut = text.find(": ")
+        if cut >= 0:
+            text = text[cut + 2:]
+    for start, kind in USAGE_ERROR_KINDS:
+        if text.startswith(start):
+            return kind
+    if text.startswith("invalid ") and " value: " in text:
+        return "invalid value"
+    return USAGE_ERROR_DEFAULT_KIND
+
+
+def _option_word_char(ch: str) -> bool:
+    return ch.isalnum() or ch in "_-"
+
+
+def usage_error_names(message: str, defined: frozenset[str]) -> list[str]:
+    """At most USAGE_ERROR_MAX_NAMES of `defined` that `message` holds as
+    whole words (no letter, digit, `_` or `-` on either side), in the order
+    the message first holds them. A string is named only because this helper
+    defines it, so a value can at most spell one of the helper's own
+    options, never be printed."""
+    found: list[tuple[int, str]] = []
+    for name in defined:
+        at = message.find(name)
+        while at >= 0:
+            end = at + len(name)
+            before = message[at - 1] if at > 0 else " "
+            after = message[end] if end < len(message) else " "
+            if not _option_word_char(before) and not _option_word_char(after):
+                found.append((at, name))
+                break
+            at = message.find(name, at + 1)
+    found.sort()
+    return [name for _, name in found[:USAGE_ERROR_MAX_NAMES]]
+
+
+def usage_error_line(prog: str, message: str, defined: frozenset[str]) -> str:
+    """The one line a usage error writes after the usage."""
+    names = usage_error_names(message, defined)
+    return "%s: error: %s%s; the values given are not shown\n" % (
+        prog, usage_error_kind(message), " (%s)" % ", ".join(names) if names else "")
+
+
+class HelperArgumentParser(argparse.ArgumentParser):
+    """argparse's parser with an error() that never prints a value
+    (D-SINK-106; the block above says why)."""
+
+    def error(self, message: str):  # never returns: it exits, as the base class does
+        self.print_usage(sys.stderr)
+        sys.stderr.write(usage_error_line(self.prog, message, defined_option_strings(self)))
+        sys.exit(EXIT_USAGE)
+
+
+def refused_verb(parser: argparse.ArgumentParser, argv: list[str]) -> str:
+    """The verb a refused argument list is answered as (its reply's `kind`
+    and its journal line): the first item that is not an option when it is
+    one of this helper's verbs, else "helper". D-SINK-106's sibling: this
+    used to be that item whatever it was, so `--socket <path> player ...` or
+    a value typed first printed the value."""
+    verbs: Any = {}
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            verbs = action.choices
+            break
+    item = next((item for item in argv if not item.startswith("-")), "")
+    return item if item in verbs else "helper"
+
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="omarchy-iptv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = HelperArgumentParser(prog="omarchy-iptv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=VERSION)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -427,7 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     player_session = argparse.ArgumentParser(add_help=False)
     player_session.add_argument("--cache-dir", default=None, help="default: $XDG_CACHE_HOME/omarchy-iptv")
     player_session.add_argument("--id", required=True, help="channel id from channels.json; the URL is read from the 0600 cache, never passed in")
-    player_session.add_argument("--seq", type=int, default=0, help="the service's intent sequence number; an older intent is superseded")
+    player_session.add_argument("--seq", type=seq_arg, default=0, help="the service's intent sequence number; an older intent is superseded")
     player_session.add_argument("--scope", default="", help="zap-ring scope stashed inside mpv (UI intent no mpv property could report)")
     player_session.add_argument("--since", type=int, default=0, help="epoch seconds the channel started playing")
     player_session.add_argument("--owner-pid", type=int, default=0, help="claim the player for this shell pid (see orphan-check)")
@@ -449,7 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     restart = player_actions.add_parser("restart", parents=[player_socket, player_session], help="stop ladder and spawn under one lock (the health verdict)")
     restart.add_argument("--from", dest="from_rung", default="term", choices=["", "quit", "term", "kill"], help="first rung of the ladder (default term: IPC is not answering)")
     stop_player = player_actions.add_parser("stop", parents=[player_socket], help="run the whole quit / SIGTERM / SIGKILL ladder in this process")
-    stop_player.add_argument("--seq", type=int, default=0, help="the service's intent sequence number")
+    stop_player.add_argument("--seq", type=seq_arg, default=0, help="the service's intent sequence number")
     stop_player.add_argument("--from", dest="from_rung", default="", choices=["", "quit", "term", "kill"], help="first rung (default quit over IPC)")
     stop_player.add_argument("--lock-timeout", type=float, default=DEFAULT_LOCK_TIMEOUT, help="seconds to wait for the player lock (default %.1f)" % DEFAULT_LOCK_TIMEOUT)
     probe = player_actions.add_parser("probe", parents=[player_socket], help="report the player without touching it (the reattach read)")
@@ -471,6 +596,18 @@ def build_parser() -> argparse.ArgumentParser:
     tracks.add_argument("--sub", default=None, help="mpv subtitle track id, or 'no'")
     tracks.set_defaults(func=cmd_player)
 
+    # D-SINK-102: the player's relay, which the player's spawn starts with
+    # its two listeners at fds 3 and 4 and the player as its child; it
+    # refuses to run otherwise (relay_inherited). Its argv carries the
+    # child's pid and nothing else: no token, no URL, no socket path.
+    relay = player_actions.add_parser("relay", help="internal: the player's relay, started by the player's spawn")
+    relay.add_argument("--child", type=int, required=True, help="the player's pid")
+    # D-PLY-66: what the shell asks once a load's open has failed. Two
+    # integers from that load's own reply; nothing private rides here.
+    refused = player_actions.add_parser("refused", parents=[player_socket],
+                                        help="how many of one load's connections the player's relay refused (a read; null when nothing can say)")
+    refused.add_argument("--relay-pid", type=int, required=True, help="the relay's pid, from the load's reply")
+    refused.add_argument("--load", type=int, required=True, help="the relay's number for the load, from the load's reply")
     orphan = player_actions.add_parser("orphan-check", parents=[player_socket], help="stop the player only if its claiming shell is still alive")
     orphan.add_argument("--owner-pid", type=int, required=True, help="the shell pid whose service was destroyed")
     orphan.add_argument("--owner-token", type=owner_token_arg, default="", help="the destroyed service instance's token: a claim carrying any other is reassigned")
@@ -501,6 +638,7 @@ def build_parser() -> argparse.ArgumentParser:
     actions.add_parser("show", parents=[common], help="print the current state")
     actions.add_parser("init", parents=[common], help="create state.json with mode 0600 when missing (the service runs this before its first write)")
     actions.add_parser("mode", parents=[common], help="make state.json 0600 and its folder 0700 when they are not; creates and reads nothing (the service runs this after each save lands)")
+    actions.add_parser("private", parents=[common], help="make state.json 0600 before a write, through a link, creating it 0600 and empty when nothing is there; refuses a target that is not a regular file of this account; leaves every folder as it is (the service runs this before each save, and writes only on its reply)")
     favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")
@@ -596,9 +734,10 @@ def helper_arguments(argv: list[str], environ: Any) -> list[str]:
     handed over in ARGS_ENV (D-SINK-47, D-SINK-48; ARGS_ENV says why).
 
     ARGS_ENV is taken OUT of `environ` on every run, flag or not: os.environ's
-    pop unsets it in the C environment, so the one child this helper starts
-    with its environment -- the detached player, exec'd by spawn_detached --
-    and wl-paste never inherit it. (The kernel's copy at exec, the one
+    pop unsets it in the C environment, so wl-paste never inherits it; the
+    player and its relay are exec'd by spawn_player with explicit
+    environments that leave it out as well (player_environment, and the
+    relay's copy). (The kernel's copy at exec, the one
     /proc/<pid>/environ reads, is untouched; the shield is what closes that.)
 
     A flag with no list, a list that is not JSON, not a list of strings, or
@@ -630,7 +769,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = helper_arguments(raw, os.environ)
     except HelperError as error:
-        verb = next((item for item in raw if not item.startswith("-")), "helper")
+        verb = refused_verb(parser, raw)
         log("%s: %s" % (verb, error.message))
         emit(error_payload(verb, error))
         return EXIT_USAGE
@@ -652,7 +791,7 @@ def main(argv: list[str] | None = None) -> int:
         # R25c: not a bug -- a folder the verb needs is a link to nothing, or
         # not a folder. One sentence, the exit every refusal has.
         log("%s: %s" % (args.command, error.sentence))
-        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": redact_urls(error.sentence)}})
+        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": shown_text(error.sentence)}})
         return EXIT_ERROR
     except HelperError as error:
         # D-PLY-38: a refusal raised where a verb has no net of its own
@@ -665,16 +804,31 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
-        message = bounded_text(redact_urls("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        # D-SINK-115 (2026-11-16, the lead's call under the owner's standing
+        # authority of 2026-11-09): and it names the exception by its class
+        # alone, in the reply and on stderr, where its frames are kept. The
+        # text is the one part no verb composes, and the URL library's own
+        # sentence quoted an authority it could not read, user information
+        # included, which the redactors withheld only when an ASCII `:`
+        # parted the user name from the password. Chained exceptions are
+        # not printed: their text is the same kind of thing. Cost: a bug
+        # report loses the exception's text (a KeyError's key, a
+        # ValueError's value).
+        kind = type(error).__name__
+        message = bounded_text(shown_text(kind), INTERNAL_MESSAGE_MAX)
         try:
             import traceback
-            trace = traceback.format_exc()
+            trace = ("Traceback (most recent call last):\n" + "".join(traceback.format_tb(error.__traceback__))
+                     + "%s (text withheld)\n" % kind)
         except Exception:
             # D-PLY-38: with no descriptor left `traceback` cannot be read,
             # and that import's own failure used to replace the answer
             # below with nothing at all (the shell's `no_output`).
             trace = "%s (no traceback: it could not be loaded)\n" % message
-        sys.stderr.write(bounded_text(redact_urls(trace), INTERNAL_TRACE_MAX, keep_tail=True))
+        # D-SINK-110: through shown_lines, log()'s reading with the lines
+        # kept, so a control in it is read as the guide row reads it before
+        # the redaction and none reaches the journal.
+        sys.stderr.write(bounded_text(shown_lines(trace), INTERNAL_TRACE_MAX, keep_tail=True))
         emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": message}})
         return EXIT_ERROR
 

@@ -3,8 +3,8 @@ import {
   STATE_VERSION, SCOPE_RECENT, SCOPE_FAVORITES, MAX_HIDDEN_GROUPS, SEP
 } from "./build.mjs"
 import {
-  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey, tokenize,
-  channelId
+  str, storedText, asList, keyedMap, hasOwnKey, normalizeText, searchKey,
+  tokenize, channelId
 } from "./text.mjs"
 import {
   primaryGroup, rowGroup, groupSearchText
@@ -22,14 +22,14 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  stripSpace, scrubUrls, sinkText
+  stripSpace, urlAt, scrubUrls, sinkText, isControlCode
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
 } from "./epg.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, findSource, deriveLabel,
-  uniqueLabel, sameDay
+  labelKeySets, labelKeySetsAdd, uniqueLabelOver, sameDay
 } from "./sources.mjs"
 import {
   warnState, normalizeSourceRecord, activeKeyText
@@ -388,7 +388,8 @@ function storedInt(value) {
 
 // One stored record. A query that tokenizes to nothing is not a saved search.
 function savedSearchRecord(entry) {
-  if (!entry || typeof entry !== "object") return null
+  // D-STATE-6: a query that is not a string is no search (storedText's rule).
+  if (!entry || typeof entry !== "object" || typeof entry.query !== "string") return null
   var query = savedQueryCut(entry.query)
   if (savedSearchTerms(query).length === 0) return null
   return { query: query, at: storedInt(entry.at) }
@@ -489,6 +490,54 @@ function withMigrationPending(state, pending) {
 // and `session` all share (python mirror: `normalize_played`). A value
 // without an `id` is dropped, which is also how a state file written
 // before the key existed reads its missing `session` as null.
+// D-SINK-111 (the owner's decision of 2026-11-16, the owner's own and not
+// the standing authority): a channel id 0.18.0 or earlier made from a tvg-id
+// holding a credential -- `t:qqqqqq:zzzzzz@cdn.test`, 0.17.0's
+// `t:http://...` -- is DELETED on load from favorites and from the recents,
+// last-played and session records, by both state readers (the helper's
+// normalize_state is the mirror; the shared withheld-ids fixture holds both).
+// channelIdWithheld is the helper's channel_id_withheld: a `t:` id whose tail
+// the parse's tvg-id rule refuses (tvgIdRefused), and nothing else. No
+// current parse makes such an id (the row takes an `n:` or `u:` id), so the
+// guide never named it and the user could not remove it.
+//
+// tvgIdRefused is the helper's tvg_id_refused: a mark the redactors' reading
+// finds (url_mark_any: a `:` and two `/` with only controls between them,
+// or a URL urlAt reads), or a `:` with an `@` after it. Index walks: one
+// pass for the narrow mark (no control is a `:`, so the runs a colon scans
+// do not overlap), and urlAt's own linear reading.
+function tvgIdRefused(text) {
+  var s = str(text)
+  var colon = s.indexOf(":")
+  if (colon !== -1 && s.indexOf("@", colon + 1) !== -1) return true
+  for (var i = colon; i !== -1; i = s.indexOf(":", i + 1)) {
+    var j = i + 1
+    while (j < s.length && isControlCode(s.charCodeAt(j))) j++
+    if (j >= s.length || s.charCodeAt(j) !== 47) continue
+    j++
+    while (j < s.length && isControlCode(s.charCodeAt(j))) j++
+    if (j < s.length && s.charCodeAt(j) === 47) return true
+  }
+  return urlAt(s, 0) !== null
+}
+
+function channelIdWithheld(id) {
+  var s = typeof id === "string" ? id : ""
+  return s.substring(0, 2) === "t:" && tvgIdRefused(s.substring(2))
+}
+
+// The reader's played record: playedRecord's, unless its id is one
+// channelIdWithheld deletes on load (D-SINK-111). playedRecord itself is what
+// every writer builds with, and is unchanged.
+function loadedPlayedRecord(entry) {
+  // D-STATE-6: from a file, an id is a string or the record is none, and a
+  // name is a string or empty (storedText); the helper's normalize_played
+  // reads the same.
+  if (!entry || typeof entry !== "object" || typeof entry.id !== "string") return null
+  var rec = playedRecord({ id: entry.id, name: storedText(entry.name), at: entry.at })
+  return rec !== null && channelIdWithheld(rec.id) ? null : rec
+}
+
 function playedRecord(entry) {
   if (!entry || typeof entry !== "object" || !entry.id) return null
   // storedInt truncates toward zero, as python's int() does, and the shared
@@ -572,7 +621,7 @@ function parseState(text) {
     var rec = normalizeSourceRecord(srcs[s])
     if (!rec) {
       // Logged by key (D-SRC-09); a record without a usable key is silent.
-      var badKey = srcs[s] && typeof srcs[s] === "object" ? str(srcs[s].key) : ""
+      var badKey = srcs[s] && typeof srcs[s] === "object" ? storedText(srcs[s].key) : ""
       if (isSourceKey(badKey)) warnState("dropped source " + badKey + " (invalid url)")
       continue
     }
@@ -595,16 +644,35 @@ function parseState(text) {
     // Re-derived HERE rather than in normalizeSourceRecord, because
     // uniqueness is a property of the list and not of a record: two sources
     // on one host must not both come back as that host.
-    if (rec.labelCustom !== true) rec.label = uniqueLabel(deriveLabel(rec.url, rec.kind), state.sources)
+    //
+    // D-SINK-100 (2026-11-16, round 2 of the security review; the lead's
+    // call under the owner's standing authority of 2026-11-09): in a second
+    // pass, below, against EVERY typed label in the list wherever it is
+    // listed and every label placed before it, raw and as it reads
+    // (labelKeySets), so a stored derived label listed before a typed one
+    // that reads alike -- `cdn.test` above `http://qqqqqq:zzzzzz@cdn.test/
+    // a.m3u` -- becomes `cdn.test 2` once, at the next load, where it kept
+    // `cdn.test` beside a row that reads the same. Two typed labels stored
+    // alike stay alike until one is edited (a typed label is the user's and
+    // is never rewritten). One reading a label, so O(n) per load; the
+    // helper's normalize_state does the same.
     seenUrl[rec.url] = true
     seenKey[rec.key] = true
     state.sources.push(rec)
   }
+  var labelSets = labelKeySets(state.sources.filter(function (r) { return r.labelCustom === true }), "")
+  for (var p = 0; p < state.sources.length; p++) {
+    var placed = state.sources[p]
+    if (placed.labelCustom !== true) {
+      placed.label = uniqueLabelOver(deriveLabel(placed.url, placed.kind), labelSets)
+      labelKeySetsAdd(labelSets, placed.label)
+    }
+  }
   var favs = asList(parsed.favorites)
   if (favs.length > 0) {
     for (var i = 0; i < favs.length; i++) {
-      var id = str(favs[i])
-      if (id !== "" && state.favorites.indexOf(id) === -1) state.favorites.push(id)
+      var id = storedText(favs[i])  // D-STATE-6
+      if (id !== "" && !channelIdWithheld(id) && state.favorites.indexOf(id) === -1) state.favorites.push(id)
     }
   }
   // M3-01. Additive and optional like savedSearches below: a file without
@@ -626,10 +694,10 @@ function parseState(text) {
   if (pending !== null) state.migrationPending = pending
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
-    var entry = playedRecord(recs[r])
+    var entry = loadedPlayedRecord(recs[r])
     if (entry) state.recents.push(entry)
   }
-  state.lastPlayed = playedRecord(parsed.lastPlayed)
+  state.lastPlayed = loadedPlayedRecord(parsed.lastPlayed)
   // Saved searches. Additive and optional, on the same precedent as `session`
   // below: both readers whitelist the keys they know, so a file without this
   // reads as [] and an older build drops it rather than failing. De-duplicated
@@ -651,7 +719,7 @@ function parseState(text) {
   // section 8): optional, nullable, and no version bump - STATE_VERSION
   // stays 2 because both readers whitelist the keys they know, so a file
   // without it reads as null and a v0.2.0 build simply drops it.
-  state.session = playedRecord(parsed.session)
+  state.session = loadedPlayedRecord(parsed.session)
   return state
 }
 
@@ -1066,7 +1134,7 @@ function normalizeFailed(list) {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i]
     if (!r || typeof r !== "object") continue
-    var id = str(r.id)
+    var id = storedText(r.id)  // D-STATE-6: as the helper's normalize_failed
     var at = storedInt(r.at)
     if (id === "" || at <= 0) continue
     if (seen[id] === true) continue
@@ -1799,7 +1867,9 @@ function stateInitFound(text, exitCode, timedOut) {
     if (f === "absent") return "absent"
     // R25c: "folder-link", a link at the state FOLDER (or above it) that
     // leads nowhere, is the helper's word too and gets its own sentence.
-    if (f === "link" || f === "not-a-dir" || f === "folder-link") return f
+    // D-STATE-9 (2026-11-21): "split-link", a link the FileView's writer
+    // reads as text to another file than the one it reads, likewise.
+    if (f === "link" || f === "not-a-dir" || f === "folder-link" || f === "split-link") return f
     if (f === "file" || f === "other" || f === "unreadable") return "present"
     return "unknown"
   }
@@ -1853,7 +1923,7 @@ function stateLoadDecision(ctx) {
   // R24b: the helper named what is at the path, and that is the reason --
   // the folder-permission sentence "absent-unconfirmed" carries would send
   // the user to chmod a folder that is fine.
-  if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
+  if (found === "link" || found === "not-a-dir" || found === "folder-link" || found === "split-link") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
@@ -1863,6 +1933,10 @@ function stateLoadDecision(ctx) {
 // umask's, so a state.json the user put at the path at 0644, or one a save
 // created after a re-point, is made 0600 (and its folder 0700) within the
 // stub's start rather than at the next shell start. Argv only, no URL.
+// [2026-11-14, D-SINK-103: that start came about a quarter of a second
+// after the save landed, measured, and that was the window; the file is
+// now made 0600 BEFORE every write (statePrivateArgv), and this run is the
+// second layer.]
 function stateModeArgv(helperPath, stateDir) {
   return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "mode"])
 }
@@ -1886,6 +1960,60 @@ function stateModeReply(text) {
     return { folder: pick(o.folder), file: pick(o.file) }
   }
   return null
+}
+
+// D-SINK-103 (2026-11-14). The argv of the helper's `state private`, which
+// the service runs before EVERY write of state.json (Service.saveState's
+// "private" step): the FileView's atomic writer gives the new file the mode
+// the old one had, read when the write opens, and the umask's for a file it
+// creates -- measured, a 0644 file restored at the path, or one a link
+// points to in another folder, took every credential written after it at
+// 0644 until the after-save repair -- so the file is made 0600 FIRST.
+// Argv only, no URL.
+function statePrivateArgv(helperPath, stateDir) {
+  return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "private"])
+}
+
+// `state private`'s reply -> { ok: true, file } when the helper says
+// state.json IS 0600 now ("kept", "changed" or "created"), or
+// { ok: false, why } for anything else. FAIL CLOSED: the
+// service writes only on ok, so a refusal, a reply from another verb, a
+// file word it does not know, no reply at all (the watchdog stopped it, an
+// empty stub mid-update) and a non-zero exit are all `ok: false`. `why` is
+// the helper's own word when it refused ("not-a-file", "not-owned",
+// "unreachable", "unconfirmed", and since D-STATE-9 "split-link": a
+// state.json link the FileView's writer would save to another file than the
+// one it reads), "no-reply" otherwise; one fixed word, never a path or a
+// URL, for the journal line the service writes.
+var STATE_PRIVATE_FILE = ["kept", "changed", "created"]
+var STATE_PRIVATE_WHY = ["not-a-file", "not-owned", "unreachable", "unconfirmed", "split-link"]
+function statePrivateReply(text, exitCode) {
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.kind !== "state" || o.action !== "private") continue
+    if (o.ok === true && Number(exitCode) === 0 && STATE_PRIVATE_FILE.indexOf(str(o.file)) !== -1) {
+      return { ok: true, file: str(o.file) }
+    }
+    if (o.ok === false) return { ok: false, why: STATE_PRIVATE_WHY.indexOf(str(o.why)) !== -1 ? str(o.why) : "refused" }
+    return { ok: false, why: "no-reply" }
+  }
+  return { ok: false, why: "no-reply" }
+}
+
+// D-SINK-103: a load the service must not read as a state. When nothing is
+// at the path, `state private` creates state.json 0600 and EMPTY for the
+// write that follows, and a view that watches the folder may load that
+// file before the write lands (a missing file that appears reloads,
+// measured, the contract's FileView facts). Read as a state it is
+// "unparsed", the no-write mode mid-session, for a file the shell itself
+// made. So: true for a load that READ an empty text while the run is out
+// (`pending`) or after it answered `created` and before our write reports
+// (`created`); false for every other load, a failed one included.
+function statePrivateEcho(ctx) {
+  var c = ctx || {}
+  var r = c.result || {}
+  return (c.pending === true || c.created === true) && r.loaded === true && str(r.text) === ""
 }
 
 // The one gate every state write goes through (Service.saveState).
@@ -1913,13 +2041,17 @@ function stateWriteGate(ctx) {
 //   verifyDone    the call IS the verify's finish (or its watchdog's)
 //   writeTurn     the call is a deferred turn of saveState's own
 //   inFlight      one of our writes is still being reported on
-// -> "join"   the read in flight decides this save too
+//   privatePending D-SINK-103: `state private` is out for this save
+//   privateDone   the call IS that run's confirmed finish
+// -> "join"   the read (or the `state private` run) in flight decides this
+//             save too
 //    "park"   no state loaded or dirs not ready: held for the load
 //    "refuse" the no-write mode, and nothing a re-read can lift now
 //    "verify" reload state.json first and decide on what it finds
 //    "defer"  ask again from a turn of its own (Qt.callLater)
 //    "wait"   one of our writes is in flight: held until it lands (or
 //             fails), then asked again from a turn of its own, which reads
+//    "private" the read is done: make state.json 0600 first (D-SINK-103)
 //    "write"  issue the write now
 // Every write is asked for again from a turn of its own before it is
 // issued, because a setText inside stateFile's own onLoaded writes the file
@@ -1943,17 +2075,27 @@ function stateWriteGate(ctx) {
 // no load in that time and the save is written without its read, counted
 // and logged, as on 0.14.2 (D-SINK-22's window c, which R27a and R28a tried
 // to close and the lead's ruling leaves open, documented).
+// D-SINK-103 (2026-11-14): NO WRITE BEFORE THE FILE IS PRIVATE. The read's
+// finish no longer writes: it answers
+//    "private" ask the helper's `state private` to make state.json 0600
+//             (Model.statePrivateArgv), and write only on its reply
+// and the write is the reply's own finish (`privateDone`). While that run is
+// out (`privatePending`) every save joins it, as a save joins the read, so
+// the write that follows carries whatever memory holds by then. A refusal
+// at that finish (the no-write mode a load set meanwhile) is the run's own
+// answer, so it refuses rather than reading again.
 function stateSavePlan(ctx) {
   var c = ctx || {}
-  if (c.verifyPending === true) return "join"
+  if (c.verifyPending === true || c.privatePending === true) return "join"
   var gate = str(c.gate)
   if (gate === "park") return "park"
   if (gate === "refuse") {
-    if (str(c.blocked) === "init-timeout" || c.verifyDone === true || c.inHandler === true) return "refuse"
+    if (str(c.blocked) === "init-timeout" || c.verifyDone === true || c.privateDone === true || c.inHandler === true) return "refuse"
     return "verify"
   }
   if (gate !== "write") return "refuse"
-  if (c.verifyDone === true) return "write"
+  if (c.privateDone === true) return "write"
+  if (c.verifyDone === true) return "private"
   if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
   return "verify"
@@ -2007,6 +2149,10 @@ var STATE_BLOCK_TITLE_MID = "Saving has stopped"
 var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
 var STATE_BLOCK_UNSAVED = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
 var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
+// D-STATE-9 / D-STATE-11 (2026-11-21): what a split link IS, in one place,
+// for the start's no-write notice (stateUnreadableNotice) and for the notice
+// of a save refused over a file that loads (statePrivateRefusalNotice).
+var STATE_SPLIT_LINK_WHAT = "is a symbolic link that would be saved to a different file than the one it is read from, because a target on the way climbs with .. out of a folder that is itself a symbolic link, or is not UTF-8"
 function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
   var r = str(reason)
@@ -2038,6 +2184,17 @@ function stateUnreadableNotice(reason, path, midSession) {
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
     fix = "Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell."
+  } else if (r === "split-link") {
+    // D-STATE-9 (2026-11-21): the helper's `state init` names a state.json
+    // link whose relative target climbs with .. out of a folder that is
+    // itself a link: the shell's writer reads that .. as text and would save
+    // to another file than the one read. Or a target that is not UTF-8,
+    // which the writer reads with U+FFFD in it (the review of 2026-11-21,
+    // measured; this named only the .. and sent such a user to a fix that
+    // keeps the refusal). An absolute target in UTF-8 with no .. is read the
+    // same way by both.
+    what = STATE_SPLIT_LINK_WHAT
+    fix = "Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     // R27e left this one as it was: at a START the helper names a link that
     // leads nowhere itself ("link", "folder-link"), so the file it found and
@@ -2078,6 +2235,67 @@ function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
   return stateUnreadableNotice(reason, path, midSession === true).title
 }
+
+// D-STATE-11 (2026-11-21): a save `state private` REFUSED over a state.json
+// that LOADS. The no-write mode above is a load's answer, and a load over
+// such a file succeeds -- the kernel reads it fine -- so it never begins, and
+// until this the refusal was told only as the guide's "Could not write
+// state.json" line (sourcesPersistFailed's state_write_failed, shown only
+// while the guide is open) and a journal word. The helper's word names the
+// cause for three refusals that stay true while the shell runs and that the
+// user can fix while it runs (STATE_PRIVATE_TOLD):
+//   split-link  the shell's writer would save to another file than the one
+//               read (D-STATE-9's guard)
+//   not-owned   another account's file, which no chmod of ours can make
+//               private
+//   unconfirmed mode 600 could not be set and read back: a filesystem
+//               without Unix permissions (FAT, SMB, some FUSE mounts), or a
+//               chmod refused
+// and each gets this notice, once per failure episode (Service.qml
+// tellStateSaveRefused, statePrivateRefusalTell). Not told here, and why:
+// `not-a-file` and `unreachable` over a file that just loaded mean the path
+// changed between the save's read and the run, and the next read meets that
+// change and blocks with its own reason and the no-write notice, which names
+// what is there; `refused`, `no-reply`, `timeout` and `still-running` name no
+// cause at the path. The save is NOT a no-write block: every save still reads
+// and asks `state private`, and the helper refuses each while the cause
+// stands, so the first save after the fix confirms and writes everything
+// memory holds -- no restart, which would drop that. Hence a second sentence
+// of its own (STATE_REFUSED_UNSAVED), and a fix with no restart in it.
+var STATE_PRIVATE_TOLD = ["split-link", "not-owned", "unconfirmed"]
+var STATE_REFUSED_UNSAVED = "Sources, favorites and other changes made now are held in this session only: once this is fixed, the next change made here saves them all, without a restart, and they are dropped if the shell is stopped first."
+function statePrivateRefusalNotice(why, path) {
+  var w = str(why)
+  if (STATE_PRIVATE_TOLD.indexOf(w) === -1) return null
+  var file = str(path) !== "" ? str(path) : "state.json"
+  var what = STATE_SPLIT_LINK_WHAT
+  var fix = "Point it at the file that holds your state with an absolute path in UTF-8 that has no .. in it."
+  if (w === "not-owned") {
+    what = "belongs to another account, so it cannot be made private before a save"
+    fix = "Make your own account its owner with chown, run as root."
+  } else if (w === "unconfirmed") {
+    what = "could not be made private (mode 600) before a save"
+    fix = "Keep it, or the file its symbolic link points to, where its mode can be set to 600: not on a read-only mount, a FAT or SMB mount without Unix permissions or some FUSE mounts, and not marked immutable (chattr +i)."
+  }
+  return { title: STATE_BLOCK_TITLE_MID, body: file + " " + what + ". " + STATE_REFUSED_UNSAVED + " " + fix }
+}
+
+// The journal's line for that notice -- the title, then the body -- or ""
+// for a word that has none.
+function statePrivateRefusalJournal(why, path) {
+  var n = statePrivateRefusalNotice(why, path)
+  return n ? n.title + ": " + n.body : ""
+}
+
+// Whether a refusal is told now: its word has a notice and is not the word
+// already told in this failure episode (`told`, "" once a write lands). A
+// second save refused for the same cause is told nothing more; a refusal
+// for ANOTHER cause in the same episode (a link pointed at another
+// account's file, say) is told, and its card replaces the first.
+function statePrivateRefusalTell(why, told) {
+  var w = str(why)
+  return STATE_PRIVATE_TOLD.indexOf(w) !== -1 && w !== str(told)
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedQueryCut,
   savedSearchTerms, savedSearchHit, savedSearchCount, savedSearchChannels,
@@ -2086,15 +2304,16 @@ export {
   savedSearchDepartures, savedSearchFooter, withSavedSearch,
   withoutSavedSearch, STORED_DECIMAL, STORED_TEXT_MAX, storedInt,
   savedSearchRecord, emptyState, entryMigratedOf, withEntryMigrated,
-  migrationPendingOf, withMigrationPending, playedRecord, cloneState,
-  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
-  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
-  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  migrationPendingOf, withMigrationPending, tvgIdRefused, channelIdWithheld,
+  loadedPlayedRecord, playedRecord, cloneState, withCacheLayout, parseState,
+  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
+  recordPlayed, clearSession, stateSession, deadSessionVerdict,
+  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
   MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,
@@ -2102,8 +2321,12 @@ export {
   MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
   mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
   STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateModeArgv, stateInitArgv, stateModeReply, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  stateModeArgv, stateInitArgv, stateModeReply, statePrivateArgv,
+  STATE_PRIVATE_FILE, STATE_PRIVATE_WHY, statePrivateReply, statePrivateEcho,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, STATE_SPLIT_LINK_WHAT, stateUnreadableNotice,
+  stateUnreadableJournal, stateBlockedHeader, STATE_PRIVATE_TOLD,
+  STATE_REFUSED_UNSAVED, statePrivateRefusalNotice,
+  statePrivateRefusalJournal, statePrivateRefusalTell
 }

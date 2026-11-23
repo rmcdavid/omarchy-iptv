@@ -3,7 +3,7 @@ import {
   ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE, SEP
 } from "./build.mjs"
 import {
-  str, asList, fnv1a32
+  str, asList, keyedMap, fnv1a32
 } from "./text.mjs"
 import {
   emptyState, stateBlockedHeader
@@ -180,9 +180,29 @@ function trimEdgeSpace(text) {
 }
 
 // Unicode code points, not UTF-16 units (SR22: the label cap counts code
-// points in both languages).
+// points in both languages). D-SINK-118 (2026-11-16): an index walk that
+// reads a surrogate pair as one code point and keeps a lone surrogate as
+// itself, which is what Array.from gives in node. Qt 6.12's engine, which
+// runs the Sources form and the state reader, walked Array.from by UTF-16
+// unit, so the shell counted a character outside the Basic Multilingual
+// Plane as two: it refused a 64-character label holding one, which the
+// helper takes, and could cut a derived label between the halves of a pair.
 function codePoints(text) {
-  return Array.from(str(text))
+  var s = str(text)
+  var out = []
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      var d = s.charCodeAt(i + 1)
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        out.push(s.substring(i, i + 2))
+        i++
+        continue
+      }
+    }
+    out.push(s.charAt(i))
+  }
+  return out
 }
 
 function codePointLength(text) {
@@ -247,6 +267,16 @@ function sourceErrorMessage(code, opts) {
     // (a username may hold one, encoded into the query), so the URL's
     // sentence names it and the names' do not.
     url_control: innerCharSentence("URL", true),
+    // D-SINK-115 (2026-11-16): an authority the helper's URL library cannot
+    // read (readAuthority), under the code `invalid` as url_control is. A
+    // character that reads as `/`, `?`, `#`, `@` or `:` cannot be part of a
+    // host name; in a user name or password it is written as its own UTF-8
+    // escape, since `%3A` would send a different password (the critique's
+    // finding 4: a fullwidth colon is %EF%BC%9A, which reaches the server as
+    // that character). A bracket in a user name or password is %5B or %5D.
+    url_fold_host: "The host holds a character that cannot be part of a host name",
+    url_fold_userinfo: "Write a character that reads as /, ?, #, @ or : in a user name or password percent-encoded as its UTF-8 bytes (a fullwidth colon is %EF%BC%9A)",
+    url_bracket: "Write [ and ] in a user name or password as %5B and %5D",
     user_control: innerCharSentence("username", false),
     pass_control: innerCharSentence("password", false),
     relative_path: "Use an absolute path (starts with /, not ~)",
@@ -405,6 +435,186 @@ function isHostFormatCode(code) {
   return false
 }
 
+// D-SINK-116 (2026-11-16): what a host name may not hold because it draws
+// as nothing: Cf, Unicode's Default_Ignorable_Code_Point and stringprep's
+// B.1 (what nameprep maps to nothing), as [first, last], 26 ranges and
+// 4,207 code points. Cf alone (HOST_FORMAT_RANGES, which the label's fold
+// still asks) let through the combining grapheme joiner, the variation
+// selectors, the Hangul fillers and the Mongolian free variation
+// selectors, several of which the helper's idna codec maps to nothing, so
+// `cdn<U+034F>.test` was looked up as `cdn.test`, and drawn like it, as a
+// second source. The helper's HOST_INVISIBLE_RANGES is the same table; the
+// node suite holds it to \p{Cf}, \p{Default_Ignorable_Code_Point} and the
+// shared host-grammar fixture's B.1, the python suite to unicodedata's Cf,
+// stringprep's B.1 and the fixture's Default_Ignorable list.
+var HOST_INVISIBLE_RANGES = [[0x00ad, 0x00ad], [0x034f, 0x034f], [0x0600, 0x0605], [0x061c, 0x061c],
+  [0x06dd, 0x06dd], [0x070f, 0x070f], [0x0890, 0x0891], [0x08e2, 0x08e2], [0x115f, 0x1160],
+  [0x17b4, 0x17b5], [0x1806, 0x1806], [0x180b, 0x180f], [0x200b, 0x200f], [0x202a, 0x202e],
+  [0x2060, 0x206f], [0x3164, 0x3164], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xffa0, 0xffa0],
+  [0xfff0, 0xfffb], [0x110bd, 0x110bd], [0x110cd, 0x110cd], [0x13430, 0x1343f], [0x1bca0, 0x1bca3],
+  [0x1d173, 0x1d17a], [0xe0000, 0xe0fff]]
+
+function isHostInvisibleCode(code) {
+  for (var i = 0; i < HOST_INVISIBLE_RANGES.length; i++) {
+    if (code < HOST_INVISIBLE_RANGES[i][0]) return false
+    if (code <= HOST_INVISIBLE_RANGES[i][1]) return true
+  }
+  return false
+}
+
+// D-SINK-117 (2026-11-16): the ASCII a host NAME may hold -- a letter, a
+// digit, `-`, `.` or `_` -- an allowlist where the rule listed delimiters.
+// Both validators accepted, and the helper's connection layer handed on, a
+// name holding ! " $ ' ( ) * + , < > ^ ` { | } ~, which no DNS name holds,
+// written as itself or as a compatibility character the fold reads as one
+// (U+2474 reads `(1)`). The helper's HOST_NAME_ASCII is the same set; the
+// shared host-grammar fixture holds both over every ASCII character and
+// every code point that folds to one outside it (301).
+function isHostNameAscii(code) {
+  return (code >= 0x30 && code <= 0x39) || (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a) ||
+    code === 0x2d || code === 0x2e || code === 0x5f
+}
+
+// D-SINK-119 (2026-11-16): the code points whose NFKC form is not themselves,
+// as [first, last], 256 ranges and 4,965 code points: node 26 (Unicode 17.0)
+// and Python 3.14 (16.0) answer the same set but for U+A7F1, which Unicode 17
+// assigned and folds to `S`, so the table is their union, and the TABLE is the
+// rule, never the engine's normalize (Qt's engine is held to it by the
+// host-grammar suite on the dev branch). A host name holding one is a
+// look-alike of the name it folds to, which the helper's idna codec writes it
+// as and, since D-SINK-119, fetches from. The helper's HOST_NFKC_RANGES is the
+// same table, held to it by the shared host-grammar fixture. Sorted.
+var HOST_NFKC_RANGES = [
+  [0x00a0, 0x00a0], [0x00a8, 0x00a8], [0x00aa, 0x00aa], [0x00af, 0x00af], [0x00b2, 0x00b5], [0x00b8, 0x00ba],
+  [0x00bc, 0x00be], [0x0132, 0x0133], [0x013f, 0x0140], [0x0149, 0x0149], [0x017f, 0x017f], [0x01c4, 0x01cc],
+  [0x01f1, 0x01f3], [0x02b0, 0x02b8], [0x02d8, 0x02dd], [0x02e0, 0x02e4], [0x0340, 0x0341], [0x0343, 0x0344],
+  [0x0374, 0x0374], [0x037a, 0x037a], [0x037e, 0x037e], [0x0384, 0x0385], [0x0387, 0x0387], [0x03d0, 0x03d6],
+  [0x03f0, 0x03f2], [0x03f4, 0x03f5], [0x03f9, 0x03f9], [0x0587, 0x0587], [0x0675, 0x0678], [0x0958, 0x095f],
+  [0x09dc, 0x09dd], [0x09df, 0x09df], [0x0a33, 0x0a33], [0x0a36, 0x0a36], [0x0a59, 0x0a5b], [0x0a5e, 0x0a5e],
+  [0x0b5c, 0x0b5d], [0x0e33, 0x0e33], [0x0eb3, 0x0eb3], [0x0edc, 0x0edd], [0x0f0c, 0x0f0c], [0x0f43, 0x0f43],
+  [0x0f4d, 0x0f4d], [0x0f52, 0x0f52], [0x0f57, 0x0f57], [0x0f5c, 0x0f5c], [0x0f69, 0x0f69], [0x0f73, 0x0f73],
+  [0x0f75, 0x0f79], [0x0f81, 0x0f81], [0x0f93, 0x0f93], [0x0f9d, 0x0f9d], [0x0fa2, 0x0fa2], [0x0fa7, 0x0fa7],
+  [0x0fac, 0x0fac], [0x0fb9, 0x0fb9], [0x10fc, 0x10fc], [0x1d2c, 0x1d2e], [0x1d30, 0x1d3a], [0x1d3c, 0x1d4d],
+  [0x1d4f, 0x1d6a], [0x1d78, 0x1d78], [0x1d9b, 0x1dbf], [0x1e9a, 0x1e9b], [0x1f71, 0x1f71], [0x1f73, 0x1f73],
+  [0x1f75, 0x1f75], [0x1f77, 0x1f77], [0x1f79, 0x1f79], [0x1f7b, 0x1f7b], [0x1f7d, 0x1f7d], [0x1fbb, 0x1fbb],
+  [0x1fbd, 0x1fc1], [0x1fc9, 0x1fc9], [0x1fcb, 0x1fcb], [0x1fcd, 0x1fcf], [0x1fd3, 0x1fd3], [0x1fdb, 0x1fdb],
+  [0x1fdd, 0x1fdf], [0x1fe3, 0x1fe3], [0x1feb, 0x1feb], [0x1fed, 0x1fef], [0x1ff9, 0x1ff9], [0x1ffb, 0x1ffb],
+  [0x1ffd, 0x1ffe], [0x2000, 0x200a], [0x2011, 0x2011], [0x2017, 0x2017], [0x2024, 0x2026], [0x202f, 0x202f],
+  [0x2033, 0x2034], [0x2036, 0x2037], [0x203c, 0x203c], [0x203e, 0x203e], [0x2047, 0x2049], [0x2057, 0x2057],
+  [0x205f, 0x205f], [0x2070, 0x2071], [0x2074, 0x208e], [0x2090, 0x209c], [0x20a8, 0x20a8], [0x2100, 0x2103],
+  [0x2105, 0x2107], [0x2109, 0x2113], [0x2115, 0x2116], [0x2119, 0x211d], [0x2120, 0x2122], [0x2124, 0x2124],
+  [0x2126, 0x2126], [0x2128, 0x2128], [0x212a, 0x212d], [0x212f, 0x2131], [0x2133, 0x2139], [0x213b, 0x2140],
+  [0x2145, 0x2149], [0x2150, 0x217f], [0x2189, 0x2189], [0x222c, 0x222d], [0x222f, 0x2230], [0x2329, 0x232a],
+  [0x2460, 0x24ea], [0x2a0c, 0x2a0c], [0x2a74, 0x2a76], [0x2adc, 0x2adc], [0x2c7c, 0x2c7d], [0x2d6f, 0x2d6f],
+  [0x2e9f, 0x2e9f], [0x2ef3, 0x2ef3], [0x2f00, 0x2fd5], [0x3000, 0x3000], [0x3036, 0x3036], [0x3038, 0x303a],
+  [0x309b, 0x309c], [0x309f, 0x309f], [0x30ff, 0x30ff], [0x3131, 0x318e], [0x3192, 0x319f], [0x3200, 0x321e],
+  [0x3220, 0x3247], [0x3250, 0x327e], [0x3280, 0x33ff], [0xa69c, 0xa69d], [0xa770, 0xa770], [0xa7f1, 0xa7f4],
+  [0xa7f8, 0xa7f9], [0xab5c, 0xab5f], [0xab69, 0xab69], [0xf900, 0xfa0d], [0xfa10, 0xfa10], [0xfa12, 0xfa12],
+  [0xfa15, 0xfa1e], [0xfa20, 0xfa20], [0xfa22, 0xfa22], [0xfa25, 0xfa26], [0xfa2a, 0xfa6d], [0xfa70, 0xfad9],
+  [0xfb00, 0xfb06], [0xfb13, 0xfb17], [0xfb1d, 0xfb1d], [0xfb1f, 0xfb36], [0xfb38, 0xfb3c], [0xfb3e, 0xfb3e],
+  [0xfb40, 0xfb41], [0xfb43, 0xfb44], [0xfb46, 0xfbb1], [0xfbd3, 0xfd3d], [0xfd50, 0xfd8f], [0xfd92, 0xfdc7],
+  [0xfdf0, 0xfdfc], [0xfe10, 0xfe19], [0xfe30, 0xfe44], [0xfe47, 0xfe52], [0xfe54, 0xfe66], [0xfe68, 0xfe6b],
+  [0xfe70, 0xfe72], [0xfe74, 0xfe74], [0xfe76, 0xfefc], [0xff01, 0xffbe], [0xffc2, 0xffc7], [0xffca, 0xffcf],
+  [0xffd2, 0xffd7], [0xffda, 0xffdc], [0xffe0, 0xffe6], [0xffe8, 0xffee], [0x10781, 0x10785], [0x10787, 0x107b0],
+  [0x107b2, 0x107ba], [0x1ccd6, 0x1ccf9], [0x1d15e, 0x1d164], [0x1d1bb, 0x1d1c0], [0x1d400, 0x1d454], [0x1d456, 0x1d49c],
+  [0x1d49e, 0x1d49f], [0x1d4a2, 0x1d4a2], [0x1d4a5, 0x1d4a6], [0x1d4a9, 0x1d4ac], [0x1d4ae, 0x1d4b9], [0x1d4bb, 0x1d4bb],
+  [0x1d4bd, 0x1d4c3], [0x1d4c5, 0x1d505], [0x1d507, 0x1d50a], [0x1d50d, 0x1d514], [0x1d516, 0x1d51c], [0x1d51e, 0x1d539],
+  [0x1d53b, 0x1d53e], [0x1d540, 0x1d544], [0x1d546, 0x1d546], [0x1d54a, 0x1d550], [0x1d552, 0x1d6a5], [0x1d6a8, 0x1d7cb],
+  [0x1d7ce, 0x1d7ff], [0x1e030, 0x1e06d], [0x1ee00, 0x1ee03], [0x1ee05, 0x1ee1f], [0x1ee21, 0x1ee22], [0x1ee24, 0x1ee24],
+  [0x1ee27, 0x1ee27], [0x1ee29, 0x1ee32], [0x1ee34, 0x1ee37], [0x1ee39, 0x1ee39], [0x1ee3b, 0x1ee3b], [0x1ee42, 0x1ee42],
+  [0x1ee47, 0x1ee47], [0x1ee49, 0x1ee49], [0x1ee4b, 0x1ee4b], [0x1ee4d, 0x1ee4f], [0x1ee51, 0x1ee52], [0x1ee54, 0x1ee54],
+  [0x1ee57, 0x1ee57], [0x1ee59, 0x1ee59], [0x1ee5b, 0x1ee5b], [0x1ee5d, 0x1ee5d], [0x1ee5f, 0x1ee5f], [0x1ee61, 0x1ee62],
+  [0x1ee64, 0x1ee64], [0x1ee67, 0x1ee6a], [0x1ee6c, 0x1ee72], [0x1ee74, 0x1ee77], [0x1ee79, 0x1ee7c], [0x1ee7e, 0x1ee7e],
+  [0x1ee80, 0x1ee89], [0x1ee8b, 0x1ee9b], [0x1eea1, 0x1eea3], [0x1eea5, 0x1eea9], [0x1eeab, 0x1eebb], [0x1f100, 0x1f10a],
+  [0x1f110, 0x1f12e], [0x1f130, 0x1f14f], [0x1f16a, 0x1f16c], [0x1f190, 0x1f190], [0x1f200, 0x1f202], [0x1f210, 0x1f23b],
+  [0x1f240, 0x1f248], [0x1f250, 0x1f251], [0x1fbf0, 0x1fbf9], [0x2f800, 0x2fa1d]]
+
+function isHostNfkcCode(code) {
+  var lo = 0
+  var hi = HOST_NFKC_RANGES.length - 1
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1
+    if (code < HOST_NFKC_RANGES[mid][0]) hi = mid - 1
+    else if (code > HOST_NFKC_RANGES[mid][1]) lo = mid + 1
+    else return true
+  }
+  return false
+}
+
+// D-SINK-119: does `s` hold a code point of HOST_NFKC_RANGES? A surrogate pair
+// is read as the code point it encodes.
+function hostHoldsNfkcChange(s) {
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i)
+    if (c < 0x80) continue
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      var d = s.charCodeAt(i + 1)
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        c = 0x10000 + (c - 0xd800) * 0x400 + (d - 0xdc00)
+        i++
+      }
+    }
+    if (isHostNfkcCode(c)) return true
+  }
+  return false
+}
+
+// D-SINK-119, the owner's decision of 2026-11-17 ("refuse and drop"): the
+// code points the helper's idna codec writes as ANOTHER name, as
+// [first, last], 14 ranges and 67 code points: every code point the rules
+// above accept in a host name whose nameprep form (stringprep's B.2 case
+// folding, then NFKC under Unicode 3.2) differs from its form as lowerHost
+// writes it. All are case folds NFKC leaves alone: U+00DF and U+1E9E become
+// `ss`, U+0345 becomes U+03B9, U+03C2 becomes U+03C3, and the 63 Greek
+// letters with a subscript or adscript iota (U+1F80 to U+1FFC) become two
+// letters, so `stra<U+00DF>e.test` was shown in Sources while the first hop
+// sent its credentials to `strasse.test`. The capital sigma is not one
+// (lowerHost folds it to U+03C3, which nameprep leaves alone). Per code
+// point, as HOST_NFKC_RANGES is: a sequence that composes is kept. Node has
+// no nameprep, so the helper's suite recomputes the table from Python's;
+// the helper's HOST_CASE_FOLD_RANGES is the same table, held to it by the
+// shared host-grammar fixture here and in Qt's engine. Sorted.
+var HOST_CASE_FOLD_RANGES = [
+  [0x00df, 0x00df], [0x0345, 0x0345], [0x03c2, 0x03c2], [0x1e9e, 0x1e9e], [0x1f80, 0x1faf], [0x1fb2, 0x1fb4],
+  [0x1fb7, 0x1fb7], [0x1fbc, 0x1fbc], [0x1fc2, 0x1fc4], [0x1fc7, 0x1fc7], [0x1fcc, 0x1fcc], [0x1ff2, 0x1ff4],
+  [0x1ff7, 0x1ff7], [0x1ffc, 0x1ffc]]
+
+function isHostCaseFoldCode(code) {
+  if (code < 0xdf || code > 0x1ffc) return false
+  for (var i = 0; i < HOST_CASE_FOLD_RANGES.length; i++) {
+    if (code < HOST_CASE_FOLD_RANGES[i][0]) return false
+    if (code <= HOST_CASE_FOLD_RANGES[i][1]) return true
+  }
+  return false
+}
+
+// D-SINK-119: does `s` hold a code point of HOST_CASE_FOLD_RANGES? All of
+// them are in the BMP, so a code unit is the code point it would be read as.
+function hostHoldsCaseFold(s) {
+  for (var i = 0; i < s.length; i++) {
+    if (isHostCaseFoldCode(s.charCodeAt(i))) return true
+  }
+  return false
+}
+
+// D-SINK-115 (2026-11-16): the code points whose compatibility form holds
+// `/`, `?`, `#`, `@` or `:` -- the same 19 under NFKC and NFKD in node 26
+// (Unicode 17.0), Python 3.14 (16.0) and Qt 6.12's engine. The helper's URL
+// library (urlsplit's _checknetloc) refuses an authority holding one
+// anywhere, so readAuthority refuses one first. The helper's
+// DELIMITER_FOLDS is the same table, held to it by the shared host-grammar
+// fixture.
+var DELIMITER_FOLDS = [0x2047, 0x2048, 0x2049, 0x2100, 0x2101, 0x2105, 0x2106, 0x2a74, 0xfe13, 0xfe16,
+  0xfe55, 0xfe56, 0xfe5f, 0xfe6b, 0xff03, 0xff0f, 0xff1a, 0xff1f, 0xff20]
+
+// D-SINK-115: the sentence each of readAuthority's told refusals carries
+// (sourceErrorMessage), under the code `invalid` as R33b's url_control is.
+// D-SINK-119, the owner's decision of 2026-11-17: `case_fold`, a host name
+// the helper's idna codec writes as another, shares fold_host's sentence --
+// the character cannot be part of a host name.
+var AUTHORITY_MESSAGE_CODES = { fold_host: "url_fold_host", fold_userinfo: "url_fold_userinfo", bracket: "url_bracket",
+  case_fold: "url_fold_host" }
+
 // One index walk over the code units, a surrogate pair read as the one code
 // point it is (a lone surrogate is none of the rule's), so linear (D-PERF-3).
 //
@@ -445,15 +655,26 @@ function hostNameRefused(host) {
   var s = str(host)
   if (hostNameRefusedAsWritten(s)) return true
   if (!NON_ASCII_RE.test(s)) return false
+  // D-SINK-119: a look-alike of the name its NFKC form spells.
+  if (hostHoldsNfkcChange(s)) return true
+  // D-SINK-119, the owner's decision of 2026-11-17: a name the helper's
+  // idna codec writes as another by its case folding. Asked as written: the
+  // fold produces none of them from a code point no table refuses.
+  if (hostHoldsCaseFold(s)) return true
   var folded = s.normalize("NFKD")
   return folded !== s && hostNameRefusedAsWritten(folded)
 }
 
+// D-SINK-116 and D-SINK-117: an ASCII character outside isHostNameAscii
+// (the colon among them: this name never carries a port), the reader's
+// whitespace, or an invisible code point (isHostInvisibleCode).
 function hostNameRefusedAsWritten(s) {
   for (var i = 0; i < s.length; i++) {
     var c = s.charCodeAt(i)
-    if (c === 0x40 || c === 0x25 || c === 0x3b || c === 0x3d || c === 0x26 || c === 0x3a || c === 0x5b || c === 0x5d ||
-      c === 0x5c) return true
+    if (c < 0x80) {
+      if (!isHostNameAscii(c)) return true
+      continue
+    }
     if (isUrlSpaceAt(s, i)) return true
     if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
       var d = s.charCodeAt(i + 1)
@@ -462,7 +683,7 @@ function hostNameRefusedAsWritten(s) {
         i++
       }
     }
-    if (isHostFormatCode(c)) return true
+    if (isHostInvisibleCode(c)) return true
   }
   return false
 }
@@ -672,6 +893,25 @@ function looksLikeHost(text) {
   return /[.:]/.test(str(text).split("/")[0])
 }
 
+// D-SINK-118 (2026-11-16, round 5 of the security review): a host is
+// lowered by lowerHost, which folds the capital sigma (U+03A3) to the small
+// one (U+03C3) before it lowers. Qt 6.12's engine, which runs the Sources
+// form and the state reader, applies no Final_Sigma rule, so it lowered a
+// capital sigma the rule reads as final (alpha, capital sigma, then -1.test)
+// to the small sigma, where node and the helper's str.lower gave the final
+// one (U+03C2): the form stored one
+// spelling and the command line the other, two sources for one address.
+// Folded first, every engine gives U+03C3. A final sigma WRITTEN as one
+// stays one, and no comparison folds it (hostKey included). The helper's
+// lower_host is the mirror; the shared host-grammar fixture holds both.
+var CAPITAL_SIGMA = String.fromCharCode(0x3a3)
+var SMALL_SIGMA = String.fromCharCode(0x3c3)
+
+function lowerHost(text) {
+  var s = str(text)
+  return (s.indexOf(CAPITAL_SIGMA) === -1 ? s : s.split(CAPITAL_SIGMA).join(SMALL_SIGMA)).toLowerCase()
+}
+
 function validateSourceUrl(text, opts) {
   var o = opts || {}
   var field = o.kind === "epg" ? "epg" : "playlist"
@@ -728,12 +968,20 @@ function validateSourceUrl(text, opts) {
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
   if (s === "." || s === ".." || s.indexOf("./") === 0 || s.indexOf("../") === 0) return fail("relative_path")
-  // [\s\S] rather than `.`: a line separator (U+2028 / U+2029) inside an
-  // http URL is whitespace (`invalid`), not a missing scheme (D-SRC-06).
-  var m = s.match(/^([A-Za-z][A-Za-z0-9+.-]*):([\s\S]*)$/)
-  if (!m) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
-  var scheme = m[1].toLowerCase()
-  var rest = m[2]
+  // D-SINK-118 (2026-11-16): the scheme is the text before the first `:`,
+  // split by index and its name tested alone, which is the helper's
+  // _SOURCE_SCHEME_RE's set (the name's class holds no `:`). A pattern read
+  // the rest as `([\s\S]*)`, and Qt 6.12's engine does not match U+180E
+  // with that union (measured: `\s`, `\S`, `[^\s]` and `.` each read it as
+  // node does), so the Sources form refused an address holding one as
+  // having no scheme and the state reader dropped such a source, which the
+  // helper accepts. A line separator (U+2028 / U+2029) inside an http URL is
+  // still whitespace (`invalid`, D-SRC-06), refused below.
+  var colon = s.indexOf(":")
+  var head = colon === -1 ? "" : s.substring(0, colon)
+  if (colon === -1 || !/^[A-Za-z][A-Za-z0-9+.-]*$/.test(head)) return fail(looksLikeHost(s) ? "scheme" : "relative_path")
+  var scheme = head.toLowerCase()
+  var rest = s.substring(colon + 1)
   if (scheme === "file") {
     if (rest.indexOf("//") !== 0) return invalid()
     var after = cutQueryAndFragment(rest.substring(2))
@@ -754,44 +1002,19 @@ function validateSourceUrl(text, opts) {
   // were already refused above), so a tab in a password is `invalid` here
   // and not the password `pass`.
   if (urlSpaceIndex(rest) !== -1) return innerChar()
-  var body = rest.substring(2)
-  var cut = body.search(/[\/?#]/)
-  var authority = cut === -1 ? body : body.substring(0, cut)
-  var tail = cut === -1 ? "" : body.substring(cut)
-  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return invalid()
-  var userinfo = ""
-  var hostport = authority
-  var at = authority.lastIndexOf("@")
-  if (at !== -1) {
-    userinfo = authority.substring(0, at)
-    hostport = authority.substring(at + 1)
-  }
-  var host = ""
-  var port = ""
-  if (hostport.charAt(0) === "[") {
-    var close = hostport.indexOf("]")
-    if (close === -1) return invalid()
-    host = hostport.substring(0, close + 1)
-    if (!isIpv6Literal(host)) return invalid()
-    var afterHost = hostport.substring(close + 1)
-    if (afterHost !== "") {
-      if (afterHost.charAt(0) !== ":") return invalid()
-      port = afterHost.substring(1)
+  var read = readAuthority(rest.substring(2))
+  if (!read.ok) {
+    if (read.why === "fold_host" || read.why === "fold_userinfo" || read.why === "bracket" || read.why === "case_fold") {
+      var told = fail("invalid")
+      told.message = sourceErrorMessage(AUTHORITY_MESSAGE_CODES[read.why], { field: field })
+      return told
     }
-  } else {
-    var colon = hostport.lastIndexOf(":")
-    host = colon === -1 ? hostport : hostport.substring(0, colon)
-    port = colon === -1 ? "" : hostport.substring(colon + 1)
-    // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
-    if (/[:\[\]]/.test(host) || hostNameRefused(host)) return invalid()
+    return invalid()
   }
-  if (host === "") return invalid()
-  host = host.toLowerCase()
-  if (port !== "") {
-    if (!/^[0-9]+$/.test(port)) return invalid()
-    port = port.replace(/^0+(?=[0-9])/, "")
-    if (Number(port) > 65535) return invalid()
-  }
+  var userinfo = read.userinfo
+  var host = read.host
+  var port = read.port
+  var tail = read.tail
   if ((scheme === "http" && port === "80") || (scheme === "https" && port === "443")) port = ""
   var hash = tail.indexOf("#")
   if (hash !== -1) tail = tail.substring(0, hash)
@@ -800,7 +1023,99 @@ function validateSourceUrl(text, opts) {
   var query = q === -1 ? "" : tail.substring(q + 1)
   if (path === "") path = "/"
   var url = scheme + "://" + (userinfo !== "" ? userinfo + "@" : "") + host + (port !== "" ? ":" + port : "") + path + (query !== "" ? "?" + query : "")
+  // D-SINK-115, the critique's finding 8: the cap is the STORED url's as
+  // well as the text's. Lowering lengthens a host (U+0130 lowers to `i` and
+  // U+0307), so a host of 1,100 of them was accepted at 1,113 units, stored
+  // at 2,213, and dropped as too long by both state readers at the next
+  // load. The helper's validate_source_url judges the same.
+  if (url.length > MAX_SOURCE_URL) return fail("too_long")
   return pass("http", url, host)
+}
+
+// D-SINK-115 (2026-11-16): the one reading of an http(s) URL's authority,
+// which validateSourceUrl asks (and the logo reading on the dev branch
+// after it): `body` is the text after `scheme://`, its whitespace and
+// controls already refused. -> { ok, why, userinfo, host, port, tail }:
+// `host` lower-cased (an IPv6 literal with its brackets), `port` without
+// its leading zeros ("" for none), `tail` from the first `/`, `?` or `#`
+// on; `why` one of "char", "fold_host", "fold_userinfo", "bracket",
+// "literal_open", "literal", "literal_after", "case_fold", "host", "empty",
+// "port_text", "port_range" when not ok. The helper's read_authority is the same
+// reading, held to it by the shared source-urls and host-grammar fixtures.
+// It refuses what the helper's URL library refuses to read, which both
+// validators accepted until then and every fetch then ended as an internal
+// error quoting the authority, user information included: a code point
+// whose compatibility form is `/`, `?`, `#`, `@` or `:` anywhere in the
+// authority (DELIMITER_FOLDS); a `[` or `]` in the user information unless
+// the host is a bracketed literal; and a bracketed host that is no IPv6
+// address (isIpv6Literal's characters and zone, then parseIpv6Groups of
+// the text before the zone). And, the owner's decision of 2026-11-17
+// (D-SINK-119), a host name the helper's idna codec case-folds into
+// another name, `case_fold`, whose sentence the Sources form shares with
+// `fold_host`. The authority ends at the first ASCII `/`,
+// `?` or `#`, and its user information at the LAST `@` within it (R32a).
+function readAuthority(body) {
+  var b = str(body)
+  var cut = -1
+  for (var k = 0; k < b.length; k++) {
+    var e = b.charCodeAt(k)
+    if (e === 0x2f || e === 0x3f || e === 0x23) { cut = k; break }
+  }
+  var authority = cut === -1 ? b : b.substring(0, cut)
+  var tail = cut === -1 ? "" : b.substring(cut)
+  function refused(why) {
+    return { ok: false, why: why, userinfo: "", host: "", port: "", tail: tail }
+  }
+  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return refused("char")
+  var at = authority.lastIndexOf("@")
+  // Every DELIMITER_FOLDS code point is outside ASCII, so an authority that
+  // is all ASCII holds none and is not walked for one, as the helper's
+  // read_authority skips its walk (D-SINK-112, the logo bound, 2026-11-17).
+  if (NON_ASCII_RE.test(authority)) {
+    for (var i = 0; i < authority.length; i++) {
+      if (DELIMITER_FOLDS.indexOf(authority.charCodeAt(i)) !== -1) return refused(i < at ? "fold_userinfo" : "fold_host")
+    }
+  }
+  var userinfo = at === -1 ? "" : authority.substring(0, at)
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  var host = ""
+  var port = ""
+  var bracketed = hostport.charAt(0) === "["
+  if (bracketed) {
+    var close = hostport.indexOf("]")
+    if (close === -1) return refused("literal_open")
+    host = hostport.substring(0, close + 1)
+    if (!isIpv6Literal(host) || parseIpv6Groups(host.substring(1, close).split("%")[0].toLowerCase()) === null) return refused("literal")
+    var afterHost = hostport.substring(close + 1)
+    if (afterHost !== "") {
+      if (afterHost.charAt(0) !== ":") return refused("literal_after")
+      port = afterHost.substring(1)
+    }
+  } else {
+    var colon = hostport.lastIndexOf(":")
+    host = colon === -1 ? hostport : hostport.substring(0, colon)
+    port = colon === -1 ? "" : hostport.substring(colon + 1)
+    // D-SINK-119, the owner's decision of 2026-11-17: a name the helper's
+    // idna codec writes as another says so (case_fold), as the helper's
+    // read_authority does; hostNameRefused refuses it too, so this decides
+    // the sentence, never the verdict.
+    if (NON_ASCII_RE.test(host) && hostHoldsCaseFold(host)) return refused("case_fold")
+    // D-SINK-86: and a name holding what no name may hold (hostNameRefused).
+    if (/[:\[\]]/.test(host) || hostNameRefused(host)) return refused("host")
+  }
+  if (!bracketed && (userinfo.indexOf("[") !== -1 || userinfo.indexOf("]") !== -1)) return refused("bracket")
+  if (host === "") return refused("empty")
+  if (port !== "") {
+    for (var j = 0; j < port.length; j++) {
+      var d = port.charCodeAt(j)
+      if (d < 0x30 || d > 0x39) return refused("port_text")
+    }
+    port = port.replace(/^0+(?=[0-9])/, "")
+    if (Number(port) > 65535) return refused("port_range")
+  }
+  // D-SINK-118: lowered as every host is (lowerHost), so this engine and
+  // the helper store one spelling.
+  return { ok: true, why: "", userinfo: userinfo, host: lowerHost(host), port: port, tail: tail }
 }
 
 // Normalized identity of an accepted URL, "" when it does not validate.
@@ -963,10 +1278,12 @@ function hostClass(host) {
 }
 
 // host_key: what "the same host" compares -- IPv4 dotted, IPv6 exploded
-// (eight four-digit groups), a name case-folded with one trailing dot
-// dropped.
+// (eight four-digit groups), a name lowered by lowerHost with one trailing
+// dot dropped. D-SINK-118: a final sigma written as one is NOT folded to
+// the small sigma, as the helper's host_key does not fold it: the player
+// asks a name holding either as its own bytes (the critique's finding 3).
 function hostKey(host) {
-  var text = str(host).trim().toLowerCase()
+  var text = lowerHost(str(host).trim())
   var lit = ipLiteral(text)
   if (lit !== null) {
     if (lit.v === 4) return [Math.floor(lit.n / 16777216), Math.floor(lit.n / 65536) % 256, Math.floor(lit.n / 256) % 256, lit.n % 256].join(".")
@@ -1044,7 +1361,7 @@ function absorbedAttribute(text) {
 // `http://USER:...`, whose host is the USERNAME; a dotted username reads as
 // a dotted host and is looked up and named as before (the review's F12). A guide hint on such a host is no hint at all (epgHintVerdict,
 // the playlist's own host excepted) and a logo on one is no host
-// (logoHost), so the username reaches neither the resolver nor the Sources
+// (logoContactHost), so the username reaches neither the resolver nor the Sources
 // row nor the consent dialog. The cost, stated: a single-label guide host
 // off the playlist's host and every single-label logo host are refused,
 // `localhost` and an all-digit or `0x` host (`2130706433`) among them.
@@ -1224,8 +1541,8 @@ function epgHintVerdict(meta, playlistUrl) {
   // D-SINK-83: a host of one DNS label (dotlessHost) is no hint
   // at all unless it is the playlist's own host (hostKey equal; the port is
   // not compared here). NOT a refusal, and that is the choice: the refusal
-  // sentences print this host (epgHintRowText: "... not used: <host> is a
-  // local address", "... its address for <host> carries a password"), and
+  // sentences printed this host until D-SINK-113 (2026-11-16; epgHintRowText
+  // names none now), and
   // a one-label host is most likely the USERNAME of a URL cut at a space in
   // its userinfo, so the row says nothing of the hint rather than naming
   // it. First, before the userinfo test, for the same reason: a cut that
@@ -1271,10 +1588,12 @@ function epgHintUrl(meta, playlistUrl) {
 function resolveEpgUrl(opts) {
   var o = opts || {}
   var user = str(o.userUrl)
-  if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: hostOf(user), fromPlaylist: false }
+  // D-SINK-109: `host` is printed (the guide's status when the service
+  // stops a fetch at its time limit), so it is the shown host.
+  if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: sourceShownHost(user), fromPlaylist: false }
   var hint = epgHintUrl({ epgUrlHint: o.hint }, o.playlistUrl)
   if (hint === "") return { url: "", origin: EPG_ORIGIN_NONE, host: "", fromPlaylist: false }
-  return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: hostOf(hint), fromPlaylist: true }
+  return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: sourceShownHost(hint), fromPlaylist: true }
 }
 
 // D-SINK-40. What the active Sources row says about the playlist's guide
@@ -1429,11 +1748,14 @@ function sourceCacheDir(cacheDir, key) {
 // reader that stops at `:` alone prints the parameter wherever it prints the
 // host. One function, shared by every reader that derives a printable host
 // from a URL's authority -- hostPortOf (the Sources row and its default
-// label) and logoHost in model/logos.mjs (the consent dialog) -- so the rule
-// has one copy per mirror; the helper's is `cut_host_params`. The `:` port
-// is NOT cut here: hostPortOf keeps it and logoHost drops it, each in its
-// own line, and a bracketed literal is unaffected because none of the three
-// can appear inside the brackets. Validation is unchanged (D-SINK-27).
+// label) -- so the rule has one copy per mirror; the helper's is
+// `cut_host_params`. The `:` port is NOT cut here: hostPortOf keeps it, and
+// a bracketed literal is unaffected because none of the three can appear
+// inside the brackets. Validation is unchanged (D-SINK-27). The consent
+// dialog's reader (logoHost in model/logos.mjs) cut here too until
+// D-SINK-112 (2026-11-16): a logo is now read by logoContactHost, which
+// counts no host holding one of the three, as no host name may since
+// D-SINK-86.
 function cutHostParams(hostport) {
   var s = str(hostport)
   var end = s.search(/[;=&]/)
@@ -1446,7 +1768,7 @@ function hostPortOf(url) {
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
-  return cutHostParams(hostport).toLowerCase()
+  return lowerHost(cutHostParams(hostport))
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
@@ -1465,8 +1787,10 @@ function deriveLabel(url, kind) {
   return capCodePoints(sanitizeInput(hostport.replace(/^www\./, "")), MAX_LABEL)
 }
 
+// The case-insensitive comparison form (SR21), lowered as a host is
+// (lowerHost, D-SINK-118), since a default label is one.
 function labelKey(text) {
-  return sanitizeInput(text).toLowerCase()
+  return lowerHost(sanitizeInput(text))
 }
 
 // `existing` is a list of labels or of records / views ({ label, id | key }).
@@ -1495,14 +1819,63 @@ function labelTaken(label, existing, selfId) {
 
 // Appends ` 2`, ` 3`, ... while the label is taken (case-insensitive);
 // derived labels only, a typed label is rejected with `label_taken` instead.
+// D-SINK-100 (2026-11-16, round 2 of the security review; the lead's call
+// under the owner's standing authority of 2026-11-09): taken also when it
+// READS as another source's label reads (labelSinkText), as validateLabel
+// has refused a typed label since D-SINK-98, so a label derived after a typed
+// `http://qqqqqq:zzzzzz@cdn.test/a.m3u` is `cdn.test 2`, not a second row
+// that reads `cdn.test`. The sets are built once (labelKeySets); the helper's
+// unique_label is the mirror, and the shared label-readings fixture (dev
+// branch) holds both.
 function uniqueLabel(label, existing, selfId) {
+  return uniqueLabelOver(label, labelKeySets(existing, selfId))
+}
+
+// The keys `existing` takes, built once: `raw`, each label's labelKey, and
+// `read`, the labelKey of each label as it reads (labelSinkText of the
+// sanitized label, labelReadTaken's reading). `existing` and `selfId` as
+// labelTaken takes them; an empty key takes nothing.
+function labelKeySets(existing, selfId) {
+  var sets = { raw: keyedMap(), read: keyedMap() }
+  var list = asList(existing)
+  var self = str(selfId)
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (item === null || item === undefined) continue
+    var raw = typeof item === "object" ? item.label : item
+    var id = typeof item === "object" ? str(item.id !== undefined ? item.id : item.key) : ""
+    if (self !== "" && id === self) continue
+    labelKeySetsAdd(sets, raw)
+  }
+  return sets
+}
+
+function labelKeySetsAdd(sets, label) {
+  var key = labelKey(label)
+  if (key !== "") sets.raw[key] = true
+  var read = labelKey(labelSinkText(sanitizeInput(label)))
+  if (read !== "") sets.read[read] = true
+}
+
+// Whether `label` is taken in labelKeySets' sets: the same label
+// case-insensitively, or one that reads as it reads.
+function labelKeySetsTake(sets, label) {
+  var key = labelKey(label)
+  if (key !== "" && sets.raw[key] === true) return true
+  var read = labelKey(labelSinkText(sanitizeInput(label)))
+  return read !== "" && sets.read[read] === true
+}
+
+// uniqueLabel over sets built once (labelKeySets): parseState places a list
+// of derived labels with one reading each.
+function uniqueLabelOver(label, sets) {
   var base = capCodePoints(sanitizeInput(label), MAX_LABEL)
   if (base === "") base = "source"
-  if (!labelTaken(base, existing, selfId)) return base
+  if (!labelKeySetsTake(sets, base)) return base
   for (var n = 2; n < 1000; n++) {
     var suffix = " " + n
     var candidate = capCodePoints(base, MAX_LABEL - suffix.length) + suffix
-    if (!labelTaken(candidate, existing, selfId)) return candidate
+    if (!labelKeySetsTake(sets, candidate)) return candidate
   }
   return base
 }
@@ -1530,7 +1903,10 @@ function defaultSourceLabel(url, kind, existingLabels) {
 // until the user renamed it. NOT done here: uniqueLabel still compares raw
 // labels, so a derived label added after a custom one can read alike, and
 // the helper's mirrors (unique_label, check_custom_label) know no reading;
-// round 2 takes both with D-SINK-100.
+// round 2 takes both with D-SINK-100. [2026-11-16, D-SINK-100: uniqueLabel
+// avoids a label that reads alike too (labelKeySets), parseState places a
+// derived label after every typed one, and the helper reads labels through
+// its port of labelSinkText (label_sink_text) in both checks.]
 function validateLabel(label, existing, selfId) {
   var text = sanitizeInput(label)
   if (codePointLength(text) > MAX_LABEL) return { ok: false, code: "label_too_long", field: "label", message: sourceErrorMessage("label_too_long"), label: text }
@@ -1764,6 +2140,34 @@ function addressAuthoritySplit(value) {
 function addressAtAfterAuthority(value) {
   var p = addressAuthoritySplit(value)
   return p !== null && p.after.indexOf("@") !== -1
+}
+
+// D-SINK-109 (2026-11-16, round 2 of the security review; the lead's call
+// under the owner's standing authority of 2026-11-09). The Sources form's
+// own predicate (formHostWithheld, D-SINK-99) over a URL: R32a's
+// urlHostWithheld, or an `@` after the authority at all
+// (addressAtAfterAuthority), which also catches a DOTTED username before a
+// password that starts with digits. The helper's source_host_withheld is the
+// mirror, and one fixture holds both to it (the shared source-host-withheld
+// fixture, dev branch). Every line that names a source's host in a
+// sentence or a status asks it (sourceShownHost); the Sources row's host and
+// the stored label keep the RFC host (R32a, the owner's ruling). The cost is
+// the form's: a valid URL with an `@` in its path or query, such as an
+// e-mail username in an Xtream path, is withheld too.
+function sourceHostWithheld(url) {
+  var s = str(url)
+  return urlHostWithheld(s) || addressAtAfterAuthority(s)
+}
+
+// What a sentence or a status names as a source's host (D-SINK-109):
+// hostOf's `local file` for a path or a `file:` URL, HOST_WITHHELD where
+// sourceHostWithheld holds, and otherwise hostOf. Display only. The helper's
+// shown_source_host is the mirror (its printer lower-cases and drops an IPv6
+// literal's brackets, so only the decision is shared).
+function sourceShownHost(url) {
+  var host = hostOf(url)
+  if (host === "local file") return host
+  return sourceHostWithheld(url) ? HOST_WITHHELD : host
 }
 
 // D-SINK-97 rule c, the parse alone: for a value that rule c publishes, its
@@ -2559,6 +2963,10 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epg
     label: str(s.label),
     kind: kind,
     host: kind === "file" ? "local file" : hostPortOf(s.url),
+    // D-SINK-109: the host the Sources list's fetching line names
+    // (sourcesProbeLine), HOST_WITHHELD where the form would withhold it;
+    // `host` above is the row's, R32a's RFC host.
+    lineHost: kind === "file" ? "local file" : (sourceHostWithheld(s.url) ? HOST_WITHHELD : hostPortOf(s.url)),
     hasEpg: ownEpg || hinted,
     epgFromPlaylist: hinted,
     channelCount: fetched ? Math.max(0, Math.floor(Number(s.channelCount) || 0)) : -1,
@@ -2570,7 +2978,8 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epg
     origin: str(s.origin),
     errorReason: str(errorReason),
     epgHintRefused: refusedHint ? str(hintState.refused) : "",
-    epgHintHost: refusedHint || (hinted && hintState.plainHttp === true) ? str(hintState.host) : "",
+    // D-SINK-113: no `epgHintHost`. Its one reader, epgHintRowText, names
+    // no host since 2026-11-16, so the view carries none.
     epgHintPlainHttp: hinted && hintState.plainHttp === true
   }
 }
@@ -2616,10 +3025,18 @@ var EPG_HINT_ROW_TEXT = "EPG from playlist"
 // Each names the hint's HOST and nothing else of it.
 var EPG_HINT_PLAIN_ROW_TEXT = "EPG from playlist over plain http"
 
+// D-SINK-113 (2026-11-16): a refused hint's sentence names no host. The
+// host is the one the playlist chose, and for an address whose password
+// holds an unencoded `/` it is the user name; these two sentences named it
+// on the row and in its accessible name. The helper's refusals of the same
+// hint name none either.
+var EPG_HINT_LOCAL_ROW_TEXT = "EPG from playlist not used: its host is a local address"
+var EPG_HINT_USERINFO_ROW_TEXT = "EPG from playlist not used: its address carries a password"
+
 function epgHintRowText(view) {
   var v = view || {}
-  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return "EPG from playlist not used: " + str(v.epgHintHost) + " is a local address"
-  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return "EPG from playlist not used: its address for " + str(v.epgHintHost) + " carries a password"
+  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return EPG_HINT_LOCAL_ROW_TEXT
+  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return EPG_HINT_USERINFO_ROW_TEXT
   if (v.hasEpg) return v.epgFromPlaylist === true ? (v.epgHintPlainHttp === true ? EPG_HINT_PLAIN_ROW_TEXT : EPG_HINT_ROW_TEXT) : "EPG"
   return ""
 }
@@ -2704,6 +3121,16 @@ function confirmRemoveMessage(label, active) {
 function fetchingLine(host, kind) {
   if (kind === "file") return "Reading the file" + ELLIPSIS
   return "Fetching from " + str(host) + ELLIPSIS
+}
+
+// The Sources list's line while a probe of a stored source runs (D-SRC-04,
+// Guide.sourcesProbeText): fetchingLine over the view's lineHost, so a
+// source whose host the form withholds reads `Fetching from [host
+// withheld]...` where its row names the RFC host (D-SINK-109). Lifted out of
+// Guide.qml so the node suite calls it (rule 12).
+function sourcesProbeLine(view) {
+  var v = view && typeof view === "object" ? view : {}
+  return fetchingLine(v.lineHost !== undefined ? v.lineHost : v.host, v.kind)
 }
 
 // R28e (2026-10-20): `code`, when the result carries one, names a refusal
@@ -2870,11 +3297,15 @@ export {
   innerCharSentence, sourceErrorMessage, sourceReason,
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, SOURCE_URL_SCHEMES, IPV6_LITERAL_RE, isIpv6Literal,
-  HOST_FORMAT_RANGES, isHostFormatCode, NON_ASCII_RE, hostNameRefused,
-  hostNameRefusedAsWritten, cutQueryAndFragment, ENCODE_SENTENCE,
-  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
-  sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP, plainHttpLine,
-  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  HOST_FORMAT_RANGES, isHostFormatCode, HOST_INVISIBLE_RANGES,
+  isHostInvisibleCode, isHostNameAscii, HOST_NFKC_RANGES, isHostNfkcCode,
+  hostHoldsNfkcChange, HOST_CASE_FOLD_RANGES, isHostCaseFoldCode,
+  hostHoldsCaseFold, DELIMITER_FOLDS, AUTHORITY_MESSAGE_CODES, NON_ASCII_RE,
+  hostNameRefused, hostNameRefusedAsWritten, cutQueryAndFragment,
+  ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  plainHttpLine, formAdviceLine, looksLikeHost, CAPITAL_SIGMA, SMALL_SIGMA,
+  lowerHost, validateSourceUrl, readAuthority, normalizeSourceUrl,
   ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE, IPV6_GROUP_RE,
   IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral, ipv4Class,
   ipv6Class, hostClass, hostKey, HINT_LIST_RE, hintFirstEntry,
@@ -2887,12 +3318,14 @@ export {
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
   cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  labelKeySets, labelKeySetsAdd, labelKeySetsTake, uniqueLabelOver,
   defaultSourceLabel, validateLabel, selfStoredLabel, labelReadTaken,
   maskQuery, maskUrl, accessibleStars, hasAddressLineTerminator,
   hostPortSplit, isZonelessIpv6Literal, ADDRESS_NAME_RE,
   addressAccessibleHost, LABEL_NAME_RE, labelHost, isDottedQuad,
-  addressAuthoritySplit, addressAtAfterAuthority, addressAuthorityParts,
-  addressAccessibleValue, labelSinkText, labelReadsAsAddress, labelHoldsField,
+  addressAuthoritySplit, addressAtAfterAuthority, sourceHostWithheld,
+  sourceShownHost, addressAuthorityParts, addressAccessibleValue,
+  labelSinkText, labelReadsAsAddress, labelHoldsField,
   labelMayCarryCredential, labelCarriesDelimiter, LABEL_LEAD, LABEL_TRAIL,
   labelCore, labelTokenReadsAsAddress, LABEL_SCHEME_RE,
   labelShapeReadsAsAddress, labelSlashAuthority, labelSchemeSlash,
@@ -2901,11 +3334,12 @@ export {
   labelHeadIsAuthority, labelLooseName, labelTokenAuthority, encodeQueryValue,
   xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
   formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, EPG_HINT_LOCAL_ROW_TEXT,
+  EPG_HINT_USERINFO_ROW_TEXT, epgHintRowText, sourceDetail,
   sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
-  logoFailedPath, logoBrokenMark, logoHaveLess
+  fetchingLine, sourcesProbeLine, PROBE_LOCAL_REFUSALS, failureFromHost,
+  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
 }

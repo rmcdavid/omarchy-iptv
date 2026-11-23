@@ -8,7 +8,7 @@ import {
   str, asList, keyedMap, ownKeyValue, trimEndSpace
 } from "./text.mjs"
 import {
-  parseJsonObject
+  parseJsonObject, statusReason
 } from "./settings.mjs"
 import {
   parseRewind
@@ -42,6 +42,26 @@ function healthTick(skips, busy) {
   var restart = !!busy && n >= HEALTH_SKIPS_BEFORE_RESTART
   return { check: !busy, restart: restart, skips: restart ? 0 : n }
 }
+
+// D-PLY-67 (2026-11-17): what a healthy `status` reply's `relay` field asks
+// of the health tick. The helper answers `relay: false` only for a player
+// this build launched whose relay no longer answers as its own: its pin
+// names a port nothing of ours holds, and whatever binds that port next
+// receives the player's plain-http requests, credentials in them. The probe
+// already reads such a player as older and the shell then replaces or stops
+// it (Model.olderPlayerUnsafe), so the tick's whole act is to ask the probe:
+// "probe", or "none". None when the field is anything but false (true, or
+// the helper could not tell, or another build's player, which is the
+// reattach's to replace), while a replacement is already owed (the probe
+// has spoken), while the player slot is busy (a start, restart or probe is
+// in flight: the next tick asks again), and while the user's stop stands.
+function healthRelayAction(relay, ctx) {
+  var c = ctx && typeof ctx === "object" ? ctx : {}
+  if (relay !== false) return "none"
+  if (c.restartOwed === true || c.slotBusy === true || c.stopping === true || c.userStopped === true) return "none"
+  return "probe"
+}
+var RELAY_GONE_LINE = "omarchy-iptv: the player's relay does not answer, checking the player"
 
 // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived ----
 //
@@ -84,12 +104,34 @@ function healthTick(skips, busy) {
 //     (D-SINK-101, 2026-11-13: player_target, before the lock), answered just
 //     inside its bound; one that reaches it refuses the channel and ends the
 //     verb, so it is summed once, by a start and by a restart
+//   relay (D-SINK-102, 2026-11-14): a spawn waits for its new relay's status
+//     up to relayStartMs, and a start or a restart asks a relay three more
+//     questions, each inside relayIpcMs: the adopted player's status
+//     (player_verdict), the load's registration and the first-load count. A
+//     probe asks one (the relay field). `play` asks two, each inside one
+//     relayIpcMs: the gate's status (feed_gate, player_verdict) and the
+//     load's registration (relay_register). Its fixed 8 s
+//     (CONTROL_WATCHDOG_MS, the control slot's watchdog before the relay)
+//     gains both, so with the 3 s lookup 5 s of the 10 s are bounds of the
+//     helper's own and mpv's round trips keep the 5 s the 8 s left them
+//     (the player-bounds walk of `play`, dev branch, holds that; it first
+//     gained one, which left them 4 s, found by the review of 7c281d8)
 // What is NOT summed is every other request at its bound: a request that
 // reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
 // answering each of a start's twenty-odd requests just inside 2 s could run a
 // verb past this. That residual is recovered, not bounded: a start the
 // watchdog stopped is no verdict, and the reattach probe decides what it left
-// (Service.qml, handlePlayerResult). The margin is what no bound cuts: the
+// (Service.qml, handlePlayerResult). [2026-11-18, D-PLY-39: no longer. The
+// helper runs each watched verb under its own deadline, this sum without the
+// margin (playerVerbBoundMs, from the helper's own constants:
+// player_verb_bound_ms, the shared fixture holding both to watchdogMs less
+// marginMs), less what the verb may still spend after its last wait on mpv
+// (player_verb_reserve_ms); a wait on mpv that cannot have its whole bound
+// before that is refused unsent as `ipc_error`, the code a request that times
+// out raises, so each verb's own handling of mpv's silence runs. The walk of
+// every watched verb with mpv answering EVERY request just inside its bound
+// ends inside the bound (the player-bounds walk, dev branch). The recovery
+// stays for what no bound cuts.] The margin is what no bound cuts: the
 // interpreter and the stub's compile (a whole `player probe` with no player,
 // 259-306 ms at load 3.2), a 10,000-channel cache read (a start that resolves
 // its id in one, 356-390 ms), the /proc scans and the poll overshoots; 5 s is
@@ -105,8 +147,19 @@ var PLAYER_BOUNDS = {
   settleMs: 500,          // STOP_SETTLE_MS (not Service.qml's stopSettleMs)
   settleConnectMs: 200,   // SETTLE_CONNECT_TIMEOUT: socket_is_dead's one connect
   settleLockMs: 500,      // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
-  lookupMs: 3000          // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
+  lookupMs: 3000,         // STREAM_LOOKUP_TIMEOUT_S: the play-time host-name lookup (D-SINK-101)
+  relayStartMs: 5000,     // RELAY_START_S: a spawn's wait for its relay's status (D-SINK-102)
+  relayIpcMs: 1000,       // RELAY_IPC_S: one question to the relay, both ways
+  relayStaggerMs: 200,    // RELAY_ATTEMPT_STAGGER_S: a dead answer delays the relay's next by this (not summed)
+  controlIpcMs: 5000      // CONTROL_IPC_S: mpv's round trips in one control-slot verb, together (D-PLY-39)
 }
+// The control slot's watchdog over one `play` or `status` before D-SINK-102,
+// which `play` extended by its two relay questions. [2026-11-18, D-PLY-39:
+// that 10 s is now `play`'s BOUND -- the lookup, the two relay questions and
+// controlIpcMs, the 5 s this 8 s left mpv's round trips after the lookup --
+// which the helper's own deadline holds the control slot's verbs inside, and
+// the watchdog adds the margin, 15 s.]
+var CONTROL_WATCHDOG_MS = 8000
 var PLAYER_WATCHDOG_MARGIN_MS = 5000
 var PLAYER_BIRTH_EDGE_MS = 12000
 
@@ -120,7 +173,37 @@ function playerLadderMs(fromRung) {
 // The shell's watchdog over one run of `kind` on the player slot, in ms:
 // "start", "restart", "probe", or "" for the birth edge. Anything else, a
 // string or not, gets the longest verb's, never a shorter one.
+//
+// D-PLY-39 (2026-11-18): the watchdog is the verb's bound (playerVerbBoundMs)
+// and the margin, and the bound is what the helper runs the verb inside.
+//
+// D-PLY-40 (2026-11-18): and "stop", which is no slot's: the detached
+// `player stop` is watched by nothing, so this is the bound Service.qml's
+// stopSettleTimer waits out before it reads the stop as one that did not
+// take (stopSettleMs). Its longest path through player_stop: the lock
+// granted on its last poll, the whole ladder from quit (the quit rung's
+// connect and request at their bounds, SIGTERM's grace, the kill rung and
+// the final settle), and the one connect the settle after it makes, with the
+// margin. The relay's own exit is not on it: player_stop waits for no relay
+// (the relay exits with its player and never holds the lock), and an older
+// build's player meets the same ladder (walked: 13.25 s, the player-bounds
+// walk of `stop`, dev branch). The backstop was 5 s, so a stop still
+// laddering drew the "outlived a stop" probe and a second `player stop`.
 function playerWatchdogMs(kind) {
+  var k = typeof kind === "string" ? kind : "?"
+  if (k === "") return PLAYER_BIRTH_EDGE_MS
+  var bound = playerVerbBoundMs(k)
+  if (bound !== null) return bound + PLAYER_WATCHDOG_MARGIN_MS
+  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+}
+
+// D-PLY-39 (2026-11-18): a watched verb's bound in ms, the watchdog less the
+// margin -- "start", "restart", "probe", "stop", or "play" for the control
+// slot, whose verbs (`play`, `status`, `pause`, `tracks`, `seek`) share its
+// one watchdog -- and null for anything else. The helper's
+// player_verb_bound_ms is the same arithmetic over its own constants, and
+// the shared player-bounds fixture holds both to watchdogMs less marginMs.
+function playerVerbBoundMs(kind) {
   var b = PLAYER_BOUNDS
   var k = typeof kind === "string" ? kind : "?"
   var lock = b.lockMs + b.lockPollMs
@@ -133,11 +216,13 @@ function playerWatchdogMs(kind) {
   // so the replace path is the wedged one plus these two (walked: 42.07 s, past
   // the 38.25 s the bound left without them; lane RA's M9).
   var carry = 2 * b.ipcMs
-  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "") return PLAYER_BIRTH_EDGE_MS
-  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+  var relay = b.relayStartMs + 3 * b.relayIpcMs
+  if (k === "start") return b.lookupMs + lock + 2 * b.ipcMs + carry + playerLadderMs("") + spawn + tail + relay
+  if (k === "restart") return b.lookupMs + lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + relay
+  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + b.relayIpcMs
+  if (k === "play") return b.lookupMs + 2 * b.relayIpcMs + b.controlIpcMs
+  if (k === "stop") return lock + playerLadderMs("") + b.settleConnectMs
+  return null
 }
 
 // ---- D-PLY-11: the play fork ----
@@ -367,7 +452,14 @@ function replyTarget(status, nowPlaying) {
   var doc = status && typeof status === "object" ? status : {}
   var left = doc.playing && typeof doc.playing === "object" ? doc.playing : null
   if (left && str(left.id) !== "") return { id: str(left.id), name: str(left.name) }
-  if (str(doc.id) !== "") return { id: str(doc.id), name: str(doc.name) }
+  if (str(doc.id) !== "") {
+    // D-PLY-66: the reply's own load carries its relay's handle; a channel
+    // the verb only found on the player (`playing`, above) has none.
+    var own = { id: str(doc.id), name: str(doc.name) }
+    var handle = relayHandle(doc.relay)
+    if (handle) own.relay = handle
+    return own
+  }
   if (nowPlaying && str(nowPlaying.id) !== "") return { id: str(nowPlaying.id), name: str(nowPlaying.name) }
   return null
 }
@@ -379,15 +471,28 @@ function replyTarget(status, nowPlaying) {
 // channel they did not choose while the interface agreed with the mistake.
 //
 //   agree     the player's record names what the shell wants
-//   unknown   nothing to compare: no record, no intent, or a record from a
-//             different playlist whose ids mean something else. Never a
-//             verdict, so an old helper or a foreign player raises nothing
+//   unknown   nothing to compare: no record, no intent, a record from a
+//             different playlist whose ids mean something else, or a record
+//             whose id the helper withheld (ID_WITHHELD). Never a verdict,
+//             so an old helper or a foreign player raises nothing
 //   diverged  they name different channels. `repair` is the id to re-apply
+//
+// D-SINK-111 (2026-11-16): the helper prints a `t:` id whose tvg-id part the
+// parse refuses (one stored by 0.18.0 or earlier, holding a credential) as
+// ID_WITHHELD in the replies the shell does not read, and as the record
+// holds it in the `player probe` and `status` replies, which the shell
+// does read: the reattach restores the playing channel from the first, and
+// this tick compares the second, so a stale failure mark on a playing
+// channel still clears here (D-PLY-14). A record carrying the token names no
+// channel, so it stays nothing to compare: read as "diverged", the tick
+// would re-apply a channel the player is already on.
+var ID_WITHHELD = "[id withheld]"
+
 function reconcileVerdict(stash, nowPlaying, sourceKey) {
   var np = nowPlaying && str(nowPlaying.id) !== "" ? nowPlaying : null
   var record = playerStash(stash)
   var unknown = { state: "unknown", repair: "", wanted: np ? str(np.id) : "", playing: record ? record.id : "" }
-  if (!np || !record || record.playing === false) return unknown
+  if (!np || !record || record.playing === false || record.id === ID_WITHHELD) return unknown
   var active = str(sourceKey)
   if (active !== "" && record.sourceKey !== "" && record.sourceKey !== active) return unknown
   if (record.id === str(np.id)) return { state: "agree", repair: "", wanted: str(np.id), playing: record.id }
@@ -889,7 +994,7 @@ function playerLaunch(raw) {
 }
 
 function parsePlayerProbe(text) {
-  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null, launch: null }
+  var empty = { valid: false, running: false, responsive: false, pid: null, idle: null, stash: null, owner: null, seq: 0, rewind: null, tls: null, launch: null, relay: null }
   var doc = parseJsonObject(text)
   if (!doc || doc.ok !== true || str(doc.kind) !== "player.probe") return empty
   var pid = Math.floor(Number(doc.pid))
@@ -910,8 +1015,21 @@ function parsePlayerProbe(text) {
     // player to feed.
     tls: playerTls(doc.tls),
     // Restart on adoption: current, older, unknown or null (playerLaunch).
-    launch: playerLaunch(doc.launch)
+    launch: playerLaunch(doc.launch),
+    // D-SINK-102: whether the player's relay answered as its own; null from
+    // a helper too old to say, which keeps today's path.
+    relay: doc.relay === true ? true : doc.relay === false ? false : null
   }
+}
+
+// D-SINK-102, decision 15 (the lead's call under the owner's standing
+// authority of 2026-11-09): whether a player another build launched is one
+// that cannot be made safe -- its TLS readings say so (a player with no relay
+// pin reads unsafe there), or its relay does not answer. Such a player is
+// restarted when its channel is deliverable and STOPPED at the hold's expiry
+// otherwise (olderRestartDisposition's `unsafe`), never deferred to play on.
+function olderPlayerUnsafe(tls, relay) {
+  return !(tls && tls.safe === true) || relay === false
 }
 
 // One newline-delimited line from mpv's own JSON IPC socket (4.8). Only the
@@ -1015,8 +1133,16 @@ function playerDeathKind(context) {
 //   recover   the same, and we no longer know WHAT is playing, so read it
 //             back out of the player's own stash - the identical path a
 //             shell restart takes (4.5), which is why it needs no new rule
+//   confirm   D-PLY-78: a start or restart issued before the last stop
+//             (`withdrawn`), answering with nothing named once that stop's
+//             settle is over. Its player is one that stop gave up on (the
+//             verb held the lock past its wait), so it is looked for as the
+//             stop's backstop looks and stopped if it is there, never
+//             recovered: recovered, it was adopted and named after the stop.
+//             Inside the settle the backstop looks (`abandoned`).
 function playerSessionFollowUp(context) {
   var ctx = context || {}
+  if (ctx.withdrawn === true && ctx.stopping !== true && ctx.nowPlaying !== true) return "confirm"
   if (ctx.attached === true) return "attached"
   if (ctx.stopping === true || ctx.userStopped === true) return "abandoned"
   return ctx.nowPlaying === true ? "hunt" : "recover"
@@ -1097,7 +1223,71 @@ function rememberEntryOwner(owners, entryId, target) {
   var keys = Object.keys(map)
   for (var i = Math.max(0, keys.length - (PLAYER_ENTRY_OWNERS - 1)); i < keys.length; i++) out[keys[i]] = map[keys[i]]
   out[String(id)] = { id: str(target.id), name: str(target.name) }
+  var handle = relayHandle(target.relay)
+  if (handle) out[String(id)].relay = handle
   return out
+}
+
+// ---- D-PLY-66 (2026-11-18): a failed open the player's relay refused
+//
+// The relay (D-SINK-102) answers a connection it refuses -- a redirect, an
+// HLS or DASH playlist, segment or key, a name that answered it a local
+// address -- with a 403 the player reports only as a failed open (measured
+// on the relay's branch, 2026-11-15), so a zap read "Failed to open <the
+// channel's own host>" or, for HLS and DASH, the playlist-or-web-page
+// sentence, which names the wrong cause. A start already asks the relay
+// (the helper's relay_refused_count) and answers `local_address`. For every
+// later failure the shell asks: the helper's replies carry the load's
+// handle, `relay: { pid, load }` -- the relay's pid and its number for the
+// load, two integers, no token -- it rides the entry-ownership ring beside
+// the channel, and at the socket's EOF the service asks
+// `player refused` once before it tells a "Stream failed" card. A count
+// above zero makes the card's reason the one a start's refusal shows;
+// anything else -- no handle, no answer, zero -- leaves the report as it was.
+// The lead's calls under the owner's standing authority of 2026-11-09:
+// option (c) of the row; the card waits for the answer at most
+// RELAY_ASK_TIMEOUT_MS; a count that cannot be read never changes or
+// withholds a card.
+var RELAY_ASK_TIMEOUT_MS = 2500
+
+// { pid, load } from a reply's `relay` or an owner's, null unless both are
+// whole numbers in range (a pid above 1, a load above 0).
+function relayHandle(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var pid = raw.pid, load = raw.load
+  if (typeof pid !== "number" || typeof load !== "number") return null
+  if (Math.floor(pid) !== pid || Math.floor(load) !== load) return null
+  if (!(pid > 1 && pid <= 4194304) || !(load > 0 && load <= 9007199254740991)) return null
+  return { pid: pid, load: load }
+}
+
+// Whether a death report is one to ask the relay about, and with what: the
+// handle of the failed entry's own load for a "Stream failed" card, null for
+// every other report (nothing told, an output of this machine, a player that
+// stopped) and for an entry whose load carried none.
+function relayAsk(report) {
+  if (!report || report.notify !== true || report.card !== "streamFailed" || !report.target) return null
+  return relayHandle(report.target.relay)
+}
+
+// `player refused` for a handle; [] for none, so the caller starts nothing.
+function playerRefusedArgv(socket, handle) {
+  var held = relayHandle(handle)
+  if (!held) return []
+  return ["player", "refused", "--socket", str(socket), "--relay-pid", String(held.pid), "--load", String(held.load)]
+}
+
+// The report to tell once the helper has answered (or not): the same report,
+// with the reason a start's `local_address` refusal shows when the relay
+// counted at least one refused connection for the load. `text` is the
+// helper's stdout; "" (killed, no output) changes nothing.
+function relayRefusedReport(report, text) {
+  if (!relayAsk(report)) return report
+  var doc = parseJsonObject(str(text))
+  if (!doc || doc.ok !== true || doc.kind !== "player.refused") return report
+  if (typeof doc.refused !== "number" || !(doc.refused > 0)) return report
+  var reason = statusReason({ ok: false, kind: "player.start", error: { code: "local_address", message: "" } })
+  return { notify: true, mark: report.mark, card: report.card, target: report.target, reason: reason, output: report.output }
 }
 
 // Which channel a load belonged to. The gate FAILS OPEN (F4): an unknown,
@@ -1308,11 +1498,12 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
   return id === playerEntryId(currentEntryId)
 }
 export {
-  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
-  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
-  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
+  stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,
+  PLAYER_BOUNDS, CONTROL_WATCHDOG_MS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playerVerbBoundMs,
+  playFork, playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
   helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
-  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
+  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget, ID_WITHHELD,
   reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
   playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
   playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
@@ -1320,11 +1511,12 @@ export {
   probeLaunchOlder, adoptedSourceMatches, adoptedChannelReach,
   olderRestartDisposition, olderRestartKeepsPause, olderRestartWith,
   olderPlayerIdentity, sameOlderPlayer, olderRestartOpen, playerTlsVerdict,
-  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, parsePlayerEvent,
-  playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
-  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport, PLAYER_WARNING_RE,
-  playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
+  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, olderPlayerUnsafe,
+  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, RELAY_ASK_TIMEOUT_MS, relayHandle,
+  relayAsk, playerRefusedArgv, relayRefusedReport, channelForEnd, endedReport,
+  PLAYER_WARNING_RE, playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

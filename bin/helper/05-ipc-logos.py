@@ -47,6 +47,101 @@ def no_descriptors(error: OSError) -> HelperError:
     return HelperError("no_descriptors", "the helper has no file descriptor left (%s)" % (error.strerror or "too many open files"))
 
 
+# ---- D-PLY-39 (2026-11-18): the verb's own deadline over mpv's waits ----
+#
+# Every wait on mpv was bounded (the client's timeout, 2 s), and the verbs
+# the shell watches make many. Only the waits a verb's bound SUMS were in the
+# shell's watchdog (Model.playerWatchdogMs), so an mpv that answered every
+# connect and request just inside its bound, with the answers a player of
+# this build gives, ran a start to 139-154 s against its 58.25 s watchdog, a
+# restart to 142 s, the probe to 127 s against 12 s and `play` to 93 s
+# against 10 s (walked under the player-bounds virtual clock; the row's
+# first estimates, about 80 s and 25 s, were low). That residual was
+# recovered (a start the watchdog stopped is no verdict, D-PLY-35), never
+# bounded.
+#
+# So a verb the shell watches runs under verb_deadline: IPC_DEADLINE holds
+# the moment its mpv waits must be over -- its bound, the watchdog less the
+# margin, derived from this helper's own constants by the model's arithmetic
+# (player_verb_bound_ms, held to the model by the shared player-bounds
+# fixture), less what the verb may still spend after them that no deadline
+# cuts (player_verb_reserve_ms). Against it:
+#   - a connect or a request is BEGUN only when its whole bound (the
+#     client's timeout) fits before the deadline, and is otherwise refused
+#     unsent, as `ipc_error` -- the code a request that times out already
+#     raises, so every verb's own handling of mpv's silence is what runs.
+#     min(bound, what is left) was not taken: a request sent with a sliver
+#     left is a command mpv may act on whose answer the helper stops waiting
+#     for -- a loadfile, a migration mark -- and refused unsent it is neither.
+#     [2026-11-18, the review of 9d604cf: "no exit is new" was false. A
+#     request refused UNSENT is a new kind of failure for a caller that
+#     records a send before making it, and apply_channel did: its
+#     `loadSent`, set before the loadfile, made player_start keep a spawn
+#     whose loadfile the deadline refused, fed nothing (D-PLY-57's black
+#     window). So the client counts what it has sent (`sent`, after the
+#     write), and a caller asks that count, never its own intention.];
+#   - drain_events ends at the deadline (an event wait sends nothing), the
+#     first-load window excepted: that is the start's verdict, summed and
+#     bounded on its own (observe_first_load).
+# Outside such a verb -- a test, the CLI's `stop`, the orphan check, the
+# relay -- it is None and nothing changes.
+IPC_DEADLINE: list[float | None] = [None]
+IPC_DEADLINE_REFUSAL = "mpv did not answer in time"
+
+
+def ipc_deadline_capped(at: float) -> float:
+    """`at`, or the verb's mpv deadline when that comes first (D-PLY-39)."""
+    end = IPC_DEADLINE[0]
+    return at if end is None else min(at, end)
+
+
+def ipc_wait_bound(own: float) -> float:
+    """`own`, the bound of a connect or a request about to begin, when it
+    fits before the verb's mpv deadline; otherwise HelperError(ipc_error),
+    before anything is sent (D-PLY-39)."""
+    end = IPC_DEADLINE[0]
+    if end is not None and end - time.monotonic() < own:
+        raise HelperError("ipc_error", IPC_DEADLINE_REFUSAL)
+    return own
+
+
+class ipc_deadline_lifted:
+    """The verb's mpv deadline set aside for one summed wait that is bounded
+    on its own -- the first-load window (observe_first_load) -- and put back
+    after it, whatever happens inside."""
+
+    def __enter__(self) -> None:
+        self.saved = IPC_DEADLINE[0]
+        IPC_DEADLINE[0] = None
+
+    def __exit__(self, *_: Any) -> None:
+        IPC_DEADLINE[0] = self.saved
+
+
+def verb_deadline(verb: str | None) -> Any:
+    """Run a verb the shell watches under its own mpv deadline (D-PLY-39):
+    from its first statement, player_verb_ipc_span_ms(verb) ahead, and put
+    back as it was when the verb returns or raises. `verb` None takes the
+    verb from the call (player_start's start or restart). A deadline already
+    standing is never moved later."""
+    def wrap(function: Any) -> Any:
+        def bounded(args: Any, *rest: Any, **more: Any) -> Any:
+            name = verb if verb is not None else (rest[0] if rest else more.get("verb", "start"))
+            end = time.monotonic() + player_verb_ipc_span_ms(name) / 1000.0
+            saved = IPC_DEADLINE[0]
+            IPC_DEADLINE[0] = end if saved is None else min(saved, end)
+            try:
+                return function(args, *rest, **more)
+            finally:
+                IPC_DEADLINE[0] = saved
+        bounded.__name__ = function.__name__
+        bounded.__qualname__ = function.__qualname__
+        bounded.__doc__ = function.__doc__
+        bounded.__wrapped__ = function
+        return bounded
+    return wrap
+
+
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
     correlated by request_id, unsolicited events KEPT.
@@ -67,6 +162,12 @@ class MpvIpc:
         self.refused = False
         self.events: list[dict[str, Any]] = []
         self.closed = False
+        # D-PLY-39's settle (2026-11-18): how many requests this client has
+        # written whole to mpv. A request the verb's deadline refuses is not
+        # written, and one whose write fails is not written whole, so mpv
+        # never reads it as a command; a caller that must know whether mpv
+        # may hold a command (apply_channel's `loadSent`) asks this.
+        self.sent = 0
 
     def connect(self) -> None:
         # D-PLY-38 (2026-11-11): the import and the socket are this
@@ -76,6 +177,8 @@ class MpvIpc:
         # holds its lock. Named (no_descriptors says why it is its own
         # code); any other failure to make the socket is the connection
         # that could not be made, in the words connect()'s own have.
+        # D-PLY-39: begun only when its whole bound fits the verb's deadline.
+        ipc_wait_bound(self.timeout)
         try:
             import socket
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -175,10 +278,16 @@ class MpvIpc:
         sent counts as `{"error": "success"}` (used by `quit`).
         """
         assert self.sock is not None
+        # D-PLY-39: begun only when its whole bound fits the verb's deadline,
+        # and the whole exchange -- the send too, which used to inherit what
+        # the previous read left of ITS bound -- inside that bound.
+        ipc_wait_bound(self.timeout)
         request_id = self.next_id
         self.next_id += 1
         payload = '{"command": %s, "request_id": %d}\n' % (ipc_json(list(command)), request_id)
+        deadline = time.monotonic() + self.timeout
         try:
+            self.sock.settimeout(max(0.001, deadline - time.monotonic()))
             self.sock.sendall(payload.encode("utf-8"))
         except (ConnectionResetError, BrokenPipeError):
             if allow_close:
@@ -186,7 +295,7 @@ class MpvIpc:
             raise HelperError("ipc_error", "mpv closed the connection")
         except OSError as error:
             raise HelperError("ipc_error", "could not write to mpv: %s" % (error.strerror or type(error).__name__))
-        deadline = time.monotonic() + self.timeout
+        self.sent += 1
         while True:
             line = self.read_line(deadline)
             if line is None:
@@ -214,6 +323,8 @@ class MpvIpc:
             return drained
         if self.sock is None or self.closed:
             return None
+        # D-PLY-39: and no later than the verb's mpv deadline.
+        deadline = ipc_deadline_capped(deadline)
         try:
             line = self.read_line(deadline)
         except HelperError:
@@ -262,69 +373,245 @@ LOGO_SCHEMES = ("https",)
 LOGO_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
-def logo_host(netloc: str) -> str:
-    """The host a logo URL would disclose to, or "" when it discloses to none.
-
-    The PORT is not part of the answer. The question the survey exists to
-    answer is how many parties learn which channels this user has, and
-    `cdn.test` and `cdn.test:8443` are one party; counting them separately
-    inflates the only number in the consent sentence.
-
-    Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
-    the host is never contacted, and naming it would print the credentials in
-    the consent text. Mirrored by Model.splitLogoUrl.
-
-    D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
-    through the same `cut_host_params` the Sources row's host goes through:
-    `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
-    credential, urllib hands it over whole in `netloc`, and this stopped at
-    `:` alone -- so the survey the consent dialog is composed from and the
-    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks; since
-    D-LOGO-25 logo_scans too) named
-    `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
-    `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
-    would count a host that is never contacted.
-
-    D-SINK-83 (the owner, 2026-11-05): and "" for a host of ONE
-    DNS label (dotless_host), which fetch_logo refuses before any lookup.
-    A logo URL cut at a space in its userinfo (D-SINK-34's class) leaves
-    `https://USER:...`, whose host is the username: the survey counted it
-    as a host to contact and the consent dialog named it as the busiest.
-    Never excepted for the playlist's own host, as a guide hint is.
-    """
-    host = logo_host_part(netloc)
-    return "" if dotless_host(host) else host
-
-
-def logo_survey_host(raw: str, netloc: str) -> str:
-    """The host logo_survey counts for the logo URL `raw`, whose authority
-    is `netloc`: logo_host's, or "" for a URL whose run took a glued
-    attribute holding another URL (absorbed_attribute, the review's F1),
-    which fetch_logo refuses, so the consent text counts it refused and
-    names nothing. Mirrored by Model.splitLogoUrl."""
-    return "" if absorbed_attribute(raw) else logo_host(netloc)
-
-
-def logo_host_part(netloc: str) -> str:
-    """logo_host's host before the one-label rule: the authority after its
-    whitespace, lower-cased, "" for userinfo, cut at the parameter
-    delimiters, without its port (see logo_host)."""
-    text = (netloc or "").strip(URL_SPACE_CHARS).lower()  # D-STATE-2: Model.stripSpace's class
-    if "@" in text:
+def logo_scheme(raw: str) -> str:
+    """A logo URL's scheme as written: the text before its first `:`,
+    lower-cased, when that text is an RFC 3986 scheme (an ASCII letter, then
+    ASCII letters, digits, `+`, `-` or `.`), else "". Nothing is stripped
+    first, so a URL with whitespace before its scheme has none. The
+    survey's `schemes` count and fetch_logo's scheme refusal read it; the
+    fetch asks it before anything else and before any URL parser
+    (D-SINK-112). Mirrored by Model.logoScheme, index for index."""
+    colon = raw.find(":")
+    if colon <= 0:
         return ""
-    text = cut_host_params(text)
-    if text.startswith("["):
-        # IPv6 literal: the bracketed half is the host, any :port follows it.
-        close = text.find("]")
-        return text[: close + 1] if close != -1 else ""
-    return text.split(":", 1)[0]
+    head = raw[:colon]
+    first = head[0]
+    if not ("a" <= first <= "z" or "A" <= first <= "Z"):
+        return ""
+    for ch in head:
+        if not ("a" <= ch <= "z" or "A" <= ch <= "Z" or "0" <= ch <= "9" or ch in "+-."):
+            return ""
+    return head.lower()
+
+
+def logo_contact_host(raw: Any) -> str:
+    """The host a logo would be fetched from, or "" when it would be
+    fetched from none -- the ONE reading of a logo's address that the
+    survey counts, fetch_logo fetches by, and the refusal lines name
+    (D-SINK-112, 2026-11-16). Model.logoContactHost is the same reading,
+    held to it by the shared logo-survey and provider-hosts fixtures and by
+    the host-grammar suite's differential on the dev branch, in node and in
+    Qt's engine.
+
+    The survey used to read the host from the raw address, cut at its first
+    `:` (logo_host), while the fetch read it as urllib's request holds it:
+    `https://user%3Apass%40cdn.test/a.png` was counted and named
+    `user%3apass%40cdn.test` and `https://user.name:pa/ss@cdn.test/a.png`
+    named `user.name`, and the counts took in logos the fetch refused or
+    could not send. So a logo is counted, slotted and fetched only when:
+      * its scheme as written is https (logo_scheme);
+      * everything after its authority, the fragment included, is printable
+        ASCII, 0x21 to 0x7E: http.client sends no other request line, and
+        urllib cuts the fragment at the LAST `#` (the critique's finding 5:
+        `https://cdn.test/a.png#<U+00D1>#` was counted and never sent);
+      * its authority as written holds no `@` (a logo never carries user
+        information, and fetch_logo never sends one) and no `%` (no DNS
+        name holds one, and the request's host is then the authority as
+        written, with nothing percent-decoded between the two readings);
+      * read_authority reads the authority, and its port as written, if it
+        has one, is what the connection layer takes (port_digits: one to
+        five ASCII digits up to 65535). read_authority takes any run of
+        digits and strips the leading zeros while the request carries the
+        port as written, so `https://cdn.test:000443/a.png` was counted as
+        cdn.test and refused at the connection before its lookup (the
+        review of round 5's build, 2026-11-17);
+      * its host is ASCII with labels the idna codec takes
+        (logo_labels_refused, D-SINK-119), no longer than DNS allows, 253
+        characters or 254 with a trailing `.` (logo_authority_in_bounds:
+        the review of the column fix, 2026-11-17), not one DNS label
+        (dotless_host, D-SINK-83) and not a literal or a name that is not global
+        (host_class: loopback, the local networks, localhost), which
+        DestinationPolicy.for_logos refuses before connecting;
+      * it absorbed no attribute of the playlist (absorbed_attribute);
+      * and the source validator accepts it with that host
+        (validate_source_url: no whitespace or control anywhere, at most
+        MAX_SOURCE_URL long, and read_authority's reading).
+    The PORT is never part of the answer: `cdn.test` and `cdn.test:8443`
+    are one party to the consent sentence. An IPv6 literal keeps its
+    brackets. D-SINK-35's accepted class stays as it was:
+    `https://qq.qq:12/zz@cdn.test/a.png` is fetched from qq.qq on port 12,
+    so it is counted and named `qq.qq`.
+
+    The answer is the conjunction of those tests, asked in three halves in
+    the order of their cost (the review of round 5's build): what the row's
+    own text decides (logo_row_authority), what its authority alone decides
+    (logo_authority_host), and the whole address (logo_address_counts).
+    Model.logoColumnShown asks the reading of every row on screen until one
+    counts, on every guide open and every keystroke, and a list none of
+    whose logos counted paid the whole source validator for each row; the
+    model's guide asks the authority half once per authority. The model
+    keeps the same three halves."""
+    authority = logo_row_authority(raw)
+    if authority == "":
+        return ""
+    host = logo_authority_host(authority)
+    if host == "" or not logo_address_counts(raw, host):
+        return ""
+    return host
+
+
+def logo_row_authority(raw: Any) -> str:
+    """The first half of logo_contact_host: a logo address's authority as
+    written, or "" when the address's own text refuses it -- a scheme that
+    is not https, no `//`, anything after the authority that is not
+    printable ASCII, an `@` or a `%` in the authority, or an authority with
+    no `.` that is not a bracketed literal (its host is then one label, or
+    none, which logo_authority_host refuses anyway). The authority ends at
+    the first `/`, `?` or `#`, as read_authority's does. Mirrored by
+    Model.logoRowAuthority."""
+    if not isinstance(raw, str) or raw == "" or logo_scheme(raw) not in LOGO_SCHEMES:
+        return ""
+    colon = raw.find(":")
+    if raw[colon + 1:colon + 3] != "//":
+        return ""
+    start = colon + 3
+    cut = _AUTHORITY_END.search(raw, start)
+    end = len(raw) if cut is None else cut.start()
+    for ch in raw[end:]:
+        if not "\x21" <= ch <= "\x7e":
+            return ""
+    authority = raw[start:end]
+    if authority == "" or "@" in authority or "%" in authority:
+        return ""
+    if not authority.startswith("[") and "." not in authority:
+        return ""
+    return authority
+
+
+# The lengths logo_authority_in_bounds holds a logo authority to (D-SINK-112,
+# the review of the column fix, 2026-11-17): a host name of at most
+# LOGO_NAME_MAX characters, one more when the last is a trailing `.` (DNS:
+# 253 characters, 255 octets on the wire); a label of at most LOGO_LABEL_MAX,
+# the idna codec's and DNS's 63; a bracketed literal of at most
+# LOGO_LITERAL_MAX, `[`, the longest IPv6 address read_authority reads (45:
+# six groups of four and a dotted tail of 15) and `]`; and a written port of
+# at most LOGO_PORT_MAX, port_digits' five. Mirrored by the model's
+# constants of the same names (model/logos.mjs).
+LOGO_NAME_MAX = 253
+LOGO_LABEL_MAX = 63
+LOGO_LITERAL_MAX = 47
+LOGO_PORT_MAX = 5
+
+
+def logo_authority_in_bounds(authority: str) -> bool:
+    """The bound logo_authority_host asks before read_authority (D-SINK-112,
+    the review of the column fix, 2026-11-17): False when a logo
+    authority's lengths alone refuse it. The model's read of a 2,000-unit
+    authority cost about 1.1 ms of Qt's engine, before its label was
+    refused, so the shell's map over 10,000 distinct ones cost about 11 s
+    per channel list; this side keeps the same bound so the two readings
+    give the same answers.
+      * a host as written (the text before the first `:`) longer than
+        LOGO_NAME_MAX, or LOGO_NAME_MAX + 1 without a trailing `.`: a NEW
+        refusal. No resolver looks such a name up, so it was counted and
+        could only fail at its lookup; it is counted refused, and
+        fetch_logo, which asks this reading first, refuses it as
+        `logo_host` before any lookup;
+      * a label of that host longer than LOGO_LABEL_MAX, which
+        logo_labels_refused refuses later anyway;
+      * more than LOGO_PORT_MAX characters after the host's `:`, which hold
+        a second `:` (read_authority refuses the host) or a port
+        port_digits refuses;
+      * a bracketed literal with no `]`, longer than LOGO_LITERAL_MAX, or
+        followed by more than `:` and LOGO_PORT_MAX characters, which
+        read_authority or port_digits refuses.
+    Every refusal but the first is one logo_authority_host gave before, only
+    sooner. A host that is not ASCII is refused whatever its lengths, so a
+    length in code points here and in UTF-16 units in the model decides
+    nothing differently. Mirrored by logoAuthorityInBounds (model/logos.mjs)."""
+    if authority.startswith("["):
+        close = authority.find("]")
+        return close != -1 and close < LOGO_LITERAL_MAX and len(authority) - close - 1 <= LOGO_PORT_MAX + 1
+    colon = authority.find(":")
+    end = len(authority) if colon == -1 else colon
+    if end > LOGO_NAME_MAX + 1 or (end == LOGO_NAME_MAX + 1 and authority[end - 1] != "."):
+        return False
+    if colon != -1 and len(authority) - colon - 1 > LOGO_PORT_MAX:
+        return False
+    return all(len(label) <= LOGO_LABEL_MAX for label in authority[:end].split("."))
+
+
+def logo_authority_host(authority: Any) -> str:
+    """The second half: the host a logo authority names, or "" when the
+    authority alone refuses it -- its lengths do (logo_authority_in_bounds),
+    read_authority refuses it, it holds an `@` or a `%`, its port as written
+    is not port_digits', or its host is not ASCII, has labels the idna codec
+    refuses, is one label, or is a literal or a name that is not global. A
+    pure function of the authority, so one answer serves every logo on it.
+    Mirrored by Model.logoAuthorityHost."""
+    if not isinstance(authority, str) or authority == "" or not logo_authority_in_bounds(authority):
+        return ""
+    if "@" in authority or "%" in authority:
+        return ""
+    if _AUTHORITY_END.search(authority):
+        return ""
+    read = read_authority(authority)
+    if not read["ok"]:
+        return ""
+    written = authority[authority.find("]") + 1:] if authority.startswith("[") else authority
+    colon = written.rfind(":")
+    if colon != -1 and not port_digits(written[colon + 1:]):
+        return ""
+    host = read["host"]
+    if not host.isascii() or logo_labels_refused(host):
+        # D-SINK-119 (2026-11-16): a logo's host is ASCII, with labels the
+        # idna codec takes. http.client cannot write a host outside Latin-1
+        # in the Host header and wrote a Latin-1 one as raw bytes, so such a
+        # logo was counted and never fetched, or fetched with a header no
+        # server reads; and judging an IDN logo by the codec the fetch would
+        # use takes the codec's tables in both mirrors.
+        return ""
+    if dotless_host(host) or host_class(host) not in ("", "global"):
+        return ""
+    return host
+
+
+def logo_address_counts(raw: Any, host: str) -> bool:
+    """The third half: the whole address absorbed no attribute and the
+    source validator accepts it, an http(s) URL whose host is `host`.
+    Mirrored by Model.logoAddressCounts."""
+    if not isinstance(raw, str) or absorbed_attribute(raw):
+        return False
+    checked = validate_source_url(raw)
+    return bool(checked["ok"]) and checked["kind"] == "http" and checked["host"] == host
+
+
+def logo_labels_refused(host: str) -> bool:
+    """D-SINK-119: would the idna codec refuse this ASCII host's labels --
+    an empty one but the last (a trailing dot), or one of 64 characters or
+    more? encodings.idna's own test for an ASCII name, the one CPython's
+    socket applies before it looks the name up. An IPv6 literal has none.
+    Mirrored by Model.logoLabelsRefused."""
+    if host.startswith("["):
+        return False
+    labels = host.split(".")
+    return any(label == "" for label in labels[:-1]) or any(len(label) >= 64 for label in labels)
 
 
 def logo_survey(channels: Any) -> dict[str, Any]:
     """Who enabling logos would contact, counted from the cache.
 
     Pure: no network, no filesystem beyond what the caller already read.
-    """
+
+    A logo is counted under the host fetch_logo would contact
+    (logo_contact_host), and every other logo is counted `refused`:
+    fetch_logo refuses it before any lookup, so a survey that counted one as
+    contactable would promise a fetch that cannot happen -- and, for a URL
+    carrying user information, print it into the consent text the user is
+    reading (the credential-sink rule, engineering rule 5: the consent
+    dialog is a sink). Hosts with the same count are ordered by code point,
+    as Model.logoSurvey orders them (D-SINK-112: the shell's survey ordered
+    them by UTF-16 unit)."""
     rows = channels if isinstance(channels, list) else []
     hosts: dict[str, int] = {}
     schemes: dict[str, int] = {}
@@ -337,22 +624,10 @@ def logo_survey(channels: Any) -> dict[str, Any]:
         if not isinstance(raw, str) or not raw:
             continue
         with_logo += 1
-        parsed = urllib.parse.urlsplit(raw)
-        scheme = (parsed.scheme or "").lower()
+        scheme = logo_scheme(raw)
         schemes[scheme] = schemes.get(scheme, 0) + 1
-        if scheme not in LOGO_SCHEMES:
-            # Counted, never contacted: rule 3 of the ruling is https only.
-            refused += 1
-            continue
-        host = logo_survey_host(raw, parsed.netloc or "")
+        host = logo_contact_host(raw)
         if not host:
-            # No host at all, userinfo, or an absorbed attribute. fetch_logo refuses a URL carrying
-            # userinfo rather than stripping it, so a survey that counted one
-            # as contactable would promise a fetch that cannot happen -- and
-            # would print `user:pass@provider.test` into the consent text the
-            # user is reading. The credential-sink rule (engineering rule 5): every sink redacts to scheme
-            # and host, and the consent dialog is a sink. Caught by
-            # the shared logo-survey fixture (dev branch) before it was ever drawn.
             refused += 1
             continue
         hosts[host] = hosts.get(host, 0) + 1
@@ -553,6 +828,10 @@ def logo_opener(host: str, policy: Any = None) -> Any:
 # and a logo is never given more than what is left of it. Mirrored by
 # Model.LOGO_DEADLINE_MS through the shared logo-deadlines fixture.
 LOGO_DEADLINE = 30.0
+# D-SINK-112: fetch_logo's refusal of an address logo_contact_host reads as
+# no host, the one sentence for every such address; it names no host, since
+# the host may be a user name. Never printed by the run, which counts codes.
+LOGO_HOST_REFUSAL = "refused a logo whose address cannot be fetched as written; not looked up"
 
 
 def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[bytes, str]:
@@ -571,26 +850,34 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
     `logo_timeout` when it passes.
     """
     import urllib.request
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme.lower() not in LOGO_SCHEMES:
+    # D-SINK-112 (2026-11-16): the address is judged by the survey's own
+    # reading (logo_contact_host) BEFORE any URL parser is asked, so every
+    # logo the survey counts refused is refused here, as `logo_host`, and
+    # counted refused by the run. urlsplit was asked first, and raised on
+    # `https://cdn<U+FF0F>.test/a.png`, a bracket in the user information
+    # and `https://[::1:]/a.png`, which the run's backstop then counted as a
+    # failed fetch (the critique's finding 6). The scheme is read as written
+    # first, so a logo that is not https keeps its own code; every other
+    # refusal of the reading is `logo_host` -- user information, an absorbed
+    # attribute (`logo_userinfo` and `logo_url` until then), one label, a
+    # literal or a name that is not global (`local_address` at connect until
+    # then), a request target that is not printable ASCII -- with one fixed
+    # sentence naming no host, before the opener and so before any lookup.
+    if logo_scheme(url) not in LOGO_SCHEMES:
         raise HelperError("logo_scheme", "refused a non-https logo host")
-    if "@" in parsed.netloc:
-        raise HelperError("logo_userinfo", "refused a logo URL carrying userinfo")
-    if dotless_host(logo_host_part(parsed.netloc)):
-        # D-SINK-83: a host of one DNS label (logo_host's ""),
-        # refused before the opener runs, so nothing looks it up; the
-        # message names no host, because the host may be a username. The
-        # connect-time policy refuses the same on every redirect hop
-        # (DestinationPolicy.refuses_name).
-        raise HelperError("logo_host", "refused a logo whose host is a name of one label, which is not looked up")
-    if absorbed_attribute(url):
-        # The review's F1 (2026-11-06): a logo URL whose run took a glued
-        # attribute holding another URL (D-SINK-80's cost) would carry that
-        # URL's credential in this request's path. Refused before the
-        # opener runs, naming no host and no URL.
-        raise HelperError("logo_url", "refused a logo URL that runs into another attribute of the playlist")
-    host = parsed.netloc.lower()
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
+    host = logo_contact_host(url)
+    if not host:
+        raise HelperError("logo_host", LOGO_HOST_REFUSAL)
+    # D-SINK-119: the target as the playlist and guide fetches write it, its
+    # host the A-label; the reading above leaves only hosts that are their
+    # own, so this is the target as written.
+    try:
+        target = a_label_target(url)
+    except ValueError:
+        target = None
+    if target is None:
+        raise HelperError("logo_host", LOGO_HOST_REFUSAL)
+    request = urllib.request.Request(target, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:
         with FetchDeadline(LOGO_DEADLINE if budget is None else budget):
             data, ctype = read_logo_response(logo_opener(host), request, timeout, host)
@@ -965,7 +1252,7 @@ def logo_scans_within_bound(data: bytes, ctype: str) -> bool:
 
 def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
     """The refusal text: a HOST and numbers, never a URL (rule 5, R6)."""
-    host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+    host = logo_contact_host(url) or "an unnamed host"
     dims = logo_dimensions(data, ctype)
     if dims is None:
         return "refused a logo from %s: its header could not be read" % host
@@ -1171,7 +1458,7 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
         raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
     if not logo_scans_within_bound(data, ctype):
         # D-LOGO-25: the same place, the same reason, the decoder's CPU.
-        host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+        host = logo_contact_host(url) or "an unnamed host"
         raise HelperError("logo_scans", "refused a logo from %s: its JPEG carries %d scans, over the %d scan bound"
                           % (host, jpeg_scan_count(data), MAX_JPEG_SCANS))
     if ctype == "image/png":
@@ -1180,7 +1467,7 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
         # reason: a refusal still creates nothing on disk.
         canon = canonical_png(data)
         if canon is None:
-            host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+            host = logo_contact_host(url) or "an unnamed host"
             raise HelperError("logo_chunks", "refused a logo from %s: its PNG chunks are malformed" % host)
         data = canon
     name = logo_filename(url)

@@ -3,6 +3,7 @@
 # a part sees every name the parts before it define. Run the helper.
 from __future__ import annotations
 
+import _thread
 import argparse
 import array
 import bisect
@@ -236,13 +237,24 @@ ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
 # group cut, or split at a `;`, inside a URL whose mark a control, a
 # zero-width or combining character, a fullwidth colon or a slash look-alike
 # breaks, or inside a scheme-less `user:pass@host`, and a tvg-id holding one,
-# each of which every sink then prints in part). A cache written under an
+# each of which every sink then prints in part); 5 is D-SINK-102's
+# refusal of mms and mmsh from a playlist that is not local (a cache
+# before it can hold such a channel, which player_target then refuses at
+# every play); 6 is D-SINK-115, D-SINK-116 and D-SINK-117's host grammar (a
+# cache before it can hold a channel whose address the URL library cannot
+# read, or whose host holds ASCII other than a letter, a digit, `-`, `.` or
+# `_`, an invisible character, or a port not written in digits, which
+# player_target then refuses at every play), and, in the same unreleased
+# round, D-SINK-119's look-alikes and the code points the idna codec's case
+# folding writes as another name (the owner's decision of 2026-11-17, which
+# leaves the number at 6: no release wrote a 6, and player_target refuses
+# such a cached channel whatever the cache's number). A cache written under an
 # older version, or carrying none, is refetched once, whatever its age, when
 # its source is the active one: the active source's at the next start, each other source's at
 # its next swap, and each shows its old cache until that refetch lands -- or,
 # if it fails, until a later one succeeds (Model.cacheBeforeDestinationRules,
 # read by Service.qml's applyFreshness for the active cache only).
-DESTINATION_RULES = 4
+DESTINATION_RULES = 6
 # The same for a guide window (its meta line's `guideRules`): 1 is the fold
 # that keeps a URL's run whole (D-SINK-79: a window written before it can hold
 # a title or a detail split inside a URL, which every sink prints as the
@@ -257,6 +269,129 @@ DESTINATION_RULES = 4
 # refetch that fails leaves the old window in use, stale and reported as a
 # failure, until one succeeds; `--now-only` never refetches.
 GUIDE_RULES = 2
+# D-SINK-102 (the marketplace maintainer on #14290, against 0.19.1): the
+# relay the player is pinned to as its HTTP proxy (12-relay.py), which looks
+# every target up itself and connects only to an address it judged. Its
+# bounds. RELAY_IPC_S is one control request each way and RELAY_START_S the
+# spawn's wait for a new relay's status (adopt_or_spawn; Model.PLAYER_BOUNDS
+# mirrors both, and RELAY_ATTEMPT_STAGGER_S, in no verb's sum). The lookup is
+# the play-time lookup's own, STREAM_LOOKUP_TIMEOUT_S; RELAY_CONNECT_S
+# bounds the connect attempts to one target, all of them together, which
+# start RELAY_ATTEMPT_STAGGER_S apart, at most RELAY_ATTEMPTS_IN_FLIGHT at
+# once (FFmpeg's own shape, so a dead first answer does not hold up a live
+# second one). RELAY_HEAD_S and RELAY_HEAD_BYTES bound one request head:
+# a connection's FIRST head from the moment it is served, so a connection
+# that sends nothing is answered 408, and every later one from its own
+# first byte, so a kept-alive connection has no idle timeout and a paused
+# channel keeps it (a later head over either bound closes the connection
+# with no reply, because the pump thread may be writing to the client).
+# RELAY_CONNECTIONS_MAX bounds how many connections there are, and
+# RELAY_LOOKUPS_MAX how many host-name lookups the process has outstanding
+# at once, a lookup that outlived its bound and still runs on the
+# resolver's own clock included (resolve_within's `limit`): past it a new
+# upstream connection is answered 502 and reaches no origin. It is
+# RELAY_CONNECTIONS_MAX, so the lookups' threads are bounded by the same
+# number as the connections that ask them. RELAY_TOKENS_MAX loads keep
+# their token, the newest. A control line is at most RELAY_CONTROL_BYTES,
+# RELAY_CONTROL_MAX at once.
+RELAY_IPC_S = 1.0
+RELAY_START_S = 5.0
+RELAY_CONNECT_S = 10.0
+RELAY_ATTEMPT_STAGGER_S = 0.2
+RELAY_ATTEMPTS_IN_FLIGHT = 3
+RELAY_HEAD_S = 10.0
+RELAY_HEAD_BYTES = 64 * 1024
+RELAY_CONNECTIONS_MAX = 64
+RELAY_LOOKUPS_MAX = RELAY_CONNECTIONS_MAX
+RELAY_TOKENS_MAX = 8
+RELAY_CONTROL_BYTES = 8 * 1024
+RELAY_CONTROL_MAX = 4
+# A refused request's reply is followed by a graceful close: what the client
+# still sends is read and dropped for at most this long.
+RELAY_DRAIN_S = 0.25
+# On SIGTERM the relay passes the signal to its process group and waits at
+# most this long for its children to go before it exits; a child still alive
+# in the group it leads is then killed with the group (SIGKILL), after the
+# relay has removed its control socket.
+RELAY_TERM_GRACE_S = 2.0
+# Once its last child has gone the relay keeps answering its control socket
+# this long before it exits, so a start whose first load just failed can
+# still ask how many of that load's connections were refused (the player
+# under --idle=once exits on that failure, and the relay with it).
+RELAY_LINGER_S = 1.0
+# Each connection is served by at most two threads, and asks at most one
+# lookup's thread at a time (RELAY_LOOKUPS_MAX of those at once, in all);
+# this bounds the serving threads' address space, not what they use. A
+# lookup's thread has RESOLVE_STACK_BYTES, set and restored under
+# RESOLVE_LOCK, which the relay's own thread starts take too.
+RELAY_THREAD_STACK_BYTES = 512 * 1024
+# The Basic proxy user every token travels under, and the realm of the 407.
+RELAY_USER = "iptv"
+RELAY_REALM = "omarchy-iptv"
+# The relay's fixed reasons and sentences: none names a host, a path or a
+# userinfo (rule 5).
+RELAY_REFUSED = "Refused a local address"
+RELAY_LOOKUP_FAILED = "Could not look up the stream's address"
+RELAY_CONNECT_FAILED = "Could not connect"
+RELAY_CONTROL_REFUSAL = "the player's relay refused that request"
+RELAY_INHERITED_REFUSAL = ("the player's relay runs only as the player's spawn starts it, with its two listeners; "
+                           "not started")
+# The launch path's half (D-SINK-102). The proxy listener is 127.0.0.1 on a
+# port the kernel chooses, RELAY_BACKLOG deep; the control socket is the
+# player's socket path plus RELAY_SOCKET_SUFFIX, in the same 0700 runtime
+# folder, and its path must fit sun_path (RELAY_SUN_PATH_MAX bytes, the
+# kernel's 108 less the terminating NUL) or the spawn is refused. The pin
+# names the listener exactly (mpv_relay_pin), with no credential: on its own
+# it denies everything, and each load the helper registers carries its own
+# token per file (RELAY_PROXY_USER_FORM).
+RELAY_HOST = "127.0.0.1"
+RELAY_BACKLOG = 64
+RELAY_SOCKET_SUFFIX = ".relay"
+RELAY_SUN_PATH_MAX = 107
+RELAY_SPAWN_FAILED = "could not start the player's relay"
+RELAY_PATH_TOO_LONG = "the player's relay socket path is too long"
+RELAY_PATH_BLOCKED = "the player's relay socket path is not a socket"
+RELAY_GONE = "the player's relay does not answer"
+# The two names FFmpeg reads from the environment (http.c and tls.c, through
+# getenv_utf8: lowercase only, measured), which the player's environment
+# never carries: `http_proxy` so that nothing but the pin names a proxy, and
+# `no_proxy` because FFmpeg judges it per hop even with the option set
+# (measured: a redirect into a matching host went direct). Each is copied to
+# its uppercase spelling where that is absent, which FFmpeg ignores and a
+# child program the user enabled (yt-dlp under --ytdl=yes) reads.
+PLAYER_PROXY_ENV = (("http_proxy", "HTTP_PROXY"), ("no_proxy", "NO_PROXY"))
+# D-SINK-102, decision 10 (the lead's call under the owner's standing
+# authority of 2026-11-09): from a playlist that is not local, the schemes
+# whose connections no proxy option reaches and whose address cannot be
+# pinned are refused, at the parse and at play. mmsh opens its HTTP child
+# with no options and that child follows redirects (read in FFmpeg n9.0.2's
+# mmsh.c; measured going direct to a LAN stand-in), and mpv opens mms as
+# mmsh. rtsps, whose TLS takes only the environment's proxy (measured:
+# neither the per-file nor the global option reached it), needs no entry
+# here: it was never one of STREAM_SCHEMES, so it is refused from every
+# playlist as a scheme the plugin does not play. rtmps is NOT refused: its
+# TLS connect was measured going through the relay as a CONNECT carrying
+# the load's token.
+STREAM_REMOTE_REFUSED_SCHEMES = frozenset(("mms", "mmsh"))
+STREAM_REMOTE_REFUSAL = ("refused a stream of a kind whose connections nothing here can judge, from a playlist that is "
+                         "not on this machine or a local network; not played")
+# And the parse's sentence for them, for one entry and for many (the
+# destinations fixture's `remoteSchemes` holds both).
+PARSE_REMOTE_SCHEME_ONE = ("%d entry skipped: an mms or mmsh stream, whose connections nothing here can judge, "
+                           "from a playlist that is not on this machine or a local network")
+PARSE_REMOTE_SCHEME_MANY = ("%d entries skipped: mms or mmsh streams, whose connections nothing here can judge, "
+                            "from a playlist that is not on this machine or a local network")
+# And the schemes that never ask an HTTP proxy but can be handed the
+# address the helper judged: from a playlist that is not local, their host
+# name is replaced by the first address its play-time lookup answered
+# (player_target), so the player looks nothing up. None of them has a
+# redirect FFmpeg follows (rtmp, srt: read; rtsp: its 3xx needs `rtsp` on
+# the protocol list, which never holds it).
+STREAM_PINNED_SCHEMES = frozenset(("rtmp", "rtsp", "srt"))
+STREAM_PIN_REFUSAL = ("could not look up the stream's host name to hand the player the address it leads to; not played")
+# A channel header that would address the relay, not the stream server:
+# dropped at play time (player_target), with one log line and no value.
+RELAY_HEADER_NAMES = frozenset(("proxy-authorization", "proxy-connection"))
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
@@ -1730,8 +1865,9 @@ def default_socket_path() -> str:
 def disable_core_dumps() -> None:
     """RLIMIT_CORE (0, 0), soft AND hard, on the process that calls this
     (D-SINK-39). Called in a CHILD between fork and exec -- the player's
-    (spawn_detached) and wl-paste's (read_clipboard, as Popen's
-    preexec_fn) -- and never in this helper itself.
+    and its relay's (spawn_player; the relay calls it again at its own
+    start) and wl-paste's (read_clipboard, as Popen's preexec_fn) -- and
+    never in this helper itself.
 
     Why a child needs its own lever: this helper is non-dumpable from its
     first statement (the stub's shield), but the kernel sets dumpable back
@@ -1976,22 +2112,82 @@ def chmod_if_kind(path: str, mode: int, kind: Any) -> bool:
 
 # ------------------------------------------------------------- redaction
 
+# D-SINK-118 (2026-11-16, round 5 of the security review): a host is
+# lowered by lower_host, which folds the capital sigma (U+03A3) to the small
+# one (U+03C3) before it lowers. str.lower applies Unicode's Final_Sigma
+# rule, so a capital sigma the rule reads as final (alpha, capital sigma,
+# then -1.test) lowered to the FINAL sigma (U+03C2) here and in node, while Qt's engine, which runs the Sources form
+# and the state reader, applies no such rule and gave the small one: the
+# form stored one spelling and the command line the other, two sources for
+# one address. Folded first, every engine lowers a capital sigma to U+03C3.
+# A final sigma WRITTEN as one stays one, and no comparison folds it
+# (host_key included): the player asks a name as its bytes, and the two are
+# other bytes (the critique's finding 3). Model.lowerHost is the mirror.
+_CAPITAL_SIGMA = chr(0x3A3)
+_SMALL_SIGMA = chr(0x3C3)
+_FINAL_SIGMA = chr(0x3C2)
+
+
+def lower_host(text: str) -> str:
+    """D-SINK-118: `text` lower-cased as a host is, with no Final_Sigma
+    rule: a capital sigma becomes the small sigma wherever it stands, and
+    the rest is str.lower (Model.lowerHost)."""
+    return text.replace(_CAPITAL_SIGMA, _SMALL_SIGMA).lower()
+
+
+def split_hostname(parts: Any) -> str:
+    """D-SINK-118: urlsplit's `hostname` for `parts`, as lower_host lowers
+    it. urllib lowers with str.lower, so where its hostname holds a final
+    sigma the netloc is read again with every capital sigma folded first; a
+    final sigma written as one reads the same both times. "" for none."""
+    host = parts.hostname or ""
+    if _FINAL_SIGMA not in host:
+        return host
+    return urllib.parse.urlsplit("//" + parts.netloc.replace(_CAPITAL_SIGMA, _SMALL_SIGMA)).hostname or ""
+
+
 def url_host(url: str) -> str:
-    """Host name of a URL, never the userinfo, path or query."""
+    """Host name of a URL, never the userinfo, path or query; lowered as
+    lower_host lowers (split_hostname, D-SINK-118), so a channel's host and
+    the validated playlist host it is compared with (host_key) are lowered
+    alike."""
     try:
-        return urllib.parse.urlsplit(url).hostname or ""
+        return split_hostname(urllib.parse.urlsplit(url))
     except ValueError:
         return ""
 
 
 def source_host(url: str) -> str:
+    """The host a status, a sentence or `state source list` names for a
+    source URL, and channels.json's `sourceHost`: `local file` for anything
+    that is not http(s), "" for what the URL library cannot read.
+
+    D-SINK-118 (2026-11-16): read as Model.hostOf reads it -- the authority
+    after its LAST `@`, a bracketed literal WITH its brackets, a name up to
+    its port's `:` (or a `;`, `=`, `&` or whitespace, which no validated
+    host holds) -- and lowered by lower_host. It was urllib's hostname,
+    which drops a literal's brackets, so the guide's status line read
+    `::1` where the Sources row reads `[::1]`, flipping after the first
+    fetch. Nothing that decides by it reads the brackets: host_key,
+    host_class and dotless_host take a literal with or without them
+    (cached_source, the guide status's one-label test)."""
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return ""
-    if parts.scheme in ("http", "https"):
-        return parts.hostname or ""
-    return "local file"
+    if parts.scheme not in ("http", "https"):
+        return "local file"
+    hostport = parts.netloc.rpartition("@")[2]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        literal = hostport[:close + 1] if close != -1 else ""
+        return "" if any(ch in URL_SPACE_CHARS for ch in literal) else lower_host(literal)
+    end = len(hostport)
+    for index, ch in enumerate(hostport):
+        if ch in ":[;=&" or ch in URL_SPACE_CHARS:
+            end = index
+            break
+    return lower_host(hostport[:end])
 
 
 def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
@@ -2053,7 +2249,7 @@ def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
     hostport = authority[authority.rfind("@") + 1:]
     if hostport.startswith("["):
         close = hostport.find("]")
-        return slash_alike_cut(hostport[:close + 1].lower() if close != -1 else ""), False
+        return slash_alike_cut(lower_host(hostport[:close + 1]) if close != -1 else ""), False
     end = _RUN_HOST_END.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
     port = ""
@@ -2074,8 +2270,8 @@ def run_host_parts(body: str, printing: bool = False) -> tuple[str, bool]:
     # with (host_withheld, Model.urlHostWithheld) does not move, nor does
     # the host a stored record shows.
     if printing and bad_port and "@" in authority:
-        return slash_alike_cut(host.lower()), True
-    return slash_alike_cut(host.lower()), later_at and (dotless or bad_port)
+        return slash_alike_cut(lower_host(host)), True
+    return slash_alike_cut(lower_host(host)), later_at and (dotless or bad_port)
 
 
 def slash_alike_cut(host: str) -> str:
@@ -2096,6 +2292,60 @@ def host_withheld(url: str) -> bool:
     """R32a': the predicate alone, over a whole URL (or any text holding one)."""
     j = url.find("://")
     return j != -1 and run_host_parts(url[j + 3:])[1]
+
+
+# `scheme://` at the start of a text, the scheme as typed in group 1
+# (Model.addressAuthoritySplit's pattern; the label reading in 02-sources.py
+# asks it too).
+_ADDRESS_SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*)://")
+
+
+def at_after_authority(value: Any) -> bool:
+    """Mirror of Model.addressAtAfterAuthority: whether `scheme://` text
+    holds an `@` after its authority's closing `/`, `?` or `#` -- R32a's
+    typo signal, `http://qqqqqq:12/zz@cdn.test/x` being a userinfo that
+    holds a `/`. False when the text is not `scheme://` or its authority
+    is not closed."""
+    if not isinstance(value, str):
+        return False
+    scheme = _ADDRESS_SCHEME.match(value)
+    if scheme is None:
+        return False
+    body = value[scheme.end():]
+    cut = _AUTHORITY_END.search(body)
+    return cut is not None and "@" in body[cut.start():]
+
+
+def source_host_withheld(url: Any) -> bool:
+    """D-SINK-109 (2026-11-16): the Sources form's own predicate
+    (Model.formHostWithheld, D-SINK-99), as Model.sourceHostWithheld has
+    it: host_withheld (R32a': a dotless host or a non-numeric port with an
+    `@` after the authority) or an `@` after the authority at all
+    (at_after_authority), which also catches a DOTTED username before a
+    password that starts with digits (`http://qqqqqq.x:12/zz@cdn.test/x`).
+    Every line that names a source's host in a sentence or a status names
+    HOST_WITHHELD where this holds (shown_source_host); the stored record's
+    host and label keep the RFC host (R32a, the owner's ruling). One
+    fixture holds both mirrors to it (the shared source-host-withheld
+    fixture, dev branch). The cost, stated as the form states it: a valid
+    URL with an `@` in its path or query (an e-mail username in an Xtream
+    path) is withheld too."""
+    if not isinstance(url, str):
+        return False
+    return host_withheld(url) or at_after_authority(url)
+
+
+def shown_source_host(url: str) -> str:
+    """What a sentence or a status names as a source's host: source_host's
+    `local file` for anything that is not http(s), HOST_WITHHELD where
+    source_host_withheld holds, and otherwise source_host's RFC host
+    (D-SINK-109). Display only: nothing decides by it -- channels.json's
+    `sourceHost`, which play-time rules read (cached_source), and the host
+    D-SINK-83's rule judges keep source_host."""
+    host = source_host(url)
+    if host == "local file":
+        return host
+    return HOST_WITHHELD if source_host_withheld(url) else host
 
 
 def run_host(raw: str) -> str:
@@ -2242,6 +2492,122 @@ def redact_urls(text: Any) -> str:
     return "".join(out)
 
 
+# What shown_text puts where a control stood that it does not delete before
+# the redaction (D-SINK-110): U+0001, which the reading crosses as FILLER,
+# never counts (it is not WIDE), never takes for a colon (it is no
+# STAND_IN), and which ends no run and no token (it is none of the six
+# delimiters and no space). Not U+FDD0, the first choice measured: that is
+# a STAND_IN and a COUNTED code point, so two of them inside one
+# credential's username let the token rule print part of it.
+SHOWN_STAND_IN = "\x01"
+
+
+def shown_text(value: Any) -> str:
+    """Provider or user text as every helper sink of free text prints it
+    (D-SINK-110, 2026-11-16): redacted as the guide row redacts it, and
+    with no control character (_CONTROL_CHARS) left in it. The player's
+    window title and media title (player_title_text) and the helper's
+    stderr (log, and main()'s traceback through shown_lines).
+    Model.shownText is the mirror for the notification body; the shared
+    shown-text fixture (dev branch) holds both.
+
+    Those sinks used to DELETE the controls and then redact (F-SINK-14,
+    F-SINK-16), so a control inside the port of a typo-shaped address made
+    a numeric port of it: `News http://my.user:12<U+0001>34/pw@cdn.test/x`
+    printed `News http://my.user`, the username, where the guide row,
+    which redacts the raw text, withholds the host. The order is now the
+    other way round, and the controls are read in two ways:
+    - a control between a URL's scheme start and its first run character,
+      as the text with its controls deleted reads its URLs (next_url),
+      is TRANSPARENT and is deleted before the redaction, as the deleting
+      sinks always read it, so `http:<DEL>//...` and `:/<TAB>/` are still
+      URLs here; and when that text holds HOST_WITHHELD right at a mark's
+      end (D-EPG-18, a line a redactor already printed) the span runs
+      through that token's `]`;
+    - every other control becomes SHOWN_STAND_IN, which the reading
+      crosses and never counts, and which ends no run: so a control inside
+      a port leaves it non-numeric, as the row reads it, and a control in
+      a username or a password moves no cap;
+    and every control left in the redacted text is deleted.
+
+    Without the transparent span, a control inside a fullwidth or
+    slash-alike mark broke the one-odd-character mark and the path printed;
+    a stand-in right after the `//` broke an IPv6 literal's bracket.
+
+    A text with no control is redact_urls' answer itself, which is what
+    the deleting sinks printed for it. What remains, stated: a TAB, LF or
+    CR in a URL's scheme, mark or username, or a control in its scheme, is
+    read as the text without it reads (R32a's dotted-username residual
+    then prints as it does there). Idempotent. Linear: one reading of the
+    text without its controls, one pass over the controls, one redaction."""
+    return _shown(value, False)
+
+
+def shown_lines(value: Any) -> str:
+    """shown_text for a text of several lines (main()'s traceback,
+    D-SINK-110): the same reading, except that a line feed is no control
+    to it -- never deleted, never read as SHOWN_STAND_IN, and kept in what
+    it prints -- so the text keeps its lines and a line feed is read as
+    the plain redaction reads it, a delimiter that ends a URL's run.
+    Deleting one inside a scheme joined the line before it to the URL
+    (`x<LF>http://...` read as the scheme `xhttp`, measured). Read whole,
+    not line by line: a credential token ends only at a space, so the
+    redaction of the whole text withholds `qqqqqq:zz<LF>zz@cdn.test`
+    where one of each line alone printed `qqqqqq:zz` (measured)."""
+    return _shown(value, True)
+
+
+def _shown(value: Any, lines: bool) -> str:
+    s = "" if value is None else str(value)
+    if s.isprintable() or _CONTROL_CHARS.search(s) is None:
+        return redact_urls(s)
+    # The controls that end the text are deleted, as the old reading deleted
+    # every control: nothing follows them for an address to run on to, and
+    # read as SHOWN_STAND_IN one would hold an address's sentence
+    # punctuation inside its run (`... http://h.test/x.<LF>` printed
+    # `http://h.test` and lost the `.`; mpv's log lines end that way). In
+    # lines, a line feed among them is kept.
+    cut = len(s)
+    while cut > 0 and "\x00" <= s[cut - 1] <= "\x9f" and not " " <= s[cut - 1] <= "~":
+        cut -= 1
+    if cut < len(s):
+        tail = "\n" * s.count("\n", cut) if lines else ""
+        return _shown(s[:cut], lines) + tail
+    holes = [m.start() for m in _CONTROL_CHARS.finditer(s) if not (lines and s[m.start()] == "\n")]
+    if not holes:
+        return redact_urls(s)
+    bare = "".join(s[a + 1:b] for a, b in zip([-1] + holes, holes + [len(s)]))
+    # The kept character j of `bare` stands at j + (the controls before it)
+    # in `s`; shift[h] is how many kept characters precede control h.
+    shift = [at - h for h, at in enumerate(holes)]
+
+    def place(j: int) -> int:
+        return j + bisect.bisect_right(shift, j)
+
+    spans: list[tuple[int, int]] = []
+    for start, _, mark_end, _ in UrlReading(bare, 0, None, True).urls:
+        if bare.startswith(HOST_WITHHELD, mark_end):
+            end = place(mark_end + len(HOST_WITHHELD) - 1) + 1
+        else:
+            end = place(mark_end)
+        spans.append((place(start), end))
+    out: list[str] = []
+    copied = 0
+    si = 0
+    for at in holes:
+        while si < len(spans) and spans[si][1] <= at:
+            si += 1
+        out.append(s[copied:at])
+        if not (si < len(spans) and spans[si][0] <= at):
+            out.append(SHOWN_STAND_IN)
+        copied = at + 1
+    out.append(s[copied:])
+    shown = redact_urls("".join(out))
+    if lines:
+        return "\n".join(_CONTROL_CHARS.sub("", line) for line in shown.split("\n"))
+    return _CONTROL_CHARS.sub("", shown)
+
+
 # How far past its limit cut_free_text reads a run for its credential, at
 # least: the window is the limit or this, whichever is longer.
 CUT_CREDENTIAL_WINDOW = 4096
@@ -2379,7 +2745,11 @@ def cut_free_text(text: str, limit: int, separator: str = "") -> str:
 
 
 def log(message: str) -> None:
-    sys.stderr.write("omarchy-iptv: %s\n" % redact_urls(message))
+    """One line on stderr, which the shell writes to the journal: the
+    message as shown_text prints it (D-SINK-110), so a control in it is
+    never written to a terminal and never splits an address before the
+    redaction reads it."""
+    sys.stderr.write("omarchy-iptv: %s\n" % shown_text(message))
 
 
 # ------------------------------------------------------- normalization
@@ -2762,7 +3132,13 @@ def search_key_of(key: str, group: Any) -> str:
     """search_key for a name already folded by normalize_text. make_channel
     stores that fold as `nameKey` as well, and folds it once for both
     (D-PERF-13): the second fold read the same name with the same class."""
-    grp = normalize_text(group)
+    return join_search_key(key, normalize_text(group))
+
+
+def join_search_key(key: str, grp: str) -> str:
+    """search_key_of's join of a folded name and a folded group text, which
+    make_channel takes with the group's fold kept by text (group_reading,
+    F-HARNESS-73)."""
     if grp:
         key = grp if not key else key + " " + grp
     return key
@@ -3018,9 +3394,13 @@ def host_key(host: Any) -> str:
     four-digit hex groups composed here from the integer, because both of
     ipaddress's own spellings of an IPv4-mapped address (str() and
     .exploded) end in a dotted quad on CPython 3.14 and did not before 3.13;
-    Model.hostKey composes the same eight groups -- a name case-folded with
-    one trailing dot dropped. Never a port and never userinfo."""
-    text = str(host or "").strip().lower()
+    Model.hostKey composes the same eight groups -- a name lowered by
+    lower_host with one trailing dot dropped. Never a port and never
+    userinfo. D-SINK-118: a capital sigma is the small sigma here, as in
+    every engine, and a final sigma written as one is NOT folded to it: the
+    player asks a name holding either as its own bytes, so the two are not
+    one host for the own-host exceptions (the critique's finding 3)."""
+    text = lower_host(str(host or "").strip())
     address = parse_ip_literal(text)
     if address is not None:
         if address.version == 4:
@@ -3102,9 +3482,9 @@ def absorbed_attribute(text: Any) -> bool:
     URL's run absorbed from beyond its own attribute -- a raw `"`, or a `,`
     that opens an attribute holding a URL (_ABSORBED_URL)? Such an address
     is never fetched: the guide fetch refuses it (fetch_bytes, origin
-    `playlist`), a logo with it has no host (logo_survey_host) and is
-    refused (fetch_logo, `logo_url`), and the shell adopts no such hint and
-    counts no such logo (Model.absorbedAttribute, both held to the
+    `playlist`), a logo with it has no host (logo_contact_host) and is
+    refused (fetch_logo, `logo_host` since D-SINK-112), and the shell
+    adopts no such hint and counts no such logo (Model.absorbedAttribute, both held to the
     provider-hosts fixture). The backstop behind the parse's own rule
     (own_value), for a cache or a shell from before it; never asked of
     a URL the user typed. The cost, stated: a quoted hint or logo holding
@@ -3132,7 +3512,7 @@ def dotless_host(host: Any) -> bool:
     away from the resolver (and through it the search domains' servers) and
     out of the Sources row and the logo consent dialog. Applied to a guide
     hint (Model.epgHintVerdict: no hint at all, the playlist's own host
-    excepted), to a logo (logo_host, fetch_logo: never excepted), and on
+    excepted), to a logo (logo_contact_host, fetch_logo: never excepted), and on
     every hop of a fetch whose URL the provider chose
     (DestinationPolicy.refuses_name). Never to a URL the user typed.
 

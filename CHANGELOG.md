@@ -3,6 +3,339 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.20.0 (2026-11-22)
+
+**A channel from a playlist on the internet now reaches the network only
+where the plugin has checked: its `http`, `https` and `rtmps` connections
+go through a relay of the plugin's own, which checks every connection as
+it is made, and its `rtmp`, `rtsp` and `srt` connections go to the address
+the plugin checked.** Up to 0.19.1 such a channel could still send the
+player to this computer or your local network: through a redirect from its
+server, an HLS or DASH playlist, segment or key on another server, or a
+server name that gave the plugin one answer and the player another a
+moment later. What to do:
+**restart the shell** (`omarchy-restart-shell`). If a channel was playing
+when you updated, expect it to reopen once in a new player window; if it
+cannot be put back, the old player is stopped -- as soon as the channel
+list has loaded when the channel is gone from it or belongs to another
+source, or about 15 seconds after the shell starts when the list has not
+arrived by then -- and you start the channel again yourself. If your
+`state.json`, or the file its link points to, is on a filesystem without
+Unix permissions or owned by another account, read the note on saving
+under Fixed first: this version does not save to it.
+
+### Fixed
+
+- **A channel from a playlist on the internet can no longer send the
+  player to this computer or your local network** by a redirect, by an HLS
+  or DASH playlist, segment, key or subtitle on another server, or by a
+  server name that changes its answer after the plugin checks it. The
+  player now connects through a small relay the plugin runs beside it,
+  which checks every connection against the address it actually connects
+  to and connects only to an address it checked; secure (`https`) streams
+  are still verified end to end. `rtmp`, `rtsp` and `srt` channels from
+  such a playlist, which never go through a proxy, are played at the
+  address the plugin checked. Reported by the Omarchy plugin marketplace's
+  maintainer against 0.19.1. (D-SINK-102)
+- **The helper's replies and its status files name a channel, its group
+  and the guide's saved names as the guide shows them**, an address as its
+  host and with no control character left in them, and write the line and
+  paragraph separators and text-direction characters, and DEL and the C1
+  controls wherever else they remain, as `\uXXXX` escapes. (D-SINK-104,
+  D-SINK-105)
+- **A channel id an earlier version made from a playlist's `tvg-id` that
+  held a password is deleted when the state file is loaded**: from your
+  favourites, your recents and the last-played and session records, so it
+  leaves `state.json` at the next save. Nothing in the guide showed it, and
+  the channel it was made for has had another id since 0.19.0. Where the
+  helper still meets one -- a player an earlier version started, a failed
+  mark -- it prints `[id withheld]`. (D-SINK-111)
+- **A mistyped command-line argument is reported by its option name, never
+  its value.** (D-SINK-106)
+- **The journal no longer names a channel id.** (D-SINK-107)
+- **Download failures, the status files, the guide's loading, empty and
+  failure lines, the Sources list's fetching and failure lines and the
+  `status` command's source host say `[host withheld]` where the source
+  form does**, so an address with an `@` after its host, such as an e-mail
+  username, reads that way there too while its row in Sources names the
+  host. (D-SINK-109)
+- **Source labels are unique as they read, and the command line prints
+  them that way**; a derived label that read like another source's is
+  renamed `<host> 2` once. (D-SINK-100, D-SINK-108)
+- **The player's window title and notifications read a channel name
+  holding a control character as the guide row does.** (D-SINK-110)
+- **The logo consent dialog names only hosts a logo would actually be
+  fetched from.** It could name a user name, or a percent-encoded user name
+  and password, from an oddly written logo address, and it counted logos
+  the fetch would refuse or could not send. A logo whose host is
+  percent-encoded, whose port is not written as at most five digits, whose
+  address is on this computer or your local network, or whose host is not
+  plain ASCII now counts as one that cannot be used, and so does one whose
+  host is longer than any name DNS can carry (more than 253 characters, not
+  counting a final dot), which is refused before it is looked up.
+  (D-SINK-112)
+- **A playlist whose logo addresses hold very long bracketed hosts no
+  longer stalls the shell.** With logos on, every guide rebuild read every
+  such logo in full, and so did the logo consent dialog with logos off;
+  ten thousand of them could hold the shell for many seconds and grow its
+  memory by gigabytes. Such a logo is now refused by its length before it
+  is read. (D-LOGO-29)
+- **A refused address that a playlist, a guide or a redirect chose is no
+  longer named.** The helper's reply, status file and journal say what was
+  refused without the host, and the Sources row says why a playlist's own
+  guide was not used without naming its host. The playlist and guide
+  journal lines name their verb once. (D-SINK-113)
+- **`player status` no longer prints the host of the playing address.**
+  (D-SINK-114)
+- **A source or guide address the plugin cannot read is refused when you
+  add it**, instead of failing every refresh with "Helper failed
+  unexpectedly". This covers a character that reads as `/`, `?`, `#`, `@`
+  or `:` (such as a fullwidth colon; in a password, write it as its UTF-8
+  escape, `%EF%BC%9A` for the fullwidth colon), a `[` or `]` in the user
+  name or password (write them `%5B` and `%5D`), and a bracketed host that
+  is not an IPv6 address. (D-SINK-115)
+- **A host name may hold only letters, digits, `-`, `.` and `_` in ASCII,
+  no invisible character, and no character that is another one written
+  differently** (a fullwidth letter, a circled digit). A source, guide,
+  redirect, logo or channel host holding anything else is refused before
+  it is looked up, and a redirect to a port not written in ASCII digits is
+  not followed. Nor may it hold a letter the international-name rules
+  fold into other letters by case -- the German sharp s, the Greek final
+  sigma and the Greek letters with a subscript iota -- because such a host
+  was fetched under the folded name (`strasse.test` for a host written
+  with the sharp s) while the Sources list showed it as written; the
+  Sources form says the character cannot be part of a host name, so write
+  the folded name instead. (D-SINK-116, D-SINK-117, D-SINK-119)
+- **A source or guide on a host name written in another script is fetched
+  by its ASCII form**, the name your system already looked up; one outside
+  Latin-1 failed every fetch before. A name the international-name rules
+  cannot write in ASCII is refused when it is fetched, and so is a redirect
+  to a host not written in ASCII (a redirect to its ASCII form is
+  followed). (D-SINK-119)
+- **The Sources form now reads three things the way the command line
+  does**: an upper-case Greek host ending in `Σ`, an address holding
+  U+180E, and a label holding an emoji near the 64-character limit; and the
+  guide's status line names an IPv6 host with its brackets, as the Sources
+  row does. (D-SINK-118)
+- **A player left running on another source's channel is no longer
+  restarted on a channel of the current source.** After you switch source
+  with the shell stopped, the player found at the next start may still be
+  on the old source's channel; if it then froze or died, the automatic
+  restart looked its channel up in the current source's list and could
+  bring back a different channel under the old name. It is now stopped
+  instead. (D-PLY-58)
+- **A hand-edited `state.json` reads the same in the guide and in the
+  helper's `state` commands.** Where the file should hold text (a
+  favourite, a recent channel's id and name, a saved search, a source's key,
+  address and label) and holds a number, a list or `true` instead, the two
+  read it differently, and a source the guide showed could be erased by the
+  next `state` command. Both now read such a value as missing (D-STATE-6).
+- **A `state.json` saved by an editor that adds a byte-order mark works
+  with the helper's `state` commands too.** The guide loaded such a file,
+  while the helper's `state show` and `state favorite add` answered that it
+  could not be read, and saved favourites could stay on old channel ids
+  after a playlist update. (D-STATE-5)
+- **If your `mpv` is a wrapper script that runs mpv without `exec`, the
+  plugin no longer stops the wrapper's shell** when it starts a channel on
+  a player it finds already running. The player played on, but anything the
+  wrapper does after mpv exits did not run. (D-PLY-62)
+- **`state.json` is made private before every save, not after it.** Where
+  `state.json` is a link into a folder other accounts can enter, which the
+  plugin supports, and the file there had been made readable by others,
+  each save that held a source's address, password included, stayed
+  readable for about a quarter of a second, until the plugin repaired the
+  file's mode. Each save now costs one more short helper run
+  first, and if that run cannot make the file private the save fails and
+  says so. Reported by the Omarchy plugin marketplace's maintainer against
+  0.19.1. (D-SINK-103)
+- **If `state.json` is a symbolic link that the shell would save to a
+  different file than the one it reads** -- a relative target that climbs
+  with `..` out of a folder that is itself a link, or a target name that is
+  not UTF-8 -- the plugin now stops saving and says why and how to fix it,
+  instead of silently saving to a file it never reads back. Point the link
+  at your state file with an absolute path that has no `..` in it.
+  (D-STATE-9, D-STATE-11)
+- **When a save is refused because `state.json` belongs to another
+  account, or because it cannot be made private** (on a filesystem
+  without Unix permissions, for example), a notification
+  titled "Saving has stopped" now says which, once, and how to fix it.
+  What you change meanwhile is kept: fix it with the shell running and
+  your next change saves everything, with no restart. Up to and including
+  0.19.1 such a file was saved anyway -- on a filesystem without Unix
+  permissions at the mount's own mode, and with no check of who owns it --
+  so after this update nothing is saved to it until you fix it, and what
+  you change meanwhile is lost if the shell stops first. Keep `state.json`,
+  or the file its link points to, on a filesystem with Unix permissions,
+  owned by you. (D-STATE-11)
+- **Playing a channel right after Stop no longer fails with "The player is
+  busy"**: the new channel starts once the old player has finished
+  closing, and is no longer lost if the old player closes between two
+  tries. Changing channel several times quickly just after a stop now ends
+  on the channel you picked last. (D-PLY-43)
+- **A stop that takes a few seconds no longer sets off a second stop**; a
+  player another program had taken over is still stopped within about
+  five seconds. (D-PLY-40)
+- **Stopping, choosing a channel and stopping again in quick succession
+  no longer sends that channel to a player that is shutting down**, and
+  a quick play, stop, play no longer shows a false "stopped
+  unexpectedly" message or loses the channel you chose last.
+  (D-PLY-69, D-PLY-71)
+- **Pressing Stop while the player is being restarted, after it stopped
+  answering or to replace it after an update, is no longer undone**: the
+  guide no longer picks the restarted player back up after the stop,
+  and a channel chosen right after such a stop starts on its own
+  instead of ending on a false "stopped unexpectedly" message. (D-PLY-72)
+- **Choosing a channel just after the plugin stopped a player on its own**
+  -- one that kept playing after your Stop, or one it would not take over
+  when the shell started -- now starts that channel fresh, instead of
+  sending it to the player being shut down, where it was lost behind a
+  false "stopped unexpectedly" message. (D-PLY-73)
+- **A Stop pressed while the plugin is still checking on the player** --
+  after an earlier stop, while the shell is starting up, or after a start
+  that hung -- now looks again and stops a player that is still playing,
+  instead of leaving it playing behind a bar that shows nothing. (D-PLY-75)
+- **A channel picked in the half-second after the plugin finds an idle or
+  stalled player now plays and shows in the bar**, instead of being
+  dropped without a word or blamed on the earlier start. (D-PLY-76)
+- **Running one of the helper's `player` commands yourself in a terminal
+  no longer lets an older stop from the guide end the player of a channel
+  started after it.** (D-PLY-77)
+- **Stopping playback while a slow player was still starting a channel no
+  longer leaves a channel playing after the stop**, whether the one being
+  started or the one that was playing before it, and the bar no longer
+  names a channel you stopped. (D-PLY-78)
+- **Starting, changing channel, pausing or seeking on a player that
+  answers too slowly now gives up within its own time limit** and says
+  "mpv did not answer", instead of waiting a minute or more, and a start
+  that gives up no longer leaves a black, empty player window behind.
+  (D-PLY-39)
+- **When another program answers the player's socket, the player the
+  plugin had just started is closed** instead of being left as an empty
+  black window. (D-PLY-57, D-PLY-65)
+- **An `mpvArgs` setting too long to hand to the player (over 64 KiB) no
+  longer stops every channel from starting**; the options that do not fit
+  are left out and the guide's footer says so. (D-PLY-50)
+- **A channel logo address with a stray bracket in its host no longer
+  stops the logo fetch for every channel of that source.** (D-LOGO-26)
+- **A channel whose playlist writes its logo address with a tab or
+  carriage return inside `http` or `https`, or with a control character
+  other than whitespace in front of it, is listed without a logo** after
+  the next refresh. Such a logo was never fetched or shown, and the logo
+  dialog no longer counts it as one it could not use. (D-LOGO-30)
+
+### Changed
+
+- **With Omarchy's animations turned off** (`omarchy toggle animations`),
+  the bar label, the glyph colour, the guide's banner and the Sources row
+  change at once instead of animating, as the rest of the shell does.
+  (D-A11Y-11)
+- **Reading a large playlist is about a fifth faster than in 0.19.1**,
+  with no change to which channels it keeps or refuses. (F-HARNESS-73)
+- **`--http-proxy` in `mpvArgs` is refused**, and so is a
+  `--demuxer-lavf-o` token naming `http_proxy`; both were accepted with a
+  warning. An `http-proxy` line, or an `http_proxy` key in
+  `demuxer-lavf-o`, in your own mpv config no longer applies to the
+  plugin's player either. Set `http_proxy` (and `no_proxy`) in the
+  environment the shell runs in instead, and the relay sends the player's
+  traffic through that proxy. (D-SINK-102)
+- **`mms` and `mmsh` channels from a playlist on the internet are not
+  played**: they are skipped when the playlist is read and counted in the
+  guide footer's playlist warning, because nothing can check where their
+  connections go. A playlist on this computer or your own network keeps
+  them. Each source's playlist is fetched again once after the update so
+  that this applies to it: the active source's when the shell starts, each
+  other source's when you next switch to it. (D-SINK-102)
+- **An `rtsp` channel from a playlist on the internet is always played
+  over TCP**, whatever `--rtsp-transport` says. (D-SINK-102)
+- **An unexpected helper error names only its kind** in the reply and the
+  journal, not its text. (D-SINK-115)
+
+### Worth knowing
+
+- **A channel the relay refuses** shows "Refused a local address" on its
+  failure card, and the guide marks it failed, whether it starts the player
+  or is a change of channel while another plays. The plugin asks the relay
+  just after the player closes; if it cannot ask within about a second, a
+  change of channel fails like a stream that would not open. (D-PLY-66)
+- **An `rtmp`, `rtsp` or `srt` channel from a playlist on the internet is
+  played at the first address its server name gave** when you played it,
+  with no fallback to the name's other addresses, and an `rtmp` server
+  that tells its streams apart by the name in the address may refuse it.
+- **A player started by an earlier version is never left playing on its
+  own**: if its channel cannot be put back in a new player window, it is
+  stopped, where earlier versions let it play on until you changed
+  channel.
+- **A playlist served from this computer (a relay such as Threadfin or
+  xTeVe on `127.0.0.1`) can no longer redirect a channel to another port
+  on this computer**: the redirect is refused and the channel fails, as a
+  channel listed on that port already was skipped. A redirect within the
+  relay's own port, to your local network or to the internet still plays.
+  (D-SINK-102)
+- **The relay looks up every server a channel connects to within 3
+  seconds**, as 0.19.1 looked up the own server of a channel from a
+  playlist on the internet; a server whose name takes longer, the
+  channel's own included when its playlist is on your network, fails like
+  a stream that would not open.
+- **With `--ytdl=yes`, yt-dlp fetches pages itself**, outside the relay's
+  checks.
+- **The relay is one more small program per player**, about 25 MB of
+  memory while idle, and it stops with the player.
+- **A saved source is dropped when the shell starts if its address holds
+  one of the shapes the plugin cannot read in an address, refused above**
+  (a character that reads as `/`, `?`, `#`, `@` or `:`, a `[` or `]` in
+  the user name or password, or a bracketed host that is not an IPv6
+  address), **or if its host holds a character a host name may not hold**,
+  as one holding `@` or `%` in its host has been since 0.19.0; a guide
+  address with either is cleared. A letter the international-name rules
+  fold by case drops nothing when it is in the user name, the password,
+  the path or the query. Add it again, written plainly or percent-encoded.
+  A source or guide address given to `state source add` or
+  `state source update` whose host had a capital sigma that earlier
+  versions saved as the final sigma is among them. Every release since
+  0.14.0 lowered a host given to the command line with Python's
+  `str.lower`, which writes a capital sigma as the final sigma when,
+  passing over case-ignorable characters such as `.`, `:`, `'` and
+  combining marks, the nearest character before it is cased and the
+  nearest after it, if there is one, is not (Unicode's Final_Sigma rule,
+  where cased is Unicode's Cased property: an uppercase, lowercase or
+  titlecase letter, or one of the other characters Unicode counts as
+  uppercase or lowercase, such as the ordinal `ª`, the circled `ⓐ` and the
+  Roman numeral `Ⅰ`). A channel whose host holds one is skipped, and each
+  source's playlist is downloaded once more after the update.
+  (D-SINK-115, D-SINK-116, D-SINK-117, D-SINK-119)
+
+### Known limitations
+
+- **Through your own web proxy, a server name is checked by the answer
+  this computer gets**, and the proxy looks the name up again on its own
+  side. Behind a proxy on a network where this computer cannot look names
+  up itself, a channel from a playlist on the internet plays only while
+  every connection it makes is to the playlist's own server or to a server
+  written as a numeric address: one on another named server is refused, as
+  since 0.19.1, and now so is one on the playlist's own server that
+  redirects to another named server or takes its HLS or DASH segments from
+  one (up to 0.19.1 your proxy followed those).
+- **If you start mpv through a wrapper script of your own that runs the
+  real player as its child, and the relay is killed outright**, the player
+  plays on with nothing to connect through until the plugin's next
+  ten-second check notices and replaces it (or stops it, when its channel
+  cannot be put back); until then another account on this computer that
+  took over the relay's port could receive the player's plain-`http`
+  requests. And a wrapper that sets `no_proxy` or `http_proxy` for the
+  real player sends the connections those name past the relay, unchecked.
+- **A playlist on this computer or your own network is trusted as before,
+  and so is everything its channels connect to**, except another port on
+  this computer for a playlist served from it: if such a playlist
+  (Threadfin or xTeVe without buffering, say) lists your provider's stream
+  addresses unchanged, that provider's servers can still redirect the
+  player, or serve it HLS or DASH segments, on your local network -- and,
+  when the playlist is on your network rather than on this computer, on
+  this computer too.
+- **The limitations listed under 0.19.1 still apply**, except the three
+  this release closes for playlists on the internet: a name that changes
+  its answer, a stream server's redirects, and the servers an HLS or DASH
+  stream's segments come from.
+
 ## 0.19.1 (2026-11-13)
 
 **Checks where a channel's server name leads before the player connects

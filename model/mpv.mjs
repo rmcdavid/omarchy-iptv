@@ -35,14 +35,11 @@ import {
 //
 // Mirrored by `mpv_arg_warnings()` in the helper (bin/helper/) and pinned by the
 // `mpvHandoff` vectors in the player-argv.json. fixture (dev branch)
-// D-SINK-51 (2026-10-29): `--http-proxy` joins them. For a plain-http stream
-// the proxy receives the request line -- the WHOLE credentialed URL -- and the
-// provider headers (measured: the proxy logged both); for https it receives
-// the host name only. A real need for some users, so warned, not refused.
+// D-SINK-51 (2026-10-29) made `--http-proxy` one of them; D-SINK-102 pins it
+// to the relay instead (MPV_RESERVED), so it is refused, not warned.
 var MPV_HANDOFF = {
   "--ytdl-format": true,
-  "--ytdl-raw-options": true,
-  "--http-proxy": true
+  "--ytdl-raw-options": true
 }
 // The same hook, reached through a script option: warned on only when the
 // value actually names it, so `--script-opts=osc-scalewindowed=2` is silent.
@@ -59,13 +56,8 @@ var MPV_HANDOFF_TEXT = " hands the stream address to another program"
 // by `mpv_arg_writes_disk()` in the helper (bin/helper/), same fixture.
 var MPV_DISK_WARN = { "--cache-on-disk": true }
 var MPV_DISK_TEXT = " writes the stream to disk while it plays"
-// D-SINK-59 (lead, 2026-10-29): `--demuxer-lavf-o` carrying FFmpeg's
-// `http_proxy` key hands a plain-http HLS stream's whole credentialed request
-// line and the provider header to the proxy (measured by rc-mpvpin's
-// recheck), what --http-proxy does, so it is warned the same way. A substring
-// of the raw token, the MPV_DEMUXER_TLS_WORDS shape. Mirrored by
-// MPV_DEMUXER_PROXY_WORD in the helper.
-var MPV_DEMUXER_PROXY_WORD = "http_proxy"
+// D-SINK-59 (lead, 2026-10-29) warned of a `--demuxer-lavf-o` token carrying
+// FFmpeg's `http_proxy` key; D-SINK-102 refuses it (MPV_DEMUXER_TLS_WORDS).
 // D-SINK-53 (lead, 2026-10-29): `--rtsp-transport` other than tcp or http
 // makes every rtsp channel bind RTP and RTCP ports on all interfaces for
 // anyone to send to (measured by lane-dest). The user's own choice (PO-5),
@@ -120,7 +112,6 @@ function mpvHandoffName(token) {
   if (base === "--ytdl") return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
   if (MPV_HANDOFF[base] === true) return name
   if (MPV_HANDOFF_SCRIPT_OPTS[base] === true) return value.indexOf("ytdl") === -1 ? "" : name
-  if (base === "--demuxer-lavf-o") return value.indexOf(MPV_DEMUXER_PROXY_WORD) === -1 ? "" : name
   return ""
 }
 
@@ -189,8 +180,9 @@ function mpvArgWarning(token) {
 }
 
 // Every cost one token carries, in a fixed order. D-SINK-65 made one token
-// able to carry two: a `--demuxer-lavf-o` holding both FFmpeg's http_proxy
-// (D-SINK-59) and a binding rtsp_transport is told both.
+// able to carry two. A `--demuxer-lavf-o` holding FFmpeg's http_proxy, which
+// D-SINK-59 warned of, is refused since D-SINK-102 and warns of nothing; one
+// holding a binding rtsp_transport is told that.
 function mpvArgWarningLines(token) {
   var out = []
   var name = mpvHandoffName(token)
@@ -230,8 +222,21 @@ function mpvArgWarnings(tokens) {
 // is option-shaped, else the fixed word `<token>`. An option-shaped name
 // that was refused is reserved (that is the only way splitMpvArgs refuses
 // one), so the sentence says so; a `<token>` is not an option at all.
+// [D-PLY-50: a token refused for the setting's LENGTH is not handed to this
+// sentence; it gets mpvArgsTooLongWarning's one line instead.]
 var MPV_REFUSED_TEXT = " refused: reserved by the plugin"
 var MPV_REFUSED_JUNK_TEXT = " refused: not a --option"
+
+// D-PLY-50 (2026-11-13). Every private helper argument shares ONE environment
+// string (helperSpawn, D-SINK-47), and the kernel refuses an exec whose
+// single string is longer than 128 KiB (MAX_ARG_STRLEN; the helper's
+// ARGS_ENV_MAX): a setting whose tokens total more would make every player
+// start fail at exec, with nothing saying why. So the tokens get half of it,
+// counted as the bytes they will occupy there -- each one as the JSON string
+// helperSpawn writes for its `--mpv-arg=TOKEN` member, in UTF-8, plus its
+// comma -- and the other half stays for the cache directory, the channel id,
+// the scope and the owner token. Read, not measured through Quickshell.
+var MPV_ARGS_ENV_BUDGET = 65536
 
 function mpvRefusedWarning(token) {
   var name = mpvRejectedName(token)
@@ -267,6 +272,9 @@ function mpvRefusedWarnings(rejected) {
 function splitMpvArgs(text) {
   var args = []
   var rejected = []
+  var shaped = []
+  var spent = 0
+  var over = 0
   var parts = str(text).split(/\s+/)
   for (var i = 0; i < parts.length; i++) {
     var token = parts[i]
@@ -283,10 +291,46 @@ function splitMpvArgs(text) {
         // D-SINK-47: a token now becomes one line of the player's options
         // file, and a line break, a NUL or a lone surrogate cannot be carried
         // on one (mpvTokenWritable).
-        || !mpvTokenWritable(token)) rejected.push(token)
-    else args.push(token)
+        || !mpvTokenWritable(token)) {
+      rejected.push(token)
+      shaped.push(token)
+      continue
+    }
+    // D-PLY-50: the kept tokens must fit the one environment string they
+    // travel in. Once one does not, it and every token after it are refused:
+    // mpv reads options in order, so a later one kept past a gap would apply
+    // without the ones written before it.
+    // (`spent` stops growing at the first one, so it stays past the budget.)
+    if (over === 0) spent += mpvArgEnvCost(token)
+    if (spent > MPV_ARGS_ENV_BUDGET) {
+      over++
+      rejected.push(token)
+    } else args.push(token)
   }
-  return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
+  var warnings = mpvRefusedWarnings(shaped)
+  if (over > 0) warnings.push(mpvArgsTooLongWarning(over))
+  return { args: args, rejected: rejected, warnings: warnings.concat(mpvArgWarnings(args)) }
+}
+
+function mpvArgEnvCost(token) {
+  // The literal is HELPER_PRIVATE_ATTACHED, which is declared below this
+  // function (a var may not be named above its declaration in a part); the
+  // node suite holds this count to the string helperSpawn really writes.
+  var text = JSON.stringify("--mpv-arg=" + str(token))
+  var bytes = 1
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i)
+    if (c < 0x80) bytes += 1
+    else if (c < 0x800) bytes += 2
+    else if (c >= 0xd800 && c < 0xdc00) { bytes += 4; i++ }
+    else bytes += 3
+  }
+  return bytes
+}
+
+function mpvArgsTooLongWarning(count) {
+  var n = Math.floor(Number(count) || 0)
+  return "mpvArgs is too long: the last " + n + (n === 1 ? " option is" : " options are") + " not used (limit 64 KiB)"
 }
 
 // D-SINK-47: whether one token can be one line of the player's options file:
@@ -602,18 +646,32 @@ function buildMpvArgv(params) {
   // a token's value (measured): the pin block after it keeps the last word.
   // The file is removed once mpv has bound its socket, which it does only
   // after reading its whole command line. No tokens, no --include.
+  //
+  // D-SINK-102: the pin block opens with the relay pin beside the resume
+  // folder (mpvPinBlock), `relayPort` the port of the listener the helper's
+  // spawn bound, so it too is set from the command line after every user
+  // token and no profile replaces it; MPV_TLS_VERIFY stays the last element.
   var extra = asList(p.extraArgs)
   var file = str(dirs.mpvArgs) !== "" ? str(dirs.mpvArgs) : dirnameOf(p.socketPath) + "/mpv-args.conf"
   var user = extra.length > 0 ? ["--include=" + file] : []
-  return argv.concat(user).concat(mpvPinBlock(dirs))
+  return argv.concat(user).concat(mpvPinBlock(dirs, p.relayPort))
+}
+
+// D-SINK-102: the pin that makes the player's relay its HTTP proxy, with no
+// credential, so on its own it denies everything; each load the helper
+// registers carries its own token per file. A port that is not one is 0,
+// which no relay holds. Mirror of mpv_relay_pin() in the helper.
+function mpvRelayPin(port) {
+  var p = typeof port === "number" && Math.floor(port) === port && port > 0 && port < 65536 ? port : 0
+  return "--http-proxy=http://127.0.0.1:" + p
 }
 
 // The trailing pins: the contained resume folder first (a named profile in
-// the user's own mpv.conf moved it: measured), then MPV_PIN_BLOCK. Mirror of
-// mpv_pin_block() in the helper.
-function mpvPinBlock(dirs) {
+// the user's own mpv.conf moved it: measured), then the relay pin
+// (D-SINK-102), then MPV_PIN_BLOCK. Mirror of mpv_pin_block() in the helper.
+function mpvPinBlock(dirs, relayPort) {
   var d = dirs || {}
-  return ["--watch-later-dir=" + str(d.watchLater)].concat(MPV_PIN_BLOCK)
+  return ["--watch-later-dir=" + str(d.watchLater), mpvRelayPin(relayPort)].concat(MPV_PIN_BLOCK)
 }
 
 // ------------------------------------------------------------ player verbs
@@ -1073,21 +1131,22 @@ function trackAccessibleName(rows, index) {
 }
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
-  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_DEMUXER_PROXY_WORD, MPV_LISTEN_WARN,
-  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY,
-  MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
-  mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
-  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvTokenWritable,
-  demuxerNamesTls, scriptOptsRefused, mpvRejectedLine, mpvRejectedName,
-  headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
-  PLAYER_BUILD_KEY, PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN,
-  mpvBuildMarker, buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV,
-  HELPER_ARGS_FLAG, HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST,
-  HELPER_PRIVATE_ATTACHED, helperSpawn, cacheRunArgv, playlistFetchArgv,
-  fetchStateDir, playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV,
-  fetchEnvironment, failedArgv, logoFetchArgv, playerTracksArgv, trackChoice,
-  parseTracks, LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_LISTEN_WARN, MPV_LISTEN_QUIET,
+  MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY, MPV_SCRIPT_OPTS_WORDS,
+  mpvOptionBase, mpvHandoffName, mpvDiskName, mpvListenName,
+  demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning, mpvArgWarningLines,
+  mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  MPV_ARGS_ENV_BUDGET, mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs,
+  mpvArgEnvCost, mpvArgsTooLongWarning, mpvTokenWritable, demuxerNamesTls,
+  scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, PLAYER_BUILD_KEY,
+  PLAYER_BUILD_PATTERN, PLAYER_BUILD_UNKNOWN, mpvBuildMarker, buildMpvArgv,
+  mpvRelayPin, mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
+  helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
   trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
   trackPanelMessage, trackAccessibleName
 }
