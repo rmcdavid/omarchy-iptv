@@ -24948,3 +24948,41 @@ capabilities. What is left is the maintainer's manual review. On the
 owner's word, replies naming 0.20.0 and #15671 were posted on #14290 (the
 two fixes and the residuals the README states) and on #13611 and #12636
 (one line each, pointing to #14290's).
+
+## F-HARNESS-126: run.sh reads its two numbers as decimal (the daily run, 2026-11-23)
+
+The row's repro, as filed: run.sh checked `--entry-ms` with `^[0-9]+$` and
+then `(( ENTRY_MS >= 400 && ENTRY_MS <= 5000 ))`, where bash reads a leading
+zero as octal, and exported the string, which the harness shell reads with
+`parseInt(..., 10)`.
+
+The fix is one function, `qa_decimal <value> <min> <max>` (scripts/qa-lib.sh):
+the value's leading zeros come off as text, a number of more than 15 digits
+is outside every range, and it prints the number it compared. run.sh
+compares and exports what it prints.
+
+The sibling (rule 15), searched as "an option value that reaches `(( ))`" in
+run.sh's parser: `--timeout` was taken as written and then read by
+`(( TIMEOUT > 0 ))`. A value of 08 is bash's "value too great for base", and
+a word is an unset variable, 0; each took the branch that starts quickshell
+with no limit. It is now `qa_decimal "$2" 0 86400`, refused otherwise. The
+callers pass 0, 5, 300, 600 or OMARCHY_IPTV_SCENARIO_TIMEOUT. Cleared:
+`--label-max` (exported as written, compared nowhere in bash), `--instance`,
+and the five functions the row names in qa-lib.sh, which stay latent.
+
+Checks: 15 in scripts/qa-lib-test.sh (804 -> 819). Ten call `qa_decimal`.
+Four drive run.sh's own parse with `--order bogus` last, so the parse dies on
+either tree and no harness starts; the option it names is the answer. One
+holds the join: run.sh assigns both from `qa_decimal` and exports ENTRY_MS.
+
+Red first, the block alone through a driver that sources d0d928f's qa-lib.sh
+and runs d0d928f's run.sh: 2 passed, 13 failed (the two are the old form's own
+line and `--timeout 08`, which the old parse did not read). On the fix:
+15 passed.
+
+Mutants of `qa_decimal`, one decision each, the same block: the zeros left on
+(8 failed), no length bound (1), `>` for `>=` at the low end (2), `<` for
+`<=` at the high end (1), no digits check (2), a bound's leading zero
+allowed (1), zeros alone left empty (1), the value printed as given (4).
+
+Not run: run.sh starting a harness with either option, which needs a cage.

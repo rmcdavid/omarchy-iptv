@@ -239,6 +239,32 @@ qa_min_skipped() {
   return 0
 }
 
+# qa_decimal <value> <min> <max>: <value> as the decimal whole number its
+# digits spell, when that lies in <min>..<max>. Prints the number without
+# leading zeros and returns 0; prints nothing and returns 1 for a value that
+# is not all digits or lies outside the range; returns 2 for a bound that is
+# not a whole number written without a leading zero.
+#
+# F-HARNESS-126. It exists because bash's arithmetic reads a leading zero as
+# octal and the program handed the same string does not: run.sh checked
+# `(( ENTRY_MS >= 400 && ENTRY_MS <= 5000 ))`, where 07000 is 3584 and
+# passed, and exported the string, which the harness shell reads with
+# parseInt(..., 10) as 7000, outside the range the check enforced; 0500 was
+# refused as 320, and 0800 printed bash's own "value too great for base". So
+# a caller compares, and passes on, what this prints, never what it was
+# given. The zeros come off as text and a number of more than 15 digits is
+# out of every range, so no value reaches the arithmetic that could wrap it.
+qa_decimal() {
+  local v=${1-} min=${2-} max=${3-}
+  [[ $min =~ ^(0|[1-9][0-9]{0,14})$ && $max =~ ^(0|[1-9][0-9]{0,14})$ ]] || return 2
+  [[ $v =~ ^[0-9]+$ ]] || return 1
+  v=${v#"${v%%[!0]*}"}
+  [[ -n $v ]] || v=0
+  (( ${#v} <= 15 )) || return 1
+  (( v >= min && v <= max )) || return 1
+  printf '%s\n' "$v"
+}
+
 # qa_outcome <stream-hits> <failure-mark>
 # D-SINK-13. What the ATTACKER saw, in one word, from two observations: how
 # many GETs of this channel's path its server logged, and whether the service

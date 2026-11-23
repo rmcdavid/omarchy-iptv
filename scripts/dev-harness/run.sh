@@ -1155,7 +1155,11 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
-        --timeout) TIMEOUT=$2; shift ;;
+        # F-HARNESS-126. A whole number, read as decimal: `(( TIMEOUT > 0 ))`
+        # below read 08 as an error and a word as an unset variable, each of
+        # them "no limit", a harness shell nothing would end.
+        --timeout) TIMEOUT=$(qa_decimal "${2-}" 0 86400) || die "--timeout takes whole seconds, 0..86400 (0 = no limit), not '${2-}'"
+                 shift ;;
         --playlist) PLAYLIST=$2; shift ;;
         --epg) EPG=$2; shift ;;
         --source2) SOURCE2=$2; shift ;;
@@ -1169,9 +1173,12 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         # would turn a typo in a scenario into a silent pass.
         --order) ORDER=$2; shift
                  [[ $ORDER == playlist || $ORDER == number ]] || die "--order takes playlist or number, not '$ORDER'" ;;
-        --entry-ms) ENTRY_MS=$2; shift
-                 [[ $ENTRY_MS =~ ^[0-9]+$ ]] || die "--entry-ms takes an integer, not '$ENTRY_MS'"
-                 (( ENTRY_MS >= 400 && ENTRY_MS <= 5000 )) || die "--entry-ms is 400..5000 (manifest range), got $ENTRY_MS" ;;
+        # F-HARNESS-126. Compared, and exported, as the decimal number its
+        # digits spell: bash's own arithmetic read 07000 as 3584 and let it
+        # through, and shell.qml reads the exported string as 7000.
+        --entry-ms) [[ ${2-} =~ ^[0-9]+$ ]] || die "--entry-ms takes an integer, not '${2-}'"
+                 ENTRY_MS=$(qa_decimal "${2-}" 400 5000) || die "--entry-ms is 400..5000 (manifest range), got ${2-}"
+                 shift ;;
         --no-bar-number) BAR_NUMBER=false ;;
         --keep) KEEP=1 ;;
         # F-HARNESS-44. Refused here for the same reason as --order: a seed

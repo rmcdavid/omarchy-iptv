@@ -4057,6 +4057,48 @@ is "clip check-tree, a probe whose first start draws only after 8 s: the warm st
 is "and the producers stopped before they served leave no buffer in the caller's TMPDIR, nor anything else" \
    "$(find "$OS/tmp-cold" -name 'wl-copy-buffer-*' | wc -l | tr -d ' ') $(ls -A "$OS/tmp-cold" | wc -l | tr -d ' ')" "0 0"
 
+# ================================================= qa_decimal (F-HARNESS-126)
+
+section "qa_decimal / F-HARNESS-126: a leading zero that bash read as octal"
+
+# What run.sh's --entry-ms did, as it was written: the pattern, then bash's
+# own arithmetic over the string, then the string itself handed on.
+old_entry_ms() { [[ $1 =~ ^[0-9]+$ ]] && (( $1 >= 400 && $1 <= 5000 )) && printf '%s\n' "$1"; }
+is "old form: 07000 passed the 400..5000 check as octal 3584 and was handed on as written" \
+   "$(old_entry_ms 07000 2>/dev/null)" "07000"
+is "qa_decimal reads 07000 as seven thousand, outside 400..5000" \
+   "$(qa_decimal 07000 400 5000; echo "rc=$?")" "rc=1"
+is "and 0500 as five hundred, inside it, printed without the zero" \
+   "$(qa_decimal 0500 400 5000; echo "rc=$?")" $'500\nrc=0'
+is "and 0800, which ended bash's own arithmetic, as eight hundred, with nothing on stderr" \
+   "$(qa_decimal 0800 400 5000 2>&1; echo "rc=$?")" $'800\nrc=0'
+is "both ends of the range are inside it, the numbers beside them outside" \
+   "$(for v in 399 400 5000 5001; do qa_decimal "$v" 400 5000 >/dev/null; printf '%s ' "$?"; done)" "1 0 0 1 "
+is "a value that is not all digits is refused: empty, signed, a word, a fraction, a space" \
+   "$(for v in '' -5 +5 abc 5.0 ' 5' 0x10; do qa_decimal "$v" 0 100 >/dev/null 2>&1; printf '%s ' "$?"; done)" "1 1 1 1 1 1 1 "
+is "zeros alone are zero" "$(qa_decimal 000 0 10; echo "rc=$?")" $'0\nrc=0'
+is "a number too long for the arithmetic is outside every range, and says nothing" \
+   "$(qa_decimal 18446744073709552016 400 5000 2>&1; echo "rc=$?")" "rc=1"
+is "long only by its zeros, it is still its number" \
+   "$(qa_decimal 00000000000000000000500 400 5000; echo "rc=$?")" $'500\nrc=0'
+is "a bound with a leading zero, or none, is the caller's mistake: 2" \
+   "$(qa_decimal 5 08 10 >/dev/null 2>&1; printf '%s ' "$?"; qa_decimal 5 0 >/dev/null 2>&1; printf '%s ' "$?"; qa_decimal 5 1 x >/dev/null 2>&1; printf '%s ' "$?")" "2 2 2 "
+
+# run.sh itself, DRIVEN. Every line ends in an option run.sh refuses, so the
+# parse dies on this tree and on the old one alike and no harness starts;
+# which option it names is the answer.
+rs_parse() { OMARCHY_IPTV_HARNESS_DIR="$TMP/rs-parse" "$ROOT/scripts/dev-harness/run.sh" "$@" --order bogus 2>&1 >/dev/null | head -n 1; }
+is "run.sh refuses --entry-ms 07000 as out of range" \
+   "$(rs_parse --entry-ms 07000)" "[run.sh] --entry-ms is 400..5000 (manifest range), got 07000"
+is "run.sh takes --entry-ms 0500 and reads on" \
+   "$(rs_parse --entry-ms 0500)" "[run.sh] --order takes playlist or number, not 'bogus'"
+is "run.sh takes --timeout 08 as eight seconds and reads on" \
+   "$(rs_parse --timeout 08)" "[run.sh] --order takes playlist or number, not 'bogus'"
+is "run.sh refuses a --timeout that is not a number, which read as no limit" \
+   "$(rs_parse --timeout soon)" "[run.sh] --timeout takes whole seconds, 0..86400 (0 = no limit), not 'soon'"
+is "and what run.sh compares and hands the harness shell is what qa_decimal printed" \
+   "$(qa_count '^ +ENTRY_MS=\$\(qa_decimal "\$\{2-\}" 400 5000\) \|\| die ' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ +--timeout\) TIMEOUT=\$\(qa_decimal "\$\{2-\}" 0 86400\) \|\| die ' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ +export OMARCHY_IPTV_ENTRY_MS="\$ENTRY_MS"$' "$ROOT/scripts/dev-harness/run.sh")" "1 1 1"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -4318,7 +4360,10 @@ is "and the producers stopped before they served leave no buffer in the caller's
 # leaves no wl-copy buffer in the caller's TMPDIR from a producer stopped
 # before it served. Red on 6684ef4's scenario (two left) and on d28039d's
 # (three).
-EXPECTED=804
+# 804 -> 819 on 2026-11-23 (F-HARNESS-126, the daily run): qa_decimal's ten
+# and run.sh's own parse, driven, five. Red on d0d928f's scripts, 13 of the
+# 15 (the old form's own line and --timeout 08 pass there); eight mutants red.
+EXPECTED=819
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
