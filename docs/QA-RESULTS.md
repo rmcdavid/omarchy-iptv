@@ -24677,12 +24677,39 @@ on an ask (1), no producer check (2), no refusal of an empty display (1), the
 caller's display asked (1), the scenario's wait removed (2), the producer's
 pid not passed (1). The suite took 168 s at nice 10.
 
-**Rule 15, searched and cleared.**
-- A producer read back: wl-copy and wl-paste appear in clip-scenario.sh
-  alone (a grep over `scripts/`). Its shell arm, live only, pastes after a
-  chord: L7 and L8 wait up to 5 s for the field's value, which says so; L10
-  starts its Ctrl+V 1.0 s and a settle after a 100 MB producer starts, the
-  same assumption P2 made. Not changed: this lane does not run the live arm.
+**Rule 15, searched; one sibling unverified.**
+- A producer read back. [Corrected 2026-11-22 by lane-fix-fh124, from the
+  recheck of 19c6235: this said wl-copy and wl-paste appear in
+  clip-scenario.sh alone, by a grep over `scripts/`, and that grep names a
+  second producer.] A grep for `wl-copy` and `wl-paste` over every tracked
+  file outside `docs/` names, besides clip-scenario.sh:
+  - scripts/qa-sources-scenarios.sh, the same shape: SRC-H03 starts one
+    producer and SRC-H04 six (`wl-copy -- "$A"`, `... | wl-copy`,
+    `wl-copy < file`), and a Ctrl+V or Shift+Insert chord reads each one
+    back straight after. It is a desk scenario on the real display and is
+    not in the gate. Its wl-copy runs without `--foreground`, so its step
+    returns when wl-copy forks, and by the recheck's reading of wl-clipboard
+    2.3.0 (the installed one) wl-copy forks only once it has set the
+    selection, so the return would mean the offer is set. That is read, not
+    measured on a display (the installed manual says only that wl-copy
+    forks and serves in the background), so this sibling is UNVERIFIED, not
+    cleared. Not changed: this lane runs nothing on the real display.
+  - scripts/dev-harness/run.sh and scripts/check.sh: comments only.
+  - The helper's `clipboard` verb (bin/helper/01-core.py, 11-cli.py) and
+    what tests it (tests/test_clipboard.py, tests/Model.test.js,
+    tests/test_local_refusals.py, the clipboard and local-refusals
+    fixtures): a consumer of whatever is offered, a stub wl-paste in every
+    test; nothing there starts a producer.
+  - tests/test_host_notify_codes.py: a static read of the HOST's
+    notification Service.qml, which runs `wl-copy --sensitive`; nothing
+    here reads it back. tests/a11y/fidelity.py and
+    tests/fixtures/source-urls.json: sentences only.
+  - Guide.qml, Service.qml and model/: comments about the helper's paste
+    path; the shipped code starts no producer.
+  clip-scenario.sh's own shell arm, live only, pastes after a chord: L7 and
+  L8 wait up to 5 s for the field's value, which says so; L10 starts its
+  Ctrl+V 1.0 s and a settle after a 100 MB producer starts, the same
+  assumption P2 made. Not changed: this lane does not run the live arm.
 - A first qml start timed against a bound: the probe arm (fixed); the shell
   arm's first quickshell start waits 20 s for `formActive` over IPC and says
   so if it gives up (live only); logo-scenario's K1 probe is offscreen and
