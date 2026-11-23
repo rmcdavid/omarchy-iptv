@@ -42,7 +42,9 @@
 #   display, offered OFFER_MB of text/plain by a foreign producer (wl-copy on
 #   the same display), and sampled for resident set from outside. This is the
 #   fact the fix rests on, re-measured on THIS machine on every commit: a
-#   read-only control reads nothing, an editable one reads everything.
+#   read-only control reads nothing, an editable one reads everything. A
+#   throwaway start of readonly.qml runs to its first frame before them, so
+#   the first measured probe is not the arm's cold start (F-HARNESS-124).
 #
 #   the shell arm (live). The dev-harness fake shell with the REAL Guide.qml
 #   and Service.qml under the same cage, in the harness-only floating window
@@ -493,15 +495,24 @@ PYRPT
 # turned on for the probes (their files stay the lead's, byte for byte) and
 # its gui-thread line "Frame prepared" follows the first frame that was
 # really swapped. The wait for it is bounded at 5 s, and the settle after
-# it at five samples inside 2.7 s, because a probe quits itself at 9 s. A
-# probe that drew no frame in that time, or is gone before the offer, is
-# NOT measured: its growth reads `no-frame` or `gone`, which no band
-# accepts, rather than a number that is its own start (or, for a probe
-# that is gone, a vacuous 0).
+# it at five samples inside 2.7 s. A probe that drew no frame in that time,
+# or is gone before the offer, is NOT measured: its growth reads `no-frame`
+# or `gone`, which no band accepts, rather than a number that is its own
+# start (or, for a probe that is gone, a vacuous 0).
+#
+# F-HARNESS-124: the probe's 9 s is counted from its component's
+# completion, which its first frame follows closely, not from its start:
+# measured 2026-11-22, a probe left to quit by itself exited 9.1 to 9.6 s
+# after its first frame (idle and beside four busy loops) and 9.6 to 9.9 s
+# after it when that frame came 6.2 s after a cold start. So the life
+# bounds what follows the frame -- the settle and the 2 s window -- and the
+# 5 s is a bound on the start alone, which warm_start() keeps warm for the
+# arm's first probe.
 PROBE_RESULT=""
 probe() {
-  local name=$1 before i drew=0 t0 rc
+  local name=$1 before i drew=0 ts t0 rc
   PROBE_PID=""
+  ts=${EPOCHREALTIME/[.,]/}
   WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 \
     QT_LOGGING_RULES='qt.scenegraph.time.renderloop.debug=true' \
     "$QML_BIN" "$SPIKE/$name.qml" >"$WORK/$name.log" 2>&1 &
@@ -511,6 +522,7 @@ probe() {
     kill -0 "$PROBE_PID" 2>/dev/null || break
     sleep 0.05
   done
+  (( drew )) && echo "   ($name.qml drew its first frame $(( (${EPOCHREALTIME/[.,]/} - ts) / 1000 )) ms after its start)"
   (( drew )) && settle "$PROBE_PID" 5 10
   before=$(rss_kb "$PROBE_PID")
   producer_start $((OFFER_MB * 1024 * 1024))
@@ -548,6 +560,42 @@ probe() {
   kill_pid "$PROBE_PID"; PROBE_PID=""
   producer_stop
 }
+# F-HARNESS-124: the arm's first qml start is a cold one. The probes share
+# one home in WORK, made fresh for every run, so the first start compiles
+# the shaders mesa's software renderer caches there and the QML the runtime
+# caches there, and after a full gate's other steps the probe's libraries
+# and fonts may have left the page cache too, which on this machine's
+# rotational disk is the larger cost: with the probe's files dropped from
+# the page cache, the first probe drew its first frame 6.2 s after its
+# start, where a warm one draws in about 0.5 s, and P4 read `no-frame` (2 of
+# 2 runs, the lead's gate's red exactly). So a throwaway start of the first
+# probe's own file, readonly.qml, runs to its first frame before any probe
+# is measured, and is stopped by its pid; nothing is offered while it
+# lives. It is bounded at WARM_BOUND_S, longer than a measured probe's 5 s
+# because nothing is measured on it, and a warm start that drew nothing
+# says so and the probes run anyway, so a probe that never draws is still
+# red at P3, P4 and P5 (F-HARNESS-66).
+WARM_BOUND_S=20
+warm_start() {
+  local t0 ms drew=0
+  t0=${EPOCHREALTIME/[.,]/}
+  WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 \
+    QT_LOGGING_RULES='qt.scenegraph.time.renderloop.debug=true' \
+    "$QML_BIN" "$SPIKE/readonly.qml" >"$WORK/warm.log" 2>&1 &
+  PROBE_PID=$!
+  while (( ${EPOCHREALTIME/[.,]/} - t0 < WARM_BOUND_S * 1000000 )); do
+    grep -qa 'Frame prepared' "$WORK/warm.log" 2>/dev/null && { drew=1; break; }
+    kill -0 "$PROBE_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  ms=$(( (${EPOCHREALTIME/[.,]/} - t0) / 1000 ))
+  if (( drew )); then
+    echo "   (warm start: a throwaway readonly.qml drew its first frame after $ms ms; stopped, not measured)"
+  else
+    echo "   (warm start: a throwaway readonly.qml drew no frame in $ms ms; the measured probes start anyway)"
+  fi
+  kill_pid "$PROBE_PID"; PROBE_PID=""
+}
 # What a probe that must read nothing answers: its growth under the band,
 # and a probe that was not measured is not under it.
 reads_nothing() {
@@ -562,6 +610,7 @@ probes() {
   cage_start 60
   ck "P1 the nested display is cage's own (caller: $LIVE_DISPLAY)" "$([[ -n $NESTED && $NESTED != "$LIVE_DISPLAY" ]] && echo nested || echo "$NESTED")" "nested"
   CONSUMER_BYTES=""
+  warm_start
   probe readonly; rd=$PROBE_RESULT; echo "   readonly.qml  before/peak/growth MB: $rd"
   probe editable; ed=$PROBE_RESULT; echo "   editable.qml  before/peak/growth MB: $ed"
   probe nofield;  nf=$PROBE_RESULT; echo "   nofield.qml   before/peak/growth MB: $nf"
