@@ -25296,3 +25296,304 @@ line changed, run through `--cage --tree`.
 - The four cage adjustments (2 to 4 and 6 above) and R7's second press are
   this lane's. They are proposed to the lead, not taken under the standing
   authority.
+
+## D-REL-14: C3, the M5-01 region moved (lane-relsplit3-move, 2026-11-23)
+
+Calls (f), (g), (i), (j) and (k) are the lead's calls under the owner's
+standing authority of 2026-11-09. This lane worked on branch relsplit-3, on
+top of the cage arm's 733f84b. Its commits:
+- 6660f73, the move;
+- 9967571, the comment-only commit;
+- 4aac8bd, the logo recipe re-pointed (rule 15);
+- this record.
+
+Nothing is released and nothing moved `main` or a tag; `main` stays held at
+0.20.0 for #15671.
+
+**What moved (call f).** The region was re-derived from 733f84b with the
+readers' own spans (`function_spans`, each function with the `//` lines
+directly above it): the functions between `// ---- M5-01 LIVE REWIND`
+(L5734) and `// ---...--- helpers` (L6547). The tree agrees with the lead's
+numbers: 36 functions, 40,680 B of span text. Each went to the domain lane
+1's prototype map gives it:
+- Service-rewind.js (ServiceRewind), 15 functions, 7,839 B: seekState,
+  seekCtx, applySeekPlan, applyRewind, clearRewind, seekRefuse, seekBy,
+  seekLive, issueSeek, requestTracks, askPlayerStatus, cancelTracks,
+  refreshTracks, clearTracks, issueQueuedTracks.
+- Service-sources.js (ServiceSources), 21 functions, 32,841 B: beginSwitch
+  through activeSourceSummary.
+- togglePause, the map's sixteenth rewind function, sits above the banner
+  and stays for C4.
+- The region's three loose comment blocks belong to no function, so they
+  stay on the root: the banner, the seekVerbSeconds note and the D-SRC-10
+  note.
+
+**The cut (call g).** The command was `split-service.py --cut --from 733f84b
+--map <the map>`, never a hand edit. It printed `verify ok (the inline view
+is 733f84b:Service.qml byte for byte, 446973 bytes)`.
+
+| file | 733f84b | 6660f73 (the move) | 9967571 (the tip's code) |
+|---|---|---|---|
+| Service.qml | 446,973 B, 8,452 lines | 409,024 B, 7,745 lines | 409,149 B |
+| Service-rewind.js | - | 8,154 B | 8,193 B |
+| Service-sources.js | - | 33,169 B | 33,169 B |
+
+- The 36 forwarders take 2,677 B. Each code-behind opens with `--cut`'s
+  four-line header (286 and 287 B).
+- Service.qml now has 49,728 B of headroom under the 458,752 B ceiling (it
+  had 11,779 B).
+- On the committed tree, `--verify --from-git 733f84b` matches byte for
+  byte. `--check` reads 3 files, 2 code-behinds, 168 root functions, 36
+  forwarders, 2,267 root member sites, 2 uses of the root whole, and 32 of
+  32 cases, so the gate's floors (2,200 and 32) stand.
+- ALLOWLIST went from 43 to 45 entries, and test_release's must_ship gained
+  both files in the same commit. release.py check reads 45 files and 24
+  runtime sources (22 before).
+- Rule 10: the test's double Service.qml now declares both code-behinds, as
+  the real one does. With must_ship changed and the double not, 13
+  failures and 21 errors: check() refuses an allowlisted `.js` that nothing
+  imports.
+- test_the_real_tree_reaches_the_whole_model now counts the runtime sources
+  as 3 + the model's files + the code-behinds, each count read from its
+  reader. Its old count of 22 is red on the moved tree, which scans 24.
+
+**Patch context (call g).** No function stays on the root for a patch's
+sake.
+- Every `*.patch` that targets Service.qml was searched: 16 key-mutation
+  and 2 chno-mutation patches, one hunk each. Each hunk was found in
+  733f84b's Service.qml by its own old-side lines, as `git apply` finds it.
+- No hunk reaches within three lines of any of the 36 functions. They sit
+  in applyOrder and startStateInit, tuneByNumber, applyUserState,
+  liftStateBlock, mergeForeignText, saveState, recheckStateBlock,
+  finishStateVerifyLater, endStateWriteWait and finishStateVerify, and in
+  object handlers at L6901-7205, all outside L5734-6547.
+- `git apply --check` passes for all 30 patches on both 733f84b and the
+  move.
+- qa-lib-test's two judges, "all nineteen key-mutation patches" and "all
+  eight chno-mutation patches", are green on both trees.
+- No scenario applies a patch itself.
+
+**The pins (call k).** Three sets of pins said this tree is Service.qml
+alone; each now names the three files:
+- tests/Model.test.js, two checks. "D-REL-14: on this tree the service is
+  Service.qml alone, ..." becomes "D-REL-14 C3: on this tree the service is
+  Service.qml and its two code-behinds, ...". The new check also cuts the
+  view again by the code-behinds' own spans and expects Service.qml byte
+  for byte, with 15 and 21 functions. "the node and python readers agree on
+  this tree" now expects the three names.
+- tests/test_service_files.py, ThisTree. test_the_files_are_service_qml_alone
+  becomes test_the_files_are_service_qml_and_its_two_code_behinds, and
+  test_the_view_is_service_qml_byte_for_byte becomes
+  test_the_view_cut_again_is_service_qml_byte_for_byte.
+- scripts/qa-lib-test.sh, two checks. "and that is Service.qml alone" becomes
+  "and on this tree that is Service.qml and its two code-behinds". "qa_service_text
+  is Service.qml, byte for byte" becomes "is the inline view
+  tests/service-files.js reads, byte for byte, and not Service.qml's own
+  text".
+
+Every count is the parent's, and the names differ only by these renames.
+
+| suite | 733f84b | 6660f73 |
+|---|---|---|
+| node tests/Model.test.js | 4,069 checks, 0 failures | 4,069, 0; the name list differs by the one renamed check |
+| python by discovery | 2,999 | 2,999; the ids differ by ThisTree's two renamed tests |
+| the 46 python modules the move can reach, under bwrap as check.sh runs them | 1,490 tests, OK | 1,490, OK |
+| tests/test_host_load_patch.py, each qml under gdb (drive_case.py) | 12 of 12, 3 qml runs | 12 of 12, 3 qml runs |
+| tests/Model.spec.qml, qmltestrunner under gdb | 112 passed, 0 failed | 112, 0, the same names |
+| scripts/qa-lib-test.sh | 820 passed, 0 failed | 820, 0; the two checks renamed |
+| the gate's preflights that read the service | chno-entry 21, chno 16, pip 41, id-rotate 14, key 12, open 19 | the same, line for line apart from the key preflight's random keys |
+
+The 46 python modules are every test_*.py that names the service, the
+allowlist, the readers or check.sh, less the four that start qml bare
+(test_bar_shown_names, test_host_notify_codes, test_host_text_format and
+test_host_load_patch, the last driven under gdb), plus the rewind, source,
+mpv and split-helper modules. The full suite is the lead's gate's.
+
+Rule 11, the pins seen red both ways:
+- **The new tests on 733f84b's tree** (an export with the four test files
+  swapped in):
+  - node: 2 of 4,069 red, both flipped checks.
+  - test_service_files and test_release: 35 red. ThisTree's two, and 33 of
+    test_release, whose double declares code-behinds the 43-entry
+    ALLOWLIST does not ship.
+  - qa-lib-test: 818 passed, 2 failed, both flipped checks.
+- **733f84b's tests on the moved tree:**
+  - node: 2 red, the old pins.
+  - test_service_files and test_release: 36 red. ThisTree's two old tests,
+    33 cases where the old double declares no code-behind against the
+    45-entry ALLOWLIST ("Service-rewind.js is on the allowlist but nothing
+    the plugin loads imports it"), and the runtime-source count, 22
+    against 24.
+  - qa-lib-test: 818 passed, 2 failed.
+
+**The guards and the qmllint step, as check.sh runs each.**
+- On the moved tree each of the nine guards prints the parent's line byte
+  for byte, apart from the file count:
+  - text format, theme names, colour literals, Qt revisions and metric
+    literals: 3 files become 5;
+  - trim shapes and model regex: 22 become 24;
+  - README notices: 35 shipped code files become 37.
+- Model members reads 413 references on both trees. On the moved tree they
+  split as Service.qml 360, Service-rewind.js 10 and Service-sources.js 43,
+  each judged under Service.qml's imports.
+- split-helper --check, split-model --check, the helper regex guard, the
+  harness root's theme names and check-board-staleness (0 disagreements)
+  read the same on both trees, and check-defect-ledger reads 795 rows on
+  both, over 551 tracked files where the parent has 549.
+- qmllint, as the step stages it: Service.qml has 0 errors on both trees,
+  but its entries go from 433 to 371.
+  - block-scope-var-declaration: 44 become 32.
+  - missing-property on Model: 387 become 337.
+  - The other two entries are unchanged.
+  - The 62 that went are in the moved bodies, which qmllint does not read
+    (Part A saw 433 become 139 on the four-file prototype).
+  - The step floors only the error count and the file count (5), so nothing
+    was re-levelled.
+  - The member check that qmllint made on those bodies is made by
+    check-model-members (413 references) and split-service's member guard
+    (2,267 sites).
+  - The 12 hoisted-`var` warnings are a lint the moved bodies no longer get
+    (proposal, below).
+  - BarWidget.qml, Guide.qml, Model.spec.qml and the harness shell.qml read
+    the same on both trees.
+
+**The suites read the code-behinds (task 2).** Each mutant below is an
+export of 6660f73 with one line changed, run through the whole node suite.
+- **Service-sources.js, clearSourceData without `root.logoHave = ({})`**:
+  4,069 checks, 1 failure, "F-M3-18 (a): through Service -- a switch runs
+  the REAL clearSourceData: ...". It got `{"x.png":true,"dir":...}` where it
+  wanted `{}`. The booted harness compiles and runs the code-behind's
+  function behind its forwarder.
+- **Service-rewind.js, seekCtx's `pendingPlayId` key misspelled
+  `pendingPlayid`** (F-RWD-19's own measured mutation): 4,069 checks, 1
+  failure, "F-RWD-19: the ctx Service.qml builds carries exactly the keys
+  the reducer reads". That check reads seekCtx's body through the inline
+  view, so it now reads Service-rewind.js. This is the one rewind node check
+  over the service's own code. Every other rewind check drives the model,
+  Model.seekQueueStep and Model.rewindApply.
+- **Service-rewind.js, applySeekPlan's clearReadout branch without
+  `root.rewind = null`** (the cage arm's R9 mutant): 4,069 checks, 0
+  failures. No node check boots the service through a zap and reads
+  `rewind`. F-RWD-19's banner says why: what is left in the service is what
+  Qt owns, property writes among them, and the decisions are in the model.
+  The cage arm's R9 is what sees this write, and it is the live mutant
+  below.
+
+**The live proofs (call i).** Each run was made the release step's way:
+- the heavy lock and nice 10;
+- scripts/dev-harness/private-bus.sh;
+- the scenario's own nested headless cage;
+- `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+  QT_QPA_PLATFORMTHEME -u OMARCHY_IPTV_HARNESS_DIR`;
+- a short private XDG_RUNTIME_DIR and TMPDIR.
+
+Each tree was a `git archive` export of its commit, carrying a git
+repository that holds only a `v0.13.6` tag whose bin/omarchy-iptv is the
+real tag's file (sha256 746c7010...), as Part A's trees did. Each scenario
+ran from its own tree's copy.
+
+| run | tree | result | time | load (1 min, start to end) | transcript | journal after |
+|---|---|---|---|---|---|---|
+| rewind, parent | 733f84b | 113 passed, 0 failed, 1 skipped (R15, median 423 ms) | 301 s | 2.57 to 3.39 | rewind-20261123-091614-3954316 | 89 |
+| key live, parent | 733f84b | 141 passed, 0 failed | 597.7 s | 2.65 to 1.63 | key-20261123-092322-3971479 | 89 |
+| rewind, moved | 6660f73 | 113 passed, 0 failed, 1 skipped (R15, median 428 ms) | 260 s | 1.63 to 2.09 | rewind-20261123-093321-4013365 | 89 |
+| key live, moved | 6660f73 | 141 passed, 0 failed | 603.4 s | 1.92 to 1.76 | key-20261123-093742-4024189 | 89 |
+| rewind, moved, mutant R9 | 6660f73, one line of Service-rewind.js changed | 111 passed, 2 failed (R9's two), 1 skipped (R15, median 426 ms) | 309 s | 1.76 to 2.68 | rewind-20261123-094746-4065850 | 89 |
+
+- **The PASS lists, name for name.** The names were compared with their
+  measured values taken out: parenthesised readings, numbers, hex keys and
+  the text after a check's colon.
+  - rewind-scenario's 114 PASS and SKIP lines on the moved tree are the
+    parent's, in the same order.
+  - key-scenario's 141 lines are the parent's. Two differ only in a random
+    source key inside a value (Y3's and H1's `after:` reading), which the
+    comparison did not strip.
+  - The rewind times are wall clock from the rig: start to end under the
+    lock. key-scenario prints its own.
+- **The harness logs.** In each key-scenario run, harness.log holds 78
+  `Launching config` lines and 78 `service loaded` lines, as Part A's runs
+  did. Neither run, and neither rewind run, logs a line naming a
+  code-behind, a TypeError, a ReferenceError or "not a function". The two
+  rewind runs log the same warnings, but for pointer values in the
+  socket's retries, of which the moved run logged one more.
+- **The mutant (run 5) proves the live shell runs the code-behind.** It is
+  the cage arm's R9 mutant, now made inside Service-rewind.js:
+  applySeekPlan's clearReadout branch keeps `seekThrottle.stop()` and loses
+  `root.rewind = null`. Service.qml is the moved tree's byte for byte, and
+  the run used the moved tree's own scenario with `--cage --tree` over the
+  mutant.
+  - Exactly R9's two checks are red, as in the arm's run F on the one-file
+    tree.
+  - "rewind is null right after the zap" read the previous channel's object
+    (`behindLive` 15.607).
+  - "playbackStateText is empty right after the zap" read `0:15 behind
+    live`.
+  - Every other check is the moved tree's.
+- The crash journal read 89 before and after every run. Every cage verdict
+  read `gone`. No runtime, tmp or bus directory was left, and the runs
+  posted no card.
+
+**The comment-only commit (call j).** The search covered every `//` line of
+both code-behinds, and the root's loose comments between the two banners,
+for a word that points by position. The words were: above, below, here,
+this file, Service.qml, earlier, later, following, preceding, next,
+previous, see, the same, this one, beside, further, and "the function
+before" or "after". Each hit was read in the function that holds it. All
+but two point inside their own function, or at a neighbour that moved with
+it in the same order (the code-behinds keep file order).
+- The M5-01 banner stayed on the root. Its "What is left here is what Qt
+  owns" and "Of every branch below" now stood over forwarders. It now names
+  Service-rewind.js, "each reached through its forwarder below", and "Of
+  every branch there".
+- askPlayerStatus moved into Service-rewind.js. Its "The `status` branch
+  above" was handleControlResult's, which stayed on the root (L3372), so
+  the comment now names it there.
+- The seekVerbSeconds note ("a second parser here") is historical, and the
+  root is still the service, so it was left as it is.
+
+Proof that 9967571 changes only comment lines:
+- `git diff 6660f73 9967571` touches two files. None of its added or
+  removed lines is anything but a `//` comment line.
+- The inline views, read by service_files.py, are 446,973 B and 447,137 B.
+  With every line that is a `//` comment dropped, they are equal: 4,450
+  lines each.
+- `split-service.py --verify --from-git 6660f73` is red at byte 318,733
+  (line 5,747 of the view, the banner), as it must be for any changed byte.
+  `--verify --from-git 9967571` is green.
+- So the move commit is compared with its successor without comments, and
+  C4's cut verifies against 9967571's view, or its successor's. The script
+  that drops the comment lines and compares is kept with this lane's
+  evidence.
+
+**Searched (rule 15).**
+- Patches: every `*.patch` under scripts/ and tests/, found by its own
+  lines (above). None was kept for and none was broken by the move.
+- Pins that the tree is Service.qml alone: every reader under tests/ and
+  scripts/ that names `Service.qml alone`, `declares no code-behind` or
+  `declares nothing`.
+  - Flipped: the six pins above, and test_release's runtime-source count.
+  - Re-worded as they had become false: three comments, in Model.test.js,
+    test_service_files.py and test_split_service.py.
+  - Cleared, each true as written ("before the split", or conditional):
+    qa-lib.sh's two, service_files.py, service-files.js, key-scenario.sh,
+    rewind-scenario.sh and split-service.py's docstring.
+- Prose that sends a reader to Service.qml for one of the 36 functions:
+  - logo-scenario.sh's header and the harness README told a reader to make
+    a clearSourceData mutant by editing Service.qml. 4aac8bd now names
+    Service-sources.js. The recipe's other mutant, the logo tag, is in
+    Service.qml still.
+  - Model.test.js names `Service.reconcile` and
+    `Service.handleProbeExit`, and Model.spec.qml L2514 seekBy and seekLive.
+    These are root members, true through the forwarders.
+- Code a forwarder reads otherwise: `this`, `arguments` or an unqualified
+  own function in a code-behind. split-service's scope and sibling rules
+  hold both files, and both are clean.
+- No function stays on the root for patch context, and none needed to.
+
+**Not done, and left open.**
+- The desk arm of rewind-scenario was not run, because this lane holds the
+  nested display only.
+- Call (d): hot reload across a version change with code-behinds, and
+  checkout.workers' write order, before the first release that ships one.
+  That is the lead's.
+- C4: player, pip and the rest of sources, togglePause among them.
