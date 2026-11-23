@@ -3947,6 +3947,14 @@ is "a producer that is gone: 3 after one ask, not the 5 s bound" "$ol_st $ol_n $
 is "an empty display, an empty type, a bound or a pid that is no number: 2, nothing asked" \
    "$(ol 1 'text/plain\n' "" text/plain 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 "" 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1x | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1 12x | cut -d' ' -f1-3)" \
    "2 0 none|2 0 none|2 0 none|2 0 none"
+# The recheck of 19c6235: a bound of 08 or 09 passed the whole-number test
+# and then ended the caller's script in bash's octal arithmetic; and a pid
+# of 0 passed too, where `kill -0 0` asks after the caller's process group.
+is "a bound written with a leading zero, 09: read as decimal, 0 at the first ask, not an end of the caller" \
+   "$(ol 1 'text/plain\n' wayland-77 text/plain 09 | cut -d' ' -f1-3)" "0 1 wayland-77"
+is "a producer pid of 0 or written with a leading zero: 2, nothing asked" \
+   "$(ol 1 'text/plain\n' wayland-77 text/plain 1 0 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1 012 | cut -d' ' -f1-3)" \
+   "2 0 none|2 0 none"
 # The scenario over stand-ins: clip-scenario.sh check-tree with a cage that
 # runs its child on a display named wayland-9 (no socket is made), a wtype
 # that sleeps, probes that exit at once without drawing, and a wl-copy that
@@ -4251,7 +4259,11 @@ rm -f "$OS/quit"
 # serves late or never. Red on d28039d's scripts: all seven failed, the two
 # scenario runs reading P2's 0 bytes as the lead's gate did; and eight
 # one-decision mutants of the function and of the scenario's call each red.
-EXPECTED=800
+# 800 -> 802 on 2026-11-22 (F-HARNESS-124, lane-fix-fh124, from the recheck
+# of 19c6235): qa_offer_listed reads a bound written with a leading zero as
+# decimal, where 09 ended the caller's script, and refuses a producer pid of
+# 0 or one written with a leading zero. Both red on 19c6235's qa-lib.sh.
+EXPECTED=802
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
