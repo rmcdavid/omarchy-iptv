@@ -20,6 +20,17 @@ Three layers, each calling the shipping code (CLAUDE.md 12):
     grep put back into check.sh: on this machine the old line read 6
     warnings and 1 on Model members where the report holds 17 and 8.
 
+And F-GATE-29 (2026-11-23): since D-REL-14's C3 a function moved into a
+code-behind is linted by nothing on its own, because qmllint does not follow
+a script import and given the .js checks its syntax alone. `--service` lints
+Service.qml's inline view and names each finding at its own file and line,
+and check.sh's door `--qmllint-view` prints it. Held over a split service in
+miniature (a block-scoped `var` and a syntax error in its code-behind, a
+sibling type its Service.qml uses) and over this tree, where the view reads
+more than Service.qml's own lint. Each case was seen red on a one-decision
+mutant; docs/QA-RESULTS.md "F-GATE-29: the service's inline view through
+qmllint (the lead, 2026-11-23)" has the table.
+
 Offscreen and local: qmllint reads files and prints; nothing is started
 that could reach a display. Skips where qmllint is absent, and the door
 case where the Omarchy shell's kit is.
@@ -53,6 +64,52 @@ def entry(kind="warning", ident="unqualified", message="Unqualified access", lin
 
 
 MEMBER = entry(ident="missing-property", message='Member "barGlyph" not found on type "Model"')
+
+# F-GATE-29: a split service in miniature. Service.qml keeps one function
+# with a block-scoped `var` (line 8) and forwards `moved` to its code-behind,
+# whose own block-scoped `var` stands on line 5 there; Helper.qml is a
+# sibling type Service.qml uses, which the view must still resolve.
+DEMO_SERVICE = (
+    'import QtQuick\n'
+    'import "Service-demo.js" as ServiceDemo\n'
+    'Item {\n'
+    '  id: root\n'
+    '  property int n: 0\n'
+    '  Helper { id: helper }\n'
+    '  function own(a) {\n'
+    '    if (a) { var y = 1 }\n'
+    '    return y\n'
+    '  }\n'
+    '  function moved(a) { return ServiceDemo.moved(a) }\n'
+    '}\n')
+DEMO_BEHIND = (
+    '// a loose comment, which the view leaves out\n'
+    '\n'
+    '  // moved\'s own comment\n'
+    '  function moved(a) {\n'
+    '    if (a) { var x = 1 }\n'
+    '    return x + root.n\n'
+    '  }\n')
+# The same function with a syntax error on its line 6, read at line 7.
+DEMO_BROKEN = DEMO_BEHIND.replace('    return x + root.n\n', '    return x +\n')
+
+
+def demo_tree(folder, behind=DEMO_BEHIND):
+    for name, text in (("Service.qml", DEMO_SERVICE), ("Service-demo.js", behind),
+                       ("Helper.qml", "import QtQuick\nItem {}\n")):
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return os.path.join(folder, "Service.qml")
+
+
+def placed(lines, ident):
+    """(file name, line) of each listed entry with this id."""
+    out = []
+    for line in lines:
+        m = re.fullmatch(r"\w+: (.+):(\d+):\d+: .* \[%s\]" % re.escape(ident), line)
+        if m:
+            out.append((os.path.basename(m.group(1)), int(m.group(2))))
+    return sorted(out)
 
 
 class ReadReportTest(unittest.TestCase):
@@ -156,6 +213,71 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(os.listdir(scratch), [])
 
 
+@unittest.skipUnless(os.access(QMLLINT, os.X_OK), "qmllint is not installed")
+class ServiceViewTest(unittest.TestCase):
+    """--service: the service's inline view through qmllint, each finding
+    named where it stands (F-GATE-29). The plain run over the same
+    Service.qml is the defect: it reads none of the code-behind."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="omarchy-iptv-qmllint-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.tree = os.path.join(self.dir, "tree")
+        os.mkdir(self.tree)
+        self.scratch = os.path.join(self.dir, "tmp")
+        os.mkdir(self.scratch)
+
+    def run_script(self, *args):
+        return subprocess.run([sys.executable, "-I", SCRIPT, *args], capture_output=True, text=True, timeout=180,
+                              stdin=subprocess.DEVNULL, env=dict(os.environ, TMPDIR=self.scratch))
+
+    def test_a_finding_in_a_moved_body_is_named_in_its_code_behind(self):
+        service = demo_tree(self.tree)
+        view = self.run_script("--list", "--service", QMLLINT, service)
+        self.assertEqual(view.returncode, 0, view.stderr)
+        lines = view.stdout.splitlines()
+        self.assertEqual(placed(lines, "block-scope-var-declaration"), [("Service-demo.js", 5), ("Service.qml", 8)])
+        self.assertTrue(all("/tree/" in line for line in lines[1:]), lines)
+        # The defect: Service.qml linted as it ships sees its own `var` only.
+        plain = self.run_script("--list", QMLLINT, service)
+        self.assertEqual(placed(plain.stdout.splitlines(), "block-scope-var-declaration"), [("Service.qml", 8)])
+
+    def test_a_syntax_error_in_a_moved_body_is_an_error_there(self):
+        service = demo_tree(self.tree, DEMO_BROKEN)
+        view = self.run_script("--list", "--service", QMLLINT, service)
+        self.assertEqual(view.returncode, 0, view.stderr)
+        lines = view.stdout.splitlines()
+        self.assertRegex(lines[0], r"^[1-9]\d* \d+ 0$")
+        self.assertEqual(placed(lines, "syntax"), [("Service-demo.js", 7)])
+        plain = self.run_script(QMLLINT, service)
+        self.assertRegex(plain.stdout, r"^0 \d+ 0\n$")
+
+    def test_a_sibling_type_still_resolves_in_the_view(self):
+        service = demo_tree(self.tree)
+        for args in ((QMLLINT, service), ("--service", QMLLINT, service)):
+            with self.subTest(args=args[0]):
+                done = self.run_script("--list", *args)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertNotIn("Helper", done.stdout)
+                self.assertNotIn("[import]", done.stdout)
+
+    def test_a_service_the_readers_refuse_is_status_two_and_one_sentence(self):
+        service = demo_tree(self.tree, "root.leak = 1\n" + DEMO_BEHIND)
+        done = self.run_script("--service", QMLLINT, service)
+        self.assertEqual((done.returncode, done.stdout), (2, ""))
+        self.assertEqual(len(done.stderr.strip().splitlines()), 1)
+        self.assertIn("stray", done.stderr)
+
+    def test_the_tree_is_untouched_and_the_scratch_left_empty(self):
+        service = demo_tree(self.tree)
+        before = dict((name, os.lstat(os.path.join(self.tree, name)).st_mtime_ns) for name in os.listdir(self.tree))
+        done = self.run_script("--service", QMLLINT, service)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        after = dict((name, os.lstat(os.path.join(self.tree, name)).st_mtime_ns) for name in os.listdir(self.tree))
+        self.assertEqual(after, before)
+        self.assertEqual(os.listdir(self.scratch), [])
+
+
 @unittest.skipUnless(os.access(QMLLINT, os.X_OK) and os.path.isdir(os.path.join(SHELL_KIT, "Commons")),
                      "qmllint or the Omarchy shell kit is not installed")
 class GateDoorTest(unittest.TestCase):
@@ -240,6 +362,72 @@ class GateDoorTest(unittest.TestCase):
         self.assertIn("FAIL BarWidget.qml: a Model member that Model.mjs does not export", done.stdout)
         self.assertIn("Model.barGlyphh", done.stdout)
         self.assertIn("ok   BarWidget.qml: 0 errors, ", done.stdout)
+
+    def view_door(self, path, **extra):
+        return subprocess.run(["bash", GATE, "--qmllint-view", path], capture_output=True, text=True, timeout=300,
+                              stdin=subprocess.DEVNULL, env=dict(self.env, **extra))
+
+    def test_the_view_door_reads_what_the_tree_s_own_lint_cannot(self):
+        # F-GATE-29 on this tree: the view's entries are more than
+        # Service.qml's own, the block-scoped `var`s of a code-behind among
+        # them, and the door lists as many as it prints.
+        path = os.path.join(ROOT, "Service.qml")
+        view = self.view_door(path, CHECK_VERBOSE="1")
+        self.assertEqual(view.returncode, 0, view.stdout + view.stderr)
+        lines = view.stdout.splitlines()
+        found = re.fullmatch(r"ok   Service\.qml's inline view \(Service\.qml(?:, Service-[a-z0-9]+\.js)+\): "
+                             r"0 errors, (\d+) warning\(s\) \+ (\d+) on Model members", lines[0])
+        self.assertIsNotNone(found, lines[0])
+        listed = [line for line in lines[1:] if line.startswith("warning: ")]
+        self.assertEqual(len(listed), int(found.group(1)) + int(found.group(2)))
+        self.assertTrue(any(re.search(r"/Service-[a-z0-9]+\.js:\d+:\d+: .*\[block-scope-var-declaration\]$", line)
+                            for line in listed), listed[:5])
+        own = self.door(path)
+        mine = re.fullmatch(r"ok   Service\.qml: 0 errors, (\d+) warning\(s\) \+ (\d+) on Model members\n", own.stdout)
+        self.assertIsNotNone(mine, own.stdout)
+        self.assertGreater(int(found.group(1)) + int(found.group(2)), int(mine.group(1)) + int(mine.group(2)))
+
+    def test_a_syntax_error_in_a_code_behind_fails_the_view_door(self):
+        tree = os.path.join(self.dir, "tree")
+        os.mkdir(tree)
+        done = self.view_door(demo_tree(tree, DEMO_BROKEN))
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertRegex(done.stdout, r"FAIL Service\.qml's inline view \(Service\.qml, Service-demo\.js\): 1 error\(s\), ")
+        self.assertEqual(placed(done.stdout.splitlines(), "syntax"), [("Service-demo.js", 7)])
+
+    def test_a_service_the_readers_refuse_fails_the_view_door(self):
+        tree = os.path.join(self.dir, "tree")
+        os.mkdir(tree)
+        done = self.view_door(demo_tree(tree, "root.leak = 1\n" + DEMO_BEHIND))
+        # Service.qml's own declarations read, so the view is built and
+        # refused there, with the readers' reason.
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("FAIL Service.qml's inline view (Service.qml, Service-demo.js): qmllint's findings could not be counted",
+                      done.stdout)
+        self.assertIn("stray: Service-demo.js line 1", done.stdout)
+
+    def test_a_declaration_the_readers_refuse_fails_the_view_door(self):
+        tree = os.path.join(self.dir, "tree")
+        os.mkdir(tree)
+        service = demo_tree(tree)
+        with open(service, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(service, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('import "Service-demo.js" as ServiceDemo', 'import "Service-demo.js" as Demo'))
+        done = self.view_door(service)
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("FAIL Service.qml: its files are refused by the service readers", done.stdout)
+
+    def test_a_qml_file_with_no_code_behind_is_said_so(self):
+        done = self.view_door(os.path.join(ROOT, "Guide.qml"))
+        self.assertEqual((done.returncode, done.stdout),
+                         (0, "ok   Guide.qml declares no code-behind: its own lint above reads all of it\n"))
+
+    def test_the_view_door_takes_one_existing_file(self):
+        for args in ((), (os.path.join(self.dir, "nope.qml"),), (GATE, GATE)):
+            done = subprocess.run(["bash", GATE, "--qmllint-view", *args], capture_output=True, text=True,
+                                  timeout=60, stdin=subprocess.DEVNULL, env=self.env)
+            self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
 
     def test_the_door_takes_one_existing_file(self):
         for args in ((), (os.path.join(self.dir, "nope.qml"),), (GATE, GATE)):

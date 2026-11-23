@@ -5,7 +5,10 @@
 #                                INCLUDING the dev-harness fake (CLAUDE.md 10);
 #                                every `Model.X` in the QML it lints must be a
 #                                name Model.mjs exports (check-model-members.py,
-#                                which reads the QML, not qmllint's output)
+#                                which reads the QML, not qmllint's output);
+#                                and Service.qml's inline view, so the bodies
+#                                moved into its code-behinds are linted where
+#                                they run (qmllint-count.py --service; F-GATE-29)
 #   3. node tests                (tests/Model.test.js)
 #   4. python tests              (python3 -m unittest discover -s tests)
 #   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
@@ -134,6 +137,11 @@
 # 45 + 365, tests/Model.spec.qml 79 + 980 (re-measured 2026-11-12 on the
 # merge of rounds 3 and 4 of the security review, after round 4 lifted the
 # form's lines into the model and made its four form writers one).
+# F-GATE-29 (2026-11-23): since D-REL-14's C3 Service.qml as it ships
+# reads 34 + 337 here, and its inline view, the one-file text with each
+# code-behind's functions read in at their forwarders, 46 + 387: the 62
+# entries the move took out of qmllint's sight, 12 block-scoped `var`s in
+# Service-sources.js among them, listed at their own file and line.
 # CHECK_VERBOSE=1 lists every entry
 # as `warning: <file>:<line>:<column>: <message> [<id>]`.
 #
@@ -1788,6 +1796,52 @@ gate_qmllint_file() {
   fi
 }
 
+# F-GATE-29 (2026-11-23): the service's INLINE view through qmllint. Since
+# D-REL-14's C3 a function moved into a code-behind (`Service-<domain>.js`)
+# is read by no linter on its own: qmllint does not follow a script import,
+# and given the .js it checks its syntax alone (measured on 6.12.0: a
+# block-scoped `var` and an unknown name drew nothing), so C3 took
+# Service.qml's entries from 433 to 371 and nothing reported the 62 it
+# dropped. The view is the one-file Service.qml the split was cut from
+# (scripts/service_files.py), which is the scope the moved bodies run in;
+# qmllint-count.py --service lints it beside the files Service.qml imports
+# and names each finding at the file and line it stands on. A Model member
+# is not judged here: check-model-members.py, run on Service.qml above,
+# already reads each code-behind under Service.qml's imports.
+gate_qmllint_view() {
+  local service=$1 names label output lint_status counts errors warnings model_members
+  names=$(python3 "$ROOT/scripts/service_files.py" names "$service" 2>&1)
+  if (( $? != 0 )); then
+    bad "$(basename "$service"): its files are refused by the service readers, so its inline view was not linted"
+    printf '%s\n' "$names"
+    return
+  fi
+  if [[ $names != *$'\n'* ]]; then
+    ok "$(basename "$service") declares no code-behind: its own lint above reads all of it"
+    return
+  fi
+  label=${names//$'\n'/, }
+  output=$(python3 "$ROOT/scripts/qmllint-count.py" --list --service "$QT_BIN/qmllint" -I "$QMLROOT" -I "$QML_IMPORTS" "$service" 2>&1)
+  lint_status=$?
+  counts=${output%%$'\n'*}
+  if [[ $output == *$'\n'* ]]; then output=${output#*$'\n'}; else output=""; fi
+  if (( lint_status != 0 )) || [[ ! $counts =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)$ ]]; then
+    bad "$(basename "$service")'s inline view ($label): qmllint's findings could not be counted"
+    printf '%s\n' "$counts" "$output"
+    return
+  fi
+  errors=${BASH_REMATCH[1]}
+  warnings=${BASH_REMATCH[2]}
+  model_members=${BASH_REMATCH[3]}
+  if (( errors > 0 )); then
+    bad "$(basename "$service")'s inline view ($label): $errors error(s), $warnings warning(s)"
+    printf '%s\n' "$output"
+  else
+    ok "$(basename "$service")'s inline view ($label): 0 errors, $(( warnings - model_members )) warning(s) + $model_members on Model members"
+    if [[ ${CHECK_VERBOSE:-0} == 1 && -n $output ]]; then printf '%s\n' "$output"; fi
+  fi
+}
+
 # One file through the qmllint step, and nothing else: the door
 # tests/test_qmllint_count.py drives. Like the byte-scan door below it stays
 # above the first `step`, so no other gate runs.
@@ -1798,6 +1852,18 @@ if [[ ${1:-} == --qmllint-file ]]; then
   [[ -x "$QT_BIN/qmllint" ]] || { printf 'qmllint not found at %s\n' "$QT_BIN/qmllint" >&2; exit 2; }
   gate_qmllint_root
   gate_qmllint_file "$2"
+  exit $fail
+fi
+
+# The service's inline view through the qmllint step, and nothing else: the
+# door tests/test_qmllint_count.py drives for F-GATE-29.
+if [[ ${1:-} == --qmllint-view ]]; then
+  if (( $# != 2 )) || [[ ! -f $2 ]]; then
+    printf 'usage: %s --qmllint-view <Service.qml>\n' "$0" >&2; exit 2
+  fi
+  [[ -x "$QT_BIN/qmllint" ]] || { printf 'qmllint not found at %s\n' "$QT_BIN/qmllint" >&2; exit 2; }
+  gate_qmllint_root
+  gate_qmllint_view "$2"
   exit $fail
 fi
 
@@ -1856,6 +1922,7 @@ else
     linted=$(( linted + 1 ))
     gate_qmllint_file "$file"
   done
+  gate_qmllint_view "$ROOT/Service.qml"
   # `[[ -f $file ]] || continue` means an unmatched glob lints NOTHING while
   # the gate reports green. Count what was actually linted.
   if (( linted < QMLLINT_FILES_MIN )); then

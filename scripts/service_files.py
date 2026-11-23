@@ -295,9 +295,31 @@ def stray_line(text, found):
 def inline_text(text, files):
     """The inline view of a Service.qml text over its code-behinds' texts,
     `files` mapping each declared file name to its text."""
+    return '\n'.join(piece for piece, _file, _line in _inline_pieces(text, files))
+
+
+def inline_origins(text, files):
+    """Where each line of the inline view comes from: one (file, line) a
+    line of inline_text(text, files), in order, `file` None for a line of
+    Service.qml's own text and a declared file's name for a code-behind's,
+    `line` 1-based in that file. Python only, and not one of the shared
+    cases: it is the gate's, which lints the view with qmllint and names a
+    finding in a moved body where it stands (F-GATE-29). Built from the same
+    pieces as the view, so the two cannot disagree on a line's place."""
+    out = []
+    for piece, file, line in _inline_pieces(text, files):
+        out.extend((file, line + k) for k in range(piece.count('\n') + 1))
+    return out
+
+
+def _inline_pieces(text, files):
+    """The inline view as (text, file, first line) pieces: each line of
+    Service.qml's text that the view keeps, `file` None, and each forwarder's
+    function span from its code-behind, `file` that file's name and `first
+    line` the span's first line there. Joined by "\\n" they are the view."""
     decls = declarations(text)
     if not decls:
-        return text
+        return [(line, None, n) for n, line in enumerate(text.split('\n'), 1)]
     by_qualifier = {}
     for file, qualifier, line in decls:
         body = files.get(file)
@@ -314,10 +336,11 @@ def inline_text(text, files):
         if stray:
             raise ServiceFilesError('stray', '%s line %d holds text outside every function that is neither blank nor a // comment'
                                     % (file, stray))
-        by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e, _c in found), set())
+        by_qualifier[qualifier] = (file, spans, dict((name, args) for name, args, _s, _e, _c in found), set(),
+                                   dict((name, body.count('\n', 0, start) + 1) for name, _a, start, _e, _c in found))
     out = []
     modern = imports_a_module(text)
-    for line in text.split('\n'):
+    for n, line in enumerate(text.split('\n'), 1):
         if imports_a_script(line, modern):
             continue
         shape = FORWARDER_SHAPE.match(line)
@@ -326,7 +349,7 @@ def inline_text(text, files):
             if not m:
                 raise ServiceFilesError('not-exact', '`%s` calls %s and is not `function F(args) { return %s.F(args) }`'
                                         % (line.strip(), shape.group(3), shape.group(3)))
-            file, spans, own_args, used = by_qualifier[m.group(3)]
+            file, spans, own_args, used, first_line = by_qualifier[m.group(3)]
             if m.group(1) not in spans:
                 raise ServiceFilesError('no-function', '%s is forwarded to %s, which has no such function' % (m.group(1), file))
             if m.group(1) in used:
@@ -335,14 +358,14 @@ def inline_text(text, files):
                 raise ServiceFilesError('not-exact', '`%s` takes (%s) and %s in %s takes (%s)'
                                         % (line.strip(), m.group(2), m.group(1), file, own_args.get(m.group(1))))
             used.add(m.group(1))
-            out.append(spans[m.group(1)])
+            out.append((spans[m.group(1)], file, first_line[m.group(1)]))
             continue
-        out.append(line)
-    for file, spans, _own_args, used in by_qualifier.values():
+        out.append((line, None, n))
+    for file, spans, _own_args, used, _first in by_qualifier.values():
         left = [name for name in spans if name not in used]
         if left:
             raise ServiceFilesError('unforwarded', '%s holds %s, which no forwarder names' % (file, ', '.join(left)))
-    return '\n'.join(out)
+    return out
 
 
 def read_text(path):
@@ -387,6 +410,23 @@ def service_text(where):
         if os.path.exists(path):
             files[file] = read_text(path)
     return inline_text(text, files)
+
+
+def service_view(where):
+    """(service_text(where), origins): the inline view and, for each of its
+    lines, the (path, line) it comes from -- Service.qml's path or a
+    code-behind's, beside Service.qml as the engine resolves it -- for the
+    gate's lint of the view (F-GATE-29)."""
+    svc = service_path(where)
+    text = read_text(svc)
+    files = {}
+    for file, _q, _n in declarations(text):
+        path = os.path.join(os.path.dirname(svc), file)
+        if os.path.exists(path):
+            files[file] = read_text(path)
+    origins = [(svc if file is None else os.path.join(os.path.dirname(svc), file), line)
+               for file, line in inline_origins(text, files)]
+    return inline_text(text, files), origins
 
 
 def main(argv):

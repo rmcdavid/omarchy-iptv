@@ -218,6 +218,66 @@ class SharedCases(unittest.TestCase):
         self.assertEqual(seen, 51)
 
 
+class Origins(unittest.TestCase):
+    """inline_origins, the gate's map from a line of the view to the line of
+    the file it comes from (F-GATE-29): qmllint lints the view and the gate
+    names each finding there. Python only, so not a shared case; held here
+    to the view itself, over this tree, the fixture and every shared case
+    that reads: each view line is the line its origin names, and a text the
+    view refuses is refused the same way."""
+
+    def assert_placed(self, service, files):
+        view = service_files.inline_text(service, files).split("\n")
+        origins = service_files.inline_origins(service, files)
+        self.assertEqual(len(origins), len(view))
+        own = service.split("\n")
+        for k, (file, line) in enumerate(origins):
+            source = own if file is None else files[file].split("\n")
+            self.assertGreaterEqual(line, 1)
+            self.assertEqual(source[line - 1], view[k], (file, line))
+        return origins
+
+    def texts(self, where):
+        service = raw(os.path.join(where, "Service.qml"))
+        files = dict((name, raw(os.path.join(where, name))) for name in service_files.service_names(where)[1:])
+        return service, files
+
+    def test_on_this_tree_each_code_behind_line_is_placed_in_its_file(self):
+        origins = self.assert_placed(*self.texts(ROOT))
+        self.assertEqual(sorted(set(f for f, _l in origins if f)), ["Service-rewind.js", "Service-sources.js"])
+
+    def test_on_the_fixture(self):
+        origins = self.assert_placed(*self.texts(FIXTURE))
+        self.assertIn("Service-demo.js", set(f for f, _l in origins))
+
+    def test_every_shared_case_that_reads_and_every_refusal(self):
+        read = refused = 0
+        for case in cases():
+            with self.subTest(case=case["name"]):
+                if "refusal" in case["expect"]:
+                    refused += 1
+                    with self.assertRaises(service_files.ServiceFilesError) as caught:
+                        service_files.inline_origins(case["service"], case["files"])
+                    self.assertEqual(caught.exception.kind, case["expect"]["refusal"])
+                else:
+                    read += 1
+                    self.assert_placed(case["service"], case["files"])
+        self.assertEqual((read, refused), (10, 41))
+
+    def test_a_moved_function_s_comment_block_is_its_first_lines(self):
+        service = 'import QtQuick\nimport "Service-demo.js" as ServiceDemo\nItem {\n  function f(a) { return ServiceDemo.f(a) }\n}\n'
+        files = {"Service-demo.js": "// loose\n\n  // f's own\n  function f(a) {\n    return a\n  }\n"}
+        self.assertEqual(service_files.inline_origins(service, files),
+                         [(None, 1), (None, 3), ("Service-demo.js", 3), ("Service-demo.js", 4),
+                          ("Service-demo.js", 5), ("Service-demo.js", 6), (None, 5), (None, 6)])
+
+    def test_service_view_is_the_view_with_paths_beside_service_qml(self):
+        text, origins = service_files.service_view(FIXTURE)
+        self.assertEqual(text, service_files.service_text(FIXTURE))
+        self.assertEqual(set(path for path, _l in origins),
+                         set(os.path.join(FIXTURE, name) for name in service_files.service_names(FIXTURE)))
+
+
 class TheTwoReadersAgree(unittest.TestCase):
     """The node reader's CLI against this module, over the same directories:
     the bytes it prints are the bytes this one returns."""

@@ -1599,7 +1599,9 @@ function moved into a code-behind, `Service-<domain>.js` imported as
 the body lives there. Edit a moved function in its code-behind, never its
 forwarder. Move more only with `scripts/split-service.py --cut`, which
 verifies the move byte for byte, never by hand; the gate's "service split
-guard" (`--check`) judges the tree.
+guard" (`--check`) judges the tree. qmllint given a code-behind checks its
+syntax alone, so the gate also lints Service.qml's inline view and names
+each finding at its own file and line (F-GATE-29).
 A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 

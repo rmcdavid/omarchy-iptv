@@ -25930,3 +25930,95 @@ filed as F-HARNESS-129 below.
   are not driven, and cage_start and cage_stop exist in five copies.
 - **F-HARNESS-129**: the desk arm has not run since three of its checks
   changed.
+
+## F-GATE-29: the service's inline view through qmllint (the lead, 2026-11-23)
+
+**The finding.** Since D-REL-14's C3, a function moved into a code-behind
+(`Service-rewind.js`, `Service-sources.js`) is read by no linter. C3 took
+Service.qml's qmllint entries from 433 to 371, and nothing reported the 62
+it dropped, 12 block-scoped `var` warnings among them.
+
+**Measured first, on qmllint 6.12.0:**
+- qmllint does not follow a script import. Linting Service.qml as it ships
+  reads 34 warnings + 337 on Model members (371).
+- Given a code-behind, qmllint reads it as JavaScript and checks its syntax
+  alone. `Service-rewind.js` and `Service-sources.js` each read 0 entries;
+  a throwaway `.js` holding a block-scoped `var` and an unknown name read
+  0 entries, status 0; one with a syntax error read one `[syntax]` entry,
+  status 255.
+- The inline view (`split-service.py --inline`, the one-file text with each
+  code-behind's functions read in at their forwarders), staged as
+  Service.qml beside Model.mjs and model/, reads 46 + 387 (433). That is
+  bd65241's one-file Service.qml under the same model: 433, 387 on Model
+  members.
+- qmllint's own-folder listing, which resolves a sibling QML type, skips a
+  symlinked `.qml`: `Helper was not found` through a link, found as a copy,
+  and through a relative link too.
+
+**The fix.** The view is the scope the moved bodies run in, so it is what
+the gate lints.
+- `scripts/service_files.py`: `inline_text` is now built from pieces (each
+  kept line of Service.qml, and each forwarder's span from its code-behind,
+  with the span's first line there). `inline_origins` gives each view line
+  its (file, line) from the same pieces, so the two cannot disagree on a
+  line's place; `service_view` adds the paths. Python only, not a shared
+  case: the node twin's outputs are unchanged, and `inline_text` reads every
+  shared case as before.
+- `scripts/qmllint-count.py --service` builds the view, stages it as
+  Service.qml in a private folder beside every other entry of Service.qml's
+  folder (a regular `.qml` and a `qmldir` copied, everything else linked, a
+  symlink kept a symlink), lints it, and names each entry at the file and
+  line it stands on. A view the readers refuse is status 2 with one
+  sentence. Nothing it makes is removed recursively: each staged name is
+  unlinked.
+- `scripts/check.sh`: `gate_qmllint_view`, run after the per-file loop on
+  Service.qml, prints `Service.qml's inline view (<its files>): 0 errors,
+  N warning(s) + M on Model members` and fails on an error, on a count it
+  cannot read, and on files the readers refuse; a Service.qml with no
+  code-behind is said so. Model members are not judged again there:
+  check-model-members already reads each code-behind under Service.qml's
+  imports. The door `--qmllint-view <Service.qml>` runs the function alone
+  for the tests.
+
+**On this tree** the gate prints `Service.qml: 0 errors, 34 warning(s) +
+337 on Model members` and `Service.qml's inline view (Service.qml,
+Service-rewind.js, Service-sources.js): 0 errors, 46 warning(s) + 387 on
+Model members`. The view's 8,456 lines each equal the line their origin
+names (7,710 in Service.qml, 165 in Service-rewind.js, 581 in
+Service-sources.js), and the 12 block-scoped `var`s are listed at
+Service-sources.js lines 142, 149, 158, 184, 187, 204, 293, 422, 513, 515,
+516 and 522.
+
+**Sibling search (rule 15):** every gate step that takes a list of QML
+files. The other nine guards read the code-behinds through release.py's
+`shipped_code` since C2. The ASCII and control-byte scans glob `*.js`. The
+qml spec and the harness's lint read no code-behind. The gate's qmllint
+step was the one reader of Service.qml alone.
+
+**Seen red (rule 11).** Each case ran in a fresh export of HEAD, 368a745,
+with the new tests and scripts copied in and one decision broken. Every new
+test reddens under at least one of them.
+
+| Mutant | test_qmllint_count.py (29) | test_service_files.py (20) |
+|---|---|---|
+| HEAD's qmllint-count.py and service_files.py, with today's check.sh so the door exists | 8 failed | 5 errored (55 subtests) |
+| a placed entry keeps the staged view's name and line | 4 failed | ok |
+| nothing beside Service.qml is staged | 1 failed (the sibling type) | ok |
+| every sibling linked, none copied | 1 failed (the sibling type) | ok |
+| a span's first line read one too far | 3 failed | 4 failed |
+| `--service` lints Service.qml itself, not the view | 4 failed | ok |
+| the view's errors never fail the gate | 1 failed (the syntax door) | ok |
+| a single file read as code-behinds and two as none | 4 failed | ok |
+| the stage left in the scratch folder | 6 failed | ok |
+| the readers' refusal of Service.qml's declarations ignored | 1 failed (the declaration door) | not run |
+| the view door's usage check removed | 1 failed (the usage door) | not run |
+
+On the tree with the fix, both files pass: 29 and 20 tests. The first
+version of this run built the code-before case with HEAD's check.sh, which
+has no `--qmllint-view` door, so each view-door test fell through to the
+whole gate. It was stopped in its first case. No mutant process was left
+running, and the crash journal stayed at 89.
+
+**Counts:** python tests 3,000 -> 3,016 by discovery (test_service_files
+15 -> 20, test_qmllint_count 18 -> 29); node 4,069 unchanged. The gate's
+qmllint step prints one more line, and no floor moves.
