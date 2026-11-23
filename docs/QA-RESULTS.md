@@ -24584,3 +24584,124 @@ bytes are the first half's knock-on, not a second fault on the display.
 Before the F-HARNESS-66 fix the same slow start was measured as growth
 (that row's 143/299/155); now it is red, which is the honest answer, and
 the readiness it lacks is filed as F-HARNESS-124.
+
+### F-HARNESS-124: the clip preflight waits for its offer and starts warm (lane-fh124, 2026-11-22)
+
+Branch fh124 from d28039d, the lead's to merge: b6d1231 (P2's readiness wait)
+and 2cf9dd1 (the warm start). Both halves are the lead's calls under the
+owner's standing authority of 2026-11-09. Every run below is
+`clip-scenario.sh check-tree` in its own nested headless cage, under the heavy
+lock, at nice 10 as the gate runs it, with the gate's `env -u` set and short
+private TMPDIR and XDG_RUNTIME_DIR; busy loops are `python3 -I -c 'while True:
+pass'` at nice 0, each under `timeout`, stopped through a pidfd by the pid
+the runner recorded. Crash journal 89 before, after every run and at the end.
+
+**CPU load did not make the red.** d28039d (an export of its `scripts/`): 5
+runs beside 2 busy loops, 5 beside 4 and 5 beside 12 (load 0.3 to 12.0), all
+7 of 7. With a timing line added for the measurement (not committed), the
+arm's first probe drew its first frame at 0.70 s idle, 1.1-1.6 s beside 4
+busy loops and 1.9-3.0 s beside 8, and the warm probes after it at 0.54,
+0.74-0.99 and 1.0-1.9 s. The start's cost is mostly not the CPU's.
+
+**The page cache did.** The files a running probe maps, read from its
+`/proc/<pid>/maps` (150 regular files under `/usr` and
+`/var/cache/fontconfig`), were dropped from the page cache before each run
+with `posix_fadvise(POSIX_FADV_DONTNEED)` on a read-only descriptor: nothing
+is written, and a page another process has mapped stays. This machine's disk
+is rotational. On d28039d, cold: 2 of 2 red with no busy loop and 5 of 5 red
+beside 2, each with the gate's lines -- `readonly.qml drew no frame within 5 s
+of its start`, P2 `got [0], want [26214400]`, P4 `got [not measured:
+no-frame]`, the editable and no-field probes measured as usual. A cold probe
+left to run drew its first frame 6.2 s after its start. That a full gate's
+earlier steps push these files out on a 7.6 GB machine is inferred, not
+measured inside a gate.
+
+**The probes' 9 s.** It counts from the component's completion, which the
+first frame follows closely, not from the start. Probes left to quit by
+themselves (a temporary arm, not committed) exited 9.06, 9.55, 9.15 and
+9.18 s after their first frame idle and beside 4 busy loops, and 9.63 and
+9.89 s after it cold, where that frame came at 6.26 and 6.22 s. So the 5 s
+first-frame bound was never what the life constrained; the life bounds the
+settle and the 2 s window after the frame. The comment in `probe()` that tied
+the two together is corrected.
+
+**The fix.**
+- P2 reads once the offer is served: `qa_offer_listed` (qa-lib.sh) asks
+  `wl-paste --list-types` on the nested display, each ask bounded at 2 s and
+  100 ms apart, until text/plain is listed as a line of its own, at most 10 s
+  (`OFFER_WAIT_S`), and stops at once when the producer's pid is gone. It
+  stays after the sampling window, because listing maps a surface too. A
+  producer that never serves its offer is a P2 FAIL that says so (`not read:
+  the producer exited before its offer was listed`, or `no text/plain offer
+  was listed on <display> within 10 s`), never 0 bytes. On the cold runs the
+  offer was listed 112-141 ms after it was asked for: the 0 bytes were the
+  consumer asking before wl-copy had taken the selection.
+- The first measured probe starts warm: `warm_start` runs a throwaway
+  readonly.qml (the first probe's own file; the probe files are unchanged)
+  to its first frame, bounded at 20 s (`WARM_BOUND_S`), and stops it by its
+  pid; nothing is offered while it lives. One that draws nothing says so and
+  the probes run anyway. Each probe's first-frame time is printed.
+
+**Runs.**
+
+| tree | condition | runs | result | detail |
+|---|---|---|---|---|
+| d28039d | idle | 1 | 7 / 0 | 11.0 s |
+| d28039d | 2, 4, 12 busy loops | 5, 5, 5 | 7 / 0 each | 11.1-20.9 s |
+| d28039d with a timing line | idle, 4, 8 busy loops | 2, 3, 3 | 7 / 0 each | first probe 0.70, 1.1-1.6, 1.9-3.0 s |
+| d28039d with a timing line | cold | 2 | 5 / 2 each | P2 [0], P4 no-frame (no frame at 5.35 s) |
+| d28039d with a timing line | cold, the life arm | 2 | 7 / 0 each | only the life arm's probe was cold |
+| d28039d | cold, 2 busy loops | 5 | 5 / 2 each | P2 [0], P4 no-frame |
+| b6d1231 (the wait alone) | cold | 2 | 6 / 1 each | P4 no-frame; P2 listed after 114, 141 ms |
+| 2cf9dd1's tree | cold | 1 | 7 / 0 | warm start 6.27 s, read-only probe 0.54 s |
+| 2cf9dd1's tree | cold, 2 busy loops | 5 | 7 / 0 each | warm start 6.28-6.49 s, read-only probe 0.56-0.66 s, P2 listed after 6-7 ms |
+| 2cf9dd1's tree | idle | 3 | 7 / 0 each | 11.5-11.8 s; warm start 0.70 s, read-only probe 0.54 s |
+| 2cf9dd1's tree | 8 busy loops | 3 | 7 / 0 each | warm start 1.5-2.3 s, read-only probe 1.3-1.9 s |
+| without `warm_start` | cold, 2 busy loops | 5 | 6 / 1 each | P4 no-frame; P2 listed after 112-127 ms |
+| without the wait | cold, 2 busy loops | 3 | 7 / 0 each | the warm start alone keeps P2 behind the window here |
+| without the wait | a probe that never draws (`CLIP_QML_BIN` a sleep) | 2 | 3 / 4 each | P2 [0], P3-P5 no-frame |
+| 2cf9dd1's tree | a probe that never draws | 2 | 4 / 3 each | P2 passes (listed after 111 ms); P3, P4, P5 no-frame, as F-HARNESS-66 left them |
+
+**The suite.** `scripts/qa-lib-test.sh` 793 -> 800. Five checks of
+`qa_offer_listed` over a stand-in wl-paste of the suite's own (listed from
+the third ask, asked on the display named and not the caller's; types that
+only begin with text/plain; an ask that hangs; a producer that is gone; the
+four refusals), and two runs of the scenario's check-tree over stand-ins (a
+cage that runs its child on a display with no socket, probes that exit at
+once without drawing, a wl-copy that takes the selection 1.5 s after it
+starts or exits first, a wl-paste that serves it only then and answers "No
+selection" before, as the real one does). All seven red on d28039d's scripts,
+the two scenario runs reading P2's 0 bytes as the gate did. Eight one-decision
+mutants, each red: one ask only (4 checks), a substring match (1), no bound
+on an ask (1), no producer check (2), no refusal of an empty display (1), the
+caller's display asked (1), the scenario's wait removed (2), the producer's
+pid not passed (1). The suite took 168 s at nice 10.
+
+**Rule 15, searched and cleared.**
+- A producer read back: wl-copy and wl-paste appear in clip-scenario.sh
+  alone (a grep over `scripts/`). Its shell arm, live only, pastes after a
+  chord: L7 and L8 wait up to 5 s for the field's value, which says so; L10
+  starts its Ctrl+V 1.0 s and a settle after a 100 MB producer starts, the
+  same assumption P2 made. Not changed: this lane does not run the live arm.
+- A first qml start timed against a bound: the probe arm (fixed); the shell
+  arm's first quickshell start waits 20 s for `formActive` over IPC and says
+  so if it gives up (live only); logo-scenario's K1 probe is offscreen and
+  waits for its exit under a 90 s bound, with no first-frame window;
+  open-scenario's check-tree is node only, and its live arm already warms the
+  shader cache with a throwaway shell (F-HARNESS-44, the same remedy);
+  text-scenario (live, on the display) reads the guide's delegates 1.5 s
+  after `ipc open`, and its T2 is the control that turns a slow open red
+  rather than vacuous; the check-trees of key, chno, chno-entry, pip and
+  id-rotate are node or seam reads and start no qml; relay-scenario's rig is
+  tests/relay_rig.py, with no display and no qml.
+
+**Not done.** The live arm was not run, and L10's 1.0 s is left as it is.
+The measured probes' 5 s bound is still a count of 100 loop turns, which
+stretches a little with CPU load (about 60 ms a turn beside 8 busy loops
+against 53 idle). check.sh's comment says the step takes about 9 s; it took
+11.0-11.6 s idle before this change and 11.5-11.8 s after it, and about 6 s
+more on a cold page cache, which the warm start now pays.
+
+Evidence, logs and summaries of every run:
+`/tmp/claude-1000/-home-ricky-Projects-omarchy-iptv/1233856c-3686-4499-b93b-4e8f9800403b/scratchpad/lane-fh124/runs/`
+(scratch, not kept).
