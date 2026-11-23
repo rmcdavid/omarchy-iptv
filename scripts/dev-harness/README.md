@@ -1041,7 +1041,9 @@ directory about 60 ms after the switch returned, the rebuilt set one sample
 later. Seen red through `--tree` over a copy of the tree with one line
 changed (the recipe is `spikes/key-mutations/README.md`'s: `git archive HEAD
 | tar -x -C "$cp"`, edit `"$cp/Service.qml"`, run with `--tree "$cp"`, remove
-the copy): `root.logoHave = ({})` deleted from `clearSourceData` -> **37 / 3**,
+the copy; since D-REL-14 `clearSourceData` is in `"$cp/Service-sources.js"`,
+so that is the file this edit takes): `root.logoHave = ({})` deleted from
+`clearSourceData` -> **37 / 3**,
 W2, W3 and W5 (the first sample at B's directory carried A's six names
 tagged for A); the tag made `root.activeCacheDir` instead of
 `Model.logoDirFor(root.activeCacheDir)` -> **36 / 4**, W1, W3, W4 and W6 (a

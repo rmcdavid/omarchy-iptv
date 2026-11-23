@@ -165,7 +165,8 @@
 #
 # Seen red by mutation (rule 11), through `--tree` over a copy of the tree
 # with ONE Service.qml decision broken (the recipe is in README.md under
-# "Logos"): `root.logoHave = ({})` deleted from clearSourceData -> W2, W3
+# "Logos"; since D-REL-14 clearSourceData is in Service-sources.js, so its
+# mutant is made there): `root.logoHave = ({})` deleted from clearSourceData -> W2, W3
 # and W5 red (the first sample at B's directory still carries A's 6 names
 # tagged for A), 37 passed 3 failed; the tag made `root.activeCacheDir`
 # instead of `Model.logoDirFor(root.activeCacheDir)` -> W1, W3, W4 and W6
