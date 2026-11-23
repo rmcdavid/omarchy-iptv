@@ -24584,3 +24584,294 @@ bytes are the first half's knock-on, not a second fault on the display.
 Before the F-HARNESS-66 fix the same slow start was measured as growth
 (that row's 143/299/155); now it is red, which is the honest answer, and
 the readiness it lacks is filed as F-HARNESS-124.
+
+### F-HARNESS-124: the clip preflight waits for its offer and starts warm (lane-fh124, 2026-11-22)
+
+Branch fh124 from d28039d, the lead's to merge: b6d1231 (P2's readiness wait)
+and 2cf9dd1 (the warm start). Both halves are the lead's calls under the
+owner's standing authority of 2026-11-09. Every run below is
+`clip-scenario.sh check-tree` in its own nested headless cage, under the heavy
+lock, at nice 10 as the gate runs it, with the gate's `env -u` set and short
+private TMPDIR and XDG_RUNTIME_DIR; busy loops are `python3 -I -c 'while True:
+pass'` at nice 0, each under `timeout`, stopped through a pidfd by the pid
+the runner recorded. Crash journal 89 before, after every run and at the end.
+
+**CPU load did not make the red.** d28039d (an export of its `scripts/`): 5
+runs beside 2 busy loops, 5 beside 4 and 5 beside 12 (load 0.3 to 12.0), all
+7 of 7. With a timing line added for the measurement (not committed), the
+arm's first probe drew its first frame at 0.70 s idle, 1.1-1.6 s beside 4
+busy loops and 1.9-3.0 s beside 8, and the warm probes after it at 0.54,
+0.74-0.99 and 1.0-1.9 s. The start's cost is mostly not the CPU's.
+
+**The page cache did.** The files a running probe maps, read from its
+`/proc/<pid>/maps` (150 regular files under `/usr` and
+`/var/cache/fontconfig`), were dropped from the page cache before each run
+with `posix_fadvise(POSIX_FADV_DONTNEED)` on a read-only descriptor: nothing
+is written, and a page another process has mapped stays. This machine's disk
+is rotational. On d28039d, cold: 2 of 2 red with no busy loop and 5 of 5 red
+beside 2, each with the gate's lines -- `readonly.qml drew no frame within 5 s
+of its start`, P2 `got [0], want [26214400]`, P4 `got [not measured:
+no-frame]`, the editable and no-field probes measured as usual. A cold probe
+left to run drew its first frame 6.2 s after its start. That a full gate's
+earlier steps push these files out on a 7.6 GB machine is inferred, not
+measured inside a gate.
+
+**The probes' 9 s.** It counts from the component's completion, which the
+first frame follows closely, not from the start. Probes left to quit by
+themselves (a temporary arm, not committed) exited 9.06, 9.55, 9.15 and
+9.18 s after their first frame idle and beside 4 busy loops, and 9.63 and
+9.89 s after it cold, where that frame came at 6.26 and 6.22 s. So the 5 s
+first-frame bound was never what the life constrained; the life bounds the
+settle and the 2 s window after the frame. The comment in `probe()` that tied
+the two together is corrected.
+
+**The fix.**
+- P2 reads once the offer is served: `qa_offer_listed` (qa-lib.sh) asks
+  `wl-paste --list-types` on the nested display, each ask bounded at 2 s and
+  100 ms apart, until text/plain is listed as a line of its own, at most 10 s
+  (`OFFER_WAIT_S`), and stops at once when the producer's pid is gone. It
+  stays after the sampling window, because listing maps a surface too. A
+  producer that never serves its offer is a P2 FAIL that says so (`not read:
+  the producer exited before its offer was listed`, or `no text/plain offer
+  was listed on <display> within 10 s`), never 0 bytes. On the cold runs the
+  offer was listed 112-141 ms after it was asked for: the 0 bytes were the
+  consumer asking before wl-copy had taken the selection.
+- The first measured probe starts warm: `warm_start` runs a throwaway
+  readonly.qml (the first probe's own file; the probe files are unchanged)
+  to its first frame, bounded at 20 s (`WARM_BOUND_S`), and stops it by its
+  pid; nothing is offered while it lives. One that draws nothing says so and
+  the probes run anyway. Each probe's first-frame time is printed.
+
+**Runs.**
+
+| tree | condition | runs | result | detail |
+|---|---|---|---|---|
+| d28039d | idle | 1 | 7 / 0 | 11.0 s |
+| d28039d | 2, 4, 12 busy loops | 5, 5, 5 | 7 / 0 each | 11.1-20.9 s |
+| d28039d with a timing line | idle, 4, 8 busy loops | 2, 3, 3 | 7 / 0 each | first probe 0.70, 1.1-1.6, 1.9-3.0 s |
+| d28039d with a timing line | cold | 2 | 5 / 2 each | P2 [0], P4 no-frame (no frame at 5.35 s) |
+| d28039d with a timing line | cold, the life arm | 2 | 7 / 0 each | only the life arm's probe was cold |
+| d28039d | cold, 2 busy loops | 5 | 5 / 2 each | P2 [0], P4 no-frame |
+| b6d1231 (the wait alone) | cold | 2 | 6 / 1 each | P4 no-frame; P2 listed after 114, 141 ms |
+| 2cf9dd1's tree | cold | 1 | 7 / 0 | warm start 6.27 s, read-only probe 0.54 s |
+| 2cf9dd1's tree | cold, 2 busy loops | 5 | 7 / 0 each | warm start 6.28-6.49 s, read-only probe 0.56-0.66 s, P2 listed after 6-7 ms |
+| 2cf9dd1's tree | idle | 3 | 7 / 0 each | 11.5-11.8 s; warm start 0.70 s, read-only probe 0.54 s |
+| 2cf9dd1's tree | 8 busy loops | 3 | 7 / 0 each | warm start 1.5-2.3 s, read-only probe 1.3-1.9 s |
+| without `warm_start` | cold, 2 busy loops | 5 | 6 / 1 each | P4 no-frame; P2 listed after 112-127 ms |
+| without the wait | cold, 2 busy loops | 3 | 7 / 0 each | the warm start alone keeps P2 behind the window here |
+| without the wait | a probe that never draws (`CLIP_QML_BIN` a sleep) | 2 | 3 / 4 each | P2 [0], P3-P5 no-frame |
+| 2cf9dd1's tree | a probe that never draws | 2 | 4 / 3 each | P2 passes (listed after 111 ms); P3, P4, P5 no-frame, as F-HARNESS-66 left them |
+
+**The suite.** `scripts/qa-lib-test.sh` 793 -> 800. Five checks of
+`qa_offer_listed` over a stand-in wl-paste of the suite's own (listed from
+the third ask, asked on the display named and not the caller's; types that
+only begin with text/plain; an ask that hangs; a producer that is gone; the
+four refusals), and two runs of the scenario's check-tree over stand-ins (a
+cage that runs its child on a display with no socket, probes that exit at
+once without drawing, a wl-copy that takes the selection 1.5 s after it
+starts or exits first, a wl-paste that serves it only then and answers "No
+selection" before, as the real one does). All seven red on d28039d's scripts,
+the two scenario runs reading P2's 0 bytes as the gate did. Eight one-decision
+mutants, each red: one ask only (4 checks), a substring match (1), no bound
+on an ask (1), no producer check (2), no refusal of an empty display (1), the
+caller's display asked (1), the scenario's wait removed (2), the producer's
+pid not passed (1). The suite took 168 s at nice 10.
+
+**Rule 15, searched; one sibling unverified.**
+- A producer read back. [Corrected 2026-11-22 by lane-fix-fh124, from the
+  recheck of 19c6235: this said wl-copy and wl-paste appear in
+  clip-scenario.sh alone, by a grep over `scripts/`, and that grep names a
+  second producer.] A grep for `wl-copy` and `wl-paste` over every tracked
+  file outside `docs/` names, besides clip-scenario.sh:
+  - scripts/qa-sources-scenarios.sh, the same shape: SRC-H03 starts one
+    producer and SRC-H04 six (`wl-copy -- "$A"`, `... | wl-copy`,
+    `wl-copy < file`), and a Ctrl+V or Shift+Insert chord reads each one
+    back straight after. It is a desk scenario on the real display and is
+    not in the gate. Its wl-copy runs without `--foreground`, so its step
+    returns when wl-copy forks, and by the recheck's reading of wl-clipboard
+    2.3.0 (the installed one) wl-copy forks only once it has set the
+    selection, so the return would mean the offer is set. That is read, not
+    measured on a display (the installed manual says only that wl-copy
+    forks and serves in the background), so this sibling is UNVERIFIED, not
+    cleared. Not changed: this lane runs nothing on the real display.
+  - scripts/dev-harness/run.sh and scripts/check.sh: comments only.
+  - The helper's `clipboard` verb (bin/helper/01-core.py, 11-cli.py) and
+    what tests it (tests/test_clipboard.py, tests/Model.test.js,
+    tests/test_local_refusals.py, the clipboard and local-refusals
+    fixtures): a consumer of whatever is offered, a stub wl-paste in every
+    test; nothing there starts a producer.
+  - tests/test_host_notify_codes.py: a static read of the HOST's
+    notification Service.qml, which runs `wl-copy --sensitive`; nothing
+    here reads it back. tests/a11y/fidelity.py and
+    tests/fixtures/source-urls.json: sentences only.
+  - Guide.qml, Service.qml and model/: comments about the helper's paste
+    path; the shipped code starts no producer.
+  clip-scenario.sh's own shell arm, live only, pastes after a chord: L7 and
+  L8 wait up to 5 s for the field's value, which says so; L10 starts its
+  Ctrl+V 1.0 s and a settle after a 100 MB producer starts, the same
+  assumption P2 made. Not changed: this lane does not run the live arm.
+- A first qml start timed against a bound: the probe arm (fixed); the shell
+  arm's first quickshell start waits 20 s for `formActive` over IPC and says
+  so if it gives up (live only); logo-scenario's K1 probe is offscreen and
+  waits for its exit under a 90 s bound, with no first-frame window;
+  open-scenario's check-tree is node only, and its live arm already warms the
+  shader cache with a throwaway shell (F-HARNESS-44, the same remedy);
+  text-scenario (live, on the display) reads the guide's delegates 1.5 s
+  after `ipc open`, and its T2 is the control that turns a slow open red
+  rather than vacuous; the check-trees of key, chno, chno-entry, pip and
+  id-rotate are node or seam reads and start no qml; relay-scenario's rig is
+  tests/relay_rig.py, with no display and no qml.
+
+**Not done.** The live arm was not run, and L10's 1.0 s is left as it is.
+The measured probes' 5 s bound is still a count of 100 loop turns, which
+stretches a little with CPU load (about 60 ms a turn beside 8 busy loops
+against 53 idle). check.sh's comment says the step takes about 9 s; it took
+11.0-11.6 s idle before this change and 11.5-11.8 s after it, and about 6 s
+more on a cold page cache, which the warm start now pays.
+
+Evidence, logs and summaries of every run:
+`/tmp/claude-1000/-home-ricky-Projects-omarchy-iptv/1233856c-3686-4499-b93b-4e8f9800403b/scratchpad/lane-fh124/runs/`
+(scratch, not kept).
+
+### F-HARNESS-125: the clip producers' buffers stay in the scenario's work folder (lane-fix-fh124, 2026-11-22)
+
+Branch fh124, the lead's to merge or drop: filed and fixed on the proposal
+of the recheck of 19c6235, which measured it and named no id; not a call
+the lead named. Crash journal 89 before, after every run and at the end.
+
+**The defect.** wl-copy copies what it is to offer into a buffer of its
+own, `wl-copy-buffer-XXXXXX/stdin` under `TMPDIR` (the installed
+wl-clipboard 2.3.0's binary names both), and the file is gone by the time
+the offer is served. clip-scenario.sh stops every producer by its pid, and
+one stopped before it has served leaves the file behind with the whole
+payload in it. A probe that is not measured stops its producer at once, so
+each such turn of the probe arm left one. check.sh's clip step gives the
+scenario no `TMPDIR` of its own, so a red gate leaves them in `/tmp`
+(tmpfs, so memory) or, under a lane's `TMPDIR`, inside the shared
+/tmp/claude-1000 quota. Four were there on 2026-11-22, each 26,214,400
+bytes, 0600 in a 0700 directory: three in `/tmp` from 03:13 and one in
+/tmp/claude-1000 from 17:09, plausibly the lead's gate red on 3157c56.
+They are not deleted here.
+
+**Measured on the real cage** (`clip-scenario.sh check-tree` in its own
+nested headless cage, under the heavy lock, the gate's `env -u` set, a
+private short `TMPDIR` and `XDG_RUNTIME_DIR`, the runner counting
+`wl-copy-buffer-*` in that `TMPDIR` after each run):
+
+| tree | condition | result | left in TMPDIR |
+|---|---|---|---|
+| 6684ef4 | a never-drawing stand-in probe (`CLIP_QML_BIN` a sleep) | 4 / 3 (P3, P4, P5 no-frame) | 2 buffers, from the editable and no-field turns |
+| the fix | the same | 4 / 3 (the same) | nothing |
+| the fix | idle, 2 runs | 7 / 0 each | nothing |
+| the fix | cold page cache, 2 busy loops, 2 runs | 7 / 0 each | nothing |
+
+The read-only turn leaves none since F-HARNESS-124's P2 wait, which lets
+wl-copy serve before it is stopped.
+
+**The fix.** Every producer the scenario starts runs with `TMPDIR=$WORK`:
+`producer_start`, and the shell arm's two small producers for L7 and L8,
+which are fixed by reading (live only, not run). `cleanup()` removes `WORK`
+and the buffer with it. The comment above `producer_start` said the payload
+is never written to disk, and it is, into that buffer; it says so now.
+
+**The suite.** qa-lib-test.sh 803 -> 804. The stand-in wl-copy of the
+F-HARNESS-124 section now copies its input into
+`${TMPDIR:-/tmp}/wl-copy-buffer-<pid>/stdin` and removes it only once it
+serves, as the real one does, and only a run's first producer ever serves,
+so the later ones are always stopped holding their buffers. One check: the
+check-tree over the cold-first stand-in probe, in a `TMPDIR` of its own,
+leaves nothing there. Red on 6684ef4's scenario (`2 2`, two buffers and
+nothing else) and on d28039d's (`3 3`, the read-only turn's too, with no P2
+wait); green on the fix.
+
+**Rule 15.** Other producers: qa-sources-scenarios.sh's seven (SRC-H03 and
+SRC-H04) run without `--foreground`, and the scenario stops none of them by
+a signal: each is replaced by the next offer, and the last keeps the user's
+clipboard, as that script's header says. Whether a background wl-copy
+removes its buffer when another offer replaces it was not measured here (it
+would be on the real display). The spike README's recipe
+(spikes/clip-offer/README.md) is text no script runs. The suites' stand-in
+producers are their own. Nothing else in the tree starts wl-copy.
+
+### F-HARNESS-124: the recheck of 19c6235, settled (lane-fix-fh124, 2026-11-22)
+
+The read-only recheck of branch fh124 at 19c6235 returned five items. Each
+was checked here before it was acted on. Crash journal 89 before, after
+every run and at the end.
+
+- **The rule-15 record was false** (the one item marked must-fix): it said
+  wl-copy and wl-paste appear in clip-scenario.sh alone, by a grep over
+  `scripts/`, and that grep, re-run here, also names
+  scripts/qa-sources-scenarios.sh, whose SRC-H03 and SRC-H04 start seven
+  producers (one and six) and read each back by a chord straight after.
+  Confirmed and corrected in place (4fc3669): the record names it, says it
+  is a desk scenario on the real display and not in the gate, and calls it
+  UNVERIFIED, because the reason it would be safe -- a wl-copy run without
+  `--foreground` returns only once it has set its selection -- is the
+  recheck's reading of wl-clipboard 2.3.0 and nobody has measured it; the
+  installed manual says only that wl-copy forks and serves in the
+  background. It also names what else the same grep finds over every
+  tracked file outside `docs/`.
+- **The warm start had no gate-level check** (proposed by the recheck):
+  built (6684ef4). A check-tree over a stand-in probe whose first start
+  draws only after 8 s, past the 5 s a measured probe is given, and every
+  later start at once. On the fix the warm start draws at 8.0 s, the
+  read-only probe at 56 ms, and P4 passes; on a mutant without the
+  `warm_start` call P4 reads `not measured: no-frame` (`0 0 0 1`, want
+  `1 1 1 0`), and so does d28039d's scenario.
+- **A red run strands wl-copy's buffer**: measured again here, filed as
+  F-HARNESS-125 and fixed (ae6aa6f); its own record is above.
+- **A bound with a leading zero ended the caller**: confirmed on 19c6235
+  (`09: value too great for base`, and the call's subshell printed
+  nothing) and fixed (d122815): the bound is read as decimal. In the same
+  test a producer pid of 0 passed the whole-number test, and `kill -0 0`
+  asks after the caller's own process group, which is never gone, so a
+  pid must now be a number above 0. Both checks red on 19c6235's
+  qa-lib.sh, and each red alone on its one-decision mutant (the decimal
+  read removed: the 09 check; the old pid pattern: the pid check).
+- **Small inaccuracies**: the row's "at most 10 s" is now 10 s plus at most
+  one 2 s ask; its 6.2 s cold first frame is attributed to the instrumented
+  copy of d28039d, which is where it was printed; its "beside 8 the cold
+  first probe" is the arm's first probe, not a page-cache-cold one
+  (4fc3669); clip-scenario.sh's MODES comment said check-tree takes about
+  9 s and says about 12 s, and about 18 s on a cold page cache (6684ef4).
+  Not changed: check.sh's "About 9 s" above the clip step, and the probe
+  arm's paragraph in scripts/dev-harness/README.md, which names neither the
+  warm start nor the offer wait and still reads 100 MB and about 13 s; both
+  are the lead's to word.
+
+**Rule 15, for the leading zero.** A grep for a whole-number pattern
+(`=~ ^[0-9]+$`) whose value then reaches bash's arithmetic, over
+`scripts/`: qa-lib.sh's qa_min_skipped (`ticks`), qa_outcome (`hits`),
+qa_stream_stopped (`closed`, `at`, `after`), qa_stop_pid and qa_stop_named
+(`grace`) have the shape and are latent only: every caller passes a
+literal, a grep count or a /proc number, none written with a leading zero.
+The scenarios' own matches test a pid, a port, a measurement or an IPC
+reply. One takes a number a person types: run.sh's `--entry-ms`, filed as F-HARNESS-126 (open), where
+the same two lines in a bare bash child accept `07000` as 3584 for a
+harness shell that then reads 7000, refuse `0500` as 320, and print bash's
+error for `0800` before the refusal. Not fixed: run.sh is the dev harness,
+which this lane may not run.
+
+**Suite.** qa-lib-test.sh 800 -> 804: two checks of `qa_offer_listed`
+(d122815), the warm-start check (6684ef4) and F-HARNESS-125's (ae6aa6f).
+The F-HARNESS-124 section alone, 11 checks, read 0 passed, 11 failed over
+d28039d's scripts, 10 passed, 1 failed over 6684ef4's (the buffer check)
+and 11 passed over the fix.
+
+**Real cage runs on the fix** (`clip-scenario.sh check-tree` in its own
+nested headless cage, under the heavy lock, at nice 10, the gate's `env -u`
+set, private short TMPDIR and XDG_RUNTIME_DIR; "cold" drops the 150 files a
+probe maps from the page cache with read-only `posix_fadvise` first; busy
+loops at nice 0, recorded by pid, stopped through a pidfd):
+
+| tree | condition | runs | result | detail |
+|---|---|---|---|---|
+| ae6aa6f's scenario | idle | 2 | 7 / 0 each | 11.5-11.7 s; warm start 0.70-0.91 s, read-only probe 537 ms, offer listed after 5-8 ms |
+| ae6aa6f's scenario | cold, 2 busy loops | 2 | 7 / 0 each | 17.8-18.0 s; warm start 6.43-6.53 s, read-only probe 555-566 ms, offer listed after 6-7 ms |
+| 6684ef4 | a never-drawing stand-in probe | 1 | 4 / 3 | P3, P4, P5 no-frame; 2 buffers left in its TMPDIR |
+| ae6aa6f's scenario | a never-drawing stand-in probe | 1 | 4 / 3 | the same; nothing left |
+
+Evidence, logs and summaries:
+`/tmp/claude-1000/-home-ricky-Projects-omarchy-iptv/1233856c-3686-4499-b93b-4e8f9800403b/scratchpad/lane-fix-fh124/runs/`
+(scratch, not kept).

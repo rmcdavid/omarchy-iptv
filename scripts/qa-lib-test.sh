@@ -3899,6 +3899,164 @@ sleep 0.3
 is "a size that keeps moving: 1 after its bounded reads" "$(qa_rss_settled "$RS_PID" 2 4; echo $?)" "1"
 kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 
+section "qa_offer_listed / F-HARNESS-124: a consumer reads once the offer is served"
+# The predicate over a stand-in wl-paste of this suite's own, first on PATH:
+# it records the display it was asked on and how many times it was asked,
+# answers "No selection" until the ask $OL/after names and then lists what
+# $OL/types holds, and hangs when $OL/hang exists. Nothing here connects to
+# a display: the stand-in is the only wl-paste these calls can reach.
+OL=$SP/ol; mkdir -p "$OL/bin"
+cat >"$OL/bin/wl-paste" <<OLP
+#!/bin/bash
+n=\$(( \$(cat "$OL/calls" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$OL/calls"
+printf '%s\n' "\${WAYLAND_DISPLAY-unset}" >"$OL/display"
+[[ \$1 == --list-types ]] || exit 2
+[[ -e "$OL/hang" ]] && exec sleep 8
+(( n >= \$(cat "$OL/after") )) && { cat "$OL/types"; exit 0; }
+echo "No selection" >&2; exit 1
+OLP
+chmod 0755 "$OL/bin/wl-paste"
+# ol <after> <types> <args...>: one call from a clean count, with the
+# caller's own WAYLAND_DISPLAY set to a name no case passes; prints
+# "<status> <asks> <display asked> <tenths of a second taken>".
+ol() {
+  local after=$1 types=$2 t0 rc
+  shift 2
+  echo "$after" >"$OL/after"; printf '%b' "$types" >"$OL/types"; rm -f "$OL/calls" "$OL/display"
+  t0=${EPOCHREALTIME/[.,]/}
+  PATH="$OL/bin:$PATH" WAYLAND_DISPLAY=wayland-caller qa_offer_listed "$@"; rc=$?
+  printf '%s %s %s %s\n' "$rc" "$(cat "$OL/calls" 2>/dev/null || echo 0)" \
+    "$(cat "$OL/display" 2>/dev/null || echo none)" $(( (${EPOCHREALTIME/[.,]/} - t0) / 100000 ))
+}
+sleep 30 & OL_LIVE=$!
+r=$(ol 3 'text/plain\n' wayland-77 text/plain 5 "$OL_LIVE")
+is "an offer listed from the third ask, its producer alive: 0 at the third, asked on the display named" \
+   "${r% *}" "0 3 wayland-77"
+kill "$OL_LIVE" 2>/dev/null; wait "$OL_LIVE" 2>/dev/null
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 1 'text/plain;charset=utf-8\ntext/plainx\nTEXT\n' wayland-77 text/plain 1)"
+is "types that only begin with the one asked for: 1, asked again until the bound, inside it" \
+   "$ol_st $(( ol_n > 1 )) $(( ol_t < 30 ))" "1 1 1"
+: >"$OL/hang"
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 1 'text/plain\n' wayland-77 text/plain 1)"
+is "a wl-paste that never answers: the ask is cut at 2 s, and the 1 s bound then ends the wait" \
+   "$ol_st $ol_n $(( ol_t >= 19 && ol_t < 40 ))" "1 1 1"
+rm -f "$OL/hang"
+sleep 0 & OL_GONE=$!; wait "$OL_GONE"
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 99 'text/plain\n' wayland-77 text/plain 5 "$OL_GONE")"
+is "a producer that is gone: 3 after one ask, not the 5 s bound" "$ol_st $ol_n $(( ol_t < 20 ))" "3 1 1"
+is "an empty display, an empty type, a bound or a pid that is no number: 2, nothing asked" \
+   "$(ol 1 'text/plain\n' "" text/plain 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 "" 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1x | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1 12x | cut -d' ' -f1-3)" \
+   "2 0 none|2 0 none|2 0 none|2 0 none"
+# The recheck of 19c6235: a bound of 08 or 09 passed the whole-number test
+# and then ended the caller's script in bash's octal arithmetic; and a pid
+# of 0 passed too, where `kill -0 0` asks after the caller's process group.
+is "a bound written with a leading zero, 09: read as decimal, 0 at the first ask, not an end of the caller" \
+   "$(ol 1 'text/plain\n' wayland-77 text/plain 09 | cut -d' ' -f1-3)" "0 1 wayland-77"
+is "a producer pid of 0 or written with a leading zero: 2, nothing asked" \
+   "$(ol 1 'text/plain\n' wayland-77 text/plain 1 0 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1 012 | cut -d' ' -f1-3)" \
+   "2 0 none|2 0 none"
+# The scenario over stand-ins: clip-scenario.sh check-tree with a cage that
+# runs its child on a display named wayland-9 (no socket is made), a wtype
+# that sleeps, probes that exit at once without drawing, and a wl-copy that
+# reads its input and takes the selection 1.5 s later -- the shape of the
+# lead's red on 3157c56, where the read-only probe drew nothing and P2's
+# consumer asked straight after the producer started. The stand-in wl-paste
+# serves the offer only while that producer lives and only once it has
+# taken the selection, and answers "No selection" otherwise, as wl-paste
+# does. A 1 MiB offer (CLIP_OFFER_MB). The second run's producer exits
+# without taking it. Like the real wl-copy, the stand-in copies its input
+# into a buffer of its own, `wl-copy-buffer-*/stdin` under TMPDIR, and
+# removes it only once it serves, so one stopped before that leaves it
+# behind (F-HARNESS-125); and only a run's first producer ever serves, so
+# the later ones are always stopped holding their buffers.
+OS=$SP/os; mkdir -p "$OS/bin" "$OS/run" "$OS/tmp"
+cat >"$OS/bin/cage" <<'OSC'
+#!/bin/bash
+[[ $1 == -- ]] && shift
+WAYLAND_DISPLAY=wayland-9 "$@"
+OSC
+printf '#!/bin/bash\nexec sleep 30\n' >"$OS/bin/wtype"
+printf '#!/bin/bash\nexit 0\n' >"$OS/bin/qml"
+cat >"$OS/bin/wl-copy" <<OSW
+#!/bin/bash
+echo \$\$ >"$OS/producer.pid"
+rm -f "$OS/ready"
+n=\$(( \$(cat "$OS/nprod" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$OS/nprod"
+b=\${TMPDIR:-/tmp}/wl-copy-buffer-\$\$; mkdir -p "\$b"
+cat >"\$b/stdin"
+[[ -e "$OS/quit" ]] && { rm -rf "\$b"; exit 1; }
+(( n > 1 )) && exec sleep 60
+sleep 1.5
+cp "\$b/stdin" "$OS/offer"; rm -rf "\$b"
+: >"$OS/ready"
+exec sleep 60
+OSW
+cat >"$OS/bin/wl-paste" <<OSP
+#!/bin/bash
+if [[ -e "$OS/ready" ]] && kill -0 "\$(cat "$OS/producer.pid" 2>/dev/null)" 2>/dev/null; then
+  case \$1 in --list-types|-l) echo text/plain ;; *) cat "$OS/offer" ;; esac
+  exit 0
+fi
+echo "No selection" >&2; exit 1
+OSP
+chmod 0755 "$OS/bin/"*
+os_run() {   # os_run <out> [<qml> [<tmpdir>]]: one check-tree over the stand-ins
+  rm -f "$OS/nprod"
+  env -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
+    CLIP_CAGE_BIN="$OS/bin/cage" CLIP_QML_BIN="${2:-$OS/bin/qml}" CLIP_OFFER_MB=1 PATH="$OS/bin:$PATH" \
+    XDG_RUNTIME_DIR="$OS/run" TMPDIR="${3:-$OS/tmp}" OMARCHY_IPTV_HARNESS_DIR="$OS/h" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
+    timeout -k 5 60 bash "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$1" 2>&1
+  printf '%s\n' "$?" >"$1.rc"
+}
+os_run "$OS/late.out"
+is "clip check-tree, the read-only probe drawing nothing and the offer served 1.5 s late: P2 waits for it and reads all 1 MiB" \
+   "$(qa_count '^FAIL P4 .*got \[not measured: no-frame\]' "$OS/late.out") $(qa_count '^   \(P2: the producer.s offer was listed on wayland-9 after a wait of [0-9]+ ms\)$' "$OS/late.out") $(qa_count '^PASS P2 a consumer on the nested display reads the whole offer \(bytes\): 1048576$' "$OS/late.out") $(qa_count '^PASS P6 ' "$OS/late.out")" \
+   "1 1 1 1"
+: >"$OS/quit"
+os_run "$OS/quit.out"
+is "and a producer that exits before it serves: P2 is red and says so, never a count of 0 bytes" \
+   "$(qa_count '^FAIL P2 .*got \[not read: the producer exited before its offer was listed\]' "$OS/quit.out") $(qa_count '^FAIL P2 .*got \[0\]' "$OS/quit.out") $(cat "$OS/quit.out.rc")" \
+   "1 0 1"
+rm -f "$OS/quit"
+# The warm start (the recheck of 19c6235): a probe whose FIRST start draws
+# only after 8 s, past the 5 s a measured probe is given, and every later
+# start at once -- the shape of a cold page cache, where the arm's first qml
+# start drew at 6.2 s and the next at about 0.5 s. With the warm start the
+# throwaway start pays the 8 s and the read-only probe is measured (P4
+# passes: the stand-in never passes settle's 50 MB floor, so its growth is
+# measured from where it is, as 0); without it P4 reads `no-frame`, as the
+# lead's gate did. A python stand-in that execs, so the scenario's TERM by
+# pid reaches the process that sleeps. P3 is red here (the stand-in reads
+# nothing) and is not what this asks.
+cat >"$OS/bin/qml-cold" <<OSQ
+#!/bin/bash
+exec python3 -I -c '
+import os, sys, time
+if not os.path.exists(sys.argv[1]):
+    open(sys.argv[1], "w").close()
+    time.sleep(8)
+sys.stderr.write("qt.scenegraph.time.renderloop: Frame prepared\\n")
+sys.stderr.flush()
+time.sleep(30)
+' "$OS/drawn"
+OSQ
+chmod 0755 "$OS/bin/qml-cold"
+rm -f "$OS/drawn"
+mkdir -p "$OS/tmp-cold"
+os_run "$OS/cold.out" "$OS/bin/qml-cold" "$OS/tmp-cold"
+is "clip check-tree, a probe whose first start draws only after 8 s: the warm start takes it, and the read-only probe is measured" \
+   "$(qa_count '^   \(warm start: a throwaway readonly\.qml drew its first frame after [0-9]+ ms; stopped, not measured\)$' "$OS/cold.out") $(qa_count '^   \(readonly\.qml drew its first frame [0-9]+ ms after its start\)$' "$OS/cold.out") $(qa_count '^PASS P4 the read-only probe reads nothing' "$OS/cold.out") $(qa_count 'not measured: no-frame' "$OS/cold.out")" \
+   "1 1 1 0"
+# F-HARNESS-125: in that run the editable and no-field probes' producers are
+# stopped before they serve, each holding a buffer of the whole offer; a
+# scenario that gives its producers its own work folder as TMPDIR leaves
+# nothing in the caller's, where 6684ef4's left both and d28039d's all
+# three (it has no P2 wait, so the read-only turn's producer is stopped
+# early too).
+is "and the producers stopped before they served leave no buffer in the caller's TMPDIR, nor anything else" \
+   "$(find "$OS/tmp-cold" -name 'wl-copy-buffer-*' | wc -l | tr -d ' ') $(ls -A "$OS/tmp-cold" | wc -l | tr -d ' ')" "0 0"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -4141,7 +4299,26 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # 792 -> 793 on 2026-11-22 (F-HARNESS-122, lane-relsplit2): check.sh's floor
 # for chno-scenario's check-tree, which joined the gate that day, is the
 # scenario's own plus one. Red on ab3d287's check.sh, which has no such floor.
-EXPECTED=793
+# 793 -> 800 on 2026-11-22 (F-HARNESS-124, lane-fh124): qa_offer_listed's five
+# over a stand-in wl-paste of the suite's own, and clip-scenario.sh's
+# check-tree twice over stand-ins whose probes draw nothing and whose producer
+# serves late or never. Red on d28039d's scripts: all seven failed, the two
+# scenario runs reading P2's 0 bytes as the lead's gate did; and eight
+# one-decision mutants of the function and of the scenario's call each red.
+# 800 -> 802 on 2026-11-22 (F-HARNESS-124, lane-fix-fh124, from the recheck
+# of 19c6235): qa_offer_listed reads a bound written with a leading zero as
+# decimal, where 09 ended the caller's script, and refuses a producer pid of
+# 0 or one written with a leading zero. Both red on 19c6235's qa-lib.sh.
+# 802 -> 803 on 2026-11-22 (F-HARNESS-124, lane-fix-fh124, from the recheck
+# of 19c6235): clip-scenario.sh's check-tree over a stand-in probe whose
+# first start draws after 8 s, which only the warm start keeps from P4's
+# `no-frame`. Red on d28039d's scenario and on a mutant without the
+# warm_start call.
+# 803 -> 804 on 2026-11-22 (F-HARNESS-125, lane-fix-fh124): clip-scenario.sh
+# leaves no wl-copy buffer in the caller's TMPDIR from a producer stopped
+# before it served. Red on 6684ef4's scenario (two left) and on d28039d's
+# (three).
+EXPECTED=804
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

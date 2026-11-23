@@ -1777,3 +1777,41 @@ qa_rss_settled() {
   done
   return 1
 }
+
+# qa_offer_listed <display> <type> [secs] [producer_pid]
+#   A bounded wait for a clipboard offer to be served on a Wayland display:
+#   0 once `wl-paste --list-types` on <display> lists <type> as a line of
+#   its own; 1 when <secs> (default 10) have passed without that; 3 at once
+#   when <producer_pid> is given and gone, because an offer nobody serves
+#   will not appear; 2, before anything is asked, for an empty <display> (a
+#   wl-paste with an empty WAYLAND_DISPLAY picks a display itself) or
+#   <type>, a <secs> that is not a whole number, or a <producer_pid> that is
+#   not one above 0 (`kill -0 0` asks after the caller's own process group,
+#   which is never gone). A <secs> written with a leading zero is read as
+#   decimal, 09 as nine seconds: bash's arithmetic reads it as octal and
+#   ends the caller's script at an 8 or a 9. Each ask is bounded at 2 s and
+#   they are 100 ms apart. It prints nothing: the caller says what an answer
+#   other than 0 means.
+#
+#   F-HARNESS-124. clip-scenario.sh's P2 consumer read the producer's offer
+#   straight after starting it whenever the probe before it was not
+#   measured, before wl-copy had read its input and taken the selection, and
+#   read 0 bytes of 25 MiB (the lead's full gate on 3157c56; reproduced on
+#   d28039d with the probe's files dropped from the page cache). Listing the
+#   types reads no data. Under cage it does map a surface for an instant
+#   (clip-scenario.sh's focus nudge rests on that), so a caller asks only
+#   where a change of keyboard focus is harmless.
+qa_offer_listed() {
+  local display=${1-} type=${2-} secs=${3:-10} producer=${4-} end out
+  [[ -n $display && -n $type && $secs =~ ^[0-9]+$ ]] || return 2
+  [[ -z $producer || $producer =~ ^[1-9][0-9]*$ ]] || return 2
+  secs=$((10#$secs))
+  end=$(( ${EPOCHREALTIME/[.,]/} + secs * 1000000 ))
+  while :; do
+    out=$(WAYLAND_DISPLAY=$display timeout 2 wl-paste --list-types 2>/dev/null)
+    [[ $'\n'$out$'\n' == *$'\n'"$type"$'\n'* ]] && return 0
+    if [[ -n $producer ]] && ! kill -0 "$producer" 2>/dev/null; then return 3; fi
+    (( ${EPOCHREALTIME/[.,]/} < end )) || return 1
+    sleep 0.1
+  done
+}
