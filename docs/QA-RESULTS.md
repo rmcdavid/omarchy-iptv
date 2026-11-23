@@ -24931,3 +24931,17 @@ read-only recheck of the rewritten passages then held them on one
 sentence that had lost its scope (a 0.19.1 player whose channel can be put
 back is replaced, not stopped); that and its five nits are taken in the
 commit after 91eaaca.
+
+**The cut itself.** The gate green on 718e4ec (node 4069, python 2991,
+spec 112, clip 7; the fingerprint the same before and after; crash journal
+89), the private-id scan 0, local `main` equal to origin's 9e006be and no
+v0.20.0 tag on either. `release.py build --gate-already-green` wrote `main`
+1321aff (parent 9e006be, 43 files, no agent-instruction file), and
+`omarchy plugin validate` of an extracted copy of it exits 0. One atomic
+push: dev d28039d..718e4ec, main 9e006be..1321aff, tag v0.20.0. The GitHub
+Release "Omarchy IPTV 0.20.0" (the CHANGELOG section) is marked Latest,
+`releases/latest` reading v0.20.0 at 2026-11-23T03:10:07Z. `[Verify]`
+#15671 filed on the owner's word: by 03:11:33Z its update validation passed
+(existing source, the exact plugin set, Quattro compatibility at 1321aff)
+and its automated security baseline passed with no findings and no
+capabilities. What is left is the maintainer's manual review.

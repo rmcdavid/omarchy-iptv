@@ -4,8 +4,12 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.19.1 (2026-11-13: D-SINK-101, the marketplace
-maintainer's finding on #14817 against 0.19.0 -- a channel's stream host name is looked up
+Quickshell process. Released through v0.20.0 (2026-11-22: D-SINK-102 and D-SINK-103, the
+marketplace maintainer's two findings on #14290, #13611 and #12636 against 0.19.1 -- the
+player's http, https and rtmps connections go through the plugin's relay, and state.json is
+made private before every save; `main` 1321aff, the GitHub Release marked Latest,
+`[Verify]` #15671 filed the same day on the owner's word). Before it, v0.19.1 (2026-11-13:
+D-SINK-101, the marketplace maintainer's finding on #14817 against 0.19.0 -- a channel's stream host name is looked up
 at play time and every answer judged by the literal rule, the playlist's own host
 included; `main` 9e006be, the GitHub Release marked Latest, `[Verify]` #14874 filed the
 same day, and a reply on #14817 on the owner's word). Before it, v0.19.0 (2026-11-12:
@@ -87,7 +91,14 @@ open, as filed.]** **[2026-11-16: the maintainer re-pointed #13611 and
 #12636 to 9e006be; by gh at about 12:50Z #12636, #13611, #14290 and #14874
 target 9e006be and #14817 34fac24, all five open, labelled `validated` and
 `plugin-update`; the owner holds `main` at 0.19.1 until #13611 is actioned
-(below).]** Neither can be approved as filed: neither Target
+(below).]** **[2026-11-22: the maintainer had already blocked 9e006be on
+#13611 (2026-11-16T10:51Z) and #12636 (11:56Z) with #14290's two findings,
+D-SINK-102 and D-SINK-103 -- the 12:50Z read above took the labels and the
+targets, not the comments, and the hold read as pending for six days
+(F-M3-28). 0.20.0 (`main` 1321aff) was cut on the owner's word with both
+fixed and its request filed as #15671; #15671, #14874, #14817, #14290,
+#13611 and #12636 stay open, as filed. Only #15671 targets our HEAD.]**
+Neither can be approved as filed: neither Target
 commit is our HEAD, and one edited to 787a33b would be refused as already
 the listing. Once `main` moves, either could be approved only if its Target
 commit were edited to the HEAD of that day, by a maintainer, as he edited
@@ -246,12 +257,21 @@ Consequences you must respect:
   pending request stale. The maintainer re-pointed #13611 (0.16.0's
   request) to 9e006be that day and #12636 (0.15.0's) the same day; the
   automated validation and baseline re-ran and passed at 9e006be on both,
-  and his manual review is pending. His review of 9e006be on #14290 on
+  and his manual review was recorded here as pending. His review of 9e006be on #14290 on
   2026-11-14 raised D-SINK-102 and D-SINK-103, so the next release (the
   relay and the private save) waits on this hold. `dev` moves freely.
   **[2026-11-18: the owner kept the hold with D-LOGO-29 known -- the
   released 0.19.1 stalls on long bracketed logo addresses, fixed on `dev`
   only -- in their own words, "Keep holding main for now".]**
+  **This hold had met its condition on 2026-11-16 at 10:51Z, unseen until
+  2026-11-22 (F-M3-28):** the maintainer blocked 9e006be on #13611 that
+  morning, and on #12636 at 11:56Z, with the two findings of #14290. The
+  owner cut 0.20.0 on 2026-11-22 ("let's cut a release and make sure
+  omarchy plugin page has the latest release listed - whatever that
+  takes"), and the standing rule applies again: a release waits for the
+  owner's word, and we close none of our requests. A hold that waits on a
+  maintainer is re-read by its COMMENTS, not its labels, every time it is
+  reported.
 
 ## Standing authority (product owner, 2026-11-09)
 
