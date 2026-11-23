@@ -24840,6 +24840,19 @@ every run and at the end.
   warm start nor the offer wait and still reads 100 MB and about 13 s; both
   are the lead's to word.
 
+**Rule 15, for the leading zero.** A grep for a whole-number pattern
+(`=~ ^[0-9]+$`) whose value then reaches bash's arithmetic, over
+`scripts/`: qa-lib.sh's qa_min_skipped (`ticks`), qa_outcome (`hits`),
+qa_stream_stopped (`closed`, `at`, `after`), qa_stop_pid and qa_stop_named
+(`grace`) have the shape and are latent only: every caller passes a
+literal, a grep count or a /proc number, none written with a leading zero.
+The scenarios' own matches test a pid, a port, a measurement or an IPC
+reply. One takes a number a person types: run.sh's `--entry-ms`, filed as F-HARNESS-126 (open), where
+the same two lines in a bare bash child accept `07000` as 3584 for a
+harness shell that then reads 7000, refuse `0500` as 320, and print bash's
+error for `0800` before the refusal. Not fixed: run.sh is the dev harness,
+which this lane may not run.
+
 **Suite.** qa-lib-test.sh 800 -> 804: two checks of `qa_offer_listed`
 (d122815), the warm-start check (6684ef4) and F-HARNESS-125's (ae6aa6f).
 The F-HARNESS-124 section alone, 11 checks, read 0 passed, 11 failed over
