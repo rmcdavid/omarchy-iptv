@@ -71,6 +71,18 @@ format. No shipped file calls it; a call, in a `.qml` or a code-behind, is
 reported with its line (D-REL-14's C2, where imperative code moved into
 code-behinds made it the one way code there could make a Text).
 
+A FORMAT SET ANYWHERE ELSE IS REFUSED (F-GATE-28). The rule above judges
+the format a Text DECLARES, and code can change it afterwards or hand it to
+a component as it is made: `item.textFormat = Text.RichText`,
+`root["textFormat"] = Text.AutoText`, a `textFormat` key in the property map
+of `createObject(parent, { ... })`, a `property alias` onto it, a binding of
+it on some other type. So in code the word `textFormat` may stand only where
+a Text or Label block declares it at its own depth, and no string literal
+may be exactly `textFormat`; any other use, a read included, is reported
+with its line, in a `.qml` and in a code-behind alike. No shipped file has
+one. NOT SEEN: a name put together at run time (`"text" + "Format"`), which
+no reading of the source can follow.
+
 HOW IT READS QML. The scan is brace-aware and masks `//` and `/* */`
 comments, the insides of string literals (double-quoted, single-quoted and
 template) and the insides of regular-expression literals before it counts a
@@ -125,6 +137,11 @@ TEXT_FORMAT_RE = re.compile(r'(?<![A-Za-z0-9_.])textFormat\s*:\s*([^\n]*)')
 # A component made from a string, matched in the masked source: the string
 # itself is blanked, so a Text inside it is unseen.
 FROM_STRING_RE = re.compile(r'(?<![A-Za-z0-9_$])createQmlObject\s*\(')
+# F-GATE-28. The word in code, and the name as a whole string literal (an
+# index or a quoted key), the second matched against the source because the
+# masked text has blanked it.
+WORD_RE = re.compile(r'(?<![A-Za-z0-9_$])textFormat(?![A-Za-z0-9_$])')
+STRING_NAME_RE = re.compile(r'(["\'`])textFormat\1')
 PLAIN = 'Text.PlainText'
 STYLED = 'Text.StyledText'
 
@@ -346,11 +363,13 @@ def check_file(path):
                          'carry any textFormat; declare the element in a '
                          'shipped .qml instead'))
     blocks = text_blocks(masked)
+    declared = set()
     for open_line, segments in blocks:
         found = []
         for seg_start, seg_end in segments:
             for m in TEXT_FORMAT_RE.finditer(masked, seg_start, seg_end):
                 found.append((line_of(masked, m.start()), m.group(1).strip()))
+                declared.add(m.start())
         if not found:
             problems.append((open_line,
                              'Text block declares no textFormat (AutoText by '
@@ -380,6 +399,17 @@ def check_file(path):
                          'textFormat is %r; only Text.PlainText passes '
                          '(or Text.StyledText under a MARKUP-EXCEPTION '
                          'comment)' % value))
+    elsewhere = [m.start() for m in WORD_RE.finditer(masked) if m.start() not in declared]
+    # A string literal's opening quote survives the mask; one quoted inside
+    # a comment or a longer string is blanked with what holds it.
+    elsewhere += [m.start() for m in STRING_NAME_RE.finditer(source) if masked[m.start()] == m.group(1)]
+    for offset in sorted(elsewhere):
+        problems.append((line_of(masked, offset),
+                         'textFormat is named outside a Text block\'s own '
+                         'declaration (an assignment, an index, a key in a '
+                         'property map, an alias or another type\'s binding), '
+                         'where this guard cannot judge the format a Text '
+                         'ends up with; declare it on the Text itself'))
     return len(blocks), problems
 
 

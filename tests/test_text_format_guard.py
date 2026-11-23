@@ -27,6 +27,12 @@ code-behinds Service.qml declares among it, so the tree's file count is
 derived from it (g); a Text built from a string by Qt.createQmlObject, which
 the scan masks like every string, is refused in a .qml and in the guards'
 fixture code-behind (g4, i), both red on ab3d287's guard.
+
+F-GATE-28: a format set anywhere but a Text's own declaration -- a member
+assignment, an index, a key in a property map, an alias, another type's
+binding -- is refused in a .qml and in the fixture code-behind (j, j2, j4),
+and the word in a comment, a sentence or a longer name is not (j3); j, j2
+and j4 red on d82c00a's guard.
 """
 
 import os
@@ -258,7 +264,10 @@ class GuardCase(unittest.TestCase):
         status, out = run([path])
         self.assertEqual(status, 1, out)
         self.assertIn('%s:4: Text block declares no textFormat' % path, out)
-        self.assertIn('1 problem(s) in 1 Text block(s)', out)
+        # F-GATE-28: and the child's line is itself a format set somewhere
+        # this guard does not judge.
+        self.assertIn("%s:7: textFormat is named outside a Text block's own declaration" % path, out)
+        self.assertIn('2 problem(s) in 1 Text block(s)', out)
 
     # (f3) `Text` is an identifier, not a suffix: a BodyText { or a
     # Foo.Text { is some other type and is not a Text block.
@@ -396,6 +405,71 @@ class GuardCase(unittest.TestCase):
         self.assertEqual(status, 1, out)
         self.assertIn('C.qml:7: createQmlObject builds QML out of a string', out)
         self.assertIn('1 problem(s)', out)
+
+    # (j) F-GATE-28: a format set anywhere but a Text's own declaration is
+    # refused, each shape alone in a file whose one Text is declared plain.
+    ELSEWHERE = (
+        'function f(item) { item.textFormat = Text.RichText }',
+        'function f(item) { item["textFormat"] = Text.AutoText }',
+        "function f(item) { item['textFormat'] = Text.AutoText }",
+        'function f(item) { item[`textFormat`] = Text.AutoText }',
+        'function f(c) { return c.createObject(root, { textFormat: Text.StyledText }) }',
+        'function f(c) { return c.createObject(root, { "textFormat": Text.StyledText }) }',
+        'function f(c) { var textFormat = Text.RichText; return c.createObject(root, { textFormat }) }',
+        'property alias shown: label.textFormat',
+        'Banner { textFormat: Text.StyledText }',
+        'function f(item) { return item.textFormat }',
+        'function f(item) { item . textFormat=Text.RichText }',
+    )
+
+    def test_j_a_format_set_outside_a_text_s_declaration_is_red(self):
+        for n, line in enumerate(self.ELSEWHERE):
+            path = self.write('J%d.qml' % n, HEAD + '  Text {\n    id: label\n    textFormat: Text.PlainText\n  }\n'
+                              '  ' + line + '\n' + TAIL)
+            status, out = run([path])
+            self.assertEqual(status, 1, (line, out))
+            self.assertIn("%s:8: textFormat is named outside a Text block's own declaration" % path, out, line)
+            self.assertIn(' problem(s) in 1 Text block(s)', out, line)
+
+    # (j2) inside the Text itself too: an own-depth handler that assigns it,
+    # and a property map one level down.
+    def test_j2_inside_the_text_block_only_the_declaration_passes(self):
+        for n, line in enumerate(('onLinkActivated: textFormat = Text.RichText',
+                                  'property var map: ({ textFormat: Text.RichText })',
+                                  'Component.onCompleted: { label.textFormat = Text.RichText }')):
+            path = self.write('K%d.qml' % n, HEAD + '  Text {\n    id: label\n    textFormat: Text.PlainText\n'
+                              '    ' + line + '\n  }\n' + TAIL)
+            status, out = run([path])
+            self.assertEqual(status, 1, (line, out))
+            self.assertIn("%s:7: textFormat is named outside a Text block's own declaration" % path, out, line)
+            self.assertIn('1 problem(s) in 1 Text block(s)', out, line)
+
+    # (j3) what is no use of it: the word in a comment, inside a longer
+    # string, quoted inside a string or a comment, and a longer name.
+    def test_j3_the_word_in_a_comment_a_sentence_or_a_longer_name_is_green(self):
+        path = self.write('L.qml', HEAD + '  Text {\n    textFormat: Text.PlainText // textFormat stays plain\n  }\n'
+                          '  // item.textFormat = Text.RichText and item["textFormat"] in a comment\n'
+                          '  /* "textFormat" */\n'
+                          '  property string note: "set textFormat: Text.PlainText"\n'
+                          '  property string quoted: "the key \'textFormat\' is refused"\n'
+                          '  property int textFormatCount: 0\n'
+                          '  property int myTextFormat: 0\n'
+                          '  property int subtextFormat: 0\n' + TAIL)
+        status, out = run([path])
+        self.assertEqual(status, 0, out)
+
+    # (j4) and in a code-behind, which is all imperative code.
+    def test_j4_each_shape_in_the_fixture_code_behind_is_red(self):
+        for mutant in ('item.textFormat = Text.RichText',
+                       'root["textFormat"] = Text.AutoText',
+                       'Qt.createComponent("Banner.qml").createObject(root, { textFormat: Text.StyledText })'):
+            shutil.rmtree(self.tmp)
+            os.makedirs(self.tmp)
+            split_fixture.tree(self.tmp, mutant)
+            status, out = run(['--root', self.tmp])
+            self.assertEqual(status, 1, (mutant, out))
+            self.assertRegex(out, r"Service-demo\.js:\d+: textFormat is named outside a Text block's own declaration")
+            self.assertIn('1 problem(s) in 1 Text block(s)', out, mutant)
 
     # (g2) the no-argument list is derived from ALLOWLIST in
     # scripts/release.py, so a shipped file is covered because it ships, not

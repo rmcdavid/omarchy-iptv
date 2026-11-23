@@ -25029,3 +25029,54 @@ Searched (rule 15) for another guard that walks a chain back to `Style` or
 `Color` as its head: the colour guard reads literals and `Qt.rgba`, not a
 chain's head, and the theme name guard already judges a code-behind under
 its importer. Neither has the shape.
+
+## F-GATE-28: a text format set after the Text is made (the daily run, 2026-11-23)
+
+The text format guard judged the `textFormat:` a Text or Label declares and
+refused `createQmlObject`. A format assigned later
+(`item.textFormat = Text.RichText`), set through an index
+(`root["textFormat"] = ...`) or handed over in a property map
+(`createObject(root, { textFormat: ... })`) passed, in a .qml function and in
+a code-behind.
+
+The fix (scripts/check-text-format.py, `check_file`): the offsets of the
+declarations the block scan judged are kept; every other occurrence of the
+word `textFormat` in the masked source is a problem, and so is a string
+literal that is exactly `textFormat`, found in the source where the mask
+kept its opening quote (so one quoted in a comment or inside a longer string
+is not). One sentence for all of them, with the line.
+
+The lead's call under the owner's standing authority of 2026-11-09: the rule
+is "the word stands only in a Text's own declaration", wider than the three
+shapes filed. It also refuses an alias onto the property, a binding of it on
+another type (a wrapper component's), an unqualified assignment inside the
+Text's own handler, and a read. The shipped code names `textFormat` nowhere
+but in its 58 declarations, so the wider rule costs nothing today.
+
+Tests, tests/test_text_format_guard.py (23 -> 27):
+
+- j: eleven shapes, each alone beside one plain Text: a member assignment
+  (also written `item . textFormat=`), an index under each of the three
+  quotes, a key and a quoted key in a property map, the shorthand key, an
+  alias, another type's binding, a read.
+- j2: three inside the Text block: an own-depth handler assigning it, a
+  property map one level down, a block handler assigning through the id.
+- j3, green: the word in a line comment, a block comment, a sentence in a
+  string, quoted inside a string, and in three longer names.
+- j4: the row's three shapes in the guards' fixture code-behind, through
+  shipped_code.
+
+Red first on d82c00a's guard: j, j2 and j4 (and f2b, whose count moved from
+one problem to two: its Item child's `textFormat:` is itself such a use).
+
+Mutants, one decision each: the declarations not excused (15 failed), no
+string check (2), the string check without the mask (1), the word without
+its right edge (1), without its left edge (1), double quotes only (1), only
+`.textFormat =` read (4), nothing reported (4).
+
+The shipped tree: 58 Text blocks in 3 files, green, as before.
+tests/test_host_text_format.py, which runs `check_file` over the host's
+notification plugin, is green on omarchy 4.5.0: the host sets no format this
+way.
+
+Not seen: a property name built at run time.
