@@ -25080,3 +25080,219 @@ notification plugin, is green on omarchy 4.5.0: the host sets no format this
 way.
 
 Not seen: a property name built at run time.
+
+## D-REL-14: rewind-scenario's cage arm (lane-relsplit3-arm, 2026-11-23)
+
+Call (h) is the lead's call under the owner's standing authority of
+2026-11-09. Before any rewind function moves, rewind-scenario.sh gets an arm
+that runs in a nested headless cage, so C3's move can be proven live without
+the desk. Before this, the scenario refused to start without wtype, asked the
+desk's own lock, drove the caller's display, and sent R13's twenty keys
+through wtype.
+
+This lane worked on branch relsplit-3, from bd65241. It made commit 20ee9da
+(the arm, its two harness repairs and their board rows) and this record. No
+shipped file changed: release.py check reads 43 files and Service.qml is
+446,973 B, as on the base. Nothing moved.
+
+**What `--cage` does** (scripts/dev-harness/rewind-scenario.sh):
+- It runs the same 110 checks in the same order as the desk arm.
+- The levers are read first, with builtins only. The arm needs cage,
+  quickshell and qs where the desk needs wtype. DISPLAY and
+  HYPRLAND_INSTANCE_SIGNATURE are unset for everything the driver starts
+  (CLAUDE.md, parallel 6b).
+- It has its own harness directory, `omarchy-iptv-rewind-cage`, exported, so
+  its `run.sh reap` and `clean` never reach a desk harness.
+- It calls qa_cage_runtime_fits above the EXIT trap, the export and the
+  transcript (F-HARNESS-104), so a refusal starts and makes nothing.
+- The cage starts after the transcript, key-scenario.sh live's way (headless
+  backend, pixman, no input devices). Its child runs as `$WORK/cage-child`,
+  so both signals in cage_stop go through qa_signal_named. The nested display
+  is refused if it names the caller's display or `wayland-1`, or if
+  qa_target_nested, asked with the caller's own signature, says it is the
+  session's.
+- WAYLAND_DISPLAY is exported as the nested display, with
+  OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1, run.sh's lever: `--gpu-sw=yes
+  --ao=null --hwdec=no` behind the shrunken cache.
+- hyprctl and omarchy-notification-send are stand-ins on `$SCRATCH/bin`,
+  which harness_env puts first on the shell's PATH. Each full run's one card
+  (`Bar setting ignored`, which the harness's own `--playlist` draws) landed
+  in the stand-in's log, with no URL in it. H stopped before its card.
+- It asks no lock, because no key goes anywhere.
+- At exit it prints the cage's verdict. It read `gone` in all nine runs: the
+  compositor, its child and the nested socket.
+
+**R13 and R14.** The headless seat has no keyboard, but a path reaches the
+same handler. key-scenario.sh drives the guide in its cage through harness
+verbs that call the guide's own handlers (`sourcesKey`). There is one for
+the list, `listKey`, but one `run.sh ipc` per press is a process start per
+press, hundreds of milliseconds apart, and that is not a held key.
+
+So shell.qml gains `listKeys <letters> <gapMs>` and `listKeysResult`:
+- A Timer in the shell's own event loop hands each letter to
+  Guide.handleListLetter, `gapMs` apart.
+- From there the key takes the path a real `b` takes in list mode:
+  Model.listLetterAction to `rewind`, Guide.seekBack, then Service.seekBy(-10)
+  and the service's queue.
+- It skips the key catcher's plumbing in front of that handler: the
+  PanelKeyCatcher event and onTextKey's guards for tracks, panel, sources,
+  control characters and number entry, and endNumberEntry. None of these
+  applies to a guide open in list mode.
+
+R13 ran in every run: 20 of 20 letters reached the handler, there were 3
+helper runs for 20 presses (coalesced), and the readout was about 40 s behind
+(at least 20 is required). R14 read what it reads on the desk, green
+throughout. A lost letter counts where the desk counts a refused key: the
+desk's last check, "no keystroke was refused by the focus guard", is "no
+press was lost on its way to the guide's list handler" in the cage.
+
+**What the desk's checks met in the cage, and what changed.** Runs A to E
+were on the base tree (bd65241's shipped files), each with the scenario as
+it stood at that step.
+
+| run | the scenario | result | reds |
+|---|---|---|---|
+| A | the arm, desk checks unchanged | 110 passed, 4 failed | the cache control's argv read; R2 `applied`; R7 13.112 for ~10; R15 median 599 ms |
+| B | + the cache control read off the player | 112 passed, 2 failed | R7 13.269; R15 574 ms |
+| C | + `--profile=fast` and LP_NUM_THREADS=1 for the cage's player | 111 passed, 3 failed | R1 `applied` -9.96; R7 13.421; R15 409 ms |
+| D | + R7's second press, one frame for R1/R2 in the cage, R15 a SKIP in the cage | 112 passed, 1 failed, 1 skipped | R10's arrival band, 11.212 -> 19.719 |
+| E | + R10's arrival bound (F-RWD-27) | 113 passed, 0 failed, 1 skipped (R15) | none |
+
+1. **F-HARNESS-127.** "the shrunken cache reached the player's argv" read
+   `--demuxer-max-back-bytes=2MiB` and `--demuxer-max-bytes=4MiB` off
+   qa_cmdline. Since D-SINK-47 (2026-10-31) the mpvArgs tokens reach mpv in a
+   private `--include` file, so the check was red on every tree since. No run
+   of the scenario was recorded after that, so nobody saw it. The check now
+   reads the player's own options over its socket, and every run since read
+   2097152 and 4194304. Red in run A on the old read; red in run H on the
+   new read.
+2. **The player's CPU.** With mpv's default scalers on llvmpipe, mpv took
+   180-350% (top every 20 s, run B), beside the stream's two encoders and the
+   helper. The cage's player now draws with mpv's `fast` profile (a user
+   setting the pin block leaves alone) and one llvmpipe thread, and takes 66
+   to 104%, median 81.5 (run E).
+3. **R7.** The first `live` left the readout 2.5 to 3.6 s behind in every
+   run that printed it (D to G and I). A to C read the same, 3.1 to 3.4,
+   through R7's 13.1 to 13.4. That held at 80% of a core and at 300% alike,
+   so CPU was not the cause. R4 and R5 leave the player at the floor, about 30 s behind,
+   where the 4 MiB forward cache is full and the demuxer stops fetching. The
+   cache's end then sits seconds short of the stream's when `live` lands, and
+   ruling D8's "as near as the cache reaches" is that far. A second press
+   follows when the readout is past SHOW_S, and lands at the edge: 9.954 and
+   ~10 after `back 10` in D and E. This is the one behaviour change the desk
+   arm shares, and only a first press that falls short takes it.
+4. **R1 and R2's `applied`**, judged to 0.01 s, read -9.96 in C: one 40 ms
+   frame played between the landing and the helper's read. The cage arm's
+   bound is one frame (0.05). The desk keeps 0.01.
+5. **F-RWD-27.** R10's "the replies keep arriving" judged the rise of the
+   stored reading as 15 +/- 6. The stored reading moves only when a status
+   reply lands, so the rise is the time between two replies, about 5 to 19 s
+   over that window. In the cage it read 8.507, 8.638 and 8.507 (D, E, F),
+   red under the old band each time. The check now asserts a rise of at
+   least 2 s, which the 12 s sleep past a 10 s tick guarantees after the 3 s
+   pair, and at most 21. Red in run G.
+6. **R15's budget** (300 ms) is the desk's. The helper waits up to
+   SEEK_EVENT_BOUND_S (250 ms) for the player to land a seek, and a
+   software-drawn player lands it later: medians 402 to 599 ms in the cage.
+   The cage arm prints it as `SKIP`, with the measurement, and the summary
+   names it. A skip counts as reached, so the floor of 110 holds for both
+   arms.
+
+**The runs.** Every run used the release step's way: the heavy lock, nice
+10, scripts/dev-harness/private-bus.sh, the scenario's own nested headless
+cage, `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+QT_QPA_PLATFORMTHEME -u OMARCHY_IPTV_HARNESS_DIR`, and short private
+XDG_RUNTIME_DIR and TMPDIR. Each scenario ran from a snapshot of the worktree
+taken before it started. The crash journal read 89 before and after every
+run.
+
+| run | tree | result | time | load (1 min, start to end) | transcript |
+|---|---|---|---|---|---|
+| A | base | 110 passed, 4 failed | 333 s | 0.16 to 6.65 | rewind-20261123-072540-3686458 |
+| B | base | 112 passed, 2 failed | 345 s | 1.43 to 5.22 | rewind-20261123-073247-3699692 |
+| C | base | 111 passed, 3 failed | 325 s | 1.14 to 4.20 | rewind-20261123-074013-3712788 |
+| D | base | 112 passed, 1 failed, 1 skipped | 325 s | 0.33 to 2.66 | rewind-20261123-074825-3726854 |
+| E | base | 113 passed, 0 failed, 1 skipped | 324 s | 0.56 to 2.43 | rewind-20261123-075612-3740558 |
+| F | mutant R9 | 111 passed, 2 failed, 1 skipped | 324 s | 1.89 to 2.32 | rewind-20261123-080152-3753077 |
+| G | mutant tick | 112 passed, 1 failed, 1 skipped | 263 s | 2.19 to 2.10 | rewind-20261123-080727-3765435 |
+| H | base, scenario mutant | the control red, then stopped | 20 s | 1.85 to 1.87 | rewind-20261123-081201-3776383 |
+| I | base, 20ee9da as committed | 113 passed, 0 failed, 1 skipped | 325 s | 0.69 to 2.13 | rewind-20261123-082114-3795174 |
+
+"Passed" counts R18's two if/ok/bad blocks and the transcript barrier, as
+the scenario's floor comment says: "111 assertions executed" is 110 checks
+plus the floor check. Runs E, F and G ran the committed scenario, harness
+shell and qa-lib-test.sh byte for byte, except that comment lines changed
+before the commit. Run I ran the committed bytes, and its PASS and SKIP lines match E's name
+for name (114 lines, values aside).
+
+**Red on a named mutant.** Each mutant tree is a bd65241 export with one
+line changed, run through `--cage --tree`.
+- **Mutant R9 (run F), "a zap's readout clear never runs":** applySeekPlan's
+  clearReadout branch loses `root.rewind = null` and keeps
+  `seekThrottle.stop()`. Exactly R9's two checks are red: "rewind is null
+  right after the zap" read the previous channel's object (`behindLive`
+  15.771), and "playbackStateText is empty right after the zap" read
+  `0:15 behind live`. The other 108 judged checks pass. applySeekPlan is one
+  of the 15 functions C3 moves into Service-rewind.js, so this mutation can
+  be applied inside the code-behind for call (i).
+- **Mutant tick (run G), "the health tick asks no status while paused":**
+  `tick.check && !root.paused`. Exactly R10's arrival check is red, 11.134
+  -> 11.134, under the new bound. This is the red that F-RWD-27's rewrite
+  must keep.
+- **Scenario mutant (run H):** the scenario's `OMARCHY_IPTV_MPV_ARGS` is
+  emptied, and the run stops after the control. The control is red, reading
+  mpv's defaults: demuxer-max-back-bytes 52428800 and demuxer-max-bytes
+  157286400. This is F-HARNESS-127's new read seen red.
+- **qa-lib-test.sh's new case**, "rewind-scenario.sh --cage: refused above
+  its trap, its export and its transcript" (fh_case, a 97-byte
+  XDG_RUNTIME_DIR, stand-ins on PATH), passes on 20ee9da. It is red on
+  bd65241's scenario: `2|unknown option: --cage|0|none`. It is red on a
+  mutant without the qa_cage_runtime_fits call:
+  `77|== transcript ...|2|made`, where the stand-in cage ran, cleanup's
+  `qs` ran, and the harness directory was made. 819 -> 820.
+
+**Checks run at the end, against the base's counts.**
+- qa-lib-test.sh: 820 passed, 0 failed (base 819).
+- node tests/Model.test.js: 4069 checks, 0 failures (base 4069).
+- Python by discovery: 2999, unchanged; this lane added no python test. The
+  ten modules that read the harness root or the board ran: 166 tests, OK.
+- qmllint on the staged harness shell.qml, as check.sh stages it: 0 errors.
+  Warnings went from 176 to 177. The new one is `Member "handleListLetter"
+  not found on type "QObject"` in listKeys's turn, the missing-property shape
+  listKey already draws on the guide Loader's item.
+- check-model-members (44 references, each exported) and the theme name
+  guard on the harness root are clean.
+- The defect ledger and board staleness are clean.
+- Private-id scan: 0.
+- check.sh was not run whole: the lead gates the merged tree.
+
+**Rule 15, searched and cleared.**
+- *mpvArgs tokens read off an argv after D-SINK-47:* `qa_cmdline` and
+  `cmdline_of` in every scenario, and every scenario that sets
+  OMARCHY_IPTV_MPV_ARGS. player-scenario (L_CANARY, the private file, P2/P5
+  sweeps past the relay pin) and tls-scenario (S2/S4 read the file or the
+  argv) already read the tokens where they are. No other scenario sets one.
+- *A magnitude band over a reading that moves only when a reply lands:*
+  every `fdelta` use. R10's and R11's SHOWN count-ups are the service's own
+  1 Hz clock; R10's and R11's 3 s pairs already assert "never backwards"
+  (F-RWD-22, F-RWD-26). Only R10's arrival band remained.
+- *Frame-exact tolerances:* every `near ... 0.01`. Only R1's and R2's
+  `applied`.
+- *A press that assumes a `live` reached the edge:* the four `ipc live`
+  calls. R13's checks hold from any start (the capped sum reaches the floor
+  either way). R16 and R17 need only a seek in flight. Only R7's premise
+  read the edge.
+
+**Not done, and left open.**
+- The desk arm was not run: this lane holds the nested display only.
+  F-HARNESS-127's read, F-RWD-27's bound and R7's second press change it.
+  Each was observed in the cage, none on the desk.
+- In the cage the key catcher in front of handleListLetter is not
+  exercised, and R15's budget is not judged.
+- Two things are inherited from key-scenario's cage_stop and were never
+  needed here. A KILL to the `timeout` cage runs under does not reach cage
+  itself. A child that ignores TERM would leave cage up past the verdict,
+  which would then read `left: cage(...)`.
+- The four cage adjustments (2 to 4 and 6 above) and R7's second press are
+  this lane's. They are proposed to the lead, not taken under the standing
+  authority.
