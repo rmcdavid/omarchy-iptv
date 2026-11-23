@@ -24986,3 +24986,46 @@ Mutants of `qa_decimal`, one decision each, the same block: the zeros left on
 allowed (1), zeros alone left empty (1), the value printed as given (4).
 
 Not run: run.sh starting a harness with either option, which needs a cage.
+
+## F-GATE-27: the metric guard reads the theme through its alias (the daily run, 2026-11-23)
+
+`in_style_call` took a number as the theme's unit only where the call's
+chain started at `Style`, so `spacing: Commons.Style.space(2)` was refused.
+Service.qml imports qs.Commons only as `Commons`, so that is the one way a
+metric there, or in a code-behind of it, can name the theme.
+
+The fix (scripts/check-metric-literals.py): `commons_aliases(text)` reads the
+names a file imports qs.Commons as, through the theme name guard's
+`file_imports`; `in_style_call` also accepts a chain whose head is one of
+them and whose second link is `Style`, with a function after it. `judge`
+takes `importer_text` for a code-behind, and `main` hands it the importer
+shipped_code names. An explicit file list reads each file under its own
+imports.
+
+The lead's call under the owner's standing authority of 2026-11-09: the
+alias must be an import of qs.Commons. Accepting any `x.Style.f(` would let
+`root.Style.space(12)`, some object's own member, excuse a number.
+
+Tests, tests/test_metric_literals.py (32 -> 36): the shape under `Commons`
+and under `Kit`; ten shapes that stay refused (no such import, `root.Style`,
+an undeclared alias, the alias of QtQuick, the alias of qs.Ui,
+`Commons.space(2)`, `Commons.Style(2)`, `Commons.Other.space(2)`,
+`root.Commons.Style.space(2)`, and a number beside the call); a code-behind
+read under its importer's aliases and not its own text; and the guards'
+fixture tree through `main`, green with `item.radius = Commons.Style.space(2)`
+and red with `Kit.Style.space(2)`.
+
+Red first on 272ef8c's guard: all four (three by `judge`'s two-argument
+form, the tree test by the refusal itself).
+
+Mutants, one decision each: any head accepted (3 failed), the second link
+not asked (1), `Commons.Style(` accepted (1), an alias of any module (1), a
+code-behind read under its own text (2), under both texts (1), `main`
+handing no importer (1).
+
+The shipped tree: 197 metric bindings in 3 files, 0 hardcoded, as before.
+
+Searched (rule 15) for another guard that walks a chain back to `Style` or
+`Color` as its head: the colour guard reads literals and `Qt.rgba`, not a
+chain's head, and the theme name guard already judges a code-behind under
+its importer. Neither has the shape.

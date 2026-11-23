@@ -120,10 +120,58 @@ class ACodeBehind(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("1 metric binding(s) read in 2 file(s) (0 hardcoded number(s), 0 excused), 0 problem(s)", out)
 
+    def test_the_themes_unit_through_the_importers_alias_is_green_in_a_code_behind(self):
+        code, out = self.run_tree("item.radius = Commons.Style.space(2)")
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 metric binding(s) read in 2 file(s) (0 hardcoded number(s), 0 excused), 0 problem(s)", out)
+        code, out = self.run_tree("item.radius = Kit.Style.space(2)")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"Service-demo\.js:\d+:\d+: `radius` is given the number 2 ")
+
     def test_a_hardcoded_metric_in_a_code_behind_is_red(self):
         code, out = self.run_tree("item.radius = 4")
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"Service-demo\.js:\d+:\d+: `radius` is given the number 4 ")
+
+
+class TheThemeThroughAnAlias(unittest.TestCase):
+    """F-GATE-27: `Commons.Style.space(2)` is the theme's unit too, under an
+    alias the file, or a code-behind's importer, imports qs.Commons as."""
+
+    def found(self, imports, line, importer=None):
+        text = "\n".join(imports) + "\nItem {\n  " + line + "\n}\n"
+        return guard.judge("x.qml", text, importer)[0]
+
+    def test_a_number_in_a_style_call_through_the_alias_is_the_themes(self):
+        both = ["import QtQuick", "import qs.Commons as Commons"]
+        self.assertEqual(self.found(both, "Row { spacing: Commons.Style.space(2) }"), [])
+        self.assertEqual(self.found(both, "Row { spacing: Commons.Style.font.scaled(1.5, 2) }"), [])
+        self.assertEqual(self.found(both, "Row { spacing: Commons.Style.space(Math.max(2, root.n)) }"), [])
+        self.assertEqual(self.found(["import qs.Commons as Kit"], "Row { spacing: Kit.Style.space(2) }"), [])
+
+    def test_only_an_alias_of_the_host_kit_s_commons(self):
+        both = ["import QtQuick", "import qs.Commons as Commons"]
+        for imports, line in ((["import QtQuick"], "Row { spacing: Commons.Style.space(2) }"),
+                              (both, "Row { spacing: root.Style.space(2) }"),
+                              (both, "Row { spacing: Kit.Style.space(2) }"),
+                              (["import QtQuick as Commons"], "Row { spacing: Commons.Style.space(2) }"),
+                              (["import qs.Ui as Commons"], "Row { spacing: Commons.Style.space(2) }"),
+                              (both, "Row { spacing: Commons.space(2) }"),
+                              (both, "Row { spacing: Commons.Style(2) }"),
+                              (both, "Row { spacing: Commons.Other.space(2) }"),
+                              (both, "Row { spacing: root.Commons.Style.space(2) }"),
+                              (both, "Row { spacing: Commons.Style.space(2) + 3 }")):
+            found = self.found(imports, line)
+            self.assertEqual(len(found), 1, (imports, line, found))
+            self.assertIn("`spacing` is given the number ", found[0])
+
+    def test_a_code_behind_reads_its_importers_alias_and_not_its_own_text(self):
+        importer = "import QtQuick\nimport qs.Commons as Commons\nItem {}\n"
+        body = "  function f(item) {\n    item.spacing = Commons.Style.space(2)\n  }\n"
+        self.assertEqual(guard.judge("Service-x.js", body, importer)[0], [])
+        self.assertEqual(len(guard.judge("Service-x.js", body, "import QtQuick\nItem {}\n")[0]), 1)
+        own = "import qs.Commons as Commons\n" + body
+        self.assertEqual(len(guard.judge("Service-x.js", own, "import QtQuick\nItem {}\n")[0]), 1)
 
 
 class WhatIsRefused(Cases):

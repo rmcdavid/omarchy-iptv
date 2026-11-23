@@ -30,7 +30,11 @@ WHAT IS REFUSED. In the expression such a name is bound to, a number other
 than zero is a hardcoded metric unless it is
 
   * an argument of a `Style.` call (`Style.space(8)`: the theme's own
-    spacing unit, scaled by the host);
+    spacing unit, scaled by the host), or of the same call reached through
+    an alias the file imports qs.Commons as (`Commons.Style.space(8)` under
+    `import qs.Commons as Commons`; a code-behind is read under its
+    importer's aliases). `x.Style.space(8)` under any other `x` is some
+    other object's member and is refused (F-GATE-27);
   * a factor: directly beside `*` or `/` (`width / 2`, `height * 0.42`);
   * one side of a comparison (`count > 1 ? Style.space(2) : 0`), or an
     index (`sizes[1]`);
@@ -169,9 +173,15 @@ def expression_end(toks, start):
     return j
 
 
-def in_style_call(toks, start, k):
+def commons_aliases(text):
+    """The names `text` imports qs.Commons as (`import qs.Commons as X`)."""
+    return frozenset(alias for alias, uri in theme.file_imports(text)[1].items() if uri == "qs.Commons")
+
+
+def in_style_call(toks, start, k, aliases=()):
     """Is toks[k] inside the argument list of a call whose callee starts
-    with `Style.`, opened at or after toks[start]?"""
+    with `Style.`, or with `<alias>.Style.` for one of `aliases`, opened at
+    or after toks[start]?"""
     depth = 0
     j = k - 1
     while j >= start:
@@ -187,6 +197,9 @@ def in_style_call(toks, start, k):
                         and toks[c - 2].kind == "ident":
                     c -= 2
                 if c < j - 1 and toks[c].kind == "ident" and toks[c].text == "Style":
+                    return True
+                if c + 2 < j - 1 and toks[c].kind == "ident" and toks[c].text in aliases \
+                        and toks[c + 2].text == "Style":
                     return True
         j -= 1
     return False
@@ -218,9 +231,10 @@ def is_zero(text):
             return False
 
 
-def metric_literals(text):
+def metric_literals(text, aliases=()):
     """(bindings, found): how many metric bindings the file holds, and
-    [(line, col, name, number, why)] for every hardcoded number in one."""
+    [(line, col, name, number, why)] for every hardcoded number in one.
+    `aliases` are the names qs.Commons is imported as."""
     toks = members.tokens(text)
     inside = groups(toks)
     found = []
@@ -255,19 +269,21 @@ def metric_literals(text):
                 continue
             if compared(toks, start, end, j):
                 continue
-            if in_style_call(toks, start, j) or in_index(toks, start, j):
+            if in_style_call(toks, start, j, aliases) or in_index(toks, start, j):
                 continue
             found.append((t.line, t.col, name, t.text, "a number added to, or set beside, the theme's value"))
         k = start
     return bindings, found
 
 
-def judge(label, text):
+def judge(label, text, importer_text=None):
     """-> (problems, counts) for one file's text. counts is a dict with
     'bindings' (metric bindings read), 'numbers' (hardcoded numbers found)
-    and 'excused'."""
+    and 'excused'. A code-behind passes its importer's text as
+    `importer_text`: it has no imports of its own, and reads the theme
+    through the aliases its importer declares."""
     lines = text.split("\n")
-    bindings, found = metric_literals(text)
+    bindings, found = metric_literals(text, commons_aliases(text if importer_text is None else importer_text))
     problems = []
     counts = {"bindings": bindings, "numbers": len(found), "excused": 0}
     for line, col, name, number, why in found:
@@ -286,7 +302,7 @@ def main(argv=None):
     parser.add_argument("files", nargs="*")
     args = parser.parse_args(argv)
     try:
-        files = args.files or [entry.path for entry in theme.shipped_code(args.root)]
+        files = [(path, path) for path in args.files] or [tuple(entry) for entry in theme.shipped_code(args.root)]
     except (OSError, ValueError, SyntaxError) as exc:
         print("metric literal guard: cannot read the allowlist: %s" % exc)
         return 2
@@ -295,10 +311,11 @@ def main(argv=None):
         return 2
     problems = []
     total = {"bindings": 0, "numbers": 0, "excused": 0}
-    for path in files:
+    for path, importer in files:
         try:
             text = theme.read(path)
-            found, counts = judge(os.path.relpath(path, args.root), text)
+            importer_text = None if importer == path else theme.read(importer)
+            found, counts = judge(os.path.relpath(path, args.root), text, importer_text)
         except (OSError, UnicodeDecodeError, members.ScanError) as exc:
             print("metric literal guard: cannot read %s: %s" % (path, exc))
             return 2
