@@ -87,7 +87,7 @@
 # reads the same state either way. Without `--cage` the desk arm runs its
 # checks in their order as before, with the two repairs this work found in
 # them (F-HARNESS-127, F-RWD-27) and R7's second `live` press, which only a
-# first press that leaves the readout past SHOW_S takes.
+# first press that lands within a step of live but past SHOW_S takes.
 #
 # Output: one PASS/FAIL line per assertion and a summary, and the run SCANS
 # ITS OWN STDOUT for a URL at the end (R18) rather than claiming not to print
@@ -756,20 +756,32 @@ if qa_leak_scan 'service loaded' "://|$HOST|live\\.m3u8|/rewind/" "$HLOG"; then 
 else bad "R6 harness log: leak or vacuous (status $?)"; fi
 
 echo "== R7 the service readout through the harness and the plugin verbs"
+r7_from=$(rw behindLive)
 ipc live >/dev/null 2>&1
 until_history 24 40 || true
 # Ruling D8: `live` lands as near the edge as the CACHE reaches. R4 and R5
 # leave the player at the floor, about 30 s behind, where the 4 MiB forward
 # cache is full and the demuxer stops fetching, so the cache's end can sit
 # seconds short of the stream's when the press lands, and the readout then
-# says, truly, that the player is that far behind: 2.5 to 3.4 s in each of
-# five runs of the cage arm (D-REL-14), at 80% of a core or at 300%. A second
-# press, once the demuxer has caught up, lands where the first was aimed;
-# R7 is about `back`, not this.
+# says, truly, that the player is that far behind: 2.5 to 3.6 s in every run
+# of the cage arm that printed it (D-REL-14), at 80% of a core or at 300%. A
+# second press, once the demuxer has caught up, lands where the first was
+# aimed; R7 is about `back`, not this.
+# But only a first press that LANDED gets one: a readout within a step of
+# live, where every short press of the cage's read 2.5 to 3.6 s from about
+# 30. A first press that moved nothing leaves the readout where R5 left it,
+# about 30 s behind, and a second press would hide that (the review of the
+# cage arm, D-REL-14): it gets none, and R7's checks below are judged from
+# there.
 if ! until_rw behindLive 0 "$SHOW_S" 6; then
-  printf '   R7 the first live left the readout at %s, past %s s; pressing live again\n' "$(rw behindLive)" "$SHOW_S"
-  ipc live >/dev/null 2>&1
-  until_rw behindLive 0 "$SHOW_S" 6 || true
+  r7_first=$(rw behindLive)
+  if [[ $(ge "$STEP" "$r7_first") == 0 ]]; then
+    printf '   R7 the first live moved the readout from %s to %s, past %s s; pressing live again\n' "$r7_from" "$r7_first" "$SHOW_S"
+    ipc live >/dev/null 2>&1
+    until_rw behindLive 0 "$SHOW_S" 6 || true
+  else
+    printf '   R7 the first live left the readout at %s (from %s), not within a step (%s s) of live: no second press\n' "$r7_first" "$r7_from" "$STEP"
+  fi
 fi
 is "R7 the harness verb back answers" "$(rf 'd["ok"]' "$(ipc back 10)")" "true"
 until_rw behindLive 8 13 6 || true
@@ -863,8 +875,15 @@ printf '   R10 stored after a further 12 s: %s\n' "$r2"
 # went red at 8.5 (D-REL-14's cage arm, rewind-20261123-074825). What the
 # window guarantees is a reply AFTER s1: the 12 s sleep is longer than the
 # 10 s tick, and that reply sits at least the 3 s pair above past r0's. So
-# it rises by 2 or more if the replies keep arriving and 0 if they stop,
-# and 21, the band's old top, still catches a reading counting double.
+# it rises by 2 or more if the replies keep arriving and 0 if they stop.
+# 21, the band's old top, sits just above the widest gap the window allows
+# and catches a reading that runs away. It does NOT catch one counting
+# double, which an earlier version of this comment said it did: doubled,
+# the rise is about 10 to 38 s, against 5 to 19 counted once, so it is red
+# only where the real gap is over 10.5 s, and the cage's gaps under this
+# bound were 7.95 to 9.44 s (the review of the cage arm). The two ranges
+# overlap, so no bound on this rise can tell them apart; this check is
+# about arrival, not rate.
 ck "R10 and over a window that contains a health tick it rises, so the replies keep arriving ($r0 -> $r2)" \
   '[[ $(ge "$(fdelta "$r0" "$r2")" 2) == 0 && $(ge 21 "$(fdelta "$r0" "$r2")") == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
@@ -1265,7 +1284,8 @@ fi
 # the first run (got 110, want 111). Which is what the guard is for.
 # The cage arm (D-REL-14) executes the same 110: R13 differs in its press
 # path, not its checks, and the key check above is one of two, one per arm,
-# indented, so the upper-bound grep reads one fewer than it used to.
+# indented, as is R15's, which the cage arm skips, so the upper-bound grep
+# reads two fewer than it used to (107, where it read 109).
 EXPECTED_CHECKS=110
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
