@@ -8,7 +8,8 @@ Quickshell process. Released through v0.20.0 (2026-11-22: D-SINK-102 and D-SINK-
 marketplace maintainer's two findings on #14290, #13611 and #12636 against 0.19.1 -- the
 player's http, https and rtmps connections go through the plugin's relay, and state.json is
 made private before every save; `main` 1321aff, the GitHub Release marked Latest,
-`[Verify]` #15671 filed the same day on the owner's word). Before it, v0.19.1 (2026-11-13:
+`[Verify]` #15671 filed the same day, and replies on #14290, #13611 and #12636 naming it,
+on the owner's word). Before it, v0.19.1 (2026-11-13:
 D-SINK-101, the marketplace maintainer's finding on #14817 against 0.19.0 -- a channel's stream host name is looked up
 at play time and every answer judged by the literal rule, the playlist's own host
 included; `main` 9e006be, the GitHub Release marked Latest, `[Verify]` #14874 filed the

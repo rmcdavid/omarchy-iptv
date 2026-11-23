@@ -24944,4 +24944,7 @@ Release "Omarchy IPTV 0.20.0" (the CHANGELOG section) is marked Latest,
 #15671 filed on the owner's word: by 03:11:33Z its update validation passed
 (existing source, the exact plugin set, Quattro compatibility at 1321aff)
 and its automated security baseline passed with no findings and no
-capabilities. What is left is the maintainer's manual review.
+capabilities. What is left is the maintainer's manual review. On the
+owner's word, replies naming 0.20.0 and #15671 were posted on #14290 (the
+two fixes and the residuals the README states) and on #13611 and #12636
+(one line each, pointing to #14290's).
