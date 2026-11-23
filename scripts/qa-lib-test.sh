@@ -3899,6 +3899,110 @@ sleep 0.3
 is "a size that keeps moving: 1 after its bounded reads" "$(qa_rss_settled "$RS_PID" 2 4; echo $?)" "1"
 kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 
+section "qa_offer_listed / F-HARNESS-124: a consumer reads once the offer is served"
+# The predicate over a stand-in wl-paste of this suite's own, first on PATH:
+# it records the display it was asked on and how many times it was asked,
+# answers "No selection" until the ask $OL/after names and then lists what
+# $OL/types holds, and hangs when $OL/hang exists. Nothing here connects to
+# a display: the stand-in is the only wl-paste these calls can reach.
+OL=$SP/ol; mkdir -p "$OL/bin"
+cat >"$OL/bin/wl-paste" <<OLP
+#!/bin/bash
+n=\$(( \$(cat "$OL/calls" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$OL/calls"
+printf '%s\n' "\${WAYLAND_DISPLAY-unset}" >"$OL/display"
+[[ \$1 == --list-types ]] || exit 2
+[[ -e "$OL/hang" ]] && exec sleep 8
+(( n >= \$(cat "$OL/after") )) && { cat "$OL/types"; exit 0; }
+echo "No selection" >&2; exit 1
+OLP
+chmod 0755 "$OL/bin/wl-paste"
+# ol <after> <types> <args...>: one call from a clean count, with the
+# caller's own WAYLAND_DISPLAY set to a name no case passes; prints
+# "<status> <asks> <display asked> <tenths of a second taken>".
+ol() {
+  local after=$1 types=$2 t0 rc
+  shift 2
+  echo "$after" >"$OL/after"; printf '%b' "$types" >"$OL/types"; rm -f "$OL/calls" "$OL/display"
+  t0=${EPOCHREALTIME/[.,]/}
+  PATH="$OL/bin:$PATH" WAYLAND_DISPLAY=wayland-caller qa_offer_listed "$@"; rc=$?
+  printf '%s %s %s %s\n' "$rc" "$(cat "$OL/calls" 2>/dev/null || echo 0)" \
+    "$(cat "$OL/display" 2>/dev/null || echo none)" $(( (${EPOCHREALTIME/[.,]/} - t0) / 100000 ))
+}
+sleep 30 & OL_LIVE=$!
+r=$(ol 3 'text/plain\n' wayland-77 text/plain 5 "$OL_LIVE")
+is "an offer listed from the third ask, its producer alive: 0 at the third, asked on the display named" \
+   "${r% *}" "0 3 wayland-77"
+kill "$OL_LIVE" 2>/dev/null; wait "$OL_LIVE" 2>/dev/null
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 1 'text/plain;charset=utf-8\ntext/plainx\nTEXT\n' wayland-77 text/plain 1)"
+is "types that only begin with the one asked for: 1, asked again until the bound, inside it" \
+   "$ol_st $(( ol_n > 1 )) $(( ol_t < 30 ))" "1 1 1"
+: >"$OL/hang"
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 1 'text/plain\n' wayland-77 text/plain 1)"
+is "a wl-paste that never answers: the ask is cut at 2 s, and the 1 s bound then ends the wait" \
+   "$ol_st $ol_n $(( ol_t >= 19 && ol_t < 40 ))" "1 1 1"
+rm -f "$OL/hang"
+sleep 0 & OL_GONE=$!; wait "$OL_GONE"
+read -r ol_st ol_n ol_d ol_t <<<"$(ol 99 'text/plain\n' wayland-77 text/plain 5 "$OL_GONE")"
+is "a producer that is gone: 3 after one ask, not the 5 s bound" "$ol_st $ol_n $(( ol_t < 20 ))" "3 1 1"
+is "an empty display, an empty type, a bound or a pid that is no number: 2, nothing asked" \
+   "$(ol 1 'text/plain\n' "" text/plain 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 "" 1 | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1x | cut -d' ' -f1-3)|$(ol 1 'text/plain\n' wayland-77 text/plain 1 12x | cut -d' ' -f1-3)" \
+   "2 0 none|2 0 none|2 0 none|2 0 none"
+# The scenario over stand-ins: clip-scenario.sh check-tree with a cage that
+# runs its child on a display named wayland-9 (no socket is made), a wtype
+# that sleeps, probes that exit at once without drawing, and a wl-copy that
+# reads its input and takes the selection 1.5 s later -- the shape of the
+# lead's red on 3157c56, where the read-only probe drew nothing and P2's
+# consumer asked straight after the producer started. The stand-in wl-paste
+# serves the offer only while that producer lives and only once it has
+# taken the selection, and answers "No selection" otherwise, as wl-paste
+# does. A 1 MiB offer (CLIP_OFFER_MB). The second run's producer exits
+# without taking it.
+OS=$SP/os; mkdir -p "$OS/bin" "$OS/run" "$OS/tmp"
+cat >"$OS/bin/cage" <<'OSC'
+#!/bin/bash
+[[ $1 == -- ]] && shift
+WAYLAND_DISPLAY=wayland-9 "$@"
+OSC
+printf '#!/bin/bash\nexec sleep 30\n' >"$OS/bin/wtype"
+printf '#!/bin/bash\nexit 0\n' >"$OS/bin/qml"
+cat >"$OS/bin/wl-copy" <<OSW
+#!/bin/bash
+echo \$\$ >"$OS/producer.pid"
+rm -f "$OS/ready"
+cat >"$OS/offer"
+[[ -e "$OS/quit" ]] && exit 1
+sleep 1.5
+: >"$OS/ready"
+exec sleep 60
+OSW
+cat >"$OS/bin/wl-paste" <<OSP
+#!/bin/bash
+if [[ -e "$OS/ready" ]] && kill -0 "\$(cat "$OS/producer.pid" 2>/dev/null)" 2>/dev/null; then
+  case \$1 in --list-types|-l) echo text/plain ;; *) cat "$OS/offer" ;; esac
+  exit 0
+fi
+echo "No selection" >&2; exit 1
+OSP
+chmod 0755 "$OS/bin/"*
+os_run() {   # os_run <out>: one check-tree over the stand-ins
+  env -u WAYLAND_DISPLAY -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_DIR \
+    CLIP_CAGE_BIN="$OS/bin/cage" CLIP_QML_BIN="$OS/bin/qml" CLIP_OFFER_MB=1 PATH="$OS/bin:$PATH" \
+    XDG_RUNTIME_DIR="$OS/run" TMPDIR="$OS/tmp" OMARCHY_IPTV_HARNESS_DIR="$OS/h" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$SP/no-bus" \
+    timeout -k 5 60 bash "$ROOT/scripts/dev-harness/clip-scenario.sh" check-tree >"$1" 2>&1
+  printf '%s\n' "$?" >"$1.rc"
+}
+os_run "$OS/late.out"
+is "clip check-tree, the read-only probe drawing nothing and the offer served 1.5 s late: P2 waits for it and reads all 1 MiB" \
+   "$(qa_count '^FAIL P4 .*got \[not measured: no-frame\]' "$OS/late.out") $(qa_count '^   \(P2: the producer.s offer was listed on wayland-9 after a wait of [0-9]+ ms\)$' "$OS/late.out") $(qa_count '^PASS P2 a consumer on the nested display reads the whole offer \(bytes\): 1048576$' "$OS/late.out") $(qa_count '^PASS P6 ' "$OS/late.out")" \
+   "1 1 1 1"
+: >"$OS/quit"
+os_run "$OS/quit.out"
+is "and a producer that exits before it serves: P2 is red and says so, never a count of 0 bytes" \
+   "$(qa_count '^FAIL P2 .*got \[not read: the producer exited before its offer was listed\]' "$OS/quit.out") $(qa_count '^FAIL P2 .*got \[0\]' "$OS/quit.out") $(cat "$OS/quit.out.rc")" \
+   "1 0 1"
+rm -f "$OS/quit"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -4141,7 +4245,13 @@ kill "$RS_PID" 2>/dev/null; wait "$RS_PID" 2>/dev/null
 # 792 -> 793 on 2026-11-22 (F-HARNESS-122, lane-relsplit2): check.sh's floor
 # for chno-scenario's check-tree, which joined the gate that day, is the
 # scenario's own plus one. Red on ab3d287's check.sh, which has no such floor.
-EXPECTED=793
+# 793 -> 800 on 2026-11-22 (F-HARNESS-124, lane-fh124): qa_offer_listed's five
+# over a stand-in wl-paste of the suite's own, and clip-scenario.sh's
+# check-tree twice over stand-ins whose probes draw nothing and whose producer
+# serves late or never. Red on d28039d's scripts: all seven failed, the two
+# scenario runs reading P2's 0 bytes as the lead's gate did; and eight
+# one-decision mutants of the function and of the scenario's call each red.
+EXPECTED=800
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

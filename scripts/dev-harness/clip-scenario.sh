@@ -75,7 +75,8 @@
 #
 #   P1  the nested display came up and is not the caller's session
 #   P2  a consumer on that display reads the whole offer (wl-paste byte count
-#       equals the payload): the producer serves what it offers
+#       equals the payload): the producer serves what it offers. It reads
+#       once the offer is listed there, inside OFFER_WAIT_S (F-HARNESS-124)
 #   P3  the editable probe grew by at least OFFER_MB    <- reads everything;
 #                                                          the rig's control
 #   P4  the read-only probe grew by less than PROBE_BAND_MB   <- reads nothing
@@ -204,6 +205,9 @@ OFFER_MB=${CLIP_OFFER_MB:-}
 # with the helper's own peak at 32 MB.
 PROBE_BAND_MB=8
 SHELL_BAND_MB=16
+# How long P2's consumer waits for the producer's offer to be listed on the
+# nested display before it reads (F-HARNESS-124; probe()).
+OFFER_WAIT_S=10
 HELPER_BAND_MB=${HELPER_BAND_MB:-64}
 IPC_BOUND_MS=400
 MODE=${1:-}
@@ -496,7 +500,7 @@ PYRPT
 # that is gone, a vacuous 0).
 PROBE_RESULT=""
 probe() {
-  local name=$1 before i drew=0
+  local name=$1 before i drew=0 t0 rc
   PROBE_PID=""
   WAYLAND_DISPLAY=$NESTED QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 \
     QT_LOGGING_RULES='qt.scenegraph.time.renderloop.debug=true' \
@@ -523,7 +527,23 @@ probe() {
     # P2 rides on this offer, after the sampling window: wl-paste takes
     # keyboard focus for the duration of its read, which is an event the
     # probes must not see inside their window.
-    CONSUMER_BYTES=$(WAYLAND_DISPLAY=$NESTED timeout 20 wl-paste --no-newline --type text/plain 2>/dev/null | wc -c | tr -d ' ')
+    # F-HARNESS-124: and only once the offer is served. When this probe is
+    # not measured there is no window, and the consumer used to run straight
+    # after producer_start, before wl-copy had read its input and taken the
+    # selection: 0 bytes of 25 MiB in the lead's full gate on 3157c56. So it
+    # waits, bounded, for text/plain to be listed on the nested display
+    # (the arm's first offer, so nothing else can be listed), and a producer
+    # that never serves it is a P2 that says so, never a count of 0. The
+    # listing maps a surface too, so it sits here, after the window.
+    t0=${EPOCHREALTIME/[.,]/}
+    qa_offer_listed "$NESTED" text/plain "$OFFER_WAIT_S" "$PRODUCER_PID"; rc=$?
+    case $rc in
+      0)
+        echo "   (P2: the producer's offer was listed on $NESTED after a wait of $(( (${EPOCHREALTIME/[.,]/} - t0) / 1000 )) ms)"
+        CONSUMER_BYTES=$(WAYLAND_DISPLAY=$NESTED timeout 20 wl-paste --no-newline --type text/plain 2>/dev/null | wc -c | tr -d ' ') ;;
+      3) CONSUMER_BYTES="not read: the producer exited before its offer was listed" ;;
+      *) CONSUMER_BYTES="not read: no text/plain offer was listed on $NESTED within ${OFFER_WAIT_S} s" ;;
+    esac
   fi
   kill_pid "$PROBE_PID"; PROBE_PID=""
   producer_stop
