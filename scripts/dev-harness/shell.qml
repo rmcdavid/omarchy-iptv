@@ -563,6 +563,26 @@ ShellRoot {
     burstPoll.restart()
   }
   Timer { id: burstPoll; interval: 1; repeat: false; onTriggered: harness.burstTurn() }
+
+  // ---- D-REL-14, rewind-scenario.sh's cage arm: a HELD list-mode letter on
+  // a seat with no keyboard. `heldKeys` is one run of `listKeys`: the
+  // letters, and how many have reached the guide's list handler. Each goes
+  // through handleListLetter (the Model letter table, then the guide
+  // action), the function the key catcher's onTextKey calls for a letter in
+  // list mode, one per heldKeyTimer interval in this shell's own event loop:
+  // the cadence the desk arm's `wtype -d` gives the same letters. A `run.sh
+  // ipc listKey` per letter would be a process start per press, hundreds of
+  // milliseconds apart, which is not a held key.
+  property var heldKeys: null
+  function heldKeyTurn() {
+    var r = harness.heldKeys, g = guideLoader.item
+    if (!r || !g || r.sent >= r.keys.length) return
+    g.handleListLetter(r.keys.charAt(r.sent))
+    r.sent = r.sent + 1
+    harness.heldKeys = r
+    if (r.sent < r.keys.length) heldKeyTimer.restart()
+  }
+  Timer { id: heldKeyTimer; interval: 60; repeat: false; onTriggered: harness.heldKeyTurn() }
   Connections {
     target: serviceLoader.item
     ignoreUnknownSignals: true
@@ -1518,6 +1538,23 @@ ShellRoot {
       if (!g) return "no"
       g.handleListLetter(text)
       return "ok"
+    }
+    // D-REL-14: `keys` one letter at a time through the same handler,
+    // `gapMs` apart, the first at once (heldKeyTurn, above). "started", or
+    // "no" with no guide or no letters, or "busy" while a run is still
+    // sending; listKeysResult says how many reached the handler.
+    function listKeys(keys: string, gapMs: int): string {
+      if (!guideLoader.item || keys.length === 0) return "no"
+      var r = harness.heldKeys
+      if (r && r.sent < r.keys.length) return "busy"
+      harness.heldKeys = { keys: keys, sent: 0 }
+      heldKeyTimer.interval = Math.max(1, gapMs)
+      harness.heldKeyTurn()
+      return "started"
+    }
+    function listKeysResult(): string {
+      var r = harness.heldKeys
+      return JSON.stringify(r ? { n: r.keys.length, sent: r.sent } : { n: 0, sent: 0 })
     }
     function sourcesKey(text: string): string {
       var g = guideLoader.item

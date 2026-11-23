@@ -3775,6 +3775,11 @@ fh_case "logo-scenario.sh live: refused above its export and transcript" \
   "$FH_CAGE" "$D97" "$FHD-logo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/logo-scenario.sh"
 fh_case "open-scenario.sh live: refused above its export and transcript" \
   "$FH_CAGE" "$D97" "$FHD-open" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" live' fh "$ROOT/scripts/dev-harness/open-scenario.sh"
+# D-REL-14 (call (h), 2026-11-23): rewind-scenario.sh's cage arm starts cage
+# too, and asks above its EXIT trap, so a refusal starts nothing and its
+# cleanup never runs run.sh toward a harness directory it would make.
+fh_case "rewind-scenario.sh --cage: refused above its trap, its export and its transcript" \
+  "$FH_CAGE" "$D97" "$FHD-rewind" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1" --cage' fh "$ROOT/scripts/dev-harness/rewind-scenario.sh"
 fh_case "spikes/first-open/run.sh: refused before it makes its scratch tree" \
   "$FH_CAGE" "$D97" "$FHD-fo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
 FH_HD62=$(sp_path 62 h)
@@ -4363,7 +4368,11 @@ is "and what run.sh compares and hands the harness shell is what qa_decimal prin
 # 804 -> 819 on 2026-11-23 (F-HARNESS-126, the daily run): qa_decimal's ten
 # and run.sh's own parse, driven, five. Red on d0d928f's scripts, 13 of the
 # 15 (the old form's own line and --timeout 08 pass there); eight mutants red.
-EXPECTED=819
+# 819 -> 820 on 2026-11-23 (D-REL-14, call (h), lane-relsplit3-arm):
+# rewind-scenario.sh's cage arm asks qa_cage_runtime_fits above its trap,
+# its export and its transcript. Red on bd65241's scenario (`unknown option:
+# --cage`) and on a mutant without the call.
+EXPECTED=820
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

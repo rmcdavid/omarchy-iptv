@@ -42,8 +42,8 @@
 #   R12 run.sh restart-shell: the new shell recovers behindLive from the
 #       player, same player pid
 #   R13 a held `b` (20 presses, 60 ms apart, through wtype into the guide in
-#       list mode) is COALESCED: fewer helper runs than presses, and the
-#       position reflects the capped sum
+#       list mode; the cage arm's through `listKeys`) is COALESCED: fewer
+#       helper runs than presses, and the position reflects the capped sum
 #   R14 the burst does not restart the player: same pid, intent counter
 #       (playSeq and the lock record) unmoved, healthSkips 0. A CONTROL on
 #       the burst, NOT evidence for ruling D10 -- see R16 and F-RWD-18
@@ -65,21 +65,74 @@
 #   scripts/dev-harness/rewind-scenario.sh
 #   scripts/dev-harness/rewind-scenario.sh --baseline 2d7df1f
 #   scripts/dev-harness/rewind-scenario.sh --tree /tmp/tree-without-D10
+#   scripts/dev-harness/rewind-scenario.sh --cage [--baseline REF | --tree DIR]
+#
+# THE CAGE ARM (D-REL-14, the lead's call (h), 2026-11-23). `--cage` runs the
+# same checks, in the same order, against a nested headless cage this run
+# starts itself, key-scenario.sh live's way: run it under private-bus.sh
+# (CLAUDE.md, parallel 6b) with DISPLAY and HYPRLAND_INSTANCE_SIGNATURE
+# unset; it unsets both again for everything it starts, points run.sh and
+# its own processes at the nested display alone, and puts the player on
+# run.sh's software-GPU lever (F-HARNESS-45: mpv's VO probe aborts on a pixman
+# compositor, and every abort is a crash card on the owner's desktop). It
+# has its own harness directory (omarchy-iptv-rewind-cage), so a desk
+# harness is never reaped by it, and stand-ins for hyprctl and
+# omarchy-notification-send first on the shell's PATH, so nothing the shell
+# does reaches a real compositor or notification daemon. It asks no screen
+# lock: no key goes anywhere. The headless seat has no keyboard, so R13's
+# held `b` is the harness verb `listKeys`, which hands the guide's own
+# list-mode handler (handleListLetter) one letter every 60 ms in the
+# shell's event loop; what that skips is the key catcher's plumbing in
+# front of the handler, never the handler or the service's queue, and R14
+# reads the same state either way. Without `--cage` the desk arm runs its
+# checks in their order as before, with the two repairs this work found in
+# them (F-HARNESS-127, F-RWD-27) and R7's second `live` press, which only a
+# first press that leaves the readout past SHOW_S takes.
 #
 # Output: one PASS/FAIL line per assertion and a summary, and the run SCANS
 # ITS OWN STDOUT for a URL at the end (R18) rather than claiming not to print
 # one -- R6's scans cover the helper replies and the harness log, and they run
 # long before the prints this file has grown since.
 set -uo pipefail
+# The levers, read first: which tools the arm needs and which harness
+# directory it owns depend on `--cage`. Builtins only, so this sits above the
+# tool refusals below with the same empty-PATH property.
+BASELINE=""
+TREE=""
+CAGE=0
+while (($# > 0)); do
+  case $1 in
+    --baseline) BASELINE=$2; shift ;;
+    --tree) TREE=$2; shift ;;
+    --cage) CAGE=1 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
 # ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
 # logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
 # empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
 # machine cannot run it" -- and nothing else. HERE is resolved from
 # BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
 # first and an empty PATH died on `dirname: command not found` instead.
-for tool in python3 ffmpeg mpv wtype pgrep ss mktemp; do
+# The cage arm needs cage and quickshell where the desk arm needs wtype.
+if (( CAGE )); then
+  TOOLS="python3 ffmpeg mpv pgrep ss mktemp cage quickshell qs"
+else
+  TOOLS="python3 ffmpeg mpv wtype pgrep ss mktemp"
+fi
+for tool in $TOOLS; do
   command -v "$tool" >/dev/null 2>&1 || { echo "SKIP rewind-scenario: $tool is not on PATH" >&2; exit 77; }
 done
+# The caller's display, read before the cage arm drops it: the nested
+# display cage reports is refused if it names this one (cage_start).
+LIVE_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
+CALLER_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-}
+# CLAUDE.md parallel 6b: run.sh drops both for what IT starts toward a nested
+# target (harness_env), and this is the layer for what the driver starts
+# itself (its helper runs, probes, ffmpeg, the cage): nothing here inherits
+# the caller's X display or compositor IPC.
+(( CAGE )) && unset DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 
 HERE=${BASH_SOURCE[0]%/*}
 [[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
@@ -89,7 +142,15 @@ RUN="$HERE/run.sh"
 PROBE="$HERE/fixtures/rewind-probe.py"
 SWEEP="$HERE/fixtures/rewind-sweep.py"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
+# The cage arm's OWN harness directory (key-scenario.sh's reason): its
+# `run.sh reap` and `clean` must never reach a desk harness on the shared
+# default. Exported, so run.sh and the transcript use it too.
+if (( CAGE )); then
+  SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-rewind-cage}
+  export OMARCHY_IPTV_HARNESS_DIR=$SCRATCH
+else
+  SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
+fi
 FIX="$SCRATCH/fixtures/rewind"
 LOG="$SCRATCH/rewind-scenario.log"
 HLOG="$SCRATCH/harness.log"
@@ -106,10 +167,23 @@ STREAM_S=780
 STEP=10
 SHOW_S=2
 HISTORY_GLYPH=$'\xf3\xb0\x8b\x9a'   # U+F02DA, UTF-8 bytes (ASCII file, rule 8)
-BASELINE=""
-TREE=""
+# R1 and R2 judge the helper's `applied`, the player's own movement, to 0.01
+# s: the read after a precise seek finds the target frame. The cage arm's
+# player draws on llvmpipe, and there the read can come one 40 ms frame
+# later (-9.96 seen, D-REL-14), so its bound is one frame.
+APPLIED_TOL=0.01
+if (( CAGE )); then APPLIED_TOL=0.05; fi
 EXPORT_DIR=""
 WORK=""
+# The cage arm's processes, each by the pid bash handed it or the one the
+# process wrote itself (cage's child), and its nested display.
+CAGE_PID=""
+CAGE_CHILD=""
+NESTED=""
+CAGE_VERDICT=""
+# R13 in the cage arm: presses that did not reach the guide's handler,
+# counted the way qa_key counts a refused key (QA_KEY_REFUSALS).
+HELD_LOST=0
 # R16's window sizes and the slow helper's sleep. The sleep must stay under
 # the service's own controlTimeoutMs (8 s when written, 15 s since D-PLY-39,
 # Model.playerWatchdogMs("play")) or the control watchdog kills the
@@ -138,24 +212,28 @@ BUSY_MS=62000
 pass=0
 fail=0
 checks=0
+skipped=0
+SKIPPED=""
 
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
 # F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
 # get the harness's HOME as well, not only what run.sh starts. Exports only.
 qa_harness_home "$SCRATCH" || exit 2
-
-while (($# > 0)); do
-  case $1 in
-    --baseline) BASELINE=$2; shift ;;
-    --tree) TREE=$2; shift ;;
-    *) echo "unknown option: $1" >&2; exit 2 ;;
-  esac
-  shift
-done
+# F-HARNESS-104: a cage that cannot make its socket under XDG_RUNTIME_DIR
+# aborts with a core and a crash card on the owner's desktop. Asked of the
+# cage arm here, above the EXIT trap, the export and the transcript, before
+# anything starts or is made (key-scenario.sh's place for it).
+if (( CAGE )); then
+  qa_cage_runtime_fits || exit 2
+fi
 
 ok()  { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
+# skip <label> <reason>: a check this arm cannot judge, printed and counted
+# as reached (the floor below holds it) and named in the summary, never a
+# pass. The cage arm's alone (D-REL-14): the desk arm skips nothing.
+skip() { checks=$((checks + 1)); skipped=$((skipped + 1)); SKIPPED="${SKIPPED:+$SKIPPED, }${1%% *}"; printf 'SKIP %s -- %s\n' "$1" "$2"; }
 is()  { checks=$((checks + 1)); if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
 ck()  { checks=$((checks + 1)); if eval "$2"; then ok "$1"; else bad "$1${3:+ ($3)}"; fi; }
 # near <a> <b> <tol>: "0" when both are numbers within tol, "1" when not,
@@ -367,6 +445,12 @@ cleanup() {
   if [[ -n $WORK ]] && grep -q -- "$WORK" "$SCRATCH/last-start.env" 2>/dev/null; then
     rm -f "$SCRATCH/last-start.env"
   fi
+  # The cage arm's compositor goes last, after the shell and the player that
+  # were its clients, and before $WORK, which holds its child's script.
+  if [[ -n $CAGE_PID ]]; then
+    cage_stop
+    echo "== cage arm: the compositor, its child and the nested socket: $CAGE_VERDICT"
+  fi
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
   return 0
@@ -375,11 +459,68 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# ---- preflight
-qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "screen is locked, or its lock cannot be asked (qa_screen_locked)" >&2; exit 2; }
+# ---- the cage arm's compositor, as key-scenario.sh starts and stops it (the
+# headless-cage spike measured that SIGTERM to cage itself is ignored for
+# 10 s and leaves a stale socket; its child's exit is what ends it). The
+# child runs as `$WORK/cage-child`, so each signal below goes through a pidfd
+# whose process still names this run (qa_signal_named): the child's pid is
+# one it reported itself, and cage's is the `timeout` bash started, whose
+# command line names the child's script.
+cage_start() {
+  local secs=$1 i
+  rm -f "$WORK/display" "$WORK/child.pid"
+  cat >"$WORK/cage-child.sh" <<CHILD
+#!/bin/bash
+echo "\$WAYLAND_DISPLAY" >"$WORK/display"
+echo \$\$ >"$WORK/child.pid"
+exec -a "$WORK/cage-child" sleep $secs
+CHILD
+  chmod 0700 "$WORK/cage-child.sh"
+  env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+    timeout -k 5 $((secs + 10)) cage -- "$WORK/cage-child.sh" >"$WORK/cage.log" 2>&1 &
+  CAGE_PID=$!
+  for ((i = 0; i < 100; i++)); do [[ -s $WORK/display && -s $WORK/child.pid ]] && break; sleep 0.1; done
+  NESTED=$(cat "$WORK/display" 2>/dev/null)
+  CAGE_CHILD=$(cat "$WORK/child.pid" 2>/dev/null)
+  if [[ -z $NESTED || -z $CAGE_CHILD ]]; then
+    echo "SKIP rewind-scenario: cage did not bring up a nested display within 10 s ($(tr '\n' ' ' <"$WORK/cage.log" | head -c 300))" >&2
+    exit 77
+  fi
+  # The caller's own display, by name or by the session's own lock file
+  # (qa_target_nested, asked with the signature the caller had): refused.
+  if [[ $NESTED == "$LIVE_DISPLAY" || $NESTED == wayland-1 ]] \
+     || ! HYPRLAND_INSTANCE_SIGNATURE=$CALLER_SIGNATURE qa_target_nested "$NESTED" "$REAL_RUNTIME"; then
+    echo "REFUSING: cage's child reports display '$NESTED', which is the live session; nothing will be driven" >&2
+    exit 2
+  fi
+}
+cage_stop() {
+  local i left=""
+  [[ -n $CAGE_CHILD ]] && qa_signal_named TERM "$WORK/cage-child" "$CAGE_CHILD"
+  for ((i = 0; i < 50; i++)); do kill -0 "$CAGE_PID" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$CAGE_PID" 2>/dev/null; then
+    left="$left cage($CAGE_PID)"
+    qa_signal_named KILL "$WORK/cage-child" "$CAGE_PID"
+  fi
+  wait "$CAGE_PID" 2>/dev/null
+  CAGE_PID=""; CAGE_CHILD=""
+  for ((i = 0; i < 20; i++)); do [[ -e $REAL_RUNTIME/$NESTED ]] || break; sleep 0.1; done
+  [[ -e $REAL_RUNTIME/$NESTED ]] && left="$left socket($NESTED)"
+  if [[ -z $left ]]; then CAGE_VERDICT=gone; else CAGE_VERDICT="left:$left"; fi
+}
+
+# ---- preflight. The desk arm asks the desk's lock, since R13's keys go to
+# the desk; the cage arm's target is a nested display it has not started
+# yet, where qa_screen_locked asks hyprlock alone (qa_target_nested), and it
+# sends no key anywhere, so it asks nothing. wtype is the desk arm's alone.
+if (( ! CAGE )); then
+  qa_unlocked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || { echo "screen is locked, or its lock cannot be asked (qa_screen_locked)" >&2; exit 2; }
+fi
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required for the local stream" >&2; exit 2; }
 command -v mpv >/dev/null || { echo "mpv is required" >&2; exit 2; }
-command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }
+if (( ! CAGE )); then
+  command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }
+fi
 grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use" >&2; exit 2; }
 qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 
@@ -426,6 +567,27 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-rewind-XXXXXX")
 # the one scenario that already had the habit of writing its output down,
 # which is why the habit is now a function every scenario calls.
 echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
+
+# ---- the cage arm: the nested compositor, then everything pointed at it.
+# 1200 s bounds it from above (cleanup ends it): a green run takes about
+# five and a half minutes and the stream itself ends at STREAM_S. From here on every
+# run.sh call and every process this driver starts sees the nested display
+# alone, and OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 is run.sh's lever, which
+# the scenarios' `h()` set the same way: --gpu-sw=yes, --ao=null and
+# --hwdec=no behind the shrunken cache below (harness_env, F-HARNESS-45 and
+# F-HARNESS-102). The stand-ins are key-scenario.sh's: the shell resolves
+# hyprctl and omarchy-notification-send through PATH, which harness_env puts
+# $SCRATCH/bin in front of, so a card the shell posts lands in a log here.
+if (( CAGE )); then
+  cage_start 1200
+  export WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1
+  mkdir -p "$SCRATCH/bin" && ln -sfn "$HERE/stub-hyprctl.py" "$SCRATCH/bin/hyprctl"
+  NOTIFY_LOG="$SCRATCH/notify.log"
+  : >"$NOTIFY_LOG"; chmod 0600 "$NOTIFY_LOG"
+  printf '#!/bin/bash\nprintf "%%s\\n" "$*" >>%q\n' "$NOTIFY_LOG" >"$SCRATCH/bin/omarchy-notification-send"
+  chmod 0700 "$SCRATCH/bin/omarchy-notification-send"
+  echo "== cage arm: nested display $NESTED (cage pid $CAGE_PID), the player on run.sh's software-GPU lever"
+fi
 
 # ---- the local live stream: a loopback server and two sliding-window HLS
 # outputs. The server is a threading one (a segment fetch must not block
@@ -476,6 +638,17 @@ sed -e "s|__LIVE_A__|http://$HOST/a/live.m3u8|" -e "s|__LIVE_B__|http://$HOST/b/
 : >"$LOG"
 : >"$HLOG"
 export OMARCHY_IPTV_MPV_ARGS="--demuxer-max-back-bytes=2MiB --demuxer-max-bytes=4MiB"
+# The cage arm's player draws on llvmpipe (the software-GPU lever), and with
+# mpv's default scalers it took 180-350% CPU of a two-core machine, beside
+# the stream's two encoders and the helper (whose seek took 574-599 ms,
+# R15). So it draws cheaply: mpv's own `fast` profile, a user setting the
+# pin block leaves alone, and one llvmpipe thread, which reaches mpv through
+# the shell's environment; it then takes about 80%. Neither touches the
+# cache, the seek or a reply.
+if (( CAGE )); then
+  OMARCHY_IPTV_MPV_ARGS="$OMARCHY_IPTV_MPV_ARGS --profile=fast"
+  export LP_NUM_THREADS=1
+fi
 "$RUN" --detach --timeout 0 --playlist "$FIX/rewind.m3u" >>"$LOG" 2>&1
 wait_log 'service loaded' 20 || { bad "the harness did not start (see $LOG)"; exit 1; }
 until_eq 2 20 svc "d['channels']" || { bad "the fixture playlist did not load"; exit 1; }
@@ -487,8 +660,15 @@ PID1=$(player_pid)
 until_eq true 10 svc "d['playing']" || true
 w=$(probe wait "$SOCK" 25)
 ck "the player is playing A (time-pos advancing; positive control)" '[[ "$(rf "d[\"ok\"]" "$w")" == true ]]'
-cmd=$(qa_cmdline "$PID1")
-ck "the shrunken cache reached the player's argv (control for R4)" '[[ "$cmd" == *"--demuxer-max-back-bytes=2MiB"* && "$cmd" == *"--demuxer-max-bytes=4MiB"* ]]'
+# F-HARNESS-127: read off the PLAYER, never its argv. Since D-SINK-47
+# (2026-10-31) the mpvArgs tokens reach mpv in a private --include file and
+# are on no command line, so the argv read this was went red on every tree
+# from then on; mpv reports the two options' values in bytes.
+caps=$(probe get "$SOCK" demuxer-max-back-bytes demuxer-max-bytes)
+cap_back=$(rf 'd["demuxer-max-back-bytes"]' "$caps")
+cap_fwd=$(rf 'd["demuxer-max-bytes"]' "$caps")
+ck "the shrunken cache reached the player (demuxer-max-back-bytes $cap_back, demuxer-max-bytes $cap_fwd; control for R4)" \
+  '[[ $(near "$cap_back" 2097152 0) == 0 && $(near "$cap_fwd" 4194304 0) == 0 ]]'
 
 echo "== R0 the stream control"
 m=$(probe measure "$SOCK" 12 2)
@@ -504,7 +684,7 @@ p1=$(pos)
 is "R1 the reply is a seek reply" "$(rf 'd["kind"]' "$r")" "seek"
 is "R1 ok" "$(rf 'd["ok"]' "$r")" "true"
 is "R1 mode by" "$(rf 'd["mode"]' "$r")" "by"
-ck "R1 applied -10 ($(rf 'd["applied"]' "$r"))" '[[ $(near "$(rf "d[\"applied\"]" "$r")" -10 0.01) == 0 ]]'
+ck "R1 applied -10 ($(rf 'd["applied"]' "$r"))" '[[ $(near "$(rf "d[\"applied\"]" "$r")" -10 "$APPLIED_TOL") == 0 ]]'
 is "R1 not refused" "$(rf 'd["refused"]' "$r")" "false"
 ck "R1 time-pos moved back by 10 on the socket (before $p0, after $p1)" '[[ $(near "$(python3 -c "print(float(\"$p1\")-float(\"$p0\"))" 2>/dev/null || echo x)" -10 2.5) == 0 ]]'
 ck "R1 the reply's position agrees with the socket" '[[ $(near "$(rf "d[\"rewind\"][\"position\"]" "$r")" "$p1" 2.5) == 0 ]]'
@@ -517,7 +697,7 @@ p0=$(pos)
 r=$(seek --by 10)
 p1=$(pos)
 is "R2 ok" "$(rf 'd["ok"]' "$r")" "true"
-ck "R2 applied +10" '[[ $(near "$(rf "d[\"applied\"]" "$r")" 10 0.01) == 0 ]]'
+ck "R2 applied +10 ($(rf 'd["applied"]' "$r"))" '[[ $(near "$(rf "d[\"applied\"]" "$r")" 10 "$APPLIED_TOL") == 0 ]]'
 ck "R2 time-pos moved forward by 10 on the socket (before $p0, after $p1)" '[[ $(near "$(python3 -c "print(float(\"$p1\")-float(\"$p0\"))" 2>/dev/null || echo x)" 10 2.5) == 0 ]]'
 ck "R2 the reply reports ~10 s behind live" '[[ $(near "$(rf "d[\"rewind\"][\"behindLive\"]" "$r")" 10 2.5) == 0 ]]'
 
@@ -578,7 +758,19 @@ else bad "R6 harness log: leak or vacuous (status $?)"; fi
 echo "== R7 the service readout through the harness and the plugin verbs"
 ipc live >/dev/null 2>&1
 until_history 24 40 || true
-until_rw behindLive 0 "$SHOW_S" 6 || true
+# Ruling D8: `live` lands as near the edge as the CACHE reaches. R4 and R5
+# leave the player at the floor, about 30 s behind, where the 4 MiB forward
+# cache is full and the demuxer stops fetching, so the cache's end can sit
+# seconds short of the stream's when the press lands, and the readout then
+# says, truly, that the player is that far behind: 2.5 to 3.4 s in each of
+# five runs of the cage arm (D-REL-14), at 80% of a core or at 300%. A second
+# press, once the demuxer has caught up, lands where the first was aimed;
+# R7 is about `back`, not this.
+if ! until_rw behindLive 0 "$SHOW_S" 6; then
+  printf '   R7 the first live left the readout at %s, past %s s; pressing live again\n' "$(rw behindLive)" "$SHOW_S"
+  ipc live >/dev/null 2>&1
+  until_rw behindLive 0 "$SHOW_S" 6 || true
+fi
 is "R7 the harness verb back answers" "$(rf 'd["ok"]' "$(ipc back 10)")" "true"
 until_rw behindLive 8 13 6 || true
 ck "R7 service rewind.behindLive ~10 ($(rw behindLive))" '[[ $(near "$(rw behindLive)" 10 2.5) == 0 ]]'
@@ -664,8 +856,17 @@ ck "R10 the PLAYER's own reading never goes backwards while paused ($r0 -> $r1)"
 sleep 12
 r2=$(stored_of "$(ipc state)")
 printf '   R10 stored after a further 12 s: %s\n' "$r2"
+# F-RWD-27. HOW MUCH it rises is the tick's phase, not a promise: r2 is the
+# reading at the last reply before it was read, r0 the one at the last
+# reply before s0, so the rise is the time between two replies -- anywhere
+# from about 5 to 19 s over this window, and the 15 +/- 6 band this was
+# went red at 8.5 (D-REL-14's cage arm, rewind-20261123-074825). What the
+# window guarantees is a reply AFTER s1: the 12 s sleep is longer than the
+# 10 s tick, and that reply sits at least the 3 s pair above past r0's. So
+# it rises by 2 or more if the replies keep arriving and 0 if they stop,
+# and 21, the band's old top, still catches a reading counting double.
 ck "R10 and over a window that contains a health tick it rises, so the replies keep arriving ($r0 -> $r2)" \
-  '[[ $(near "$(fdelta "$r0" "$r2")" 15 6) == 0 ]]'
+  '[[ $(ge "$(fdelta "$r0" "$r2")" 2) == 0 && $(ge 21 "$(fdelta "$r0" "$r2")") == 0 ]]'
 ck "R10 playbackStateText says paused ($(snap playbackStateText))" '[[ "$(snap playbackStateText)" == paused* && "$(snap playbackStateText)" == *"behind live" ]]'
 is "R10 resumed" "$(pause_toggle)" "playing"
 w=$(probe wait "$SOCK" 8)
@@ -731,10 +932,26 @@ seq0=$(player_seq); lock0=$(lock_seq); pid0=$(player_pid); skips0=$(svc "d['heal
 python3 "$SWEEP" 9 "$HELPER" "$WORK/sweep.json" >>"$WORK/sweep.err" 2>&1 &
 SWEEP_PID=$!
 sleep 0.3
-qa_key "$RUN" -d 60 -- bbbbbbbbbbbbbbbbbbbb
+if (( CAGE )); then
+  # The cage's seat has no keyboard: the same twenty letters, 60 ms apart,
+  # through the guide's list handler in the shell's own loop (listKeys,
+  # scripts/dev-harness/shell.qml). How many arrived is read once the sweep
+  # is over, below; one that did not is counted as qa_key counts a refusal.
+  held=$(ipc listKeys bbbbbbbbbbbbbbbbbbbb 60)
+else
+  qa_key "$RUN" -d 60 -- bbbbbbbbbbbbbbbbbbbb
+fi
 PRESSES=20
 for ((i = 0; i < 120; i++)); do kill -0 "$SWEEP_PID" 2>/dev/null || break; sleep 0.1; done
 kill "$SWEEP_PID" 2>/dev/null; wait "$SWEEP_PID" 2>/dev/null
+if (( CAGE )); then
+  sent=$(rf 'd["sent"]' "$(ipc listKeysResult)")
+  printf '   R13 held key through listKeys: %s, %s of %s reached the list handler\n' "${held:-no answer}" "$sent" "$PRESSES"
+  if [[ $held != started || $sent != "$PRESSES" ]]; then
+    HELD_LOST=$((HELD_LOST + 1))
+    printf 'FAIL listKeys answered %s and %s of %s presses reached the guide\n' "${held:-nothing}" "$sent" "$PRESSES"
+  fi
+fi
 runs=$(rf 'd["runs"]' "$(cat "$WORK/sweep.json" 2>/dev/null)")
 lifetimes=$(rf 'd["lifetimesMs"]' "$(cat "$WORK/sweep.json" 2>/dev/null)")
 ck "R13 the helper ran for the presses at all ($runs runs; positive control)" '[[ $(ge "$runs" 1) == 0 ]]'
@@ -769,7 +986,15 @@ for i in 1 2 3 4 5; do
   times="$times $(( (e - s) / 1000000 ))"
 done
 med=$(tr ' ' '\n' <<<"$times" | sed '/^$/d' | sort -n | sed -n 3p)
-ck "R15 player seek spawn-to-reply median $med ms within 300 (runs:$times)" '[[ -n "$med" && $(ge 300 "$med") == 0 ]]'
+if (( CAGE )); then
+  # The budget is the desk's. The helper waits up to SEEK_EVENT_BOUND_S
+  # (250 ms) for the player to land a seek, and a player drawing on llvmpipe
+  # lands it later: 402 to 599 ms medians in the cage (D-REL-14), so the
+  # number measures the cage. It is printed, and judged on the desk.
+  skip "R15 player seek spawn-to-reply median $med ms (runs:$times)" "the 300 ms budget is the desk's: the cage's player draws on llvmpipe"
+else
+  ck "R15 player seek spawn-to-reply median $med ms within 300 (runs:$times)" '[[ -n "$med" && $(ge 300 "$med") == 0 ]]'
+fi
 ck "R15 and the replies were real (ok true on the last)" '[[ "$(rf "d[\"ok\"]" "$(tail -1 "$WORK/replies.jsonl")")" == true ]]'
 
 echo "== R16 ruling D10: a seek run is not busy for the health tick (F-RWD-18)"
@@ -1025,15 +1250,28 @@ else bad "R18 the harness log after R16: leak or vacuous capture (status $?)"; f
 # two, plus the transcript barrier R18 gained with F-M3-1 half (b) -- and
 # this floor is read off "assertions executed", never off "passed".
 # (78 before R16 and R17; the rest are F-RWD-18's and the review's.)
-# F-HARNESS-5. The guard's refusals are counted, not only printed.
-ck "no keystroke was refused by the focus guard" '(( QA_KEY_REFUSALS == 0 ))' "$QA_KEY_REFUSALS refusal(s), each a FAIL line above"
+# F-HARNESS-5. The guard's refusals are counted, not only printed. The cage
+# arm sends no key; its presses go through listKeys, and one that did not
+# reach the guide's handler is counted in the same place (R13).
+if (( CAGE )); then
+  ck "no press was lost on its way to the guide's list handler" '(( HELD_LOST == 0 ))' "$HELD_LOST lost, a FAIL line above"
+else
+  ck "no keystroke was refused by the focus guard" '(( QA_KEY_REFUSALS == 0 ))' "$QA_KEY_REFUSALS refusal(s), each a FAIL line above"
+fi
 # 109 -> 110: the F-HARNESS-5 refusal count, and that alone. F-RWD-26 replaced
 # one `ck` with one `ck`, so it moves this by nothing -- the first version of
 # this line said 111 for "the refusal count and F-RWD-26's replacement pair",
 # counted a one-for-one swap as an addition, and the guard above caught it on
 # the first run (got 110, want 111). Which is what the guard is for.
+# The cage arm (D-REL-14) executes the same 110: R13 differs in its press
+# path, not its checks, and the key check above is one of two, one per arm,
+# indented, so the upper-bound grep reads one fewer than it used to.
 EXPECTED_CHECKS=110
 is "the scenario ran every check it has" "$checks" "$EXPECTED_CHECKS"
 
-printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"
+if (( skipped )); then
+  printf '\n== rewind-scenario: %d passed, %d failed, %d skipped (%s), %d assertions executed\n' "$pass" "$fail" "$skipped" "$SKIPPED" "$checks"
+else
+  printf '\n== rewind-scenario: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"
+fi
 (( fail == 0 )) || exit 1
