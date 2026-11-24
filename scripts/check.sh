@@ -794,7 +794,24 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # and no node check had called it), red on two one-decision mutants of it
 # in the code-behind and green on the parent (QA-RESULTS "D-REL-14: C4, the
 # player, pip and sources move"); the suite runs 4070.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4070}
+# 2026-11-24, lane-drel15 (D-REL-15): 4070 -> 4071 -- persistActiveLater,
+# the root function adoptActive now defers its persistActive(key) through,
+# keeps two calls in one turn as two calls, both keys in order; red on
+# baea04a (no such function) and on a mutant that hands Qt.callLater
+# root.persistActive (QA-RESULTS "D-REL-15: no code-behind closure outlives
+# its call"); the suite runs 4071.
+# 2026-11-24, lane-settle-drel15 (F-HARNESS-130): 4071 -> 4072 -- the
+# harness's Qt.callLater made Qt's (a folded call at the last call's place
+# with the last arguments; a call queued while a batch runs goes to the next
+# batch), held by a check of the double, red on the old double (C 1, B; A,
+# B1); the suite runs 4072, and 4072 without the own-write echo.
+# 2026-11-24, lane-settle-drel15 (D-REL-15): 4072 -> 4073 -- adoptActive's
+# own deferral and order, two migrating adoptions in one turn through its
+# forwarder, red on five one-decision mutants of the fix, two of which
+# (adoptActive persisting at once, and handing Qt.callLater
+# root.persistActive) no other check saw (QA-RESULTS "D-REL-15 ... Round
+# two"); the suite runs 4073, and 4073 without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1404,7 +1421,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4070}
 # the suite counts on the tree being cut, as the release step asks; the floor
 # had trailed the suite since the rounds after 2026-11-18; the suite counts
 # 2991.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2991}
+# 2026-11-24, lane-settle2-drel15 (D-REL-15's settle, the lead's call (dd)):
+# 2991 -> 3030 -- re-levelled to what the suite counts on the tree: 3016 on
+# baea04a (the floor had trailed the suite since the cut), D-REL-15's 12
+# Closures tests in round one, and round two's two (a class handed to map
+# stays refused; an async function is placed at its `async`), each red on
+# its one-decision mutant of the guard (QA-RESULTS "D-REL-15 ... Round
+# two"); the suite counts 3030. 3030 -> 3033: round three's three guard
+# tests (judge() refuses a closure in each code-behind; a static method's
+# two refusals; a header's exemption is its line's), each red on its
+# mutant (QA-RESULTS "Round three"); the suite counts 3033.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3033}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1565,8 +1592,13 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # and sources' other 44 after C3's in Service-rewind.js and Service-sources.js;
 # the judge reads the same 2,267 sites across the five files (158 forwarders,
 # 32 of 32 cases), so both floors stand.
+# D-REL-15 (2026-11-24, lane-drel15): the judge refuses a function a
+# code-behind makes but the callback of a synchronous Array method and one a
+# CLOSURE-EXCEPTION comment excuses (kind `closure`), and gains two cases, a
+# refusal and a clean layout: 32 -> 34 cases. persistActiveLater adds a root
+# function and one site (2,268), so the site floor stands.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
-SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
+SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-34}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -2071,10 +2103,14 @@ step "service split guard (scripts/split-service.py --check)"
 # declared twice at the root, any script (*.js, *.mjs) beside Service.qml
 # that it does not import as a code-behind, the model's own excepted,
 # a qualifier named outside its forwarders, `this` or `arguments` in a
-# code-behind, a code-behind naming its own function unqualified, and a
-# root.N that is no member of the root -- the member check qmllint stopped
-# making once a body moved, and only ever warned about. Then the script's
-# own cases, so the judge is seen judging on a tree with nothing split.
+# code-behind, a code-behind naming its own function unqualified, a function
+# a code-behind makes that is no synchronous Array method's callback and
+# carries no CLOSURE-EXCEPTION (D-REL-15: one can take the QML engine down,
+# a SIGSEGV, measured, when anything calls it after its Service is deleted),
+# and a root.N that is no member of the root -- the member check qmllint
+# stopped making once a body moved, and only ever warned about. Then the
+# script's own cases, so the judge is seen judging on a tree with nothing
+# split.
 split_service_log=$CHECK_TMP/split-service.log
 if python3 "$ROOT/scripts/split-service.py" --check --root "$ROOT" --qml-dir "$QML_IMPORTS" >"$split_service_log" 2>&1; then
   split_sites=$(grep -oE '[0-9]+ root member site\(s\) judged' "$split_service_log" | head -1 | grep -oE '^[0-9]+')

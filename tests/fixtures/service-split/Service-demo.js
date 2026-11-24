@@ -20,6 +20,7 @@
   // ---- a banner the next function carries, directly attached
   function pattern(text) {
     var re = /[}{]\/+/g
+    // CLOSURE-EXCEPTION: replace's callback, called before replace returns (D-REL-15)
     function count(m) { return "{" + m.length + "}" }
     return text.replace(re, count)
   }

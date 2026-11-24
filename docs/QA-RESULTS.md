@@ -26571,7 +26571,12 @@ The lead's calls at the merge, each under the owner's standing authority of
   hands to Qt.callLater from Service-sources.js is a SIGSEGV in the QML
   engine when the Service is deleted before it runs, where the root's copy
   logged a TypeError (qml probes under gdb, the crash journal unchanged at
-  89). C4 adds no such closure. It is fixed next, before C5.
+  89). C4 adds no such closure. It is fixed next, before C5. [2026-11-24,
+  lane-settle2-drel15, D-REL-15's call (aa): the SIGSEGV was measured on a
+  replica of that closure; the shipped text driven beside a stand-in read a
+  ReferenceError, and whether a code-behind closure crashes turns on what
+  its maker looked up first -- the section "D-REL-15: no code-behind
+  closure outlives its call" below.]
 - F-PERF-3 stays as lane-relsplit4-move filed it, P4.
 - check.sh's F-GATE-29 comment gains C4's figures: Service.qml as it ships
   reads 9 + 134 and its inline view still 46 + 387.
@@ -26583,3 +26588,683 @@ before the run, and every later pip run on that rig shows
 tree-id.txt (G4 and G5, which read the v0.13.6 helper, pass on both
 trees). One qa-lib-test run on the moved tree used the session's runtime
 directory and left nothing there; every later run used a private one.
+
+## D-REL-15: no code-behind closure outlives its call (lane-drel15, 2026-11-24)
+
+Calls (r) to (w) are the lead's calls under the owner's standing authority
+of 2026-11-09. This lane worked on branch drel15, from baea04a (dev,
+gate-green, D-REL-14's C4 merged), and held no display: every qml and
+qmltestrunner it started, or that a test it ran started, ran under gdb
+(`-batch`, debuginfod off, `handle all nopass`, `run`, `kill`), offscreen,
+with decoy HOME, XDG, runtime and QML disk-cache folders and no display
+variables. Its commits:
+- e1e376e, the fix (call r) and its node check;
+- 2e249e8, the guard and its tests (call s), with call (t)'s exception;
+- 8a5490d, the spike (call u);
+- d6e8fd3, the fix's two comments narrowed to what was measured;
+- this record.
+
+Nothing is released, pushed or merged, and nothing moved `main` or a tag.
+The crash journal read 89 at the lane's start, after every qml run and at
+its end.
+
+**The base.** baea04a, re-measured by this lane: node 4,070 checks, 0
+failures; python 3,016 by discovery; split-service --check 5 files, 4
+code-behinds, 46 root functions, 158 forwarders, 2,267 sites, 32 of 32
+cases; the spec (qmltestrunner under gdb) 112 passed, 0 failed, and qa-lib-test
+837 passed, 0 failed with a private XDG_RUNTIME_DIR, both run later in the
+lane on an export of baea04a made a repository of its own in scratch (the
+same tree, so the same counts);
+F-GATE-29's door, `check.sh --qmllint-view Service.qml`, 0 errors, 46
+warnings + 387 on Model members.
+
+**Call (r), measured before the fix.** Two probe shapes, as the scope
+recheck's: a Service with a classic-JS code-behind, and the same with
+`pragma ComponentBehavior: Bound` and an ES-module import. The driver
+creates the Service, asks its `destroy()` (deferred, so the calls still
+reach a live object), makes two calls with keys k1 and k2, and quits about
+400 ms later; "kept" never asks it.
+
+| shape | deleted, both forms | kept, both forms |
+|---|---|---|
+| the closure made in the code-behind | SIGSEGV in libQt6Qml | PERSIST k1, PERSIST k2 |
+| the closure made in a root function | TypeError x2 | PERSIST k1, PERSIST k2 |
+| a code-behind calling that root function (the fix) | TypeError x2 | PERSIST k1, PERSIST k2 |
+| `root.ping` handed to Qt.callLater from the code-behind | nothing ran | PING once (folded) |
+
+The TypeError is `Cannot call method 'persistActive' of null (exception
+occurred during delayed function evaluation)`. Asked the other way round,
+the calls first and `destroy()` after them in the same turn (probe-after,
+three shapes, one run each in both forms), the old and the new shape ran
+both calls before the deletion and `root.ping`'s two calls folded into one
+PING; that the call queued first runs first is read from the order of the
+output, not isolated. So the root-built shape holds, and the fix went
+ahead.
+
+**The fix (e1e376e).** adoptActive, in Service-sources.js, calls
+`root.persistActiveLater(key)`; persistActiveLater is a new root function
+written inline in Service.qml after adoptActive's forwarder, with a comment
+saying why it lives there, and does
+`Qt.callLater(function() { root.persistActive(key) })`. Each closure is its
+own call, so two adoptions in one turn persist both keys in order, as on
+the root before C3. The shape the D-REL-15 row proposed, a root-bound
+function with the key in a root property, would have folded them: the
+spike's shape fold measures that two `Qt.callLater(root.persistActive,
+key)` in one turn are one call, with the LAST key. The row is corrected.
+
+One node check, through Service.qml's own function on the harness: two
+persistActiveLater calls in one turn persist nothing at once, then k1 and
+k2, in order.
+
+| tree | the new check | the suite |
+|---|---|---|
+| baea04a with the new check | red: `threw: h.root.persistActiveLater is not a function` | 4,071, 1 failure |
+| the fix, persistActiveLater handing callLater `root.persistActive, key` | red: got `[[], ["k1"]]` | 4,071, 1 failure |
+| the fix | green | 4,071, 0 failures |
+| the fix without adoptActive's call to persistActiveLater, run before the new check existed | - | 4,070 checks, 110 failures |
+
+The last row is the lead's node mutant: without the call, 110 named checks
+are red -- R22a 22, R21e 20, D-SRC-64 16, R29d 12, R27d 12, R28b 8, round
+8's 8, F1 8, R13 4 -- so the suite reads THAT adoptActive persists, not
+when, and the new check holds persistActiveLater's own deferral and order,
+not adoptActive's [corrected in round two: adoptActive persisting at once,
+or handing Qt.callLater root.persistActive, left all 4,071 green
+(lane-recheck-drel15-semantics), and a check of adoptActive's own deferral
+and order is round two's call (x), below]. The fold mutant read k1 in node
+where Qt reads k2 (the double kept the first arguments of a folded call,
+F-HARNESS-130, filed below; since round two's 04fa5e4 it reads k2); it is
+red either way. NODE_CHECKS_MIN 4,070 -> 4,071.
+
+**The guard (2e249e8).** scripts/split-service.py --check judges every
+code-behind with `closure_problems` (kind `closure`): every function the
+file makes inside its functions -- a function expression or nested
+declaration (generators and `async` included), an arrow, an object
+literal's method (`get`, `set`, `async`, `static`, `*` and computed names
+included), a class -- unless it is the immediate callback argument of a
+synchronous Array method (filter, map, forEach, some, every, find,
+findIndex, reduce, reduceRight, sort, flatMap; `.` or `?.` before the name;
+never an `async` callback), or a `// CLOSURE-EXCEPTION: <reason>` with
+text after the colon sits on the line it starts on or in the unbroken run
+of comment-only lines directly above that line. A `//` inside a string, a
+template or a regular expression is no comment, and a comment-only line
+inside a multi-line template is not one either. A file's own headers at the
+root's indent (column 3) are what forwarders name and are not judged. The
+message names the file, the line, the column and D-REL-15, and says where
+such a function belongs (a root function of Service.qml, as
+persistActiveLater is).
+
+Red first, the guard over baea04a's tree (`--check --root <export>
+--no-self-test`):
+```
+split-service: closure: Service-sources.js:423:20: a function expression or declaration made in a code-behind (D-REL-15): ...
+split-service: closure: Service-sources.js:450:30: a function expression or declaration made in a code-behind (D-REL-15): ...
+```
+adoptActive's line and startCacheLayout's onDone; persistFailed's
+`.filter(function (j) ...)` reads. On the fix alone, 453:30 (onDone) only;
+on 2e249e8, clean: 5 files, 4 code-behinds, 47 root functions, 158
+forwarders, 2,268 sites, 34 of 34 cases.
+
+**--cut.** cut_texts builds the files a cut writes and runs judge() over
+them before anything is written, raising the first problem as "the cut is
+refused by --check"; judge() now runs the closure rule, so a cut that
+would move a closure into a code-behind is refused and writes nothing.
+Held by a test: cutting persistActiveLater out of this tree's one-file view
+is refused as `closure`, and the repository is unchanged.
+
+**Its tests.** tests/test_split_service.py gains 12 tests (class Closures)
+and one refused cut, and the self-test two cases (a callLater closure,
+refused; a filter and a map callback, an excused function, a function in a
+string and in a comment, clean), 32 -> 34 cases, SERVICE_SPLIT_CASES_MIN
+with it. The Closures tests call `closure_problems`, the shipping judge,
+over small texts: 23 refused shapes, the eleven methods each with a
+function, an arrow, an optional-call arrow and a multi-line function
+allowed, 19 shapes that make no function (statements' blocks, comparisons,
+`root.str` connected, `Qt.callLater(root.persistActive)`, `x.function`,
+`{ class: 1 }`, a string, a template, a regular expression, block and line
+comments), a refused function inside an allowed callback (on its own line
+and on the callback's), a header line holding a second function, the four
+excuse forms that excuse and the eight that do not (no reason, spaces
+only, a blank line between, a code line's trailing comment, the marker in a
+string, a block comment, the marker inside a template, another guard's
+marker), a text the tokenizer cannot read (refused as `scan`), this tree's
+four code-behinds (clean), and this tree with the fix undone (refused at
+adoptActive and startCacheLayout, named by the readers' spans). The
+readers' fixture holds a nested `function count(m)` handed to
+String.replace, which the rule refuses; it carries a CLOSURE-EXCEPTION in
+Service-demo.js and inline.txt alike, so every reader's round trip stays
+byte for byte.
+
+Rule 11, the test module over baea04a's split-service.py and over nineteen
+one-decision mutants of the rule, each applied to a copy of the tree and
+the module run whole, twice (before 2e249e8 was committed and on the tip),
+the same counts both times:
+
+| mutant | red (failures, subtests counted) |
+|---|---|
+| baea04a's script | 16 tests (every Closures test, test_every_case, the self-test, the gate command, the refused cut) |
+| judge() does not run the rule | 4 (the closure case, the self-test, the gate command, the refused cut) |
+| no synchronous callback is allowed | 51, the tree's own filter among them |
+| any `.name(` counts as synchronous | 23 (`.then`, `.map(x, f)`, `Array.from`, the header line, the tree undone ...) |
+| an `async` callback is allowed | 2 |
+| the headers are not exempt | 130 |
+| a header line exempts its whole line | 1 (the header line holding a second function) |
+| arrows are not read | 5 |
+| an arrow's parameter list is not walked back | 11 |
+| methods are not read | 5 |
+| a method needs no `{` or `,` before it | 130 (every header reads as one) |
+| statement words do not stop a method | 11 |
+| classes are not read | 1 |
+| `x.function` and `{ class: 1 }` read as the keyword | 3 |
+| no excuse on the function's own line | 1 |
+| no excuse in the run above | 13 (the readers' fixture among them) |
+| the reason is optional | 2 |
+| a `//` inside a string is a comment | 2 |
+| a comment-only line inside a template counts | 1 |
+| an unreadable text is clean | 1 |
+
+Two decisions were taken for equivalent mutants and left without a test:
+that `=` and `>` are adjacent (no valid JavaScript has them apart and
+consecutive) and that an `async` function's start moves to its `async`
+(the verdict is the same from either token; only the column differs).
+[Corrected in round two: the column is the refusal's output, so the
+`async` start is tested now, and the guard recheck found seven more
+decisions with no test, each tested now; three equivalent mutants remain,
+the `=>` adjacency among them -- round two's call (z), below. Of the 52
+then written: round three, below, wrote 31 more and tested the nine
+decisions they found untested, and six equivalent mutants of 83 remain.]
+
+**Call (t): startCacheLayout's onDone.** It is held only in
+`root.cacheQueue` and `root.cacheJob` (root properties, read by no other
+file) and called only by runNextCacheJob (its drop branch) and
+handleCacheExit, synchronously, inside a call into the Service: cacheProc's
+exit through its Connections, the state init's exit, and the root
+functions that queue a job. It is never handed to Qt.callLater or a signal.
+The spike's shape stored measures that structure -- a code-behind closure
+stored on the root and called by a root function from a child Timer of the
+root -- and once the Service is gone nothing calls it, with no crash. Its
+shape held: called directly by an object outside the Service after the
+deletion, the same closure reads `ReferenceError: root is not defined`,
+not a crash. [Corrected in round two: this said "what crashes is the
+engine calling it later (Qt.callLater, a signal)". held's maker looks up
+the root before making the closure; the same direct call on a closure
+whose maker looks nothing up first is a SIGSEGV (shape heldbare), so a
+direct call crashes too, and what decides is what the maker looked up
+first. What makes onDone safe is that nothing outside the Service holds
+it.] Quickshell's Process does not load in plain qml, so whether
+cacheProc's teardown can deliver an exit to its Connections while the
+Service is being destroyed is read, not measured; such a handler would
+reach root.handleCacheExit, a root function, first. So onDone carries a
+CLOSURE-EXCEPTION, and stays; since round two's 6caf9b0 it reads that only
+root.cacheQueue and root.cacheJob hold it, and they die with the Service.
+
+**Call (u): the spike (8a5490d).**
+scripts/dev-harness/spikes/codebehind-calllater/: Plain.qml and Bound.qml
+(the two forms), Service-probe.js (the code-behind), one d-*.qml driver per
+shape, form and case, gdbrun.sh (the one way it starts qml: under gdb, and
+it refuses without gdb), run.sh (the shapes, one verdict line per shape)
+and shipped.sh with standin.py (the shipped text). Both scripts read the
+crash journal before and after every run and stop if it moves.
+RESULT-2026-11-24.txt holds both runs:
+
+| shape | deleted (both forms) | kept (both forms) |
+|---|---|---|
+| old: a closure made in the code-behind, to Qt.callLater | SIGSEGV | k1, k2 |
+| oldread: the same after its function read the root | ReferenceError x2 | k1, k2 |
+| root: made in a root function | TypeError x2 | k1, k2 |
+| new: a code-behind calling that root function | TypeError x2 | k1, k2 |
+| method: `root.ping` from the code-behind | nothing ran | PING once |
+| fold: `Qt.callLater(root.persistActive, key)` twice | nothing ran | k2 only |
+| stored: a code-behind closure on the root, called from the root's child | nothing ran | ran |
+| held: the same, called directly by an outside holder | ReferenceError x1 | ran |
+| heldroot: made on the root, held outside | TypeError x1 | ran |
+| connect: a code-behind closure on an outside object's signal | SIGSEGV | ran |
+| connectroot: made on the root | TypeError x1 | ran |
+| binding / bindingroot: Qt.binding on an outside property | dropped with the Service | re-evaluated |
+| heldbare (round two): held's direct call, its maker looking nothing up first | SIGSEGV | ran |
+| connectread (round two): connect, its maker reading the root first | ReferenceError x1 | ran |
+
+shipped.sh loads the plugin's own Service-sources.js and Model.mjs beside a
+stand-in Service whose persistActiveLater, where the commit's Service.qml
+has one, is that file's own text (read by the readers), and drives
+adoptActive twice in one turn through its
+forwarder, as a migration does: the tree's code reads two TypeErrors
+deleted and persists a.m3u then b.m3u kept; baea04a's reads two
+`ReferenceError: root is not defined`, not a SIGSEGV, and persists both
+kept. That corrects the row's first column: the SIGSEGV was measured on the
+replica, and the shipped adoptActive, which reads the root before it makes
+its closure, took shape oldread's ReferenceError in this stand-in. Varying
+the replica inside the shipped file narrowed it (scratch variants, not
+committed, their outputs only in lane-drel15's session transcript:
+baea04a's file with the replica appended, a SIGSEGV three runs of three,
+beside the shipped adoptActive's ReferenceError three of three; the five
+variants that tell the two apart, one run each; shape oldread keeps the
+read): a scheduling function
+that reads or writes a root member or calls `console` before making the
+closure gives the ReferenceError; one that only assigns a parameter or
+calls the model gives the SIGSEGV. So whether a code-behind closure
+crashes turns on what its function did first, which no reading of the
+source can be held to, and the closure the root makes is a TypeError or
+nothing, never a crash, in every shape measured (round two: bindingroot
+logs nothing). d6e8fd3 narrows the fix's two comments to "can take the
+engine down". The spike is not run by the gate; the guard is what holds
+the rule on the tree.
+
+**Call (v): siblings by shape.** Searched in the four code-behinds, by
+tokens and by grep:
+- every `Qt.callLater` in a code-behind: seven sites hand a root method
+  (Service-player.js 373, 374, 380, 393, 491; Service-sources.js 298, 760
+  [757 on the settled tip, 6eb165f, where 6caf9b0 shortened
+  startCacheLayout's excuse by three lines]),
+  skipped once the Service is gone (shape method); adoptActive's closure is
+  the fix;
+- `.connect(`, `.disconnect(`, `Qt.binding`, `.then(`, `setTimeout`,
+  `setInterval`, `Function(`, `.bind(`: none in any code-behind;
+- `createObject`: attachPlayerSocket's `playerSocketComponent.createObject(root)`
+  hands no property map and no function;
+- functions a code-behind makes: three before the fix -- adoptActive's
+  (fixed), startCacheLayout's onDone (excused, call t), persistFailed's
+  synchronous `.filter` callback (allowed);
+- a queue or map holding a function: `root.cacheQueue` and `root.cacheJob`
+  (onDone, or `null` from every other queueCacheJob); `root.failedQueue`
+  holds plain objects;
+- a root function used as a value: twelve sites in the service's files,
+  each the argument of `Qt.callLater` (five in Service.qml, seven above);
+- a code-behind function handed by its qualifier as a value (`ServiceX.fn`
+  not called): none; the qualifier rule refuses any use outside a
+  forwarder, and every forwarder calls;
+- Service.qml's own closures: persistActiveLater and onSaved's R19d
+  `Qt.callLater(function() { root.persistActive(root.activeSourceKey) })`
+  are root-built and stay; its other function values are signal handlers
+  (onLoadFailed, onSaveFailed, onRead, onError);
+- other shipped files: Guide.qml and BarWidget.qml declare no classic-JS
+  code-behind (their only script is Model.mjs, an ES module), so their
+  closures are component-built; the model holds no `Qt.callLater`.
+Cleared, and one double found: tests/service-harness.js's `Qt.callLater`
+keeps the first arguments of a folded call, where Qt keeps the last (the
+spike's shape fold). No service call passes arguments today. Filed
+F-HARNESS-130, P4, open.
+
+**The records (call w).** D-REL-15's row reads fixed on dev, unreleased,
+its open column the fix bracket; F-HARNESS-130's row is new. CLAUDE.md is
+the lead's: the proposed sentence for the service paragraph is in this
+lane's result.
+
+**On the tip.** Every count below is the base's but where a new check, test or case is
+named.
+
+| check | baea04a | the tip (d6e8fd3 and this record) |
+|---|---|---|
+| node tests/Model.test.js | 4,070, 0 failures | 4,071, 0; the base's names plus the D-REL-15 check |
+| the same, IPTV_HARNESS_OWN_ECHO=none (the gate's second run) | - | 4,071, 0 |
+| python by discovery | 3,016 | 3,028 (the 12 Closures tests) |
+| 30 modules that read the service, the readers, the allowlist or the gate, bare (the C4 move lane's selection less the two that start qml, plus test_harness_shell_model, test_rewind and test_source) | 813, 2 failures on the export: test_harness_shell_model's two stage-tree tests read git history (`b731882^`) the export has not | 825, OK |
+| tests/test_host_load_patch.py, every qml under gdb (lane-settle2-relsplit1's drive_case.py) | - | 12 of 12, 3 qml runs |
+| tests/Model.spec.qml, qmltestrunner under gdb | 112 passed, 0 failed | 112, 0, the same names |
+| scripts/qa-lib-test.sh, a private XDG_RUNTIME_DIR | 837 passed, 0 failed | 837, 0; the runtime folder left empty both times |
+| split-service.py --check | 5 files, 4 code-behinds, 46 root functions, 158 forwarders, 2,267 sites, 32 of 32 cases | 5, 4, 47, 158, 2,268, 34 of 34 |
+| F-GATE-29's door, check.sh --qmllint-view Service.qml | 0 errors, 46 + 387 on Model members | 0 errors, 46 + 387 |
+| release.py check | 47 files | 47 files, 26 runtime sources, the largest Guide.qml at 310,448 B |
+
+Service.qml goes from 229,117 to 230,265 B (228,487 under the ceiling) and
+Service-sources.js from 90,258 to 90,888 B [90,674 B on the settled tip,
+6eb165f, after 6caf9b0's shorter excuse]. `--verify --from-git baea04a`
+is red at byte 351,502, line 6,363 of the view, adoptActive's new comment
+line above its call (449,221 bytes against 447,443); against e1e376e it is
+red at byte 351,625, line 6,364, d6e8fd3's narrowed comment, and against
+d6e8fd3 it is green, 449,221 bytes. With every comment-only line dropped
+the tip's view is e1e376e's line for line (4,454 lines), and against
+baea04a's it differs only in adoptActive's call and persistActiveLater's
+four lines. All 30 mutation patches under spikes/ still apply (`git apply
+--check`). The marketplace capability scan reads 0 hits over 207 files, and
+the ascii and control-byte scans are clean (552 and 524 files).
+check-defect-ledger and check-board-staleness are green with this record
+and the two rows. The full check.sh was not run here, by the lane's rules;
+the gate on the merged tree is the lead's.
+
+### Round two (lane-settle-drel15, 2026-11-24)
+
+The settle of round one's three rechecks (lane-recheck-drel15-semantics,
+-guard and -evidence, each pushable with no must-fix), calls (x) to (ee),
+each the lead's call under the owner's standing authority of 2026-11-09.
+lane-settle-drel15 ran from 13:03 to 13:47 and committed calls (x) and (y)
+(04fa5e4, 4f20e5f) before the owner rebooted the machine after a system
+update (no package the plugin or its gate depends on moved). The reboot
+wiped /tmp, and with it every scratch folder of round one and of that lane.
+lane-settle2-drel15 recovered the rigs read-only from the agents' session
+transcripts, re-ran what had no result on record, and committed the rest:
+cbfb227, 6caf9b0, 1c71f01, 9bccc80, 9f1597d and this record. Neither lane
+held a display; every qml and qmltestrunner either started ran under gdb
+(`-batch`, debuginfod off, `handle all nopass`, `run`, `kill`), offscreen,
+with decoy HOME, XDG, runtime and QML disk-cache folders. The crash journal
+read 89 at every reading.
+
+**The base of this round.** 4f20e5f with the guard work still uncommitted,
+re-measured by lane-settle2-drel15: node 4,073 checks, 0 failures; python
+3,029 by discovery (4f20e5f's 3,028 and the uncommitted class test);
+split-service --check 5 files, 4 code-behinds, 47 root functions, 158
+forwarders, 2,268 sites, 34 of 34 cases; the spec under gdb 112 passed, 0
+failed; qa-lib-test 837 passed, 0 failed, with a private XDG_RUNTIME_DIR
+left empty.
+
+**Call (y): F-HARNESS-130 (04fa5e4).** The semantics recheck measured Qt
+6.12.0's Qt.callLater (its order and batch probes, qml under gdb):
+- a folded call runs once, where the LAST call was queued, with the last
+  arguments: `c("1"), b, c("2")` ran B and then C 2;
+- only what is pending is folded: `a` and then `b` queued, `a` queuing `b`
+  again, ran A, B1, B2 -- the running batch's own entries are not searched.
+
+The double kept the first call's place and arguments (C 1, B) and folded
+the re-queue into the running batch (A, B1). Now callLater takes a pending
+entry for the same function out and appends `{fn, args}`, and runLater
+takes the queue a batch at a time: what a batch queues, a Qt.callLater or
+one of the harness's own events (a simulated process exit or a state load,
+pushed onto `h.later` directly), runs in the next batch, so the order of
+the events is the queue's as before. A call that throws leaves the rest of
+its batch queued ahead of what it queued. Every direct reader and writer
+of `h.later` was read first: the harness's six pushes (the cache, state
+mode and notify processes' exits and the state loader) and Model.test.js's
+uses at lines 23315, 23369, 23372, 23543, 25360, 25378 and 25486.
+
+Rule 10, by counts. A check of the double itself, through the `h.Qt` the
+service's code calls:
+
+| the double | the check got | the suite |
+|---|---|---|
+| the old one | `[["C 1","B"],["A","B1"]]` | 4,073, 1 failure (with call (x)'s check) |
+| the new one, the batch undone | `[["B","C 2"],["A","B1"]]` | 4,072, 1 (on 04fa5e4) |
+| the new one, the first call's place and arguments kept | `[["C 1","B"],["A","B1","B2"]]` | 4,072, 1 |
+| the new one, the arguments updated in place (the row's first proposal) | `[["C 2","B"],["A","B1","B2"]]` | 4,072, 1 |
+| the new one | `[["B","C 2"],["A","B1","B2"]]` | 4,073, 0, and 4,073, 0 with IPTV_HARNESS_OWN_ECHO=none, the same names |
+
+No other check went red on the faithful double, so none leaned on the old
+forgiveness and none showed a defect; the names are the base's plus the
+two new checks. persistActiveLater's fold mutant (callLater handed
+`root.persistActive, key`) now reads k2 in node, as Qt does, where the old
+double read k1 (2 failures, both D-REL-15 checks). NODE_CHECKS_MIN 4,071 ->
+4,072.
+
+**Call (x): adoptActive's own deferral and order (4f20e5f).** A node check
+drives the shipping adoptActive through its forwarder twice in one turn,
+two migrating adoptions of `http://127.0.0.1/a.m3u` and `.../b.m3u`, with
+the root's persistActive recorded: nothing at once, then a.m3u and b.m3u,
+in order. The semantics recheck's rig (rig/adopt2.js) read that on 8e3bbac^
+(the root's adoptActive before C3), on baea04a and on the tip. Five
+one-decision mutants of the fix, each on a copy of the tree with both
+D-REL-15 checks and the new double:
+
+| mutant | checks, failures | the new check got |
+|---|---|---|
+| m-sync: adoptActive calls `root.persistActive(key)` at once | 4,073, 1 | `[a, b]` at once, then `[a, b]` |
+| m-fold: `Qt.callLater(root.persistActive, key)` | 4,073, 1 | `[]`, then `[b]` |
+| m-latersync: persistActiveLater calls persistActive at once | 4,073, 2 (both D-REL-15 checks) | `[a, b]` at once |
+| m-dbl: `Qt.callLater(root.persistActiveLater, key)` | 4,073, 3 (two round 8 checks too) | `[]`, then `[b]` |
+| m-nocall: the call removed | 4,073, 111: R22a 22, R21e 20, D-SRC-64 16, R29d 12, R27d 12, round 8 8, R28b 8, F1 8, R13 4, and the new check | `[]`, then `[]` |
+
+m-sync and m-fold left all 4,071 of round one's checks green (the semantics
+recheck), so this is the one check that sees them. NODE_CHECKS_MIN 4,072 ->
+4,073. The round-one check's comment now says what each check holds: it
+holds persistActiveLater alone, its deferral and order; the new one,
+adoptActive's; the 110, that adoptActive persists, not when. Round one's
+sentence that the suite read adoptActive's deferral is corrected in place
+above.
+
+**Calls (z) and (dd), the guard (cbfb227).** One subtest for each of the
+guard recheck's seven untested decisions, for the `async` start, and for
+the two readings this commit changes:
+
+| shape | refused, and red on the mutant that |
+|---|---|
+| `root.queue.map = function (s) { ... }` | drops the check that the callback is the call's argument (1) |
+| `var later = filter(function (s) { ... })` | drops the check for a `.` or `?.` before the name (1) |
+| `{ "go"(s) { ... } }`, `{ 7(s) { ... } }` | drops string and number keys from methods (2) |
+| `{ set v(s) { ... } }` | drops `set` from the modifiers (1) |
+| an excuse after `"a\" //` on the call's line | skips no escape in a string (1) |
+| an excuse inside `/[//] ... /` | reads no regular expression as quoted (1) |
+| `x.map(class { m() { ... } })`, both the class and its method | allows any kind as the synchronous callback (1) |
+| `async function`, `async () =>`, `async y =>`, at the `async`'s column | starts the function at its `function` (1) or its parameters (2) |
+| `{ a: 1, for(s) { ... } }`, `{ get if() { ... } }` | reads a statement word anywhere (2) |
+| `{ catch(s) { ... } }` | keeps `catch` a statement word (1) |
+| `/* // CLOSURE-EXCEPTION: ... */ call` and an excuse on a line inside a `/* */` | reads no block comment (2) |
+
+The `async` start was round one's second equivalent mutant: the verdict is
+the same from either token, but the refusal names the column, so it is
+output and now held. The two readings this commit changes:
+- a statement word (if, for, while, switch, with) opens a statement only
+  straight after a `{`, the one place a token reader cannot tell a block
+  from an object literal; after a `,` nothing can open one, so
+  `{ a: 1, for(s) {...} }` is a method and refused. `catch` never stands
+  where a method could (it follows a `}`), so it is no statement word.
+- a `/* */` comment is read as quoted, as strings, templates and regular
+  expressions are, so an excuse inside one excuses nothing; a `//` comment
+  hides a `/*` in it. Four more subtests hold that a real excuse still
+  excuses after a `//` inside a string, after a block comment, below a `//`
+  line holding a `/*`, and in a comment inside a template's substitution.
+
+The docstring now says the synchronous allowance reads a method's NAME and
+cannot know its receiver (any object's own `filter(...)` would pass;
+nothing in reach has such a method), and lists what the guard does not
+read: `Function(...)`, `.bind(...)`, `eval`, and the shared tokenizer's
+reading of `of`, `await` or `yield` used as a variable before a `/` as a
+regular expression's start.
+test_this_tree_with_the_fix_undone finds startCacheLayout's excuse by its
+function's span, not by counting the file's excuses.
+
+Rule 11: 52 one-decision mutants of the guard -- round one's 19, 21 of the
+guard recheck's 22 (its `catch`-dropped mutant is now the rule, and its
+inverse is one of round two's), and round two's own 12 -- each applied to a
+copy of the tree and tests/test_split_service.py run whole on the final
+test module (failures, subtests counted; the tip OK, 4fc714a's guard 5):
+
+| mutants | failures |
+|---|---|
+| judge() skips the rule; no synchronous callback; any `.name(` synchronous; an async callback allowed | 4; 51; 27; 2 |
+| headers not exempt; a header exempts its line; arrows not read; an arrow's start its last token | 152; 1; 7; 12 |
+| methods not read; a method in any context; no statement words; classes not read | 12; 152; 12; 2 |
+| member and key names read as keywords; no excuse on the own line; none in the run above; the reason optional | 4; 4; 14; 2 |
+| a `//` in a string a comment; a comment-only line in a template counts; an unreadable text clean | 6; 2; 1 |
+| the recheck's (a) to (g), in the shape table's order | 1; 1; 2; 1; 1; 1; 1 |
+| no computed key; `*` no modifier; `with` dropped; only the first `//` read; a template read to the end | 1; 1; 1; 1; 1 |
+| the run above crosses code; any `EXCEPTION:` excuses; the key half of a name dropped; the member half dropped | 4; 1; 1; 3 |
+| `?.` no member; `function` named as a keyword; any call before `{` a method; `?.` refused as a receiver; the line above's comment as the own line's | 1; 3; 6; 11; 1 |
+| a statement word anywhere; `catch` a statement word; `function` read as a method's name | 2; 1; 4 |
+| no block comments; a `//` hides no `/*`; only the first gap read; a block comment to the next token only | 2; 1; 2; 2 |
+| an async function's start at its `function`; an async arrow's at its parameters | 1; 2 |
+| the `=>` adjacency dropped; the statement-word lookback's index guard dropped; a `//` comment not clamped to its gap | 0; 0; 0 |
+
+49 red and three left green. Those three are equivalent mutants and are
+recorded as such: no valid JavaScript has `=` and `>` apart and
+consecutive; a name at index 0 is skipped just below the lookback; and a
+`//` comment always ends before the next token, so the clamp never binds.
+[Of these 52. The tests recheck wrote 31 more, and nine of them left the
+suite green where the guard's reading changes; each is tested now, and
+three more equivalent mutants are named -- round three, below.]
+Round one's "two decisions are equivalent mutants and untested" is
+corrected in place above. Python 3,028 -> 3,030 by discovery (the class
+test and the `async` test); PY_TESTS_MIN 2,991 -> 3,030 (9f1597d), the
+tree's count (it had trailed the suite since the 0.20.0 cut).
+SERVICE_SPLIT_CASES_MIN stays at 34, the count.
+
+**Call (aa): the wording, by shape (6caf9b0, 1c71f01).** Searched for
+"SIGSEGV", "is a SIGSEGV", "take the engine down", "direct call", "called
+directly", "the two that call", "Qt.callLater or a signal" and "in every
+shape measured" in every file citing D-REL-15:
+- changed: the guard's refusal message and its docstring, check.sh's
+  comment at the service split guard, the self-test case's name, run.sh's
+  shapes old and held (and heldbare beside it), shipped.sh's header ("a
+  TypeError or nothing, never a crash"), the harness README's paragraph,
+  and startCacheLayout's CLOSURE-EXCEPTION, which keeps its reason (only
+  root.cacheQueue and root.cacheJob hold it, and they die with the Service)
+  and drops the claim that only Qt.callLater and signals call a function
+  late; in the records, the D-REL-15 row's first column (call cc) and its
+  (s) and (u), the D-REL-14 row's mention of D-REL-15, this section's calls
+  (r), (t) and (u), and a bracket on the lead's filing sentence in "D-REL-14:
+  C4 merged";
+- cleared: Service.qml's comment on persistActiveLater and adoptActive's in
+  Service-sources.js (they say a closure handed to Qt.callLater "can take
+  the engine down", which was measured, and make no claim that only
+  Qt.callLater calls late); tests/Model.test.js's D-REL-15 comment (4f20e5f
+  already says "can take the QML engine down (a SIGSEGV, measured)");
+  gdbrun.sh's and RESULT-2026-11-24.txt's SIGSEGV lines (a verdict and its
+  detection, not a claim); tests/test_split_service.py (no such wording);
+  CHANGELOG.md, README.md and CLAUDE.md (no mention of D-REL-15).
+
+**Call (bb): the spike's confound (1c71f01, 9bccc80).** Shape held's maker,
+`stash()`, looks up the root before making its closure (to assign
+`root.queue`), which is what turns shape old's SIGSEGV into oldread's
+ReferenceError. Two shapes the evidence recheck measured join the spike,
+with its texts and in its style: heldbare (the same direct call by an
+outside holder, its maker `makeHeld` looking nothing up first: a SIGSEGV)
+and connectread (shape connect, its maker reading the root first: a
+ReferenceError x1). With held, oldread, old and connect, they show the
+maker's first lookup decides, not the caller. run.sh and shipped.sh ran
+once each at 1c71f01, exactly as they say: all 60 runs of fifteen shapes
+(old, heldbare and connect a SIGSEGV deleted, each caught by gdb) and the
+four shipped-text runs (the tree's two TypeErrors and baea04a's two
+ReferenceErrors, both kept runs persisting a.m3u then b.m3u) read as
+recorded, the crash journal at 89 before and after, the work folders empty.
+RESULT-2026-11-24.txt now holds both runs under a header naming 1c71f01;
+the stand-in's persistActiveLater reads 1,146 bytes, d6e8fd3's comment
+included. The evidence recheck's own runs of the two shapes were two each,
+deleted in both forms and kept in the plain one, with the same verdicts.
+The narrowing variants of round one stay uncommitted, one run each (the
+three-run pair beside them noted above).
+The sentence on destroy() after the schedule is narrowed above to what
+probe-after measured: three shapes, `root.ping`'s two calls folded into
+one, and the order an inference from the output.
+
+**Call (cc).** The D-REL-15 row's first column says what was measured: a
+closure made in a code-behind can take the engine down once its Service is
+deleted and something calls it; whether it does turns on what its making
+function looked up first; the SIGSEGV was measured on a replica, and the
+shipped baea04a text read a ReferenceError beside a stand-in. It no longer
+says that a closure resolving any name through the QML context crashes
+(oldread and connectread resolve `root` and do not). Call (r)'s table above
+loses "(C3's adoptActive)" from the replica's row.
+
+**Call (ee), not taken.** round one's `pgrep -x -n node` wait (a bounded
+wait, no signal) is recorded here and was harmless. `Function(...)`,
+`.bind(...)` and `eval` are not read by the guard and not measured, and
+whether a Quickshell Process can deliver an exit to its Connections while
+its Service is being destroyed needs a cage; both are in the D-REL-15 row's
+bracket, with no new id.
+
+**What was found in the previous lane's two commits.** Nothing wrong in
+04fa5e4 or 4f20e5f. 04fa5e4's floor comment says "the suite runs 4072, and
+4072 without the own-write echo"; lane-settle-drel15 had measured the suite
+at 4,073 with call (x)'s check already in the tree, so lane-settle2-drel15
+ran it on an archive of 04fa5e4 alone: 4,072 checks, 0 failures, and the
+same with IPTV_HARNESS_OWN_ECHO=none, the same names.
+
+**On the tip** (this record, on 9f1597d):
+
+| check | round two's base | the tip |
+|---|---|---|
+| node tests/Model.test.js | 4,073, 0 | 4,073, 0, the same names |
+| the same, IPTV_HARNESS_OWN_ECHO=none | - | 4,073, 0, the same names |
+| python by discovery | 3,029 | 3,030 |
+| tests/test_split_service.py | 35, OK | 36, OK |
+| 27 modules that read the guard, the readers, the gate, the board or the spike (none starts qml) | - | 674, OK |
+| tests/Model.spec.qml, qmltestrunner under gdb | 112 passed, 0 failed | 112, 0, the same names |
+| scripts/qa-lib-test.sh, a private XDG_RUNTIME_DIR | 837 passed, 0 failed | 837, 0, the folder left empty |
+| split-service.py --check | 5, 4, 47, 158, 2,268, 34 of 34 | the same |
+| check.sh --qmllint-view Service.qml | - | 0 errors, 46 + 387 on Model members |
+| release.py check | - | 47 files, 26 runtime sources, Guide.qml 310,448 B the largest |
+| check.sh --byte-scan ascii / control | - | 560 / 532 files, clean |
+| marketplace capability scan | - | 215 files, 0 hits |
+| check-defect-ledger, check-board-staleness | - | 802 rows, green; 0 disagreements |
+| the 30 mutation patches under spikes/ | - | all apply |
+
+Not run: the full check.sh (the lead's gate on the merged tree), and
+tests/test_host_load_patch.py, whose qml runs need a gdb driver that went
+with /tmp; it reads Service.qml's inline view, which this round changed by
+one comment in Service-sources.js.
+CLAUDE.md is the lead's; the proposed sentence is in this lane's result.
+
+### Round three (the lead, 2026-11-24)
+
+Round two had two read-only rechecks, one on the records and the spike and
+one on the tests and the guard. Both read the branch pushable, and neither
+found a defect on the tree. Each call below is the lead's call under the
+owner's standing authority of 2026-11-09.
+
+**The tests recheck's two should-fix findings, taken.**
+- Nothing held that `judge()`, which `--check` runs, applies the closure
+  rule to every code-behind. Every test that goes through `judge()` has
+  exactly one code-behind, and the tree tests call `closure_problems()`
+  directly. The recheck wrote two mutants that judge only the first or only
+  the last declared code-behind. Both left the suite green, and with C3's
+  line put back in Service-sources.js the first-only one read the tree
+  clean. New test
+  `test_check_refuses_a_closure_put_into_each_of_this_trees_code_behinds`:
+  - it puts `Qt.callLater(function () { root.persistActive(1) })` after
+    the first function header of each of the four code-behinds in turn;
+  - it asserts that `judge()` refuses it as `closure` in that file and in
+    no other.
+- Six more decisions of the guard had no test. One subtest each in
+  `test_what_is_no_closure_exception_does_not_excuse`:
+  - a string ends only at its own quote;
+  - a template skips its escapes;
+  - a `$` opens a substitution only before `{`;
+  - a block comment's `*/` is looked for after its `/*`;
+  - the excuse is upper case.
+
+  A new test holds the sixth: the header exemption is a header line's, not
+  column 3's on any line.
+- The recheck's nit `static-not-modifier` drops only the second of two
+  refusals. A new test pins the exact problem list.
+
+Each against tests/test_split_service.py, on an archive of 6eb165f with the
+new test module, the recheck's mutant texts applied to the script:
+
+| mutant | failures |
+|---|---|
+| the tip | 0 (39 tests, OK) |
+| judge-first-code-behind-only | 3 (the three code-behinds it skips) |
+| judge-last-code-behind-only | 3 |
+| str-ends-at-any-quote | 1 |
+| tmpl-escapes-ignored | 1 |
+| dollar-alone-ends-piece | 1 |
+| block-close-searched-from-star | 1 |
+| exception-any-case | 1 |
+| header-by-column-only | 1 |
+| static-not-modifier | 1 |
+
+Each failure is in the test written for that mutant. The recheck's three
+other green mutants are equivalent, and are named rather than tested:
+- `comment-only-from-line-start`: a quoted range cannot begin or end
+  inside leading whitespace;
+- `sync-receiver-kind-unread`: no token but a name can carry a method name
+  between `.` and `(`;
+- `str-end-before-quote`: a string's closing quote is never a `/`.
+
+So 83 one-decision mutants of the guard have been written across the
+rounds: round two's 52 and the recheck's 31. 77 are red and six are
+equivalent. Python by discovery goes from 3,030 to 3,033, and
+PY_TESTS_MIN with it.
+
+**The records recheck's five nits, taken.**
+- The harness README's direct-call clause now ends "a ReferenceError when
+  it had read the root first". Round one's narrowing variants (one run
+  each) crashed after a lookup that was not the root's: variant D's
+  `Model.emptyState()` and variant A's parameter assignment.
+- run.sh says the outside object calls back 150 ms later, not 100. The
+  100 ms is the Service's own `tick`, shape stored's caller. This is a
+  comment only, so the runs at 1c71f01 that RESULT-2026-11-24.txt records
+  stand.
+- The D-REL-15 row's destroy-after sentence gets round two's narrowing.
+- Round one's call (v) line number and its Service-sources.js size are
+  bracketed with the tip's.
+
+**Recorded, not committed.** The records recheck asked whether held and
+heldbare differ by their maker's root read or by held's storage on the
+root. Its scratch probe `heldread` answered: the read decides, not the
+storage. The probe is heldbare's driver calling a maker that reads `root.n`
+and stores nothing, run through the spike's own gdbrun.sh in both forms.
+- Deleted: `ReferenceError: root is not defined`.
+- Kept: it ran.
+- 8 of 8 runs as stated, crash journal 89.
+
+It stays out of the spike (the lead's call). The guard, not the spike,
+holds the rule, and RESULT-2026-11-24.txt is what the records cite.
+Removing the two redundant guard lines behind round two's equivalent
+mutants was also not taken (the lead's call); they are named instead.

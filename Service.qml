@@ -2537,6 +2537,24 @@ Item {
 
   function adoptActive(playlist, epg, plan) { return ServiceSources.adoptActive(playlist, epg, plan) }
 
+  // D-REL-15: adoptActive's deferred persistActive(key), built HERE, on the
+  // root, and never in a code-behind. A function expression made inside a
+  // code-behind and handed to Qt.callLater can take the QML engine down (a
+  // SIGSEGV in libQt6Qml; a ReferenceError instead when its function had
+  // read the root first, which no reading of the source can be held to)
+  // when this Service is deleted after the call is scheduled and before it
+  // runs; the same closure made in a function of this file logs a TypeError,
+  // and so it does when a code-behind calls this function (measured under
+  // gdb, 2026-11-24). A closure, and not Qt.callLater(root.persistActive,
+  // key): callLater folds calls of one function before the next turn into
+  // one, with the last arguments, so two adoptions in one turn would persist
+  // only the second key; each closure is its own call, both keys in order,
+  // as before the split. It stays on the root, written inline: the service
+  // split guard refuses a function expression in a code-behind.
+  function persistActiveLater(key) {
+    Qt.callLater(function() { root.persistActive(key) })
+  }
+
   function applyInvalidStatus() { return ServiceSources.applyInvalidStatus() }
 
   // D-SRC-10's settings write-back is GONE (D-SINK-19). It existed because a

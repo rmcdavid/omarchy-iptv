@@ -21,10 +21,24 @@ service's files, the move that cuts them, and the round trip back.
     three functions verifies and goes red on a one-byte mutant; a cut
     appended to a code-behind REV already holds; and the cuts it refuses,
     writing nothing -- among them a function whose arguments are not plain
-    names, and a tree holding an untracked file at a new code-behind's path.
+    names, a tree holding an untracked file at a new code-behind's path, and
+    a function that makes a closure (persistActiveLater, D-REL-15);
+  * the closure rule (D-REL-15, ss.closure_problems over small texts): each
+    shape of a function a code-behind makes is refused, the immediate
+    callback of a synchronous Array method is not, nor is anything that
+    makes no function (a string, a comment, a regular expression, a
+    statement's block); a refused one inside an allowed callback is still
+    refused; the CLOSURE-EXCEPTION comment excuses on its line or in the run
+    of comment lines directly above, with a reason, and nowhere else; this
+    tree's code-behinds make no unexcused function, and with the fix undone
+    the tree is refused at adoptActive and startCacheLayout.
 
 Rule 11: each refusal kind's case is wrong on a one-decision mutant of the
-judge, and the round trip on a one-byte mutant; and the fix pass on 2a4ab03's
+judge, and the round trip on a one-byte mutant; the closure rule's tests are
+red on baea04a's script and each on one of nineteen one-decision mutants of
+the rule (docs/QA-RESULTS.md "D-REL-15: no code-behind closure outlives its
+call"; 77 of 83 such mutants red by round three, the other six equivalent,
+named there); and the fix pass on 2a4ab03's
 eight new cases, the untracked-file cut, the plain-argument cut, the script
 beside the fixture and the CRLF message are each red on 2a4ab03's script or a
 one-decision mutant; docs/QA-RESULTS.md "D-REL-14: the splitter and its
@@ -37,6 +51,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,7 +68,7 @@ ss = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ss)
 
 KINDS = ("stray", "not-exact", "unforwarded", "missing", "declaration", "function-twice", "undeclared",
-         "qualifier", "scope", "sibling", "member", "unjudged", "scan")
+         "qualifier", "scope", "sibling", "member", "unjudged", "scan", "closure")
 
 
 def raw(path):
@@ -127,6 +142,26 @@ class ThisTree(unittest.TestCase):
         self.assertGreater(counts["sites"], 2000)
         self.assertGreater(counts["root_functions"] + counts["forwarders"], 150)
 
+    def test_check_refuses_a_closure_put_into_each_of_this_trees_code_behinds(self):
+        # judge(), which --check runs, applies the closure rule (D-REL-15)
+        # to every code-behind Service.qml declares, not to one of them:
+        # the same made function put into each in turn is refused there,
+        # and only there (round three, the lead's; red on the mutants that
+        # judge only the first or only the last code-behind declared,
+        # where every other test that goes through judge() has one).
+        service, files, present = ss.tree_inputs(ROOT)
+        decls = ss.service_files.declarations(service)
+        self.assertGreaterEqual(len(decls), 2)
+        for name, _qualifier, _n in decls:
+            with self.subTest(code_behind=name):
+                header = re.search(r"(?m)^  function [A-Za-z0-9_]+\([^)\n]*\) \{\n", files[name])
+                self.assertIsNotNone(header, name)
+                made = dict(files)
+                made[name] = (files[name][:header.end()] + "    Qt.callLater(function () { root.persistActive(1) })\n"
+                              + files[name][header.end():])
+                problems, _counts = ss.judge(service, made, present, QML_DIR)
+                self.assertEqual([str(p).split(":")[1].strip() for p in problems if p.kind == "closure"], [name])
+
     def test_the_gate_command_is_clean_and_runs_its_own_cases(self):
         rc, out = run("--check", "--root", ROOT, "--qml-dir", QML_DIR)
         self.assertEqual(rc, 0, out)
@@ -154,7 +189,7 @@ class Cases(unittest.TestCase):
                     self.assertEqual(problems, [])
                     for key, value in want.get("counts", {}).items():
                         self.assertEqual(counts[key], value, key)
-        self.assertEqual(len(self.cases), 32)
+        self.assertEqual(len(self.cases), 34)
 
     def test_every_refusal_kind_has_a_case(self):
         kinds = set(c["expect"].get("refusal") for c in self.cases)
@@ -319,6 +354,10 @@ class Cut(unittest.TestCase):
         # persistFailed calls the root's str() unqualified: moved together
         # into one code-behind, that names a sibling.
         self.refused("sibling", "--domain", "cache", "str", "persistFailed")
+        # D-REL-15: persistActiveLater makes the closure it hands to
+        # Qt.callLater, which a code-behind may not; the cut runs --check's
+        # judge over its result, so it is refused and writes nothing.
+        self.refused("closure", "--domain", "later", "persistActiveLater")
 
     def test_a_forwarder_is_not_cut_again(self):
         self.repo = Repo({"Service.qml": raw(os.path.join(FIXTURE, "inline.txt"))})
@@ -365,6 +404,283 @@ class Cut(unittest.TestCase):
         self.repo = Repo({"Service.qml": raw(os.path.join(FIXTURE, "inline.txt"))})
         write(os.path.join(self.repo.dir, "Service.qml"), raw(os.path.join(FIXTURE, "inline.txt")) + "// edited\n")
         self.refused("tree", "--domain", "demo", "bump")
+
+
+def code_behind(*body):
+    """A code-behind holding one function whose body is `body`, one line
+    each at four spaces: body line 0 is the file's line 4."""
+    return "// a test code-behind\n\n  function f(x) {\n" + "".join("    %s\n" % line for line in body) + "  }\n"
+
+
+BODY_LINE = 4
+SYNC = ("filter", "map", "forEach", "some", "every", "find", "findIndex", "reduce", "reduceRight", "sort", "flatMap")
+
+
+class Closures(unittest.TestCase):
+    """D-REL-15: --check refuses a function a code-behind makes, but the
+    immediate callback of a synchronous Array method and one a
+    CLOSURE-EXCEPTION comment excuses. ss.closure_problems is the shipping
+    judge, called here over small texts; Cases above runs it through
+    judge() and the self-test, and Cut runs it through a refused cut."""
+
+    def judged(self, *body):
+        out = []
+        for p in ss.closure_problems("Service-test.js", code_behind(*body)):
+            m = re.match(r"([a-z-]+): Service-test\.js:([0-9]+):([0-9]+): ", str(p))
+            self.assertIsNotNone(m, str(p))
+            out.append((m.group(1), int(m.group(2)) - BODY_LINE, int(m.group(3))))
+        return out
+
+    def refused_at(self, body, line=0, col=None):
+        got = self.judged(*body)
+        self.assertEqual([(k, l) for k, l, _c in got], [("closure", line)], body)
+        if col is not None:
+            self.assertEqual(got[0][2], col, body)
+
+    def test_the_allowed_methods_are_the_synchronous_array_methods(self):
+        self.assertEqual(sorted(ss.SYNC_ARRAY_METHODS), sorted(SYNC))
+
+    def test_each_shape_of_a_made_function_is_refused(self):
+        for line in ("Qt.callLater(function () { root.persistActive(x) })",
+                     "Qt.callLater(function() { root.persistActive(x) })",
+                     "Qt.callLater(() => root.persistActive(x))",
+                     "Qt.callLater(y => root.persistActive(y))",
+                     "Qt.callLater(async () => root.persistActive(x))",
+                     "root.queueCacheJob(x, function (status) { root.done(status) })",
+                     "var g = function () { return root.count }",
+                     "function helper() { return 1 }",
+                     "function* gen() { yield 1 }",
+                     "root.poke.connect(function () { root.done(1) })",
+                     "root.label = Qt.binding(function () { return root.count })",
+                     "var o = { done(status) { return status } }",
+                     "var o = { get v() { return 1 } }",
+                     "var o = { a: 1, async go() { return 2 } }",
+                     "var o = { *items() { yield 1 } }",
+                     "var o = { [x](s) { return s } }",
+                     "class A {}",
+                     "x.forEach(async (y) => { await y })",
+                     "x.forEach(async function (y) { await y })",
+                     "x.then(function (y) { return y })",
+                     "Array.from(x, function (y) { return y })",
+                     "x.map(x, function (y) { return y })",
+                     "x.filter[0](function (y) { return y })",
+                     # Round two (lane-settle-drel15), each red on the
+                     # one-decision mutant named: a method name's callback
+                     # that is not the call's argument (the immediacy check
+                     # dropped), and a bare call of a method's name (the
+                     # receiver check dropped) --
+                     "root.queue.map = function (s) { root.done(s) }",
+                     "var later = filter(function (s) { root.done(s) })",
+                     # -- a method keyed by a string or a number (those key
+                     # kinds dropped), a setter (`set` no modifier) --
+                     'var o = { "go"(s) { root.done(s) } }',
+                     "var o = { 7(s) { return s } }",
+                     "var o = { set v(s) { root.done(s) } }",
+                     # -- a method named for a statement word after a `,`,
+                     # where no statement can open (the word read as a
+                     # statement wherever it is), and one named catch after
+                     # a `{` (catch read as a statement word).
+                     "var o = { a: 1, for(s) { return s } }",
+                     "var o = { get if() { return 1 } }",
+                     "var o = { catch(s) { return s } }"):
+            with self.subTest(line=line):
+                self.refused_at([line])
+
+    def test_a_class_handed_to_a_synchronous_array_method_is_still_refused(self):
+        # The allowance is a function expression's or an arrow's: a class
+        # there is refused, and its method with it (round two; red on the
+        # mutant that allows any kind there).
+        line = "var cs = x.map(class { m() { return 1 } })"
+        self.assertEqual(self.judged(line), [("closure", 0, 4 + line.index("class") + 1),
+                                             ("closure", 0, 4 + line.index("m()") + 1)])
+
+    def test_a_static_method_is_refused_at_its_static_and_its_class_at_its_class(self):
+        # Two refusals, the class's and its method's, the method's placed at
+        # its `static` (round three, the lead's; red on the mutant that
+        # reads `static` as no modifier, which drops the second).
+        line = "var A = class { static m() { return 1 } }"
+        self.assertEqual(self.judged(line), [("closure", 0, 4 + line.index("class") + 1),
+                                             ("closure", 0, 4 + line.index("static") + 1)])
+
+    def test_a_function_made_at_the_header_indent_on_a_line_that_is_no_header_is_refused(self):
+        # Only a header LINE's own `function` at column 3 is exempt; one
+        # that starts at column 3 on a continuation line is made inside the
+        # function above it (round three, the lead's; red on the mutant
+        # that exempts column 3 on any line).
+        text = "// a test code-behind\n\n  function f(x) {\n    Qt.callLater(\n  function () { root.done(x) })\n  }\n"
+        problems = ss.closure_problems("Service-test.js", text)
+        self.assertEqual([str(p).split(": ")[1] for p in problems], ["Service-test.js:5:3"])
+
+    def test_an_async_function_or_arrow_is_placed_at_its_async(self):
+        # The refusal names the column the function starts at, its `async`
+        # included (round two; each red on the mutant that starts it at its
+        # `function` or its parameters).
+        for line in ("Qt.callLater(async function () { root.done(1) })",
+                     "Qt.callLater(async () => root.done(1))",
+                     "Qt.callLater(async y => root.done(y))"):
+            with self.subTest(line=line):
+                self.refused_at([line], 0, 4 + line.index("async") + 1)
+
+    def test_a_function_made_on_a_header_line_is_refused_and_the_header_is_not(self):
+        # The header's own `function`, at the root's indent, declares what a
+        # forwarder names; another on the same line is made inside it.
+        text = "// a test code-behind\n\n  function g(x) { Qt.callLater(function () { root.done(x) }) }\n"
+        problems = ss.closure_problems("Service-test.js", text)
+        self.assertEqual([str(p).split(": ")[1] for p in problems], ["Service-test.js:3:32"])
+        self.assertEqual(ss.closure_problems("Service-test.js", "  function g(x) { return x }\n"), [])
+
+    def test_the_message_names_the_file_the_line_the_column_and_the_finding(self):
+        problems = ss.closure_problems("Service-test.js", code_behind("var a = 1", "Qt.callLater(function () {})"))
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(str(problems[0]).startswith("closure: Service-test.js:5:18: "), str(problems[0]))
+        self.assertIn("D-REL-15", str(problems[0]))
+        self.assertIn("CLOSURE-EXCEPTION", str(problems[0]))
+
+    def test_a_synchronous_array_methods_immediate_callback_is_allowed(self):
+        for method in SYNC:
+            for line in ("var q = x.%s(function (a, b) { return a })" % method,
+                         "var q = x.%s((a, b) => a)" % method,
+                         "var q = x?.%s(a => a)" % method,
+                         "var q = x.%s(function(a) {\n      return a\n    })" % method):
+                with self.subTest(line=line):
+                    self.assertEqual(self.judged(line), [])
+
+    def test_what_makes_no_function_is_not_refused(self):
+        for line in ("var o = { a: f(x), b: [g(x)], c: x ? h(x) : 0 }",
+                     "if (x) { root.done(1) } else if (x > 1) { root.done(2) } else { root.done(3) }",
+                     "for (var i = 0; i < 2; i++) { root.done(i) }",
+                     "while (x) { x = 0 }",
+                     "do { x = 0 } while (x)",
+                     "switch (x) { case 1: break }",
+                     "try { root.done(1) } catch (e) { root.done(2) }",
+                     "var t = x >= 1 && x == 2 && (x = 3) > 2",
+                     "root.countChanged.connect(root.str)",
+                     "Qt.callLater(root.persistActive)",
+                     "x.function(1)",
+                     "var o = { class: 1, function: 2 }",
+                     "var k = o.class",
+                     'var s = "function () { return 1 }"',
+                     "var s = 'x => y'",
+                     "var s = `() => function () {} ${x}`",
+                     "var r = /function \\(\\) =>/",
+                     "var n = 1 /* () => 2, function () {} */",
+                     "// Qt.callLater(function () { root.done(1) })",
+                     # Round two: a statement word straight after a `{`
+                     # opens a statement there (`with` dropped from the
+                     # words), and `?.function` is a member's name.
+                     "if (x) { with (o) { root.done(1) } }",
+                     "var k = o?.function"):
+            with self.subTest(line=line):
+                self.assertEqual(self.judged(line), [])
+
+    def test_a_made_function_inside_an_allowed_callback_is_refused_and_an_allowed_one_is_not(self):
+        self.assertEqual(self.judged("x.map(function (a) { return a.filter(function (b) { return b }) })"), [])
+        line = "x.filter(function (a) { Qt.callLater(function () { root.done(a) }); return a })"
+        self.refused_at([line], 0, 4 + line.index("function ()") + 1)
+        self.refused_at(["x.forEach(function (a) {", "  Qt.callLater(() => root.done(a))", "})"], 1)
+
+    def test_a_closure_exception_with_a_reason_excuses_it_on_its_line_or_directly_above(self):
+        call = "Qt.callLater(function () { root.done(1) })"
+        for body in ([call + " // CLOSURE-EXCEPTION: a test's reason"],
+                     ["// CLOSURE-EXCEPTION: a test's reason", call],
+                     ["// CLOSURE-EXCEPTION: a test's reason", "// and a second line of it", call],
+                     ["// CLOSURE-EXCEPTION: a test's reason", "root.queueCacheJob(x, function (s) {", "  root.done(s)",
+                      "})"],
+                     # Round two: a real excuse after a `//` inside a string
+                     # on the same line (only the first `//` read), after a
+                     # block comment, below a `//` line holding a `/*` (a
+                     # line comment read as opening a block), and in a
+                     # comment inside a template's substitution (a template
+                     # piece read to its closing backtick).
+                     ['var s = "//"; ' + call + " // CLOSURE-EXCEPTION: a test's reason"],
+                     [call + " /* a note */ // CLOSURE-EXCEPTION: a test's reason"],
+                     ["// a note /* that opens nothing", "// CLOSURE-EXCEPTION: a test's reason", call],
+                     [call[:-1] + ", `${ 1 // CLOSURE-EXCEPTION: a test's reason", "}`)"]):
+            with self.subTest(body=body):
+                self.assertEqual(self.judged(*body), [])
+
+    def test_what_is_no_closure_exception_does_not_excuse(self):
+        call = "Qt.callLater(function () { root.done(1) })"
+        for body, line in ((["// CLOSURE-EXCEPTION:", call], 1),
+                           (["// CLOSURE-EXCEPTION:   ", call], 1),
+                           (["// CLOSURE-EXCEPTION: a reason", "", call], 2),
+                           (["var a = 1 // CLOSURE-EXCEPTION: its own line's", call], 1),
+                           (['Qt.callLater(function () { root.done(1) }, "// CLOSURE-EXCEPTION: in a string")'], 0),
+                           (["Qt.callLater(function () { root.done(1) }) /* CLOSURE-EXCEPTION: a block comment */"], 0),
+                           # Round two: past an escaped quote, still in the
+                           # string (escapes not skipped), in a regular
+                           # expression (regexes not quoted), and a `//` in a
+                           # `/* */` comment, on the call's line and on a line
+                           # of its own inside one (block comments not read).
+                           (['Qt.callLater(function () { root.done(1) }, "a\\" // CLOSURE-EXCEPTION: in a string")'], 0),
+                           (["Qt.callLater(function () { root.done(1) }, /[//] CLOSURE-EXCEPTION: in a regex/)"], 0),
+                           (["/* // CLOSURE-EXCEPTION: in a block comment */ " + call], 0),
+                           (["/*", "// CLOSURE-EXCEPTION: inside a block comment", "*/ " + call], 2),
+                           (["var s = `a", "// CLOSURE-EXCEPTION: inside a template", "`; " + call], 2),
+                           (["// CONVENTION-EXCEPTION: another guard's", call], 1),
+                           # Round three (the lead's, from the tests
+                           # recheck's fresh mutants), each red on the one
+                           # named: a string ends only at its own quote
+                           # (either quote ends it), a template skips its
+                           # escapes (escapes not skipped), a `$` opens a
+                           # substitution only before `{` (any `$` does), a
+                           # block comment's `*/` is looked for after its
+                           # `/*` (from its `*`), and the excuse is upper
+                           # case (read in any case).
+                           ([call[:-1] + ", 'a \" // CLOSURE-EXCEPTION: in a string')"], 0),
+                           ([call[:-1] + ", `a\\` // CLOSURE-EXCEPTION: in a template`)"], 0),
+                           ([call[:-1] + ", `$5 // CLOSURE-EXCEPTION: in a template`)"], 0),
+                           (["/*/ // CLOSURE-EXCEPTION: in a block comment */ " + call], 0),
+                           ([call + " // closure-exception: lower case"], 0)):
+            with self.subTest(body=body):
+                self.refused_at(body, line)
+
+    def test_a_text_the_tokenizer_cannot_read_is_refused_as_unread(self):
+        # Never passed as holding no closure: everything after the lost
+        # place would go unread.
+        problems = ss.closure_problems("Service-test.js", code_behind("var s = `never closed", "Qt.callLater(function () {})"))
+        self.assertEqual([p.kind for p in problems], ["scan"])
+
+    def test_this_trees_code_behinds_make_no_unexcused_function(self):
+        for path in ss.service_files.service_files(ROOT)[1:]:
+            with self.subTest(path=os.path.basename(path)):
+                self.assertEqual(ss.closure_problems(os.path.basename(path), raw(path)), [])
+
+    def test_this_tree_with_the_fix_undone_is_refused_at_adoptactive_and_startcachelayout(self):
+        # One decision back each: adoptActive's closure made in the
+        # code-behind again (C3's line), and startCacheLayout's onDone with
+        # its CLOSURE-EXCEPTION taken away.
+        text = raw(os.path.join(ROOT, "Service-sources.js"))
+        fixed = "      root.persistActiveLater(key)\n"
+        self.assertEqual(text.count(fixed), 1)
+        text = text.replace(fixed, "      Qt.callLater(function() { root.persistActive(key) })\n")
+        lines = text.split("\n")
+        # The excuse inside startCacheLayout, found by its function's span,
+        # whatever other excuses the file carries.
+        spans = []
+        ss.service_files.function_spans(text, "Service-sources.js", spans)
+        span = [(s, e) for name, _a, s, e, _c in spans if name == "startCacheLayout"]
+        self.assertEqual(len(span), 1)
+        starts = [0]
+        for line in lines:
+            starts.append(starts[-1] + len(line) + 1)
+        at = [i for i, line in enumerate(lines) if "CLOSURE-EXCEPTION:" in line and span[0][0] <= starts[i] < span[0][1]]
+        self.assertEqual(len(at), 1)
+        start = at[0]
+        while ss.service_files.COMMENT_LINE.match(lines[start - 1]):
+            start -= 1
+        end = at[0]
+        while ss.service_files.COMMENT_LINE.match(lines[end + 1]):
+            end += 1
+        text = "\n".join(lines[:start] + lines[end + 1:])
+        found = []
+        ss.service_files.function_spans(text, "Service-sources.js", found)
+        where = []
+        for p in ss.closure_problems("Service-sources.js", text):
+            line = int(str(p).split(":")[2])
+            offset = sum(len(l) + 1 for l in text.split("\n")[:line - 1])
+            where.append([name for name, _a, s, e, _c in found if s <= offset < e])
+        self.assertEqual(where, [["adoptActive"], ["startCacheLayout"]])
 
 
 if __name__ == "__main__":

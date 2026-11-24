@@ -420,7 +420,10 @@
     // the plugin has already reported it.
     if (out.writeEntry) {
       var key = out.key
-      Qt.callLater(function() { root.persistActive(key) })
+      // The root builds the deferred call (persistActiveLater): a closure
+      // made in this file and handed to Qt.callLater can take the engine
+      // down if the Service is deleted before it runs (D-REL-15).
+      root.persistActiveLater(key)
     }
   }
 
@@ -447,6 +450,9 @@
     root.cacheMigrating = true
     var args = ["migrate"]
     if (root.activeSourceKey !== "") args = args.concat(["--key", root.activeSourceKey])
+    // CLOSURE-EXCEPTION: only root.cacheQueue and root.cacheJob hold it,
+    // and they die with the Service: nothing outside the Service holds it,
+    // so nothing is left to call it once the Service is gone (D-REL-15).
     root.queueCacheJob(args, function(status) {
       root.cacheMigrating = false
       if (status.ok === true) {

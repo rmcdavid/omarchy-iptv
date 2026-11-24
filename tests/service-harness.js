@@ -16,7 +16,8 @@
 // fakes of what QML supplies: the host (`shell`, lagging one write behind or
 // echoing at once, rule 9), the state FileView (its `saved` / `saveFailed`
 // as queued events, a failing disk on request), Qt.callLater (deferred, and
-// de-duplicated per function the way Qt does it) and a clock. The root's
+// folded per function the way Qt 6.12.0 was measured to fold it,
+// F-HARNESS-130) and a clock. The root's
 // `readonly property` bindings are compiled from their own text and
 // re-evaluated on every read, so `settings`, `activeSourceKey` and the rest
 // are what Service.qml says they are. A Service.qml edit is therefore an
@@ -939,12 +940,24 @@ function bootService(svc, Model, o) {
     static now() { return h.clock }
   }
   const Qt = {
+    // F-HARNESS-130 (rule 10): as Qt 6.12.0 was measured to do it (qml under
+    // gdb; QA-RESULTS "D-REL-15 ... Round two"). A function already queued is
+    // taken out and queued again at the END with the LAST call's arguments:
+    // it runs once, where the last call put it. Only what is pending is
+    // searched: runLater takes a batch at a time (below), so a call made
+    // while a batch runs goes to the next one, and a function the running
+    // batch has still to call runs in it and again in the next. Until
+    // 2026-11-24 this kept the FIRST call's place and arguments, and folded
+    // a call into the batch that was running.
     callLater(fn, ...args) {
-      if (h.later.some(e => e.fn === fn)) return
+      const at = h.later.findIndex(e => e.fn === fn)
+      if (at !== -1) h.later.splice(at, 1)
       h.later.push({ fn, args })
     },
     resolvedUrl(x) { return { toString() { return String(x) } } }
   }
+  // The double the service's code calls, for a check of the double itself.
+  h.Qt = Qt
   const extras = Object.assign({ root, Model, console: quiet, Qt, Date: FakeDate }, ids)
   // D-REL-14 C2: each code-behind's qualifier, filled once `compile` exists.
   for (const b of parsed.behinds) extras[b.qualifier] = {}
@@ -1282,11 +1295,21 @@ function bootService(svc, Model, o) {
 
   const BOUND = opts.bound || 400
   h.root = root
+  // A batch at a time, as Qt's deferred-call queue takes its pending calls
+  // (F-HARNESS-130): what is queued when the batch starts runs, in order;
+  // what it queues -- a Qt.callLater, or one of this harness's own events
+  // (a process's exit, a state load) -- waits for the next batch, so the
+  // order is the queue's as before and only the fold is narrowed to what is
+  // pending. A call that throws leaves the rest of its batch queued first.
   h.runLater = () => {
     while (h.later.length) {
-      if (++h.turns > BOUND) { h.later = []; throw new Error("LOOP: " + h.turns + " deferred calls, " + h.host.writes.length + " entry writes") }
-      const e = h.later.shift()
-      e.fn.apply(null, e.args)
+      const batch = h.later
+      h.later = []
+      for (let i = 0; i < batch.length; i++) {
+        if (++h.turns > BOUND) { h.later = []; throw new Error("LOOP: " + h.turns + " deferred calls, " + h.host.writes.length + " entry writes") }
+        const e = batch[i]
+        try { e.fn.apply(null, e.args) } catch (err) { h.later = batch.slice(i + 1).concat(h.later); throw err }
+      }
     }
   }
   // Deliver one FileView event, then the own-write reload a `saved` raises

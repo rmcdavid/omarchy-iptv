@@ -356,6 +356,31 @@
    "expect": {
     "refusal": "unjudged"
    }
+  },
+  {
+   "name": "a function a code-behind makes and hands to Qt.callLater is refused: called once its Service is deleted, one made there can take the QML engine down (a SIGSEGV, measured), where one made on the root logs a TypeError (D-REL-15)",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += by\n    Qt.callLater(function () { root.done(root.count) })\n    return root.visible ? root.count : 0\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "refusal": "closure"
+   }
+  },
+  {
+   "name": "a synchronous Array method's callback, a function excused by its CLOSURE-EXCEPTION comment, and a function inside a string or a comment read clean (D-REL-15)",
+   "service": "import QtQuick\nimport \"Model.mjs\" as Model\nimport \"Service-demo.js\" as ServiceDemo\n\nItem {\n  id: root\n  property int count: 0\n  readonly property string label: \"x\"\n  signal done(int n)\n\n  Timer {\n    id: tick\n    interval: 10\n  }\n\n  function str(v) { return v === undefined || v === null ? \"\" : String(v) }\n\n  function bump(by) { return ServiceDemo.bump(by) }\n  function last() { return ServiceDemo.last() }\n}\n",
+   "files": {
+    "Service-demo.js": "// Service-demo.js -- the check cases' code-behind\n\n  // bump the count\n  function bump(by) {\n    root.count += [by].filter(function (b) { return b > 0 }).map(b => b * 2).length\n    // CLOSURE-EXCEPTION: the case's own, called before bump returns\n    var later = function () { return root.count }\n    // Qt.callLater(function () { root.done(root.count) })\n    if (root.count > 3) root.done(root.count)\n    return root.visible ? later() : \"function () { root.count }\".length\n  }\n\n  function last() { return root.str(root.label) + root.objectName }\n"
+   },
+   "expect": {
+    "counts": {
+     "code_behinds": 1,
+     "forwarders": 2,
+     "root_functions": 1,
+     "sites": 9
+    }
+   }
   }
  ]
 }
