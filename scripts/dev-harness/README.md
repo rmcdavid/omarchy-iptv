@@ -2651,3 +2651,28 @@ None is part of the gate.
   re-measured under a nested cage, with the seat requirement that makes the
   measurement non-vacuous. `clip-scenario.sh check-tree` IS the re-run and
   is part of the gate; the gdb half is for a human.
+- `spikes/codebehind-calllater/run.sh [shape...]` and `shipped.sh [REV]`:
+  what a function made in a classic-JS code-behind, and the same made on
+  the root, does when its Service is deleted before something calls it
+  (D-REL-15). `Plain.qml` and `Bound.qml` (the second with
+  `pragma ComponentBehavior: Bound` and an ES-module import) are the probe's
+  Service, `Service-probe.js` its code-behind, and each `d-*.qml` driver one
+  shape, deleted or kept. Thirteen shapes, each in both forms: a code-behind
+  closure handed to Qt.callLater is a SIGSEGV inside libQt6Qml, or a
+  ReferenceError when its function read the root first; the same made in a
+  root function, or in one a code-behind calls (the fix), a TypeError;
+  `root.X` from a code-behind skipped; two `Qt.callLater(root.X, key)` in a
+  turn one call with the last key; a code-behind closure stored on the root
+  and called from a child of the root never runs once it is gone; called
+  directly by an object outside it, a ReferenceError; connected to an
+  outside object's signal, a SIGSEGV; a Qt.binding is dropped.
+  `shipped.sh` loads the plugin's own `Service-sources.js` and model beside
+  a stand-in Service (`standin.py`, which takes persistActiveLater's text
+  from Service.qml) and drives adoptActive twice: the tree's two TypeErrors,
+  baea04a's two ReferenceErrors. Every qml runs under gdb through
+  `gdbrun.sh` (debuginfod off, signals not passed, the inferior killed at
+  the stop: no core, no crash card), offscreen, with no display variables
+  or session bus and decoy HOME, XDG and runtime folders; each script
+  refuses to start one any other way and stops if the crash journal moves.
+  `RESULT-2026-11-24.txt` holds both runs. It crashes by design and is
+  never part of the gate; `split-service.py --check`'s `closure` rule is.

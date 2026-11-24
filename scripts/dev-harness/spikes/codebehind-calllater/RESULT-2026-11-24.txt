@@ -1,0 +1,85 @@
+# D-REL-15, measured 2026-11-24 by lane-drel15 on branch drel15 (the fix e1e376e, the guard 2e249e8),
+# qt6-declarative 6.12.0-2, qt6-base 6.12.0-3, gdb 18.1-1; every qml under gdb, offscreen.
+
+## ./run.sh
+
+crash journal before: 89
+d-old-Plain-1            SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-old-Plain-0            ran: PERSIST k1,PERSIST k2         ok
+d-old-Bound-1            SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-old-Bound-0            ran: PERSIST k1,PERSIST k2         ok
+d-oldread-Plain-1        ReferenceError x2                  ok  [ReferenceError: root is not defined (exception occurred during delayed function evaluation)]
+d-oldread-Plain-0        ran: PERSIST k1,PERSIST k2         ok
+d-oldread-Bound-1        ReferenceError x2                  ok  [ReferenceError: root is not defined (exception occurred during delayed function evaluation)]
+d-oldread-Bound-0        ran: PERSIST k1,PERSIST k2         ok
+d-root-Plain-1           TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
+d-root-Plain-0           ran: PERSIST k1,PERSIST k2         ok
+d-root-Bound-1           TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
+d-root-Bound-0           ran: PERSIST k1,PERSIST k2         ok
+d-new-Plain-1            TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
+d-new-Plain-0            ran: PERSIST k1,PERSIST k2         ok
+d-new-Bound-1            TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
+d-new-Bound-0            ran: PERSIST k1,PERSIST k2         ok
+d-method-Plain-1         nothing ran                        ok
+d-method-Plain-0         ran: PING                          ok
+d-method-Bound-1         nothing ran                        ok
+d-method-Bound-0         ran: PING                          ok
+d-fold-Plain-1           nothing ran                        ok
+d-fold-Plain-0           ran: PERSIST k2                    ok
+d-fold-Bound-1           nothing ran                        ok
+d-fold-Bound-0           ran: PERSIST k2                    ok
+d-stored-Plain-1         nothing ran                        ok
+d-stored-Plain-0         ran: PERSIST k1:done               ok
+d-stored-Bound-1         nothing ran                        ok
+d-stored-Bound-0         ran: PERSIST k1:done               ok
+d-held-Plain-1           ReferenceError x1                  ok  [ReferenceError: root is not defined]
+d-held-Plain-0           ran: PERSIST k1:late               ok
+d-held-Bound-1           ReferenceError x1                  ok  [ReferenceError: root is not defined]
+d-held-Bound-0           ran: PERSIST k1:late               ok
+d-heldroot-Plain-1       TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
+d-heldroot-Plain-0       ran: PERSIST k1:late               ok
+d-heldroot-Bound-1       TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
+d-heldroot-Bound-0       ran: PERSIST k1:late               ok
+d-connect-Plain-1        SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-connect-Plain-0        ran: PERSIST signal                ok
+d-connect-Bound-1        SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-connect-Bound-0        ran: PERSIST signal                ok
+d-connectroot-Plain-1    TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
+d-connectroot-Plain-0    ran: PERSIST signal                ok
+d-connectroot-Bound-1    TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
+d-connectroot-Bound-0    ran: PERSIST signal                ok
+d-binding-Plain-1        ran: LABEL bound 0 2               ok
+d-binding-Plain-0        ran: LABEL bound 0 2,LABEL bound 1 2 ok
+d-binding-Bound-1        ran: LABEL bound 0 2               ok
+d-binding-Bound-0        ran: LABEL bound 0 2,LABEL bound 1 2 ok
+d-bindingroot-Plain-1    ran: LABEL bound 0 2               ok
+d-bindingroot-Plain-0    ran: LABEL bound 0 2,LABEL bound 1 2 ok
+d-bindingroot-Bound-1    ran: LABEL bound 0 2               ok
+d-bindingroot-Bound-0    ran: LABEL bound 0 2,LABEL bound 1 2 ok
+crash journal after: 89
+shape old       deleted: SIGSEGV        kept: ran: PERSIST k1,PERSIST k2   both forms: as measured
+shape oldread   deleted: ReferenceError x2 kept: ran: PERSIST k1,PERSIST k2   both forms: as measured
+shape root      deleted: TypeError x2   kept: ran: PERSIST k1,PERSIST k2   both forms: as measured
+shape new       deleted: TypeError x2   kept: ran: PERSIST k1,PERSIST k2   both forms: as measured
+shape method    deleted: nothing ran    kept: ran: PING                    both forms: as measured
+shape fold      deleted: nothing ran    kept: ran: PERSIST k2              both forms: as measured
+shape stored    deleted: nothing ran    kept: ran: PERSIST k1:done         both forms: as measured
+shape held      deleted: ReferenceError x1 kept: ran: PERSIST k1:late         both forms: as measured
+shape heldroot  deleted: TypeError x1   kept: ran: PERSIST k1:late         both forms: as measured
+shape connect   deleted: SIGSEGV        kept: ran: PERSIST signal          both forms: as measured
+shape connectroot deleted: TypeError x1   kept: ran: PERSIST signal          both forms: as measured
+shape binding   deleted: ran: LABEL bound 0 2 kept: ran: LABEL bound 0 2,LABEL bound 1 2 both forms: as measured
+shape bindingroot deleted: ran: LABEL bound 0 2 kept: ran: LABEL bound 0 2,LABEL bound 1 2 both forms: as measured
+run.sh exit 0
+
+## ./shipped.sh
+
+crash journal before: 89
+the tree's Service-sources.js: persistActiveLater: from its Service.qml, 1031 bytes
+tree   deleted  TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
+tree   kept     ran: PERSIST a.m3u,PERSIST b.m3u   ok
+baea04a78d2a6b9294c42c5cb6ae31176eae8138's Service-sources.js: persistActiveLater: none in its Service.qml
+rev    deleted  ReferenceError x2                  ok  [ReferenceError: root is not defined (exception occurred during delayed function evaluation)]
+rev    kept     ran: PERSIST a.m3u,PERSIST b.m3u   ok
+crash journal after: 89
+shipped.sh exit 0
