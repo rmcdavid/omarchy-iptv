@@ -1702,7 +1702,8 @@
     }
     root.playerSocket = s
     // createObject() is typed QObject, so the linter cannot see Socket's
-    // own properties here; the type is guaranteed by the Component below.
+    // own properties here; the type is guaranteed by playerSocketComponent
+    // in Service.qml.
     // qmllint disable missing-property
     s.connected = true
     if (s.connected) return true

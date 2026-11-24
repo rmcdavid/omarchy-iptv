@@ -1121,8 +1121,10 @@ Item {
 
   // ---- picture in picture (M2-05, M2-05-PICTURE-IN-PICTURE.md (dev branch))
   //
-  // TWO GATE RESULTS SHAPE EVERYTHING BELOW, and both of them override the
-  // design's own text (section 14, rulings PIP10 and PIP11):
+  // TWO GATE RESULTS SHAPE EVERYTHING BELOW -- and the PiP functions, which
+  // are in Service-pip.js since D-REL-14, each reached through its forwarder
+  // below -- and both of them override the design's own text (section 14,
+  // rulings PIP10 and PIP11):
   //
   //   PIP11. An exit code cannot detect failure here. `hyprctl dispatch`
   //   answers rc 0 `ok` for a dispatch aimed at an address that does not
@@ -1131,8 +1133,9 @@ Item {
   //   error - that is, only for a bug in our own string. So SUCCESS IS
   //   DEFINED IN EXACTLY ONE PLACE: pipVerify() compares a fresh read of
   //   `hyprctl -j clients` against what was asked for. Nothing in this file
-  //   may branch on a dispatch's exit status or on its output. The stdout of
-  //   a step is captured for the journal and for nothing else.
+  //   or in Service-pip.js may branch on a dispatch's exit status or on its
+  //   output. The stdout of a step is captured for the journal and for
+  //   nothing else.
   //
   //   PIP10. The action argument is IGNORED: float and pin toggle
   //   unconditionally, and asking to UNSET one on a tiled window floats it. So
@@ -2142,7 +2145,8 @@ Item {
   //
   // ARCHITECTURE-PLAYER.md sections 4.4 to 4.10, with the shape corrections
   // of section 13 (the socket observer is a Component, one fresh object per
-  // attempt). Nothing in this block ever execs mpv: `player start` is
+  // attempt). Nothing in this block, or in the functions in Service-player.js
+  // its forwarders reach (D-REL-14), ever execs mpv: `player start` is
   // idempotent - it adopts a live player or spawns one under a lock - so
   // every call here is safe to repeat and none of them is a spawn gate.
 

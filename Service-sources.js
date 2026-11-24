@@ -694,10 +694,11 @@
       root.saveState()
       var next = Model.findSource(updated.state.sources, key)
       // M2-09 GS11: the other half of "a cleared guide URL takes its cache
-      // with it". The ACTIVE source reaches that through onActiveEpgUrlChanged
-      // below, which also catches a change made from outside the plugin; this
-      // is an INACTIVE source edited in the Sources form, where activeEpgUrl
-      // never moves and nothing else would notice the file is now an orphan.
+      // with it". The ACTIVE source reaches that through Service.qml's
+      // onActiveEpgUrlChanged, which also catches a change made from outside
+      // the plugin; this is an INACTIVE source edited in the Sources form,
+      // where activeEpgUrl never moves and nothing else would notice the file
+      // is now an orphan.
       if (key !== root.activeSourceKey && String(rec.epgUrl || "") !== "" && next && String(next.epgUrl || "") === "") {
         root.queueCacheJob(["epg-clear", "--key", key], null)
       }
@@ -993,9 +994,9 @@
     // That is the whole safety property, and it is why only THIS call site
     // carries the flag. The active source's fetch is the one moment we know
     // the user means this list, so it is the one moment the saved references
-    // may be rewritten to match it. The source PROBE at sourceProbeProc below
-    // must never pass it -- probing a candidate the user may cancel must not
-    // rewrite favourites against a list they never adopted.
+    // may be rewritten to match it. The source PROBE at sourceProbeProc, in
+    // Service.qml, must never pass it -- probing a candidate the user may
+    // cancel must not rewrite favourites against a list they never adopted.
     //
     // Without this line the helper still writes scheme-2 ids into channels.json
     // while the migration sits dead, so 4,898 of 5,221 rows change id with
@@ -1251,12 +1252,13 @@
   //
   // The write is applied LOCALLY on success and the guide redraws from that;
   // the plugin never waits for the host to echo its own settings back
-  // (D-LIVE-20 / D-LIVE-21, see `settings` above) -- and since D-SINK-19 it
-  // does not depend on this write at all: the active key is already in
-  // state.json, which is what every binding here reads. The failure HERE is
-  // only a missing host or an entry updateEntryInline cannot rewrite:
-  // `false` from a writable entry is its `!dirty` branch (shell.qml:1114),
-  // i.e. the host already stores exactly what we asked for, which is success.
+  // (D-LIVE-20 / D-LIVE-21, see `settings` in Service.qml) -- and since
+  // D-SINK-19 it does not depend on this write at all: the active key is
+  // already in state.json, which is what every binding here reads. The
+  // failure HERE is only a missing host or an entry updateEntryInline cannot
+  // rewrite: `false` from a writable entry is its `!dirty` branch
+  // (shell.qml:1114), i.e. the host already stores exactly what we asked
+  // for, which is success.
   //
   // R13 / SR25 as amended: `announce` false. The key is already in
   // state.json, so a refused mirror loses nothing -- the next start repairs
@@ -1411,7 +1413,7 @@
   // D-SINK-18. Start the shield, or remember to start it again. Setting
   // `running = true` on a Process that is already running is not a queue, so
   // a second request while one is in flight is folded into one re-run on exit
-  // -- the same shape as playlistRerun / epgRerun above.
+  // -- the same shape as playlistRerun / epgRerun in Service.qml.
   function runConfigShield() {
     if (configShieldProc.running) {
       root.configShieldRerun = true
