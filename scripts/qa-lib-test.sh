@@ -3859,6 +3859,50 @@ printf "%s|%s|%s|%s" "$LIVE_DISPLAY" "$CALLER_SIGNATURE" "${HYPRLAND_INSTANCE_SI
 }
 is "and the scenario's own lines keep the caller's display and signature above the line that unsets them" \
    "$(caller_reads)" "wayland-9|rcgsig|unset|unset"
+# F-HARNESS-128 (the daily run, 2026-11-24): key-scenario's, logo-scenario's
+# and open-scenario's cage_start carry the same refusal by name (the caller's
+# display, or wayland-1) and nothing drove it either: their fh_case refusals
+# stop above cage, and a caged run's cage reports a nested display. Each
+# scenario's own cage_start and cage_stop run here beside the stand-in cage
+# above, handed in as the scenario's CAGE_BIN. None of the three asks the
+# session's lock, so there is no third branch to drive. open-scenario's
+# cage_stop keeps no verdict, so "gone" is read off the child's own pid, the
+# one the child wrote, for all three, as cage_stop returns: `left` if the
+# child outlived it, `slow` if it returned only once the child's own 30 s
+# were up (a stop that ends nothing waits the child out).
+# cgs <scenario> <display cage reports> <caller's display>:
+# "<status>|<REFUSING lines naming it>|<the child gone or left>|<accepted or
+# refused>".
+cgs() {
+  local sc="$ROOT/scripts/dev-harness/$1-scenario.sh" w rc pid said
+  w=$(mktemp -d "$RCG/w.XXXXXX")
+  qa_extract "$sc" '^cage_start\(\) \{$' '^\}$' >"$w/start.sh" || { echo "cage_start not taken out"; return; }
+  qa_extract "$sc" '^cage_stop\(\) \{$' '^\}$' >"$w/stop.sh" || { echo "cage_stop not taken out"; return; }
+  ( unset WLR_BACKENDS WLR_RENDERER WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+    export RCG_SHOWN=$2
+    WORK=$w REAL_RUNTIME=$RCG/rt LIVE_DISPLAY=$3 CAGE_BIN=$RCG/bin/cage SKIP=77
+    CAGE_PID="" CAGE_CHILD="" NESTED="" STOP_VERDICT=""
+    . "$w/start.sh"; . "$w/stop.sh"
+    trap 't=$SECONDS; cage_stop; echo $((SECONDS - t)) >"$w/stop-s"; kill -0 "$(cat "$w/child.pid")" 2>/dev/null && : >"$w/left"' EXIT
+    cage_start 30 2>"$w/err"
+    : >"$w/accepted"
+  ) >/dev/null 2>&1
+  rc=$?
+  pid=$(cat "$w/child.pid" 2>/dev/null)
+  case $1 in
+    open) said="^REFUSING: cage's child reports the live display '$2'" ;;
+    *) said="^REFUSING: cage's child reports display '$2', which is the live session" ;;
+  esac
+  printf '%s|%s|%s|%s\n' "$rc" "$(qa_count "$said" "$w/err")" \
+    "$(if [[ -z $pid || ! -s $w/stop-s ]]; then echo unread; elif [[ -e $w/left ]]; then echo left; elif (( $(<"$w/stop-s") > 15 )); then echo slow; else echo gone; fi)" \
+    "$([[ -e $w/accepted ]] && echo accepted || echo refused)"
+}
+for cg in key logo open; do
+  is "$cg-scenario.sh refuses a nested display named wayland-1, whatever the caller's display, and its cage's child is gone after" \
+     "$(cgs "$cg" wayland-1 wayland-0)" "2|1|gone|refused"
+  is "and the caller's own display, by name" "$(cgs "$cg" wayland-5 wayland-5)" "2|1|gone|refused"
+  is "control: a nested display neither names is driven, and its child ended" "$(cgs "$cg" wayland-7 wayland-3)" "0|0|gone|accepted"
+done
 fh_case "spikes/first-open/run.sh: refused before it makes its scratch tree" \
   "$FH_CAGE" "$D97" "$FHD-fo" bash -c 'OMARCHY_IPTV_HARNESS_DIR=$FH104_HD exec bash "$1"' fh "$ROOT/scripts/dev-harness/spikes/first-open/run.sh"
 FH_HD62=$(sp_path 62 h)
@@ -4458,7 +4502,11 @@ is "and what run.sh compares and hands the harness shell is what qa_decimal prin
 # scenario, all eight; each branch red on a mutant without it, the controls
 # on one that refuses every display, the order check on one that reads the
 # signature below the unset.
-EXPECTED=828
+# 828 -> 837 on 2026-11-24 (F-HARNESS-128, the daily run): key-scenario's,
+# logo-scenario's and open-scenario's refusal of the live session, two
+# branches and a control each, driven through each one's own cage_start and
+# cage_stop.
+EXPECTED=837
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

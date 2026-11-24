@@ -26022,3 +26022,45 @@ running, and the crash journal stayed at 89.
 **Counts:** python tests 3,000 -> 3,016 by discovery (test_service_files
 15 -> 20, test_qmllint_count 18 -> 29); node 4,069 unchanged. The gate's
 qmllint step prints one more line, and no floor moves.
+
+## F-HARNESS-128: three more cage refusals driven (the daily run, 2026-11-24)
+
+key-scenario.sh, logo-scenario.sh and open-scenario.sh each refuse, in their
+own `cage_start`, a nested display that names the caller's display or
+`wayland-1`. Nothing drove those branches: the `fh_case` refusals stop above
+cage, and a caged run's cage reports a nested display. `scripts/qa-lib-test.sh`
+now takes each scenario's `cage_start` and `cage_stop` out whole
+(`qa_extract`) and runs them beside the stand-in cage f9bd8fb made for
+rewind-scenario, handed in as the scenario's `CAGE_BIN`: two refusals and one
+control each, nine checks, 828 -> 837. No scenario changed.
+
+What each check reads: the subshell's status (2 or 0), the count of the
+scenario's own REFUSING line naming the display, whether the stand-in's child
+was gone as `cage_stop` returned (`left` if it outlived the stop, `slow` if
+the stop returned only after more than 15 s, the child's own 30 s being what a
+stop that ends nothing waits out), and whether the line after `cage_start`
+ran.
+
+Mutants, each run through the block alone against a mutated copy of the
+scenario in the item's worktree, restored after:
+
+| Mutant, in each of the three scenarios | Result |
+|---|---|
+| the `wayland-1` branch removed | the first check red (`0\|0\|gone\|accepted`) |
+| the caller's-display branch removed | the second check red |
+| every display refused | the control red (`2\|1\|gone\|refused`) |
+| `cage_stop` ends nothing (no TERM, no KILL) | all three red (`slow`) |
+| `cage_stop` without its TERM alone | green: its KILL of the cage's `timeout` ends the child (coreutils' timeout asks for its child's death with its own), which is the fallback working |
+
+The first version of the "gone" reading asked the child's pid after the
+subshell had ended, and passed on a stop that ends nothing, because by then
+the child's 30 s were over. It is read as the stop returns now.
+
+Not done, and on the row: the five copies of `cage_start` and `cage_stop`
+are still five; key-, logo- and open-scenario's refusal does not ask the
+session's lock, as rewind-scenario's does. Both wait for one cage helper in
+qa-lib, which needs a caged run of each scenario.
+
+Run: `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY bash
+scripts/qa-lib-test.sh`, 837 passed, 0 failed. Crash journal 89 before and
+after.
