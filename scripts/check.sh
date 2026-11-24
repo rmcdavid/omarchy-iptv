@@ -786,7 +786,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # the suite runs on the tree being cut, as the release step asks; the floor
 # had trailed the suite since the rounds after 2026-11-18 (D-PLY-69..79,
 # D-REL-14's readers and splitter); the suite runs 4069.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4069}
+# 2026-11-24, lane-relsplit4-move (D-REL-14 C4): 4069 -> 4070 -- togglePause
+# called through Service.qml's forwarder (it moved into Service-rewind.js,
+# and no node check had called it), red on two one-decision mutants of it
+# in the code-behind and green on the parent (QA-RESULTS "D-REL-14: C4, the
+# player, pip and sources move"); the suite runs 4070.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4070}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

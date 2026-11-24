@@ -21541,6 +21541,33 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [busy, owed, unhealthy, [probes(d.slots) - d.base, goneLines(d.h)]]
     }, [[1, 1], [true, 0, 0], [0, 0], [0, 0]])
 
+    // ---- D-REL-14 C4 (2026-11-24): the pause verb, through the service ----
+    //
+    // togglePause moved into Service-rewind.js in C4, and until then no node
+    // check called it (one stubs it), so a mutant without its optimistic flip
+    // was red only in rewind-scenario's cage arm (R10, R11). This calls it
+    // through Service.qml's own forwarder on a player of this build: the flip
+    // lands at once (rule 9), a press while the control slot runs is refused
+    // and changes nothing, the helper's reply is authoritative, and nothing
+    // playing is refused before anything is asked.
+    checkCall("D-REL-14 C4: togglePause through Service.qml -- with a channel playing it asks the control slot for `player pause --state on` and shows paused at once (rule 9); a second press while that run is out answers busy and asks nothing; the helper's reply then sets paused; with nothing playing it answers idle and asks nothing", () => {
+      const { h, zaps } = current()
+      const base = zaps.length, was = h.root.paused
+      const first = h.root.togglePause()
+      const asked = zaps.slice(base).map(c => [verbOf(c), c[c.indexOf("--state") + 1]])
+      const flipped = h.root.paused
+      const second = h.root.togglePause()
+      const busy = [second, zaps.length - base, h.root.paused]
+      h.ids.controlProc.running = false
+      h.root.handleControlResult(statusOf({ kind: "pause", paused: false }))
+      h.drain()
+      const corrected = h.root.paused
+      h.root.nowPlaying = null
+      const n = zaps.length
+      const idle = [h.root.togglePause(), zaps.length - n]
+      return [was, first, asked, flipped, busy, corrected, idle]
+    }, [false, "", [["player pause", "on"]], true, ["busy", 1, true], false, ["idle", 0]])
+
     // ---- D-PLY-58 (2026-11-17): the health relaunch of another source's player ----
     //
     // A player adopted on ANOTHER source's channel was relaunched with
