@@ -27055,6 +27055,36 @@ checkCall("D-REL-15: persistActiveLater (Service.qml) defers each persistActive(
   return [atOnce, persisted]
 }, [[], ["k1", "k2"]])
 
+// ---- F-HARNESS-130 (rule 10): the harness's Qt.callLater is Qt's ----
+//
+// Measured on Qt 6.12.0, qml under gdb (lane-recheck-drel15-semantics, its
+// order and batch probes; the spike's shape fold): a function already queued
+// is taken out and queued again at the end, with the LAST call's arguments,
+// so `c("1"), b, c("2")` runs b and then c("2"); and only the pending batch is
+// searched -- a call queued while a batch runs goes to the next batch, so a
+// function the running batch has still to call runs in it and again in the
+// next (`a` queuing b, with b queued after a: A, B1, B2). The double kept the
+// first call's place and arguments (C 1, B) and folded a call into the batch
+// that was running (A, B1). h.Qt is the double the service's code calls.
+checkCall("F-HARNESS-130 (rule 10): the harness's Qt.callLater as Qt 6.12.0 was measured -- a folded call runs once, at the LAST call's place with the LAST arguments; a call queued while a batch runs goes to the next batch, not folded into the running one", () => {
+  const H = require("./service-harness.js")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  h.runLater()
+  const ran = []
+  const b = () => ran.push("B")
+  const c = x => ran.push("C " + x)
+  h.Qt.callLater(c, "1"); h.Qt.callLater(b); h.Qt.callLater(c, "2")
+  h.runLater()
+  const fold = ran.splice(0)
+  let n = 0
+  const b2 = () => ran.push("B" + (++n))
+  const a = () => { ran.push("A"); h.Qt.callLater(b2) }
+  h.Qt.callLater(a); h.Qt.callLater(b2)
+  h.runLater()
+  return [fold, ran]
+}, [["B", "C 2"], ["A", "B1", "B2"]])
+
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----
 //
 // Every service boot in this process (tests/service-harness.js) records each
