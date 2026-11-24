@@ -44,4 +44,6 @@ Item {
   }
   function listen(target) { return ServiceProbe.listen(target) }
   function bindTo(target) { return ServiceProbe.bindTo(target) }
+  function makeHeld(key) { return ServiceProbe.makeHeld(key) }
+  function listenAfterRead(target) { return ServiceProbe.listenAfterRead(target) }
 }

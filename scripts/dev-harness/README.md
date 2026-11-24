@@ -2657,15 +2657,19 @@ None is part of the gate.
   (D-REL-15). `Plain.qml` and `Bound.qml` (the second with
   `pragma ComponentBehavior: Bound` and an ES-module import) are the probe's
   Service, `Service-probe.js` its code-behind, and each `d-*.qml` driver one
-  shape, deleted or kept. Thirteen shapes, each in both forms: a code-behind
-  closure handed to Qt.callLater is a SIGSEGV inside libQt6Qml, or a
-  ReferenceError when its function read the root first; the same made in a
-  root function, or in one a code-behind calls (the fix), a TypeError;
-  `root.X` from a code-behind skipped; two `Qt.callLater(root.X, key)` in a
-  turn one call with the last key; a code-behind closure stored on the root
-  and called from a child of the root never runs once it is gone; called
-  directly by an object outside it, a ReferenceError; connected to an
-  outside object's signal, a SIGSEGV; a Qt.binding is dropped.
+  shape, deleted or kept. Fifteen shapes, each in both forms: a code-behind
+  closure called once its Service is deleted can take the QML engine down
+  (a SIGSEGV inside libQt6Qml, measured), and whether it does turns on what
+  the function that made it looked up first, not on who calls it -- handed
+  to Qt.callLater, a SIGSEGV, or a ReferenceError when its function read the
+  root first; called directly by an object outside the Service, a SIGSEGV
+  when its maker looked nothing up and a ReferenceError when it had;
+  connected to an outside object's signal, the same two -- while the same
+  made in a root function, or in one a code-behind calls (the fix), logs a
+  TypeError or does nothing, never a crash; `root.X` from a code-behind
+  skipped; two `Qt.callLater(root.X, key)` in a turn one call with the last
+  key; a code-behind closure stored on the root and called from a child of
+  the root never runs once it is gone; a Qt.binding is dropped.
   `shipped.sh` loads the plugin's own `Service-sources.js` and model beside
   a stand-in Service (`standin.py`, which takes persistActiveLater's text
   from Service.qml) and drives adoptActive twice: the tree's two TypeErrors,

@@ -40,3 +40,17 @@
   function bindTo(target) {
       target.label = Qt.binding(function() { return "bound " + target.beat + " " + root.n })
   }
+
+  // Shape heldbare: a closure made HERE by a function that looks up no name
+  // before making it, returned to an outside holder (stash, shape held's
+  // maker, looks up the root first, to assign root.queue).
+  function makeHeld(key) {
+      return function(status) { root.persistActive(key + ":" + status) }
+  }
+
+  // Shape connectread: shape connect's closure, its function reading the root
+  // first, as oldread's does.
+  function listenAfterRead(target) {
+      var seen = root.n
+      target.poke.connect(function() { root.persistActive("signal") })
+  }

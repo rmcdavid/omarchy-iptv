@@ -18,7 +18,8 @@
 # the replica's SIGSEGV into this ReferenceError: what a code-behind closure
 # does once its Service is gone depends on what its function did before
 # making it, which no reading of the source can be held to; the closure the
-# root makes is a TypeError in every shape measured. The same kept. Every
+# root makes is a TypeError or nothing, never a crash, in every shape
+# measured (run.sh). The same kept. Every
 # qml runs under gdb, as gdbrun.sh does it (see run.sh's SAFETY); not run by
 # the gate.
 set -u

@@ -13,8 +13,9 @@
 # with `pragma ComponentBehavior: Bound` and an ES-module import, as the
 # plugin's Service.qml has); Service-probe.js is its code-behind, imported
 # with no .import and no .pragma, so it runs in the Service's own scope.
-#   old       a closure made in the code-behind, handed to Qt.callLater (C3's
-#             adoptActive): SIGSEGV in libQt6Qml once the Service is gone
+#   old       a closure made in the code-behind, handed to Qt.callLater (a
+#             replica of C3's adoptActive): SIGSEGV in libQt6Qml once the
+#             Service is gone
 #   oldread   the same, its function reading the root first, as adoptActive
 #             does (shipped.sh drives adoptActive's own text): a
 #             ReferenceError ("root is not defined") instead of the SIGSEGV
@@ -34,29 +35,40 @@
 #             the Service, so nothing calls it, and nothing crashes
 #   held      that stored closure held by an object OUTSIDE the Service and
 #             called by it directly after the Service is gone: a
-#             ReferenceError ("root is not defined"), no crash -- a direct
-#             call is not what crashes
+#             ReferenceError ("root is not defined"), no crash -- but its
+#             maker, stash(), looks up the root first (to assign root.queue),
+#             as oldread's does
+#   heldbare  the same direct call, the closure made by a code-behind
+#             function that looks up no name before making it (makeHeld
+#             returns it): SIGSEGV in libQt6Qml -- a direct call crashes too
 #   heldroot  the same, the closure made on the root: a TypeError
 #   connect   a code-behind closure connected to a signal of an object
 #             outside the Service, which emits it after the Service is gone:
 #             SIGSEGV in libQt6Qml, as Qt.callLater's
+#   connectread  the same, its function reading the root first: a
+#             ReferenceError, as oldread's -- with heldbare and held, what
+#             the maker looked up before making the closure decides, not
+#             who calls it
 #   connectroot  the same closure made on the root: a TypeError
 #   binding   a code-behind closure given to an outside object's property
 #             as Qt.binding: the binding is dropped with the Service, and a
 #             change after it is gone re-evaluates nothing
 #   bindingroot  the same, made on the root: the same
-# "Deleted": the driver asks the Service's destroy() and then makes the calls
-# (old, oldread, root, new, method, fold) -- destroy() is deferred, so the calls still
-# reach a live object -- or makes them and then asks it (stored, held,
-# heldroot, connect, connectroot, binding, bindingroot), and the outside
-# object calls back 100 ms later. Asked the other way round for the
-# Qt.callLater shapes, the deferred call runs before the deletion and every
-# shape runs normally (measured on 2026-11-24, not a case here). "Kept": no
-# destroy().
+# "Deleted": the driver asks the Service's destroy() and then makes the
+# calls (old, oldread, root, new, method, fold) -- destroy() is deferred, so
+# the calls still reach a live object -- or makes them and then asks it
+# (stored, held, heldbare, heldroot, connect, connectread, connectroot,
+# binding, bindingroot), and the outside object calls back 100 ms later.
+# Asked the other way round -- the calls first and destroy() after them in
+# the same turn -- shapes old, new and method ran their deferred calls before
+# the deletion, in both forms: old's and new's both keys, method's one PING,
+# its two calls folded (one scratch run each on 2026-11-24, not a case
+# here). "Kept": no destroy().
 #
-# NOT RUN BY THE GATE: shapes old and connect crash by design. What holds the
-# rule on the tree is the service split guard (scripts/split-service.py
-# --check, kind `closure`); this spike is the observation behind it (rule 14).
+# NOT RUN BY THE GATE: shapes old, heldbare and connect crash by design.
+# What holds the rule on the tree is the service split guard
+# (scripts/split-service.py --check, kind `closure`); this spike is the
+# observation behind it (rule 14).
 #
 # SAFETY. Every qml this starts runs under gdb (debuginfod off, signals not
 # passed, the inferior killed at the stop), so a SIGSEGV is caught there: no
@@ -78,13 +90,15 @@ declare -A WANT=(
   [fold-1]="nothing ran"        [fold-0]="ran: PERSIST k2"
   [stored-1]="nothing ran"      [stored-0]="ran: PERSIST k1:done"
   [held-1]="ReferenceError x1"         [held-0]="ran: PERSIST k1:late"
+  [heldbare-1]="SIGSEGV"        [heldbare-0]="ran: PERSIST k1:late"
   [heldroot-1]="TypeError x1"   [heldroot-0]="ran: PERSIST k1:late"
   [connect-1]="SIGSEGV"         [connect-0]="ran: PERSIST signal"
+  [connectread-1]="ReferenceError x1" [connectread-0]="ran: PERSIST signal"
   [connectroot-1]="TypeError x1" [connectroot-0]="ran: PERSIST signal"
   [binding-1]="ran: LABEL bound 0 2"     [binding-0]="ran: LABEL bound 0 2,LABEL bound 1 2"
   [bindingroot-1]="ran: LABEL bound 0 2" [bindingroot-0]="ran: LABEL bound 0 2,LABEL bound 1 2"
 )
-SHAPES="old oldread root new method fold stored held heldroot connect connectroot binding bindingroot"
+SHAPES="old oldread root new method fold stored held heldbare heldroot connect connectread connectroot binding bindingroot"
 if (( $# > 0 )); then
   for s in "$@"; do [[ " $SHAPES " == *" $s "* ]] || { echo "run.sh: no shape $s (shapes: $SHAPES)" >&2; exit 2; }; done
   SHAPES="$*"
