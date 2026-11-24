@@ -157,7 +157,10 @@ tree and proved against its parent:
 then the new file goes on release.py's ALLOWLIST. After the split a function
 is added to a code-behind by writing it there and its forwarder on the root,
 which --check holds; `--inline` prints what every pin and the node harness's
-inline readers read.
+inline readers read. docs/SERVICE-SPLIT.md is the whole of it: why the split
+exists, the layout and what stays on the root, how a code-behind runs, each
+refusal above with what it protects, and the steps around a move and a new
+code-behind (the patches, the pins, the allowlist, the records).
 
 Exit status: 0 clean, 1 a problem (one line each), 2 usage.
 Python 3 standard library only; ASCII only.
