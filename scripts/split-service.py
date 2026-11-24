@@ -73,23 +73,34 @@ MODES (exactly one):
                               in Service.qml logs a TypeError
                               (scripts/dev-harness/spikes/codebehind-calllater/).
                               Allowed: the immediate callback argument of a
-                              synchronous Array method (filter, map,
-                              forEach, some, every, find, findIndex, reduce,
-                              reduceRight, sort, flatMap), which runs before
-                              the method returns; and one excused by a
-                              `// CLOSURE-EXCEPTION: <reason>` comment on the
-                              line it starts on or in the unbroken run of
-                              `//` lines directly above that line, the
-                              reason saying why nothing can call it after
-                              its Service is gone (the guard reads that a
-                              reason is there, not what it says). A function
+                              call to a method named filter, map, forEach,
+                              some, every, find, findIndex, reduce,
+                              reduceRight, sort or flatMap -- the synchronous
+                              Array methods, whose callback runs before the
+                              method returns; the guard reads the method's
+                              NAME and cannot know its receiver, so another
+                              object's method of one of those names passes
+                              too (none in reach: 2026-11-24) -- and one
+                              excused by a `// CLOSURE-EXCEPTION: <reason>`
+                              comment on the line it starts on or in the
+                              unbroken run of `//` lines directly above that
+                              line, the reason saying why nothing can call it
+                              after its Service is gone (the guard reads that
+                              a reason is there, not what it says; one inside
+                              a string, a template, a regular expression or a
+                              `/* */` comment is not a comment). A function
                               that must outlive its call is made in a root
                               function of Service.qml, as persistActiveLater
                               is. Not read: `Function(...)`, which makes a
-                              function in the global scope, and
-                              `.bind(...)`, whose result wraps the function
-                              it is called on; no code-behind holds either
-                              (2026-11-24), and neither was measured
+                              function in the global scope; `.bind(...)`,
+                              whose result wraps the function it is called
+                              on; `eval` of a text that makes one; and what
+                              the shared tokenizer (check-model-members')
+                              misreads, among them `of`, `await` or `yield`
+                              used as a variable before a `/`, read as a
+                              regular expression's start, which hides what
+                              follows on the line. No code-behind holds any
+                              of them (2026-11-24), and none was measured
               member          a `root.N` (or `root?.N`, `root["N"]`,
                               `root?.["N"]`) in
                               Service.qml or a code-behind where N is no
@@ -354,8 +365,13 @@ def code_problems(label, text, qualifiers, own, allowed_lines=()):
 SYNC_ARRAY_METHODS = frozenset(('filter', 'map', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce',
                                 'reduceRight', 'sort', 'flatMap'))
 CLOSURE_EXCEPTION = re.compile(r'CLOSURE-EXCEPTION:[ \t]*[^ \t\r\n]')
-# Before `(...) {` these open a statement, not an object literal's method.
-STATEMENT_WORDS = frozenset(('if', 'for', 'while', 'switch', 'catch', 'with', 'function'))
+# Straight after a `{` and before `(...) {`, these open a statement -- the
+# first of a block, which a token reader cannot tell from an object literal
+# there -- and are read so; after anything else they cannot open one there
+# and are read as a method's name (`{ a: 1, for(s) {...} }`). `catch` opens
+# no statement (it follows a `}`), and `function` is read as a function
+# already.
+STATEMENT_WORDS = frozenset(('if', 'for', 'while', 'switch', 'with'))
 METHOD_MODIFIERS = frozenset(('get', 'set', 'async', 'static'))
 
 
@@ -427,8 +443,10 @@ def made_functions(toks, headers):
             name = k - 1
             if _punct(toks[name], ']'):
                 name = _match_back(toks, name, '[', ']')
-            elif not (toks[name].kind in ('str', 'num') or (toks[name].kind == 'ident'
-                                                            and toks[name].text not in STATEMENT_WORDS)):
+            elif toks[name].kind not in ('str', 'num', 'ident'):
+                continue
+            elif toks[name].kind == 'ident' and (toks[name].text == 'function' or (
+                    toks[name].text in STATEMENT_WORDS and name and _punct(toks[name - 1], '{'))):
                 continue
             if name <= 0:
                 continue
@@ -482,19 +500,45 @@ def _raw_end(text, t, at):
     return at + len(t.text)
 
 
+def _block_comments(text, spans):
+    """[(start, end)] of the `/* */` comments of `text`, whose tokens span
+    `spans` (offsets, in order): they lie between the tokens, where a `//`
+    comment runs to its line's end and hides a `/*` in it."""
+    out = []
+    edges = [0] + [e for _a, e in spans]
+    ends = [a for a, _e in spans] + [len(text)]
+    for g0, g1 in zip(edges, ends):
+        p = g0
+        while p < g1:
+            if text.startswith('//', p):
+                q = text.find('\n', p)
+                p = g1 if q == -1 or q > g1 else q
+            elif text.startswith('/*', p):
+                q = text.find('*/', p + 2)
+                q = len(text) if q == -1 else q + 2
+                out.append((p, q))
+                p = q
+            else:
+                p += 1
+    return out
+
+
 class _Comments(object):
     """The `//` comments of one file, told apart from a `//` inside a string,
-    a template or a regular expression literal."""
+    a template, a regular expression literal or a `/* */` comment."""
 
     def __init__(self, text, toks):
         self.text = text
         self.lines = text.split('\n')
         self.starts = [0] + [m.end() for m in re.finditer('\n', text)]
         self.quoted = []
+        spans = []
         for t in toks:
+            at = self.starts[t.line - 1] + t.col - 1
+            spans.append((at, _raw_end(text, t, at)))
             if t.kind in ('str', 'tmpl', 'regex'):
-                at = self.starts[t.line - 1] + t.col - 1
-                self.quoted.append((at, _raw_end(text, t, at)))
+                self.quoted.append(spans[-1])
+        self.quoted += _block_comments(text, spans)
 
     def _outside(self, p):
         return not any(a <= p < b for a, b in self.quoted)

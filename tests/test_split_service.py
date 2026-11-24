@@ -442,9 +442,46 @@ class Closures(unittest.TestCase):
                      "x.then(function (y) { return y })",
                      "Array.from(x, function (y) { return y })",
                      "x.map(x, function (y) { return y })",
-                     "x.filter[0](function (y) { return y })"):
+                     "x.filter[0](function (y) { return y })",
+                     # Round two (lane-settle-drel15), each red on the
+                     # one-decision mutant named: a method name's callback
+                     # that is not the call's argument (the immediacy check
+                     # dropped), and a bare call of a method's name (the
+                     # receiver check dropped) --
+                     "root.queue.map = function (s) { root.done(s) }",
+                     "var later = filter(function (s) { root.done(s) })",
+                     # -- a method keyed by a string or a number (those key
+                     # kinds dropped), a setter (`set` no modifier) --
+                     'var o = { "go"(s) { root.done(s) } }',
+                     "var o = { 7(s) { return s } }",
+                     "var o = { set v(s) { root.done(s) } }",
+                     # -- a method named for a statement word after a `,`,
+                     # where no statement can open (the word read as a
+                     # statement wherever it is), and one named catch after
+                     # a `{` (catch read as a statement word).
+                     "var o = { a: 1, for(s) { return s } }",
+                     "var o = { get if() { return 1 } }",
+                     "var o = { catch(s) { return s } }"):
             with self.subTest(line=line):
                 self.refused_at([line])
+
+    def test_a_class_handed_to_a_synchronous_array_method_is_still_refused(self):
+        # The allowance is a function expression's or an arrow's: a class
+        # there is refused, and its method with it (round two; red on the
+        # mutant that allows any kind there).
+        line = "var cs = x.map(class { m() { return 1 } })"
+        self.assertEqual(self.judged(line), [("closure", 0, 4 + line.index("class") + 1),
+                                             ("closure", 0, 4 + line.index("m()") + 1)])
+
+    def test_an_async_function_or_arrow_is_placed_at_its_async(self):
+        # The refusal names the column the function starts at, its `async`
+        # included (round two; each red on the mutant that starts it at its
+        # `function` or its parameters).
+        for line in ("Qt.callLater(async function () { root.done(1) })",
+                     "Qt.callLater(async () => root.done(1))",
+                     "Qt.callLater(async y => root.done(y))"):
+            with self.subTest(line=line):
+                self.refused_at([line], 0, 4 + line.index("async") + 1)
 
     def test_a_function_made_on_a_header_line_is_refused_and_the_header_is_not(self):
         # The header's own `function`, at the root's indent, declares what a
@@ -489,7 +526,12 @@ class Closures(unittest.TestCase):
                      "var s = `() => function () {} ${x}`",
                      "var r = /function \\(\\) =>/",
                      "var n = 1 /* () => 2, function () {} */",
-                     "// Qt.callLater(function () { root.done(1) })"):
+                     "// Qt.callLater(function () { root.done(1) })",
+                     # Round two: a statement word straight after a `{`
+                     # opens a statement there (`with` dropped from the
+                     # words), and `?.function` is a member's name.
+                     "if (x) { with (o) { root.done(1) } }",
+                     "var k = o?.function"):
             with self.subTest(line=line):
                 self.assertEqual(self.judged(line), [])
 
@@ -505,7 +547,17 @@ class Closures(unittest.TestCase):
                      ["// CLOSURE-EXCEPTION: a test's reason", call],
                      ["// CLOSURE-EXCEPTION: a test's reason", "// and a second line of it", call],
                      ["// CLOSURE-EXCEPTION: a test's reason", "root.queueCacheJob(x, function (s) {", "  root.done(s)",
-                      "})"]):
+                      "})"],
+                     # Round two: a real excuse after a `//` inside a string
+                     # on the same line (only the first `//` read), after a
+                     # block comment, below a `//` line holding a `/*` (a
+                     # line comment read as opening a block), and in a
+                     # comment inside a template's substitution (a template
+                     # piece read to its closing backtick).
+                     ['var s = "//"; ' + call + " // CLOSURE-EXCEPTION: a test's reason"],
+                     [call + " /* a note */ // CLOSURE-EXCEPTION: a test's reason"],
+                     ["// a note /* that opens nothing", "// CLOSURE-EXCEPTION: a test's reason", call],
+                     [call[:-1] + ", `${ 1 // CLOSURE-EXCEPTION: a test's reason", "}`)"]):
             with self.subTest(body=body):
                 self.assertEqual(self.judged(*body), [])
 
@@ -517,6 +569,15 @@ class Closures(unittest.TestCase):
                            (["var a = 1 // CLOSURE-EXCEPTION: its own line's", call], 1),
                            (['Qt.callLater(function () { root.done(1) }, "// CLOSURE-EXCEPTION: in a string")'], 0),
                            (["Qt.callLater(function () { root.done(1) }) /* CLOSURE-EXCEPTION: a block comment */"], 0),
+                           # Round two: past an escaped quote, still in the
+                           # string (escapes not skipped), in a regular
+                           # expression (regexes not quoted), and a `//` in a
+                           # `/* */` comment, on the call's line and on a line
+                           # of its own inside one (block comments not read).
+                           (['Qt.callLater(function () { root.done(1) }, "a\\" // CLOSURE-EXCEPTION: in a string")'], 0),
+                           (["Qt.callLater(function () { root.done(1) }, /[//] CLOSURE-EXCEPTION: in a regex/)"], 0),
+                           (["/* // CLOSURE-EXCEPTION: in a block comment */ " + call], 0),
+                           (["/*", "// CLOSURE-EXCEPTION: inside a block comment", "*/ " + call], 2),
                            (["var s = `a", "// CLOSURE-EXCEPTION: inside a template", "`; " + call], 2),
                            (["// CONVENTION-EXCEPTION: another guard's", call], 1)):
             with self.subTest(body=body):
@@ -542,7 +603,16 @@ class Closures(unittest.TestCase):
         self.assertEqual(text.count(fixed), 1)
         text = text.replace(fixed, "      Qt.callLater(function() { root.persistActive(key) })\n")
         lines = text.split("\n")
-        at = [i for i, line in enumerate(lines) if "CLOSURE-EXCEPTION:" in line]
+        # The excuse inside startCacheLayout, found by its function's span,
+        # whatever other excuses the file carries.
+        spans = []
+        ss.service_files.function_spans(text, "Service-sources.js", spans)
+        span = [(s, e) for name, _a, s, e, _c in spans if name == "startCacheLayout"]
+        self.assertEqual(len(span), 1)
+        starts = [0]
+        for line in lines:
+            starts.append(starts[-1] + len(line) + 1)
+        at = [i for i, line in enumerate(lines) if "CLOSURE-EXCEPTION:" in line and span[0][0] <= starts[i] < span[0][1]]
         self.assertEqual(len(at), 1)
         start = at[0]
         while ss.service_files.COMMENT_LINE.match(lines[start - 1]):
