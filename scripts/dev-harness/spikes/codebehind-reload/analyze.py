@@ -131,4 +131,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # The readout is ASCII, a guide footer's middle dot written as an escape,
+    # so a RESULT file kept beside this rig passes the gate's ASCII scan.
+    sys.stdout.reconfigure(errors="backslashreplace", encoding="ascii")
     main(sys.argv)
