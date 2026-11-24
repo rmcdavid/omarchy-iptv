@@ -1,5 +1,8 @@
-# D-REL-15, measured 2026-11-24 by lane-drel15 on branch drel15 (the fix e1e376e, the guard 2e249e8),
-# qt6-declarative 6.12.0-2, qt6-base 6.12.0-3, gdb 18.1-1; every qml under gdb, offscreen.
+# D-REL-15, measured 2026-11-24 by lane-settle2-drel15 on branch drel15 at 1c71f01 (round two:
+# shapes heldbare and connectread added, startCacheLayout's excuse reworded in 6caf9b0); the
+# first record, of thirteen shapes, was lane-drel15's at 8a5490d. qt6-declarative 6.12.0-2,
+# qt6-base 6.12.0-3, gdb 18.1-1; every qml under gdb, offscreen; each script run once, exactly
+# as it says (TMPDIR a private 0700 folder, under the heavy lock, nice 10).
 
 ## ./run.sh
 
@@ -36,6 +39,10 @@ d-held-Plain-1           ReferenceError x1                  ok  [ReferenceError:
 d-held-Plain-0           ran: PERSIST k1:late               ok
 d-held-Bound-1           ReferenceError x1                  ok  [ReferenceError: root is not defined]
 d-held-Bound-0           ran: PERSIST k1:late               ok
+d-heldbare-Plain-1       SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-heldbare-Plain-0       ran: PERSIST k1:late               ok
+d-heldbare-Bound-1       SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
+d-heldbare-Bound-0       ran: PERSIST k1:late               ok
 d-heldroot-Plain-1       TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
 d-heldroot-Plain-0       ran: PERSIST k1:late               ok
 d-heldroot-Bound-1       TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
@@ -44,6 +51,10 @@ d-connect-Plain-1        SIGSEGV                            ok  [in ?? () from /
 d-connect-Plain-0        ran: PERSIST signal                ok
 d-connect-Bound-1        SIGSEGV                            ok  [in ?? () from /usr/lib/qt6/bin/../../libQt6Qml.so.6]
 d-connect-Bound-0        ran: PERSIST signal                ok
+d-connectread-Plain-1    ReferenceError x1                  ok  [ReferenceError: root is not defined]
+d-connectread-Plain-0    ran: PERSIST signal                ok
+d-connectread-Bound-1    ReferenceError x1                  ok  [ReferenceError: root is not defined]
+d-connectread-Bound-0    ran: PERSIST signal                ok
 d-connectroot-Plain-1    TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
 d-connectroot-Plain-0    ran: PERSIST signal                ok
 d-connectroot-Bound-1    TypeError x1                       ok  [TypeError: Cannot call method 'persistActive' of null]
@@ -65,8 +76,10 @@ shape method    deleted: nothing ran    kept: ran: PING                    both 
 shape fold      deleted: nothing ran    kept: ran: PERSIST k2              both forms: as measured
 shape stored    deleted: nothing ran    kept: ran: PERSIST k1:done         both forms: as measured
 shape held      deleted: ReferenceError x1 kept: ran: PERSIST k1:late         both forms: as measured
+shape heldbare  deleted: SIGSEGV        kept: ran: PERSIST k1:late         both forms: as measured
 shape heldroot  deleted: TypeError x1   kept: ran: PERSIST k1:late         both forms: as measured
 shape connect   deleted: SIGSEGV        kept: ran: PERSIST signal          both forms: as measured
+shape connectread deleted: ReferenceError x1 kept: ran: PERSIST signal          both forms: as measured
 shape connectroot deleted: TypeError x1   kept: ran: PERSIST signal          both forms: as measured
 shape binding   deleted: ran: LABEL bound 0 2 kept: ran: LABEL bound 0 2,LABEL bound 1 2 both forms: as measured
 shape bindingroot deleted: ran: LABEL bound 0 2 kept: ran: LABEL bound 0 2,LABEL bound 1 2 both forms: as measured
@@ -75,7 +88,7 @@ run.sh exit 0
 ## ./shipped.sh
 
 crash journal before: 89
-the tree's Service-sources.js: persistActiveLater: from its Service.qml, 1031 bytes
+the tree's Service-sources.js: persistActiveLater: from its Service.qml, 1146 bytes
 tree   deleted  TypeError x2                       ok  [TypeError: Cannot call method 'persistActive' of null (exception occurred during delayed function evaluation)]
 tree   kept     ran: PERSIST a.m3u,PERSIST b.m3u   ok
 baea04a78d2a6b9294c42c5cb6ae31176eae8138's Service-sources.js: persistActiveLater: none in its Service.qml
