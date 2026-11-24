@@ -58,7 +58,7 @@
 # calls (old, oldread, root, new, method, fold) -- destroy() is deferred, so
 # the calls still reach a live object -- or makes them and then asks it
 # (stored, held, heldbare, heldroot, connect, connectread, connectroot,
-# binding, bindingroot), and the outside object calls back 100 ms later.
+# binding, bindingroot), and the outside object calls back 150 ms later.
 # Asked the other way round -- the calls first and destroy() after them in
 # the same turn -- shapes old, new and method ran their deferred calls before
 # the deletion, in both forms: old's and new's both keys, method's one PING,

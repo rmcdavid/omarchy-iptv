@@ -37,7 +37,8 @@ Rule 11: each refusal kind's case is wrong on a one-decision mutant of the
 judge, and the round trip on a one-byte mutant; the closure rule's tests are
 red on baea04a's script and each on one of nineteen one-decision mutants of
 the rule (docs/QA-RESULTS.md "D-REL-15: no code-behind closure outlives its
-call"); and the fix pass on 2a4ab03's
+call"; 77 of 83 such mutants red by round three, the other six equivalent,
+named there); and the fix pass on 2a4ab03's
 eight new cases, the untracked-file cut, the plain-argument cut, the script
 beside the fixture and the CRLF message are each red on 2a4ab03's script or a
 one-decision mutant; docs/QA-RESULTS.md "D-REL-14: the splitter and its
@@ -140,6 +141,26 @@ class ThisTree(unittest.TestCase):
         # prototype. A judge that stopped reading them would pass anything.
         self.assertGreater(counts["sites"], 2000)
         self.assertGreater(counts["root_functions"] + counts["forwarders"], 150)
+
+    def test_check_refuses_a_closure_put_into_each_of_this_trees_code_behinds(self):
+        # judge(), which --check runs, applies the closure rule (D-REL-15)
+        # to every code-behind Service.qml declares, not to one of them:
+        # the same made function put into each in turn is refused there,
+        # and only there (round three, the lead's; red on the mutants that
+        # judge only the first or only the last code-behind declared,
+        # where every other test that goes through judge() has one).
+        service, files, present = ss.tree_inputs(ROOT)
+        decls = ss.service_files.declarations(service)
+        self.assertGreaterEqual(len(decls), 2)
+        for name, _qualifier, _n in decls:
+            with self.subTest(code_behind=name):
+                header = re.search(r"(?m)^  function [A-Za-z0-9_]+\([^)\n]*\) \{\n", files[name])
+                self.assertIsNotNone(header, name)
+                made = dict(files)
+                made[name] = (files[name][:header.end()] + "    Qt.callLater(function () { root.persistActive(1) })\n"
+                              + files[name][header.end():])
+                problems, _counts = ss.judge(service, made, present, QML_DIR)
+                self.assertEqual([str(p).split(":")[1].strip() for p in problems if p.kind == "closure"], [name])
 
     def test_the_gate_command_is_clean_and_runs_its_own_cases(self):
         rc, out = run("--check", "--root", ROOT, "--qml-dir", QML_DIR)
@@ -473,6 +494,23 @@ class Closures(unittest.TestCase):
         self.assertEqual(self.judged(line), [("closure", 0, 4 + line.index("class") + 1),
                                              ("closure", 0, 4 + line.index("m()") + 1)])
 
+    def test_a_static_method_is_refused_at_its_static_and_its_class_at_its_class(self):
+        # Two refusals, the class's and its method's, the method's placed at
+        # its `static` (round three, the lead's; red on the mutant that
+        # reads `static` as no modifier, which drops the second).
+        line = "var A = class { static m() { return 1 } }"
+        self.assertEqual(self.judged(line), [("closure", 0, 4 + line.index("class") + 1),
+                                             ("closure", 0, 4 + line.index("static") + 1)])
+
+    def test_a_function_made_at_the_header_indent_on_a_line_that_is_no_header_is_refused(self):
+        # Only a header LINE's own `function` at column 3 is exempt; one
+        # that starts at column 3 on a continuation line is made inside the
+        # function above it (round three, the lead's; red on the mutant
+        # that exempts column 3 on any line).
+        text = "// a test code-behind\n\n  function f(x) {\n    Qt.callLater(\n  function () { root.done(x) })\n  }\n"
+        problems = ss.closure_problems("Service-test.js", text)
+        self.assertEqual([str(p).split(": ")[1] for p in problems], ["Service-test.js:5:3"])
+
     def test_an_async_function_or_arrow_is_placed_at_its_async(self):
         # The refusal names the column the function starts at, its `async`
         # included (round two; each red on the mutant that starts it at its
@@ -579,7 +617,21 @@ class Closures(unittest.TestCase):
                            (["/* // CLOSURE-EXCEPTION: in a block comment */ " + call], 0),
                            (["/*", "// CLOSURE-EXCEPTION: inside a block comment", "*/ " + call], 2),
                            (["var s = `a", "// CLOSURE-EXCEPTION: inside a template", "`; " + call], 2),
-                           (["// CONVENTION-EXCEPTION: another guard's", call], 1)):
+                           (["// CONVENTION-EXCEPTION: another guard's", call], 1),
+                           # Round three (the lead's, from the tests
+                           # recheck's fresh mutants), each red on the one
+                           # named: a string ends only at its own quote
+                           # (either quote ends it), a template skips its
+                           # escapes (escapes not skipped), a `$` opens a
+                           # substitution only before `{` (any `$` does), a
+                           # block comment's `*/` is looked for after its
+                           # `/*` (from its `*`), and the excuse is upper
+                           # case (read in any case).
+                           ([call[:-1] + ", 'a \" // CLOSURE-EXCEPTION: in a string')"], 0),
+                           ([call[:-1] + ", `a\\` // CLOSURE-EXCEPTION: in a template`)"], 0),
+                           ([call[:-1] + ", `$5 // CLOSURE-EXCEPTION: in a template`)"], 0),
+                           (["/*/ // CLOSURE-EXCEPTION: in a block comment */ " + call], 0),
+                           ([call + " // closure-exception: lower case"], 0)):
             with self.subTest(body=body):
                 self.refused_at(body, line)
 

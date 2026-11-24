@@ -26769,7 +26769,9 @@ consecutive) and that an `async` function's start moves to its `async`
 [Corrected in round two: the column is the refusal's output, so the
 `async` start is tested now, and the guard recheck found seven more
 decisions with no test, each tested now; three equivalent mutants remain,
-the `=>` adjacency among them -- round two's call (z), below.]
+the `=>` adjacency among them -- round two's call (z), below. Of the 52
+then written: round three, below, wrote 31 more and tested the nine
+decisions they found untested, and six equivalent mutants of 83 remain.]
 
 **Call (t): startCacheLayout's onDone.** It is held only in
 `root.cacheQueue` and `root.cacheJob` (root properties, read by no other
@@ -26850,7 +26852,9 @@ the rule on the tree.
 **Call (v): siblings by shape.** Searched in the four code-behinds, by
 tokens and by grep:
 - every `Qt.callLater` in a code-behind: seven sites hand a root method
-  (Service-player.js 373, 374, 380, 393, 491; Service-sources.js 298, 760),
+  (Service-player.js 373, 374, 380, 393, 491; Service-sources.js 298, 760
+  [757 on the settled tip, 6eb165f, where 6caf9b0 shortened
+  startCacheLayout's excuse by three lines]),
   skipped once the Service is gone (shape method); adoptActive's closure is
   the fix;
 - `.connect(`, `.disconnect(`, `Qt.binding`, `.then(`, `setTimeout`,
@@ -26902,7 +26906,8 @@ named.
 | release.py check | 47 files | 47 files, 26 runtime sources, the largest Guide.qml at 310,448 B |
 
 Service.qml goes from 229,117 to 230,265 B (228,487 under the ceiling) and
-Service-sources.js from 90,258 to 90,888 B. `--verify --from-git baea04a`
+Service-sources.js from 90,258 to 90,888 B [90,674 B on the settled tip,
+6eb165f, after 6caf9b0's shorter excuse]. `--verify --from-git baea04a`
 is red at byte 351,502, line 6,363 of the view, adoptActive's new comment
 line above its call (449,221 bytes against 447,443); against e1e376e it is
 red at byte 351,625, line 6,364, d6e8fd3's narrowed comment, and against
@@ -27070,6 +27075,9 @@ test module (failures, subtests counted; the tip OK, 4fc714a's guard 5):
 recorded as such: no valid JavaScript has `=` and `>` apart and
 consecutive; a name at index 0 is skipped just below the lookback; and a
 `//` comment always ends before the next token, so the clamp never binds.
+[Of these 52. The tests recheck wrote 31 more, and nine of them left the
+suite green where the guard's reading changes; each is tested now, and
+three more equivalent mutants are named -- round three, below.]
 Round one's "two decisions are equivalent mutants and untested" is
 corrected in place above. Python 3,028 -> 3,030 by discovery (the class
 test and the `async` test); PY_TESTS_MIN 2,991 -> 3,030 (9f1597d), the
@@ -27171,3 +27179,92 @@ tests/test_host_load_patch.py, whose qml runs need a gdb driver that went
 with /tmp; it reads Service.qml's inline view, which this round changed by
 one comment in Service-sources.js.
 CLAUDE.md is the lead's; the proposed sentence is in this lane's result.
+
+### Round three (the lead, 2026-11-24)
+
+Round two had two read-only rechecks, one on the records and the spike and
+one on the tests and the guard. Both read the branch pushable, and neither
+found a defect on the tree. Each call below is the lead's call under the
+owner's standing authority of 2026-11-09.
+
+**The tests recheck's two should-fix findings, taken.**
+- Nothing held that `judge()`, which `--check` runs, applies the closure
+  rule to every code-behind. Every test that goes through `judge()` has
+  exactly one code-behind, and the tree tests call `closure_problems()`
+  directly. The recheck wrote two mutants that judge only the first or only
+  the last declared code-behind. Both left the suite green, and with C3's
+  line put back in Service-sources.js the first-only one read the tree
+  clean. New test
+  `test_check_refuses_a_closure_put_into_each_of_this_trees_code_behinds`:
+  - it puts `Qt.callLater(function () { root.persistActive(1) })` after
+    the first function header of each of the four code-behinds in turn;
+  - it asserts that `judge()` refuses it as `closure` in that file and in
+    no other.
+- Six more decisions of the guard had no test. One subtest each in
+  `test_what_is_no_closure_exception_does_not_excuse`:
+  - a string ends only at its own quote;
+  - a template skips its escapes;
+  - a `$` opens a substitution only before `{`;
+  - a block comment's `*/` is looked for after its `/*`;
+  - the excuse is upper case.
+
+  A new test holds the sixth: the header exemption is a header line's, not
+  column 3's on any line.
+- The recheck's nit `static-not-modifier` drops only the second of two
+  refusals. A new test pins the exact problem list.
+
+Each against tests/test_split_service.py, on an archive of 6eb165f with the
+new test module, the recheck's mutant texts applied to the script:
+
+| mutant | failures |
+|---|---|
+| the tip | 0 (39 tests, OK) |
+| judge-first-code-behind-only | 3 (the three code-behinds it skips) |
+| judge-last-code-behind-only | 3 |
+| str-ends-at-any-quote | 1 |
+| tmpl-escapes-ignored | 1 |
+| dollar-alone-ends-piece | 1 |
+| block-close-searched-from-star | 1 |
+| exception-any-case | 1 |
+| header-by-column-only | 1 |
+| static-not-modifier | 1 |
+
+Each failure is in the test written for that mutant. The recheck's three
+other green mutants are equivalent, and are named rather than tested:
+- `comment-only-from-line-start`: a quoted range cannot begin or end
+  inside leading whitespace;
+- `sync-receiver-kind-unread`: no token but a name can carry a method name
+  between `.` and `(`;
+- `str-end-before-quote`: a string's closing quote is never a `/`.
+
+So 83 one-decision mutants of the guard have been written across the
+rounds: round two's 52 and the recheck's 31. 77 are red and six are
+equivalent. Python by discovery goes from 3,030 to 3,033, and
+PY_TESTS_MIN with it.
+
+**The records recheck's five nits, taken.**
+- The harness README's direct-call clause now ends "a ReferenceError when
+  it had read the root first". Round one's narrowing variants (one run
+  each) crashed after a lookup that was not the root's: variant D's
+  `Model.emptyState()` and variant A's parameter assignment.
+- run.sh says the outside object calls back 150 ms later, not 100. The
+  100 ms is the Service's own `tick`, shape stored's caller. This is a
+  comment only, so the runs at 1c71f01 that RESULT-2026-11-24.txt records
+  stand.
+- The D-REL-15 row's destroy-after sentence gets round two's narrowing.
+- Round one's call (v) line number and its Service-sources.js size are
+  bracketed with the tip's.
+
+**Recorded, not committed.** The records recheck asked whether held and
+heldbare differ by their maker's root read or by held's storage on the
+root. Its scratch probe `heldread` answered: the read decides, not the
+storage. The probe is heldbare's driver calling a maker that reads `root.n`
+and stores nothing, run through the spike's own gdbrun.sh in both forms.
+- Deleted: `ReferenceError: root is not defined`.
+- Kept: it ran.
+- 8 of 8 runs as stated, crash journal 89.
+
+It stays out of the spike (the lead's call). The guard, not the spike,
+holds the rule, and RESULT-2026-11-24.txt is what the records cite.
+Removing the two redundant guard lines behind round two's equivalent
+mutants was also not taken (the lead's call); they are named instead.

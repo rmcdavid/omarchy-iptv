@@ -2663,8 +2663,9 @@ None is part of the gate.
   the function that made it looked up first, not on who calls it -- handed
   to Qt.callLater, a SIGSEGV, or a ReferenceError when its function read the
   root first; called directly by an object outside the Service, a SIGSEGV
-  when its maker looked nothing up and a ReferenceError when it had;
-  connected to an outside object's signal, the same two -- while the same
+  when its maker looked nothing up and a ReferenceError when it had read
+  the root first; connected to an outside object's signal, the same two --
+  while the same
   made in a root function, or in one a code-behind calls (the fix), logs a
   TypeError or does nothing, never a crash; `root.X` from a code-behind
   skipped; two `Qt.callLater(root.X, key)` in a turn one call with the last

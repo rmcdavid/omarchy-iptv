@@ -1427,8 +1427,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # Closures tests in round one, and round two's two (a class handed to map
 # stays refused; an async function is placed at its `async`), each red on
 # its one-decision mutant of the guard (QA-RESULTS "D-REL-15 ... Round
-# two"); the suite counts 3030.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3030}
+# two"); the suite counts 3030. 3030 -> 3033: round three's three guard
+# tests (judge() refuses a closure in each code-behind; a static method's
+# two refusals; a header's exemption is its line's), each red on its
+# mutant (QA-RESULTS "Round three"); the suite counts 3033.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3033}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
