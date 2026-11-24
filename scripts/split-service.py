@@ -66,11 +66,15 @@ MODES (exactly one):
                               nested declaration, an arrow function, an
                               object literal's method, a class (D-REL-15).
                               Measured under gdb, one made in a code-behind
-                              and handed to Qt.callLater, or connected to a
-                              signal of an object outside the Service, is a
-                              SIGSEGV inside libQt6Qml once its Service is
-                              deleted before the call, where the same made
-                              in Service.qml logs a TypeError
+                              can take the QML engine down (a SIGSEGV inside
+                              libQt6Qml) when something calls it after its
+                              Service is deleted -- Qt.callLater, a signal of
+                              an object outside the Service, or that object
+                              calling it directly -- where the same made in
+                              Service.qml logs a TypeError; whether it
+                              crashes or logs a ReferenceError turned on what
+                              its making function did before making it,
+                              which no reading of the source can be held to
                               (scripts/dev-harness/spikes/codebehind-calllater/).
                               Allowed: the immediate callback argument of a
                               call to a method named filter, map, forEach,
@@ -593,9 +597,9 @@ def closure_problems(label, text):
         t = toks[start]
         if comments.excused(t.line):
             continue
-        out.append(Problem('closure', '%s:%d:%d: %s made in a code-behind (D-REL-15): handed to Qt.callLater or '
-                           'connected to a signal, a function made here is a SIGSEGV in the QML engine once its '
-                           'Service is deleted before the call, where one made in Service.qml logs a TypeError. '
+        out.append(Problem('closure', '%s:%d:%d: %s made in a code-behind (D-REL-15): a function made here can '
+                           'take the QML engine down (a SIGSEGV, measured) when anything calls it after its '
+                           'Service is deleted, where one made in Service.qml logs a TypeError. '
                            'Make it in a root function of Service.qml (as persistActiveLater is), or, when nothing '
                            'can call it once its Service is gone, say why on its line or directly above it: '
                            '`// CLOSURE-EXCEPTION: <reason>`. The callback of a synchronous Array method (%s) is '

@@ -2095,11 +2095,12 @@ step "service split guard (scripts/split-service.py --check)"
 # a qualifier named outside its forwarders, `this` or `arguments` in a
 # code-behind, a code-behind naming its own function unqualified, a function
 # a code-behind makes that is no synchronous Array method's callback and
-# carries no CLOSURE-EXCEPTION (D-REL-15: handed to Qt.callLater or a signal,
-# one is a SIGSEGV in the QML engine once its Service is deleted), and a
-# root.N that is no member of the root -- the member check qmllint stopped
-# making once a body moved, and only ever warned about. Then the script's
-# own cases, so the judge is seen judging on a tree with nothing split.
+# carries no CLOSURE-EXCEPTION (D-REL-15: one can take the QML engine down,
+# a SIGSEGV, measured, when anything calls it after its Service is deleted),
+# and a root.N that is no member of the root -- the member check qmllint
+# stopped making once a body moved, and only ever warned about. Then the
+# script's own cases, so the judge is seen judging on a tree with nothing
+# split.
 split_service_log=$CHECK_TMP/split-service.log
 if python3 "$ROOT/scripts/split-service.py" --check --root "$ROOT" --qml-dir "$QML_IMPORTS" >"$split_service_log" 2>&1; then
   split_sites=$(grep -oE '[0-9]+ root member site\(s\) judged' "$split_service_log" | head -1 | grep -oE '^[0-9]+')
