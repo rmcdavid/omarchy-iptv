@@ -8,12 +8,14 @@ text now reads it through the readers: the FILES (Service.qml, then each
 read as its function's text, which is the one-file Service.qml the split was
 cut from). This file holds the Python reader to:
 
-  * this tree, where Service.qml declares two code-behinds since D-REL-14's
-    C3 (2026-11-23), Service-rewind.js and Service-sources.js: the files are
-    those three, and the view cut again by the code-behinds' own spans is
-    Service.qml, byte for byte (so every converted reader reads the one-file
-    text it read before the move; before C3 these tests pinned the files as
-    Service.qml alone and the view as its text, and the move flipped them);
+  * this tree, where Service.qml declares four code-behinds since D-REL-14's
+    C4 (2026-11-24), Service-pip.js, Service-player.js, Service-rewind.js and
+    Service-sources.js: the files are those five, and the view cut again by
+    the code-behinds' own spans is Service.qml, byte for byte (so every
+    converted reader reads the one-file text it read before the moves; before
+    C3 (2026-11-23) these tests pinned the files as Service.qml alone and the
+    view as its text, between C3 and C4 as the three files, and each move
+    flipped them);
   * the shared fixture tests/fixtures/service-split/: its view is inline.txt,
     and the round trip closes -- inline.txt cut again by the reader's own
     function spans is the fixture's Service.qml;
@@ -86,11 +88,14 @@ def node(*args):
 
 
 class ThisTree(unittest.TestCase):
-    # D-REL-14 C3: the M5-01 region's functions, rewind's 15 and sources' 21.
-    CODE_BEHINDS = (("Service-rewind.js", "ServiceRewind"), ("Service-sources.js", "ServiceSources"))
+    # D-REL-14 C3 moved the M5-01 region's functions, rewind's 15 and
+    # sources' 21; C4 pip's 23, player's 54, rewind's togglePause and sources'
+    # other 44, appended after C3's.
+    CODE_BEHINDS = (("Service-pip.js", "ServicePip"), ("Service-player.js", "ServicePlayer"),
+                    ("Service-rewind.js", "ServiceRewind"), ("Service-sources.js", "ServiceSources"))
 
-    def test_the_files_are_service_qml_and_its_two_code_behinds(self):
-        names = ["Service.qml", "Service-rewind.js", "Service-sources.js"]
+    def test_the_files_are_service_qml_and_its_four_code_behinds(self):
+        names = ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"]
         self.assertEqual(service_files.service_files(ROOT), [os.path.join(ROOT, n) for n in names])
         self.assertEqual(service_files.service_names(ROOT), names)
 
@@ -114,7 +119,7 @@ class ThisTree(unittest.TestCase):
         self.assertEqual(cut.count(anchor), 1)
         cut = cut.replace(anchor, anchor + "".join('import "%s" as %s\n' % fq for fq in self.CODE_BEHINDS))
         self.assertEqual(cut, raw(os.path.join(ROOT, "Service.qml")))
-        self.assertEqual(counts, [15, 21])
+        self.assertEqual(counts, [23, 54, 16, 65])
 
     def test_a_service_qml_path_reads_the_same_as_its_root(self):
         self.assertEqual(service_files.service_text(os.path.join(ROOT, "Service.qml")), service_files.service_text(ROOT))
@@ -244,7 +249,8 @@ class Origins(unittest.TestCase):
 
     def test_on_this_tree_each_code_behind_line_is_placed_in_its_file(self):
         origins = self.assert_placed(*self.texts(ROOT))
-        self.assertEqual(sorted(set(f for f, _l in origins if f)), ["Service-rewind.js", "Service-sources.js"])
+        self.assertEqual(sorted(set(f for f, _l in origins if f)),
+                         ["Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"])
 
     def test_on_the_fixture(self):
         origins = self.assert_placed(*self.texts(FIXTURE))

@@ -26064,3 +26064,484 @@ qa-lib, which needs a caged run of each scenario.
 Run: `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY bash
 scripts/qa-lib-test.sh`, 837 passed, 0 failed. Crash journal 89 before and
 after.
+
+## D-REL-14: C4, the player, pip and sources move (lane-relsplit4-move, 2026-11-24)
+
+Calls (l) to (q) are the lead's calls under the owner's standing authority
+of 2026-11-09. This lane worked on branch relsplit-4, from 91721d8, and held
+the nested display. Its commits:
+- 080b70f, the move;
+- 65f5d3d, the comment-only commit (call p);
+- b0b74cc, a node check that calls togglePause (call q);
+- e3cb567, the logo recipe's tag mutant re-pointed (rule 15);
+- this record.
+
+Nothing is released, pushed or merged, and nothing moved `main` or a tag;
+`main` stays held at 0.20.0 for #15671. The parent's half of call (o) and
+the mutants were lane-relsplit4-live's, on 91721d8; their runs are in the
+table under "The live proofs".
+
+**The base.** 91721d8 is 1418903, the last tree the lead gated, plus
+F-HARNESS-128's change to scripts/qa-lib-test.sh (828 -> 837 checks) and
+two documents. lane-relsplit4-live re-measured every count on it and each
+is the lead's but qa-lib-test's 837: node 4,069; python 3,016 by discovery;
+the spec 112; split-service --check 3 files, 36 forwarders, 2,267 sites,
+32 of 32 cases; Service.qml 409,149 B, Service-rewind.js 8,193 B,
+Service-sources.js 33,169 B; release.py check 45 files; qmllint on
+Service.qml as shipped 34 + 337 on Model members, and on its inline view
+46 + 387.
+
+**The map (call l).** Re-derived on 91721d8 with the readers' own spans
+(`function_spans`, each function with the `//` lines directly above it),
+from lane 1's prototype map of 9ed04be. The 168 root functions and C3's 36
+forwarders are 9ed04be's 204, in the same order, so no root function is
+one the map has never seen.
+
+| domain | on the root at 91721d8 | moved by C4 | bytes moved | stays |
+|---|---|---|---|---|
+| pip | 23 | 23, into a new Service-pip.js (ServicePip) | 19,907 | - |
+| player | 55 | 54, into a new Service-player.js (ServicePlayer) | 112,211 | tuneByNumber, 1,584 B |
+| sources | 45 | 44, after C3's 21 in Service-sources.js | 56,950 | applyOrder, 450 B |
+| rewind | 1 | togglePause, after C3's 15 in Service-rewind.js | 908 | - |
+| none | 44 | - | - | all 44, 46,140 B |
+
+That is 122 functions and 189,976 B, as the lead's scan of 1418903 read
+(about 190 KB). The names, in the order each code-behind now holds them:
+- pip: togglePip, requestPip, pipRefuse, pipReadClients, pipReadMonitors,
+  pipApplyClients, pipApplyMonitors, pipPlanRound, pipRunNextStep,
+  pipNoteStep, pipCheck, pipFinish, pipReset, notePlayerPid, pipPeek,
+  pipApplyPeek, pipWriteMpv, pipRequestSnapshot, pipNoteReply, pipConfig,
+  runPipProbe, handlePipWhichExit, handlePipInfoExit.
+- player: play, playArgs, stop, restartPlayer, zap, channelByNumber,
+  focusPlayer, dispatchFocus, runControl, handleControlResult,
+  drainPendingPlay, reapplyIntent, checkPlayerChannel, startPlayer,
+  issuePlayerSession, staleStartInFlight, lookForWithdrawn, runPlayer,
+  runPlayerProbe, handlePlayerResult, playerFirstLoadFailed,
+  probeOverruled, applyProbe, openOlderRestart, endOlderRestart,
+  reestablishAdopted, refusedWhilePlaying, reestablishForTls,
+  markDeadSession, noteSessionOutcome, stopForeignPlayer,
+  stopUnadoptedPlayer, reconcileNowPlaying, socketAttached,
+  releasePlayerSocket, attachPlayerSocket, armPlayerSocket, socketWrite,
+  onPlayerAttached, onSocketError, handlePlayerLine, rememberEntry,
+  raiseStreamFailure, raiseLocalPlayFailure, settleTimedOutPlay,
+  raisePlayerStopped, raiseOutputFailure, askRelayThenRaise,
+  handleRelayAnswer, raiseDeath, rememberStderr, handlePlayerGone,
+  runWhichMpv, handleWhichExit.
+- sources, after C3's: logoSurvey, refreshPlaylist, refreshEpg,
+  sourceResult, sourcesReady, addSource, updateSource, removeSource,
+  retryHeldMigration, switchSource, buildXtreamSource, sourceForEdit,
+  retrySource, cancelProbe, requestClipboard, applyChannels, adoptIdScheme,
+  applyPlaylistStatus, adoptSourceStats, applyEpgStatus, setEpgStatus,
+  applyEpgNow, helperTimeoutStatus, runPlaylistHelper, runEpgHelper,
+  handlePlaylistExit, handleEpgExit, persistActive, flushPendingEntry,
+  persistEntryKey, refuseUnsafePersist, writeActive, writeOwnedEntry,
+  runConfigShield, onConfigShieldExit, setShowLogos, handleFailedExit,
+  persistFailed, runFailedJob, applyFailed, pruneFailed, onLogoLine,
+  flushLogoNames, fetchLogos.
+- rewind, after C3's: togglePause.
+
+The 44 the map never named stay on the root: toggleFavorite,
+toggleHiddenGroup, saveSearch, forgetSearch, removeRecent, refresh, notify,
+runNotify, handleNotifyExit, notifyOverdue, nowPlayingSummary,
+statusSummary, startStateInit, startStartupCheck, startupMkdirExited,
+stateInitExited, stateLoadArrived, saveDeferredState, recheckStateBlock,
+finishStateVerifyLater, endStateWriteWait, finishStateVerify,
+decideStateLoad, blockStateWrites, liftStateBlock, applyUserState,
+mergeForeignText, saveState, settleEntryFlush, runHelper,
+requestStateMode, handleStateModeExit, requestStatePrivate,
+handleStatePrivateExit, finishStatePrivate, noteStateWriteFailed,
+tellStateSaveRefused, str, hostForRecord, resultField, probeRecord,
+withKey, withoutKey, recheckBuild. With applyOrder and tuneByNumber, 46
+functions are left on the root.
+
+Since `--cut` appends to a code-behind in file order, C4's sources
+functions sit after C3's in Service-sources.js, though most of them came
+before C3's region in the one-file text, and togglePause sits after
+issueQueuedTracks, where it sat just above seekState. A comment that points
+up or down at a function of the other cohort would now read the wrong way;
+the search under call (p) found none.
+
+**Patch context (call m).** The lead's scan stands on 91721d8:
+- Every hunk of the 18 patches that target Service.qml was found by its own
+  old-side lines in 91721d8's Service.qml, as `git apply` finds it. With the
+  map, none comes within three lines of a moved function (its span
+  included). flip-refetches.patch sits in applyOrder and startStateInit,
+  unknown-plays.patch in tuneByNumber; the rest in applyUserState,
+  liftStateBlock, mergeForeignText, saveState, recheckStateBlock,
+  finishStateVerifyLater, endStateWriteWait, finishStateVerify and in object
+  handlers, all on the root.
+- `git apply --check` of all 30 patches: 30 of 30 on 91721d8 and on the
+  move.
+- A scratch cut of 91721d8 that moves applyOrder and tuneByNumber too:
+  28 of 30, flip-refetches.patch and unknown-plays.patch refused, and no
+  other.
+- qa-lib-test's two judges, "all eight chno-mutation patches" and "all
+  nineteen key-mutation patches", are green inside its 837 on both trees.
+- The six service-reading preflights the gate runs read the parent's PASS
+  lines on the moved tree: chno-entry 21, chno 16, pip 41, id-rotate 14,
+  key 12, open 19, the key preflight's random source keys apart. No
+  scenario applies a patch itself. logo- and clip-scenario's check-tree
+  start a qml probe bare, so they were not run here.
+
+**The cut (call n).** The command was `split-service.py --cut --from
+91721d86b443fd4e4c8b8daccae95fbb1d8c98f2 --map <the map>`, never a hand
+edit, and it printed `verify ok (the inline view matches
+91721d86b443fd4e4c8b8daccae95fbb1d8c98f2's inline view byte for byte,
+447137 bytes)`.
+
+| file | 91721d8 | 080b70f (the move) | e3cb567 (the tip's code) |
+|---|---|---|---|
+| Service.qml | 409,149 B, 7,747 lines | 228,886 B, 4,379 lines | 229,117 B |
+| Service-pip.js | - | 20,235 B | 20,235 B |
+| Service-player.js | - | 112,604 B | 112,628 B |
+| Service-rewind.js | 8,193 B | 9,103 B | 9,103 B |
+| Service-sources.js | 33,169 B | 90,207 B | 90,258 B |
+
+- The 122 new forwarders take 9,631 B and the two new import lines 82 B:
+  409,149 - 189,976 + 9,631 + 82 = 228,886.
+- Service.qml has 229,866 B of headroom under the 458,752 B ceiling at the
+  move (it had 49,603), and Guide.qml, 310,448 B, is now the largest
+  shipped file.
+- `--check` reads 5 files, 4 code-behinds, 46 root functions, 158
+  forwarders, 2,267 root member sites, 2 uses of the root whole and 32 of
+  32 cases, so the gate's floors (2,200 and 32) stand.
+- ALLOWLIST goes from 45 to 47 entries (Service-pip.js, Service-player.js),
+  test_release's must_ship gains both in the same commit, and its double's
+  Service.qml declares both, as the real one does (rule 10). release.py
+  check reads 47 files and 26 runtime sources (24 before).
+
+**The pins (call n).** Each pin that said the tree is Service.qml and two
+code-behinds now names the five files:
+- tests/Model.test.js, two checks. "D-REL-14 C3: on this tree the service
+  is Service.qml and its two code-behinds, ..." becomes "D-REL-14 C4: ...
+  its four code-behinds, pip's, player's, rewind's and sources', ...", and
+  its cut of the view by the code-behinds' own spans now expects 23, 54, 16
+  and 65 functions. "the node and python readers agree on this tree" now
+  expects the five names.
+- tests/test_service_files.py: ThisTree's
+  test_the_files_are_service_qml_and_its_two_code_behinds becomes
+  ..._four_code_behinds, test_the_view_cut_again_is_service_qml_byte_for_byte
+  expects [23, 54, 16, 65], and Origins'
+  test_on_this_tree_each_code_behind_line_is_placed_in_its_file (F-GATE-29's)
+  expects the four code-behinds.
+- scripts/qa-lib-test.sh, one check: "and on this tree that is Service.qml
+  and its four code-behinds, pip's, player's, rewind's and sources'". The
+  check C3 flipped beside it, that qa_service_text is the other engine's
+  view and not Service.qml's own text, holds for any split tree and stands.
+- Docstrings and comments that named two code-behinds: test_split_service.py
+  and check.sh's service split floor comment.
+
+Rule 11, red both ways. Each run was in a scratch clone of one side with
+the other side's tests/Model.test.js, tests/test_service_files.py,
+tests/test_release.py and scripts/qa-lib-test.sh swapped in, then restored:
+- **080b70f's tests on 91721d8:** node 4,069 checks, 2 failures, the two
+  flipped checks; test_service_files and test_release 140 tests, 36 red (14
+  failures, 22 errors): ThisTree's two and Origins' one, and 33 of
+  test_release, whose double declares Service-pip.js and Service-player.js
+  where the 45-entry ALLOWLIST ships neither; qa-lib-test 836 passed, 1
+  failed, the flipped check.
+- **91721d8's tests on 080b70f:** node 2 red, the old pins; python 36 red (15
+  failures, 21 errors): ThisTree's two and Origins' one, and 33 of
+  test_release ("Service-pip.js is on the allowlist but nothing the plugin
+  loads imports it"); qa-lib-test 836 passed, 1 failed.
+
+**The suites.** Every count is the parent's; the names differ only by the
+renames above.
+
+| suite | 91721d8 | the moved tree |
+|---|---|---|
+| node tests/Model.test.js | 4,069, 0 failures (the live lane) | 4,069, 0 (the move, before b0b74cc); the name list differs by the one renamed check |
+| python by discovery | 3,016 | 3,016; the ids differ by ThisTree's one renamed test |
+| the 46 modules that name the service, the allowlist, the readers or check.sh, under bwrap as check.sh runs them | 1,507 tests, OK | 1,507, OK |
+| tests/test_host_load_patch.py, each qml under gdb (drive_case.py) | 12 of 12, 3 qml runs | 12 of 12, 3 qml runs |
+| tests/Model.spec.qml, qmltestrunner under gdb | 112 passed, 0 failed (the live lane) | 112, 0, the same names |
+| scripts/qa-lib-test.sh | 837 passed, 0 failed (the live lane) | 837, 0; the one check renamed |
+
+The 46 modules are lane C3's selection: every test_*.py naming the
+service, the allowlist, the readers or check.sh (39 on 91721d8), less the
+three that start qml (test_host_notify_codes and test_host_text_format
+bare, and test_host_load_patch, driven under gdb on its own), plus ten the
+lane added (board staleness, the id-rotate fixture, the harness shell's
+model, helper, mpv, qml stderr logging, relay, rewind, source and
+split-helper). Re-applied on 91721d8 the rule names no module the
+selection lacks.
+The full python suite is the lead's gate's. The qa-lib-test run on the
+moved tree inherited the session's XDG_RUNTIME_DIR, where it made its
+transcript directory and removed it (nothing was left in the runtime
+directory, listed after the run); every later run of it here had a private
+one.
+
+**The guards and the qmllint step, as check.sh runs each.**
+- On both trees, light-all.sh ran every light step in check.sh's own
+  command lines: release.py check, the three split checks, the nine guards,
+  the SR register, double-encoding, mpv option and marketplace guards, both
+  byte scans, check-defect-ledger and check-board-staleness. Each prints the
+  parent's line byte for byte but for a count of files: text format, theme
+  names, colour literals, Qt revisions and metric literals 5 -> 7 files;
+  trim shapes and model regex 24 -> 26; README notices 37 -> 39 shipped
+  code files; double-encoding and the ledger 551 -> 553 tracked files; the
+  byte scans 489 -> 491 and 461 -> 463; the marketplace scan 145 -> 147
+  files and 69,874 -> 70,000 commands (the 122 forwarders, the 2 import
+  lines and release.py's 2 new ALLOWLIST lines, counted per file by the
+  scan's own `command_sequence`).
+- Model members reads 413 references on both trees: on 91721d8 Service.qml
+  360, Service-rewind.js 10, Service-sources.js 43; on the move Service.qml
+  150, Service-pip.js 23, Service-player.js 98, Service-rewind.js 11,
+  Service-sources.js 131, each code-behind judged under Service.qml's
+  imports.
+- split-helper --check, split-model --check, the helper regex guard and the
+  harness root's theme names read the same on both trees; the ledger reads
+  798 rows (before this record's F-PERF-3) and the board 0 disagreements.
+- qmllint, through check.sh's `--qmllint-file` door per file and the
+  harness shell staged as the step stages it: Service.qml has 0 errors on
+  both trees and its entries fall from 371 (32 block-scoped `var`s and 339
+  missing-property, 337 on Model) to 143 (7 and 136, 134 on Model), the
+  moved bodies being read by no linter of their own. BarWidget.qml,
+  Guide.qml, Model.spec.qml and shell.qml read the same.
+- F-GATE-29's door (`--qmllint-view Service.qml`) reads `0 errors, 46
+  warning(s) + 387 on Model members` on both trees. With CHECK_VERBOSE each
+  of the 433 entries was placed back on the inline view's own line through
+  `inline_origins`, and the two lists are equal entry for entry (view line,
+  column and message): the same entries in the same places, named now at
+  Service-pip.js (23), Service-player.js (113), Service-rewind.js (9),
+  Service-sources.js (145) and Service.qml (143). Service.qml's own count
+  falling is the move, not a re-level, and no floor moves.
+
+**The suites read the code-behinds (call q).** lane-relsplit4-live's node
+mutants, each a script that replaces one exact string and refuses unless it
+occurs once, applied on b0b74cc to the code-behind where the string now is
+(once there, 0 times anywhere else in the service), each through the whole
+node suite:
+
+| mutant | on 91721d8 (the live lane) | on b0b74cc, inside |
+|---|---|---|
+| handleControlResult's healthy-status branch without `root.runPlayerProbe()` | 4,069, 2 failures: the two D-PLY-67 checks ("through Service.qml, a healthy status whose relay is gone sends ONE `player probe` ..." and "while the probe it asked for is still running, ...") | Service-player.js: 4,070, the same 2 |
+| handlePipWhichExit without `hyprInfoProc.running = true` | 1: "D-SRC-37 (c), rule 15 / D-PLY-26: the PiP start-up pair ..." | Service-pip.js: the same 1 |
+| removeSource without `root.queueCacheJob(["remove", "--key", key], null)` | 2: "D-SRC-69: a record REMOVED between cacheReady and dirsReady ..." and "D-SRC-70 (guards): SR7 unchanged ..." | Service-sources.js: the same 2 |
+| togglePause without `root.paused = want` | 0: no node check called togglePause (one stubs it) | Service-rewind.js: 1, the new check below |
+
+togglePause had no node reader, only rewind-scenario's R10 and R11, live,
+so b0b74cc adds one: "D-REL-14 C4: togglePause through Service.qml -- with a
+channel playing it asks the control slot for `player pause --state on` and
+shows paused at once (rule 9); a second press while that run is out
+answers busy and asks nothing; the helper's reply then sets paused; with
+nothing playing it answers idle and asks nothing". It boots the service on
+a player of this build (D-PLY-67's `current()` world) and calls the
+forwarder. Seen red (rule 11), with b0b74cc's Model.test.js in a clone:
+- 080b70f with the flip dropped in Service-rewind.js: 4,070, 1 failure,
+  this check (flipped and busy read `false`).
+- the idle refusal dropped instead (`if (!root.nowPlaying) return "idle"`):
+  1 failure, this check (nothing playing answered `""` and asked once).
+- 91721d8, where togglePause is still in Service.qml: the check is green;
+  with the flip dropped there, it is red.
+- On the tree, 4,070 checks, 0 failures; NODE_CHECKS_MIN goes from 4,069 to
+  4,070.
+
+In one of the twelve node runs this lane made (the new check on 91721d8),
+"D-SINK-112: over 10,000 rows none of whose logos counts ... the column
+test costs under half of validating the addresses" was red on its fifth
+shape and green in the other eleven. It is a ratio of two wall-clock
+timings, two earlier lanes had seen it red under load without an id, and
+it is filed as F-PERF-3.
+
+**The live proofs (call o).** Every run was made the release step's way:
+- the heavy lock and nice 10;
+- scripts/dev-harness/private-bus.sh;
+- a nested headless cage (the scenario's own for rewind --cage and key
+  live; for pip, the rig's, below);
+- `env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+  QT_QPA_PLATFORMTHEME -u OMARCHY_IPTV_HARNESS_DIR`;
+- a short private XDG_RUNTIME_DIR and TMPDIR.
+
+Each tree was a `git archive` export of its commit, carrying a git
+repository that holds only a `v0.13.6` tag whose bin/omarchy-iptv is the
+real tag's file (sha256 746c7010...), as C3's trees did, and its .tree-id
+records the commit, the mutation's diff and the sha256 of every file the
+runs read. Each scenario ran from its own tree's copy. The moved tree is
+b0b74cc, whose service files are 65f5d3d's (080b70f's code with eight
+comments re-worded).
+
+pip-scenario.sh has no cage arm. Its live half ran as committed against a
+nested headless cage that a rig in scratch (pip-cage.sh) starts and stops
+the way rewind-scenario's cage arm does, with WAYLAND_DISPLAY the nested
+socket for the scenario alone, the player on run.sh's software-GPU lever
+(the harness's last-start.env reads `--gpu-sw=yes --ao=null --hwdec=no`),
+the scenario's own stub hyprctl, and a stand-in notification sender that
+logs a card instead of posting it. No sixth copy of cage_start and
+cage_stop was committed.
+
+| # | tree | scenario | result | time | load (1 min) | transcript |
+|---|---|---|---|---|---|---|
+| 1 | 91721d8 | pip live | 84 passed, 0 failed | 22 s | 0.39 to 1.11 | pip-20261124-062211-923242 |
+| 2 | 91721d8 | rewind --cage | 113 passed, 0 failed, R15 skipped (median 415 ms) | 308 s | 0.34 to 2.75 | rewind-20261124-062421-927167 |
+| 3 | 91721d8 | key live | 141 passed, 0 failed | 598.6 s | 2.95 to 2.02 | key-20261124-063125-940638 |
+| 4 | 91721d8, play() without `root.clearRewind()` | rewind --cage | 111 passed, 2 failed (R9's two), R15 skipped | 310 s | 2.13 to 3.04 | rewind-20261124-064313-983034 |
+| 5 | 91721d8, pipApplyPeek without its `pipOn` write | pip live | 83 passed, 2 failed (P11's two) | 31 s | 2.45 to 3.82 | pip-20261124-065015-996133 |
+| 6 | 91721d8 | pip live | 84 passed, 0 failed | 23 s | 2.49 to 2.56 | pip-20261124-065235-1000649 |
+| 7 | 91721d8, togglePause without `root.paused = want` | rewind --cage | 109 passed, 4 failed (R10's and R11's), R15 skipped | 312 s | 0.40 to 3.05 | rewind-20261124-065645-1005869 |
+| 8 | b0b74cc | pip live | 84 passed, 0 failed | 24 s | 1.10 to 2.74 | pip-20261124-081900-1167347 |
+| 9 | b0b74cc | rewind --cage | 113 passed, 0 failed, R15 skipped (median 431 ms) | 297 s | 2.74 to 2.59 | rewind-20261124-081925-1170243 |
+| 10 | b0b74cc | key live | 141 passed, 0 failed | 597.4 s | 2.59 to 2.86 | key-20261124-082423-1181537 |
+| 11 | b0b74cc, pipApplyPeek without its `pipOn` write, in Service-pip.js | pip live | 83 passed, 2 failed (P11's two) | 32 s | 2.86 to 2.74 | pip-20261124-083421-1222823 |
+| 12 | b0b74cc, play() without `root.clearRewind()`, in Service-player.js | rewind --cage | 111 passed, 2 failed (R9's two), R15 skipped (median 436 ms) | 310 s | 2.74 to 2.10 | rewind-20261124-083453-1226270 |
+| 13 | b0b74cc, togglePause without `root.paused = want`, in Service-rewind.js | rewind --cage | 109 passed, 4 failed (R10's and R11's), R15 skipped (median 409 ms) | 311 s | 1.93 to 4.83 | rewind-20261124-084005-1238188 |
+
+Runs 1 to 7 are lane-relsplit4-live's (with three PiP-guard runs of its
+own, below); 8 to 13 are this lane's.
+- **The PASS lists, name for name**, with the measured values taken out
+  (the live lane's names.py: parenthesised readings, numbers, hex keys,
+  paths and the text after a check's colon): run 9's 113 PASS and the R15
+  SKIP are run 2's, in order; run 8's 84 are run 1's and run 6's; run 10's
+  141 are run 3's but for the random source keys inside Y3's and H1's
+  `after:` readings, which the comparison does not strip.
+- **The mutants prove the live shell runs each code-behind.** Each mutant
+  script matched its string once in the code-behind and nowhere else in
+  the service, and the moved tree's Service.qml holds only the forwarder.
+  Each run on b0b74cc is red on exactly the checks its mutant reddened on
+  91721d8, name for name: R9 "rewind is null right after the zap" (it read
+  the previous channel's object, behindLive 15.706) and "playbackStateText
+  is empty right after the zap" (`0:15 behind live`); P11's wait line, "the
+  new shell never worked out that it is in PiP (D-PIP-4)", and "P11: the
+  new shell reports PiP on, derived and not remembered"; R10 "paused
+  through the plugin verb" and "resumed", R11 "paused" and "resumed". Every
+  other check reads its parent's.
+- **The harness logs.** key live's harness.log holds 78 `Launching config`
+  lines on the moved tree, as on C3's. No run's harness.log names a
+  code-behind or holds a TypeError, a ReferenceError or "not a function".
+- The crash journal read 89 before and after every run. Every cage verdict
+  read `gone`, each rig removed its private runtime and tmp folders, and
+  no player, cage or quickshell but the owner's was left. The pip runs'
+  one card ("Bar setting ignored") went to the stand-in's log.
+
+**What the pip runs in a cage stand on.** lane-relsplit4-live found that
+pip-scenario's P1 ("PiP is on offer") passes in a cage only because of a
+gap in a guard. Toward a nested target run.sh's harness_env unsets
+HYPRLAND_INSTANCE_SIGNATURE (F-HARNESS-47), and the harness shell logs it
+unset at both of its starts (twice in run 8 too). handlePipWhichExit, in
+Service-pip.js since this move, hides PiP only when
+`Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === ""`, and Quickshell.env
+answers a QVariant that is not `""` for an unset variable, so the guard
+never fires and PiP stays on offer through the stub's `systeminfo`. Its
+probe (the guard read as `!Quickshell.env(...)`) read 68 passed, 19 failed
+from P1 onward as committed in the cage (pip-20261124-070627-1032273) and
+84 / 0 with a scratch shim that hands the harness shell `harness`, the
+desk's signature, which reaches no compositor
+(pip-20261124-070737-1038450); the parent with the shim read 84 / 0, the
+same names (pip-20261124-070800-1041316). The node harness's double of
+Quickshell.env answers `""` for every name (rule 10). That finding is the
+live lane's proposal 1 and has no row here; it is the lead's to file. If
+the guard is fixed first, pip's live half in a cage needs the shim or a
+committed cage arm.
+
+**The comment-only commit (call p).** The search covered every `//` line of
+the four code-behinds and of the root, for a word that points by position
+(above, below, here, this file, Service.qml, earlier, later, following,
+preceding, next, previous, see, the same, this one, beside, further,
+underneath, before or after it, the function before or after): 542 lines.
+Three narrower passes then read what each points at:
+- a line in a code-behind that places a root member (a property, an id, a
+  handler, a signal, a Component, Timer or Process) above or below it, read
+  over the line and its neighbours: 33 hits, of which five point at the
+  root itself and are wrong now, because no code-behind is above or below
+  anything on the root, and 28 point inside their own function;
+- a line anywhere that names a service function beside a word of order,
+  where that function now sits in another file or on the other side of the
+  line's own function than it did in the one-file view: three hits, all
+  temporal ("beginSwitch BEFORE the key moves") or a plain name ("every
+  run (runHelper)"), none positional;
+- the root's banners and loose comment blocks over forwarders: two that
+  described the bodies under them.
+- The moved functions' 56 lines that say above, below, this file,
+  Service.qml, beside, preceding or following, and their 77 that say here,
+  this file, Service.qml, earlier or "the function", were each read in
+  context, as were the root's 33 lines with the first set's words. Each
+  points inside its own function, or at a neighbour that moved with it and
+  kept its side: the 31 moved functions whose neighbours changed were
+  listed (by a script in the lane's scratch), and none of their comments points at the
+  old neighbour.
+
+65f5d3d changes:
+- Service-player.js, attachPlayerSocket: "the type is guaranteed by the
+  Component below" names playerSocketComponent in Service.qml.
+- Service-sources.js, updateSource: "through onActiveEpgUrlChanged below"
+  names Service.qml's onActiveEpgUrlChanged.
+- Service-sources.js, runPlaylistHelper: "The source PROBE at
+  sourceProbeProc below" says sourceProbeProc, in Service.qml.
+- Service-sources.js, writeActive: "see `settings` above" says in
+  Service.qml (and the paragraph is re-wrapped).
+- Service-sources.js, runConfigShield: "playlistRerun / epgRerun above"
+  says in Service.qml.
+- Service.qml, the PiP banner: "TWO GATE RESULTS SHAPE EVERYTHING BELOW"
+  now names the PiP functions in Service-pip.js reached through the
+  forwarders below, and "Nothing in this file may branch on a dispatch's
+  exit status" now says this file or Service-pip.js.
+- Service.qml, the detached player banner: "Nothing in this block ever
+  execs mpv" now says this block, or the functions in Service-player.js
+  its forwarders reach.
+
+Left as they are: setShowLogos's "There is no second updateEntryInline in
+this file any more", true of Service-sources.js, which holds the one call
+(in writeOwnedEntry); Service.qml's header lines "Nothing here may ever
+exec mpv" and "keepLoaded: edits to THIS file only apply after `omarchy
+restart shell`", which speak for the service (the second is call (d)'s
+subject and the lead's, below).
+
+Proof that 65f5d3d changes only comment lines:
+- `git diff 080b70f 65f5d3d` touches Service.qml, Service-player.js and
+  Service-sources.js, and none of its added or removed lines is anything
+  but a `//` comment line (the edit script asserted it of every line).
+- The inline views are 447,137 B (080b70f, and 91721d8) and 447,443 B
+  (65f5d3d). With every line that is a `//` comment dropped, 65f5d3d's
+  equals 080b70f's and 91721d8's: 4,450 lines each (C3's comment-only.py,
+  run from each tree's own readers).
+- `split-service.py --verify --from-git 080b70f` and `--from-git 91721d8`
+  are each red at byte 72,653 (line 1,124 of the view, the PiP banner);
+  `--verify --from-git 65f5d3d` is green. So the move commit verifies
+  against its parent byte for byte, and its successors against 65f5d3d's
+  view; what C5 or a later move cuts from verifies against that.
+
+**Searched (rule 15).**
+- Patches: every `*.patch` (30), each hunk found by its own lines; none was
+  broken by the move, and two functions stay on the root for theirs.
+- Pins that the tree is Service.qml and two code-behinds: every reader
+  under tests/ and scripts/ naming Service-rewind.js, Service-sources.js,
+  ServiceRewind, ServiceSources, "two code-behinds" or "three files".
+  Flipped: the five pins above. Re-worded: the comments beside them,
+  test_split_service.py's docstring and check.sh's floor comment. Cleared:
+  check.sh's F-GATE-29 comment (it records what C3 measured), the
+  harness's own cut checks in Model.test.js (they cut the one-file view
+  their own way, whatever the tree holds), and the fixtures' cases.
+- Readers of Service.qml's text that do not go through the readers: the
+  converted ones all do; qa-sources-scenarios.sh's qa_defines_function
+  reads a forwarder for switchSource, which it accepts, as for C3.
+- Prose that sends a reader to Service.qml for a function C4 moved: the
+  logo recipe's tag mutant (`root.logoFetchDir =
+  Model.logoDirFor(root.activeCacheDir)`, in fetchLogos on 0cae446 as on
+  91721d8), which C3's 4aac8bd said stayed in Service.qml; e3cb567 says it
+  is in Service-sources.js now, in logo-scenario.sh's header and the
+  harness README. The other mentions ("Service.qml's own handlePlayerLine",
+  "Service.qml's checkPlayerChannel", "Service.qml's applyEpgNow", ...)
+  name root members, which the forwarders keep true. README.md line 1778
+  ("After editing `Service.qml` run `omarchy restart shell`") is the lead's
+  (C5).
+- Code a forwarder reads otherwise (`this`, `arguments`, an unqualified own
+  function in a code-behind): split-service's scope and sibling rules hold
+  all four files, and all four are clean.
+- Root functions the map has never seen: none (above).
+
+**On the tip** (e3cb567 and this record): node 4,070 checks, 0 failures,
+the parent's names plus the togglePause check and the one renamed pin;
+python 3,016 by discovery; qa-lib-test 837 passed, 0 failed, with a private
+XDG_RUNTIME_DIR; split-service --check as at the move, and --verify
+--from-git 65f5d3d green; release.py check 47 files; check-defect-ledger and
+check-board-staleness green with this record's F-PERF-3 row. The crash
+journal read 89 at the lane's start, after every cage run and at its end.
+The full check.sh was not run here, by the lane's rules; the gate on the
+merged tree is the lead's.
+
+**Not done, and left open.**
+- The desk arms (rewind-scenario's, pip-scenario's on the owner's display)
+  were not run; this lane holds the nested display only.
+- Call (d): a hot reload across a version change with code-behinds, and
+  checkout.workers' write order, before the first release that ships one.
+  That is the lead's, as are C5's documents.

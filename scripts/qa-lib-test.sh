@@ -498,9 +498,11 @@ is "on the shared fixture qa_service_files names, path for path, the files tests
 # D-REL-14 C3 (2026-11-23): this tree declares two code-behinds, the M5-01
 # region's, so these two pins flipped from "Service.qml alone" and "the view
 # is Service.qml, byte for byte" (true of every tree before the move) to the
-# three files and the other engine's view.
-is "and on this tree that is Service.qml and its two code-behinds, rewind's and sources'" \
-   "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml Service-rewind.js Service-sources.js 0"
+# three files and the other engine's view. C4 (2026-11-24) added pip's and
+# player's, so the first now names the five files; the second holds for any
+# split tree and stands.
+is "and on this tree that is Service.qml and its four code-behinds, pip's, player's, rewind's and sources'" \
+   "$(qa_service_files "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' '; printf '%s' "${PIPESTATUS[0]}")" "Service.qml Service-pip.js Service-player.js Service-rewind.js Service-sources.js 0"
 node -e 'process.stdout.write(require(process.argv[1]).serviceText(process.argv[2]))' "$ROOT/tests/service-files.js" "$ROOT" >"$TMP/service-view-node.txt" 2>/dev/null
 ck "on this tree qa_service_text is the inline view tests/service-files.js reads, byte for byte, and not Service.qml's own text" \
    'qa_service_text "$ROOT" | cmp -s - "$TMP/service-view-node.txt" && ! cmp -s "$TMP/service-view-node.txt" "$ROOT/Service.qml"'

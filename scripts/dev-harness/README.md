@@ -1046,7 +1046,8 @@ so that is the file this edit takes): `root.logoHave = ({})` deleted from
 `clearSourceData` -> **37 / 3**,
 W2, W3 and W5 (the first sample at B's directory carried A's six names
 tagged for A); the tag made `root.activeCacheDir` instead of
-`Model.logoDirFor(root.activeCacheDir)` -> **36 / 4**, W1, W3, W4 and W6 (a
+`Model.logoDirFor(root.activeCacheDir)` (in `fetchLogos`, which D-REL-14's
+C4 moved into `"$cp/Service-sources.js"` too) -> **36 / 4**, W1, W3, W4 and W6 (a
 set tagged for the cache directory, which the guide never compares equal).
 The live floor is the check-tree floor plus the W lines, pinned in
 `scripts/qa-lib-test.sh`; `check.sh`'s preflight was check-tree's 33 then,

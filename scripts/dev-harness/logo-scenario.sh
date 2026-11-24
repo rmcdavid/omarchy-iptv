@@ -169,7 +169,8 @@
 # mutant is made there): `root.logoHave = ({})` deleted from clearSourceData -> W2, W3
 # and W5 red (the first sample at B's directory still carries A's 6 names
 # tagged for A), 37 passed 3 failed; the tag made `root.activeCacheDir`
-# instead of `Model.logoDirFor(root.activeCacheDir)` -> W1, W3, W4 and W6
+# instead of `Model.logoDirFor(root.activeCacheDir)` (in fetchLogos, which
+# D-REL-14's C4 moved into Service-sources.js too) -> W1, W3, W4 and W6
 # red (a set tagged for the cache directory, which the guide never compares
 # equal), 36 passed 4 failed; the tree itself 40 passed 0 failed
 # (lane-liveproofs over 0cae446, 2026-10-25, under private-bus.sh). The

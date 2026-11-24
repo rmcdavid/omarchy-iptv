@@ -77,6 +77,8 @@ ALLOWLIST = (
     # follows Service.qml's imports, so a code-behind missing here is red, and
     # so is one listed here that nothing imports; shipped_code() hands the
     # guards each one Service.qml declares.
+    'Service-pip.js',
+    'Service-player.js',
     'Service-rewind.js',
     'Service-sources.js',
     # D-REL-5: the model, as ES modules. Model.mjs re-exports the public names

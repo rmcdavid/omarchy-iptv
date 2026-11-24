@@ -64,7 +64,7 @@ def must_ship():
     return {
         'manifest.json', 'README.md', 'LICENSE', 'CHANGELOG.md', 'preview.png',
         'BarWidget.qml', 'Guide.qml', 'Service.qml',
-        'Service-rewind.js', 'Service-sources.js',
+        'Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js',
         'bin/omarchy-iptv',
         'contrib/bindings.lua', 'contrib/omarchy-menu.jsonc', 'contrib/windows.lua',
     } | set(model_files.model_paths(ROOT)) | set(helper_files.part_paths(ROOT))
@@ -125,6 +125,8 @@ class ReleaseCase(unittest.TestCase):
         # refuses an allowlisted one nothing imports, so the double declares
         # them too (rule 10).
         self.write('Service.qml', 'import "Model.mjs" as Model\n'
+                   'import "Service-pip.js" as ServicePip\n'
+                   'import "Service-player.js" as ServicePlayer\n'
                    'import "Service-rewind.js" as ServiceRewind\n'
                    'import "Service-sources.js" as ServiceSources\n'
                    'x: Qt.resolvedUrl("bin/omarchy-iptv")\n')
