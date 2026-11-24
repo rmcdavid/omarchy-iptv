@@ -1552,6 +1552,11 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # D-REL-14 (C3, 2026-11-23, lane-relsplit3-move): the M5-01 region moved into
 # Service-rewind.js and Service-sources.js, and the judge reads the same
 # 2,267 sites across the three files (32 of 32 cases), so both floors stand.
+# D-REL-14 (C4, 2026-11-24, lane-relsplit4-move): pip's 23 functions and
+# player's 54 moved into Service-pip.js and Service-player.js, and togglePause
+# and sources' other 44 after C3's in Service-rewind.js and Service-sources.js;
+# the judge reads the same 2,267 sites across the five files (158 forwarders,
+# 32 of 32 cases), so both floors stand.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
 SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,

@@ -182,3 +182,21 @@
     root.tracksQueued = null
     root.requestTracks(queued.select)
   }
+
+  // Pause or resume what is playing. Returns false when there is nothing to
+  // pause, so a caller can say so rather than appearing to work.
+  //
+  // The local flip is applied at once and the helper confirms it on the next
+  // health tick: the bar must not wait a process launch to show the state the
+  // user just asked for (rule 9). A refusal corrects it within a tick.
+  // -> "" on success, else a reason. Two different failures used to share one
+  // `false` and the guide said "Nothing is playing" for both, including when
+  // something WAS playing and the helper slot was merely busy. A message that
+  // is wrong about why is worse than no message.
+  function togglePause() {
+    if (!root.nowPlaying) return "idle"
+    var want = !root.paused
+    if (!root.runControl("pause", Model.playerPauseArgv(root.socketPath, want ? "on" : "off"))) return "busy"
+    root.paused = want
+    return ""
+  }

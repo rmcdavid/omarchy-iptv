@@ -854,13 +854,16 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 
 // ---- D-REL-14: the service readers ----
 //
-// Since D-REL-14's C3 (2026-11-23) this tree's Service.qml declares two
-// code-behinds, Service-rewind.js and Service-sources.js, which hold the
-// M5-01 region's 36 functions: the service's files are those three, and its
-// one text, cut again by the code-behinds' own spans, is Service.qml byte for
-// byte, so every converted reader reads the one-file text it read before the
-// move (before C3 the files were Service.qml alone and the text was the
-// file's: these two checks pinned that, and the move flipped them). The shared
+// Since D-REL-14's C4 (2026-11-24) this tree's Service.qml declares four
+// code-behinds, Service-pip.js, Service-player.js, Service-rewind.js and
+// Service-sources.js, which hold 158 of its 204 functions (C3 moved the
+// M5-01 region's 36 into the last two on 2026-11-23, and C4 the rest of
+// pip, player and sources and rewind's togglePause): the service's files are
+// those five, and its one text, cut again by the code-behinds' own spans, is
+// Service.qml byte for byte, so every converted reader reads the one-file
+// text it read before the moves (before C3 the files were Service.qml alone
+// and the text was the file's, and between C3 and C4 they were three: these
+// two checks pinned each, and each move flipped them). The shared
 // fixture (tests/fixtures/service-split/) has one code-behind; its view is
 // inline.txt and the round trip closes. tests/test_service_files.py runs the
 // same fixture and cases through scripts/service_files.py, and each engine
@@ -891,11 +894,11 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
     return { status: r.status, stdout: r.stdout }
   }
 
-  checkCall("D-REL-14 C3: on this tree the service is Service.qml and its two code-behinds, rewind's and sources', and its one text cut again by the code-behinds' own spans is Service.qml, byte for byte, read from the root or from Service.qml's own path", () => {
+  checkCall("D-REL-14 C4: on this tree the service is Service.qml and its four code-behinds, pip's, player's, rewind's and sources', and its one text cut again by the code-behinds' own spans is Service.qml, byte for byte, read from the root or from Service.qml's own path", () => {
     const view = SF.serviceText(ROOT), whole = SF.functionSpans(view, "the view")
     let cut = view
     const moved = [], own = []
-    for (const [file, q] of [["Service-rewind.js", "ServiceRewind"], ["Service-sources.js", "ServiceSources"]]) {
+    for (const [file, q] of [["Service-pip.js", "ServicePip"], ["Service-player.js", "ServicePlayer"], ["Service-rewind.js", "ServiceRewind"], ["Service-sources.js", "ServiceSources"]]) {
       const spans = SF.functionSpans(raw(path.join(ROOT, file)), file)
       moved.push(spans.size)
       for (const [name, span] of spans) {
@@ -906,17 +909,18 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
     }
     const anchor = 'import "Model.mjs" as Model\n'
     const anchored = cut.split(anchor).length === 2
-    cut = cut.split(anchor).join(anchor + 'import "Service-rewind.js" as ServiceRewind\nimport "Service-sources.js" as ServiceSources\n')
+    cut = cut.split(anchor).join(anchor + 'import "Service-pip.js" as ServicePip\nimport "Service-player.js" as ServicePlayer\nimport "Service-rewind.js" as ServiceRewind\nimport "Service-sources.js" as ServiceSources\n')
     return { files: SF.serviceFiles(ROOT).map(f => path.relative(ROOT, f)), names: SF.serviceNames(ROOT),
              moved, own: own.length > 0 && own.every(Boolean), anchored, closes: cut === raw(path.join(ROOT, "Service.qml")),
              viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource }
-  }, { files: ["Service.qml", "Service-rewind.js", "Service-sources.js"], names: ["Service.qml", "Service-rewind.js", "Service-sources.js"],
-       moved: [15, 21], own: true, anchored: true, closes: true, viaPath: true })
+  }, { files: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
+       names: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
+       moved: [23, 54, 16, 65], own: true, anchored: true, closes: true, viaPath: true })
 
   checkCall("D-REL-14: the node and python readers agree on this tree, names and text", () => {
     const n = py("names", ROOT), t = py("text", ROOT)
     return { names: [n.status, n.stdout], text: [t.status, t.stdout === SF.serviceText(ROOT)] }
-  }, { names: [0, "Service.qml\nService-rewind.js\nService-sources.js\n"], text: [0, true] })
+  }, { names: [0, "Service.qml\nService-pip.js\nService-player.js\nService-rewind.js\nService-sources.js\n"], text: [0, true] })
 
   checkCall("D-REL-14 (fixture): the service is Service.qml and its one code-behind, and its one text is inline.txt, byte for byte, from the root or from Service.qml's own path", () => {
     const inline = raw(path.join(FIX, "inline.txt"))
