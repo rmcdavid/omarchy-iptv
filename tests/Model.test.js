@@ -27028,19 +27028,22 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
 
 // ---- D-REL-15 (2026-11-24): adoptActive's deferral, built on the root ----
 //
-// A function expression made in a code-behind and handed to Qt.callLater is a
-// SIGSEGV in the QML engine when its Service is deleted before the call runs,
-// where the same closure made in Service.qml logs a TypeError (measured under
-// gdb: scripts/dev-harness/spikes/codebehind-calllater/). So adoptActive, in
-// Service-sources.js, hands its deferred persistActive(key) to the root's
-// persistActiveLater, which builds the closure in Service.qml. A closure and
-// not Qt.callLater(root.persistActive, key), because callLater folds two
-// calls of one function in a turn into one (measured: once, with the last
-// key), and two adoptions in one turn persisted both keys, in order, each its
-// own call, before the split. adoptActive's own call to it is held by checks
-// above: without it 110 are red (R21e, R22a, D-SRC-64, R13, R27d to R29d and
-// round 8's among them). This is red on baea04a, which has no
-// persistActiveLater, and on a mutant that hands callLater root.persistActive.
+// A function expression made in a code-behind can take the QML engine down
+// (a SIGSEGV, measured) when its Service is deleted before something calls
+// it, where the same closure made in Service.qml logs a TypeError (measured
+// under gdb: scripts/dev-harness/spikes/codebehind-calllater/). So
+// adoptActive, in Service-sources.js, hands its deferred persistActive(key) to
+// the root's persistActiveLater, which builds the closure in Service.qml. A
+// closure and not Qt.callLater(root.persistActive, key), because callLater
+// folds two calls of one function in a turn into one (measured: once, with
+// the last key), and two adoptions in one turn persisted both keys, in order,
+// each its own call, before the split. What each check holds: this one,
+// persistActiveLater alone -- its deferral and its order, red on baea04a
+// (no such function), on persistActiveLater calling persistActive at once,
+// and on its handing callLater root.persistActive; the next one, adoptActive's
+// own deferral and order through its forwarder; the 110 checks above that go
+// red without adoptActive's call (R21e, R22a, D-SRC-64, R13, R27d to R29d and
+// round 8's among them), THAT adoptActive persists, not when.
 checkCall("D-REL-15: persistActiveLater (Service.qml) defers each persistActive(key) to the end of the turn as its own call -- two calls in one turn persist nothing at once, then both keys, in order", () => {
   const H = require("./service-harness.js")
   const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
@@ -27054,6 +27057,33 @@ checkCall("D-REL-15: persistActiveLater (Service.qml) defers each persistActive(
   h.runLater()
   return [atOnce, persisted]
 }, [[], ["k1", "k2"]])
+
+// D-REL-15, round two (lane-settle-drel15, 2026-11-24): adoptActive's OWN
+// deferral and order, through its forwarder, as shipped.sh drives it on the
+// real engine. Two migrating adoptions in one turn: nothing persisted at once,
+// then the first source's key and the second's, in order -- what the root's
+// adoptActive did before C3 (8e3bbac^), baea04a's code-behind did, and the
+// fix does. The check above holds persistActiveLater alone; the 110 above
+// hold THAT adoptActive persists, not when: adoptActive calling
+// root.persistActive(key) at once, or Qt.callLater(root.persistActive, key),
+// left every one of them green (lane-recheck-drel15-semantics). This is red on
+// both of those, on persistActiveLater calling persistActive at once, on
+// adoptActive without the call, and on Qt.callLater(root.persistActiveLater,
+// key) (QA-RESULTS "D-REL-15 ... Round two").
+checkCall("D-REL-15: adoptActive (Service-sources.js, through its forwarder) defers its persistActive(key) to the end of the turn as its own call -- two migrating adoptions in one turn persist nothing at once, then the first source's key and the second's, in order", () => {
+  const H = require("./service-harness.js")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  h.runLater()
+  const persisted = []
+  h.root.persistActive = key => { persisted.push(key); return true }
+  h.root.adoptActive("http://127.0.0.1/a.m3u", "", { adoptUrl: true, migrating: true })
+  h.root.adoptActive("http://127.0.0.1/b.m3u", "", { adoptUrl: true, migrating: true })
+  const atOnce = persisted.slice()
+  h.runLater()
+  const urlOf = k => { const r = (h.root.userState.sources || []).find(x => x.key === k); return r ? r.url.split("/").pop() : "?" + k }
+  return [atOnce.map(urlOf), persisted.map(urlOf), h.compileErrors]
+}, [[], ["a.m3u", "b.m3u"], []])
 
 // ---- F-HARNESS-130 (rule 10): the harness's Qt.callLater is Qt's ----
 //

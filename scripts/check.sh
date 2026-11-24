@@ -805,7 +805,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # with the last arguments; a call queued while a batch runs goes to the next
 # batch), held by a check of the double, red on the old double (C 1, B; A,
 # B1); the suite runs 4072, and 4072 without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4072}
+# 2026-11-24, lane-settle-drel15 (D-REL-15): 4072 -> 4073 -- adoptActive's
+# own deferral and order, two migrating adoptions in one turn through its
+# forwarder, red on five one-decision mutants of the fix, two of which
+# (adoptActive persisting at once, and handing Qt.callLater
+# root.persistActive) no other check saw (QA-RESULTS "D-REL-15 ... Round
+# two"); the suite runs 4073, and 4073 without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
