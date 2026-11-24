@@ -421,8 +421,8 @@
     if (out.writeEntry) {
       var key = out.key
       // The root builds the deferred call (persistActiveLater): a closure
-      // made in this file and handed to Qt.callLater takes the engine down
-      // if the Service is deleted before it runs (D-REL-15).
+      // made in this file and handed to Qt.callLater can take the engine
+      // down if the Service is deleted before it runs (D-REL-15).
       root.persistActiveLater(key)
     }
   }
