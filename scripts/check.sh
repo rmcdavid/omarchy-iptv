@@ -1421,7 +1421,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # the suite counts on the tree being cut, as the release step asks; the floor
 # had trailed the suite since the rounds after 2026-11-18; the suite counts
 # 2991.
-PY_TESTS_MIN=${PY_TESTS_MIN:-2991}
+# 2026-11-24, lane-settle2-drel15 (D-REL-15's settle, the lead's call (dd)):
+# 2991 -> 3030 -- re-levelled to what the suite counts on the tree: 3016 on
+# baea04a (the floor had trailed the suite since the cut), D-REL-15's 12
+# Closures tests in round one, and round two's two (a class handed to map
+# stays refused; an async function is placed at its `async`), each red on
+# its one-decision mutant of the guard (QA-RESULTS "D-REL-15 ... Round
+# two"); the suite counts 3030.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3030}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
