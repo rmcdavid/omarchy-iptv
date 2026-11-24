@@ -317,10 +317,12 @@ toggle() {
   ipc shell summon "$PLUGIN_ID" '{}' >/dev/null; sleep 2
   marks "$1-open"
 }
+# restart [SECS]: stop the shell gracefully, start it again, and wait up to
+# SECS (90) for three channels.
 restart() {
   stop_qs
   start_qs || return 1
-  wait_ready 90 || echo "   not ready after the restart"
+  wait_ready "${1:-90}" || echo "   not ready after the restart"
   marks restart
   ipc shell summon "$PLUGIN_ID" '{}' >/dev/null; sleep 2
   marks restart-open
@@ -421,7 +423,7 @@ run_arm() {
     stop_watch
     marks completed-rescan
     toggle completed
-    restart
+    restart 30
   else
     start_qs || return 1
     wait_ready 90 || echo "   not ready at start"
