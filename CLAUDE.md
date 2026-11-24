@@ -1604,6 +1604,13 @@ verifies the move byte for byte, never by hand; the gate's "service split
 guard" (`--check`) judges the tree. qmllint given a code-behind checks its
 syntax alone, so the gate also lints Service.qml's inline view and names
 each finding at its own file and line (F-GATE-29).
+A code-behind makes no function that may outlive its call (D-REL-15): one
+called after its Service is deleted can take the QML engine down (a
+SIGSEGV, measured), and whether it does turns on what the function that
+made it looked up first, so a function that must outlive its call is made
+in a root function of Service.qml (`persistActiveLater` is the model), and
+the service split guard refuses any other but a synchronous Array method's
+callback or one a `// CLOSURE-EXCEPTION: <reason>` comment excuses.
 A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 

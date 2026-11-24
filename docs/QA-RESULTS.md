@@ -27268,3 +27268,27 @@ It stays out of the spike (the lead's call). The guard, not the spike,
 holds the rule, and RESULT-2026-11-24.txt is what the records cite.
 Removing the two redundant guard lines behind round two's equivalent
 mutants was also not taken (the lead's call); they are named instead.
+
+## D-REL-15: merged (the lead, 2026-11-24)
+
+D-REL-15's fix ran as workflow wf-drel15: lane-drel15, then three
+rechecks. Its settle was cut off by the owner's system-update reboot, which
+wiped /tmp, and resumed from the agents' transcripts as wf-drel15s2:
+lane-settle2-drel15, then two read-only rechecks. Both read the branch
+pushable, with no must-fix. Round three (above) took the tests recheck's
+two should-fix findings and the records recheck's nits. The lead merged
+drel15 into dev with a merge commit, e1f2268, whose tree is the branch
+tip's (b0fd7a4).
+
+The lead's calls at the merge, each under the owner's standing authority of
+2026-11-09:
+- CLAUDE.md's service paragraph gains the rule in lane-settle2-drel15's
+  proposed words: a code-behind makes no function that may outlive its
+  call, because one called after its Service is deleted can take the engine
+  down and whether it does turns on what its maker looked up first.
+  persistActiveLater is the model, and the guard is named.
+- D-REL-15 reads fixed on dev, merged, unreleased. The first release with
+  code-behinds still waits on C5's documents and on call (d): a hot reload
+  across a version change in a cage (D-REL-6), and D-REL-9's write order.
+- The settle lane could not run tests/test_host_load_patch.py, because its
+  gdb driver went with /tmp. It runs in the gate on the merged tree.
