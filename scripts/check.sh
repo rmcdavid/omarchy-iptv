@@ -142,6 +142,9 @@
 # code-behind's functions read in at their forwarders, 46 + 387: the 62
 # entries the move took out of qmllint's sight, 12 block-scoped `var`s in
 # Service-sources.js among them, listed at their own file and line.
+# F-GATE-29 (2026-11-24): since D-REL-14's C4 Service.qml as it ships reads
+# 9 + 134 here and its inline view still 46 + 387, so 290 entries are read
+# only through the view.
 # CHECK_VERBOSE=1 lists every entry
 # as `warning: <file>:<line>:<column>: <message> [<id>]`.
 #

@@ -110,9 +110,10 @@ there, which is why the owner holds it.]**
 ## Branches: `dev` is the tree, `main` is the artifact
 
 You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
-the files in `ALLOWLIST` in `scripts/release.py` (45 on `dev` since
-D-REL-14's C3 moved code into `Service-rewind.js` and `Service-sources.js`,
-2026-11-23, unreleased; 43 since D-SINK-102 added
+the files in `ALLOWLIST` in `scripts/release.py` (47 on `dev` since
+D-REL-14's C4 added `Service-player.js` and `Service-pip.js`, 2026-11-24,
+unreleased; 45 since its C3 moved code into `Service-rewind.js` and
+`Service-sources.js`, 2026-11-23; 43 since D-SINK-102 added
 the relay's part, `bin/helper/12-relay.py`; 42 after D-REL-5 split the
 model into `Model.mjs` and `model/` and D-REL-7 split the helper into
 `bin/omarchy-iptv` and `bin/helper/`), exported from a
@@ -1593,9 +1594,10 @@ needs the helper's FILES reads the list from the stub
 (`scripts/helper_files.py`, `qa_helper_parts`); a copy of the stub alone is
 a helper that cannot start.
 The service is going the same way (D-REL-14; C3 merged into `dev` on
-2026-11-23, unreleased): `Service.qml` keeps a one-line forwarder for each
+2026-11-23 and C4 on 2026-11-24, unreleased): `Service.qml` keeps a one-line forwarder for each
 function moved into a code-behind, `Service-<domain>.js` imported as
-`Service<Domain>` (today `Service-rewind.js` and `Service-sources.js`), and
+`Service<Domain>` (today `Service-player.js`, `Service-pip.js`,
+`Service-rewind.js` and `Service-sources.js`), and
 the body lives there. Edit a moved function in its code-behind, never its
 forwarder. Move more only with `scripts/split-service.py --cut`, which
 verifies the move byte for byte, never by hand; the gate's "service split

@@ -26429,7 +26429,7 @@ desk's signature, which reaches no compositor
 (pip-20261124-070737-1038450); the parent with the shim read 84 / 0, the
 same names (pip-20261124-070800-1041316). The node harness's double of
 Quickshell.env answers `""` for every name (rule 10). That finding is the
-live lane's proposal 1 and has no row here; it is the lead's to file. If
+live lane's proposal 1, filed by the lead at the merge as D-PIP-8. If
 the guard is fixed first, pip's live half in a cage needs the shim or a
 committed cage arm.
 
@@ -26545,3 +26545,41 @@ merged tree is the lead's.
 - Call (d): a hot reload across a version change with code-behinds, and
   checkout.workers' write order, before the first release that ships one.
   That is the lead's, as are C5's documents.
+
+## D-REL-14: C4 merged (the lead, 2026-11-24)
+
+C4 ran as workflow relsplit-4 from 91721d8 (the nightly run's tip, which
+differed from 1418903 only in qa-lib-test.sh's nine F-HARNESS-128 checks and
+two documents; the live lane re-measured every base count on it). The four
+rechecks (the move, the live evidence, the harness, and what changes when a
+body runs from a code-behind) each read the branch pushable with no
+must-fix, so no fix lane ran. The lead merged relsplit-4 into dev with a
+merge commit; its tree is the branch tip's.
+
+The lead's calls at the merge, each under the owner's standing authority of
+2026-11-09:
+- b0b74cc, the node check that calls togglePause through Service.qml's
+  forwarder, is lane-relsplit4-move's addition and was not one of calls (l)
+  to (q); the lead takes it, and NODE_CHECKS_MIN at 4,070 with it. The live
+  R10 and R11 mutant stays togglePause's live reader.
+- The guard gap the live lane found behind pip's cage proof (the section
+  "What the pip runs in a cage stand on" above) is filed as D-PIP-8, P4,
+  open: no user is known to meet it, and its fix must bring pip's cage proof
+  a signature shim or a committed cage arm.
+- The scope recheck's measurement is filed as D-REL-15, P3, open, a release
+  gate for the first release with code-behinds: a closure C3's adoptActive
+  hands to Qt.callLater from Service-sources.js is a SIGSEGV in the QML
+  engine when the Service is deleted before it runs, where the root's copy
+  logged a TypeError (qml probes under gdb, the crash journal unchanged at
+  89). C4 adds no such closure. It is fixed next, before C5.
+- F-PERF-3 stays as lane-relsplit4-move filed it, P4.
+- check.sh's F-GATE-29 comment gains C4's figures: Service.qml as it ships
+  reads 9 + 134 and its inline view still 46 + 387.
+
+The evidence the rechecks noted as thin and left as it is: pip's first
+parent run kept no last-start.env (its rig exported the software-GPU lever
+before the run, and every later pip run on that rig shows
+`--gpu-sw=yes --ao=null --hwdec=no`), and the key runs' folders keep no
+tree-id.txt (G4 and G5, which read the v0.13.6 helper, pass on both
+trees). One qa-lib-test run on the moved tree used the session's runtime
+directory and left nothing there; every later run used a private one.
