@@ -61,6 +61,35 @@ MODES (exactly one):
                               the root's forwarder is the engine's scope
                               order, and `Qt.callLater` deduplicates by the
                               function it is handed; say `root.F`
+              closure         a function a code-behind MAKES inside one of
+                              its functions -- a function expression, a
+                              nested declaration, an arrow function, an
+                              object literal's method, a class (D-REL-15).
+                              Measured under gdb, one made in a code-behind
+                              and handed to Qt.callLater, or connected to a
+                              signal of an object outside the Service, is a
+                              SIGSEGV inside libQt6Qml once its Service is
+                              deleted before the call, where the same made
+                              in Service.qml logs a TypeError
+                              (scripts/dev-harness/spikes/codebehind-calllater/).
+                              Allowed: the immediate callback argument of a
+                              synchronous Array method (filter, map,
+                              forEach, some, every, find, findIndex, reduce,
+                              reduceRight, sort, flatMap), which runs before
+                              the method returns; and one excused by a
+                              `// CLOSURE-EXCEPTION: <reason>` comment on the
+                              line it starts on or in the unbroken run of
+                              `//` lines directly above that line, the
+                              reason saying why nothing can call it after
+                              its Service is gone (the guard reads that a
+                              reason is there, not what it says). A function
+                              that must outlive its call is made in a root
+                              function of Service.qml, as persistActiveLater
+                              is. Not read: `Function(...)`, which makes a
+                              function in the global scope, and
+                              `.bind(...)`, whose result wraps the function
+                              it is called on; no code-behind holds either
+                              (2026-11-24), and neither was measured
               member          a `root.N` (or `root?.N`, `root["N"]`,
                               `root?.["N"]`) in
                               Service.qml or a code-behind where N is no
@@ -320,6 +349,216 @@ def code_problems(label, text, qualifiers, own, allowed_lines=()):
     return out
 
 
+# D-REL-15: the Array methods whose callback runs before the method returns,
+# so a function made as their immediate argument cannot outlive the call.
+SYNC_ARRAY_METHODS = frozenset(('filter', 'map', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce',
+                                'reduceRight', 'sort', 'flatMap'))
+CLOSURE_EXCEPTION = re.compile(r'CLOSURE-EXCEPTION:[ \t]*[^ \t\r\n]')
+# Before `(...) {` these open a statement, not an object literal's method.
+STATEMENT_WORDS = frozenset(('if', 'for', 'while', 'switch', 'catch', 'with', 'function'))
+METHOD_MODIFIERS = frozenset(('get', 'set', 'async', 'static'))
+
+
+def _punct(t, text):
+    return t is not None and t.kind == 'punct' and t.text == text
+
+
+def _match_back(toks, k, open_text, close_text):
+    """The index of the token opening the bracket toks[k] closes; -1 if none."""
+    depth = 0
+    for j in range(k, -1, -1):
+        if _punct(toks[j], close_text):
+            depth += 1
+        elif _punct(toks[j], open_text):
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _match_forward(toks, k, open_text, close_text):
+    """The index of the token closing the bracket toks[k] opens; -1 if none."""
+    depth = 0
+    for j in range(k, len(toks)):
+        if _punct(toks[j], open_text):
+            depth += 1
+        elif _punct(toks[j], close_text):
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _named(toks, k):
+    """Whether the word at toks[k] is a member (`x.function`) or an object
+    literal's key (`{ class: 1 }`): a name, not the keyword."""
+    prev = toks[k - 1] if k else None
+    nxt = toks[k + 1] if k + 1 < len(toks) else None
+    if prev is not None and prev.kind == 'punct' and prev.text in ('.', '?.'):
+        return True
+    return _punct(nxt, ':') and prev is not None and prev.kind == 'punct' and prev.text in ('{', ',')
+
+
+def made_functions(toks, headers):
+    """[(what, start)] for every function the tokens of a code-behind MAKE:
+    `start` is the index of the token it starts at. `headers` holds the
+    1-based lines of the file's own function headers, whose `function` at
+    the root's indent (column 3) declares the function a forwarder names."""
+    out = []
+    for k, t in enumerate(toks):
+        if t.kind == 'ident' and t.text == 'function' and not _named(toks, k):
+            if t.line in headers and t.col == 3:
+                continue
+            start = k - 1 if k and toks[k - 1].kind == 'ident' and toks[k - 1].text == 'async' else k
+            out.append(('a function expression or declaration', start))
+        elif t.kind == 'ident' and t.text == 'class' and not _named(toks, k):
+            out.append(('a class', k))
+        elif _punct(t, '=') and k + 1 < len(toks) and _punct(toks[k + 1], '>') \
+                and toks[k + 1].line == t.line and toks[k + 1].col == t.col + 1 and k:
+            # An arrow: its parameters are the name or the parenthesised list
+            # before `=>`.
+            start = _match_back(toks, k - 1, '(', ')') if _punct(toks[k - 1], ')') else k - 1
+            if start > 0 and toks[start - 1].kind == 'ident' and toks[start - 1].text == 'async':
+                start -= 1
+            out.append(('an arrow function', max(start, 0)))
+        elif _punct(t, '(') and k:
+            # An object literal's method, `{ name(args) { ... } }`, and its
+            # `get`, `set`, `async`, `static` and `*` forms.
+            name = k - 1
+            if _punct(toks[name], ']'):
+                name = _match_back(toks, name, '[', ']')
+            elif not (toks[name].kind in ('str', 'num') or (toks[name].kind == 'ident'
+                                                            and toks[name].text not in STATEMENT_WORDS)):
+                continue
+            if name <= 0:
+                continue
+            close = _match_forward(toks, k, '(', ')')
+            if close == -1 or not _punct(toks[close + 1] if close + 1 < len(toks) else None, '{'):
+                continue
+            start = name
+            while start > 0 and ((toks[start - 1].kind == 'ident' and toks[start - 1].text in METHOD_MODIFIERS)
+                                 or _punct(toks[start - 1], '*')):
+                start -= 1
+            before = toks[start - 1] if start else None
+            if before is not None and before.kind == 'punct' and before.text in ('{', ','):
+                out.append(('an object literal\'s method', start))
+    return out
+
+
+def sync_callback(toks, start):
+    """Whether the function starting at toks[start] is the immediate
+    callback argument of a synchronous Array method: `.filter(function ...`,
+    `.map(x => ...`, `?.some((a, b) => ...`. An `async` one is not: its body
+    past its first `await` runs after the method has returned."""
+    if toks[start].kind == 'ident' and toks[start].text == 'async':
+        return False
+    return start >= 3 and _punct(toks[start - 1], '(') and toks[start - 2].kind == 'ident' \
+        and toks[start - 2].text in SYNC_ARRAY_METHODS and toks[start - 3].kind == 'punct' \
+        and toks[start - 3].text in ('.', '?.')
+
+
+def _raw_end(text, t, at):
+    """Where the source text of the token at offset `at` ends: a quoted
+    string at its closing quote, a template's piece at its closing backtick
+    or `${`, anything else after its own text."""
+    n = len(text)
+    if t.kind == 'str':
+        j = at + 1
+        while j < n and text[j] != text[at]:
+            j += 2 if text[j] == '\\' else 1
+        return j + 1
+    if t.kind == 'tmpl':
+        j = at + 1
+        while j < n:
+            if text[j] == '\\':
+                j += 2
+            elif text[j] == '`':
+                return j + 1
+            elif text[j] == '$' and text[j + 1:j + 2] == '{':
+                return j + 2
+            else:
+                j += 1
+        return n
+    return at + len(t.text)
+
+
+class _Comments(object):
+    """The `//` comments of one file, told apart from a `//` inside a string,
+    a template or a regular expression literal."""
+
+    def __init__(self, text, toks):
+        self.text = text
+        self.lines = text.split('\n')
+        self.starts = [0] + [m.end() for m in re.finditer('\n', text)]
+        self.quoted = []
+        for t in toks:
+            if t.kind in ('str', 'tmpl', 'regex'):
+                at = self.starts[t.line - 1] + t.col - 1
+                self.quoted.append((at, _raw_end(text, t, at)))
+
+    def _outside(self, p):
+        return not any(a <= p < b for a, b in self.quoted)
+
+    def comment(self, line):
+        """The `//` comment on 1-based `line`, from its `//`; None if none."""
+        s = self.starts[line - 1]
+        e = s + len(self.lines[line - 1])
+        p = self.text.find('//', s, e)
+        while p != -1:
+            if self._outside(p):
+                return self.text[p:e]
+            p = self.text.find('//', p + 1, e)
+        return None
+
+    def comment_only(self, line):
+        """Whether 1-based `line` is a `//` comment and nothing else."""
+        raw = self.lines[line - 1]
+        s = self.starts[line - 1] + len(raw) - len(raw.lstrip(' \t'))
+        return service_files.COMMENT_LINE.match(raw) is not None and self._outside(s)
+
+    def excused(self, line):
+        """A CLOSURE-EXCEPTION with a reason on `line`'s own comment, or in
+        the unbroken run of comment-only lines directly above it."""
+        own = self.comment(line)
+        if own is not None and CLOSURE_EXCEPTION.search(own):
+            return True
+        j = line - 1
+        while j >= 1 and self.comment_only(j):
+            if CLOSURE_EXCEPTION.search(self.lines[j - 1]):
+                return True
+            j -= 1
+        return False
+
+
+def closure_problems(label, text):
+    """`closure` problems of one code-behind's text (D-REL-15): every
+    function it makes inside its functions that is neither the immediate
+    callback of a synchronous Array method nor excused by a
+    `// CLOSURE-EXCEPTION: <reason>` comment."""
+    try:
+        toks = members.tokens(text)
+    except members.ScanError as error:
+        return [Problem('scan', '%s: the tokenizer lost its place at %s' % (label, error))]
+    headers = set(n for n, line in enumerate(text.split('\n'), 1) if service_files.HEADER.match(line))
+    comments = None
+    out = []
+    for what, start in made_functions(toks, headers):
+        if what in ('a function expression or declaration', 'an arrow function') and sync_callback(toks, start):
+            continue
+        comments = comments or _Comments(text, toks)
+        t = toks[start]
+        if comments.excused(t.line):
+            continue
+        out.append(Problem('closure', '%s:%d:%d: %s made in a code-behind (D-REL-15): handed to Qt.callLater or '
+                           'connected to a signal, a function made here is a SIGSEGV in the QML engine once its '
+                           'Service is deleted before the call, where one made in Service.qml logs a TypeError. '
+                           'Make it in a root function of Service.qml (as persistActiveLater is), or, when nothing '
+                           'can call it once its Service is gone, say why on its line or directly above it: '
+                           '`// CLOSURE-EXCEPTION: <reason>`. The callback of a synchronous Array method (%s) is '
+                           'allowed' % (label, t.line, t.col, what, ', '.join(sorted(SYNC_ARRAY_METHODS)))))
+    return out
+
+
 def judge(service, files, present, qml_dir, cache=None):
     """(problems, counts) for one service: `service` is Service.qml's text,
     `files` the declared code-behinds that are there (name -> text),
@@ -351,6 +590,7 @@ def judge(service, files, present, qml_dir, cache=None):
     for file, _q, _n in decls:
         own_of[file] = list(service_files.function_spans(files[file], file))
         problems += code_problems(file, files[file], qualifiers, set(own_of[file]))
+        problems += closure_problems(file, files[file])
     counts['code_behinds'] = len(decls)
     counts['files'] = 1 + len(decls)
     counts['moved'] = sum(len(v) for v in own_of.values())

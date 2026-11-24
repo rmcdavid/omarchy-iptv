@@ -450,6 +450,12 @@
     root.cacheMigrating = true
     var args = ["migrate"]
     if (root.activeSourceKey !== "") args = args.concat(["--key", root.activeSourceKey])
+    // CLOSURE-EXCEPTION: held only in root.cacheQueue and root.cacheJob,
+    // and called only by runNextCacheJob and handleCacheExit, synchronously,
+    // within a call into this Service (cacheProc's exit, the state init's, a
+    // root function); nothing outside the Service holds it, and it is never
+    // handed to Qt.callLater or a signal, the two that call a code-behind's
+    // function after its Service is gone (D-REL-15).
     root.queueCacheJob(args, function(status) {
       root.cacheMigrating = false
       if (status.ok === true) {

@@ -1571,8 +1571,13 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # and sources' other 44 after C3's in Service-rewind.js and Service-sources.js;
 # the judge reads the same 2,267 sites across the five files (158 forwarders,
 # 32 of 32 cases), so both floors stand.
+# D-REL-15 (2026-11-24, lane-drel15): the judge refuses a function a
+# code-behind makes but the callback of a synchronous Array method and one a
+# CLOSURE-EXCEPTION comment excuses (kind `closure`), and gains two cases, a
+# refusal and a clean layout: 32 -> 34 cases. persistActiveLater adds a root
+# function and one site (2,268), so the site floor stands.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
-SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-32}
+SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-34}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -2077,7 +2082,10 @@ step "service split guard (scripts/split-service.py --check)"
 # declared twice at the root, any script (*.js, *.mjs) beside Service.qml
 # that it does not import as a code-behind, the model's own excepted,
 # a qualifier named outside its forwarders, `this` or `arguments` in a
-# code-behind, a code-behind naming its own function unqualified, and a
+# code-behind, a code-behind naming its own function unqualified, a function
+# a code-behind makes that is no synchronous Array method's callback and
+# carries no CLOSURE-EXCEPTION (D-REL-15: handed to Qt.callLater or a signal,
+# one is a SIGSEGV in the QML engine once its Service is deleted), and a
 # root.N that is no member of the root -- the member check qmllint stopped
 # making once a body moved, and only ever warned about. Then the script's
 # own cases, so the judge is seen judging on a tree with nothing split.
