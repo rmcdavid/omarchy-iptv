@@ -794,7 +794,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # and no node check had called it), red on two one-decision mutants of it
 # in the code-behind and green on the parent (QA-RESULTS "D-REL-14: C4, the
 # player, pip and sources move"); the suite runs 4070.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4070}
+# 2026-11-24, lane-drel15 (D-REL-15): 4070 -> 4071 -- persistActiveLater,
+# the root function adoptActive now defers its persistActive(key) through,
+# keeps two calls in one turn as two calls, both keys in order; red on
+# baea04a (no such function) and on a mutant that hands Qt.callLater
+# root.persistActive (QA-RESULTS "D-REL-15: no code-behind closure outlives
+# its call"); the suite runs 4071.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4071}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

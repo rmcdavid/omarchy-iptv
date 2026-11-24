@@ -27026,6 +27026,35 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   }, [true, true, true, true, true, true, true, true, true])
 })()
 
+// ---- D-REL-15 (2026-11-24): adoptActive's deferral, built on the root ----
+//
+// A function expression made in a code-behind and handed to Qt.callLater is a
+// SIGSEGV in the QML engine when its Service is deleted before the call runs,
+// where the same closure made in Service.qml logs a TypeError (measured under
+// gdb: scripts/dev-harness/spikes/codebehind-calllater/). So adoptActive, in
+// Service-sources.js, hands its deferred persistActive(key) to the root's
+// persistActiveLater, which builds the closure in Service.qml. A closure and
+// not Qt.callLater(root.persistActive, key), because callLater folds two
+// calls of one function in a turn into one (measured: once, with the last
+// key), and two adoptions in one turn persisted both keys, in order, each its
+// own call, before the split. adoptActive's own call to it is held by checks
+// above: without it 110 are red (R21e, R22a, D-SRC-64, R13, R27d to R29d and
+// round 8's among them). This is red on baea04a, which has no
+// persistActiveLater, and on a mutant that hands callLater root.persistActive.
+checkCall("D-REL-15: persistActiveLater (Service.qml) defers each persistActive(key) to the end of the turn as its own call -- two calls in one turn persist nothing at once, then both keys, in order", () => {
+  const H = require("./service-harness.js")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  h.runLater()
+  const persisted = []
+  h.root.persistActive = key => { persisted.push(key); return true }
+  h.root.persistActiveLater("k1")
+  h.root.persistActiveLater("k2")
+  const atOnce = persisted.slice()
+  h.runLater()
+  return [atOnce, persisted]
+}, [[], ["k1", "k2"]])
+
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----
 //
 // Every service boot in this process (tests/service-harness.js) records each
