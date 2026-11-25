@@ -5,8 +5,8 @@ cache holds for the plugin's files, read off the cache files themselves.
   cache.py CACHE_ROOT CAND_JSON PLUGIN_DIR [--dirs]
 
 CACHE_ROOT is searched for cache files (*.qmlc, *.jsc, *.mjsc): the arm's
-QML_DISK_CACHE_PATH folder, or with RIG_QMLCACHE=xdg the decoy HOME's
-.cache, where the shell's own default puts them. CAND_JSON is candidates.py's
+QML_DISK_CACHE_PATH folder, or with RIG_QMLCACHE=xdg or home the decoy
+HOME's .cache, where the shell's own default puts them. CAND_JSON is candidates.py's
 output (the scratch upstream and the four builds). PLUGIN_DIR is the
 installed plugin.
 

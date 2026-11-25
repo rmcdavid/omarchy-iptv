@@ -17,6 +17,17 @@ inotify names no process, so an open inside a merge's span may be git's: the
 rig's verdicts rest on the marks and the cache files, never on an open).
 READY is created once the watches are established. Ends its inotifywait (its
 own child, by the pid it started) on SIGTERM, and exits.
+
+TWO CLOCKS. Each line's time is Python's time.time() when this script READS
+the event from inotifywait's pipe, not when the kernel raised it, while a
+file's own write and a cache unit's "saved" time (cache.py) are tmpfs
+modification times, which step in 1 ms ticks. Measured on one race arm's 18
+plugin files (recheck-c5ds-measure, 2026-11-24, its run A644): each
+CLOSE_WRITE line came 0.55-2.2 ms after the file's mtime. So the ORDER of
+events within one watch holds, but a comparison across the two clocks under
+about 2 ms, and a sub-millisecond duration between two lines, are
+differences of read stamps: a poisoned unit can read as saved before git
+closed its file. The rig's verdicts rest on the cache files' contents.
 """
 import os
 import signal

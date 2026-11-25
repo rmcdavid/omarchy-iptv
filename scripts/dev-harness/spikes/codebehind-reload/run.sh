@@ -22,6 +22,9 @@
 #                        puts its disk cache where it would for a user, in
 #                        the decoy HOME (default: the arm's own qmlcache
 #                        folder through QML_DISK_CACHE_PATH)
+#   RIG_QMLCACHE=home    as xdg, and without XDG_CACHE_HOME too, as the
+#                        real launcher starts the shell, so Qt falls back
+#                        to $HOME/.cache (the decoy HOME's)
 #
 # WHAT IT MEASURES. candidates.py builds C0 (the release, one Service.qml),
 # C1 (dev's ALLOWLIST export: Service.qml and four code-behinds), C2 (C1
@@ -117,7 +120,7 @@ if [[ ${RIG_INNER:-} != 1 ]]; then
   done
   [[ ${RIG_RACE_DELAY_MS:-0} =~ ^[0-9]{1,4}$ ]] || { echo "run.sh: RIG_RACE_DELAY_MS is not a number of ms below 10000" >&2; exit 2; }
   [[ ${RIG_RECOVER:-none} =~ ^(none|clear|update)$ ]] || { echo "run.sh: RIG_RECOVER is none, clear or update" >&2; exit 2; }
-  [[ ${RIG_QMLCACHE:-arm} =~ ^(arm|xdg)$ ]] || { echo "run.sh: RIG_QMLCACHE is arm or xdg" >&2; exit 2; }
+  [[ ${RIG_QMLCACHE:-arm} =~ ^(arm|xdg|home)$ ]] || { echo "run.sh: RIG_QMLCACHE is arm, xdg or home" >&2; exit 2; }
   [[ ${RIG_RACE_FILE:-Service.qml} =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && ${RIG_RACE_FILE:-} != *..* ]] || {
     echo "run.sh: RIG_RACE_FILE is a plugin file's relative path" >&2; exit 2; }
   base=/tmp/claude-1000
@@ -224,13 +227,16 @@ check_journal() {
 }
 start_qs() {
   local i pid
-  local -a qmlcache=(QML_DISK_CACHE_PATH="$H/qmlcache")
-  [[ ${RIG_QMLCACHE:-arm} == xdg ]] && qmlcache=()
+  local -a qmlcache=(QML_DISK_CACHE_PATH="$H/qmlcache") xdgcache=(XDG_CACHE_HOME="$H/home/.cache")
+  [[ ${RIG_QMLCACHE:-arm} != arm ]] && qmlcache=()
+  # home: no XDG_CACHE_HOME at all (env -u below), as omarchy-launch-shell
+  # starts the shell; Qt then takes $HOME/.cache, the same decoy folder.
+  [[ ${RIG_QMLCACHE:-arm} == home ]] && xdgcache=()
   rm -f "$H/qs.pid"
   note "shell starting"
   env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u OMARCHY_IPTV_HARNESS_DIR \
-    -u QML_DISK_CACHE_PATH \
-    HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config" XDG_CACHE_HOME="$H/home/.cache" \
+    -u QML_DISK_CACHE_PATH -u XDG_CACHE_HOME \
+    HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config" "${xdgcache[@]}" \
     XDG_STATE_HOME="$H/home/.local/state" XDG_DATA_HOME="$H/home/.local/share" \
     "${qmlcache[@]}" QT_FORCE_STDERR_LOGGING=1 QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 \
     OMARCHY_PATH="$ROOTDIR" WAYLAND_DISPLAY="$NESTED" QT_QPA_PLATFORM=wayland PATH="$WORK/bin:/usr/bin:/bin" \
@@ -335,7 +341,7 @@ stop_race() {
 }
 # Qt's disk cache: where it is for this arm, what it holds (cache.py), and
 # its removal, the way a user would remove it.
-cache_root() { if [[ ${RIG_QMLCACHE:-arm} == xdg ]]; then printf '%s\n' "$H/home/.cache"; else printf '%s\n' "$H/qmlcache"; fi; }
+cache_root() { if [[ ${RIG_QMLCACHE:-arm} != arm ]]; then printf '%s\n' "$H/home/.cache"; else printf '%s\n' "$H/qmlcache"; fi; }
 cache_read() {
   printf '  [cache %s]\n' "$1" >>"$H/cache.txt"
   python3 -I "$HERE/cache.py" "$(cache_root)" "$WORK/cand.json" "$DIR" >>"$H/cache.txt" 2>&1
@@ -384,7 +390,9 @@ leftovers() {
     left=""
     for p in /proc/[0-9]*; do
       [[ ${p#/proc/} == "$$" || ${p#/proc/} == "$BASHPID" ]] && continue
-      tr '\0' ' ' <"$p/cmdline" 2>/dev/null | /usr/bin/grep -qF "$H/" && left="$left ${p#/proc/}"
+      # The braces: a redirection that fails (the process exited mid-scan)
+      # reports on the stderr in force BEFORE the inner 2>/dev/null applies.
+      { tr '\0' ' ' <"$p/cmdline"; } 2>/dev/null | /usr/bin/grep -qF "$H/" && left="$left ${p#/proc/}"
     done
     [[ -z $left ]] && return 0
     sleep 0.5
@@ -529,6 +537,7 @@ run_arm() {
   local extra=""
   [[ $mode == x ]] && extra=", the merge at the first open of ${RIG_RACE_FILE:-Service.qml} +${RIG_RACE_DELAY_MS:-0} ms, recover ${RIG_RECOVER:-none}"
   [[ ${RIG_QMLCACHE:-arm} == xdg ]] && extra="$extra, Qt's own cache folder"
+  [[ ${RIG_QMLCACHE:-arm} == home ]] && extra="$extra, Qt's own cache folder with XDG_CACHE_HOME unset"
   echo "== $ARM: root $root ($([[ $root == a ]] && echo pragma || echo no pragma)), C$from -> C$to, mode $mode${git:+, git $git}$extra"
   publish "$to"
   if [[ $mode == x ]]; then
@@ -545,9 +554,11 @@ run_arm() {
     cache_read race
     ipc shell summon "$PLUGIN_ID" '{}' >/dev/null; sleep 2
     marks race-open
-    restart 60
+    # A restart that brings no shell up ends the arm: every step after it
+    # asks the shell by its pid, and QS is empty then.
+    restart 60 || return 1
     cache_read restart-1
-    restart 60
+    restart 60 || return 1
     cache_read restart-2
     case ${RIG_RECOVER:-none} in
       clear)

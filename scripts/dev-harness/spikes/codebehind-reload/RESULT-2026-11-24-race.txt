@@ -44,6 +44,17 @@ written \xb7. A "read" near a merge may be git's own open: the open watch
 sees every open, and git re-reads files it checks before and after it
 writes them (inferred, not traced); the verdicts rest on the marks and the
 cache files.
+[2026-11-24, lane-fix-c5d: and the times below mix two clocks. watch.py
+stamps each event with Python's time.time() when it READS the event from
+inotifywait's pipe, while a file's write and a unit's "saved" are tmpfs
+modification times in 1 ms ticks: on one race arm's 18 plugin files each
+CLOSE_WRITE stamp came 0.55-2.2 ms after the file's mtime
+(recheck-c5ds-measure, its run A644), so that recheck's poisoned U649-c4
+Service-player.js reads "git closed +683.9; ... cache saved +683.0". The
+ORDER of events within one watch holds; a comparison across the two clocks
+under about 2 ms, and a sub-millisecond duration (h4's 0.1-1.1 ms, h0's
+under 0.1 ms at one worker) is a difference of read stamps. The verdicts
+rest on the cache files' contents.]
 
 SUMMARY (docs/QA-RESULTS.md "D-REL-14: call (d), settled (lane-settle-c5d,
 2026-11-24)" holds the reading).
@@ -62,7 +73,15 @@ SUMMARY (docs/QA-RESULTS.md "D-REL-14: call (d), settled (lane-settle-c5d,
 - Q7, root a (the pragma, the host's root today): no unit is ever written
   for Service.qml, Guide.qml or BarWidget.qml (the load patch serves them
   through qs:), while the code-behinds and the model are cached, each unit
-  saved 0.2-5 ms after its read. The sweep, 24 races (merge at the
+  saved 0.2-5 ms after its read [2026-11-24, lane-fix-c5d: in a QUIET cold
+  start (a-12-r). Under a concurrent merge on this 2-core machine the
+  poisoned units' read-to-save gap was about 9-10 ms: recheck-c5ds-measure's
+  A641-c4 Service-player.js, the engine's last open before git's unlink
+  +668.9, the unlink +669.0, git's close +676.6, the save-time checksum read
+  +677.9, the unit saved +678.0 (cache.py's whole ms; +678.4 as that recheck
+  read the mtime); and S1-633's one-worker Service-player.js, as that
+  recheck read this record, open +672.4, unlink +677.7, save +682.0.
+  Unpoisoned races reached 6-8 ms too (its A637 and A652-c4)]. The sweep, 24 races (merge at the
   scanner's read of Service.qml, +615 to +665 ms, one worker and four):
   5 POISONED a code-behind and the mix survived two restarts
   (Service-player.js 4 times, status throwing "TypeError: Property
@@ -77,10 +96,16 @@ SUMMARY (docs/QA-RESULTS.md "D-REL-14: call (d), settled (lane-settle-c5d,
   code-behinds 658.7-707.1 ms later (four arms); on root b 4.7-15.5 ms
   later (three arms). At four workers git unlinked every changed file
   before any worker created one in 15 of 15 runs (Service.qml absent
-  5.1-8.2 ms), and in 3 of 15 Service.qml closed before Service-player.js
+  5.1-8.2 ms [2026-11-24, lane-fix-c5d: 5.5-14.6 ms in the 19 four-worker
+  races of recheck-c5ds-measure's run logs, 14.6 in its M1 and 10.3 on root
+  b in its BM, where git and a starting shell shared the two cores; 5.1-14.6
+  ms combined]), and in 3 of 15 Service.qml closed before Service-player.js
   or Service-rewind.js was created or closed (0.1-1.1 ms, h4's shape). At
   one worker every code-behind closed before the old Service.qml was
-  unlinked in 20 of 20 merges.
+  unlinked in 20 of 20 merges [2026-11-24, lane-fix-c5d: 24 of 24: the
+  record prints h0 and h1 lines for 24 one-worker merges (R1, R2's two, R3's
+  two, R4, R5's two h1 arms, S1's 12 and U's 4), every h1 "yes" and every h0
+  0.0-0.1 ms; 20 is the count without U's four].
 - h1 re-run with the faithful tree (every changed file before Service.qml
   in byte order from the new build): both roots ran C1's Service.qml with
   C2's code-behinds, guide and bar, status throwing the TypeError, the
