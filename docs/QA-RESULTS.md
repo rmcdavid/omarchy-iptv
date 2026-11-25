@@ -28754,3 +28754,80 @@ could not have ended it: it asks the shell by QS.
 - Crash journal 89 before and after every run.
 - Not done: no arm of the rig ran in its cage tonight; `leftovers` is still
   skipped on a failed arm.
+
+## F-GATE-32: the rest of constraint 3 (the nightly run, 2026-11-25)
+
+F-GATE-30's `tests/test_helper_stdlib.py` held constraint 3's import
+statements. F-GATE-32's row lists what its reader passed: an import function
+behind an alias, a `getattr`, `__builtins__`, `exec` and `compile` of a
+string, `runpy` and `importlib.util`, a preload changed by `+=`, a `global`
+store or `__defaults__`, a list grown by `.append`, `limit_memory` behind
+an alias, a module-level `preload` read ahead of the parameter, a `CDLL` of
+a named library, an optional standard module, and no pin on the programs the
+helper starts. The lead's call on the row was to hold the whole constraint;
+this is that, in the same module (22 -> 42 tests).
+
+- `exec`, `eval`, `compile`: the stub's loader calls `compile` once and
+  `exec` once; any other call (a part's, a second one in the stub, any
+  `eval`, `builtins.exec`) and any reference that is not a call is refused.
+- The import functions: an alias from an import statement is resolved
+  (the alias table spans the parts, one namespace) and its call judged as
+  before; a reference to `__import__` or `import_module` that is not a
+  direct call, the name `__builtins__`, and a string outside a docstring
+  that spells one of the three are refused.
+- `runpy`, `pkgutil`, `zipimport`, `imp`, `importlib.util` and
+  `importlib.machinery`: an import of any (as `import x`, `from importlib
+  import util`, or a name from one) and a reference to either submodule.
+  `imp` and `importlib.machinery` are the lead's addition to the row's four,
+  by shape (each loads code from a path).
+- The preload: `_strings` reads a tuple only; a module-level name resolves
+  only if it is stored once anywhere in the helper (a `+=`, a `global` or
+  `nonlocal` declaration or a `del` in any function counts); the loop's
+  iterable is read as the function's own parameter before the module table,
+  and a keyword-only or starred one is refused; the function that holds the
+  judged import (`limit_memory`) may only be called, so its `__defaults__`
+  cannot be rebound and it cannot be handed on under another name. Its call
+  sites are three, 03-io-playlist.py, 04-epg.py and 06-failed.py (F-GATE-30
+  said two).
+- `CDLL`, `PyDLL`, `LoadLibrary`, `find_library`: a call whose first
+  positional argument is the literal None passes (the helper's three
+  `ctypes.CDLL(None, use_errno=True)`), anything else is refused, with any
+  reference to `cdll` or `pydll`.
+- Optional standard modules, decided from the distribution's list: `pacman
+  -Qi python` gives "sqlite: for a default database integration", "xz: for
+  lzma", "tk: for tkinter", so `sqlite3`, `lzma`, `tkinter` (and `_sqlite3`,
+  `_lzma`, `_tkinter`, `turtle`, `turtledemo`, `idlelib`, `dbm.sqlite3`)
+  are refused, as a statement or in the preload. bzip2, expat, openssl,
+  zlib, libffi, gdbm, mpdecimal and zstd are hard dependencies there.
+- The programs: `programs()` reads every launcher call (the subprocess and
+  os exec, spawn and posix_spawn families, aliases resolved) and resolves
+  the head of its command: a constant; a list literal's head; `name[0]`
+  where the name is stored once in the function from a helper function
+  whose one return is a list literal; a parameter never stored, through
+  every call of that function, each handing a module-level list stored once
+  and never changed in place. On this tree: three sites (`os.execvpe`,
+  `os.execve` in 07-player.py, `subprocess.Popen` in 11-cli.py) and three
+  programs, `mpv`, `wl-paste`, and `sys.executable or 'python3'` for the
+  relay. The pin is that list; a head it cannot show is named
+  `unresolved: <source>`, which is not on the list.
+- On this tree: `python3 -m unittest tests.test_helper_stdlib`, 42 tests,
+  OK; no finding in the helper.
+- Proven by mutation (rule 11): 35 one-decision mutants of the reader, each run against the
+  42 tests, each red. Three survived the first set of cases (a keyword-only
+  preload beside a module-level name; the docstring exemption; a launcher's
+  command built in a local) and each got a case that turns it red. They
+  cover every refusal above: the alias table, the tuple-only preload, the
+  three store counts, the parameter's precedence, the loader and optional
+  module lists in each import form, the string and `__builtins__` rules,
+  the five `exec` decisions, the reference rules, the library argument,
+  the holder, and eight decisions of `programs()`.
+- Not seen, stated in the module: `sys.modules[...]`, `globals()[...]`
+  with a computed key, an attribute fetched by a computed `getattr`, and a
+  library a standard module loads by itself. The row's remark that two of
+  F-GATE-30's 22 tests cannot go red for a change to the helper (the old
+  grep's demonstration; the files assert) stands: both are kept as they are.
+- The lead's calls under the owner's standing authority of 2026-11-09: the
+  two loader modules added by shape; the optional list read from Arch's
+  package, the distribution Omarchy is built on; the relay's program pinned
+  by its source, `sys.executable or 'python3'`, not by a path; and the
+  python floor 3078 -> 3098.

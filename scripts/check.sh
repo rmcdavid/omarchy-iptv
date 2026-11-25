@@ -1444,7 +1444,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # model part); the row's four mutants refused on copies of the real files and
 # 26 one-decision mutants of the readers red (QA-RESULTS "F-GATE-31: the
 # argv-only launch guard (the nightly run, 2026-11-25)"); the suite counts 3078.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3078}
+# 2026-11-25, the nightly run (F-GATE-32): 3078 -> 3098 -- 20 more tests in
+# tests/test_helper_stdlib.py (the forms that load code or a library with no
+# import statement, the preload's stricter reading, the optional standard
+# modules, and the programs the helper starts); each refusal a case red on its form and 35
+# one-decision mutants of the reader red (QA-RESULTS
+# "F-GATE-32: the rest of constraint 3 (the nightly run, 2026-11-25)"); the
+# suite counts 3098.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3098}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
