@@ -8989,6 +8989,17 @@ So the `FileView`'s `watchChanges` was bound to a file that no longer exists. It
 never fired, `onDiskVersion` still held the version read at startup, that
 equalled `PLUGIN_VERSION`, and `staleBuild` answered false — correctly, by its
 own rule that it answers false whenever either side is unknown.
+**[2026-11-25, lane-l3cagefix: the inodes are right and "it never fired" is
+not what they show. 0.7.5's manifestFile declared no `onFileChanged` (nor
+does any release up to 0.20.0), so nothing would have read the file whether
+the watch fired or not. Under git's merge the watch fires: with only
+manifestFile's own `onFileChanged` to answer it, 6fb53e4's service read the
+update at the watcher's reload, with no guide open, in 5 of 5 caged arms
+(lane-l3cage's R1ma and R1ma2, run from
+`scripts/dev-harness/spikes/codebehind-reload/mutants/no-root-manifest-handler.patch`).
+The missing handler was the cause (D-HOST-16), not the replacement.
+D-DOC-39; the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)"
+below.]**
 
 ### The candidate fix is UNVERIFIED and is not claimed as fixed
 
@@ -9031,6 +9042,12 @@ question readable as a value, the two halves separate in one pass:
 
 So the `watchChanges` watcher **does not fire on a replace** — proven directly
 rather than inferred from inode numbers — and `recheckBuild` works.
+**[2026-11-25, lane-l3cagefix: not proven. The view had no `onFileChanged`,
+so a watch that fired would have left `onDisk` at 0.7.7 all the same; what
+the table shows is that nothing re-read the file before the guide opened.
+With a handler, git's replacement is read at the watcher's reload (D-DOC-39,
+the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)" below).
+`recheckBuild` works, as the table says.]**
 
 And the footer closes the loop end to end. With `stale` true it measures
 **300 px**, against 162 px showing the counts, which is the predicted width of
@@ -28888,7 +28905,16 @@ on the l3stamp branch from 8fa4998. Node only; no display, no qml run.
   onFileChanged and nothing else; every assignment of a new object to
   `manifest` runs the tree's onManifestChanged, the boot's own `{ id }`
   included. The three handlers and the root's are compiled from the tree's
-  text; a tree without one runs nothing there.
+  text; a tree without one runs nothing there. **[2026-11-25,
+  lane-l3cagefix: the real view does not do this at an update. Git's merge
+  writes manifest.json as an unlink and a create (lane-l3cage's watch logs),
+  and with only manifestFile's `onFileChanged` the caged service read the
+  new manifest at the watcher's reload (R1ma, R1ma2: 5 of 5; D-DOC-39). So
+  the double is less eventful than the view there. That is stricter, not
+  more forgiving (rule 10): it is why the root-handler mutant below is red
+  in node (the hand-off check) while the same decision deleted in the
+  cage still reads the update. The double's in-place half is not in
+  question.]**
 - The checks, three boots of the shipping service: an update replaces the
   file (status unmoved), the rescan hands a manifest whose own version is
   `0.1.0-harness`, and status reads the file's 99.0.0 with stale true, then
@@ -29317,6 +29343,14 @@ a stamped model part's var, the footer's elision, QStandardPaths with a
 relative XDG_CACHE_HOME, how Qt reads its two cache switches, and whether
 `reportedStamps` keeps a null prototype (it works under the engine in
 every arm). the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)" below]**
+**[2026-11-25, lane-l3cagefix, from the records recheck of 1193870: two
+corrections to that bracket. The bar's report is observed under the rig's
+reduction of Bar.qml's widget host and under the dev harness's shell.qml
+(K1), never under the host's own Bar.qml, so the bar's report under the
+host's own Bar.qml stays UNVERIFIED. And the pre-stamp part did not leave
+the plugin "with no model": `Model` was undefined in the service and its
+code-behinds, while the guide and the bar composed their words through it
+(that section's section 6).]**
 
 **What the caged arms must show** (the display lane's; the plan's
 cagedArms with what this lane built): a-12-r and b-12-r, `build` reading
@@ -29350,6 +29384,18 @@ caged a11y probe with L2-BAR-08 green. In every arm analyze.py's `agree`
 line must read that the notice fits the marks. **[2026-11-25, lane-l3cage:
 every arm ran within its bounds, and with the rig as f9ca702 fixed it,
 all 329 `agree` lines fit; the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)" below]**
+**[2026-11-25, lane-l3cagefix: not every arm as this list names it. The
+race delays were 633, 645 and 650 ms, not 639; `RIG_RECOVER=clear` and
+`update` ran at 650 alone, each stopping at its first poisoned race; the
+model-part race ran 4 races past the brief's bound, at a part made to
+change; and a-12-x-c4 at manifest.json loaded no plugin in 1 of its 3
+races, the other 2 a mix. And the `agree` line, as f9ca702 left it, judged
+neither view's notice and could not tell a view with no service from one
+bound to another service object. analyze.py judges the notices since, and
+tells the two apart wherever the rig records whether a view's service is
+null, which rig.qml.in does since and no caged run has yet exercised
+(that section's "The rechecks of 1193870 (lane-l3cagefix)"); the 329
+lines still fit.]**
 
 ## D-REL-16: the three rechecks of 1c64c77 (lane-l3fix, 2026-11-25)
 
@@ -29564,10 +29610,15 @@ is in `scripts/dev-harness/spikes/codebehind-reload/RESULT-2026-11-25.txt`;
 the kept evidence (each arm's marks.jsonl, steps.log, qs.log, cache.txt
 and watch logs, each run's output, the scenario transcripts and the
 probe's per-check results) is the lane's scratch folder `arms/` and
-`runs/`, 6.3 MB, named in its result for the lead.
+`runs/`, 7.0 MB and 1.8 MB as du reads them **[2026-11-25, lane-l3cagefix:
+it said 6.3 MB]**, named in its result for the lead.
 
 **The answer.** Every arm the brief named ran, within its bounds, and 4
-races more at a model part made to change (section 6). The
+races more at a model part made to change (section 6) **[2026-11-25,
+lane-l3cagefix: every kind of arm, at the delays and in the modes the
+"Runs" table gives: 633, 645 and 650 ms where lane-l3b's list named 639
+too, and clear and update at 650 alone, each stopped at its first poisoned
+race; the footer's elision (section 8) was not read]**. The
 stamps say what the marks say in every arm: with the rig as fixed here
 (f9ca702), the 329 `agree` lines of the 47 stamped arms all read that the
 notice fits the marks. The README's order, the cache folder removed while
@@ -29581,7 +29632,9 @@ that said git's replacement never fires it was wrong (D-DOC-39, filed).
 A model part from before the stamps, poisoned under the first stamped
 build, does not stop the plugin loading, where the records reasoned it
 would: the plugin loads with no model and says `Loaded mid-update`
-(D-DOC-40, filed).
+(D-DOC-40, filed) **[2026-11-25, lane-l3cagefix: `Model` undefined in the
+service and its code-behinds; the guide and the bar composed their words
+through it (section 6)]**.
 `key-scenario.sh live` read 142 passed, 0 failed, B44 green, and B44 red
 at `files:25 off:BarWidget.qml` through the patch. The caged probe read
 337 checks, 0 failures, on baseline, L2-BAR-08 and L2-BAR-08-LIT green.
@@ -29661,7 +29714,20 @@ its kept files; that is where the 329 lines are counted.
   FileView table agrees with this run (a file renamed over a REGULAR file is
   seen, C10; its "raises nothing" rows are about a LINKED `state.json`),
   so the wrong records are D-HOST-2's row and the comments and records that
-  repeat it: D-DOC-39, filed below.
+  repeat it: D-DOC-39, filed below. **[2026-11-25, lane-l3cagefix: C10 is
+  not the shape git wrote. The watch logs read manifest.json as DELETE,
+  CREATE, CLOSE_WRITE within 0.2 ms, +26.2 to +28.3 ms after the merge
+  started (R1's a-12-r and b-12-r, R1c, R1ma, R1mb, R1ma2's b-12-r): an
+  unlink and a create, no rename. The contract's nearest measured row is a
+  link's target removed and put back (Z8: the removal seen, `fileChanged+1
+  loadFailed+1`, the return not), and these runs fit its first half: a
+  reload asked at the removal read the new file. The kept logs time neither
+  the signal nor the reload, only the mark after the watcher's reload, so
+  which event raised it is read, not watched. The two mutants are kept as
+  patches, `scripts/dev-harness/spikes/codebehind-reload/mutants/no-root-manifest-handler.patch`
+  (dce5268's) and `no-manifestfile-onfilechanged.patch` (80f80a0's): each,
+  applied to 6fb53e4 and committed, gives candidates.py's exact exports of
+  those runs, C1 72f0daf and 4aefb3a.]**
 
 ### 2. key-scenario.sh live
 
@@ -29693,7 +29759,7 @@ clear and update 2 each. Every race:
 
 | run | workers | at the race (the `build` notice; what `mixed` names) | poisoned (cache.py, at the race and after both restarts) | after two restarts | recovery, then a restart |
 |---|---|---|---|---|---|
-| X-cl-633 | 1 | C1 Service.qml, C2 code-behinds; `cache`, the four code-behinds | none (the shipped cache.py printed `model/build.mjs ... POISONED` after each restart, F-HARNESS-134; read again with the fix, none) | all C2, `""` | clear-live: all C2, `""` |
+| X-cl-633 | 1 | C1 Service.qml, C2 code-behinds; `cache`, the four code-behinds | none (the shipped cache.py printed `model/build.mjs ... POISONED` after each restart, F-HARNESS-134; read again with the fix, none **[2026-11-25, lane-l3cagefix: the final cache, after the clear, was read again (`cache-final-reread.txt`); the units after the two restarts were not kept, and their shipped readout, `code C1+C2` under C2's checksum, is the shape the fix reads as C2, so they agree by that reading, not by a re-read]**) | all C2, `""` | clear-live: all C2, `""` |
 | X-cl-633 | 4 | the same | none (the same false line) | all C2, `""` | the same |
 | X-cl-645 | 1 | the same | none | all C2, `""` | the same |
 | X-cl-645 | 4 | the same | none | all C2, `""` | the same |
@@ -29705,7 +29771,14 @@ clear and update 2 each. Every race:
 | X-u-650 | 4 | all C1; `cache`, `mixed []` | none | all C2, `""` | update: `restart`, onDisk 0.99.2; restart: all C3, `""` |
 
 - **"cache" names every POISONED file after both restarts**, in 4 of 4
-  (and in every poisoned arm below). At the cold start it names what runs
+  (and in every poisoned arm below) **[2026-11-25, lane-l3cagefix: not in
+  every one below. `mixed` names the poisoned file in b-12-x
+  (`Service.qml`) and BM (`BarWidget.qml`), so in 6 of the 9 poisoned
+  cases, the four code-behind cases and the two QML files. In b-01-x C0's
+  `Service.qml` carries no stamp and answers no `build`, and the views'
+  `cache`, through serviceBuildNotice, names no file; in M-text-3 the
+  reading threw (`mixed []`, no stamps). There cache.py named the poisoned
+  unit, and the notice only said `cache`]**. At the cold start it names what runs
   beside the loaded table, which is not the poisoned set: the poisoned unit
   holds the code the race RAN, and that code agrees with the table the race
   loaded (C1's build.mjs, read long before); it is the next start, with C2's
@@ -29721,7 +29794,10 @@ clear and update 2 each. Every race:
   logged; the restart then compiled every unit again (cache.py: every unit
   saved anew, the poisoned one `agrees`) and read `""`. The removal under a
   running shell did no harm that any mark, notice or log line shows: over
-  all 19 clear-live arms the step read with the folder gone matched the
+  all 23 clear-live arms **[2026-11-25, lane-l3cagefix: it said 19,
+  counted before the P-logos runs; 23 re-read from the kept marks, each
+  equal to the step before it, with no notable log line between]** the
+  step read with the folder gone matched the
   step before it (marks, notice, footer, tooltip, name) and logged nothing.
   The footer and the tooltip gave the order the run used: `Loaded
   mid-update · remove the QML cache, restart the shell` and `Loaded
@@ -29822,7 +29898,15 @@ clear and update 2 each. Every race:
   undefined`, `status` throwing `Cannot read property 'groupChannels' of
   undefined`), while the guide and the bar composed their words (the guide
   logged only `Cannot read property 'favorites' of undefined`, the
-  service's state).
+  service's state) **[2026-11-25, lane-l3cagefix: and the host logged
+  `plugin io.github.rmcdavid.iptv open() threw: TypeError: Cannot read
+  property 'favorites' of undefined` at each guide open, two in each arm,
+  beside the guide's own line from its `favoriteSet` binding (Guide.qml
+  753). So the guide's open() stopped part way: the marks read it opened
+  (`opened`, set at Guide.qml 1099) on the first-run form's prose `Paste or
+  type your M3U URL or path, then press Enter`; which of the statements
+  after that line ran, and whether the guide then held the keyboard, was
+  not read]**.
   `build` answered `notice 'cache'`, running "", no stamps (the buildCheck
   binding's catch); the guide's footer read `Loaded mid-update · remove the
   QML cache, restart the shell` above `No playlist configured`, the bar's
@@ -29925,7 +30009,17 @@ lane's files. It stays UNVERIFIED.
   Behaviour is right either way (both paths now reload). The documents are
   bracketed here; the two shipped comments are the lead's to correct (a
   comment edit is a shipped-file change: the next cut restamps the file,
-  as it does any changed file).
+  as it does any changed file). **[2026-11-25, lane-l3cagefix: the search
+  missed nine more places, listed on D-DOC-39's row: four in documents,
+  bracketed since (this file's "The cause of that failure is proven" and
+  "D-HOST-2 verified 2026-09-23", lane-l3a's D-HOST-16 section and
+  D-HOST-16's row, the last two describing its double); a third shipped
+  comment, Service.qml's
+  over `recheckBuild` ("the only way to see a file that was replaced
+  underneath us"); three test comments (tests/service-harness.js over
+  ManifestFile, tests/Model.test.js in the D-HOST-2 pin and in the first
+  D-HOST-16 boot); and CHANGELOG.md's 0.7.8 entry ("the watch never
+  fired"), a released note, not edited.]**
 - **D-DOC-40** (P4, docs): "V4 fails the module link on a missing named
   export (the first stamped cut beside a poisoned part from before the
   stamps), which then loads no plugin" is false (section 6). Bracketed in
@@ -29957,11 +30051,126 @@ tests/a11y/*.py, CHANGELOG.md (not edited, the cut's) and the STATUS rows.
   QML `var` keeping a null-prototype map as one (the service's
   `reportedStamps` works under the engine in every arm, the reports reach
   the reply, but its prototype is not read); UX.md 6.3's "which Qt asks
-  first".
-- Cleared: CHANGELOG.md names none of these; check_bus.py states its checks
+  first". **[2026-11-25, lane-l3cagefix: and the bar's report under the host's
+  own Bar.qml, which no run had (the rig's reduction of its widget host,
+  the dev harness's shell.qml); kept UNVERIFIED in ARCHITECTURE.md
+  section 9, lane-l3b's list and D-REL-16's row]**
+- Cleared: CHANGELOG.md names none of these **[2026-11-25, lane-l3cagefix:
+  wrong. Its 0.7.8 entry says "the watch never fired", which the search's
+  present-tense "never fires" could not match; a released note, not
+  edited, and named on D-DOC-39's row]**; check_bus.py states its checks
   and claims nothing run.
 
 ### Checks
 
 The full gate on the committed tree, and the counts it printed, are in the
 lane's result for the lead.
+
+### The rechecks of 1193870 (lane-l3cagefix, 2026-11-25)
+
+**[2026-11-25, lane-l3cagefix: two rechecks read 1193870, one by
+measurement over the kept evidence and one over the records, and found
+nothing wrong in a verdict; they found counts, scopes and citations the
+records stated wrongly, two gaps in the rig's `agree` line, and a sibling
+search that stopped short. This lane held no display: it started no cage,
+quickshell, qml or player, and read lane-l3cage's kept evidence (the lane's
+scratch `arms/` and `runs/`), the rig's analyze.py and candidates.py (git
+and python only) and the gate.]**
+
+- **Re-derived from the kept marks.** 48 arms; the shipped analyze.py
+  (1193870's) reprints every arm's `analyze-final.txt` byte for byte; 329
+  `agree` lines in 47 arms, none that does not fit; 23 `cleared-live`
+  steps, each equal to the step before it in the marks, `status`, `build`,
+  the footer, the views' notices and stamps, the empty state, the tooltip
+  and the name, with no notable log line between them.
+- **Corrected where they stand, each with its own bracket:** 19 clear-live
+  arms (23: here, UX.md 6.1's footer row, D-REL-16's row) and the evidence's
+  size; `cache` naming every poisoned file "in every poisoned arm below"
+  (6 of the 9 poisoned cases: here and D-REL-16's row); "every arm ...
+  within its bounds" (here, lane-l3b's cage list, D-REL-14's row); "loads
+  the plugin with no model" (here, lane-l3b's UNVERIFIED list, D-REL-16's
+  row); the bar's report "under the host" (the host's own Bar.qml was never
+  run: kept UNVERIFIED in ARCHITECTURE.md section 9, lane-l3b's list and
+  D-REL-16's row); the contract row D-DOC-39 cited (C10; git's write is an
+  unlink and a create: here and D-DOC-39's row); D-DOC-40's guide (its
+  open() threw: here and D-DOC-40's row); the no-service accessible name
+  "in every no-service arm" (only a stamped build's bar says it: UX.md
+  7.1 and D-A11Y-14's row; 0.20.0's bar in a-01-h4 and a-01-h0 says `IPTV,
+  idle`, 10 marks); "4 races ... missed by 2 to 7 ms" on D-REL-16's row
+  (the two one-worker races missed by 2 and 6.7 ms; at four workers git
+  unlinked the part before its unit was saved); X-cl-633's re-read (the
+  final cache only).
+- **D-DOC-39's siblings, by shape** ("never fire(s|d)", "does not fire",
+  "old inode", "no longer exists", "replaces the file", "raises nothing",
+  "watching nothing", "replaced underneath", across docs/, README.md,
+  CHANGELOG.md, every QML, JS, MJS, PY and SH file, tests/ and scripts/):
+  nine places lane-l3cage's search missed, now on D-DOC-39's row. Four in
+  documents, bracketed: "The cause of that failure is proven" and "D-HOST-2
+  verified 2026-09-23" in this file, lane-l3a's D-HOST-16 section and
+  D-HOST-16's row (both describe the double: less eventful than the view at
+  git's write, so stricter, not more forgiving, rule 10). Four comments,
+  left for the lead with the two shipped ones the row named: Service.qml's
+  over `recheckBuild` (shipped), tests/service-harness.js's over
+  ManifestFile, and tests/Model.test.js's in the D-HOST-2 pin and in the
+  first D-HOST-16 boot. CHANGELOG.md's 0.7.8 entry ("the watch never
+  fired"), a released note, not edited. Read and cleared: every release tag
+  with a manifestFile (33, v0.7.5 to v0.20.0) declares no `onFileChanged`
+  on it; ARCHITECTURE.md section 5's and the contract's FileView section's
+  "a replacement or a re-point raises nothing" describe `stateFile`'s
+  double, built from the LINKED state.json measurements (C8, C9, C11), not
+  the manifest (where a boot uses it over a regular file it is less
+  eventful than C10's view, so stricter; no boot was read for that);
+  ARCHITECTURE.md section 11's open risk 1 is the
+  helper's rename of a state file, settled in its own bracket; the other
+  matches are other subjects.
+- **SERVICE-SPLIT's L3 paragraph** ("UNVERIFIED until the caged arms ...")
+  named the clear-live order and b-01-x as shown by no arm; lane-l3cage's
+  runs showed both and its records lift them elsewhere, and its search
+  missed this paragraph. A bracket there now points at those runs and keeps
+  what they did not show UNVERIFIED. Nothing is lifted here that
+  lane-l3cage's runs did not observe.
+- **The two mutants D-DOC-39 rests on are kept** (183e10f) as
+  `scripts/dev-harness/spikes/codebehind-reload/mutants/no-root-manifest-handler.patch`
+  (R1ma and R1ma2's scratch commit dce5268: the root's `onManifestChanged`
+  deleted) and `no-manifestfile-onfilechanged.patch` (R1mb's 80f80a0:
+  manifestFile's `onFileChanged` deleted), each one line. Each was applied
+  to a clone at 6fb53e4, committed, and handed to the rig's own
+  candidates.py: it exported C1 72f0daf, C2 8eda590 and C3 0cb91b0 for the
+  first and 4aefb3a, 7c7d701 and 01b0c2f for the second, the exact builds
+  those runs' cand.json name, so each patch is its commit's tree. Both
+  apply to l3cage's tree (`git apply --check`), whose runtime files are
+  6fb53e4's. Each file's header says how to run it again.
+- **analyze.py's `agree` line, two gaps F-HARNESS-135's fix left** (the
+  measure recheck; 183e10f). (1) It printed both views' notices and judged neither,
+  so a `cache` reply beside two views reading "" read as fitting: now each
+  view that holds this service must say the reply's notice, in the reply's
+  verdict and the reading-threw one, or the line reads THE NOTICE DOES NOT
+  FIT. (2) `attached` cannot tell a view with no service (the bar's 500 ms
+  resolve) from one bound to another service object: rig.qml.in now records
+  `guideServiceIsNull` and `barServiceIsNull`, analyze.py names a view
+  pending only when its service is null, and a view bound to another object
+  and unstamped is a disagreement; marks taken before the field say so
+  ("whether its service was null is not recorded"). Red first, by calling
+  `stamp_lines` over marks from the kept arms, each changed in one field,
+  10 cases: the shipped analyze.py 5 wrong (both views "" beside a cache
+  mix, the bar "" beside one, the guide "" beside a restart, both "" beside
+  a reading that threw, a bar bound to another service object: all read
+  fits), the fix 0; one-decision mutants of the fix, the bar's notice
+  unjudged 1 wrong, the reading-threw verdict not judging the views 1, the
+  reply's verdict not judging them 3, the null ignored 1. Over all 48 kept
+  arms the fix prints 329 `agree` lines, none that does not fit, and differs
+  from the shipped readout only in the 8 pending lines, which now say the
+  null was not recorded. rig.qml.in's two lines: make-root.py builds both
+  roots with them, and qmllint reads the root a shell.qml with rc 0, as it
+  reads the root built from 1193870's block (and rc 255 on a deliberate
+  syntax error in the same line). **UNVERIFIED** until a caged arm runs
+  them: no rig run has read the new fields.
+- **Left for the lead:** the bar's resolve window (for up to 500 ms after an
+  enable its tooltip and name say the service is not loaded, with the cache
+  step, while the service runs; recorded in section 5 "as designed" and
+  proposed, no id); D-DOC-39's six comments, shipped and test; the state
+  words "fixed on the l3stamp branch ..., unmerged" on D-HOST-16, D-A11Y-14,
+  D-REL-16 and in SERVICE-SPLIT, which 6fb53e4's merge made stale; and
+  L2-BAR-08, seen green on the bus but never seen red (rule 11): the run
+  that would show it is the caged probe over a tree whose composer has no
+  no-service branch.

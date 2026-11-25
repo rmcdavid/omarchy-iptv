@@ -5250,6 +5250,12 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
     stamps, and the footer and the tooltip say `Loaded mid-update`
     (D-DOC-40). STILL UNVERIFIED -- a stamped part's `var` surviving as the
     old build's (no race poisoned one), and the last item, Qt's order.]**
+    **[2026-11-25, lane-l3cagefix, from the records recheck of 1193870: and
+    the bar's report under the host's OWN Bar.qml, which no run had: the
+    rig hosts the bar with its own reduction of Bar.qml's widget host, and
+    key-scenario with the dev harness's shell.qml. So that half of "both
+    views' reports reach the service" stays UNVERIFIED; the guide's under
+    the host's own panel loader is observed.]**
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in
