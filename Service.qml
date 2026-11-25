@@ -45,8 +45,13 @@ import "Service-sources.js" as ServiceSources
 // one-line forwarder here at its old place (D-REL-14; SERVICE-SPLIT.md on
 // the dev branch). Edit a body there, never its forwarder.
 //
-// keepLoaded: edits to THIS file or to its code-behinds only apply after
-// `omarchy restart shell`.
+// Edits to THIS file or to its code-behinds only apply after `omarchy
+// restart shell`. keepLoaded carries this object over the host's plugin
+// reload, and the engine keeps the component it first compiled: measured
+// across a version change with code-behinds (D-REL-14's call (d)), the
+// host's reload, a rescan and a disable and an enable all ran the build
+// the shell first loaded, this file and every code-behind together, and
+// the guide and the bar with them.
 Item {
   id: root
 

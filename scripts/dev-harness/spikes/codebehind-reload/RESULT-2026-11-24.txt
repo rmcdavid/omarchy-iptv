@@ -47,8 +47,9 @@ change with code-behinds" holds the reading).
   entry (refreshMinutes 120 -> 360 after the enable; D-QA-17).
 - Write order (17 updates): at git's default one worker every working-tree
   close was in index order (Service-*.js, then Service.qml, then
-  manifest.json and model/), the writes spanning 5.3-6.1 ms of a 38-47 ms
-  merge with no gap above 1.4 ms. At four workers, by `-c` (2 of 2) and by
+  manifest.json and model/), the writes spanning 5.3-5.8 ms of a 38-47 ms
+  merge with no gap above 1.4 ms [the join, 2026-11-24: this line read
+  5.3-6.1 ms; the fourteen one-worker runs below print 5.3 to 5.8]. At four workers, by `-c` (2 of 2) and by
   the decoy HOME's ~/.gitconfig (1 of 1, the order no longer index order,
   so the user's setting reached the update's git), the closes interleaved;
   in the two `-c` runs Service.qml was created before Service-rewind.js (and

@@ -27648,3 +27648,238 @@ Three things the half-tree arms show:
   lead's to change. Sibling search: no committed script runs `flock` itself
   (a grep of scripts/, tests/ and the docs). The idiom lives in the
   workflow briefs.
+
+## D-REL-14: C5, the documents (lane-c5-docs, 2026-11-24)
+
+C5 is D-REL-14's documents. lane-c5-docs wrote them on branch c5-docs from
+3200d22 (20113e8, 31f61dc, 1f6275f, a6ae342). lane-join-c5d merged reload-d
+(call (d), the section above) and then c5-docs into branch c5d, each with
+`git merge --no-ff`. Neither merge conflicted: the two branches touch no
+file in common. The join wrote SERVICE-SPLIT.md's section on updates from
+call (d)'s measurement, corrected two comments to it, and wrote these
+records. Nothing was pushed, and no tag moved. Every count below is from
+c5d unless it says 3200d22.
+
+### What was written
+
+- **docs/SERVICE-SPLIT.md**, new, written the way HELPER-SPLIT.md is. It
+  covers:
+  - why: the ceiling, and Service.qml's size from v0.14.3 to 3200d22, in
+    eight rows;
+  - the three designs, and the fallback that was taken;
+  - the layout of the five files, with their bytes and function counts;
+  - what stays on the root, and why;
+  - how a code-behind runs: its scope, the host's load patch, the
+    forwarder's exact form and the inline view, with the judge's, Part A's
+    and C3's and C4's measurements, naming the code-behind each live mutant
+    was in;
+  - the one list and its readers;
+  - every refusal of `split-service.py --check`, the readers' 12 kinds and
+    the judge's 9, each with what it keeps true, and `--cut`'s;
+  - the closure rule (D-REL-15);
+  - editing, moving a function and adding a code-behind;
+  - how qmllint sees the service (F-GATE-29), and how the node harness runs
+    it;
+  - **Updates and hot reloads across a version change (call (d))**,
+    written by the join and summarised below;
+  - the history (C1 to C5, call (d) and D-REL-15, with their commits);
+  - what is not measured, narrowed by the join to what call (d) left open.
+- **The updates section.** Every claim in it is call (d)'s measurement, or
+  is marked read:
+  - what a running shell does after `omarchy plugin update`: the old build
+    runs, whole, through the watcher's reload and a rescan. That covers the
+    kept service object, the guide and the bar made from the cached
+    components, and the model, whose `Model.PLUGIN_VERSION` the status
+    reads as `build.running`. The footer reads "Updated" once the guide
+    opens.
+  - what a disable and an enable does: it makes the old build's service
+    again, twice, even after gc and 8,000 new loads.
+  - D-REL-9's write order, in a table: at one worker, index order with the
+    code-behinds before `Service.qml`; at four workers, by `-c` or by
+    `~/.gitconfig`, interleaved. What the host's scripts pass git is read,
+    not measured.
+  - what reads the window: no reload, but any cold load.
+  - the four half trees, h1, h4, the first release's h4, and h0, in a
+    table;
+  - what a user must do: restart after an update, as the README and every
+    release's notes already ask. A disable and enable is no substitute, and
+    a second restart is needed after a cold load inside the window
+    (D-REL-16).
+  - that no fix was made; whether that meets call (d) is the lead's call.
+- **docs/ARCHITECTURE.md**:
+  - section 9 gains "The service's code-behinds (D-REL-14)", seven rule
+    bullets beside the model's and the helper's;
+  - section 4 gains a `Service-<domain>.js` row;
+  - section 10's QML static row gains `scripts/check.sh --qmllint-view
+    Service.qml`;
+  - decision 8 gains two dated brackets: the code-behinds' restart (lane
+    c5-docs), and call (d)'s finding that the restart is not keepLoaded's
+    cost alone (the join).
+- **The plans.** Each of these reads the code-behinds now, with a dated
+  bracket:
+  - QA-PLAYER PLY-STOP-11, PLY-SOCK-02, PLY-SVC-02 and PLY-SVC-07;
+  - QA.md TC-INST-04, SEC-07's sink grep (75 of the 183 lines its pattern
+    matches in the service were in the code-behinds on 3200d22), and a lint
+    line for the view's door;
+  - PLAN-M2 MR1, rule 8 and MR12.
+- **scripts/split-service.py**'s docstring points at the document.
+- **Service.qml**'s header, comment lines only:
+  - lane-c5-docs named the four code-behinds and the forwarder rule;
+  - the join replaced "keepLoaded: edits to THIS file or to its
+    code-behinds only apply after `omarchy restart shell`" with what call
+    (d) measured. keepLoaded carries the object over the host's reload,
+    and the engine keeps the component it first compiled. The host's
+    reload, a rescan and a disable and enable all ran the build first
+    loaded, this file and every code-behind together, and the guide and
+    the bar with them. The new lines hold no `{`, which would end the
+    header test_host_load_patch.py reads.
+- **README.md's development line.** lane-c5-docs named the code-behinds.
+  The join added `Guide.qml`, `BarWidget.qml` and the model, and replaced
+  "(kept-loaded services do not hot-reload)" with the measured reason: the
+  running shell keeps the code it loaded first, and the plugin reload, a
+  rescan and a disable and enable all bring back the same build. The line
+  names no docs/ path.
+- **The rig's record.** The join corrected one figure in
+  RESULT-2026-11-24.txt's summary, with a bracket. It said the one-worker
+  writes spanned 5.3-6.1 ms, and its fourteen one-worker runs, as printed
+  below it, read 5.3 to 5.8 ms. The runs themselves are unchanged.
+
+### Proof that the service changed in comment lines only
+
+- `git diff -U0 3200d22 -- Service.qml Service-*.js` has 0 added or
+  removed lines that are not `//` lines.
+- The inline views of 3200d22 and c5d, read through the tree's own
+  readers, are 449,007 and 449,758 bytes. With every `//` line dropped they
+  are 4,454 lines each and equal (lane-c5-docs's comparison script, run by
+  the join).
+- Shown red: one property line added to a scratch copy reads 4,454 against
+  4,455, DIFFER.
+- `split-service.py --verify --from-git 3200d22` is red, as it should be,
+  at byte 2049, line 38 of the view, the header: 449,758 bytes against
+  449,007.
+
+### Searched and cleared (rule 15)
+
+lane-c5-docs searched docs/ARCHITECTURE*.md, UX*.md, QA*.md (not
+QA-RESULTS) and PLAN-M2.md. That covered every `Service.qml` mention, about
+231, and greps for line citations, one-file wording, and "comment/text/body
+of Service.qml".
+- **Fixed**, the category being a present-tense statement that treats
+  Service.qml as the whole service, or a grep criterion over Service.qml
+  for a moved body: the rows listed above.
+- **Cleared:**
+  - 34 `Service.qml:NNN` line citations in ARCHITECTURE-PLAYER,
+    ARCHITECTURE-SOURCES, QA-PHASE3, QA-PLAYER and QA-HEADLESS. These are
+    design-time or dated records, and their numbers were stale before the
+    split.
+  - Dated round and lane records, among them ARCHITECTURE-SOURCES's "the
+    ONLY updateEntryInline call in Service.qml". The node pin counts that
+    over the inline view, so it is still true of the service.
+  - Mentions of a member, an object or a property, which stay true through
+    the forwarder or stay on the root.
+  - The historical lane-ownership tables, and the host's own
+    notifications/Service.qml.
+  - Comments deferring to C5: the only one is in this file's earlier
+    sections, which stay as dated records.
+
+The join searched two more shapes.
+- **"Only the service needs a restart."** Call (d) shows the restart is
+  the engine's component cache's, not keepLoaded's alone.
+  - Corrected: the README's development line and Service.qml's header.
+  - Bracketed: ARCHITECTURE decision 8.
+  - Cleared:
+    - model/build.mjs's D-HOST-1 comment already says the overlay and the
+      bar are rebuilt from the cached old components (D-REL-6's closure),
+      and call (d) measured the same on Quickshell 0.3.2.
+    - PLAN-M2 MR1 and rule 8 speak of the service only, which stays true.
+    - The README's Updating paragraph says the shell "keeps the background
+      service it already loaded until it is restarted" and asks for the
+      restart. That is true, but it names only the service, and it lies
+      outside the join's README scope; it is proposed to the lead.
+    - CHANGELOG.md has no unreleased section to carry it.
+- **A grep criterion over `bin/omarchy-iptv` alone**, the stub since
+  D-REL-7. lane-c5-docs proposed this shape; the join searched it in every
+  docs/*.md but QA-RESULTS and STATUS, for each line that names both `grep`
+  and `bin/omarchy-iptv` and not `bin/helper`.
+  - Found: QA.md SEC-07 (its pattern matches 9 lines in the stub and 133
+    in the parts), QA-PLAYER PLY-SVC-07 (`playSeq`, 0 and 2) and
+    PLY-SEC-17 (`^import |^from `, 2 and 33).
+  - Cleared:
+    - ROADMAP-PROPOSED's dated "`grep -n player_api bin/omarchy-iptv`
+      returns nothing", which the parts do not contradict: 0 matches there
+      too.
+    - QA-HEADLESS's and QA-SOURCES's lines, which run the helper or match
+      its process; they do not grep its code.
+    - CLEANUP-PLAN's dated line citation.
+  - With ARCHITECTURE section 4's "the mpv `Process`", filed as D-DOC-37.
+    Service.qml holds no Process that runs mpv: its only mpv argv is
+    `which mpv`.
+
+### Checks, on c5d against 3200d22's counts
+
+- `scripts/release.py check`: 47 files, 26 runtime sources, the largest
+  `Guide.qml` at 310,448 of 458,752 B (base 47).
+- `scripts/split-service.py --check`: 5 files, 4 code-behinds, 47 root
+  functions, 158 forwarders, 2,268 sites, 2 uses of the root whole, 34 of
+  34 cases (the base's, identical).
+- `scripts/check.sh --qmllint-view Service.qml`: 0 errors, 46 warnings +
+  387 on Model members. `--qmllint-file Service.qml`: 0 errors, 9 + 134.
+  Both are the base's.
+- `scripts/check-readme-notices.py`: 46 quotes, 31 joined (24 exact, 2
+  composed, 5 elided), 15 skipped, 0 problems (the base's).
+- `node tests/Model.test.js`: 4,073 checks, 0 failures, and 4,073 with
+  IPTV_HARNESS_OWN_ECHO=none (base 4,073 and 4,073).
+- Python by discovery: 3,033 (base 3,033).
+- The python modules that read the changed files, found by grepping tests/
+  for their names (README.md, Service.qml, Service-, ARCHITECTURE.md,
+  QA.md, QA-RESULTS, STATUS.md, split-service, spikes), minus
+  test_host_load_patch: 53 modules, run under the heavy lock. Ran 1,593
+  tests, OK, with 1 skipped: test_playlist's standing skip for D-PERF-13.
+  test_split_service alone ran 39, OK.
+- test_host_load_patch.py was not run, because it starts plain qml under a
+  core limit only. It copies Service.qml's header into its probes, and the
+  header still ends at `Item {` (line 51), the first line holding a `{`, as
+  it ended at line 43 on 3200d22. The lead's gate runs it. The QML spec and
+  scripts/qa-lib-test.sh were not run: no file they read changed in
+  anything but comments or documents.
+- `scripts/check-defect-ledger.py`: 805 rows on the board, 805 ids across
+  630 tracked files, 58 of them markdown, 0 problems. The rows were 804
+  after reload-d; D-DOC-37 is the 805th.
+- `scripts/check-board-staleness.py`: 805 rows, 7 bare-open, 37 commit
+  fix-claims, 0 disagreements.
+- `scripts/check-sr-register.py`: 40 rows, 455 citations in 39 files, 0
+  problems.
+- `scripts/check-double-encoding.py`: 630 files, 0 problems.
+- The byte scans (`check.sh --byte-scan`): ascii, 567 files; control, 539
+  files; both ok (3200d22: 560 and 532, with reload-d's seven rig files
+  added).
+- `scripts/check-marketplace-capabilities.py`: 220 files, 72,468 commands,
+  0 capability hits.
+- The reload rig has no check mode of its own. `bash -n run.sh` is clean,
+  and its four python files parse. `make-root.py` built both roots on this
+  host: the sha256 pins held, root a's first line is the pragma and root
+  b's is not, and each root's shell.qml and PluginRegistry.qml carry one
+  `RIG ADAPTATION` line. `run.sh` on a PATH without gdb refused with
+  "refused: gdb is not installed", rc 2, before it started anything.
+- The private-id scan of the commit range: 0.
+- The crash journal read 89 at the start, after every run and at the end.
+  The join started no Qt process.
+
+### Filed
+
+- **D-DOC-37** (P4, docs), from lane-c5-docs's proposal, with PLY-SEC-17
+  added by the join's search. ARCHITECTURE.md section 4 says Service.qml
+  owns "the mpv `Process`". Three plan greps, SEC-07, PLY-SVC-07 and
+  PLY-SEC-17, read the helper's stub alone. Each is open, with its counts on
+  the row.
+
+Left out, and why:
+- lane-c5-docs's item 4 says of itself that it is not a finding: two runs
+  it did not repeat.
+- lane-reload-d's two brief nits. release.py check refusing a suffixed test
+  version is its X.Y.Z reading working as designed, not a defect. A SIGPIPE
+  ending a shell under `handle all nopass` is a property of the brief's gdb
+  line, recorded in the section above with no id; it is a line for the
+  lead's briefs.
+- lane-reload-d's own findings are already filed, as D-REL-16 and
+  F-HARNESS-131.

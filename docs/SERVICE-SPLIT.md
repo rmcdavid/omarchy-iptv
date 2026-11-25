@@ -4,8 +4,11 @@ Written 2026-11-24 on `dev` 3200d22, D-REL-14's C5. The split itself is
 done and merged on `dev` (C3 on 2026-11-23, C4 and D-REL-15's fix on
 2026-11-24) and **unreleased**: v0.20.0, the release on `main`, ships the
 one-file `Service.qml`, so no install has run a code-behind yet. Every
-figure below was read or run on 3200d22 unless a date says otherwise; the
-measurements behind them are in `docs/QA-RESULTS.md` (the sections from "The
+figure below was read or run on 3200d22 unless a date says otherwise (the
+section on updates was measured the same day with 3200d22's export; the
+tree this document was merged on, branch c5d, differs from 3200d22's
+service in `Service.qml`'s header comments only); the measurements behind
+them are in `docs/QA-RESULTS.md` (the sections from "The
 lead's follow-ups to lane-ply78 and the D-REL-14 design" to "D-REL-15:
 merged") and the plan and the lead's calls are on the D-REL-14 row of
 `docs/STATUS.md`. This is the service's counterpart of
@@ -36,8 +39,10 @@ was next. `Service.qml`, read from git:
 It grew 46,467 bytes in the eight days after 0.19.1, the player rounds of
 November (D-PLY-39 to -76) most of it, so a few more rounds would have
 reached the ceiling and `release.py check` would then have refused the
-cut. The service's one text today -- its inline view, below, what the one
-file would weigh -- is 449,007 bytes, 9,745 under the ceiling.
+cut. The service's one text on 3200d22 -- its inline view, below, what
+the one file would weigh -- is 449,007 bytes, 9,745 under the ceiling. On
+c5d, after the header's comments were re-worded, `Service.qml` is 231,016
+bytes and the view 449,758, 8,994 under it.
 
 The plan was chosen on 2026-11-21 from three read-only designs and a judge
 (QA-RESULTS "The lead's follow-ups to lane-ply78 and the D-REL-14 design"):
@@ -430,6 +435,174 @@ service in `tests/Model.test.js` and `tests/proto-run.mjs` pass the file
 set, and the suite's pins on the service's text read `serviceText`, the
 view.
 
+## Updates and hot reloads across a version change (call (d))
+
+The lead's call (d) asked, before the first release that ships a
+code-behind, for a hot reload across a version change to be measured in a
+nested cage, and for D-REL-9's write order to be measured or answered
+above git's default `checkout.workers=1`. lane-reload-d measured both on
+2026-11-24 (branch reload-d, merged with this section). Everything below is
+that measurement unless it says "read". The rig is
+`scripts/dev-harness/spikes/codebehind-reload/` (`run.sh`; its record,
+every arm as printed, is `RESULT-2026-11-24.txt` there); the reading is
+QA-RESULTS "D-REL-14: call (d), a version change with code-behinds
+(lane-reload-d, 2026-11-24)".
+
+**What was run.** The host's own loader, reload, disable and enable code,
+cut from its `shell.qml` (Omarchy 4.5.0-3, sha256 pinned) by line range,
+byte for byte, with two adaptations named in its output (`firstPartyDir`
+points at an empty folder, so no first-party plugin or service starts; the
+orphan reaper's `pgrep -f` is `true`). The folder watcher
+(`PluginRegistry.qml` 726-745) and its 150 ms debounce are the host's,
+unchanged, and the shell starts the way the live launcher starts it
+(`QS_DISABLE_FILE_WATCHER=1`). It ran in one nested headless cage on
+`scripts/dev-harness/private-bus.sh`, every quickshell under gdb, on two
+roots: a, with the load patch's pragma, and b, without it. The plugin was
+installed the way `omarchy-plugin-add` installs it, from a scratch
+upstream, and updated by `omarchy-plugin-update`'s own git step run by
+argv (`fetch`, then `merge --ff-only FETCH_HEAD`, then validation). Three
+builds, each committed onto the last as `release.py` does:
+
+| build | what it is | version |
+|---|---|---|
+| C0 | 1321aff, `main`: 0.20.0, one `Service.qml` | 0.20.0 |
+| C1 | 3200d22's `ALLOWLIST` export by `release.py`'s own `build_tree`: four code-behinds | 0.99.0 |
+| C2 | C1 with `Service-player.js`'s `socketAttached` renamed and `Service.qml`'s forwarder calling the new name, so any pair of a C1 file and a C2 file throws on every call, `status` included | 0.99.1 |
+
+C1 and C2 carry an inert mark in `Service.qml`, each code-behind,
+`Guide.qml` and `BarWidget.qml` (C0's mark is that it has none), and the
+rig reads each running object's QML type name, which a component compiled
+again changes. A deliberately mixed tree reads as mixed (h1, below), so the
+all-old readings are not a readout that cannot go red.
+
+**After `omarchy plugin update`, with the shell running.** C0 to C1 and C1
+to C2, both roots: the old build kept running, whole, through the watcher's
+reload (which began 150.6-154.5 ms after git's last write) and then
+through `rescanPlugins`.
+- The service is the same object: it is keepLoaded, so the host's
+  `unloadPluginServices` carried it over and `_syncServices` handed it the
+  new manifest.
+- The guide and the bar are new items, made from the cached old
+  components: the same `_QMLTYPE_` numbers as before the update, the old
+  marks.
+- Nothing mixed. Across C1 to C2 the service ran C1's `Service.qml` and C1's
+  four code-behinds, and no TypeError appeared although C2's forwarder on
+  disk names a function C1's file lacks. The plugin's files logged nothing
+  at either reload, in either root: no error, no `Script ... unavailable`.
+- The model stayed old too: `status`'s `build.running`, which is
+  `Model.PLUGIN_VERSION`, read the old version.
+- The plugin says so once the guide opens (D-HOST-1): before that, `status`
+  read the running and on-disk versions alike, because the replaced
+  manifest's watch never fires (D-HOST-2); at the open `recheckBuild` read
+  the new manifest, `stale` became true, and the footer read "Updated ·
+  restart the shell to see the new version".
+- After a restart the new build ran everywhere, clean: ready with three
+  channels, the starred channel and the bar entry's `refreshMinutes` 120
+  kept.
+
+That is what D-REL-6 measured on 2026-10-12 for a one-file service, now
+measured with code-behinds on Quickshell 0.3.2: an update does not reload
+the plugin's code, and the code-behinds change nothing about that.
+
+**A disable and an enable, without a restart.** After each update the rig
+disabled and enabled the plugin the host's way (`setPluginEnabled` false,
+then `enablePlugin`, the calls `omarchy-plugin-disable` and `-enable`
+make, read in them),
+twice, in both roots. Each new service instance was the OLD build's type
+and text, `Service.qml` and every code-behind together (C0's type with no
+marks; C1's type with all five marks C1), ready with three channels, with
+no error and no crash. Before the second enable the rig collected garbage,
+loaded 8,000 components the type loader had never seen, and made and let
+go a control component of its own, then rewrote the control's file: the
+enable still made the old type, and the control came back with its first
+text. So no path the rig drove released a component once it was loaded,
+and D-REL-6's mixed shape (a cached file beside a fresh one) was not
+reached by an update, a reload or a toggle. Why the engine keeps the
+component was not read in the Qt sources. Two things beside it:
+- A Service with live code-behinds was destroyed by each disable (four
+  times) and at every C1 or C2 shell's exit, with no fault. Whether a
+  deferred call was pending at that moment was not observed, so D-REL-15's
+  crash condition stays unmeasured (below).
+- The host's disable removes the bar entry and the enable puts back only
+  its id, so `refreshMinutes` went from 120 to the default 360 (D-QA-17,
+  known); the playlist survived because start-up had moved it into
+  `state.json`.
+
+**D-REL-9's write order.** The update's merge was timed by an inotify watch
+on the plugins folder, on the clock the rig's events use.
+
+| `checkout.workers` | runs | the closes | writes |
+|---|---|---|---|
+| 1, git's default | 14 (8 updates, 6 half-tree completions) | index order every time: `BarWidget.qml`, `Guide.qml`, `Service-pip.js`, `Service-player.js`, `Service-rewind.js`, `Service-sources.js`, `Service.qml`, `manifest.json`, `model/build.mjs` (of the files named); every code-behind closed before `Service.qml` was created | 5.3-5.8 ms inside a 38-47 ms merge, no gap above 1.4 ms |
+| 4, by `-c checkout.workers=4 -c checkout.thresholdForParallelism=1` on the merge | 2 | interleaved; `Service.qml` was created before `Service-rewind.js` closed, and in one run before `Service-player.js` too | 7.4-8.4 ms, gaps up to 3.9 ms |
+| 4, by the same two settings in the decoy HOME's `~/.gitconfig` | 1 | not index order (`manifest.json` and `model/build.mjs` before `Service-player.js`), so the user's setting reached the update's git; `Service.qml` happened to close last | 10.7 ms, a gap of 5.4 ms |
+
+Read in `omarchy-plugin-update` and `omarchy-plugin-add`: they pass git no
+`-c` option, export only `GIT_TERMINAL_PROMPT` and `GIT_SSH_COMMAND`, and
+leave HOME, XDG_CONFIG_HOME and every `GIT_CONFIG_*` alone, so a user's git
+configuration sets the worker count (`~/.gitconfig` measured above;
+`$XDG_CONFIG_HOME/git/config` and `/etc/gitconfig` by git's own rules,
+not run). The update writes in place a second
+time on a failed validation, its rollback `git reset --hard ORIG_HEAD`
+(read, not run). `plugin add` has no such window: it clones into a hidden
+staging folder, which the watcher ignores, and moves it into place (read).
+
+What reads the window: no reload the host makes. In all 17 writes the
+watcher's events arrived during the writes, each restarting the 150 ms
+debounce, `reloadPlugins` began 150.6-154.5 ms after the last write, and
+every reload served cached components; the only plugin file a reload reads
+is `manifest.json`, read by the scan after the last write. A load the cache
+does not serve does read it: a shell starting or relaunched, or the plugin
+loaded for the first time, inside git's 5-11 ms of writes. How often that
+happens was not measured. What it then runs, measured on half trees made
+by hand in the shapes the order passes through, each started cold and then
+completed under the live watcher, rescanned, disabled and enabled, and
+restarted:
+
+| half tree | the window it stands for | cold start | until the restart |
+|---|---|---|---|
+| h1: C2's code-behinds beside C1's `Service.qml` | one worker, the code-behinds written and `Service.qml` not yet | a MIX, C1's `Service.qml` with C2's code-behinds; `status` throws "TypeError: Property 'socketAttached' of object [object Object] is not a function" | the same mixed type at every reload, rescan and enable; nothing told the user before the tree completed, and after it the footer read "Updated" |
+| h4: C2's `Service.qml`, `Service-player.js` not there | four workers | no service: "Script file://.../Service-player.js unavailable"; the guide and the bar load without it, the footer empty | the host retried at every scan and at the enable, and each retry failed with the same line |
+| a-01-h4: C1's `Service.qml`, no code-behind yet | the first code-behind release at four workers | no service: "Script file://.../Service-pip.js unavailable" | as h4 |
+| h0: `Service.qml` unlinked | any worker count; 0.20.0's own updates have it | no service: "Service.qml: No such file or directory" | as h4 |
+
+Every retry got back the component the engine kept from the first load,
+failed or mixed, and only a restart recovered. So the stickiness is not new
+(h0 is 0.20.0's), but code-behinds widen what a cold load can read: h1 at
+one worker for any release that changes a function across `Service.qml`
+and a code-behind, and h4 at more. Filed as D-REL-16. Under the load
+patch's pragma `Service.qml` compiles as `qs://` and its code-behinds as
+`file://`, and the patch's scanner follows a code-behind's import and logs
+a missing one as "Ignoring unresolvable import", so on root a a missing
+code-behind is reported twice.
+
+**What a user must do.** Restart the shell after `omarchy plugin update`
+(`omarchy-restart-shell`), as the README's Updating paragraph and every
+release's notes already ask. Until then the old build runs, whole and
+unmixed, and the guide's footer says "Updated" once it opens. A disable and
+an enable is no substitute: it makes the old build's service again. If the
+shell started, restarted or first loaded the plugin while the update was
+writing it (D-REL-16), it may run no service, or a mixed pair whose calls
+throw, until it is restarted once more after the update has finished.
+With no service the guide opens with an empty footer; with a mixed pair
+nothing the plugin shows says so before the update finishes. The
+code-behinds ask nothing of the user that 0.20.0 did not: the same
+restart, and the same second restart after a load inside the window,
+whose shapes they widen.
+
+**What it changed.** No shipped code: the ordinary update path showed no
+failure, so no fix was made; whether that meets call (d) is the lead's
+call (lane-reload-d proposed that it does). The rig and its record are the
+measurement's only files. Filed: D-REL-16 and F-HARNESS-131 (the heavy
+lock's descriptor inherited by a process that outlived a run, found while
+building the rig, whose own runs use `flock -o`). D-REL-6, D-REL-9 and
+D-REL-14 carry dated brackets. The join brought two texts to the
+measurement: `Service.qml`'s header comment no longer gives keepLoaded as
+the whole reason a restart is needed, and the README's development line
+names the guide, the bar and the model beside the service, since none of
+them reloads either. D-REL-16's options and their costs are in
+lane-reload-d's result, for the lead.
+
 ## History
 
 - **2026-11-21.** D-REL-14 filed at 444,947 bytes; the design panel and the
@@ -463,25 +636,41 @@ view.
   code-behind; 4f20e5f held the deferral and its order in node; 04fa5e4
   made the harness's `Qt.callLater` fold as Qt's does (F-HARNESS-130);
   8a5490d kept the spike.
-- **2026-11-24, C5**, this document, and the service's rules in
-  `docs/ARCHITECTURE.md` section 9.
+- **2026-11-24, call (d)** (lane-reload-d, branch reload-d: 9d40778 and
+  0dbc3d0 the rig, 2f62745 its record, ab92fe4 the board). A hot reload
+  across a version change with code-behinds and D-REL-9's write order
+  above one worker, measured (the section above); D-REL-16 and
+  F-HARNESS-131 filed. No shipped file changed.
+- **2026-11-24, C5** (lane-c5-docs, branch c5-docs: 20113e8 this
+  document, 31f61dc the service's rules in `docs/ARCHITECTURE.md` section
+  9, 1f6275f the plans' greps and restart rules, a6ae342 `Service.qml`'s
+  header and the README's development line). Both branches were merged on
+  c5d (lane-join-c5d), which wrote the section on updates and corrected
+  the header and the development line to call (d)'s measurement.
 
 ## What is not measured
 
-From the D-REL-14 and D-REL-15 rows:
-- The host's own plugin registry. Part A's rig ran the host's three loaders
-  under the host's `shell.qml` header, with the file watcher off; no
-  `PluginRegistry`, `_syncServices` or `rescanPlugins` ran.
-- Before the first release that ships a code-behind, the lead's call (d)
-  asks two things to be measured or answered, never assumed: a hot reload
-  across a version change with code-behinds, in a nested cage (D-REL-6's
-  case), and D-REL-9's write order, which Part A measured holding only at
-  git's default `checkout.workers=1`.
+From the D-REL-14, D-REL-15 and D-REL-16 rows:
+- The host's WHOLE shell. Call (d)'s rig ran the host's own registry,
+  watcher, `_syncServices`, `rescanPlugins`, disable and enable, but
+  without the bar, the other plugins and the first-party services
+  (`firstPartyDir` kept them out). Whether a real shell's engine ever
+  releases a plugin's component over a long session was not reached, and
+  why the rig's never did was not read in the Qt 6.12 sources.
+- Any player across an update: nothing played, attached or zapped in call
+  (d)'s arms, so the old and new player code-behinds ran only their
+  start-up probes.
+- D-REL-16's window in a real race: the half trees were made by hand in
+  the shapes git's measured order passes through, not timed by git; how
+  often a cold load falls inside the window; root b's h0 and first-release
+  h4; `/etc/gitconfig` (read, not run); and `omarchy plugin remove` then
+  `add` without a restart, which no arm drove.
 - D-REL-15's crash needs the Service deleted inside the turn a closure was
-  scheduled in; the host destroys a plugin's services in `shell.qml`'s
-  `_syncServices` on a disable or a remove (read), and that is not
-  measured. Whether a Quickshell Process can deliver an exit to its
-  Connections while its Service is being destroyed needs a cage.
+  scheduled in. Call (d)'s disables destroyed a Service with live
+  code-behinds four times with no fault, but whether a deferred call was
+  pending then was not observed, so that condition is not measured.
+  Whether a Quickshell Process can deliver an exit to its Connections
+  while its Service is being destroyed needs a cage.
 - rewind-scenario's desk arm has not run since three of its checks changed
   in C3's lanes (F-HARNESS-129); every live proof of the split ran in a
   nested cage.
