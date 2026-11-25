@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "Model.mjs" as Model
 
 // Lane 2 BarWidget host.
 //
@@ -30,7 +31,8 @@ Window {
   property string scenario: host.scenarioName()
 
   // The three states R7 (ARCHITECTURE.md:478) says must never be told apart
-  // by colour alone. `playing` also carries the channel number, because
+  // by colour alone, and since 2026-11-25 a fourth, "noservice" (D-A11Y-14),
+  // in which the host hands no service at all. `playing` also carries the channel number, because
   // M2-03 8.1 says the number is spoken as "channel 101" and never as a
   // bare digit string.
   QtObject {
@@ -42,6 +44,16 @@ Window {
     property bool pipOn: false
     property bool refreshing: false
     property string status: host.scenario === "error" ? "error" : "ready"
+    // D-REL-16 (rule 10): the guide and the bar report their build stamp
+    // (reportBuildStamp) and read the service's buildNotice. A service with
+    // neither reads as one from before the stamps -- "cache" -- and every
+    // footer and bar name this host grades would carry the cache words, which
+    // no real service on this tree gives. So the notice is the real
+    // Model.buildVerdict over what this fake is reported, never a constant.
+    property var reportedStamps: ({})
+    function reportBuildStamp(file, stamp) { fakeService.reportedStamps = Model.withReportedStamp(fakeService.reportedStamps, file, stamp) }
+    readonly property string buildNotice: Model.buildVerdict({ reported: fakeService.reportedStamps,
+                                                               loadedDisk: Model.PLUGIN_VERSION, onDisk: Model.PLUGIN_VERSION }).notice
     function refresh() {}
     function stop() {}
     function zap(direction) {}
@@ -49,7 +61,8 @@ Window {
 
   QtObject {
     id: fakeShell
-    function serviceFor(id) { return fakeService }
+    // D-A11Y-14: the "noservice" state is a host that has none to hand.
+    function serviceFor(id) { return host.scenario === "noservice" ? null : fakeService }
     function toggle(id, payload) {}
   }
 
@@ -79,7 +92,7 @@ Window {
     }
     onLoaded: {
       item.bar = fakeBar
-      item.service = fakeService
+      if (host.scenario !== "noservice") item.service = fakeService
       console.warn("BAR_SCENARIO " + host.scenario)
       // Readback of the shipping widget's own derived state, so an
       // assertion about what the bus says can be paired with what the
@@ -91,7 +104,11 @@ Window {
           glyphCodePoint: item.glyph.length > 0 ? item.glyph.codePointAt(0) : 0,
           accessibleName: item.Accessible.name,
           nowPlayingName: item.nowPlayingName,
-          nowPlayingChno: item.nowPlayingChno
+          nowPlayingChno: item.nowPlayingChno,
+          // D-REL-16: what the bar reported and what it reads back.
+          reported: fakeService.reportedStamps,
+          buildNotice: item.buildNotice,
+          tooltip: item.tooltip
         }))
         console.warn("BAR_HOST_READY")
       })

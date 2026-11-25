@@ -311,6 +311,9 @@ RULED = {
     # so the announced name must too, or the one user who cannot see the glyph
     # is the one user not told.
     "bar.paused": "IPTV, paused channel 101, BBC One HD",
+    # D-A11Y-14 (2026-11-25): with no service the bar says so, as its tooltip
+    # does; it said "IPTV, idle". docs/UX.md 7.1 "Bar widget".
+    "bar.noservice": "IPTV, service not loaded",
     # docs/UX.md 7.1 "Channel row": `, row N of M` appended last. The row at
     # :953 states the delivered form as `Channel 7, row 8 of 10,000`.
     "row.query": "BBC One HD, row 1 of 1",
@@ -434,6 +437,20 @@ def check_bar():
     check("L2-BAR-07", len(set(v for v in seen_glyphs.values() if v)) == 3,
           "R7: the three states carry three distinct glyphs",
           "%r" % (seen_glyphs,))
+
+    # D-A11Y-14: the host hands no service (barhost's "noservice"): the one
+    # button says so, from the shipping composer and in the ruled words, and
+    # it is not the idle announcement it used to be.
+    nodes, rb = bar("noservice")
+    if nodes:
+        buttons = with_role(nodes, "push button")
+        heard = buttons[0]["name"] if buttons else None
+        expected = model_says('M.barAccessibleName({serviceMissing:true})')
+        check("L2-BAR-08", heard == expected and heard != seen_names.get("idle"),
+              "bar (no service): what the user hears is Model.barAccessibleName, not the idle name",
+              "heard %r, Model.js says %r, idle was %r" % (heard, expected, seen_names.get("idle")))
+        check_ruled("L2-BAR-08-LIT", "bar.noservice", heard, expected,
+                    "bar (no service): and the words are the ones docs/UX.md 7.1 rules")
 
 
 # ---------------------------------------------------------------- guide states

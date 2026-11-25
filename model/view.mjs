@@ -39,6 +39,84 @@ import {
   isFormField, formHasText
 } from "./source-records.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_VIEW = "0.20.0"
+
+// ------------------------------------------------------------ the build's words
+//
+// D-REL-16 (L3, the words of the panel's plan, run wf_d3ab969d-020): what the
+// guide's footer, the bar's tooltip and its accessible name say about the
+// build the stamps read (Model.buildVerdict's notice). "restart": the build
+// running is whole and older than the files on disk; anything else non-empty
+// ("cache", or a notice a later build adds): files of two builds are loaded,
+// or were loaded while an update wrote them, and Quickshell's QML cache may
+// keep them, so the advice names the cache. Never a notification (the lead's
+// call L3-c).
+
+var QML_CACHE_DEFAULT = "~/.cache/quickshell/qmlcache"
+// Every variable qmlCacheFolder reads, which the guide and the service hand
+// it from Quickshell.env by this list, so neither can leave one out.
+var QML_CACHE_ENV = ["QML_DISABLE_DISK_CACHE", "QML_FORCE_DISK_CACHE", "QML_DISK_CACHE_PATH", "XDG_CACHE_HOME"]
+
+// The value of `name` in `env` when it is a string, else "".
+function envText(env, name) {
+  var v = env && typeof env === "object" ? env[name] : undefined
+  return typeof v === "string" ? v : ""
+}
+
+// Where Quickshell's QML disk cache is, NAMED, never read: the words carry a
+// variable's name and never its value (a path names a user, and the words
+// reach the bar and the bus). From the variables the installed Qt carries
+// (libQt6Qml 6.12.0, read with strings(1), not run): QML_DISABLE_DISK_CACHE
+// turns the cache off -- "" here, so the words drop the cache step -- only for
+// a whole number other than 0, a value Qt's boolean option reading
+// (qmlConvertBoolConfigOption in the installed qqmlglobal_p.h: any value but
+// "", "0" and "false") reads as set, and only while QML_FORCE_DISK_CACHE holds
+// nothing, because Qt asks that one first (upstream's
+// ExecutionEngine::diskCacheOptions as the words recheck of D-REL-16 cites
+// it, not read in the installed binary, whose strings list the two names in
+// that order; so any forced value at all keeps the folder named);
+// QML_DISK_CACHE_PATH is the folder itself; otherwise Qt puts it under its
+// cache location, `quickshell/qmlcache`, which follows XDG_CACHE_HOME only
+// when that is an absolute path (the XDG rule; QStandardPaths' handling of a
+// relative one is read, not measured). `env` is an object of those names
+// (QML_CACHE_ENV), so a test hands a fake one and nothing here reads the
+// process's own.
+function qmlCacheFolder(env) {
+  if (/^0*[1-9][0-9]*$/.test(envText(env, "QML_DISABLE_DISK_CACHE")) && envText(env, "QML_FORCE_DISK_CACHE") === "") return ""
+  if (envText(env, "QML_DISK_CACHE_PATH") !== "") return "$QML_DISK_CACHE_PATH"
+  if (envText(env, "XDG_CACHE_HOME").charAt(0) === "/") return "$XDG_CACHE_HOME/quickshell/qmlcache"
+  return QML_CACHE_DEFAULT
+}
+
+// The folder a composer names: `folder` when it is a string ("" is the cache
+// turned off), else the default -- a view that could not compose it (an
+// older model, no service to ask) still names the folder, because naming a
+// folder Qt does not read costs a command and not naming one it does costs
+// the recovery.
+function cacheFolderOr(folder) {
+  return typeof folder === "string" ? folder : QML_CACHE_DEFAULT
+}
+
+var BUILD_UPDATED = "Updated"
+var BUILD_LOADED_MID = "Loaded mid-update"
+var BUILD_RESTART_TAIL = "restart the shell to see the new version"
+
+// "restart", "cache" (any other non-empty notice), or "".
+function buildNoticeKind(notice) {
+  var n = str(notice)
+  if (n === "") return ""
+  return n === "restart" ? "restart" : "cache"
+}
+
+// The guide's body with no service (UX 6.3): the restart first, then the
+// cache -- every measured no-service case recovered by a restart.
+function serviceMissingProse(folder) {
+  var f = cacheFolderOr(folder)
+  return "Run omarchy restart shell" + (f === "" ? "" : SEP + "if that does not help, remove " + f + " and restart again")
+}
+
 // ------------------------------------------------------------ bar widget
 
 // R7: glyph per state, never color-only.
@@ -66,7 +144,11 @@ function barGlyph(opts) {
 // that it is on top of anything.
 function barTooltip(opts) {
   var o = opts || {}
-  if (o.serviceMissing) return "IPTV" + SEP + "service not loaded, run omarchy restart shell"
+  // D-REL-16: and a second line, the cache, always the default folder: with
+  // no service there is nothing to ask where it is (BarWidget.qml imports no
+  // Quickshell of its own).
+  if (o.serviceMissing) return "IPTV" + SEP + "service not loaded, run omarchy restart shell" +
+    "\nIf that does not help, remove " + QML_CACHE_DEFAULT + " and restart again"
   var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
@@ -95,11 +177,35 @@ function barTooltip(opts) {
   else if (!o.configured) line = "IPTV" + SEP + "no playlist configured"
   else if (o.error) line = "IPTV" + SEP + "playlist error, open the guide"
   else line = "IPTV" + SEP + "click to open the guide"
-  return o.pip === true ? line + "\n" + PIP_TOOLTIP_ON : line
+  if (o.pip === true) line += "\n" + PIP_TOOLTIP_ON
+  // D-REL-16: one more LINE, last, for the build (UX 6.3).
+  var kind = buildNoticeKind(o.buildNotice)
+  if (kind === "restart") line += "\n" + BUILD_UPDATED + SEP + BUILD_RESTART_TAIL
+  else if (kind === "cache") {
+    var folder = cacheFolderOr(o.cacheFolder)
+    line += "\n" + BUILD_LOADED_MID + SEP + (folder === "" ? "restart the shell" : "remove " + folder + ", then restart the shell")
+  }
+  return line
 }
 
 function barAccessibleName(opts) {
   var o = opts || {}
+  // D-A11Y-14: with no service the bar says so, as its tooltip does; it said
+  // "IPTV, idle" until 2026-11-25.
+  if (o.serviceMissing === true) return "IPTV, service not loaded"
+  return barAccessibleState(o) + buildSpoken(o)
+}
+
+// D-REL-16: what the name adds for the build, after everything else, spoken
+// rather than shown -- no folder (a path read aloud helps no one), the step.
+function buildSpoken(o) {
+  var kind = buildNoticeKind(o.buildNotice)
+  if (kind === "restart") return ", updated, " + BUILD_RESTART_TAIL
+  if (kind === "cache") return ", loaded mid-update, " + (cacheFolderOr(o.cacheFolder) === "" ? "restart the shell" : "remove the QML cache and restart the shell")
+  return ""
+}
+
+function barAccessibleState(o) {
   // PAUSE LIVE TV. The glyph and the tooltip both changed for paused; the
   // accessible name has to as well, or the one user who cannot see the glyph
   // is the one user not told. That asymmetry is exactly the D-GS-3 shape.
@@ -281,6 +387,11 @@ function footerStatus(opts) {
       str(entry.name), entry.matches, entry.ordinal, false)
   }
   if (str(o.transient) !== "") return str(o.transient)
+  // D-REL-16 (the lead's call L3-b): a mix sits below the number entry and
+  // the transient and ABOVE the empty-state gate, so it shows with no
+  // channels too -- a mixed build can be why the list is empty.
+  if (buildNoticeKind(o.buildNotice) === "cache")
+    return BUILD_LOADED_MID + SEP + (cacheFolderOr(o.cacheFolder) === "" ? "restart the shell" : "remove the QML cache, restart the shell")
   if (o.configured === false || !(Number(o.count) > 0)) return ""
   if (o.truncated) return "First " + formatCount(o.cap || MAX_ROWS_DEFAULT) + " of " + formatCount(o.resultTotal) + SEP + "keep typing"
   // M5-01 (design 2.5): the state line -- `1:32 behind live`, `paused SEP
@@ -307,7 +418,9 @@ function footerStatus(opts) {
   // D-HOST-1. Below a provider warning, which is more urgent, and above the
   // plain counts, which are what the footer shows most of the time -- so this
   // is seen without ever displacing something that needs acting on first.
-  if (o.staleBuild === true) return "Updated" + SEP + "restart the shell to see the new version"
+  // D-REL-16: the service's notice says the same; `staleBuild` is still read
+  // for an older guide, which passes only that.
+  if (o.staleBuild === true || buildNoticeKind(o.buildNotice) === "restart") return BUILD_UPDATED + SEP + BUILD_RESTART_TAIL
   return footerCounts(o)
 }
 
@@ -796,7 +909,10 @@ function motionMs(style, ms) {
   return Math.round(got)
 }
 export {
-  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  BUILD_STAMP_VIEW, QML_CACHE_DEFAULT, QML_CACHE_ENV, envText, qmlCacheFolder,
+  cacheFolderOr, BUILD_UPDATED, BUILD_LOADED_MID, BUILD_RESTART_TAIL,
+  buildNoticeKind, serviceMissingProse, barGlyph, barTooltip,
+  barAccessibleName, buildSpoken, barAccessibleState, ipcNowPlaying, ipcJson,
   guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
   arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
   hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,

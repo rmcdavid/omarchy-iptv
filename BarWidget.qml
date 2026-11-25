@@ -24,6 +24,29 @@ BarWidget {
   property var service: null
   property int wheelAccumulator: 0
 
+  // D-REL-16. The version of the last cut that changed this file, written by
+  // build_stamps.py (dev branch) at the cut and held to model/build.mjs's
+  // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
+  // names the code that is running, whichever file that unit was saved under.
+  readonly property string buildStamp: "0.20.0"
+  // D-REL-16 (the lead's call A1). This file reports its stamp to the service:
+  // at completion, when one is there already, and at every change of
+  // `service`, which this widget resolves itself (resolveService) once the
+  // host's bar hands it `bar` (Bar.qml's injectProps, read). The service's
+  // report is idempotent; guarded on the FUNCTION, because a service from
+  // before the stamps has none.
+  function reportBuild() {
+    if (root.service && typeof root.service.reportBuildStamp === "function") root.service.reportBuildStamp("BarWidget.qml", root.buildStamp)
+  }
+  onServiceChanged: root.reportBuild()
+  // What the service says of the build (Model.serviceBuildNotice); a model
+  // without the reading beside this file is a mix, so a throw reads "cache".
+  readonly property string buildNotice: { try { return Model.serviceBuildNotice(root.service) } catch (e) { return "cache" } }
+  // The QML cache's folder as the service names it (it reads the
+  // environment; this file imports no Quickshell of its own), else null,
+  // and the words name the default.
+  readonly property var cacheFolder: root.service && typeof root.service.buildCacheFolder === "string" ? root.service.buildCacheFolder : null
+
   // ---- timing constants (UX.md 5.9)
   // D-A11Y-11: the two animation times are the host's answer for them, 0
   // while Omarchy's reduce motion is on (Model.motionMs).
@@ -114,7 +137,9 @@ BarWidget {
     // M5-01 (2.5): one more LINE, like PiP's -- the state line from the
     // shared composer and the window from the last read, both composed by
     // Model.barTooltip from these two numbers. Nothing from the stream.
-    behindS: root.behindLiveS, historyS: root.historyS
+    behindS: root.behindLiveS, historyS: root.historyS,
+    // D-REL-16: one more line, last, for the build (UX 6.3).
+    buildNotice: root.buildNotice, cacheFolder: root.cacheFolder
   })
 
   Behavior on glyphColor {
@@ -171,9 +196,12 @@ BarWidget {
   // composer the tooltip and the footer read.
   // Spoken as units ("1 minute 32 seconds behind live"), which the composer
   // decides: "one thirty-two" is a time of day to a listener.
+  // D-A11Y-14: with no service it says so, as the tooltip does. D-REL-16: and
+  // the build's notice, spoken last.
   Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
                                              chno: root.nowPlayingChno, error: root.hasError, paused: root.paused,
-                                             behindS: root.behindLiveS })
+                                             behindS: root.behindLiveS, serviceMissing: !root.serviceReady,
+                                             buildNotice: root.buildNotice, cacheFolder: root.cacheFolder })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
   // while a bar popup (KeyboardPanel) is open.
@@ -192,6 +220,7 @@ BarWidget {
   Component.onCompleted: {
     root.syncClickRegistration()
     root.resolveService()
+    root.reportBuild()
   }
   Component.onDestruction: if (root.registeredBar && root.registeredBar.unregisterClickTarget) root.registeredBar.unregisterClickTarget(root)
 

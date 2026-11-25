@@ -14,10 +14,14 @@
 #                        open by the starting shell fires the merge
 #                        (default Service.qml)
 #   RIG_RACE_DELAY_MS=<n> an x arm waits n ms after that open (default 0)
-#   RIG_RECOVER=clear|update  an x arm, after its two restarts: remove the
-#                        QML disk cache's folder and restart, or publish
-#                        the next build, update under the running shell and
-#                        restart (default neither)
+#   RIG_RECOVER=clear|clear-live|update  an x arm, after its two restarts:
+#                        remove the QML disk cache's folder and restart
+#                        (clear: the shell stopped first; clear-live: the
+#                        README's order, the folder removed while the shell
+#                        RUNS and then a restart, as `rm -rf
+#                        ~/.cache/quickshell/qmlcache && omarchy-restart-shell`
+#                        does, D-REL-16), or publish the next build, update
+#                        under the running shell and restart (default none)
 #   RIG_START_TENTHS=<n> tenths of a second a start waits for the shell's pid
 #                        (default 300; qa-lib-test.sh shortens it)
 #   RIG_QMLCACHE=xdg     start the shell without QML_DISK_CACHE_PATH, so Qt
@@ -121,7 +125,7 @@ if [[ ${RIG_INNER:-} != 1 ]]; then
     [[ $a =~ ^[ab]-(01|12)-(r|t|w|x|h0|h1|h4)(-(c4|g4))?$ ]] || { echo "run.sh: no arm $a (arms: $ARMS_ALL)" >&2; exit 2; }
   done
   [[ ${RIG_RACE_DELAY_MS:-0} =~ ^[0-9]{1,4}$ ]] || { echo "run.sh: RIG_RACE_DELAY_MS is not a number of ms below 10000" >&2; exit 2; }
-  [[ ${RIG_RECOVER:-none} =~ ^(none|clear|update)$ ]] || { echo "run.sh: RIG_RECOVER is none, clear or update" >&2; exit 2; }
+  [[ ${RIG_RECOVER:-none} =~ ^(none|clear|clear-live|update)$ ]] || { echo "run.sh: RIG_RECOVER is none, clear, clear-live or update" >&2; exit 2; }
   [[ ${RIG_QMLCACHE:-arm} =~ ^(arm|xdg|home)$ ]] || { echo "run.sh: RIG_QMLCACHE is arm, xdg or home" >&2; exit 2; }
   [[ ${RIG_RACE_FILE:-Service.qml} =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && ${RIG_RACE_FILE:-} != *..* ]] || {
     echo "run.sh: RIG_RACE_FILE is a plugin file's relative path" >&2; exit 2; }
@@ -584,6 +588,14 @@ run_arm() {
         stop_qs
         clear_cache
         restart_up 60
+        cache_read cleared ;;
+      clear-live)
+        # The README's order (D-REL-16): the folder goes while the shell that
+        # compiled it still runs, then the restart. What the shell does with
+        # a cache folder removed under it is what this arm reads.
+        clear_cache
+        marks cleared-live
+        restart 60 || return 1
         cache_read cleared ;;
       update)
         publish $((to + 1))

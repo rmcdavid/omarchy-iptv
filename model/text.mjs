@@ -6,6 +6,10 @@ import {
   isSpaceAt
 } from "./privacy.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_TEXT = "0.20.0"
+
 // ------------------------------------------------------------ normalization
 
 // Latin diacritics folded to ASCII. Kept as (chars, replacement) groups so the
@@ -497,10 +501,10 @@ function findByUrl(channels, url) {
   return null
 }
 export {
-  FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, storedText, asList, keyedMap,
-  hasOwnKey, ownKeyValue, trimEndSpace, LATIN_COMBINING_RE, decompose,
-  normalizeText, normalizeIdText, foldText, searchKey, tokenize, fnv1a32,
-  CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, GENERATED_NAME_WORD,
+  BUILD_STAMP_TEXT, FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, storedText,
+  asList, keyedMap, hasOwnKey, ownKeyValue, trimEndSpace, LATIN_COMBINING_RE,
+  decompose, normalizeText, normalizeIdText, foldText, searchKey, tokenize,
+  fnv1a32, CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, GENERATED_NAME_WORD,
   GENERATED_NAME_RE, nameIdKey, suffixIds, channelIds, legacyChannelIds,
   substituteNameIds, channelIdRemap, remapStateIds, remapChannelIds,
   channelId, indexById, findByUrl

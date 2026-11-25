@@ -16,6 +16,10 @@ import {
   stripSpace, redactUrls, scrubUrls
 } from "./privacy.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_MPV = "0.20.0"
+
 // ------------------------------------------------------------ mpv
 
 // Options that are allowed through but hand the stream address to a SECOND
@@ -1130,12 +1134,12 @@ function trackAccessibleName(rows, index) {
   return parts.join(", ")
 }
 export {
-  MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
-  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_LISTEN_WARN, MPV_LISTEN_QUIET,
-  MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY, MPV_SCRIPT_OPTS_WORDS,
-  mpvOptionBase, mpvHandoffName, mpvDiskName, mpvListenName,
-  demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning, mpvArgWarningLines,
-  mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  BUILD_STAMP_MPV, MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF,
+  MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, MPV_LISTEN_WARN,
+  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY,
+  MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
+  mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
+  mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
   MPV_ARGS_ENV_BUDGET, mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs,
   mpvArgEnvCost, mpvArgsTooLongWarning, mpvTokenWritable, demuxerNamesTls,
   scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,

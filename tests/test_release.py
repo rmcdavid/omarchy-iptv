@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
 import service_files  # noqa: E402  the service's files, as Service.qml declares them (D-REL-14)
+import build_stamps  # noqa: E402  every runtime file's build stamp (D-REL-16)
 
 # The real model's layout, so the fixture tree has the same files the
 # artifact must carry. The first part holds the fixture's PLUGIN_VERSION.
@@ -76,6 +77,24 @@ def aggregator(parts):
 
 
 TODAY = '2026-09-26'
+
+
+def with_stamp(rel, text, kind, name, value):
+    """`text` as the stand-in's `rel` carrying its build stamp in the one
+    place build_stamps.py's form puts it (D-REL-16): anywhere in a QML file
+    or the aggregator (here, last), first in a code-behind, and in a model
+    part directly above its first line of code (build_stamps.first_body_line,
+    the judge's own reading), or last when it has none."""
+    line = build_stamps.stamp_line(kind, name, value)
+    if kind in ('qml', 'aggregator'):
+        return text + ('' if text.endswith('\n') or not text else '\n') + line + '\n'
+    if kind == 'code-behind':
+        return line + '\n' + text
+    lines = text.split('\n')
+    j = build_stamps.first_body_line(lines)
+    if j is None:
+        j = len(lines) - 1 if lines and lines[-1] == '' else len(lines)
+    return '\n'.join(lines[:j] + [line] + lines[j:])
 
 
 def premise_fixture(exception=False):
@@ -147,6 +166,7 @@ class ReleaseCase(unittest.TestCase):
         # it cannot read the premise from, so the double carries the fixture,
         # as the real tree does, with no exception in it.
         self.write(release.A11Y_PREMISE_FIXTURE, premise_fixture())
+        self.restamp()
         self.git('add', '-A')
         self.git('commit', '-q', '-m', 'before the split')
         # The real main is not linear: what it held before the split carries
@@ -189,7 +209,57 @@ class ReleaseCase(unittest.TestCase):
         with io.open(path, 'w', encoding='utf-8') as fh:
             fh.write(text)
 
-    def commit_all(self, msg='change'):
+    def runtime(self):
+        """The stand-in's runtime files in load order, as check() reaches them."""
+        self.git('add', '-A')
+        return release.runtime_files(self.dir, release.tracked(self.dir), set(release.ALLOWLIST), [])
+
+    def restamp(self):
+        """D-REL-16 (rule 10): the stand-in carries what the real tree must --
+        each runtime file its build stamp in its kind's form, and build.mjs
+        its BUILD_FILES directly under PLUGIN_VERSION -- or check() refuses
+        every case for it. A file with any declaration of a stamp keeps it,
+        so a case that writes a wrong one is judged on it; a file with none
+        is given the manifest's version; the table is then written from what
+        the files carry. Only a cut (build_stamps.cut) moves a stamp."""
+        try:
+            version = json.loads(self.read('manifest.json'))['version']
+        except (OSError, ValueError, KeyError, TypeError):
+            version = '0.9.9'     # a case that breaks the manifest on purpose
+        order = self.runtime()
+        texts = dict((rel, self.read(rel)) for rel in order)
+        quals = build_stamps.qualifiers(texts)
+        rows = []
+        for rel in order:
+            kind = build_stamps.kind_of(rel, quals)
+            if kind is None or kind == 'build':
+                continue
+            name = build_stamps.stamp_name(rel, kind, quals)
+            found, got = build_stamps.judge_file(rel, texts[rel], kind, name)
+            if [p.kind for p in found] == ['missing']:
+                texts[rel] = with_stamp(rel, texts[rel], kind, name, version)
+                self.write(rel, texts[rel])
+                got = (version, None)
+            rows.append((rel, got[0] if got else version))
+        lines = texts.get(VERSION_PART, '').split('\n')
+        at = next((i for i, line in enumerate(lines) if line.startswith('var PLUGIN_VERSION = ')), None)
+        if at is None:
+            return
+        start = next((i for i, line in enumerate(lines) if line == build_stamps.TABLE_START), None)
+        if start is not None:
+            end = next(i for i in range(start, len(lines)) if lines[i] == '}')
+            first = start - len(build_stamps.TABLE_HEAD)
+            del lines[first if first > at else start:end + 1]
+        lines[at + 1:at + 1] = build_stamps.table_block(rows).split('\n')[:-1]
+        self.write(VERSION_PART, '\n'.join(lines))
+
+    def read(self, rel):
+        with io.open(os.path.join(self.dir, rel), encoding='utf-8', newline='') as fh:
+            return fh.read()
+
+    def commit_all(self, msg='change', stamp=True):
+        if stamp:
+            self.restamp()
         self.git('add', '-A')
         self.git('commit', '-q', '-m', msg)
 
@@ -228,7 +298,9 @@ class ReleaseCase(unittest.TestCase):
         self.commit_all()
         self.build()
         blob = self.git('show', 'main:' + VERSION_PART)
-        self.assertEqual('new model\nvar PLUGIN_VERSION = "0.9.9"\n', blob)
+        # Byte for byte what dev holds, the BUILD_FILES restamp() wrote included.
+        self.assertTrue(blob.startswith('new model\nvar PLUGIN_VERSION = "0.9.9"\n'), blob)
+        self.assertEqual(self.read(VERSION_PART), blob)
 
     # -- refusals --------------------------------------------------------
 
@@ -258,7 +330,7 @@ class ReleaseCase(unittest.TestCase):
         # notice forever. Bumping only the manifest here would be testing a
         # release that could not ship.
         self.write(VERSION_PART, self.git('show', 'dev:' + VERSION_PART)
-                   .replace('0.9.9', '1.0.0'))
+                   .replace('var PLUGIN_VERSION = "0.9.9"', 'var PLUGIN_VERSION = "1.0.0"'))
         # And the release notes, because the cut now requires the heading to
         # name the version being shipped and to be dated the day it ships.
         # Bumping the manifest alone here would be testing a release that
@@ -400,10 +472,14 @@ class ReleaseCase(unittest.TestCase):
         return new
 
     def bump(self, version):
-        """manifest, PLUGIN_VERSION and a dated heading, as a real cut bumps them."""
+        """manifest, PLUGIN_VERSION and a dated heading, as a real cut bumps
+        them, and then the stamps' own step, build_stamps.py --cut against
+        main (D-REL-16)."""
         self.write('manifest.json', self.git('show', 'dev:manifest.json').replace('0.9.9', version))
-        self.write(VERSION_PART, self.git('show', 'dev:' + VERSION_PART).replace('0.9.9', version))
+        self.write(VERSION_PART, self.git('show', 'dev:' + VERSION_PART)
+                   .replace('var PLUGIN_VERSION = "0.9.9"', 'var PLUGIN_VERSION = "%s"' % version))
         self.write('CHANGELOG.md', '# Changelog\n\n## %s (%s)\n\n- a thing\n' % (version, TODAY))
+        build_stamps.cut(self.dir, 'main', runtime=self.runtime(), out=io.StringIO())
         self.commit_all(version)
 
     def origin_takes_main(self):
@@ -1299,6 +1375,53 @@ class ReleaseCase(unittest.TestCase):
                 self.assertFalse(self.origin_takes_main())
                 take()
 
+    # -- D-REL-16: the build stamps ----------------------------------------
+
+    def test_check_refuses_a_runtime_file_that_carries_no_stamp(self):
+        self.write('Guide.qml', 'content of Guide.qml\n')
+        self.commit_all(stamp=False)
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertEqual(['Guide.qml: carries no build stamp; its kind\'s line is '
+                          '`  readonly property string buildStamp: "N.N.N"` [missing] '
+                          '(D-REL-16: build_stamps.py --check)'], problems)
+
+    def test_check_refuses_a_table_row_the_file_does_not_carry(self):
+        self.write(VERSION_PART, self.read(VERSION_PART).replace('  "Guide.qml": "0.9.9",', '  "Guide.qml": "0.9.8",'))
+        self.commit_all(stamp=False)
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn('the row for Guide.qml says 0.9.8, and the file carries 0.9.9 [table]', problems[0])
+
+    def test_the_cut_refuses_a_changed_file_that_keeps_its_old_stamp(self):
+        """A file this cut rewrites, still carrying the last cut's stamp, would
+        read as another build's from the moment it is installed."""
+        self.build()
+        self.bump('1.0.0')
+        self.write('Guide.qml', self.read('Guide.qml') + '// changed\n')
+        self.commit_all()
+        old = self.git('rev-parse', 'main').strip()
+        with self.assertRaisesRegex(release.ReleaseError, 'the build stamps do not match this cut') as refused:
+            self.build()
+        self.assertIn('Guide.qml', str(refused.exception))
+        self.assertIn('[stale]', str(refused.exception))
+        self.assertIn('build_stamps.py --cut', str(refused.exception))
+        self.assertEqual(old, self.git('rev-parse', 'main').strip())
+        self.assertEqual('', self.git('tag', '--list', 'v1.0.0').strip())
+
+    def test_the_cut_goes_once_the_stamps_step_has_run_and_ships_them(self):
+        self.build()
+        self.bump('1.0.0')
+        self.write('Guide.qml', self.read('Guide.qml') + '// changed\n')
+        self.assertEqual(['Guide.qml', VERSION_PART],
+                         build_stamps.cut(self.dir, 'main', runtime=self.runtime(), out=io.StringIO()))
+        self.commit_all(stamp=False)
+        self.build()
+        shipped = self.git('show', 'main:Guide.qml')
+        self.assertIn('  readonly property string buildStamp: "1.0.0"\n', shipped)
+        self.assertIn('  readonly property string buildStamp: "0.9.9"\n', self.git('show', 'main:BarWidget.qml'))
+        self.assertIn('  "Guide.qml": "1.0.0",\n  "Service.qml": "0.9.9",',
+                      self.git('show', 'main:' + VERSION_PART))
+
     # -- the allowlist check that runs in the gate ------------------------
 
     def test_a_clean_tree_passes_check(self):
@@ -1590,7 +1713,8 @@ class ReleaseCase(unittest.TestCase):
         self.write(PARTS[-1], "function load() { return import('./orphan.mjs') }\n")
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
-        self.assertTrue(any('%s:1 imports dynamically' % PARTS[-1] in p for p in problems), problems)
+        # Line 2: the part's build stamp leads its code (D-REL-16).
+        self.assertTrue(any('%s:2 imports dynamically' % PARTS[-1] in p for p in problems), problems)
 
     def test_an_unreadable_model_is_a_message_not_a_traceback(self):
         """model_files raising used to leave `m` None and the next branch read
@@ -1662,6 +1786,10 @@ class ReleaseCase(unittest.TestCase):
 
     # -- the size ceiling (D-REL-5) -----------------------------------------
 
+    def stamp_bytes(self, rel):
+        """The bytes restamp() adds to the model part `rel`: its stamp line."""
+        return len(build_stamps.stamp_line('part', build_stamps.stamp_name(rel, 'part', {}), '0.9.9')) + 1
+
     def test_the_ceiling_sits_64_kib_under_the_scanners_limit(self):
         self.assertEqual(release.SCANNER_FILE_LIMIT, 524288)   # 512 * 1024, the marketplace's number
         self.assertEqual(release.FILE_CEILING, 458752)         # 448 KiB
@@ -1669,7 +1797,7 @@ class ReleaseCase(unittest.TestCase):
 
     def test_a_shipped_file_over_the_ceiling_is_red(self):
         """The failure the marketplace hit at 0.13.5, with 64 KiB to spare."""
-        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 2) + '\n')
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 2 - self.stamp_bytes(PARTS[-1])) + '\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
         self.assertTrue(any('%s is %d bytes, over the %d-byte ceiling'
@@ -1677,7 +1805,7 @@ class ReleaseCase(unittest.TestCase):
                             for p in problems), problems)
 
     def test_a_shipped_file_at_the_ceiling_is_fine(self):
-        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 3) + '\n')
+        self.write(PARTS[-1], '//' + 'x' * (release.FILE_CEILING - 3 - self.stamp_bytes(PARTS[-1])) + '\n')
         self.commit_all()
         out = io.StringIO()
         self.assertEqual([], release.check(self.dir, out=out))

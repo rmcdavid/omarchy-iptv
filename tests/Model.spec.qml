@@ -3692,4 +3692,32 @@ TestCase {
     }
     compare(got, want)
   }
+
+  // D-REL-16 (L3): the build stamps' reading in V4, as node reads it
+  // (tests/Model.test.js, "D-REL-16: ..."). The aggregator's own
+  // `export var BUILD_STAMP_AGGREGATOR` loads beside its re-exports, every
+  // part's stamp is its row in the loaded table, and the verdict reads one
+  // build whole, a disk that moved, a read that threw and a `__proto__`
+  // report as node does -- over null-prototype maps, which V4 iterates too.
+  function test_buildStampsInV4() {
+    var s = Model.modelBuildStamps()
+    var keys = Object.keys(s)
+    var off = []
+    for (var i = 0; i < keys.length; i++) {
+      var row = keys[i] === "model/build.mjs" ? Model.PLUGIN_VERSION : Model.BUILD_FILES[keys[i]]
+      if (s[keys[i]] !== row) off.push(keys[i])
+    }
+    var modelRows = Object.keys(Model.BUILD_FILES).filter(function (f) { return f.indexOf("model/") === 0 })
+    var own = { "Service.qml": Model.BUILD_FILES["Service.qml"], "Model.mjs": Model.BUILD_STAMP_AGGREGATOR }
+    compare([typeof Model.BUILD_STAMP_AGGREGATOR, Model.BUILD_STAMP_AGGREGATOR === Model.BUILD_FILES["Model.mjs"],
+             keys.length === modelRows.length + 1, keys[0], off,
+             Model.buildVerdict({ own: own, loadedDisk: Model.PLUGIN_VERSION, onDisk: Model.PLUGIN_VERSION }).notice,
+             Model.buildVerdict({ own: own, loadedDisk: Model.PLUGIN_VERSION, onDisk: "99.0.0" }).notice,
+             Model.buildVerdict({ own: own, loadedDisk: "99.0.0", onDisk: "99.0.0" }).notice,
+             JSON.stringify(Model.buildVerdict({ own: { "Service-pip.js": "?" } }).mixed),
+             JSON.stringify(Model.buildVerdict({ reported: Model.withReportedStamp({}, "__proto__", Model.PLUGIN_VERSION) }).mixed),
+             Model.serviceBuildNotice(null), Model.serviceBuildNotice({}), Model.serviceBuildNotice({ buildNotice: "restart" })],
+            ["string", true, true, "model/build.mjs", [], "", "restart", "cache", "[\"Service-pip.js\"]", "[\"__proto__\"]",
+             "", "cache", "restart"])
+  }
 }

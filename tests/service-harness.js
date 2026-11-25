@@ -95,6 +95,8 @@ function makeIds(h) {
   const view = name => ({ name, reload() {}, text() { return "" }, setText() {} })
   return {
     stateFile: h.stateFile,
+    // D-HOST-16: the manifest's view (ManifestFile below), wired in bootService.
+    manifestFile: h.manifestFile,
     stateInitProc: proc("stateInitProc"),
     // R24d: the start-up mkdir is the first half of the check the watchdog
     // bounds; it runs (h.initExit delivers its exit) like the init.
@@ -302,7 +304,7 @@ function makeIds(h) {
     // h.detached keeps the command -- what /proc shows -- and h.detachedRuns
     // each run's command and what the helper parses (helperView, which throws
     // on a flag with no list, as the helper refuses one).
-    Quickshell: { env() { return "" }, execDetached(context) {
+    Quickshell: { env(name) { return h.env && typeof h.env[name] === "string" ? h.env[name] : "" }, execDetached(context) {
       if (!Array.isArray(context) || context.length === 0) throw new TypeError("Passing incompatible arguments to C++ functions from JavaScript is not allowed (execDetached takes a command list; a { command, environment } object is refused, measured on Quickshell 0.3.2)")
       const ctx = { command: context, environment: {} }
       const argv = ctx.command.map(String)
@@ -762,6 +764,54 @@ class StateFile {
   }
 }
 
+// D-HOST-16: the manifest's FileView (manifestFile), built the way stateFile's
+// double is and never more forgiving than Quickshell's FileView (rule 10).
+// What it models, read in the installed /usr/lib/qt6/qml/Quickshell/Io/
+// FileView.qml and quickshell-io.qmltypes and measured on stateFile (the
+// contract's FileView facts, docs/OMARCHY-PLUGIN-CONTRACT.md):
+//   the view is made       one load is queued: the wrapper's `preload` is
+//                          true unless set, and with `blockLoading` unset the
+//                          read is asynchronous, so it lands later, never
+//                          inside the creation
+//   reload()               queues a load, never runs one inline; the load
+//                          reads the file as it is when it is DELIVERED, and
+//                          re-arms the watch when there is a file (the
+//                          fourth and eighth facts)
+//   a load                 `loaded` with the text, or `loadFailed` 2
+//                          (FileNotFound) for a missing file (the fifth
+//                          fact's table), through the tree's own onLoaded /
+//                          onLoadFailed, compiled from their text
+//   an in-place edit       (h.manifestEdit) raises `fileChanged`, queued,
+//                          and only while the block declares `watchChanges:
+//                          true` and the watch is armed; the view then runs
+//                          the tree's onFileChanged and NOTHING else. The
+//                          wrapper declares no handler of its own, so a tree
+//                          without one reads nothing (whether the C++ view
+//                          would reload by itself is not measured; a double
+//                          that does not is the less forgiving of the two)
+//   a replacement          (assigning h.manifestDisk: an update's shape, git
+//                          replaces the file, D-HOST-2) raises nothing and
+//                          leaves the view watching nothing until a reload
+//                          re-arms it (the eighth fact, R26c)
+// `disk` is the file's text, null for no file.
+class ManifestFile {
+  constructor(text) {
+    this.disk = text
+    this.view = ""
+    this.watching = false
+    this.armed = true
+    this.loader = null
+    this.loads = 0
+    this.reloads = 0
+  }
+  text() { return this.view }
+  reload() {
+    this.reloads++
+    if (this.disk !== null) this.armed = true
+    if (this.loader) this.loader()
+  }
+}
+
 // The REAL helper's `state init`, as a double that is not more forgiving
 // than it (rule 10) -- every branch below is the shipping helper's, pinned by
 // tests/test_state.py's R22a cases against the same five faults:
@@ -916,6 +966,13 @@ function bootService(svc, Model, o) {
   if (Object.prototype.hasOwnProperty.call(opts, "barSections")) kit.barSections = opts.barSections
   h.host = new Host(opts.entry, opts.host || "lag", kit)
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
+  // D-HOST-16: manifest.json beside the tree as the view finds it --
+  // `manifestText` (null for no file), or the running model's own version,
+  // which is what a whole install holds (the gate proves the two agree).
+  // D-REL-16: what Quickshell.env answers, by name (`env`); "" for anything
+  // else, as before.
+  h.env = opts.env && typeof opts.env === "object" ? opts.env : {}
+  h.manifestFile = new ManifestFile(opts.manifestText !== undefined ? opts.manifestText : JSON.stringify({ id: PID, version: Model.PLUGIN_VERSION }) + "\n")
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says
   // otherwise (h.cacheFails = ["migrate"]).
@@ -1003,6 +1060,11 @@ function bootService(svc, Model, o) {
         const before = values[p.name]
         values[p.name] = v
         if (p.name === "ownWrite" && v !== before && h.started) onSettingsChanged()
+        // D-HOST-16: `manifest` is a var property, so a new object is a new
+        // value and QML runs onManifestChanged inside the assignment -- the
+        // host's own, made after creation (shell.qml's ensureService), and
+        // every rescan's fresh copy (_syncServices) alike.
+        if (p.name === "manifest" && v !== before && typeof h.manifestChanged === "function") h.manifestChanged()
         // D-LOGO-20 (R32f): `activeCacheDir` is a readonly binding over
         // stateLoaded, cacheReady and the active key, and QML fires its
         // change handler synchronously the moment any of them moves it.
@@ -1063,6 +1125,48 @@ function bootService(svc, Model, o) {
     onActiveCacheDirChanged()
   }
   root.hostConfigShield = Model.CONFIG_SHIELD_PRIVATE
+  // D-HOST-16: manifestFile's three handlers and the root's onManifestChanged,
+  // from their own text (one line, or a block), with the view's own
+  // unqualified `text()` and `reload()` read as the view's. A tree without a
+  // handler runs nothing there, which is that tree.
+  const manifestAt = serviceText.indexOf("    id: manifestFile")
+  const manifestBlock = manifestAt === -1 ? "" : serviceText.slice(manifestAt, serviceText.indexOf("\n  }", manifestAt))
+  const viewOwn = (t) => t.replace(/(^|[^.\w])text\(\)/g, "$1manifestFile.text()").replace(/(^|[^.\w])reload\(\)/g, "$1manifestFile.reload()")
+  const manifestHandler = (name, args) => {
+    const one = (manifestBlock.match(new RegExp("^    " + name + ": (?:\\(error\\) => )?(?!\\{)(.*)$", "m")) || [])[1]
+    const body = one || handlerBlock(manifestBlock, "    " + name + ": " + (args ? "(error) => {" : "{"))
+    return body ? compile(args, viewOwn(body), "manifestFile_" + name) : () => {}
+  }
+  const onManifestLoaded = manifestHandler("onLoaded", "")
+  const onManifestLoadFailed = manifestHandler("onLoadFailed", "error")
+  const onManifestFileChanged = manifestHandler("onFileChanged", "")
+  h.manifestFile.watching = /^    watchChanges: true$/m.test(manifestBlock)
+  const rootManifestText = (serviceText.match(/^  onManifestChanged: (?!\{)(.*)$/m) || [])[1] || handlerBlock(serviceText, "  onManifestChanged: {")
+  h.manifestChanged = rootManifestText ? compile("", rootManifestText, "onManifestChanged") : () => {}
+  // One load of manifest.json as it is NOW, through the tree's handlers.
+  h.loadManifest = () => {
+    const mf = h.manifestFile
+    mf.loads++
+    if (mf.disk === null) { mf.view = ""; onManifestLoadFailed(2); return }
+    mf.view = mf.disk
+    onManifestLoaded()
+  }
+  h.manifestFile.loader = () => h.later.push({ fn: h.loadManifest, args: [] })
+  // An in-place edit: fileChanged, queued, while the view watches.
+  h.manifestEdit = (text) => {
+    const mf = h.manifestFile
+    mf.disk = text
+    if (mf.watching && mf.armed) h.later.push({ fn: onManifestFileChanged, args: [] })
+  }
+  // A replacement (an update's shape): nothing raised, the watch lost.
+  Object.defineProperty(h, "manifestDisk", {
+    get() { return h.manifestFile.disk },
+    set(v) { h.manifestFile.disk = v; h.manifestFile.armed = false },
+    enumerable: true, configurable: true
+  })
+  // The view is made (its first load queued), then the host hands it the
+  // manifest, as ensureService does once createObject returns.
+  if (manifestAt !== -1) h.manifestFile.loader()
   root.manifest = { id: PID }
   // The FileView's two outcome handlers and the start-up init's exit, from
   // their own text.

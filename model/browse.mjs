@@ -30,6 +30,10 @@ import {
   withFormProbing, closeSources
 } from "./form-edit.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_BROWSE = "0.20.0"
+
 // ------------------------------------------------------------ search
 
 function containsAll(text, tokens) {
@@ -864,14 +868,15 @@ function zapStep(list, currentId, delta, failed, maxSkip) {
   return { channel: first, skipped: 0 }
 }
 export {
-  containsAll, containsAllWords, matchRank, groupNamesForHint, groupWordHint,
-  favoriteSet, filterChannels, floatChnoMatch, groupChannels, groupScopeId,
-  isGroupScope, isPinnedScope, rawScopeName, scopeName, countFavorites,
-  countRecents, scopeSurface, scopeEntries, channelsForScope, numberJumpScope,
-  channelsInGroup, effectiveScope, moveScope, scopeIndex, columnAnchor,
-  fallbackScope, requestedScope, initialScope, cursorFor, revealOffset,
-  scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide, openTracks,
-  closeTracks, withTrackCursor, withQuery, withScope, withMode, withCursor,
-  toggleMode, onEscape, moveCursor, launchScope, zapRing, nextInGroup,
-  rowIndexOfId, placeToRestore, placeMark, zapSkipNotice, zapStep
+  BUILD_STAMP_BROWSE, containsAll, containsAllWords, matchRank,
+  groupNamesForHint, groupWordHint, favoriteSet, filterChannels,
+  floatChnoMatch, groupChannels, groupScopeId, isGroupScope, isPinnedScope,
+  rawScopeName, scopeName, countFavorites, countRecents, scopeSurface,
+  scopeEntries, channelsForScope, numberJumpScope, channelsInGroup,
+  effectiveScope, moveScope, scopeIndex, columnAnchor, fallbackScope,
+  requestedScope, initialScope, cursorFor, revealOffset, scopeLabel,
+  GUIDE_MODES, guideMode, guideState, copyGuide, openTracks, closeTracks,
+  withTrackCursor, withQuery, withScope, withMode, withCursor, toggleMode,
+  onEscape, moveCursor, launchScope, zapRing, nextInGroup, rowIndexOfId,
+  placeToRestore, placeMark, zapSkipNotice, zapStep
 }

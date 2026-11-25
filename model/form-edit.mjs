@@ -18,6 +18,10 @@ import {
   isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
 } from "./source-records.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_FORM_EDIT = "0.20.0"
+
 // ---- form editing (D-CLIP-1) ----
 //
 // Every form field is a read-only TextInput for as long as the form is open.
@@ -567,10 +571,10 @@ function afterSwitch(scopeId) {
   return guideState(scopeId)
 }
 export {
-  WORD_SEPARATOR_RE, WORD_SPACE_RE, clipboardArgv, clipboardCut,
-  parseClipboardReply, isWordSpace, isWordSeparator, clampIndex, editCapacity,
-  editRange, fullRange, editRangeFor, cutApplies, orderedRange, wordBoundary,
-  isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd,
+  BUILD_STAMP_FORM_EDIT, WORD_SEPARATOR_RE, WORD_SPACE_RE, clipboardArgv,
+  clipboardCut, parseClipboardReply, isWordSpace, isWordSeparator, clampIndex,
+  editCapacity, editRange, fullRange, editRangeFor, cutApplies, orderedRange,
+  wordBoundary, isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd,
   PASTE_LINE_BREAK_RE, typedText, editInsert, editDelete, withFormError,
   withFormProbing, formProbeField, formHostWithheld, formLineHost,
   formFetchingLine, formProbeFailureLine, formLabelPlaceholder,

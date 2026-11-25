@@ -11,6 +11,10 @@ import {
   isUrlSpaceAt, stripSpace, sinkText
 } from "./privacy.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_CHANNELS = "0.20.0"
+
 // ------------------------------------------------------------ channels
 
 // R5: a channel with `group-title="A;B;C"` is listed under its FIRST group,
@@ -862,15 +866,15 @@ function chnoStatus(kind, label, name, matches, ordinal, committed) {
   return out
 }
 export {
-  primaryGroup, rowGroup, groupSearchText, helperGroupFold, looksLikeUrl,
-  cleanName, displayName, prepareChannels, CHNO_NONE, CHNO_NO_MATCH,
-  CHNO_NO_NUMBERS_TEXT, chnoFail, chnoRawOf, isAsciiDigit, parseChno,
-  isChnoSpace, chnoOf, buildChnoIndex, chnoIdAt, chnoEntryKey, resolveChno,
-  chnoUnambiguous, channelByNumber, channelOrderOf, orderChannels,
-  NUMERIC_QUERY_RE, isNumericQuery, isNumberEntryKey, numberEntry,
-  normalizeNumberEntry, pushNumberKey, popNumberKey, cancelNumberEntry,
-  closeNumberEntry, numberKeyStep, numberPopStep, chnoCommitLabel,
-  numberCommitStep, chnoColumnUnits, QT_SHIFT_MODIFIER, QT_CONTROL_MODIFIER,
-  QT_ALT_MODIFIER, QT_META_MODIFIER, QT_KEYPAD_MODIFIER, CHNO_CHORD_MASK,
-  numberKeyAction, chnoCommitPlan, chnoStatus
+  BUILD_STAMP_CHANNELS, primaryGroup, rowGroup, groupSearchText,
+  helperGroupFold, looksLikeUrl, cleanName, displayName, prepareChannels,
+  CHNO_NONE, CHNO_NO_MATCH, CHNO_NO_NUMBERS_TEXT, chnoFail, chnoRawOf,
+  isAsciiDigit, parseChno, isChnoSpace, chnoOf, buildChnoIndex, chnoIdAt,
+  chnoEntryKey, resolveChno, chnoUnambiguous, channelByNumber, channelOrderOf,
+  orderChannels, NUMERIC_QUERY_RE, isNumericQuery, isNumberEntryKey,
+  numberEntry, normalizeNumberEntry, pushNumberKey, popNumberKey,
+  cancelNumberEntry, closeNumberEntry, numberKeyStep, numberPopStep,
+  chnoCommitLabel, numberCommitStep, chnoColumnUnits, QT_SHIFT_MODIFIER,
+  QT_CONTROL_MODIFIER, QT_ALT_MODIFIER, QT_META_MODIFIER, QT_KEYPAD_MODIFIER,
+  CHNO_CHORD_MASK, numberKeyAction, chnoCommitPlan, chnoStatus
 }

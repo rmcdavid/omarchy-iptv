@@ -136,6 +136,7 @@ not because the harness is.
 - `L2-BAR-04-*`, `L2-BAR-07` the three R7 codepoints U+F0502 / U+F0567 / U+F0503, distinct.
 - `L2-BAR-05-*` no node hands a Private-Use glyph to a reader. (Narrower than its label -- section 6.)
 - `L2-BAR-06` the three states are three distinct announcements.
+- `L2-BAR-08`, `L2-BAR-08-LIT` with no service (barhost's `noservice` state, a host with none to hand) the one button says `IPTV, service not loaded`, from the shipping composer and in docs/UX.md 7.1's words, and not the idle name (D-A11Y-14, 2026-11-25). Written, not yet run in a cage: UNVERIFIED until the caged probe runs it.
 
 ### 4.3 First run
 

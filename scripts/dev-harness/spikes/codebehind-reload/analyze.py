@@ -24,6 +24,9 @@ PLUGIN_FILES = ("Service.qml", "Service-pip.js", "Service-player.js", "Service-r
 CODE_BEHINDS = PLUGIN_FILES[1:5]
 READ_FILES = PLUGIN_FILES + ("model/build.mjs",)
 PLUGIN_DIR = "/io.github.rmcdavid.iptv/"
+# D-REL-16: the version each build's cut stamps on the files it changes
+# (candidates.py's bump): a marked file's stamp names the build its mark does.
+MARK_VERSIONS = {"C1": "0.99.0", "C2": "0.99.1", "C3": "0.99.2"}
 NOTABLE = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a function|unavailable|case mismatch|"
                      r"Error|error|WARN|warn|failed|received signal", re.I)
 
@@ -108,6 +111,8 @@ def main(argv):
                                                    k.get("guideFooter")))
         print("    bar      %s | %s; bar.service is the service: %s" % (
             short(k.get("barObject")), k.get("bar"), k.get("barServiceIsService")))
+        for line in stamp_lines(k):
+            print("    " + line)
         lines = [l for l in log[prev:m["logLine"]] if "RIG-EVENT" not in l and NOTABLE.search(l)]
         counts = collections.Counter(tidy(l, d)[:300] for l in lines)
         print("    log      %d notable line(s) since the step before" % len(lines))
@@ -137,6 +142,72 @@ def main(argv):
     write_order(d, steps, log)
     race(d, steps)
     cache(d)
+
+
+def file_marks(k):
+    """{file: build} the marks name: Service.qml's reloadMarks string ("C1
+    Service.qml, C1 Service-pip.js, ..."), the guide's and the bar's mark;
+    None for a file with none (C0's, or a read that threw)."""
+    out = {}
+    svc = k.get("service")
+    if isinstance(svc, str):
+        for part in svc.split(", "):
+            m = re.match(r"(C[0-9]) (\S+)$", part.strip())
+            if m:
+                out[m.group(2)] = m.group(1)
+    for key, name in (("guide", "Guide.qml"), ("bar", "BarWidget.qml")):
+        m = re.match(r"(C[0-9]) ", str(k.get(key) or ""))
+        out.setdefault(name, m.group(1) if m else None)
+    for name in ("Service.qml",) + CODE_BEHINDS:
+        out.setdefault(name, None)
+    return out
+
+
+def stamp_lines(k):
+    """D-REL-16: the `build` reply's verdict beside the marks -- its notice,
+    `mixed` and `stamps` -- what the guide's footer and the bar's tooltip and
+    name say, and whether the stamps agree with the marks: a marked file's
+    stamp is the version its mark's build was cut at (MARK_VERSIONS), and an
+    unmarked one (C0's) has none to give."""
+    b = k.get("build")
+    if not isinstance(b, dict):
+        return ["build    %s" % (b if b is not None else "no build reply (a rig from before the stamps)")]
+    stamps = b.get("stamps") if isinstance(b.get("stamps"), dict) else {}
+    lines = ["build    notice %r; mixed %s; running %s onDisk %s loadedDisk %s; %d stamp(s)" % (
+        b.get("notice"), b.get("mixed"), b.get("running"), b.get("onDisk"), b.get("loadedDisk"), len(stamps))]
+    by = collections.defaultdict(list)
+    for name in sorted(stamps):
+        by[stamps[name]].append(name)
+    for version in sorted(by):
+        lines.append("  stamps %s: %s" % (version, ", ".join(by[version])))
+    lines.append("views    guide notice %r stamp %r; bar notice %r stamp %r" % (
+        k.get("guideNotice"), k.get("guideStamp"), k.get("barNotice"), k.get("barStamp")))
+    lines.append("  bar tooltip %r" % (k.get("barTooltip"),))
+    lines.append("  bar name    %r" % (k.get("barName"),))
+    marks = file_marks(k)
+    off = []
+    for name, build in sorted(marks.items()):
+        stamp = stamps.get(name)
+        want = MARK_VERSIONS.get(build) if build else None
+        if build is None and stamp not in (None, "?"):
+            off.append("%s unmarked but stamped %s" % (name, stamp))
+        elif build is not None and stamp is None:
+            # A marked file the reply does not stamp: a view that never
+            # reported (the l3-bar-no-report patch's shape), which a check
+            # that skipped it read as agreeing (the gate recheck of 1c64c77).
+            off.append("%s marked %s (%s) but not stamped" % (name, build, want))
+        elif build is not None and stamp != want:
+            off.append("%s marked %s (%s) but stamped %s" % (name, build, want, stamp))
+    builds = sorted(set(v for v in marks.values() if v)) + (["C0"] if any(v is None for v in marks.values()) else [])
+    mixed_marks = len(builds) > 1
+    # A mix the marks see must read "cache"; one build may read anything
+    # (a whole build loaded behind the disk reads "cache" too).
+    agree = not off and (not mixed_marks or b.get("notice") == "cache")
+    lines.append("agree    marks name %s; stamps %s; %s" % (
+        "one build, " + builds[0] if len(builds) == 1 else "a mix of " + ", ".join(builds),
+        "agree with every mark" if not off else "disagree: " + "; ".join(off),
+        "the notice fits the marks" if agree else "THE NOTICE DOES NOT FIT THE MARKS (a finding)"))
+    return lines
 
 
 def write_order(d, steps, log):

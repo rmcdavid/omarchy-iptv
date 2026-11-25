@@ -21,6 +21,10 @@ import {
   REWIND_STEP_S, BEHIND_LIVE_SHOW_S
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_REWIND = "0.20.0"
+
 // ---- M5-01: live rewind ----
 //
 // M5-01-LIVE-REWIND.md (dev branch) 2.1-2.5 on SPIKE-LIVE-REWIND.md (dev branch) 11 and 12.
@@ -659,11 +663,11 @@ function playerProbeArgv(socket, ownerPid, ownerToken) {
   return argv
 }
 export {
-  SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,
-  finiteOr, round3, clockSpan, spokenSpan, playbackStateText, barBehindText,
-  rewindOsdText, seekTransientText, clampSeek, playerSeekArgv,
-  seekVerbSeconds, coalesceSeek, behindLiveNow, parseRewind, seekQueueState,
-  SEEK_CTX_KEYS, seekQueueCtx, seekRefusal, seekQueuePending, seekPlanOf,
-  rewindApply, healthBusy, canRewindNow, behindTickRunning, seekQueueStep,
-  playerProbeArgv
+  BUILD_STAMP_REWIND, SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S,
+  SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S, finiteOr, round3, clockSpan, spokenSpan,
+  playbackStateText, barBehindText, rewindOsdText, seekTransientText,
+  clampSeek, playerSeekArgv, seekVerbSeconds, coalesceSeek, behindLiveNow,
+  parseRewind, seekQueueState, SEEK_CTX_KEYS, seekQueueCtx, seekRefusal,
+  seekQueuePending, seekPlanOf, rewindApply, healthBusy, canRewindNow,
+  behindTickRunning, seekQueueStep, playerProbeArgv
 }

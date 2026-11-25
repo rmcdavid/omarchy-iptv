@@ -858,7 +858,8 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // code-behinds, Service-pip.js, Service-player.js, Service-rewind.js and
 // Service-sources.js, which hold 158 of its 204 functions (C3 moved the
 // M5-01 region's 36 into the last two on 2026-11-23, and C4 the rest of
-// pip, player and sources and rewind's togglePause): the service's files are
+// pip, player and sources and rewind's togglePause; since D-REL-16, 2026-11-25,
+// 162 of 208, each code-behind's build stamp its first): the service's files are
 // those five, and its one text, cut again by the code-behinds' own spans, is
 // Service.qml byte for byte, so every converted reader reads the one-file
 // text it read before the moves (before C3 the files were Service.qml alone
@@ -915,7 +916,8 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
              viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource }
   }, { files: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
        names: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
-       moved: [23, 54, 16, 65], own: true, anchored: true, closes: true, viaPath: true })
+       // D-REL-16 (2026-11-25): each code-behind's first function is its build stamp.
+       moved: [24, 55, 17, 66], own: true, anchored: true, closes: true, viaPath: true })
 
   checkCall("D-REL-14: the node and python readers agree on this tree, names and text", () => {
     const n = py("names", ROOT), t = py("text", ROOT)
@@ -3986,29 +3988,486 @@ checkCall("D-HOST-1: the notice sits below a real warning and above the plain co
   "Copied",
   true,
 ])
-checkCall("D-HOST-2: the status IPC carries the build state, so this is a VALUE and not a pixel width", function () {
-  // The only attempt to observe the notice before this measured the width of a
-  // footer line. That is not an instrument. These three make the question
-  // readable: what the running component believes it is, what is on disk beside
-  // it, and the verdict. Version strings carry no credential and no path, so
-  // this adds nothing to the redaction surface.
-  return [qmlSites(/running: Model\.PLUGIN_VERSION/).length,
-          qmlSites(/onDisk: root\.onDiskVersion/).length,
-          qmlSites(/stale: root\.staleBuild/).length]
-}, [1, 1, 1])
-checkCall("D-HOST-2: the manifest is re-read from its PATH when the guide opens", function () {
+// D-HOST-2's two text pins -- the status IPC's three build fields and the
+// re-read's two reloads -- are boots of the shipping service since D-REL-16
+// (below, "the build verb replies..." and "the guide's open re-reads...").
+// What no boot can see stays pinned: that the guide's open() CALLS the
+// re-read, and calls it guarded on the function (D-A11Y-8's spelling; the
+// parse after the D-REL-16 block holds every call in open() to the guard).
+checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest from its PATH, guarded on the function", function () {
   // The watcher is not what makes this work, and D-HOST-2 is the proof: an
   // update REPLACES the file -- measured, a git fast-forward took manifest.json
   // from inode 495084 to 495097 -- so a FileView bound to the old inode never
   // fires. 0.7.5 carried the check, had the right ladder order, and stayed
   // silent through the 0.7.5 -> 0.7.7 update it was built to catch.
-  return [qmlSites(/function recheckBuild\(\)/).length,
-          qmlSites(/manifestFile\.reload\(\)/).length,
-          // D-A11Y-8: the call is GUARDED ON THE FUNCTION, and this pins that
-          // spelling rather than the bare one it shipped with. `serviceReady`
-          // says a service object is attached, not that it has this method.
-          qmlSites(/typeof root\.service\.recheckBuild === "function"\) root\.service\.recheckBuild\(\)/).length]
-}, [1, 1, 1])
+  return qmlSites(/typeof root\.service\.recheckBuild === "function"\) root\.service\.recheckBuild\(\)/).length
+}, 1)
+// ---- D-HOST-16: the manifest re-read follows the host and the watcher -----
+// Until D-HOST-16 the service re-read manifest.json only through
+// recheckBuild, which only the guide's open() calls, so between an update and
+// the next guide open `status` read the version from the service's creation
+// (the reload rig's R1 readout, `stale False`). These boot the SHIPPING
+// service (tests/service-harness.js, its manifestFile double) and drive the
+// update the way the host and git make it.
+;(function () {
+  const H = require("./service-harness.js")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  const V = Model.PLUGIN_VERSION
+  const OTHER = "99.0.0"   // never this tree's version
+  const manifestOf = v => JSON.stringify({ id: H.PID, version: v }) + "\n"
+  const boot = () => {
+    const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    let rechecks = 0
+    const recheck = h.root.recheckBuild
+    h.root.recheckBuild = function () { rechecks++; return recheck.apply(this, arguments) }
+    h.rechecks = () => rechecks
+    return h
+  }
+  const build = h => { const b = h.root.statusSummary().build; return [b.running, b.onDisk, b.stale] }
+  checkCall("D-HOST-16: an update's rescan hands the kept service a fresh manifest, and status reads the new version on disk with no guide open", () => {
+    const h = boot()
+    const started = build(h)
+    // The update REPLACES manifest.json (D-HOST-2): the view raises nothing.
+    h.manifestDisk = manifestOf(OTHER)
+    h.runLater()
+    const replaced = build(h)
+    // The rescan's copy (shell.qml _syncServices). Its own version is the
+    // host's reading and is NOT what is read: the dev harness hands this one.
+    h.root.manifest = { id: H.PID, version: "0.1.0-harness" }
+    h.runLater()
+    const handed = build(h)
+    // And the reload re-armed the watch: an in-place edit after it is seen.
+    h.manifestEdit(manifestOf(V))
+    h.runLater()
+    return [h.compileErrors.length, started, replaced, handed, build(h), h.rechecks()]
+  }, [0, [V, V, false], [V, V, false], [V, OTHER, true], [V, V, false], 0])
+  checkCall("D-HOST-16: an in-place edit of manifest.json is read through the watcher, with no hand-off and no guide open", () => {
+    const h = boot()
+    h.manifestEdit(manifestOf(OTHER))
+    h.runLater()
+    return [h.compileErrors.length, build(h), h.rechecks()]
+  }, [0, [V, OTHER, true], 0])
+  checkCall("D-HOST-16: a manifest that is gone when the hand-off re-reads it reads as unknown, never as stale", () => {
+    const h = boot()
+    h.manifestDisk = null
+    h.root.manifest = { id: H.PID }
+    h.runLater()
+    return [h.compileErrors.length, build(h), h.manifestFile.loads, h.rechecks()]
+  }, [0, [V, "", false], 3, 0])
+})()
+
+// ---- D-REL-16: the build stamps' reading (L3) -----------------------------
+// Every runtime file carries its build stamp (build_stamps.py, the gate's
+// "build stamp guard"); these hold what the RUNNING code makes of them --
+// Model.buildVerdict over the shared cases, the shipping service booted over
+// its own file set (tests/service-harness.js) and over copies in which one
+// file is another build's, a copy of the model per part, and the join, by
+// call, between the guard's reading of the tree and what the service and the
+// model collect. What only the cage can show (a stale unit's literal under
+// Qt's cache, the views' reports under the host) is in QA-RESULTS, UNVERIFIED.
+// BEGIN D-REL-16 READING
+;(function () {
+  const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
+  const H = require("./service-harness.js")
+  const ROOT = path.join(__dirname, "..")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || path.join(ROOT, "Service.qml"))
+  const V = Model.PLUGIN_VERSION
+  const OTHER = "99.0.0"   // above every row, so no build's
+  const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "build-verdict.json"), "utf8"))
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
+  const rowOf = f => f === "model/build.mjs" ? V : (Model.BUILD_FILES && own(Model.BUILD_FILES, f) ? Model.BUILD_FILES[f] : V)
+  const tok = (v, f) => v === "@running" ? V : v === "@other" ? OTHER : v === "@row" ? rowOf(f) : v
+  // A case's map with its tokens read, as an object without a prototype so
+  // the fixture's `__proto__` stays a key.
+  const map = m => {
+    if (!m || typeof m !== "object") return m
+    const out = Object.create(null)
+    for (const k of Object.keys(m)) out[k] = tok(m[k], k)
+    return out
+  }
+  const plain = m => JSON.parse(JSON.stringify(m))
+  checkCall("D-REL-16: the shared cases are all there (verdict, notice, report)", () =>
+    [FIX.verdict.length, FIX.notice.length, FIX.report.length], [15, 6, 9])
+  FIX.verdict.forEach(c => {
+    checkCall("D-REL-16: buildVerdict -- " + c.why, () => {
+      const r = Model.buildVerdict({ own: map(c.own), reported: map(c.reported), loadedDisk: tok(c.loadedDisk), onDisk: tok(c.onDisk) })
+      return [r.notice, r.mixed, r.running, r.onDisk, r.loadedDisk]
+    }, [c.want.notice, c.want.mixed, V, tok(c.onDisk), tok(c.loadedDisk)])
+  })
+  FIX.notice.forEach(c => {
+    checkCall("D-REL-16: serviceBuildNotice -- " + c.why, () => Model.serviceBuildNotice(c.service), c.want)
+  })
+  FIX.report.forEach(c => {
+    checkCall("D-REL-16: withReportedStamp -- " + c.why, () =>
+      plain(Model.withReportedStamp(map(c.map), c.file, tok(c.stamp))), plain(map(c.want)))
+  })
+  checkCall("D-REL-16: buildVerdict never throws and reads nothing as nothing", () => {
+    const out = []
+    for (const v of [undefined, null, 7, "x", [], { own: 7, reported: "Guide.qml", onDisk: 1, loadedDisk: null }]) {
+      try { const r = Model.buildVerdict(v); out.push([r.notice, r.mixed, r.onDisk, r.loadedDisk]) } catch (e) { out.push("threw: " + e.message) }
+    }
+    return out
+  }, [["", [], "", ""], ["", [], "", ""], ["", [], "", ""], ["", [], "", ""], ["", [], "", ""], ["", [], "", ""]])
+
+  // The guard's reading of the tree, which the joins below hold the running
+  // code to. One run; every check that needs it reads this.
+  let guard = null
+  try {
+    guard = JSON.parse(cp.execFileSync("python3", ["-I", path.join(ROOT, "scripts", "build_stamps.py"), "--json"], { encoding: "utf8", timeout: 60000 }))
+  } catch (e) { guard = { error: String(e.message || e).slice(0, 200) } }
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"))
+  const VIEWS = [manifest.entryPoints.overlay, manifest.entryPoints.barWidget]
+  const entry = { sourceKey: "", showLogos: false }
+  const boot = (set, extra) => H.bootService(set || svcSet, Model, Object.assign({ entry, stateText: "", host: "lag" }, extra || {}))
+  const manifestOf = v => JSON.stringify({ id: H.PID, version: v }) + "\n"
+  // L3-c: neither notice ever posts one -- no notification run, and no
+  // detached `omarchy-notification-send`.
+  const notices = h => [h.notifyRuns.length, h.detached.filter(a => a[0] === "omarchy-notification-send").length]
+
+  checkCall("D-REL-16: the shipping service reads its own build whole -- notice \"\", nothing mixed, every own and model stamp counted", () => {
+    const h = boot()
+    h.runLater()
+    const r = h.root.buildReply()
+    return [h.compileErrors.length, r.notice, r.mixed, Object.keys(r.stamps).length, r.running, r.loadedDisk, r.onDisk, h.root.staleBuild]
+  }, [0, "", [], guard.error ? guard.error : Object.keys(guard).length - VIEWS.length, V, V, V, false])
+
+  checkCall("D-REL-16: the guard's stamps (build_stamps.py --json) are exactly what the running code collects -- the service's own, the model's, the two views'", () => {
+    if (guard.error) return guard.error
+    const h = boot()
+    h.runLater()
+    for (const v of VIEWS) h.root.reportBuildStamp(v, guard[v])
+    const r = h.root.buildReply()
+    const got = Object.keys(r.stamps), want = Object.keys(guard)
+    return [want.filter(f => got.indexOf(f) === -1), got.filter(f => want.indexOf(f) === -1),
+            want.filter(f => got.indexOf(f) !== -1 && r.stamps[f] !== guard[f]), r.notice, r.mixed, want.length]
+  }, [[], [], [], "", [], guard.error ? guard.error : Object.keys(guard).length])
+
+  checkCall("D-REL-16: an update under the running service reads restart from its own rescan, with no guide open and no notification", () => {
+    const h = boot()
+    h.runLater()
+    const before = h.root.buildNotice
+    h.manifestDisk = manifestOf(OTHER)
+    h.root.manifest = { id: H.PID, version: "0.1.0-harness" }
+    h.runLater()
+    const r = h.root.buildReply()
+    return [before, r.notice, r.loadedDisk, r.onDisk, r.mixed, h.root.staleBuild, notices(h)]
+  }, ["", "restart", V, OTHER, [], true, [0, 0]])
+
+  checkCall("D-REL-16: a service whose FIRST manifest read is already another version reads cache, and \"\" once a later read finds this build", () => {
+    const h = boot(null, { manifestText: manifestOf(OTHER) })
+    h.runLater()
+    const first = [h.root.buildNotice, h.root.loadedDisk, h.root.onDiskVersion]
+    // The update completes: manifest.json, written last, now names this build.
+    h.manifestDisk = manifestOf(V)
+    h.root.manifest = { id: H.PID }
+    h.runLater()
+    return [first, h.root.buildNotice, h.root.loadedDisk, h.root.onDiskVersion, notices(h)]
+  }, [["cache", OTHER, OTHER], "", OTHER, V, [0, 0]])
+
+  checkCall("D-REL-16: the guide's open re-reads the manifest from its PATH (recheckBuild), where a replacement raised nothing", () => {
+    const h = boot()
+    h.runLater()
+    h.manifestDisk = manifestOf(OTHER)
+    h.runLater()
+    const unseen = [h.root.onDiskVersion, h.root.buildNotice]
+    h.root.recheckBuild()
+    h.runLater()
+    return [unseen, h.root.onDiskVersion, h.root.buildNotice]
+  }, [[V, ""], OTHER, "restart"])
+
+  // One file set per code-behind the service declares, in which that file's
+  // stamp is another build's: what a stale unit of it would hold.
+  serviceReader.declarations(svcSet.service).forEach(d => {
+    checkCall("D-REL-16: a " + d.file + " of another build beside this service reads cache, naming it", () => {
+      const text = svcSet.files[d.file]
+      const re = /^  function buildStamp[A-Za-z]+\(\) \{ return "[^"]*" \}$/m
+      if (!re.test(text)) return d.file + " has no stamp line"
+      const files = Object.assign({}, svcSet.files)
+      files[d.file] = text.replace(re, m => m.replace(/"[^"]*"/, JSON.stringify(OTHER)))
+      const h = boot({ service: svcSet.service, files })
+      h.runLater()
+      return [h.compileErrors.length, h.root.buildNotice, h.root.buildReply().mixed, h.root.buildReply().stamps[d.file], notices(h)]
+    }, [0, "cache", [d.file], OTHER, [0, 0]])
+  })
+
+  // And one per code-behind whose stamp READ throws: a code-behind from
+  // before the stamps beside this Service.qml, whose forwarder then calls a
+  // function that is not there -- a TypeError, which the harness can only
+  // boot as a body that throws one (it refuses a forwarder with no function,
+  // `no-function`), the device of the TypeError-mix check below. The
+  // service's catch reads "?", which is no build's row; the logic recheck's
+  // mutant that read Service.qml's own stamp there instead was green in every
+  // check until these.
+  serviceReader.declarations(svcSet.service).forEach(d => {
+    checkCall("D-REL-16: a " + d.file + " whose stamp read throws (one from before the stamps) beside this service reads cache, naming it at \"?\"", () => {
+      const text = svcSet.files[d.file]
+      const re = /^  function (buildStamp[A-Za-z]+)\(\) \{ return "[^"]*" \}$/m
+      if (!re.test(text)) return d.file + " has no stamp line"
+      const files = Object.assign({}, svcSet.files)
+      files[d.file] = text.replace(re, (m, n) => "  function " + n + "() { throw new TypeError(\"Property '" + n + "' is not a function\") }")
+      const h = boot({ service: svcSet.service, files })
+      h.runLater()
+      const r = h.root.buildReply()
+      return [h.compileErrors.length, h.root.buildNotice, r.mixed, r.stamps[d.file], notices(h)]
+    }, [0, "cache", [d.file], "?", [0, 0]])
+  })
+
+  checkCall("D-REL-16: a Service.qml of another build reads cache, naming itself", () => {
+    const re = /^  readonly property string buildStamp: "[^"]*"$/m
+    if (!re.test(svcSet.service)) return "Service.qml has no stamp line"
+    const h = boot({ service: svcSet.service.replace(re, m => m.replace(/"[^"]*"/, JSON.stringify(OTHER))), files: svcSet.files })
+    h.runLater()
+    return [h.compileErrors.length, h.root.buildNotice, h.root.buildReply().mixed]
+  }, [0, "cache", ["Service.qml"]])
+
+  checkCall("D-REL-16: a view's report joins the verdict -- the same report again assigns nothing, another build's reads cache naming it", () => {
+    const h = boot()
+    h.runLater()
+    h.root.reportBuildStamp(VIEWS[0], rowOf(VIEWS[0]))
+    const first = h.root.reportedStamps
+    h.root.reportBuildStamp(VIEWS[0], rowOf(VIEWS[0]))
+    const same = h.root.reportedStamps === first
+    const agreed = h.root.buildNotice
+    h.root.reportBuildStamp(VIEWS[1], OTHER)
+    return [agreed, same, Object.keys(h.root.reportedStamps), h.root.buildNotice, h.root.buildReply().mixed, notices(h)]
+  }, ["", true, [VIEWS[0], VIEWS[1]], "cache", [VIEWS[1]], [0, 0]])
+
+  checkCall("D-REL-16: the build verb replies with the verdict alone, through ipcJson -- file names, versions and the notice; status carries the same", () => {
+    const h = boot()
+    h.runLater()
+    h.root.reportBuildStamp(VIEWS[0], OTHER)
+    const text = h.ipc.build()
+    const b = JSON.parse(text)
+    const st = JSON.parse(h.ipc.status()).build
+    const values = Object.keys(b.stamps).map(k => b.stamps[k]).filter(v => !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(v))
+    const viaIpcJson = text === Model.ipcJson(h.root.buildReply())
+    // A report is bounded but not filtered, so the reply escapes what JSON
+    // leaves raw (F-SINK-16): a C1 control in a reported name reaches the
+    // caller's terminal as an escape, never as the byte.
+    h.root.reportBuildStamp("x\u009b.qml", OTHER)
+    const escaped = h.ipc.build()
+    return [viaIpcJson, Object.keys(b), b.notice, b.mixed, values,
+            text.indexOf("://") === -1 && text.indexOf(ROOT) === -1 && text.indexOf(H.PID) === -1,
+            Object.keys(st), [st.running, st.onDisk, st.stale, st.loadedDisk, st.notice, st.mixed],
+            /[\u0080-\u009f]/.test(escaped), escaped.indexOf("x\\u009b.qml") !== -1]
+  }, [true, ["notice", "running", "onDisk", "loadedDisk", "mixed", "stamps"], "cache", [VIEWS[0]], [], true,
+      ["running", "onDisk", "stale", "loadedDisk", "notice", "mixed"], [V, V, true, V, "cache", [VIEWS[0]]], false, true])
+
+  checkCall("D-REL-16: the build verb answers in the mixed load where status throws (a forwarder whose code-behind function throws a TypeError, the rig's C2 shape)", () => {
+    const body = "  function socketAttached() {\n    return root.playerSocket !== null && root.playerSocket.connected === true\n  }\n"
+    const p = svcSet.files["Service-player.js"] || ""
+    if (p.indexOf(body) === -1) return "Service-player.js has no socketAttached body to break"
+    const files = Object.assign({}, svcSet.files, { "Service-player.js": p.replace(body, "  function socketAttached() {\n    throw new TypeError(\"not a function\")\n  }\n") })
+    const h = boot({ service: svcSet.service, files })
+    h.runLater()
+    let st
+    try { st = h.ipc.status() } catch (e) { st = "threw " + e.name }
+    let b
+    try { b = JSON.parse(h.ipc.build()).notice } catch (e) { b = "threw " + e.name }
+    return [st, b]
+  }, ["threw TypeError", ""])
+
+  checkCall("D-REL-16: beside a model from before the reading (no buildVerdict, no aggregator stamp) the service reads cache, and status and the verb still answer", () => {
+    // What an aggregator of 0.20.0 is to this file: every other name, and
+    // none of the reading's. The binding's own catch is what answers.
+    const old = Object.assign({}, Model)
+    delete old.buildVerdict
+    delete old.BUILD_STAMP_AGGREGATOR
+    const h = H.bootService(svcSet, old, { entry, stateText: "", host: "lag" })
+    h.runLater()
+    let b
+    try { b = JSON.parse(h.ipc.build()) } catch (e) { b = { notice: "threw " + e.message } }
+    return [h.root.buildNotice, h.root.staleBuild, b.notice, b.running, h.root.ownBuildStamps()["Model.mjs"], JSON.parse(h.ipc.status()).build.notice]
+  }, ["cache", true, "cache", V, "?", "cache"])
+
+  checkCall("D-REL-16: beside a model with none of the reading's names, a view's report throws nothing -- the one call into the reading outside a binding -- and the service still reads cache", () => {
+    // The nine public names L3 added to the model, all gone, as in 0.20.0's
+    // aggregator. A report that threw would log a TypeError at every view's
+    // completion and service hand-off in exactly the mix the notice is for.
+    const old = Object.assign({}, Model)
+    for (const k of ["BUILD_FILES", "BUILD_STAMP_AGGREGATOR", "modelBuildStamps", "withReportedStamp",
+                     "buildVerdict", "serviceBuildNotice", "qmlCacheFolder", "serviceMissingProse",
+                     "QML_CACHE_ENV"]) delete old[k]
+    const h = H.bootService(svcSet, old, { entry, stateText: "", host: "lag" })
+    h.runLater()
+    const out = VIEWS.map(v => { try { h.root.reportBuildStamp(v, V); return "answered" } catch (e) { return "threw " + e.name } })
+    return [h.compileErrors.length, out, h.root.buildNotice, JSON.parse(h.ipc.build()).notice]
+  }, [0, ["answered", "answered"], "cache", "cache"])
+
+  // One copy of the model per part, in which that part's stamp is another
+  // build's: what a stale unit of it would hold. build.mjs's own stamp is
+  // PLUGIN_VERSION, its own row, so its copy is another build's TABLE: a row
+  // for Service.qml that this service's stamp does not match.
+  // The parts, as the aggregator re-exports them (the file node and V4 load).
+  const aggParts = (() => {
+    const agg = fs.readFileSync(path.join(ROOT, "Model.mjs"), "utf8")
+    return [...agg.matchAll(/^(?:\}|export \{\}) from "\.\/(model\/[a-z][a-z0-9-]*\.mjs)"$/gm)].map(m => m[1])
+  })()
+  // A model without the reading still runs every check below, each red.
+  const parts = typeof Model.modelBuildStamps === "function" ? Object.keys(Model.modelBuildStamps()) : aggParts
+  checkCall("D-REL-16: modelBuildStamps names every part Model.mjs re-exports from, build.mjs first, each at its row", () =>
+    [parts[0], parts.slice().sort(), parts.filter(f => Model.modelBuildStamps()[f] !== rowOf(f))],
+    ["model/build.mjs", aggParts.slice().sort(), []])
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-stamps-"))
+  try {
+    parts.forEach((part, i) => {
+      checkCall("D-REL-16: a " + part + " of another build reads cache, naming " + (part === "model/build.mjs" ? "the file its table disagrees with" : "it"), () => {
+        const dir = path.join(work, String(i))
+        fs.mkdirSync(path.join(dir, "model"), { recursive: true })
+        fs.copyFileSync(path.join(ROOT, "Model.mjs"), path.join(dir, "Model.mjs"))
+        for (const f of fs.readdirSync(path.join(ROOT, "model"))) if (f.endsWith(".mjs")) fs.copyFileSync(path.join(ROOT, "model", f), path.join(dir, "model", f))
+        const file = path.join(dir, part)
+        const text = fs.readFileSync(file, "utf8")
+        const re = part === "model/build.mjs" ? /^  "Service\.qml": "[^"]*",$/m : /^var BUILD_STAMP_[A-Z_]+ = "[^"]*"$/m
+        if (!re.test(text)) return part + " has no stamp line"
+        fs.writeFileSync(file, text.replace(re, m => m.replace(/"[^"]*"(,?)$/, JSON.stringify(part === "model/build.mjs" ? "0.0.1" : OTHER) + "$1")))
+        const copy = require(path.join(dir, "Model.mjs"))
+        const r = copy.buildVerdict({ own: { "Service.qml": rowOf("Service.qml") }, loadedDisk: V, onDisk: V })
+        return [r.notice, r.mixed]
+      }, ["cache", [part === "model/build.mjs" ? "Service.qml" : part]])
+    })
+  } finally { fs.rmSync(work, { recursive: true, force: true }) }
+})()
+// END D-REL-16 READING
+
+// ---- D-REL-16: the build's words, and D-A11Y-14 ---------------------------
+// What the footer, the bar's tooltip, its accessible name and the guide's
+// no-service body say about the stamps' notice (L3's words, the lead's calls
+// L3-b and L3-g), composed by the model and called here. The folder is a
+// variable's NAME, never its value; every environment below is a fake.
+// BEGIN D-REL-16 WORDS
+;(function () {
+  // The middle dot and its spaces, spelled out (UX.md's separator).
+  const SEP = " \u00b7 "
+  const CACHE = "Loaded mid-update" + SEP + "remove the QML cache, restart the shell"
+  const CACHE_OFF = "Loaded mid-update" + SEP + "restart the shell"
+  const RESTART = "Updated" + SEP + "restart the shell to see the new version"
+  const DEF = "~/.cache/quickshell/qmlcache"
+  const ENVS = [
+    [{}, DEF, "nothing set: Qt's default under the user's cache"],
+    [{ XDG_CACHE_HOME: "/srv/u7/cache" }, "$XDG_CACHE_HOME/quickshell/qmlcache", "an absolute XDG_CACHE_HOME, named and not read"],
+    [{ XDG_CACHE_HOME: "rel/cache" }, DEF, "a relative XDG_CACHE_HOME is not a base"],
+    [{ XDG_CACHE_HOME: "" }, DEF, "an empty XDG_CACHE_HOME"],
+    [{ QML_DISK_CACHE_PATH: "/srv/u7/qc", XDG_CACHE_HOME: "/srv/u7/cache" }, "$QML_DISK_CACHE_PATH", "QML_DISK_CACHE_PATH is the folder itself, before XDG"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_DISK_CACHE_PATH: "/srv/u7/qc" }, "", "the cache turned off beats a path"],
+    [{ QML_DISABLE_DISK_CACHE: "007" }, "", "a whole number other than 0 is off"],
+    [{ QML_DISABLE_DISK_CACHE: "0" }, DEF, "0 is not off"],
+    [{ QML_DISABLE_DISK_CACHE: "yes" }, DEF, "a word is not a number: the folder is named, which costs a command if Qt read it as off"],
+    [{ QML_DISABLE_DISK_CACHE: "" }, DEF, "set to nothing"],
+    [{ QML_DISABLE_DISK_CACHE: 1, QML_DISK_CACHE_PATH: null, XDG_CACHE_HOME: undefined }, DEF, "values that are not strings are unset (Quickshell.env answers undefined)"],
+    // QML_FORCE_DISK_CACHE: Qt asks it before QML_DISABLE_DISK_CACHE (upstream's
+    // diskCacheOptions, read, not run), so a forced cache is on whatever the
+    // other says; any value but "" counts, because naming a folder Qt does
+    // not read costs a command and not naming one it does costs the recovery.
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }, DEF, "a forced cache beats the cache turned off"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "0" }, DEF, "any forced value but nothing keeps the folder named, 0 included"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "" }, "", "a forced value of nothing is unset"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1", QML_DISK_CACHE_PATH: "/srv/u7/qc" }, "$QML_DISK_CACHE_PATH", "forced, the path still names the folder"],
+  ]
+  ENVS.forEach(([env, want, why]) => checkCall("D-REL-16: qmlCacheFolder -- " + why, () => Model.qmlCacheFolder(env), want))
+  checkCall("D-REL-16: qmlCacheFolder never prints a value the environment holds, and reads nothing but what it is handed", () => {
+    const leaked = ENVS.filter(([env]) => Object.keys(env).some(k => typeof env[k] === "string" && env[k].length > 1 && Model.qmlCacheFolder(env).indexOf(env[k]) !== -1))
+    return [leaked.length, Model.qmlCacheFolder(null), Model.qmlCacheFolder("XDG_CACHE_HOME=/x"), Model.qmlCacheFolder(undefined)]
+  }, [0, DEF, DEF, DEF])
+  checkCall("D-REL-16: QML_CACHE_ENV, the list the guide and the service hand their environment from, names exactly the variables qmlCacheFolder reads", () => {
+    const read = new Set()
+    for (const [env] of ENVS) Model.qmlCacheFolder(new Proxy(env, { get(t, k) { read.add(k); return t[k] } }))
+    const list = Array.isArray(Model.QML_CACHE_ENV) ? Model.QML_CACHE_ENV : []
+    return [list.slice().sort(), [...read].sort()]
+  }, [["QML_DISABLE_DISK_CACHE", "QML_DISK_CACHE_PATH", "QML_FORCE_DISK_CACHE", "XDG_CACHE_HOME"],
+      ["QML_DISABLE_DISK_CACHE", "QML_DISK_CACHE_PATH", "QML_FORCE_DISK_CACHE", "XDG_CACHE_HOME"]])
+
+  const f = extra => Model.footerStatus(Object.assign({ configured: true, count: 5 }, extra))
+  checkCall("D-REL-16 (L3-b): the footer's cache line sits below the number entry and the transient and above everything else, the empty-state gate included", () => [
+    f({ buildNotice: "cache" }),
+    f({ buildNotice: "cache", count: 0 }),
+    f({ buildNotice: "cache", configured: false, count: 0 }),
+    f({ buildNotice: "cache", transient: "Copied" }),
+    f({ buildNotice: "cache", playingName: "BBC One", warning: "Provider unreachable", truncated: true, resultTotal: 900 }),
+    f({ buildNotice: "cache", numberEntry: { active: true, kind: "none", buffer: "1" } }) !== CACHE,
+    f({ buildNotice: "cache", cacheFolder: "" }),
+    f({ buildNotice: "cache", cacheFolder: "$XDG_CACHE_HOME/quickshell/qmlcache" }),
+    f({ buildNotice: "cache", cacheFolder: null }),
+    f({ buildNotice: "a later build's notice" }),
+    CACHE.length,
+  ], [CACHE, CACHE, CACHE, "Copied", CACHE, true, CACHE_OFF, CACHE, CACHE, CACHE, 59])
+  checkCall("D-REL-16: the footer's restart line keeps D-HOST-1's rung, from the notice or from an older guide's staleBuild, and says nothing with no channels", () => [
+    f({ buildNotice: "restart" }),
+    f({ staleBuild: true }),
+    f({ buildNotice: "restart", warning: "Provider unreachable" }),
+    f({ buildNotice: "restart", count: 0 }),
+    f({ buildNotice: "" }),
+    f({}),
+  ], [RESTART, RESTART, "Provider unreachable", "", "5 channels", "5 channels"])
+
+  const tip = extra => Model.barTooltip(Object.assign({ configured: true }, extra))
+  checkCall("D-REL-16: the bar's tooltip gains one line, last, for each notice -- naming the folder for the cache", () => [
+    tip({ buildNotice: "restart" }),
+    tip({ buildNotice: "cache" }),
+    tip({ buildNotice: "cache", cacheFolder: "$XDG_CACHE_HOME/quickshell/qmlcache" }),
+    tip({ buildNotice: "cache", cacheFolder: "$QML_DISK_CACHE_PATH" }),
+    tip({ buildNotice: "cache", cacheFolder: "" }),
+    tip({ buildNotice: "cache", pip: true }).split("\n").length,
+    tip({ buildNotice: "" }),
+  ], [
+    "IPTV" + SEP + "click to open the guide\n" + RESTART,
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove " + DEF + ", then restart the shell",
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove $XDG_CACHE_HOME/quickshell/qmlcache, then restart the shell",
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove $QML_DISK_CACHE_PATH, then restart the shell",
+    "IPTV" + SEP + "click to open the guide\n" + CACHE_OFF,
+    3,
+    "IPTV" + SEP + "click to open the guide",
+  ])
+  checkCall("D-REL-16: with no service the tooltip keeps its first line and adds the cache, at the default folder (nothing to ask where it is)", () =>
+    [Model.barTooltip({ serviceMissing: true }), Model.barTooltip({ serviceMissing: true, buildNotice: "cache", cacheFolder: "$QML_DISK_CACHE_PATH" })],
+    ["IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove " + DEF + " and restart again",
+     "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove " + DEF + " and restart again"])
+  checkCall("D-A11Y-14: with no service the bar's accessible name says so (it said \"IPTV, idle\"), whatever else it is handed", () =>
+    [Model.barAccessibleName({ serviceMissing: true }), Model.barAccessibleName({ serviceMissing: true, playing: true, name: "BBC One", buildNotice: "cache" }),
+     Model.barAccessibleName({}), Model.barAccessibleName({ serviceMissing: false })],
+    ["IPTV, service not loaded", "IPTV, service not loaded", "IPTV, idle", "IPTV, idle"])
+  checkCall("D-REL-16: the bar's accessible name speaks the notice last, the step and never the folder", () => [
+    Model.barAccessibleName({ buildNotice: "restart" }),
+    Model.barAccessibleName({ buildNotice: "cache" }),
+    Model.barAccessibleName({ buildNotice: "cache", cacheFolder: "" }),
+    Model.barAccessibleName({ buildNotice: "cache", error: true }),
+    Model.barAccessibleName({ buildNotice: "cache", playing: true, name: "BBC One", chno: "101" }),
+  ], [
+    "IPTV, idle, updated, restart the shell to see the new version",
+    "IPTV, idle, loaded mid-update, remove the QML cache and restart the shell",
+    "IPTV, idle, loaded mid-update, restart the shell",
+    "IPTV, playlist error, loaded mid-update, remove the QML cache and restart the shell",
+    "IPTV, playing channel 101, BBC One, loaded mid-update, remove the QML cache and restart the shell",
+  ])
+  checkCall("D-REL-16: the guide's no-service body gives the restart first, then the cache at the folder it names", () => [
+    Model.serviceMissingProse(Model.qmlCacheFolder({})),
+    Model.serviceMissingProse("$XDG_CACHE_HOME/quickshell/qmlcache"),
+    Model.serviceMissingProse(""),
+    Model.serviceMissingProse(undefined),
+  ], [
+    "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
+    "Run omarchy restart shell" + SEP + "if that does not help, remove $XDG_CACHE_HOME/quickshell/qmlcache and restart again",
+    "Run omarchy restart shell",
+    "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
+  ])
+  checkCall("D-REL-16: the service names the folder for the bar, from its own environment (the harness's Quickshell.env answers \"\": the default)", () => {
+    const H = require("./service-harness.js")
+    const h = H.bootService(serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml")), Model,
+      { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    return [h.compileErrors.length, h.root.buildCacheFolder]
+  }, [0, DEF])
+  checkCall("D-REL-16: the service hands the composer every variable it reads -- the cache turned off drops the folder, a forced one keeps it named", () => {
+    const H = require("./service-harness.js")
+    const set = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+    const at = env => {
+      const h = H.bootService(set, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag", env })
+      return [h.compileErrors.length, h.root.buildCacheFolder]
+    }
+    return [at({ QML_DISABLE_DISK_CACHE: "1" }), at({ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }),
+            at({ XDG_CACHE_HOME: "/srv/u7/cache" }), at({ QML_DISK_CACHE_PATH: "/srv/u7/qc" })]
+  }, [[0, ""], [0, DEF], [0, "$XDG_CACHE_HOME/quickshell/qmlcache"], [0, "$QML_DISK_CACHE_PATH"]])
+})()
+// END D-REL-16 WORDS
 
 checkCall("D-A11Y-8: every service call inside open() is guarded on the FUNCTION", function () {
   // Not a blanket rule: the guide calls the service unguarded in seven places
@@ -4052,17 +4511,24 @@ checkCall("D-A11Y-8: every service call inside open() is guarded on the FUNCTION
   return [body.length > 20, unguarded]
 }, [true, []])
 checkCall("D-HOST-1: the runtime reads its OWN directory, and the guide passes the answer on", function () {
-  // Two names joined by nothing but spelling, so they are inventoried. The
-  // manifest path must resolve against the RUNNING component (Qt.resolvedUrl),
-  // because the whole point is to compare what is loaded against what is on
-  // disk beside it.
+  // The manifest path must resolve against the RUNNING component
+  // (Qt.resolvedUrl), because the whole point is to compare what is loaded
+  // against what is on disk beside it; the node harness's resolvedUrl is the
+  // identity, so no boot can see that, and it stays pinned. What the service
+  // reads from the file (Model.manifestVersion through manifestFile's own
+  // onLoaded) and what it decides from it are held by the D-HOST-16 and
+  // D-REL-16 boots since D-REL-16, which replaced two text pins here.
   return [
     qmlSites(/Qt\.resolvedUrl\("manifest\.json"\)/).length,
-    qmlSites(/Model\.staleBuild\(Model\.PLUGIN_VERSION/).length,
-    qmlSites(/Model\.manifestVersion\(/).length,
-    qmlSites(/staleBuild: root\.serviceReady && root\.service\.staleBuild === true/).length,
+    // D-REL-16: the guide and the bar read the service's notice through
+    // Model.serviceBuildNotice (a service from before the stamps reads
+    // "cache"), and the guide passes it to its footer with staleBuild for an
+    // older model. The views run under the host only: the caged arms observe
+    // what these name (QA-RESULTS, UNVERIFIED until then).
+    qmlSites(/Model\.serviceBuildNotice\(root\.service\)/).length,
+    qmlSites(/^\s*staleBuild: root\.buildNotice !== "",$/).length,
   ]
-}, [1, 1, 1, 1])
+}, [1, 2, 1])
 
 // ---- D-RUNG-17: the MIX search had the same defect in its fallback ---------
 const CURSOR_INK_SHIPPED = [
@@ -8703,7 +9169,8 @@ check("barTooltip not configured", Model.barTooltip({ configured: false }), "IPT
 check("barTooltip playing full name", Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event" }), "Playing Sky Sports Main Event")
 check("barTooltip error", Model.barTooltip({ configured: true, error: true }), "IPTV" + SEP + "playlist error, open the guide")
 check("barTooltip refreshing", Model.barTooltip({ configured: true, refreshing: true }), "IPTV" + SEP + "refreshing playlist\u2026")
-check("barTooltip service missing", Model.barTooltip({ serviceMissing: true }), "IPTV" + SEP + "service not loaded, run omarchy restart shell")
+// D-REL-16 (2026-11-25): and a second line, the QML cache at the default folder.
+check("barTooltip service missing", Model.barTooltip({ serviceMissing: true }), "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove ~/.cache/quickshell/qmlcache and restart again")
 check("barAccessibleName", [Model.barAccessibleName({}), Model.barAccessibleName({ playing: true, name: "X" }), Model.barAccessibleName({ error: true })], ["IPTV, idle", "IPTV, playing X", "IPTV, playlist error"])
 
 // ---- footer ----
@@ -15147,14 +15614,15 @@ check("section 5: the bar tooltip gains ONE line when PiP is on, and the glyph i
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: true }),
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: false }),
   Model.barTooltip({ configured: true, pip: true }),
-  // serviceMissing wins: with no service there is no PiP truth to report.
+  // serviceMissing wins: with no service there is no PiP truth to report
+  // (D-REL-16: its second line is the QML cache's, not PiP's).
   Model.barTooltip({ serviceMissing: true, pip: true }),
   Model.barGlyph({ playing: true, pip: true }) === Model.barGlyph({ playing: true })
 ], [
   "Playing Sky Sports Main Event\nPicture in picture: on",
   "Playing Sky Sports Main Event",
   "IPTV" + SEP + "click to open the guide\nPicture in picture: on",
-  "IPTV" + SEP + "service not loaded, run omarchy restart shell",
+  "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove ~/.cache/quickshell/qmlcache and restart again",
   true
 ])
 check("section 5: `p pip` joins the list-mode hints, and is hidden where PiP cannot work", [
@@ -24125,10 +24593,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // answering C1 controls (the side-effecting ones made inert), and no
     // reply may carry one raw. The second half names the verbs that answer
     // JSON, which is what makes the first half non-vacuous.
-    checkCall("F-SINK-16 (service): every IPC verb, called with what it reports answering C1 controls, prints none of them raw -- and the verbs that answer JSON (back, channel, forward, live, pip, status) carry them escaped", () => {
+    checkCall("F-SINK-16 (service): every IPC verb, called with what it reports answering C1 controls, prints none of them raw -- and the verbs that answer JSON (back, build, channel, forward, live, pip, status) carry them escaped", () => {
       const h = bootPlayer()
       const loud = () => ({ ok: false, text: C1, nested: { name: C1, list: [C1] } })
-      for (const fn of ["statusSummary", "tuneByNumber", "requestPip", "seekBy", "seekLive", "seekRefuse"]) h.root[fn] = loud
+      // D-REL-16 adds `build`, which reports through buildReply.
+      for (const fn of ["statusSummary", "tuneByNumber", "requestPip", "seekBy", "seekLive", "seekRefuse", "buildReply"]) h.root[fn] = loud
       h.root.play = () => false
       h.root.stop = () => {}
       h.root.zap = () => false
@@ -24138,7 +24607,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const replies = verbs.map(v => [v, String(h.ipc[v]("1"))])
       return [verbs.length, replies.filter(r => /[\u007f-\u009f\u2028\u2029]/.test(r[1])).map(r => r[0]),
               replies.filter(r => r[1].indexOf("\\u009b") !== -1).map(r => r[0])]
-    }, [13, [], ["back", "channel", "forward", "live", "pip", "status"]])
+    }, [14, [], ["back", "build", "channel", "forward", "live", "pip", "status"]])
   }
 })()
 

@@ -26,6 +26,10 @@ import {
   sourceViews
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_SOURCE_RECORDS = "0.20.0"
+
 // ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
 
 // `search` rather than `test`: CONTROL_RE is global (stateful lastIndex).
@@ -1560,9 +1564,10 @@ function withFormReveal(st, field, revealed) {
   return cur
 }
 export {
-  hasControlChars, warnState, normalizeSourceRecord, copySourceRecord,
-  replaceSource, nowInt, sourceLabels, reducerFail, sourcesFull, addSource,
-  updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
+  BUILD_STAMP_SOURCE_RECORDS, hasControlChars, warnState,
+  normalizeSourceRecord, copySourceRecord, replaceSource, nowInt,
+  sourceLabels, reducerFail, sourcesFull, addSource, updateSource,
+  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
   adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,

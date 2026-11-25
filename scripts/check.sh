@@ -349,7 +349,10 @@ fail=0
 # 2026-11-22, the 0.20.0 cut (the lead): 111 -> 112 -- re-levelled to what
 # the spec runs on the tree being cut, as the release step asks; the spec
 # runs 112.
-QML_SPEC_MIN=${QML_SPEC_MIN:-112}
+# 2026-11-25, lane-l3b (D-REL-16): 112 -> 113, test_buildStampsInV4 -- the
+# aggregator's `export var` and the stamps' reading in V4, red on the parent
+# model (modelBuildStamps is not a function).
+QML_SPEC_MIN=${QML_SPEC_MIN:-113}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -811,7 +814,36 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # (adoptActive persisting at once, and handing Qt.callLater
 # root.persistActive) no other check saw (QA-RESULTS "D-REL-15 ... Round
 # two"); the suite runs 4073, and 4073 without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
+# 2026-11-25, lane-l3a (D-HOST-16): 4073 -> 4076 -- three boots of the
+# shipping service over the harness's new manifestFile double (the host's
+# fresh manifest at a rescan, an in-place edit through the watcher, a file
+# gone at the hand-off), red on 8fa4998's Service.qml (3 failures) and on
+# each of two one-decision mutants (2 failures each) (QA-RESULTS "D-HOST-16:
+# the manifest re-read follows the host"); the suite runs 4076, and 4076
+# without the own-write echo.
+# 2026-11-25, lane-l3b (D-REL-16, L3's reading): 4076 -> 4140 -- 65 checks
+# of the build stamps' reading (the shared cases of
+# tests/fixtures/build-verdict.json, boots of the shipping service over its
+# own file set and over one copy per code-behind and per model part of
+# another build, the join with build_stamps.py --json, the `build` verb),
+# red on the parent tree (64 of 65) and on 21 one-decision mutants, and the
+# two D-HOST-2 text pins narrowed to the one no boot can see; the suite runs
+# 4140, and 4140 without the own-write echo.
+# 2026-11-25, lane-l3b (D-REL-16, L3's words; D-A11Y-14): 4140 -> 4160 --
+# 20 checks of the words (the folder's eleven environments and its never
+# printing a value, the footer's two rungs, the tooltip's lines, the bar's
+# accessible name and its no-service reading, the guide's no-service prose,
+# the service's folder), red on the parent tree (20 of 20) and on 15
+# one-decision mutants; two older tooltip pins take the no-service line's
+# second line; the suite runs 4160, and 4160 without the own-write echo.
+# 2026-11-25, lane-l3fix (D-REL-16, the three rechecks of 1c64c77): 4160 ->
+# 4171 -- one boot per code-behind whose stamp read throws (each red when its
+# catch reads Service.qml's stamp), a view's report beside a model with none
+# of L3's names (red first: both reports threw), four environments of
+# QML_FORCE_DISK_CACHE, QML_CACHE_ENV held to what the composer reads, and
+# the service's folder from a boot's environment (red first, 5 of the 6 new
+# words checks); the suite runs 4171, and 4171 without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4171}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1451,7 +1483,27 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # one-decision mutants of the reader red (QA-RESULTS
 # "F-GATE-32: the rest of constraint 3 (the nightly run, 2026-11-25)"); the
 # suite counts 3098.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3098}
+# 2026-11-25, lane-l3a (D-REL-16): 3098 -> 3129 -- tests/test_build_stamps.py's
+# 23 tests (the guard over this tree, every case of its fixture, what each
+# table refusal says, and the cut over a scratch copy of the 26 runtime
+# files), 4 in tests/test_release.py (check and build call the guard), 3 in
+# tests/test_split_model.py (the aggregator's stamp line) and 1 in
+# tests/test_model_members.py; 20 one-decision mutants of build_stamps.py and
+# 6 of release.py, split-model.mjs and model_files.py red (QA-RESULTS
+# "D-REL-16: the build stamps and their guard"); the suite counts 3129.
+# 2026-11-25, lane-l3b (D-REL-16, D-A11Y-14): 3129 -> 3130 --
+# tests/test_bar_shown_names.py's report test (the SHIPPING bar reports its
+# stamp and speaks the notice and the no-service name), red on the parent's
+# bar and with the bar's report deleted; its fake computes the notice with
+# the real Model.buildVerdict (rule 10: the old fake read as a service from
+# before the stamps, 42 bad entries).
+# 2026-11-25, lane-l3fix (D-REL-16, the gate recheck of 1c64c77): 3130 ->
+# 3135 -- tests/test_build_stamps.py's needless restamp (a cut against an
+# older main named and set back, its blob judged with the filters, none on a
+# main from before the stamps), the CLI's default ref refs/heads/main, and
+# every refusal case naming its message; red first and on four one-decision
+# mutants (QA-RESULTS "D-REL-16: the three rechecks of 1c64c77").
+PY_TESTS_MIN=${PY_TESTS_MIN:-3135}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1619,6 +1671,21 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # function and one site (2,268), so the site floor stands.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
 SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-34}
+# D-REL-16 (2026-11-25, lane-l3a): the build stamp guard
+# (scripts/build_stamps.py --check) reads every runtime file release.py's
+# runtime_files reaches -- 26 on this tree: the three QML entry points,
+# Model.mjs, the four code-behinds and the 18 model parts -- and a stamp from
+# each, then runs its own cases (46: every refusal kind, the cut and the
+# strict check), so the step goes red when the judge stops judging. Both
+# floors sit at the tree's counts, and are floors, not equalities: a runtime
+# file the guard stops reading is one whose mixed build nothing could see, and
+# a new one raises the floor in the same commit (the gate recheck of 1c64c77
+# read "exact" here beside a `<` comparison).
+# D-REL-16 (2026-11-25, lane-l3fix): two cases for `needless`, a file that
+# differs from the main a cut compares with only in its stamp (a cut against
+# a local main behind origin's), one strict and one cut: 46 -> 48.
+BUILD_STAMPS_FILES_MIN=${BUILD_STAMPS_FILES_MIN:-26}
+BUILD_STAMPS_CASES_MIN=${BUILD_STAMPS_CASES_MIN:-48}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -1631,7 +1698,12 @@ MODEL_REGEX_LITERALS_MIN=${MODEL_REGEX_LITERALS_MIN:-60}
 # backticked notices from README.md and joins 19 (14 exact, 2 composed, 3
 # elided; 9 skipped as key chords or a command, each printed). Fewer joined
 # means the extraction stopped seeing quotes, not that the README improved.
-README_NOTICES_MIN=${README_NOTICES_MIN:-19}
+# 2026-11-25, lane-l3b (D-REL-16): 19 -> 32, the count the tree joins -- 31
+# on its parent, and `Loaded mid-update` (model/view.mjs) the 32nd.
+# 2026-11-25, lane-l3fix (D-REL-16, the words recheck): 32 -> 34, the
+# Updating sentence and the Troubleshooting bullet quoting `Loaded
+# mid-update` once more each for a disable and an enable after an update.
+README_NOTICES_MIN=${README_NOTICES_MIN:-34}
 # F-M3-20 (2026-10-24, lane-p23-docs): the SR register holds 40 rows, the
 # one count the gate reads from the checker's summary line (its citation
 # and file counts are printed, never floored, and the first version of
@@ -2146,6 +2218,41 @@ if python3 "$ROOT/scripts/split-service.py" --check --root "$ROOT" --qml-dir "$Q
   fi
 else
   cat "$split_service_log"; bad "service split guard"
+fi
+
+step "build stamp guard (scripts/build_stamps.py --check)"
+# D-REL-16. A shell that starts while `omarchy plugin update` writes the
+# plugin can load files of two builds, and Qt's disk cache can keep the mix
+# through every restart (call (d), measured). So every runtime file carries a
+# build stamp, a literal of the version of the last cut that changed it, in
+# its kind's one form, and model/build.mjs's BUILD_FILES names each file with
+# the stamp it carries. This proves the tree as it stands: each runtime file
+# (release.py's runtime_files, in load order) carries exactly one stamp of
+# its kind, by its own name, in the exact form and place (a code-behind's is
+# its first function, a part's its first declaration), whose value is a
+# version no higher than PLUGIN_VERSION; and BUILD_FILES is the generated
+# block directly under PLUGIN_VERSION, a row for each other runtime file in
+# load order, each equal to what that file carries. Then the script's own
+# cases, the --cut and strict ones in scratch repositories, so the judge is
+# seen judging. release.py check calls the same judge; release.py build adds
+# the cut's own check, that a file the cut changes carries its version.
+build_stamps_log=$CHECK_TMP/build-stamps.log
+if python3 -I "$ROOT/scripts/build_stamps.py" --check --root "$ROOT" >"$build_stamps_log" 2>&1; then
+  stamp_files=$(sed -n 's/^build-stamps: check ok (\([0-9]*\) runtime file(s), \([0-9]*\) stamp(s) read, .*$/\1 \2/p' "$build_stamps_log" | head -1)
+  stamp_cases=$(grep -oE 'self-test [0-9]+ of [0-9]+ cases' "$build_stamps_log" | head -1)
+  stamp_ran=$(printf '%s\n' "$stamp_cases" | grep -oE 'of [0-9]+' | grep -oE '[0-9]+')
+  stamp_passed=$(printf '%s\n' "$stamp_cases" | grep -oE '^self-test [0-9]+' | grep -oE '[0-9]+')
+  if [[ -z $stamp_files || -z $stamp_ran || -z $stamp_passed ]]; then
+    cat "$build_stamps_log"; bad "build stamp guard printed no file or case count"
+  elif (( ${stamp_files% *} < BUILD_STAMPS_FILES_MIN || ${stamp_files#* } < BUILD_STAMPS_FILES_MIN )); then
+    cat "$build_stamps_log"; bad "build stamp guard read ${stamp_files#* } stamp(s) over ${stamp_files% *} runtime file(s), expected at least $BUILD_STAMPS_FILES_MIN"
+  elif (( stamp_passed != stamp_ran || stamp_ran < BUILD_STAMPS_CASES_MIN )); then
+    cat "$build_stamps_log"; bad "build stamp guard passed $stamp_passed of its own $stamp_ran cases, expected all of at least $BUILD_STAMPS_CASES_MIN"
+  else
+    ok "build stamp guard ($(sed -n 's/^build-stamps: check ok (\(.*\))$/\1/p' "$build_stamps_log" | head -1))"
+  fi
+else
+  cat "$build_stamps_log"; bad "build stamp guard"
 fi
 
 step "qmltestrunner tests/Model.spec.qml"

@@ -12,6 +12,10 @@ import {
   validateSourceUrl, readAuthority, hostClass, absorbedAttribute, dotlessHost
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_LOGOS = "0.20.0"
+
 // ------------------------------------------------------------ logos (M2-04)
 //
 // The ruling is RULING-LOGOS.md (dev branch) and its first line is the whole of it:
@@ -1045,16 +1049,17 @@ function logoSummaryNotice(line) {
   return parts.length === 0 ? "" : "[iptv] logo fetch: " + parts.join("; ")
 }
 export {
-  LOGO_SCHEMES, optInSetting, logoSurvey, compareCodePoints, codePointAtIndex,
-  logoScheme, logoContactHost, logoRowAuthority, logoAuthorityWritten,
-  logoSchemeLengthTaken, logoAuthorityAt, logoTailPrintable, LOGO_NAME_MAX,
-  LOGO_LABEL_MAX, LOGO_LITERAL_MAX, LOGO_PORT_MAX, logoAuthorityInBounds,
-  logoAuthorityHost, logoAddressCounts, logoPortDigits, logoAuthorityHosts,
-  logoLabelsRefused, splitLogoUrl, logoConsentLines, logoFile, logoSlot,
-  WALL_KEY, FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints,
-  footerHintMarkup, WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry,
-  wallTile, arrowAction, wallStep, logoDirFor, logoHaveSet, logoHaveIsSet,
-  logoHaveMerge, logoHaveCount, logoFetchPlan, logoColumnShown,
-  logoStreamName, logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS,
-  LOGO_RUN_DEADLINE_MS, LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
+  BUILD_STAMP_LOGOS, LOGO_SCHEMES, optInSetting, logoSurvey,
+  compareCodePoints, codePointAtIndex, logoScheme, logoContactHost,
+  logoRowAuthority, logoAuthorityWritten, logoSchemeLengthTaken,
+  logoAuthorityAt, logoTailPrintable, LOGO_NAME_MAX, LOGO_LABEL_MAX,
+  LOGO_LITERAL_MAX, LOGO_PORT_MAX, logoAuthorityInBounds, logoAuthorityHost,
+  logoAddressCounts, logoPortDigits, logoAuthorityHosts, logoLabelsRefused,
+  splitLogoUrl, logoConsentLines, logoFile, logoSlot, WALL_KEY,
+  FOOTER_DROP_ORDER, footerHintWidth, fitFooterHints, footerHintMarkup,
+  WALL_MAX_COLUMNS, WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction,
+  wallStep, logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge,
+  logoHaveCount, logoFetchPlan, logoColumnShown, logoStreamName,
+  logoNamesFrom, logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
+  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

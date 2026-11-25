@@ -3059,7 +3059,11 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   as the one not to use (D-HOST-3: it resets `shell.json`). `omarchy plugin
   update` itself ends in a plugin rescan, not a restart, and the guide
   footer reads `Updated`, then `restart the shell to see the new version`,
-  until the restart happens (D-HOST-1).
+  until the restart happens (D-HOST-1). **[2026-11-25, D-REL-16 and
+  D-HOST-16, on the l3stamp branch: from the update's own rescan, not only
+  once the guide opens, and the bar's tooltip says it too; a shell that
+  loaded the plugin while the update wrote it says `Loaded mid-update`
+  instead, with the QML cache's removal. Section 9, "The reading".]**
 - The real peak of a 65500x65500 progressive JPEG is unmeasured and is not
   claimed. Under the user-session memory scope both were SIGKILLed at
   1.5 GB (lead, 2026-10-09); under the 2.5 GB address-space rlimit the
@@ -5015,13 +5019,24 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   `import "Model.js" as Model` on the day both stopped being true). The code lives in the parts under `model/`,
   one per domain. QML imports `Model.mjs` (`import "Model.mjs" as Model`), so
   every `Model.X` call site and every `Model.X` citation is unchanged.
+  **[2026-11-25, D-REL-16 (the lead's call L3-e under the owner's standing
+  authority of 2026-11-09): and one line more, its own build stamp,
+  `export var BUILD_STAMP_AGGREGATOR = "N.N.N"` directly under the generated
+  line and above the first export block. split-model.mjs keeps it there,
+  value and all, through `--relink` and `--check`, and refuses it anywhere
+  else or in any other spelling; `build_stamps.py` writes its value;
+  `scripts/model_files.py`'s `public_names` reads it, so
+  check-model-members accepts `Model.BUILD_STAMP_AGGREGATOR`. See "Build
+  stamps" below.]**
 - `scripts/split-model.mjs` cut the parts out of the one-file `Model.js` and
   is the judge of them afterwards: `scripts/check.sh` runs its `--check`, and
   `--relink` rewrites a part's generated import and export lines after an
   edit adds a call across parts. A new part is a line in
   `scripts/model-parts.json`, a line in `Model.mjs` (relink writes it) and an
   entry in `ALLOWLIST` in `scripts/release.py`; the gate is red until all
-  three agree.
+  three agree. **[2026-11-25, D-REL-16: and two more, its build stamp var
+  and its row in `BUILD_FILES` (below); the build stamp guard is red until
+  both are there.]**
 - Pure functions, `var`/`function` declarations at the top level, no
   Quickshell or Qt globals (`Qt.md5` etc. are not available in node).
 - **Init locality.** A top-level initializer reads only declarations of its
@@ -5098,6 +5113,123 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
 - Anything in Python or shell that needs the model's FILES reads the part
   list from `Model.mjs`: `scripts/model_files.py` in Python, `qa_model_files`
   in `scripts/qa-lib.sh` in shell. Never a second list.
+- **Build stamps (D-REL-16, 2026-11-25).** Every runtime file -- what
+  `release.py`'s runtime_files reaches from the three QML entry points, 26
+  files on this tree -- carries a literal naming the version of the last
+  cut that CHANGED it (the lead's call L3-a under the owner's standing
+  authority of 2026-11-09), so the running code can tell a unit Qt compiled
+  from another build: a stale cached unit carries the old literal,
+  whichever file it was saved under. The forms, one per kind, each exactly
+  once, held by `scripts/build_stamps.py --check` (the gate's "build stamp
+  guard") and by `release.py check`:
+  - each model part but `build.mjs`: `var BUILD_STAMP_<PART> = "N.N.N"`,
+    the part's name upper-cased with its dashes underscores
+    (`BUILD_STAMP_SOURCE_RECORDS`), as the part's first declaration after
+    its generated import blocks. It is a part's own top-level declaration,
+    so the part's generated export block lists it, and it is not public:
+    the aggregator does not re-export it;
+  - `model/build.mjs`: its stamp is `PLUGIN_VERSION`, which every cut moves,
+    and directly under that line the generated `BUILD_FILES` block -- a
+    comment and `var BUILD_FILES = { "<file>": "<stamp>", ... }`, one row
+    for every other runtime file, in load order, each equal to the stamp
+    that file carries. A literal initializer, so init locality and declared
+    first hold; never written by hand but for a new file's row;
+  - `Model.mjs`: its one line, above;
+  - each QML entry point: `readonly property string buildStamp: "N.N.N"`
+    at the root's indent; each of the service's code-behinds: a
+    `buildStamp<Domain>()` function returning its literal, the file's first
+    function, read through its forwarder (docs/SERVICE-SPLIT.md, "Adding a
+    code-behind").
+  A stamp is never edited by hand: `build_stamps.py --cut`, run on `dev`
+  at the cut after the version bump and after `git fetch origin
+  main:main`, gives every runtime file whose blob differs from the main
+  branch's (`refs/heads/main`, the ref `release.py build` reads) the
+  version being cut and rewrites `BUILD_FILES`, and `release.py build`
+  refuses a cut in which a changed file does not carry it (`cut_problems`,
+  `stale`) or in which a file differs from that main ONLY in its stamp
+  (`needless`: a cut against a local main behind origin's restamps files
+  the update does not change; a cut against the current main sets such a
+  stamp back, lane-l3fix after the gate recheck of 1c64c77). A new part or a new code-behind therefore needs its
+  stamp at the last cut's version and its row, as a new file needs its
+  `ALLOWLIST` entry. **Frozen, additive only** (the lead's call L3-h under
+  the owner's standing authority of 2026-11-09), because an OLDER build's
+  code reads them beside a newer one in exactly the mix the stamps exist to
+  catch: the stamp names (`buildStamp`, `buildStamp<Domain>`,
+  `BUILD_STAMP_<PART>`, `BUILD_STAMP_AGGREGATOR`, `PLUGIN_VERSION`,
+  `BUILD_FILES`), `buildVerdict`'s input fields and its output fields,
+  `reportBuildStamp` and `serviceBuildNotice` (the last three as L3's
+  reading defines them), and what a view or a service of another build
+  reads of its partner (the two rechecks of 1c64c77, 2026-11-25): the
+  service's `buildNotice`, which `serviceBuildNotice` reads, so a later
+  service that renamed it would read "cache" in every view of this build;
+  its `staleBuild`, which a 0.20.0 guide reads; its `buildCacheFolder`,
+  which the bar reads (a string or nothing, so the bar names the default
+  without it); and `Model.withReportedStamp`, which this `Service.qml`'s
+  `reportBuildStamp` calls, so a later model without it would drop every
+  view's report SILENTLY (the call is caught since lane-l3fix), and beside
+  a model that still has `buildVerdict` the notice would read "" with views
+  of another build loaded (the second logic recheck, through the service
+  harness, 2026-11-25), which is why the name is frozen. A field may be added;
+  none is renamed, retyped or removed.
+- **The reading (D-REL-16, L3, lane-l3b, 2026-11-25; D-HOST-1's check,
+  extended).** What the running code makes of the stamps, all of it in the
+  model (`model/build.mjs`, rule 12) but the collection:
+  - `Model.modelBuildStamps()` reads every part's stamp in a function body
+    (init locality), build.mjs's own as `PLUGIN_VERSION`; Service.qml's
+    `ownBuildStamps()` adds its own, each code-behind's through its
+    forwarder and the aggregator's, each read in try/catch, `"?"` for a read
+    that throws (no build's row); the guide and the bar report theirs with
+    `reportBuildStamp(file, stamp)` (`Model.withReportedStamp`: strings
+    only, a file of at most 64 characters, a stamp of at most 32;
+    idempotent) from their completion and from every change of `service`.
+  - `Model.buildVerdict({ own, reported, loadedDisk, onDisk })` counts
+    `own`, then the model's, then `reported` ("" is no stamp; a file counted
+    keeps its first stamp), puts on `mixed` every file whose stamp is not
+    the loaded table's row or that the table does not list, and answers
+    `notice`: "cache" for a mix; otherwise, when the manifest's LATEST
+    reading (`onDisk`) is known and is not `PLUGIN_VERSION`, "restart" if
+    the service's FIRST successful reading (`loadedDisk`, set once) was this
+    build, else "cache" (a build already behind the disk when it loaded);
+    otherwise "". The latest reading is asked first, so a whole new build
+    whose first read caught the old manifest (written last) reads "" once
+    the next read lands. `Model.serviceBuildNotice(s)` is what a view reads:
+    "" with no service, "cache" for a service with no string `buildNotice`
+    (one from before the stamps, which only a mix puts beside a stamped
+    view). `staleBuild` and `manifestVersion` stay exported, and the
+    service's `staleBuild` is `buildNotice !== ""`, because an older build's
+    guide and service read them.
+  - The service's `buildCheck` is a binding with its own catch ("cache": a
+    model without the reading beside this file is a mix); `buildReply()`
+    and the IPC `build` verb answer with `{ notice, running, onDisk,
+    loadedDisk, mixed, stamps }` through `Model.ipcJson`, file names and
+    version strings only, and call nothing that throws in the mixed load
+    where `status` does (the lead's call L3-d). Both are root functions
+    (D-REL-15). `status`'s `build` gains `loadedDisk`, `notice`, `mixed`.
+  - The words are the model's (`Model.footerStatus`, `barTooltip`,
+    `barAccessibleName`, `serviceMissingProse`; UX.md 6.1, 6.3, 7.1); the
+    folder is `Model.qmlCacheFolder(env)`, a variable's NAME and never its
+    value, over the environment the guide and the service hand it by one
+    list, `Model.QML_CACHE_ENV`; it reads the cache as off only while
+    `QML_FORCE_DISK_CACHE`, which upstream Qt asks first, holds nothing
+    (lane-l3fix, after the words recheck). No notice posts a notification
+    (the lead's call L3-c).
+  - UNVERIFIED until the caged arms (rule 14): that each kind of unit's
+    literal survives Qt's disk cache as the old build's (measured for QML
+    and code-behind literals by the reload rig's marks; reasoned for a
+    model part's `var`); that the guide's and the bar's reports reach the
+    service under the host (read in the host; observed offscreen on the
+    shipping bar under a stand-in host by tests/test_bar_shown_names.py);
+    that the host's hand-off raises onManifestChanged at a real update's
+    rescan; that V4 fails the module link on a missing named export (the
+    first stamped cut beside a poisoned part from before the stamps); that
+    the README's and the notices' order -- the cache removed while the
+    shell runs, then a restart (`RIG_RECOVER=clear-live`) -- recovers, where
+    call (d) measured stop, remove, start; that a pre-stamp `Service.qml`
+    on root b beside stamped views reads the cache line through
+    `serviceBuildNotice` (b-01-x); and that Qt asks `QML_FORCE_DISK_CACHE`
+    before `QML_DISABLE_DISK_CACHE` (upstream's `diskCacheOptions` as the
+    words recheck cites it; the installed binary's strings list the two
+    names in that order, which is consistent with it and proves nothing).
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in

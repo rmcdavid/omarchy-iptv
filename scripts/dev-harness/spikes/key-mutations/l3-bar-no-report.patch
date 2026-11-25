@@ -1,0 +1,24 @@
+D-REL-16 (lane-l3b, 2026-11-25): the bar never reports its build stamp to the
+service -- BarWidget.qml's onServiceChanged and its completion's report
+deleted. key-scenario.sh's B44 reads `files:25 off:BarWidget.qml`; the
+node suite does not see it (it boots no view), and tests/test_bar_shown_names.py
+does (the reported map is empty).
+
+--- a/BarWidget.qml
++++ b/BarWidget.qml
+@@ -38,7 +38,6 @@
+   function reportBuild() {
+     if (root.service && typeof root.service.reportBuildStamp === "function") root.service.reportBuildStamp("BarWidget.qml", root.buildStamp)
+   }
+-  onServiceChanged: root.reportBuild()
+   // What the service says of the build (Model.serviceBuildNotice); a model
+   // without the reading beside this file is a mix, so a throw reads "cache".
+   readonly property string buildNotice: { try { return Model.serviceBuildNotice(root.service) } catch (e) { return "cache" } }
+@@ -220,7 +219,6 @@
+   Component.onCompleted: {
+     root.syncClickRegistration()
+     root.resolveService()
+-    root.reportBuild()
+   }
+   Component.onDestruction: if (root.registeredBar && root.registeredBar.unregisterClickTarget) root.registeredBar.unregisterClickTarget(root)
+ 

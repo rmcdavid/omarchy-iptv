@@ -28856,3 +28856,655 @@ corrects; nothing measured anew on the rig.
   `-e` per alternative they read the same raw and rendered: 6 on dev and 1
   on a `playSeq++` line for the service's, 0 on dev and 1 on each of the six
   for the helper's. PLY-SVC-07 carries those forms now.
+
+## D-HOST-16: the manifest re-read follows the host (lane-l3a, 2026-11-25)
+
+Commit 1 of the L3 plan (the panel wf_d3ab969d-020's judge, 2026-11-24/25),
+on the l3stamp branch from 8fa4998. Node only; no display, no qml run.
+
+- What changed in Service.qml: the root's `onManifestChanged:
+  manifestFile.reload()`, manifestFile's `onFileChanged: reload()`, and the
+  comment over the view, which said the watcher stayed "because an in-place
+  edit is free to catch" while nothing answered it.
+- Read in the host, not watched: ensureService assigns `inst.manifest =
+  shell.publicPluginManifest(manifest)` once `comp.createObject` returns,
+  and `_syncServices` assigns `kept.manifest =
+  shell.publicPluginManifest(m)` to a kept service at every rescan (its
+  `onScanFinished`); for a plugin that is not first-party that is a fresh
+  `JSON.parse(JSON.stringify(...))` copy, so a `property var` takes a new
+  value each time. Read in Quickshell 0.3.2's installed FileView.qml: the
+  wrapper declares no fileChanged handler and `preload` is true unless set.
+- The double (tests/service-harness.js, `ManifestFile`): a load queued at
+  the view's creation and at every reload, delivered later and reading the
+  file as it is then, `loaded` with the text or `loadFailed` 2 for no file;
+  a replacement (assigning `h.manifestDisk`) raises nothing and unarms the
+  watch, which a reload re-arms when there is a file; an in-place edit
+  (`h.manifestEdit`) raises fileChanged, queued, only while the block says
+  `watchChanges: true` and the watch is armed, and then runs the tree's own
+  onFileChanged and nothing else; every assignment of a new object to
+  `manifest` runs the tree's onManifestChanged, the boot's own `{ id }`
+  included. The three handlers and the root's are compiled from the tree's
+  text; a tree without one runs nothing there.
+- The checks, three boots of the shipping service: an update replaces the
+  file (status unmoved), the rescan hands a manifest whose own version is
+  `0.1.0-harness`, and status reads the file's 99.0.0 with stale true, then
+  an in-place edit after that reload is seen again; an in-place edit alone
+  is read through the watcher; a file gone at the hand-off reads "" and
+  stale false, after three loads. `recheckBuild` is counted in each and is
+  never called.
+- Red first, node tests/Model.test.js with `IPTV_SERVICE_QML` at a copy of
+  8fa4998's Service.qml and its four code-behinds: 4076 checks, 3 failures
+  (the three new checks). On the fix: 4076 checks, 0 failures (base 4073,
+  so +3). The D-HOST-2 text pin that counts `manifestFile.reload()` reads
+  2 now (it reads the tree's own file, so it stayed green on the base run).
+- Mutants, one decision each, through `IPTV_SERVICE_QML`: the root's
+  onManifestChanged dropped, 4076 checks, 2 failures (the hand-off check
+  and the gone-file check); manifestFile's onFileChanged dropped, 4076
+  checks, 2 failures (the hand-off check's last step and the in-place
+  check).
+- Not seen: that a real update's rescan emits manifestChanged on the kept
+  service. The caged arms a-12-r and b-12-r (the plan's cagedArms 1) read
+  `build` before any guide opens.
+
+## D-REL-16: the build stamps and their guard (lane-l3a, 2026-11-25)
+
+Commit 2 of the L3 plan (the panel wf_d3ab969d-020's judge), on the
+l3stamp branch above D-HOST-16. The stamps are carried and judged; nothing
+reads them at runtime yet (that is commit 3). No display, no qml run of my
+own; the full gate on the final tree is the lane's last step.
+
+- The value, the lead's call L3-a under the owner's standing authority of
+  2026-11-09: each runtime file carries the version of the last cut that
+  changed it, and model/build.mjs's `BUILD_FILES` names the other 25 with
+  their stamps in load order; build.mjs's own stamp is `PLUGIN_VERSION`.
+  On dev every stamp reads 0.20.0, the last cut's version. The forms: the
+  three QML files `readonly property string buildStamp`; each code-behind
+  `buildStamp<Domain>()` as its first function, with its forwarder in
+  Service.qml; each of the 17 other parts `var BUILD_STAMP_<PART>` as its
+  first declaration; Model.mjs `export var BUILD_STAMP_AGGREGATOR` under
+  the generated line (L3-e).
+- Read before writing the cut: release.py's `build_tree` takes each
+  allowlisted path's blob id from dev's commit (`ls-tree`) and puts that
+  id in a fresh index (`update-index --cacheinfo`), so every runtime file
+  reaches main byte for byte, transformed by nothing. The one place a
+  transform can enter is between the working tree and the commit, through
+  the repository's own filters, so the cut hashes each file with `git
+  hash-object` at its path, filters applied: the blob `git add` stores.
+  Held by a case and a test with an `ident` attribute, whose working copy
+  differs from REF's blob only by an expanded `$Id: ... $`: unchanged,
+  stamp kept; mutant M12 (`--no-filters`) restamps it, 4 failures.
+- Red first: `build_stamps.py --check --no-self-test` over a clone of
+  8fa4998 gives 26 refusals, 25 `missing` and 1 `table` (exit 1), as the
+  plan expected; on the stamped tree, 26 runtime files, 26 stamps, 25 rows,
+  and the self-test's 46 of 46 cases.
+- One-decision mutants of build_stamps.py, each run against
+  tests/test_build_stamps.py (23 tests) and `--check`: the shipping script
+  23 OK, check rc 0. Every mutant is red in the tests; all but four also
+  red `--check` through the self-test.
+
+  | Mutant | tests | `--check` |
+  |---|---|---|
+  | M1 `missing` never reported | 7 failures, 3 errors | rc 1 |
+  | M2 `twice` never reported | 6 failures | rc 1 |
+  | M3a the form read by search, not the whole line | 3 failures | rc 1 |
+  | M3b a code-behind's stamp need not lead | 3 failures | rc 1 |
+  | M3c a part's stamp need not lead | 3 failures | rc 1 |
+  | M4 a misnamed stamp not named (`name`) | 6 failures | rc 1 |
+  | M5 a leading zero read as a version | 3 failures | rc 1 |
+  | M6 a stamp above PLUGIN_VERSION passes | 3 failures | rc 1 |
+  | M7 a row unequal to its file passes | 1 failure | rc 0 |
+  | M8 the rows' files not compared | 3 failures | rc 0 |
+  | M9 the block's form not compared | 5 failures | rc 1 |
+  | M10 no table passes | 4 failures | rc 1 |
+  | M11 only a file new since REF counts as changed | 8 failures | rc 1 |
+  | M12 blobs hashed without the filters | 4 failures | rc 1 |
+  | M13 the cut does not judge the tree first | 1 failure, 3 errors | rc 1 |
+  | M14 the cut takes a PLUGIN_VERSION that is not the manifest's | 4 failures | rc 1 |
+  | M15 the strict check never stale | 7 failures | rc 1 |
+  | M16 a wrong case does not red `--check` | 1 failure | rc 0 |
+  | M17 a tree problem does not red `--check` | 1 failure | rc 0 |
+  | M18 the cut rewrites no table | 5 failures, 3 errors | rc 1 |
+
+  M7 and M8 leave `--check` green because the block-form comparison
+  behind them still refuses the same trees as `table`; the tests that name
+  each reason (TheTable) are what see them. M16 and M17 are `--check`'s own
+  wiring, which its self-test cannot judge. M1 and M13 red `--check` with a
+  traceback-shaped "unreadable" line (a KeyError), not a refusal.
+- The gate's step, "build stamp guard" after the service split guard,
+  extracted and run under plain bash (`env -i PATH=/usr/bin:/bin`): green
+  on the tree; with M2, two self-test cases wrong and `BAD build stamp
+  guard`, step exit 1. Floors: 26 files, 46 cases.
+- release.py: `check` calls `build_stamps.problems` over the files it
+  reached; `build` calls `cut_problems(root, old_main, version)` after its
+  guards and before `build_tree`. tests/test_release.py's stand-in trees
+  carry stamps and a table (`restamp`, rule 10), its `bump` runs the cut as
+  a real cut does, and four tests join the wiring: a file with no stamp and
+  a table row the file does not carry are refused by `check`; a cut whose
+  changed file keeps its old stamp is refused and moves nothing; after
+  `build_stamps.cut` the cut goes and main carries the new stamp beside an
+  unchanged file's old one. 120 -> 124 tests. Mutants: R1 `check` calls no
+  judge, 2 failures; R2 `build` makes no cut check, 1 failure.
+- split-model.mjs keeps the aggregator's stamp line under the generated
+  line through `--relink` and `--check`, refuses it anywhere else or in
+  another spelling, and holds the loaded namespace to the export lines plus
+  it; the aggregator's generated header names it. tests/test_split_model.py
+  gains three tests (33 -> 36): S1, the base reader that knows no stamp
+  line, 1 failure; S2, a reader taking either quote, 1 failure; S3, a
+  generator that drops the line it read, 1 failure. scripts/model_files.py
+  `public_names` reads the line, so check-model-members accepts
+  `Model.BUILD_STAMP_AGGREGATOR`: P1, a reader that skips it, 2 failures
+  (the namespace join and the new test) in tests/test_model_members.py.
+- Everything else the change moved: `split-service.py --check` 158 -> 162
+  forwarders (5 files, 4 code-behinds, 47 root functions, 34 of 34 cases);
+  `split-model.mjs --check` 1153 -> 1171 declarations in 18 parts (17
+  stamps and the table; scripts/model-parts.json relinked); node
+  tests/Model.test.js 4076 checks, 0 failures, with one tree pin moved (the
+  D-REL-14 C4 round trip reads each code-behind one function longer:
+  [24, 55, 17, 66]) and its python twin in tests/test_service_files.py the
+  same (missed by my sibling search and found by the gate's first run, rule
+  15: the search was for the node pin's text, not for the round trip's
+  shape), and the forwarders' shared comment made a loose one,
+  a blank line under it, so the inline view reads each stamp with its own
+  comment; python by discovery 3098 -> 3129. All 30 mutation patches under
+  scripts/dev-harness/spikes/ still apply (`git apply --check`): the 19
+  key-mutations serve key-scenario.sh, the 8 chno-mutations chno-scenario.sh
+  and chno-entry-scenario.sh, the 3 open-mutations open-scenario.sh; none
+  regenerated.
+- candidates.py (the reload rig): `bump()` now runs build_stamps.py's cut
+  against the build each one updates from, after its marks (which moved
+  above it, so the cut sees them), so C1 restamps all 26 files against C0
+  and C2 and C3 the files their marks change. Run with REPO this branch's
+  worktree, C0REF main (1321aff, 0.20.0) and DEVREF l3stamp at this
+  commit's runtime files (this record was added to the commit after), git
+  work only: each export read back through the judge gives 0 problems; C1
+  changes 26 runtime files against C0, all at 0.99.0; C2 changes 8 against
+  C1 (the 7 marked files and build.mjs), all at 0.99.1, and its 18
+  unchanged files keep C1's 0.99.0; C3 the same 8 at 0.99.2. A mutant
+  without the cut builds candidates the guard also passes (0 problems)
+  whose changed files are stale against their parent: 25 in C1, 7 in C2, 7
+  in C3 -- the strict check, not `--check`, is what sees it.
+- Sizes, `wc -c`, 8fa4998 -> this tree: BarWidget.qml 15413 -> 15773;
+  Guide.qml 310448 -> 310808 (still the largest, of 458752); Service.qml
+  231016 -> 233196 (with D-HOST-16's +1.3 KB); Model.mjs 16789 -> 16865;
+  the code-behinds +304 to +308 each; model/build.mjs 33725 -> 34842; the
+  other 17 parts +187 to +211 each.
+- Not seen: that each kind's literal rides a stale cached unit (the plan's
+  cagedArms; shown for QML and code-behind literals by the rig's marks,
+  reasoned for a model part's var).
+- A trap in my own mutation runs, recorded so the next runner avoids it:
+  the first full gate failed four `twice` cases in tests/test_build_stamps.py
+  and was green in the guard's own step. The step demonstration had written
+  mutant M2 (`> 1` to `> 9`, the same length), imported it once (release.py
+  imports build_stamps, so Python cached its bytecode), and put the source
+  back within the same second; a pyc is trusted when the source's size and
+  whole-second mtime match, so every later import ran M2 while the file on
+  disk was the shipping one. `__main__` is never cached, which is why the
+  step stayed green. Removing scripts/__pycache__/build_stamps.*.pyc ended
+  it. A mutant runner here should remove the module's pyc on restore, or run
+  with PYTHONDONTWRITEBYTECODE=1.
+
+## D-REL-16, L3's reading and words (lane-l3b, 2026-11-25)
+
+Commits 3 to 6 of the L3 plan (the panel wf_d3ab969d-020's judge, with the
+lead's calls L3-a..i, DR1, DR2 and A1..A7 recorded in docs/STATUS.md's
+Decisions log, 2026-11-25), on the l3stamp branch above lane-l3a's two
+(f6c3bce D-HOST-16, 0a5dbb5 the stamps). No display, no cage, no
+quickshell, no scenario's live half (A4): every qml process of mine ran
+offscreen under gdb with a private home and its own QML cache folder, and
+the crash journal read 89 before, after every Qt run and at the end.
+
+**Lane-l3a, in brief** (its two sections above hold the detail).
+D-HOST-16: red on 8fa4998's Service.qml (4076 checks, 3 failures), green
+on the fix (4076, 0), two one-decision mutants red (2 and 2). The stamps
+and their guard: `build_stamps.py --check` over a clone of 8fa4998 gives
+26 refusals (25 `missing`, 1 `table`); eighteen one-decision mutants of
+build_stamps.py (M1..M18), two of release.py (R1, R2), three of
+split-model.mjs (S1..S3) and one of model_files.py (P1), each red in its
+own suite; python 3098 -> 3129, forwarders 158 -> 162, the model's
+declarations 1153 -> 1171; the gate on 0a5dbb5 green.
+
+**The reading (commit 3, be88316).**
+- What: `Model.modelBuildStamps`, `withReportedStamp`, `buildVerdict` and
+  `serviceBuildNotice` in model/build.mjs (and `BUILD_FILES` made public);
+  in Service.qml `loadedDisk` (manifestFile's onLoaded keeps the first
+  version read, once), `reportedStamps`, `ownBuildStamps()` (each read in
+  try/catch, `"?"` on a throw), the `buildCheck` binding with its own catch
+  ("cache"), `buildNotice`, `staleBuild: buildNotice !== ""`,
+  `reportBuildStamp(file, stamp)` and `buildReply()` as root functions
+  (D-REL-15), `status`'s `build.loadedDisk`, `.notice` and `.mixed`, and
+  the IPC `build` verb. candidates.py's staleBuild anchor moved with the
+  line.
+- The shared cases, tests/fixtures/build-verdict.json: 15 verdict cases
+  (the judge's 12 -- consistent, an update under a running shell, a
+  poisoned code-behind, a thrown read, an old guide, an unreported guide,
+  a whole old build raced in, a whole new build whose first read was old,
+  no reading, a failed first read, an unknown file, a `__proto__` key --
+  and an aggregator read as `?`, a mix beside a moved disk, a file counted
+  twice), 6 notice cases (a service from before the stamps among them) and
+  9 report cases.
+- The block (tests/Model.test.js, "D-REL-16 READING"): 65 checks -- the
+  cases, a never-throws sweep, boots of the shipping service (the tree
+  whole; the guard's `build_stamps.py --json` joined, by call, with what
+  the service and the model collect and the two views report: 26 files,
+  none missing, none extra, none at another value; an update under the
+  running service reads "restart" from its rescan with no guide open; a
+  first manifest read of another version reads "cache", then "" once a
+  later read finds this build; the guide's re-read from the path; one file
+  set per code-behind the service declares, and one for Service.qml, of
+  another build, each "cache" naming it; a view's report, idempotent; the
+  `build` verb's reply, through ipcJson, escaping a C1 control in a
+  reported name; `build` answering where `status` throws a TypeError; a
+  model from before the reading beside the service), and one copy of the
+  model per part, each of another build, "cache" naming it (build.mjs's
+  copy is another build's TABLE, naming the file it disagrees with).
+  Through every boot, no notification run and no detached
+  `omarchy-notification-send` (L3-c).
+- Red first: the block over lane-l3a's tree (0a5dbb5's Model.mjs,
+  model/build.mjs, Service.qml and model-parts.json): 65 checks, 64
+  failures, the fixture's own row count the one green.
+- One-decision mutants, each against the block (65 checks): the
+  loadedDisk branch dropped 2 failures (a whole old build raced in; the
+  first-read boot); loadedDisk asked before the latest reading 2 (the new
+  build with an old first read; the first-read boot); `mixed` ignored 32;
+  "" counted as a stamp 1; a pre-stamp service read as "" 2; a part left
+  out of modelBuildStamps 3 (63 checks); a report's file length unbounded
+  1; a plain-object copy (the `__proto__` key lost) 1; the last stamp
+  winning 1; Service.qml's loadedDisk set at every load 3; Service-pip.js
+  left out of ownBuildStamps 3; the aggregator left out 2; the report
+  always reassigning 1; the report recording nothing 3; buildReply calling
+  `socketAttached` 1; a notice posted at the report 1 and at the load 6;
+  status's notice dropped 1; recheckBuild reading nothing 1; the verb past
+  ipcJson 1; the binding's catch reading "" 1 (seen surviving at first,
+  so the old-model boot was added: 0 failures before it, 1 after).
+- The F-SINK-16 sweep of every IPC verb counts `build` (13 -> 14 verbs,
+  `buildReply` made loud beside `statusSummary`); two D-HOST-2 text pins
+  are now boots, the one no boot can see (open() calls the re-read,
+  guarded) kept; the D-HOST-1 pin keeps `Qt.resolvedUrl("manifest.json")`.
+- The qml spec's `test_buildStampsInV4`, run alone under gdb: red on the
+  parent model (`Property 'modelBuildStamps' of object ... is not a
+  function`), green on the fix; it observes the aggregator's
+  `export var BUILD_STAMP_AGGREGATOR` beside its re-exports in V4 and the
+  reading over null-prototype maps there.
+- Counts: node 4076 -> 4140 (and 4140 without the own-write echo), the qml
+  spec 112 -> 113, python unchanged 3129. Service.qml 233,196 -> 237,524
+  bytes, 221,228 under release.py's 458,752 ceiling; split-service.py
+  --check 50 root functions, 162 forwarders, 2,297 sites, 34 of 34 cases.
+  The gate on a clone of be88316: exit 0, "check.sh: all green".
+
+**The words (commit 4, c99572a).**
+- What: in model/view.mjs `qmlCacheFolder(env)` (a variable's NAME, never
+  its value), `serviceMissingProse(folder)`, `footerStatus`'s
+  `buildNotice` and `cacheFolder` inputs, `barTooltip`'s build line and its
+  no-service second line, `barAccessibleName`'s notice and its no-service
+  reading (D-A11Y-14); in Guide.qml and BarWidget.qml the report (from
+  Component.onCompleted and onServiceChanged, guarded on the function),
+  `buildNotice` through `Model.serviceBuildNotice` in try/catch, and the
+  footer, tooltip and name inputs; the service's `buildCacheFolder` for the
+  bar, which gains no import. open() unchanged.
+- The block ("D-REL-16 WORDS"): 20 checks. Red first on the parent tree
+  (commit 3's Model.mjs, view.mjs, Service.qml, model-parts.json): 20 of
+  20. One-decision mutants, each 1 failure unless said: the cache line
+  below the empty-state gate; the tooltip's restart line and its cache line
+  dropped; the no-service second line dropped; the D-A11Y-14 branch
+  dropped; the name's notice dropped; a relative XDG_CACHE_HOME taken (1);
+  any word read as the cache off (2); the folder's value printed (2); the
+  path asked before the off switch; the prose ignoring the folder; the
+  footer's off-cache line dropped; the restart rung from staleBuild only;
+  the service's folder null; an unknown notice read as nothing. Two older
+  tooltip pins take the no-service line's second line.
+- tests/test_bar_shown_names.py, its qml run under gdb through QML_BIN
+  (a copy of the tree in scratch): the old fake beside the new bar,
+  42 bad entries (21 names, the tooltip and the name of each carrying the
+  cache words, because a fake with no `buildNotice` reads as a service
+  from before the stamps -- rule 10); the new fake, which computes its
+  notice with the real Model.buildVerdict over what it is reported, 2
+  tests OK. The new report test observes the SHIPPING bar, handed a bar
+  under the stand-in host, resolving its service and reporting
+  `BarWidget.qml` at the value build_stamps.py reads, then speaking the
+  cache words beside a guide of another build and `IPTV, service not
+  loaded` with none: red on the parent's bar and model
+  (`{'BarWidget.qml': '0.20.0'} != {}`), and red the same with
+  spikes/key-mutations/l3-bar-no-report.patch applied.
+- The a11y hosts, run offscreen with no bus under gdb (their readbacks,
+  not the AT-SPI tree): the bar host's old fake read `IPTV, idle, loaded
+  mid-update, remove the QML cache and restart the shell` in idle and in
+  the new noservice state (the old host has no such state); the new fake
+  reads `IPTV, idle`, `IPTV, playing channel 101, BBC One HD` and, with no
+  service, `IPTV, service not loaded` and the tooltip's two lines. The
+  guide host's query footer: old `Loaded mid-update · remove the QML
+  cache, restart the shell`, new `3 channels · updated 0`. The sources
+  host loads with both. check_bus.py gains L2-BAR-08 and L2-BAR-08-LIT
+  over barhost's noservice state, with the ruled `bar.noservice`; check_bus
+  has no fake of its own (the plan named one; the three hosts are the
+  fakes). tests/a11y's 35 fidelity tests green.
+- qmllint: Guide.qml 370 warnings + 279 on Model members (276 before:
+  serviceBuildNotice, qmlCacheFolder, serviceMissingProse), BarWidget.qml
+  17 + 11 (10 before), 0 errors. check-readme-notices joins
+  `Loaded mid-update`: 31 -> 32 joined (its floor 19 -> 32).
+- Counts: node 4140 -> 4160 (and without the echo), python 3129 -> 3130.
+  The gate on a clone of c99572a: exit 0, "check.sh: all green" -- node
+  4160 both ways, python 3130, the qml spec 113, the harness predicates 839,
+  a11y fidelity 35, the build stamp guard 26 files and 46 cases, the
+  release allowlist 47 files with Guide.qml the largest at 313,002 of
+  458,752 bytes.
+- A2, read and not run: strings(1) over the installed libQt6Qml.so.6.12.0
+  carries `QML_DISABLE_DISK_CACHE`, `QML_DISK_CACHE_PATH`, `QML_DISK_CACHE`
+  (its options `aot`, `aot-bytecode`, `aot-native`, `qmlc`, `qmlc-read`,
+  `qmlc-write`), `QML_FORCE_DISK_CACHE` and `/qmlcache/`; the quickshell
+  binary (0.3.2.r7.g2b4501a) carries no QML cache variable of its own, an
+  `AppId` pragma and `QS_APP_ID`. The words handle the first two and an
+  absolute `XDG_CACHE_HOME`, and treat `QML_DISABLE_DISK_CACHE` as off only
+  for a whole number other than 0 (the one value Qt reads as off whether it
+  asks whether the variable is set or what number it holds: naming a
+  folder Qt does not read costs a command, not naming one it does costs the
+  recovery). UNVERIFIED: how Qt reads `QML_DISABLE_DISK_CACHE` and
+  `QML_DISK_CACHE` exactly, QStandardPaths with a relative
+  `XDG_CACHE_HOME`, and whether `QS_APP_ID` or the pragma moves Qt's cache
+  location (the host sets neither).
+  **[2026-11-25, lane-l3fix, after the words recheck of 1c64c77: the words
+  now read `QML_FORCE_DISK_CACHE` too -- upstream's `diskCacheOptions` asks
+  it before `QML_DISABLE_DISK_CACHE`, as the recheck cites the source; the
+  installed binary's strings list the two in that order, which is
+  consistent and proves nothing -- and call the cache off only while it
+  holds nothing. The installed private header `qqmlglobal_p.h` shows how Qt
+  reads a boolean option (`qmlConvertBoolConfigOption`: any value but "",
+  "0" and "false" is set); the whole-number rule for the off switch is a
+  safe subset of it, and which options Qt reads that way stays read, not
+  run.]**
+- A1, read and not run: the host's panel Loader is asynchronous and sets
+  `item.service = shell.serviceFor(...)` in its onLoaded, after the
+  guide's completion, and `serviceFor` answers null until the service is
+  made (shell.qml); Bar.qml's injectProps sets `bar` after its Loader
+  loads, and the widget resolves its service itself in onBarChanged. So in
+  both hosts the report reaches the service through onServiceChanged, and
+  the completion's report finds no service and does nothing (it covers a
+  host that hands `service` before completion). UNVERIFIED under the host.
+
+**The rig and the live check (commit 5, scripts only).**
+- analyze.py prints, per step, the `build` reply's notice, `mixed`,
+  versions and stamps by version, the guide's and the bar's notice and
+  stamp, the bar's tooltip and name, and an `agree` line: whether every
+  marked file's stamp is the version its mark's build was cut at
+  (C1 0.99.0, C2 0.99.1, C3 0.99.2) and whether a mix the marks see reads
+  "cache". rig.qml.in's `marks` carries those values. The committed RESULT
+  files are analyze's printed readouts of 3200d22's unstamped builds, not
+  arm folders (no marks.jsonl, qs.log or steps.log), so there is nothing
+  in them for it to read; it was driven instead over a synthetic arm in
+  scratch: one build (agree), a C1/C2 mix reading "cache" (agree), and a
+  mix reading "" with a stamp unequal to its mark (`stamps disagree:
+  Service-player.js marked C2 (0.99.1) but stamped 0.99.0; THE NOTICE DOES
+  NOT FIT THE MARKS`).
+  **[2026-11-25, lane-l3fix, after the gate recheck of 1c64c77: the
+  `agree` line skipped a marked file the reply does not stamp, so a
+  one-build C2 reply naming every file but BarWidget.qml -- an unreported
+  view, the l3-bar-no-report patch's shape -- read "agree with every
+  mark". It now reads `BarWidget.qml marked C2 (0.99.1) but not stamped`
+  and that the notice does not fit (red first, by calling stamp_lines).]**
+- run.sh: `RIG_RECOVER=clear-live`, the README's order (the folder removed
+  while the shell runs, then a restart); `bash -n` clean, and a bogus value
+  refused before anything starts.
+- key-scenario.sh: the `BUILD` segment, B44 (`--only BUILD` selectable,
+  ONLY_CHECKS[BUILD]=1, the live floor 140 -> 141, check-tree unchanged at
+  11). Its two halves without a display: the rows from the tree's model
+  (26), and the comparison over the shipping service's own `build` reply
+  from the node harness, `notice:none mixed:none files:26 off:none` with
+  both views reported and `files:25 off:BarWidget.qml` without the bar's.
+  spikes/key-mutations/l3-bar-no-report.patch deletes the bar's two
+  reports and applies to the tree (git apply --check; qa-lib-test.sh's
+  list nineteen -> twenty). Its live red, and that the segment stands
+  alone, are the display lane's run.
+
+**Siblings searched (rule 15), by shape, and what was cleared.** Every
+reader of `staleBuild`, `recheckBuild` and `onDiskVersion` (Guide.qml,
+Model.mjs, model/build.mjs, model/view.mjs, Service.qml, candidates.py,
+tests/Model.test.js, a comment in check_bus.py): each moved with the
+reading or kept for an older caller. Every fake that hands a service to
+the guide or the bar (`serviceFor` across tests/ and scripts/): the three
+a11y hosts and test_bar_shown_names.py's probe fixed; the dev harness's
+shell.qml and the reload rig's rig.qml.in hand the REAL Service.qml, and
+the dev harness hands its manifest once, as `0.1.0-harness`, which the
+reading never reads (the object is a trigger only). Every list of the IPC
+verbs: Service.qml's header comment and the README's list gained `build`;
+ARCHITECTURE.md's `controlProc` line names the helper's verbs, not the
+handler's. The F-SINK-16 sweep of every verb counts it. Every place the
+no-service state speaks: the guide's body, the bar's tooltip and its name
+(D-A11Y-14); the footer stays blank. Every notification path
+(Service.notify's Process and the execDetached fallback): both counted to
+zero by the reading's boots (L3-c).
+
+**UNVERIFIED (rule 14), each where it is stated:** that each kind of
+unit's literal survives a stale cached unit as the old build's (QML and
+code-behind literals shown by the rig's marks; a model part's `var`
+reasoned); the guide's and the bar's reports under the host; the host's
+hand-off raising onManifestChanged at a real update's rescan; V4 failing
+the module link on a missing named export (the first stamped cut beside a
+poisoned pre-stamp part, which then loads no plugin); the footer's
+59-character line beside the hints (it elides on the right); QStandardPaths
+with a relative XDG_CACHE_HOME; how Qt reads its two cache switches; a QML
+`var` property keeping a null-prototype map as one (V4 iterates them in the
+spec; the service's `reportedStamps` is untested under the engine); the
+a11y probe's L2-BAR-08 on the bus; B44 live; the rig's analyze lines over
+a real arm. **[2026-11-25, lane-l3fix, after the words recheck: and the
+README's and the notices' removal order, the cache removed while the shell
+runs and then a restart (`RIG_RECOVER=clear-live`; call (d) measured stop,
+remove, start), and root b's pre-stamp Service.qml beside stamped views
+reading the cache line through `serviceBuildNotice` (b-01-x), both claimed
+in the words and shown by no arm.]**
+
+**What the caged arms must show** (the display lane's; the plan's
+cagedArms with what this lane built): a-12-r and b-12-r, `build` reading
+"restart" and onDisk 0.99.1 after the update's rescan BEFORE the guide
+opens (red on dev: `stale False`), the footer's `Updated` line once it
+opens, "" with all 26 stamps at their rows after the restart; a-01-r and
+b-01-r, C0 to C1; a-12-t and b-12-t, the stated misread ("cache" after a
+disable and an enable); a-12-h1 and b-12-h1, "cache" from the cold start
+with `mixed` naming C2's files, the footer and tooltip lines, still
+"cache" after the tree completes, "" after the restart; a-12-h4, b-12-h4,
+a-01-h4 and a-01-h0, the guide's new no-service prose and the tooltip's
+two lines; a-12-x and a-12-x-c4 at RIG_RACE_DELAY_MS 633, 639, 645 and
+650 with RIG_RECOVER=clear and RIG_QMLCACHE=home, "cache" naming each
+POISONED file after both restarts and "" after the clear -- **[but for
+model/build.mjs itself, the logic recheck of 1c64c77: `mixed` lists the
+files whose stamp is not the LOADED table's row, so an old build.mjs beside
+newer files reads "cache" and names every file the newer cut changed, never
+build.mjs (tests/Model.test.js's build.mjs copy expects `["Service.qml"]`).
+Its tell is `running`, and the stamps' `model/build.mjs`, reading the old
+version; analyze.py's `agree` line judges no model part, so it would not
+flag that either]** -- the same with
+RIG_RECOVER=update and the new RIG_RECOVER=clear-live; b-12-x, "cache"
+naming Service.qml; b-01-x, C0's poisoned Service.qml beside C1, the C1
+guide's footer and the bar's tooltip reading the cache line through
+`serviceBuildNotice`; BM, "cache" naming BarWidget.qml through the bar's
+report; a-12-x-c4 with RIG_RACE_FILE=manifest.json and 0 ms, no plugin and
+the journal unchanged; a model-part race, or the model literal stays
+reasoned; `key-scenario.sh live` with B44 green and, with
+l3-bar-no-report.patch through `--tree`, B44 red at `files:25`; and the
+caged a11y probe with L2-BAR-08 green. In every arm analyze.py's `agree`
+line must read that the notice fits the marks.
+
+## D-REL-16: the three rechecks of 1c64c77 (lane-l3fix, 2026-11-25)
+
+Three read-only rechecks (logic, gate, words) reviewed the l3stamp branch at
+1c64c77; logic and words read it blocked, gate pushable. This lane fixed
+every finding they marked must-fix, and every should-fix and nit it could
+make small and sure; what it left is said below with why. No display, cage,
+quickshell, player or scenario live half was run; the crash journal read 89
+at the start, after every Qt run of the gates, and at the end.
+
+**Must-fix, fixed.**
+- Logic: no test held the catch on a code-behind's stamp read
+  (`ownBuildStamps`), so its mutant O6 -- the catch reading Service.qml's
+  own stamp -- left a pre-stamp code-behind beside this Service.qml reading
+  "" with the whole suite green. One boot per code-behind the service
+  declares now makes that read throw a TypeError (the harness refuses a
+  forwarder with no function, `no-function`, so a throwing body is the
+  device, as in the TypeError-mix check) and expects "cache", `mixed` the
+  file, its stamp `"?"`. Each of the four catches mutated is red in exactly
+  its own check (69 checks, 1 failure each). 420980d.
+- Words, blocker: README's Updating sentence said `Updated` after a disable
+  and an enable, where the reading says `Loaded mid-update` (a new service of
+  the old build whose first reading is already the new version). The
+  sentence, the Troubleshooting bullet, UX.md 6.1's `cache` definition and
+  SERVICE-SPLIT's L3 bracket now name that case and say the restart alone is
+  the fix there.
+- Words, blocker: SERVICE-SPLIT's counts were lane-l3a's at 0a5dbb5 under a
+  bracket saying they were re-read. Re-read at the tip: Service.qml 238,260
+  bytes and 50 root functions (`ownBuildStamps`, `reportBuildStamp` and
+  `buildReply` added to "What stays on the root"), the guard's 2,297 sites,
+  Guide.qml 312,903 bytes the largest file.
+- Words, blocker: README Troubleshooting said the bar's tooltip names the
+  folder it found, which is false with no service (the tooltip names the
+  default, as the plan's words and UX.md 6.3 say). It now says the guide
+  names the folder Qt uses, the tooltip too while the service runs, and the
+  default with none. [The lead's settle, 2026-11-25: the second words
+  recheck found that over-reaching too -- with a service the guide names no
+  folder, and "the folder Qt uses" is read, not measured -- so the README
+  now says the tooltip names the folder it reads from the shell's
+  environment while the service runs, and the guide does when the service
+  is not loaded.] The tooltip's no-service line is left as the plan
+  wrote it (the lead's call L3-b).
+
+**Should-fix and nits, fixed.**
+- Logic nit: `reportBuildStamp` called `Model.withReportedStamp` with no
+  catch. Beside a model with none of L3's nine public names, a boot of the
+  shipping service showed both views' reports throwing a TypeError (red
+  first); with the catch both answer and the notice still reads "cache".
+- Words: `QML_FORCE_DISK_CACHE`, which upstream's diskCacheOptions asks
+  before `QML_DISABLE_DISK_CACHE` (as the words recheck cites the source;
+  read, not run), was never read, so a user with both set was told to
+  restart without removing a cache that is on. `qmlCacheFolder` reads the
+  cache as off only while the forced one holds nothing; the guide and the
+  service hand it their environment from one list, `Model.QML_CACHE_ENV`,
+  which a recording proxy holds to exactly the names the composer reads,
+  and the harness's `Quickshell.env` answers a boot's `env`, so the
+  service's half is a call (red first: 5 of the 6 new checks; a mutant list
+  without the forced name, 2). The guide's half is the same loop and is not
+  booted here. The installed `qqmlglobal_p.h`'s boolean reading is cited in
+  the composer and in lane-l3b's A2 bracket.
+- Gate: a `--cut` against a local main behind origin's restamped every file
+  changed since it, files the update does not change among them, and the
+  cut's check against the current main passed them all. build_stamps.py
+  names such a file `needless` -- it differs from the main the cut compares
+  with only in its stamp: set back to that main's stamp, it hashes, filters
+  applied, to that main's blob -- so release.py build refuses it, and
+  `--cut` against the current main sets the stamp back. The default ref is
+  `refs/heads/main`, the ref release.py build reads, so a tag named `main`
+  cannot split the two. tests/test_build_stamps.py: the finding's shape
+  measured (an older main's cut, then the current main: `needless` for both
+  restamped files, the cut setting both back, a second cut writing
+  nothing), the filters, none on a main from before the stamps, and the
+  CLI's default against a tag named `main` -- red first, 2 failures of 26.
+  One-decision mutants, each red: the check that never names it (5
+  failures, and --check red on the new strict case), the cut that never
+  sets back (5, --check red on the new cut case), the hash with no path and
+  so no filters (1), the default ref the bare name (1). The skip for a main
+  with no stamp line is an equivalent mutant: its hash can never match.
+  Two cases join the fixture (46 -> 48).
+- Gate nit: the step's self-test compared only each case's first refusal
+  kind, so lane-l3a's M7 (a row unequal to its file) and M8 (the table's
+  file list) were green in --check behind the block-form refusal of the
+  same kind. Every refusal case now names its message (`says`); M7 and M8
+  turn --check red (1 and 3 cases wrong), and a runner that ignores `says`
+  is red in the unit suite. M17's shape, check()'s own wiring, stays the
+  unit suite's (`test_a_tree_problem_reds_the_check`), as it was.
+- Gate nit: analyze.py's `agree` line skipped a marked file the `build`
+  reply does not stamp; called with a one-build C2 reply naming every file
+  but BarWidget.qml it read "agree with every mark", and now reads
+  `BarWidget.qml marked C2 (0.99.1) but not stamped` and that the notice
+  does not fit.
+- Gate nit: check.sh called the stamp floors exact beside a `<`; it says
+  floors, and the case floor is 48.
+- Words and logic nits: ARCHITECTURE section 9's frozen list (L3-h) gains
+  what a partner of another build reads: the service's `buildNotice`,
+  `staleBuild` and `buildCacheFolder`, and `Model.withReportedStamp`. The
+  generated table's comment said it is never edited by hand, where between
+  cuts a new file's row is the one hand edit: it says so, in four lines as
+  before, and ARCHITECTURE's "never edited on `dev`" reads "never edited by
+  hand". The D-REL-16 bracket gives the counts from the base. The new
+  release gate the board stated (the caged arms) is lane-l3b's proposal,
+  and both brackets now say so. The removal order (`RIG_RECOVER=clear-live`)
+  and b-01-x join every L3 UNVERIFIED list. UX.md 6.2's bracket names the
+  three rungs the empty-state gate does not hold back. The Troubleshooting
+  bullet joins the remedy to the notice ("still says `Loaded mid-update`").
+  The Decisions-log row keeps the calls apart from what the lanes read.
+- Logic nit: an old model/build.mjs beside newer files reads "cache" and
+  names every file the newer cut changed, never build.mjs; lane-l3b's
+  caged-arm list now says so, and that `running` and the stamps'
+  `model/build.mjs` are its tell.
+
+**Left, with why.**
+- Words nit (D-A11Y-14's name gives the state, not the step): `IPTV,
+  service not loaded` is the plan's userWords under the lead's call L3-b,
+  true as written; adding the step is a words call for the lead or the
+  owner.
+- The two draft CHANGELOG findings (logic, words) and the CLAUDE.md draft's
+  wording are about text off the tree; this lane's result redrafts them for
+  the lead.
+- 420980d's three `var`s sat inside try blocks and moved qmllint's counts
+  (Guide.qml 649 -> 651); 05a8284 declares them where qmllint does not count
+  them, and both files' findings are again exactly 1c64c77's.
+
+**Counts.** Node 4160 -> 4171 (and without the own-write echo), python by
+discovery 3130 -> 3135, the build stamp guard's cases 46 -> 48, README
+notices joined 32 -> 34; the qml spec stays 113, split-service 50 root
+functions and 162 forwarders, release.py check 47 files. The gate on a
+clone of 420980d: exit 0, all green, at that commit's own counts; the
+counts above are the final tree's, printed by lane-l3fix's last gate on
+b2bff65 (exit 0, all green) [the lead's settle, 2026-11-25, after the
+second words recheck].
+
+## D-REL-16: the lead's settle of L3 (2026-11-25)
+
+The build workflow wf_82ab6bdf-78c ran lane-l3a (D-HOST-16 and the stamps,
+f6c3bce and 0a5dbb5), lane-l3b (the reading, the words, the rig scripts and
+the records, be88316 to 1c64c77), three read-only rechecks of 1c64c77
+(logic blocked, gate pushable, words blocked), lane-l3fix (420980d to
+b2bff65) and a second pass of the two blocked lenses at b2bff65: logic
+pushable, words blocked on two must-fix findings, both wording. Crash
+journal 89 at the launch and 89 at the settle. The settle, on the branch:
+
+- **Who names the cache folder (second words recheck, blocker).** The
+  README's Troubleshooting bullet said the guide names "the folder Qt uses";
+  with a service the guide names no folder (its footer's line says "remove
+  the QML cache"), and the folder is the one the composer reads from the
+  shell's environment, which is read in strings(1) and not run. It now says
+  the tooltip names that folder while the service runs and the guide does
+  when the service is not loaded. The lane-l3fix line above carries a
+  bracket.
+- **Two UX.md claims without their mark (second words recheck, blocker).**
+  6.1's "the cache's removal does no harm" (the order the words give, the
+  cache removed while the shell runs, is the `clear-live` arm, which has not
+  run) and 6.3's "which Qt asks first" (upstream's source, not the installed
+  binary) now carry UNVERIFIED. Its sibling in the README's Updating
+  paragraph, "(the removal does no harm)", is dropped: the README says the
+  restart alone is enough there, which is the claim the words make.
+- **The old-model test (second logic recheck, nit).** It now deletes
+  `QML_CACHE_ENV` too, the ninth public name, as 0.20.0's aggregator lacks
+  it; node 4171 checks, 0 failures, the same answer.
+- **ARCHITECTURE section 9 (second logic recheck, nit).** A later model
+  without `withReportedStamp` drops every view's report silently, and
+  beside one that still has `buildVerdict` reads "" with views of another
+  build loaded; the record said "cache".
+- **The counts paragraph above (second words recheck, nit)** says which
+  tree its counts are.
+- **The Decisions-log row's A2 and A3 (second words recheck, nit)** carry
+  the clauses the brief gave them.
+- **Filed open:** F-GATE-34 (no test reaches the guide's own read of the
+  environment: a mutant that ignores it passes 4171 node checks), and
+  F-HARNESS-133 (the harness's `Quickshell.env` answers "" for an unset
+  name; the installed Quickshell's `env` is a QVariant, which upstream's
+  source answers null; Service-pip.js compares with "").
+- **The lead's calls** (STATUS Decisions log, 2026-11-25, "L3's settle"):
+  the first release that ships a code-behind also waits for the caged arms;
+  the no-service accessible name keeps the plan's words; the CHANGELOG
+  lines wait for the cut and say "from the next update on" where the update
+  into the first stamped release cannot show the new words.
+- **CLAUDE.md** takes the lanes' drafts as lane-l3fix corrected them: the
+  release step's `git fetch origin main:main` and `build_stamps.py --cut`
+  (with `stale` and `needless`), the build stamp beside the allowlist rule,
+  and the D-REL-14 paragraph's L3 sentence.
+
+Left as the rechecks graded them: the second logic recheck's should-fix is
+F-GATE-34 above; the gate recheck's findings were fixed by lane-l3fix
+(c2c04dc); the words rechecks' CHANGELOG findings are about text off the
+tree, and the cut writes the notes.

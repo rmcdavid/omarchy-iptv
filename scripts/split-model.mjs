@@ -116,11 +116,12 @@ const AGG_HEADER = [
   "//",
   "// What it is. An ES module that re-exports every public name of the model",
   "// from the part under model/ that declares it. The code lives in the parts,",
-  "// one domain each; this file holds this header and the export lines below,",
-  "// nothing else. QML imports it AS A MODULE, `import \"Model.mjs\" as Model`,",
-  "// and every `Model.<name>` resolves through these lines; node loads it with",
-  "// `require(\"./Model.mjs\")` or `import`. One instance is shared by every",
-  "// component that imports it, so no code in the model writes to its own state.",
+  "// one domain each; this file holds this header, its build stamp (D-REL-16)",
+  "// and the export lines below, nothing else. QML imports it AS A MODULE,",
+  "// `import \"Model.mjs\" as Model`, and every `Model.<name>` resolves through",
+  "// these lines; node loads it with `require(\"./Model.mjs\")` or `import`. One",
+  "// instance is shared by every component that imports it, so no code in the",
+  "// model writes to its own state.",
   "//",
   "// How it is made, by split-model.mjs on the dev branch (scripts directory):",
   "//   --write --from-git REF    cut the one-file model at commit REF into this",
@@ -134,6 +135,17 @@ const AGG_HEADER = [
   "// in ARCHITECTURE.md (dev branch), section 9.",
   "",
 ].join("\n") + "\n"
+// D-REL-16 (the lead's call L3-e under the owner's standing authority of
+// 2026-11-09): the aggregator carries its own build stamp, the one line in it
+// that is not generated here. It sits directly under the generated line,
+// above the first export block; build_stamps.py (dev branch) writes its
+// value at a cut, and --check and --relink keep the line exactly as they
+// find it, value and all. A stamp line anywhere else is not a generated line,
+// and refused. Its name joins the loaded namespace, so --check holds the
+// module's exports to the export lines plus it.
+const AGG_STAMP_NAME = "BUILD_STAMP_AGGREGATOR"
+const AGG_STAMP_RE = /^export var BUILD_STAMP_AGGREGATOR = "([^"\\\n]*)"\n$/
+function aggStampLine(value) { return "export var " + AGG_STAMP_NAME + " = \"" + value + "\"\n" }
 // Where the dropped lines are recorded: the `## 9.` section of this file.
 const RECORD_FILE = path.join("docs", "ARCHITECTURE.md")
 const RECORD_SECTION = /^## 9\. /
@@ -501,7 +513,7 @@ function partHeader(p) {
 // after a dot excluded): an unused import costs nothing, a missing one is a
 // ReferenceError at call time. F-GATE-8: reading the raw text instead made a
 // comment that named another part's export into an import of it.
-function generate(parts, chunks, byName, publicNames, headers) {
+function generate(parts, chunks, byName, publicNames, headers, aggStamp) {
   const files = new Map()
   const graph = new Map()
   for (const p of parts) {
@@ -522,6 +534,7 @@ function generate(parts, chunks, byName, publicNames, headers) {
     files.set(PART_DIR + "/" + p.name + ".mjs", text)
   }
   let agg = AGG_HEADER + GENERATED_LINE + "\n"
+  if (aggStamp !== null && aggStamp !== undefined) agg += aggStampLine(aggStamp)
   const pub = new Set(publicNames)
   for (const p of parts) agg += reexportBlock(chunks.filter((c) => c.part === p.name && pub.has(c.name)).map((c) => c.name), p.name)
   files.set(AGGREGATOR, agg)
@@ -557,6 +570,9 @@ function readAggregator(text) {
   if (g < 0) refuse(AGGREGATOR + ": no `" + GENERATED_MARK + "` line")
   const reexports = []
   let k = g + 1
+  let stamp = null
+  const sm = k < ls.length && AGG_STAMP_RE.exec(ls[k])
+  if (sm) { stamp = sm[1]; k++ }
   while (k < ls.length) {
     let m = /^export \{\} from "\.\/model\/([a-z][a-z0-9-]*)\.mjs"\n$/.exec(ls[k])
     if (m) { reexports.push({ part: m[1], names: [] }); k++; continue }
@@ -569,7 +585,7 @@ function readAggregator(text) {
     reexports.push({ part: m[1], names })
     k = j + 1
   }
-  return { header: ls.slice(0, g).join(""), reexports }
+  return { header: ls.slice(0, g).join(""), reexports, stamp }
 }
 
 function listPartFiles(root) {
@@ -887,7 +903,7 @@ async function modeTree(opts, manifest, rewrite) {
     if (rewrite) { writeManifest(opts.manifest, manifest, t.chunks); console.log("relinked " + manifestLabel) }
     else problems.push(...drift)
   }
-  const gen = generate(manifest.parts, t.chunks, byName, t.publicNames, t.headers)
+  const gen = generate(manifest.parts, t.chunks, byName, t.publicNames, t.headers, t.agg.stamp)
   for (const [rel, text] of gen.files) {
     const file = path.join(opts.root, rel)
     const now = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null
@@ -898,7 +914,7 @@ async function modeTree(opts, manifest, rewrite) {
   if (!problems.length) {
     try {
       const ns = await loadModules(opts.root, manifest.parts.map((p) => p.name))
-      const have = Object.keys(ns).sort(), want = [...t.publicNames].sort()
+      const have = Object.keys(ns).sort(), want = [...t.publicNames].concat(t.agg.stamp !== null ? [AGG_STAMP_NAME] : []).sort()
       if (have.join(",") !== want.join(",")) problems.push(AGGREGATOR + ": the loaded namespace is not the listed names")
       else console.log("runtime: " + AGGREGATOR + " and every part load; " + have.length + " public names")
     } catch (e) {

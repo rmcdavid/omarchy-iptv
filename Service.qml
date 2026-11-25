@@ -75,12 +75,81 @@ Item {
   // is the directory the loaded component came from -- which is exactly the
   // directory `omarchy plugin update` has just rewritten underneath it.
   readonly property string manifestPath: decodeURIComponent(Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, ""))
+  // D-REL-16. The version of the last cut that changed this file, written by
+  // build_stamps.py (dev branch) at the cut and held to model/build.mjs's
+  // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
+  // names the code that is running, whichever file that unit was saved under.
+  readonly property string buildStamp: "0.20.0"
+  // Each code-behind's stamp, read through its forwarder: a code-behind holds
+  // nothing but functions, and its qualifier is named nowhere else (D-REL-14).
+  // A loose comment, so the inline view reads each stamp with its own.
+
+  function buildStampPip() { return ServicePip.buildStampPip() }
+  function buildStampPlayer() { return ServicePlayer.buildStampPlayer() }
+  function buildStampRewind() { return ServiceRewind.buildStampRewind() }
+  function buildStampSources() { return ServiceSources.buildStampSources() }
+
   // The version on DISK. Model.PLUGIN_VERSION is the version compiled into the
   // component that is running. They agree at release time (the gate proves it),
   // so a disagreement here means a hot reload left an older component mounted
   // and the user is looking at an interface the update was supposed to replace.
   property string onDiskVersion: ""
-  readonly property bool staleBuild: Model.staleBuild(Model.PLUGIN_VERSION, onDiskVersion)
+  // D-REL-16. The version at THIS service's first successful read of the
+  // manifest (manifestFile's onLoaded sets it once): what was on disk right
+  // after the files it loads compiled. A build already behind the disk then
+  // was loaded while an update wrote it; one that falls behind later was
+  // updated under a running shell.
+  property string loadedDisk: ""
+  // What the guide and the bar report of their own stamps (reportBuildStamp).
+  property var reportedStamps: ({})
+  // Every stamp this service holds itself, by file: its own, each
+  // code-behind's through its forwarder, the aggregator's. A read that throws
+  // (a code-behind from before the stamps, beside this file) reads "?",
+  // which is no build's row.
+  function ownBuildStamps() {
+    var out = {}
+    var s = "?"
+    try { s = root.buildStamp } catch (e) { s = "?" }
+    out["Service.qml"] = typeof s === "string" ? s : "?"
+    try { s = root.buildStampPip() } catch (e) { s = "?" }
+    out["Service-pip.js"] = typeof s === "string" ? s : "?"
+    try { s = root.buildStampPlayer() } catch (e) { s = "?" }
+    out["Service-player.js"] = typeof s === "string" ? s : "?"
+    try { s = root.buildStampRewind() } catch (e) { s = "?" }
+    out["Service-rewind.js"] = typeof s === "string" ? s : "?"
+    try { s = root.buildStampSources() } catch (e) { s = "?" }
+    out["Service-sources.js"] = typeof s === "string" ? s : "?"
+    try { s = Model.BUILD_STAMP_AGGREGATOR } catch (e) { s = "?" }
+    out["Model.mjs"] = typeof s === "string" ? s : "?"
+    return out
+  }
+  // The verdict (Model.buildVerdict): { notice, running, onDisk, loadedDisk,
+  // mixed, stamps }. A throw can only be a model without the reading beside
+  // this file, which is a mix, so it reads "cache".
+  readonly property var buildCheck: {
+    try {
+      return Model.buildVerdict({ own: root.ownBuildStamps(), reported: root.reportedStamps,
+                                  loadedDisk: root.loadedDisk, onDisk: root.onDiskVersion })
+    } catch (e) {
+      return { notice: "cache", running: typeof Model.PLUGIN_VERSION === "string" ? Model.PLUGIN_VERSION : "",
+               onDisk: root.onDiskVersion, loadedDisk: root.loadedDisk, mixed: [], stamps: ({}) }
+    }
+  }
+  // "" | "restart" | "cache", what the guide's footer and the bar read
+  // (Model.serviceBuildNotice). Never a notification (the lead's call L3-c).
+  readonly property string buildNotice: root.buildCheck && typeof root.buildCheck.notice === "string" ? root.buildCheck.notice : "cache"
+  // Kept for an older guide beside this service, which reads only this.
+  readonly property bool staleBuild: buildNotice !== ""
+  // Where Quickshell's QML cache is, NAMED (Model.qmlCacheFolder), for the
+  // bar, which imports no Quickshell of its own; null when the model cannot
+  // say, and the bar names the default.
+  readonly property var buildCacheFolder: {
+    var env = {}, i = 0
+    try {
+      for (i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
+      return Model.qmlCacheFolder(env)
+    } catch (e) { return null }
+  }
 
   // ---- timing constants, in one place (UX.md 5.9)
   readonly property int refreshDebounceMs: 300
@@ -1527,10 +1596,14 @@ Item {
       // the defect was precisely that this number stayed 0 until the fetch
       // exited, and nothing outside the guide could see that.
       logos: Model.logoHaveCount(root.logoHave),
+      // D-REL-16: and the stamps' verdict, additive (the `build` verb's own).
       build: {
         running: Model.PLUGIN_VERSION,
         onDisk: root.onDiskVersion,
-        stale: root.staleBuild
+        stale: root.staleBuild,
+        loadedDisk: root.loadedDisk,
+        notice: root.buildNotice,
+        mixed: root.buildReply().mixed
       },
       player: {
         up: root.playerUp,
@@ -2837,33 +2910,80 @@ Item {
   // The four cache views follow the active source's directory (D5). Content
   // is only ever applied from onLoaded / onLoadFailed (R1: after a path
   // change the view still reports the previous file until then).
-  // D-HOST-1. Read once at load and re-read when the directory changes, which
-  // is precisely the moment an update lands. printErrors stays off: a missing
-  // manifest is not a user-facing error, it just means we cannot tell, and
-  // staleBuild answers false for an empty version rather than guessing.
+  // D-HOST-1. Read when the view is made, and re-read three ways, because
+  // its path never changes (it is this component's own directory) and a
+  // FileView reloads only when it is told to. printErrors stays off: a
+  // missing manifest is not a user-facing error, it just means we cannot
+  // tell, and staleBuild answers false for an empty version rather than
+  // guessing.
+  // D-HOST-16. The first way is the host's hand-off. The host hands a kept
+  // service a FRESH manifest object at every rescan, and an update's own
+  // rescan is one (shell.qml's _syncServices, `kept.manifest =
+  // shell.publicPluginManifest(m)`, a JSON copy for a plugin that is not
+  // first-party; read in the host, not yet watched under a real update). The
+  // service used that object only for its id, so between an update and the
+  // next guide open `status` read the version from the service's creation.
+  // The object is a trigger only: its version is the host's reading, and the
+  // dev harness hands `0.1.0-harness`, so the file is what is read.
+  onManifestChanged: manifestFile.reload()
   FileView {
     id: manifestFile
     path: root.manifestPath
-    // watchChanges is kept, and it is NOT what makes this work. D-HOST-2: an
-    // update REPLACES the file rather than editing it -- measured, a git
-    // fast-forward took manifest.json from inode 495084 to 495097 -- so a
-    // watcher bound to the old inode never fires, and the notice this exists
-    // for stayed silent through the exact update it was built to catch. The
-    // watcher stays because an in-place edit is free to catch; the reload
-    // below is what actually catches an update.
+    // The second way is the watcher, for an in-place edit. It is NOT what
+    // catches an update. D-HOST-2: an update REPLACES the file rather than
+    // editing it -- measured, a git fast-forward took manifest.json from
+    // inode 495084 to 495097 -- so a watcher bound to the old inode never
+    // fires, and the notice this exists for stayed silent through the exact
+    // update it was built to catch. A replacement raises nothing and leaves
+    // the view watching nothing until a reload re-arms it (the contract's
+    // FileView facts, measured on stateFile). Until D-HOST-16 this said an
+    // in-place edit was "free to catch" while nothing answered the watcher:
+    // Quickshell's FileView.qml declares no fileChanged handler, and every
+    // view measured here reloads from its own onFileChanged, so the handler
+    // below is what makes the watch read anything (whether the C++ view
+    // would ever reload by itself is read nowhere and not measured).
     watchChanges: true
     printErrors: false
-    onLoaded: root.onDiskVersion = Model.manifestVersion(text())
+    onFileChanged: reload()
+    // D-REL-16: the first version read is kept as loadedDisk, once.
+    onLoaded: {
+      root.onDiskVersion = Model.manifestVersion(text())
+      if (root.loadedDisk === "" && root.onDiskVersion !== "") root.loadedDisk = root.onDiskVersion
+    }
     onLoadFailed: root.onDiskVersion = ""
   }
 
-  // Re-read the manifest from its PATH, which is the only way to see a file
-  // that was replaced underneath us. Called when the guide opens: that is the
-  // moment the notice would be shown, so it is the moment the answer has to be
-  // current, and it costs one small read against a 150 ms budget whose open
-  // work measures about 20 ms.
+  // The third way: re-read the manifest from its PATH, which is the only way
+  // to see a file that was replaced underneath us. Called when the guide
+  // opens: that is the moment the notice would be shown, so it is the moment
+  // the answer has to be current, and it costs one small read against a
+  // 150 ms budget whose open work measures about 20 ms.
   function recheckBuild() {
     manifestFile.reload()
+  }
+
+  // D-REL-16. A view's report of its own build stamp ("Guide.qml",
+  // "BarWidget.qml"), made when it is handed this service. Idempotent: the
+  // same pair again changes nothing, so a view may report from both its
+  // completion and its service's change (the lead's call A1). A model
+  // without withReportedStamp beside this file is a mix that buildCheck's
+  // own catch already reads as "cache", so the catch here only keeps each
+  // view's report from logging a TypeError in that mix.
+  function reportBuildStamp(file, stamp) {
+    var next = null
+    try {
+      next = Model.withReportedStamp(root.reportedStamps, file, stamp)
+      if (JSON.stringify(next) !== JSON.stringify(Model.withReportedStamp(root.reportedStamps, "", ""))) root.reportedStamps = next
+    } catch (e) { }
+  }
+  // The `build` verb's reply: the verdict alone, file names and version
+  // strings only. It reads the binding and nothing that throws in a mixed
+  // load, so it answers where `status` does not (the lead's call L3-d).
+  function buildReply() {
+    var b = root.buildCheck
+    return { notice: root.buildNotice, running: b && typeof b.running === "string" ? b.running : "",
+             onDisk: root.onDiskVersion, loadedDisk: root.loadedDisk,
+             mixed: b && Array.isArray(b.mixed) ? b.mixed : [], stamps: b && b.stamps ? b.stamps : ({}) }
   }
 
   FileView {
@@ -4334,6 +4454,7 @@ Item {
 
   // omarchy-shell io.github.rmcdavid.iptv toggle | play <id-or-url> |
   // channel <n> | stop | next | previous | refresh | status   (R9)
+  // | build (D-REL-16: the build check alone)
   IpcHandler {
     target: root.pluginId
 
@@ -4409,5 +4530,9 @@ Item {
     // F-SINK-16: every JSON reply through Model.ipcJson, which escapes the
     // C1 controls JSON.stringify passes through to the caller's terminal.
     function status(): string { return Model.ipcJson(root.statusSummary()) }
+    // D-REL-16: the build check alone (Service.buildReply), which answers in
+    // the mixed load where `status` throws. File names, version strings and
+    // the notice; no path, no URL, no id.
+    function build(): string { return Model.ipcJson(root.buildReply()) }
   }
 }

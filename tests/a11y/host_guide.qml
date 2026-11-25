@@ -194,6 +194,16 @@ Window {
     property var chnoIndex: null
     property int numberEntryMs: 1200
     property var userState: ({ favorites: ["c2"], recents: [] })
+    // D-REL-16 (rule 10): the guide and the bar report their build stamp
+    // (reportBuildStamp) and read the service's buildNotice. A service with
+    // neither reads as one from before the stamps -- "cache" -- and every
+    // footer and bar name this host grades would carry the cache words, which
+    // no real service on this tree gives. So the notice is the real
+    // Model.buildVerdict over what this fake is reported, never a constant.
+    property var reportedStamps: ({})
+    function reportBuildStamp(file, stamp) { fakeService.reportedStamps = Model.withReportedStamp(fakeService.reportedStamps, file, stamp) }
+    readonly property string buildNotice: Model.buildVerdict({ reported: fakeService.reportedStamps,
+                                                               loadedDisk: Model.PLUGIN_VERSION, onDisk: Model.PLUGIN_VERSION }).notice
     function play() {}
     function stop() {}
     function refresh() {}

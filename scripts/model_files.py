@@ -46,12 +46,17 @@ def part_paths(root):
 # A generated re-export block of the aggregator: `export {`, the names, then
 # `} from "./model/x.mjs"` (or the one-line empty form, which names nothing).
 EXPORT_BLOCK = re.compile(r'^export \{\n((?:  [^\n]*\n)*)\} from "\./model/[a-z][a-z0-9-]*\.mjs"$', re.M)
+# D-REL-16: the aggregator's own build stamp, the one name it declares itself
+# rather than re-exports (split-model.mjs keeps the line under its generated
+# one; build_stamps.py writes its value).
+AGGREGATOR_STAMP = re.compile(r'^export var (BUILD_STAMP_AGGREGATOR) = "[^"\\\n]*"$', re.M)
 
 
 def public_names(root):
-    """The names Model.mjs re-exports, in its order: what QML sees as
+    """The names Model.mjs exports, in its order: what QML sees as
     `Model.<name>`. Read from the generated export blocks, the same text the
-    engine loads; split-model.mjs --check proves the loaded namespace is
+    engine loads, and from the aggregator's own stamp line above them
+    (D-REL-16); split-model.mjs --check proves the loaded namespace is
     exactly this list."""
     agg = os.path.join(root, AGGREGATOR)
     try:
@@ -59,7 +64,7 @@ def public_names(root):
             text = fh.read()
     except OSError as error:
         raise ModelLayoutError('%s is unreadable: %s' % (agg, error))
-    names = []
+    names = AGGREGATOR_STAMP.findall(text)
     for block in EXPORT_BLOCK.findall(text):
         names.extend(n.strip() for n in block.replace('\n', ',').split(',') if n.strip())
     if not names:

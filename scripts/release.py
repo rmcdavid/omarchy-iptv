@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
 import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
 import service_files  # noqa: E402  the service's files, read from Service.qml (D-REL-14)
+import build_stamps  # noqa: E402  every runtime file's build stamp (D-REL-16)
 
 RELEASE_BRANCH = 'main'
 DEV_BRANCH = 'dev'
@@ -836,6 +837,18 @@ def check(root, out=sys.stdout):
                 'Model.PLUGIN_VERSION is %s but manifest.json says %s; every install would show the '
                 'restart notice forever' % (m.group(1), actual))
 
+    # D-REL-16. Every runtime file carries the version of the last cut that
+    # changed it, in its kind's one form, and model/build.mjs's BUILD_FILES
+    # names each with the stamp it carries, so the running build can tell a
+    # unit compiled from another build (a cache poisoned by a start that
+    # raced an update). The judge is build_stamps.py's, over the files this
+    # check reached, in that order.
+    try:
+        for p in build_stamps.problems(root, runtime=reached):
+            problems.append('%s (D-REL-16: build_stamps.py --check)' % (p,))
+    except build_stamps.BuildStampsError as error:
+        problems.append('the build stamps cannot be read: %s' % error)
+
     # Every manifest entry point must ship.
     if 'manifest.json' in have:
         manifest = json.loads(read(root, 'manifest.json'))
@@ -1087,6 +1100,23 @@ def build(root, gate_already_green=False, validate=True, tag=True,
     notes = changelog_problems(root, strict=True, today=today)
     if notes:
         raise ReleaseError('the release notes do not match this cut:\n  ' + '\n  '.join(notes))
+
+    # D-REL-16. A runtime file the cut changes must carry the version being
+    # cut, or the running build would read its own new file as another
+    # build's (or an old one as this one's). Against the main this cut goes
+    # onto, so it is what the update rewrites; `build_stamps.py --cut` after
+    # the bump is what makes it so. And no file differs from that main ONLY in
+    # its stamp (`needless`): a cut against a local main behind origin's
+    # restamps files the update does not change.
+    reached = runtime_files(root, tracked(root), set(ALLOWLIST), [])
+    try:
+        stale = build_stamps.cut_problems(root, old_main, version, runtime=reached)
+    except build_stamps.BuildStampsError as error:
+        raise ReleaseError('the build stamps cannot be compared with %s: %s' % (RELEASE_BRANCH, error))
+    if stale:
+        raise ReleaseError('the build stamps do not match this cut; run `python3 -I scripts/build_stamps.py --cut` '
+                           'after the bump, against the main installs have (`git fetch origin main:main` first):\n  '
+                           + '\n  '.join(str(p) for p in stale))
 
     tree = build_tree(root, dev_sha)
     got = tree_paths(root, tree)
