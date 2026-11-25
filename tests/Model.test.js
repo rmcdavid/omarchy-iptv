@@ -4294,6 +4294,120 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
 })()
 // END D-REL-16 READING
 
+// ---- D-REL-16: the build's words, and D-A11Y-14 ---------------------------
+// What the footer, the bar's tooltip, its accessible name and the guide's
+// no-service body say about the stamps' notice (L3's words, the lead's calls
+// L3-b and L3-g), composed by the model and called here. The folder is a
+// variable's NAME, never its value; every environment below is a fake.
+// BEGIN D-REL-16 WORDS
+;(function () {
+  // The middle dot and its spaces, spelled out (UX.md's separator).
+  const SEP = " \u00b7 "
+  const CACHE = "Loaded mid-update" + SEP + "remove the QML cache, restart the shell"
+  const CACHE_OFF = "Loaded mid-update" + SEP + "restart the shell"
+  const RESTART = "Updated" + SEP + "restart the shell to see the new version"
+  const DEF = "~/.cache/quickshell/qmlcache"
+  const ENVS = [
+    [{}, DEF, "nothing set: Qt's default under the user's cache"],
+    [{ XDG_CACHE_HOME: "/srv/u7/cache" }, "$XDG_CACHE_HOME/quickshell/qmlcache", "an absolute XDG_CACHE_HOME, named and not read"],
+    [{ XDG_CACHE_HOME: "rel/cache" }, DEF, "a relative XDG_CACHE_HOME is not a base"],
+    [{ XDG_CACHE_HOME: "" }, DEF, "an empty XDG_CACHE_HOME"],
+    [{ QML_DISK_CACHE_PATH: "/srv/u7/qc", XDG_CACHE_HOME: "/srv/u7/cache" }, "$QML_DISK_CACHE_PATH", "QML_DISK_CACHE_PATH is the folder itself, before XDG"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_DISK_CACHE_PATH: "/srv/u7/qc" }, "", "the cache turned off beats a path"],
+    [{ QML_DISABLE_DISK_CACHE: "007" }, "", "a whole number other than 0 is off"],
+    [{ QML_DISABLE_DISK_CACHE: "0" }, DEF, "0 is not off"],
+    [{ QML_DISABLE_DISK_CACHE: "yes" }, DEF, "a word is not a number: the folder is named, which costs a command if Qt read it as off"],
+    [{ QML_DISABLE_DISK_CACHE: "" }, DEF, "set to nothing"],
+    [{ QML_DISABLE_DISK_CACHE: 1, QML_DISK_CACHE_PATH: null, XDG_CACHE_HOME: undefined }, DEF, "values that are not strings are unset (Quickshell.env answers undefined)"],
+  ]
+  ENVS.forEach(([env, want, why]) => checkCall("D-REL-16: qmlCacheFolder -- " + why, () => Model.qmlCacheFolder(env), want))
+  checkCall("D-REL-16: qmlCacheFolder never prints a value the environment holds, and reads nothing but what it is handed", () => {
+    const leaked = ENVS.filter(([env]) => Object.keys(env).some(k => typeof env[k] === "string" && env[k].length > 1 && Model.qmlCacheFolder(env).indexOf(env[k]) !== -1))
+    return [leaked.length, Model.qmlCacheFolder(null), Model.qmlCacheFolder("XDG_CACHE_HOME=/x"), Model.qmlCacheFolder(undefined)]
+  }, [0, DEF, DEF, DEF])
+
+  const f = extra => Model.footerStatus(Object.assign({ configured: true, count: 5 }, extra))
+  checkCall("D-REL-16 (L3-b): the footer's cache line sits below the number entry and the transient and above everything else, the empty-state gate included", () => [
+    f({ buildNotice: "cache" }),
+    f({ buildNotice: "cache", count: 0 }),
+    f({ buildNotice: "cache", configured: false, count: 0 }),
+    f({ buildNotice: "cache", transient: "Copied" }),
+    f({ buildNotice: "cache", playingName: "BBC One", warning: "Provider unreachable", truncated: true, resultTotal: 900 }),
+    f({ buildNotice: "cache", numberEntry: { active: true, kind: "none", buffer: "1" } }) !== CACHE,
+    f({ buildNotice: "cache", cacheFolder: "" }),
+    f({ buildNotice: "cache", cacheFolder: "$XDG_CACHE_HOME/quickshell/qmlcache" }),
+    f({ buildNotice: "cache", cacheFolder: null }),
+    f({ buildNotice: "a later build's notice" }),
+    CACHE.length,
+  ], [CACHE, CACHE, CACHE, "Copied", CACHE, true, CACHE_OFF, CACHE, CACHE, CACHE, 59])
+  checkCall("D-REL-16: the footer's restart line keeps D-HOST-1's rung, from the notice or from an older guide's staleBuild, and says nothing with no channels", () => [
+    f({ buildNotice: "restart" }),
+    f({ staleBuild: true }),
+    f({ buildNotice: "restart", warning: "Provider unreachable" }),
+    f({ buildNotice: "restart", count: 0 }),
+    f({ buildNotice: "" }),
+    f({}),
+  ], [RESTART, RESTART, "Provider unreachable", "", "5 channels", "5 channels"])
+
+  const tip = extra => Model.barTooltip(Object.assign({ configured: true }, extra))
+  checkCall("D-REL-16: the bar's tooltip gains one line, last, for each notice -- naming the folder for the cache", () => [
+    tip({ buildNotice: "restart" }),
+    tip({ buildNotice: "cache" }),
+    tip({ buildNotice: "cache", cacheFolder: "$XDG_CACHE_HOME/quickshell/qmlcache" }),
+    tip({ buildNotice: "cache", cacheFolder: "$QML_DISK_CACHE_PATH" }),
+    tip({ buildNotice: "cache", cacheFolder: "" }),
+    tip({ buildNotice: "cache", pip: true }).split("\n").length,
+    tip({ buildNotice: "" }),
+  ], [
+    "IPTV" + SEP + "click to open the guide\n" + RESTART,
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove " + DEF + ", then restart the shell",
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove $XDG_CACHE_HOME/quickshell/qmlcache, then restart the shell",
+    "IPTV" + SEP + "click to open the guide\nLoaded mid-update" + SEP + "remove $QML_DISK_CACHE_PATH, then restart the shell",
+    "IPTV" + SEP + "click to open the guide\n" + CACHE_OFF,
+    3,
+    "IPTV" + SEP + "click to open the guide",
+  ])
+  checkCall("D-REL-16: with no service the tooltip keeps its first line and adds the cache, at the default folder (nothing to ask where it is)", () =>
+    [Model.barTooltip({ serviceMissing: true }), Model.barTooltip({ serviceMissing: true, buildNotice: "cache", cacheFolder: "$QML_DISK_CACHE_PATH" })],
+    ["IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove " + DEF + " and restart again",
+     "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove " + DEF + " and restart again"])
+  checkCall("D-A11Y-14: with no service the bar's accessible name says so (it said \"IPTV, idle\"), whatever else it is handed", () =>
+    [Model.barAccessibleName({ serviceMissing: true }), Model.barAccessibleName({ serviceMissing: true, playing: true, name: "BBC One", buildNotice: "cache" }),
+     Model.barAccessibleName({}), Model.barAccessibleName({ serviceMissing: false })],
+    ["IPTV, service not loaded", "IPTV, service not loaded", "IPTV, idle", "IPTV, idle"])
+  checkCall("D-REL-16: the bar's accessible name speaks the notice last, the step and never the folder", () => [
+    Model.barAccessibleName({ buildNotice: "restart" }),
+    Model.barAccessibleName({ buildNotice: "cache" }),
+    Model.barAccessibleName({ buildNotice: "cache", cacheFolder: "" }),
+    Model.barAccessibleName({ buildNotice: "cache", error: true }),
+    Model.barAccessibleName({ buildNotice: "cache", playing: true, name: "BBC One", chno: "101" }),
+  ], [
+    "IPTV, idle, updated, restart the shell to see the new version",
+    "IPTV, idle, loaded mid-update, remove the QML cache and restart the shell",
+    "IPTV, idle, loaded mid-update, restart the shell",
+    "IPTV, playlist error, loaded mid-update, remove the QML cache and restart the shell",
+    "IPTV, playing channel 101, BBC One, loaded mid-update, remove the QML cache and restart the shell",
+  ])
+  checkCall("D-REL-16: the guide's no-service body gives the restart first, then the cache at the folder it names", () => [
+    Model.serviceMissingProse(Model.qmlCacheFolder({})),
+    Model.serviceMissingProse("$XDG_CACHE_HOME/quickshell/qmlcache"),
+    Model.serviceMissingProse(""),
+    Model.serviceMissingProse(undefined),
+  ], [
+    "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
+    "Run omarchy restart shell" + SEP + "if that does not help, remove $XDG_CACHE_HOME/quickshell/qmlcache and restart again",
+    "Run omarchy restart shell",
+    "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
+  ])
+  checkCall("D-REL-16: the service names the folder for the bar, from its own environment (the harness's Quickshell.env answers \"\": the default)", () => {
+    const H = require("./service-harness.js")
+    const h = H.bootService(serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml")), Model,
+      { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    return [h.compileErrors.length, h.root.buildCacheFolder]
+  }, [0, DEF])
+})()
+// END D-REL-16 WORDS
+
 checkCall("D-A11Y-8: every service call inside open() is guarded on the FUNCTION", function () {
   // Not a blanket rule: the guide calls the service unguarded in seven places
   // and they are all user-triggered actions (play, stop, refresh, favourite,
@@ -4345,9 +4459,15 @@ checkCall("D-HOST-1: the runtime reads its OWN directory, and the guide passes t
   // D-REL-16 boots since D-REL-16, which replaced two text pins here.
   return [
     qmlSites(/Qt\.resolvedUrl\("manifest\.json"\)/).length,
-    qmlSites(/staleBuild: root\.serviceReady && root\.service\.staleBuild === true/).length,
+    // D-REL-16: the guide and the bar read the service's notice through
+    // Model.serviceBuildNotice (a service from before the stamps reads
+    // "cache"), and the guide passes it to its footer with staleBuild for an
+    // older model. The views run under the host only: the caged arms observe
+    // what these name (QA-RESULTS, UNVERIFIED until then).
+    qmlSites(/Model\.serviceBuildNotice\(root\.service\)/).length,
+    qmlSites(/^\s*staleBuild: root\.buildNotice !== "",$/).length,
   ]
-}, [1, 1])
+}, [1, 2, 1])
 
 // ---- D-RUNG-17: the MIX search had the same defect in its fallback ---------
 const CURSOR_INK_SHIPPED = [
@@ -8988,7 +9108,8 @@ check("barTooltip not configured", Model.barTooltip({ configured: false }), "IPT
 check("barTooltip playing full name", Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event" }), "Playing Sky Sports Main Event")
 check("barTooltip error", Model.barTooltip({ configured: true, error: true }), "IPTV" + SEP + "playlist error, open the guide")
 check("barTooltip refreshing", Model.barTooltip({ configured: true, refreshing: true }), "IPTV" + SEP + "refreshing playlist\u2026")
-check("barTooltip service missing", Model.barTooltip({ serviceMissing: true }), "IPTV" + SEP + "service not loaded, run omarchy restart shell")
+// D-REL-16 (2026-11-25): and a second line, the QML cache at the default folder.
+check("barTooltip service missing", Model.barTooltip({ serviceMissing: true }), "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove ~/.cache/quickshell/qmlcache and restart again")
 check("barAccessibleName", [Model.barAccessibleName({}), Model.barAccessibleName({ playing: true, name: "X" }), Model.barAccessibleName({ error: true })], ["IPTV, idle", "IPTV, playing X", "IPTV, playlist error"])
 
 // ---- footer ----
@@ -15432,14 +15553,15 @@ check("section 5: the bar tooltip gains ONE line when PiP is on, and the glyph i
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: true }),
   Model.barTooltip({ configured: true, playing: true, name: "Sky Sports Main Event", pip: false }),
   Model.barTooltip({ configured: true, pip: true }),
-  // serviceMissing wins: with no service there is no PiP truth to report.
+  // serviceMissing wins: with no service there is no PiP truth to report
+  // (D-REL-16: its second line is the QML cache's, not PiP's).
   Model.barTooltip({ serviceMissing: true, pip: true }),
   Model.barGlyph({ playing: true, pip: true }) === Model.barGlyph({ playing: true })
 ], [
   "Playing Sky Sports Main Event\nPicture in picture: on",
   "Playing Sky Sports Main Event",
   "IPTV" + SEP + "click to open the guide\nPicture in picture: on",
-  "IPTV" + SEP + "service not loaded, run omarchy restart shell",
+  "IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove ~/.cache/quickshell/qmlcache and restart again",
   true
 ])
 check("section 5: `p pip` joins the list-mode hints, and is hidden where PiP cannot work", [

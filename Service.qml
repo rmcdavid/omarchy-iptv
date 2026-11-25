@@ -140,6 +140,16 @@ Item {
   readonly property string buildNotice: root.buildCheck && typeof root.buildCheck.notice === "string" ? root.buildCheck.notice : "cache"
   // Kept for an older guide beside this service, which reads only this.
   readonly property bool staleBuild: buildNotice !== ""
+  // Where Quickshell's QML cache is, NAMED (Model.qmlCacheFolder), for the
+  // bar, which imports no Quickshell of its own; null when the model cannot
+  // say, and the bar names the default.
+  readonly property var buildCacheFolder: {
+    try {
+      return Model.qmlCacheFolder({ QML_DISABLE_DISK_CACHE: Quickshell.env("QML_DISABLE_DISK_CACHE"),
+                                    QML_DISK_CACHE_PATH: Quickshell.env("QML_DISK_CACHE_PATH"),
+                                    XDG_CACHE_HOME: Quickshell.env("XDG_CACHE_HOME") })
+    } catch (e) { return null }
+  }
 
   // ---- timing constants, in one place (UX.md 5.9)
   readonly property int refreshDebounceMs: 300

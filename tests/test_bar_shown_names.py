@@ -41,6 +41,7 @@ SHELL = OMARCHY + "/shell"
 PROBE = r"""
 import QtQuick
 import QtQuick.Window
+import "Model.mjs" as Model
 Window {
   id: host
   visible: false
@@ -57,6 +58,14 @@ Window {
     property bool refreshing: false
     property bool paused: false
     property string status: "ready"
+    // D-REL-16 (rule 10): the bar reports its stamp and reads buildNotice; a
+    // service with neither reads as one from before the stamps ("cache"),
+    // which no real service on this tree gives. host_bar.qml's fake, the
+    // real Model.buildVerdict over what it is reported.
+    property var reportedStamps: ({})
+    function reportBuildStamp(file, stamp) { fakeService.reportedStamps = Model.withReportedStamp(fakeService.reportedStamps, file, stamp) }
+    readonly property string buildNotice: Model.buildVerdict({ reported: fakeService.reportedStamps,
+                                                               loadedDisk: Model.PLUGIN_VERSION, onDisk: Model.PLUGIN_VERSION }).notice
     function refresh() {}
     function stop() {}
     function zap(direction) {}
@@ -98,7 +107,17 @@ Window {
           fakeService.nowPlaying = { id: "c" + i, name: host.names[i] }
           out.push({ drawn: host.drawn(item, []), tooltip: item.tooltip, accessibleName: item.Accessible.name })
         }
-        console.log("BAR_SHOWN " + JSON.stringify(out))
+        // D-REL-16: what the widget reported when the host's bar let it
+        // resolve this service, then its words for another build's guide
+        // beside it (a cache notice) and for no service at all (D-A11Y-14).
+        var reported = JSON.parse(JSON.stringify(fakeService.reportedStamps))
+        fakeService.nowPlaying = null
+        fakeService.playing = false
+        fakeService.reportBuildStamp("Guide.qml", "99.0.0")
+        var cache = { notice: item.buildNotice, tooltip: item.tooltip, accessibleName: item.Accessible.name }
+        item.service = null
+        var none = { notice: item.buildNotice, tooltip: item.tooltip, accessibleName: item.Accessible.name }
+        console.log("BAR_SHOWN " + JSON.stringify({ names: out, reported: reported, stamp: item.buildStamp, cache: cache, none: none }))
         Qt.exit(0)
       })
     }
@@ -144,7 +163,7 @@ class BarShownNamesTest(unittest.TestCase):
 
     def test_the_bar_draws_tooltips_and_names_the_shown_name(self):
         names = self.fixture()
-        seen = self.observe([v["name"] for v in names])
+        seen = self.observe([v["name"] for v in names])["names"]
         self.assertEqual(len(seen), len(names))
         sep = " \u00b7 "
         bad = []
@@ -158,6 +177,30 @@ class BarShownNamesTest(unittest.TestCase):
             text = json.dumps(got, ensure_ascii=False)
             bad.extend("%s: %r leaked" % (v["why"], frag) for frag in v["mustNotAppear"] if frag in text)
         self.assertEqual([], bad)
+
+    def test_the_bar_reports_its_build_stamp_and_speaks_the_notice(self):
+        """D-REL-16 (the lead's call A1) and D-A11Y-14, observed on the SHIPPING
+        widget: handed a bar, it resolves the service and reports its own stamp
+        -- the value build_stamps.py reads off BarWidget.qml -- and, beside a
+        guide of another build and with no service at all, its tooltip and
+        accessible name carry the words the model composes. Under this host's
+        stand-in, not the host's bar: the caged arms observe that."""
+        got = self.observe([])
+        stamps = json.loads(subprocess.run([sys.executable, "-I", os.path.join(REPO, "scripts", "build_stamps.py"), "--json"],
+                                           capture_output=True, text=True, timeout=60, check=True).stdout)
+        sep = " \u00b7 "
+        self.assertEqual({"BarWidget.qml": stamps["BarWidget.qml"]}, got["reported"])
+        self.assertEqual(stamps["BarWidget.qml"], got["stamp"])
+        self.assertEqual({"notice": "cache",
+                          "tooltip": "IPTV" + sep + "click to open the guide\nLoaded mid-update" + sep
+                                     + "remove ~/.cache/quickshell/qmlcache, then restart the shell",
+                          "accessibleName": "IPTV, idle, loaded mid-update, remove the QML cache and restart the shell"},
+                         got["cache"])
+        self.assertEqual({"notice": "",
+                          "tooltip": "IPTV" + sep + "service not loaded, run omarchy restart shell\nIf that does not help, "
+                                     "remove ~/.cache/quickshell/qmlcache and restart again",
+                          "accessibleName": "IPTV, service not loaded"},
+                         got["none"])
 
 
 if __name__ == "__main__":

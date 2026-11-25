@@ -112,8 +112,8 @@ version, and then **restart the shell with `omarchy-restart-shell`**. The
 update rewrites the plugin's files on disk, but the running shell keeps the
 plugin it already loaded — the background service, the guide and the bar —
 until it is restarted, and disabling and enabling the plugin does not load the
-new version either. The guide's footer says `Updated`, then `restart the
-shell to see the new version`, while that is the case. This matters for the logo update described under Settings: until
+new version either. The guide's footer and the bar's tooltip say `Updated`,
+then `restart the shell to see the new version`, while that is the case. This matters for the logo update described under Settings: until
 the shell restarts, the old service is the one talking to the new helper, so
 the cache sweep runs but the guide-side guard that keeps one source's logo
 list from being drawn against another source's files is not in place yet.
@@ -665,6 +665,7 @@ omarchy-shell io.github.rmcdavid.iptv live                # back to live; JSON r
 omarchy-shell io.github.rmcdavid.iptv stop
 omarchy-shell io.github.rmcdavid.iptv refresh
 omarchy-shell io.github.rmcdavid.iptv status              # JSON
+omarchy-shell io.github.rmcdavid.iptv build               # JSON: the build check alone, which answers when status cannot
 ```
 
 ## Pause and rewind
@@ -1783,8 +1784,9 @@ Nothing inside the plugin directory is written at runtime.
   code it loaded first: the shell's own plugin reload, a rescan and a
   disable and an enable all bring back the same build, the kept-loaded
   service and the guide and the bar alike.
-- **IPTV is missing from the bar, or misbehaves, after an update even though
-  you restarted the shell.** A shell that was starting while
+- **The guide's footer or the bar's tooltip says `Loaded mid-update`, or IPTV
+  is missing from the bar or misbehaves after an update, even though you
+  restarted the shell.** A shell that was starting while
   `omarchy plugin update` was still writing the plugin's files can fail to
   load the plugin at all, so the bar shows no IPTV and the guide does not
   open, or can load part of the old version beside part of the new one; and
@@ -1796,7 +1798,9 @@ Nothing inside the plugin directory is written at runtime.
   is under `$XDG_CACHE_HOME/quickshell/` instead when you set that variable).
   The cache holds only compiled copies of QML and JavaScript files and is
   rebuilt at the next start. Updating to the next version also clears it for
-  the files that version changes.
+  the files that version changes. The bar's tooltip names the folder it
+  found; with no notice and no IPTV in the bar, this paragraph is the only
+  place that can say so.
 
 ## Uninstall
 

@@ -57,6 +57,33 @@ Item {
   // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
   // names the code that is running, whichever file that unit was saved under.
   readonly property string buildStamp: "0.20.0"
+  // D-REL-16 (the lead's call A1). This file reports its stamp to the service
+  // it is handed: at completion, when one is there already, and at every
+  // change of `service` -- the host's panel Loader assigns it in its onLoaded,
+  // after this component completes (shell.qml, read), and open() resolves it
+  // where that found none. The service's report is idempotent. Guarded on the
+  // FUNCTION, as every service call in open() is (D-A11Y-8): a service from
+  // before the stamps has none.
+  function reportBuild() {
+    if (root.service && typeof root.service.reportBuildStamp === "function") root.service.reportBuildStamp("Guide.qml", root.buildStamp)
+  }
+  onServiceChanged: root.reportBuild()
+  Component.onCompleted: root.reportBuild()
+  // What the service says of the build (Model.serviceBuildNotice): "" with
+  // no service, "restart", or "cache" -- a service from before the stamps
+  // included. A model without the reading beside this file is a mix too.
+  readonly property string buildNotice: { try { return Model.serviceBuildNotice(root.service) } catch (e) { return "cache" } }
+  // Where Quickshell's QML cache is, NAMED (Model.qmlCacheFolder): the guide
+  // asks the environment itself, because with no service nothing else can.
+  // null when the model cannot say, and the words then name the default.
+  readonly property var cacheFolder: {
+    try {
+      return Model.qmlCacheFolder({ QML_DISABLE_DISK_CACHE: Quickshell.env("QML_DISABLE_DISK_CACHE"),
+                                    QML_DISK_CACHE_PATH: Quickshell.env("QML_DISK_CACHE_PATH"),
+                                    XDG_CACHE_HOME: Quickshell.env("XDG_CACHE_HOME") })
+    } catch (e) { return null }
+  }
+  readonly property string serviceMissingText: { try { return Model.serviceMissingProse(root.cacheFolder) } catch (e) { return "Run omarchy restart shell" } }
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "io.github.rmcdavid.iptv"
   property bool opened: false
@@ -233,7 +260,8 @@ Item {
   readonly property var copy: ({
     searchPlaceholder: "Search channels" + Model.ELLIPSIS,
     serviceTitle: "Service not loaded",
-    serviceProse: "Run omarchy restart shell",
+    // D-REL-16: and the cache after the restart (Model.serviceMissingProse).
+    serviceProse: root.serviceMissingText,
     unconfiguredTitle: "No playlist configured",
     // D-SINK-19 round 11 (R21): the guide is the one place a source is added.
     // This used to offer `omarchy bar set ... playlistUrl <url>` as a command
@@ -886,7 +914,12 @@ Item {
     // D-HOST-1: the running component is older than the files it was loaded
     // from, which means an update landed and a hot reload did not replace it.
     // Sits below a provider warning and above the plain counts.
-    staleBuild: root.serviceReady && root.service.staleBuild === true,
+    // D-REL-16: the service's notice (buildNotice above) -- "cache" sits
+    // above the empty-state gate, "restart" here. `staleBuild` is still
+    // passed for an older model's footerStatus, which reads only that.
+    staleBuild: root.buildNotice !== "",
+    buildNotice: root.buildNotice,
+    cacheFolder: root.cacheFolder,
     count: root.surface.channelCount,
     lastUpdated: root.serviceReady ? root.service.lastUpdated : "",
     stale: root.serviceStatus === "cached",
