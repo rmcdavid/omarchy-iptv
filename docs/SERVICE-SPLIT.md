@@ -63,17 +63,17 @@ was.
 
 | file | bytes | functions | what it holds |
 |---|---|---|---|
-| `Service.qml` | 233,196 | 47 of its own, 162 forwarders | every property, signal, change handler and object; the state machine; the functions listed below; one import line per code-behind |
+| `Service.qml` | 238,260 | 50 of its own, 162 forwarders | every property, signal, change handler and object; the state machine; the functions listed below; one import line per code-behind |
 | `Service-pip.js` | 20,539 | 24 | picture in picture: the `p` key and its verb, the window and monitor reads, the step plan, the peek, the probe |
 | `Service-player.js` | 112,935 | 55 | the detached player: play, stop, zap, the control verbs and their results, the probe and adoption, the socket observer and its lines, the failure notices |
 | `Service-rewind.js` | 9,410 | 17 | live rewind: the seek queue and its readout, the track requests, and `togglePause` |
 | `Service-sources.js` | 90,982 | 66 | sources: switching, probing, reconcile and adoption, cache jobs, the playlist and guide runs, the bar entry writer, logos, dead-channel marks |
 
-**[2026-11-25, D-REL-16, lane-l3a: the bytes and counts re-read on the l3stamp branch. Each code-behind's first function is now its build stamp, and `Service.qml` carries their four forwarders beside its own `buildStamp`; see "Adding a code-behind".]**
+**[2026-11-25, D-REL-16, lane-l3a: the bytes and counts re-read on the l3stamp branch. Each code-behind's first function is now its build stamp, and `Service.qml` carries their four forwarders beside its own `buildStamp`; see "Adding a code-behind".]** **[Re-read again at the l3stamp tip by lane-l3fix, 2026-11-25, after the words recheck found the table still at lane-l3a's 0a5dbb5: lane-l3b's reading added three root functions (`ownBuildStamps`, `reportBuildStamp`, `buildReply`) and grew `Service.qml` and `Guide.qml`; the code-behinds are unchanged since 0a5dbb5.]**
 
 Each code-behind is mode 100644 and on `ALLOWLIST` in `scripts/release.py`
 (47 files on this tree); `release.py check` reads 47 files and 26 runtime
-sources, the largest now `Guide.qml` at 310,448 bytes.
+sources, the largest now `Guide.qml` at 312,903 bytes.
 
 **What stays on the root, and why.**
 - Everything that is not a function: properties, signals, change handlers
@@ -99,6 +99,10 @@ sources, the largest now `Guide.qml` at 310,448 bytes.
   same commit, red first.
 - `persistActiveLater`, by D-REL-15: a function that must outlive its call
   is made on the root (below).
+- `ownBuildStamps`, `reportBuildStamp` and `buildReply`, D-REL-16's
+  reading (L3): the stamps the service holds, a view's report, and the
+  `build` verb's reply, which must answer where a code-behind throws, so
+  none of them lives in one ("What the build stamps tell", below).
 
 ## How a code-behind runs
 
@@ -239,8 +243,8 @@ as the model's import rather than a code-behind (F-HARNESS-123), so every
 The gate's "service split guard" runs `scripts/split-service.py --check`
 over the tree and then over its own 34 cases
 (`tests/fixtures/service-split/check-cases.json`), so the step goes red when
-the judge stops judging. On this tree it reads 5 files, 4 code-behinds, 47
-root functions, 162 forwarders and 2,268 root member sites, 34 of 34 cases;
+the judge stops judging. On this tree it reads 5 files, 4 code-behinds, 50
+root functions, 162 forwarders and 2,297 root member sites, 34 of 34 cases;
 `scripts/check.sh` floors the sites at 2,200 and the cases at 34. Every
 refusal is one line naming its kind.
 
@@ -660,7 +664,7 @@ code-behinds ask nothing of the user that 0.20.0 did not: the same
 restart, and the same second restart after a load inside the window,
 whose shapes they widen. **[2026-11-24, lane-settle-c5d: three corrections. Not every release's notes ask: of CHANGELOG.md's 46 sections 13 do, 0.13.4 to 0.14.2 and 0.15.0 to 0.20.0 (0.14.3's do not, 0.13.3's say no restart is needed, and none from 0.1.0 to 0.13.2 asks). A second restart is not always enough: where a race poisoned Qt's disk cache ("Real races", above), every start runs the mix again, on root b for `Service.qml` and on root a, today's host, for a code-behind. What recovers is removing the cache folder, `$XDG_CACHE_HOME/quickshell/qmlcache` (`~/.cache/quickshell/qmlcache` by default), and restarting, or a later update that rewrites the poisoned file; the README's Troubleshooting says so, and its Updating paragraph says the guide and the bar stay loaded too and that a disable and an enable loads nothing new. And with a mixed pair no build reading tells the user, so the lead's call L3, a build stamp in every shipped file the service, the guide and the bar load, read with D-HOST-1's, is the next step before the first release that ships a code-behind]** **[2026-11-24, lane-fix-c5d: two more. A shell that starts while a four-worker update has the model unlinked can load nothing of the plugin: no bar entry, no guide, no service (recheck-c5ds-measure's M1 and M2, above); a restart recovers it, and the README's Troubleshooting names a plugin missing from the bar. And, the lead's call under the owner's standing authority of 2026-11-09, L3 gains two sentences: a stale reading right after a fresh start can only mean a race or a poisoned cache, so the stamp's notice names the cache removal (the README's Troubleshooting step) when it reads stale at start-up, rather than only asking for a restart, which cannot clear a poisoned unit; and the stamp cannot speak in the four-worker model outcome, where no bar, guide or service loads, so only the README reaches that user. The first release that ships a code-behind carries a release-notes line naming the cache removal, an item for that cut (D-REL-16)]**
 
-**[2026-11-25, D-REL-16's L3, on the l3stamp branch (lane-l3a, lane-l3b): the plugin now says which of these a user is in, below.]** After an update under a running shell the guide's footer and the bar's tooltip say `Updated`, `restart the shell to see the new version`, from the update's own rescan (D-HOST-16) rather than once the guide opens. A shell that loaded files of two builds, or a build already behind the disk at its first reading, says `Loaded mid-update`, with the QML cache's removal: `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the README's Troubleshooting step; the tooltip names the folder from `$QML_DISK_CACHE_PATH` or an absolute `$XDG_CACHE_HOME` when set). With no service the guide's body and the bar's tooltip add the cache step after the restart, and the bar's accessible name says `IPTV, service not loaded` (D-A11Y-14). With no plugin loaded nothing of the plugin can speak: the README and the cut's notes are all that reach that user. UNVERIFIED until the caged arms (QA-RESULTS "D-REL-16, L3's reading and words (lane-l3b, 2026-11-25)").
+**[2026-11-25, D-REL-16's L3, on the l3stamp branch (lane-l3a, lane-l3b): the plugin now says which of these a user is in, below.]** After an update under a running shell the guide's footer and the bar's tooltip say `Updated`, `restart the shell to see the new version`, from the update's own rescan (D-HOST-16) rather than once the guide opens. A shell that loaded files of two builds, or a build already behind the disk at its first reading, says `Loaded mid-update`, with the QML cache's removal -- and so, the stated misread, does a disable and an enable after an update, which makes a new service of the old build whose first reading is already the new version, and where the restart alone is the fix: `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the README's Troubleshooting step; the tooltip names the folder from `$QML_DISK_CACHE_PATH` or an absolute `$XDG_CACHE_HOME` when set, and drops the step only while `QML_DISABLE_DISK_CACHE` turns the cache off and `QML_FORCE_DISK_CACHE` does not force it on). With no service the guide's body and the bar's tooltip add the cache step after the restart, and the bar's accessible name says `IPTV, service not loaded` (D-A11Y-14). With no plugin loaded nothing of the plugin can speak: the README and the cut's notes are all that reach that user. UNVERIFIED until the caged arms (QA-RESULTS "D-REL-16, L3's reading and words (lane-l3b, 2026-11-25)"), and with them two things the words assert and no arm has shown: the README's and the notices' order, the cache removed while the shell runs and then a restart (`RIG_RECOVER=clear-live`; call (d) measured stop, remove, start), and root b's pre-stamp `Service.qml` beside stamped views reading the cache line through `serviceBuildNotice` (b-01-x).
 
 **What it changed.** No shipped code: the ordinary update path showed no
 failure, so no fix was made; whether that meets call (d) is the lead's
@@ -691,7 +695,10 @@ reading"). For a code-behind that means three things beside what
   added there too, or its file is never judged; the node suite boots one
   file set per code-behind the service declares with that file's stamp of
   another build and goes red for any it does not read (tests/Model.test.js,
-  "D-REL-16: a Service-X.js of another build ...").
+  "D-REL-16: a Service-X.js of another build ..."), and one more per
+  code-behind whose stamp READ throws, which reads `"?"` (the logic
+  recheck's mutant that read Service.qml's own stamp in that catch was
+  green in every check until then; "... whose stamp read throws ...").
 - **What answers in a mix.** `buildReply()` and the IPC `build` verb read
   the `buildCheck` binding and nothing that throws, so they answer in the
   measured TypeError mix (C2's Service.qml beside C1's Service-player.js),

@@ -5140,11 +5140,16 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
     `buildStamp<Domain>()` function returning its literal, the file's first
     function, read through its forwarder (docs/SERVICE-SPLIT.md, "Adding a
     code-behind").
-  A stamp is never edited on `dev`: `build_stamps.py --cut`, run at the cut
-  after the version bump, gives every runtime file whose blob differs from
-  `main`'s the version being cut and rewrites `BUILD_FILES`, and
-  `release.py build` refuses a cut in which a changed file does not carry
-  it (`cut_problems`). A new part or a new code-behind therefore needs its
+  A stamp is never edited by hand: `build_stamps.py --cut`, run on `dev`
+  at the cut after the version bump and after `git fetch origin
+  main:main`, gives every runtime file whose blob differs from the main
+  branch's (`refs/heads/main`, the ref `release.py build` reads) the
+  version being cut and rewrites `BUILD_FILES`, and `release.py build`
+  refuses a cut in which a changed file does not carry it (`cut_problems`,
+  `stale`) or in which a file differs from that main ONLY in its stamp
+  (`needless`: a cut against a local main behind origin's restamps files
+  the update does not change; a cut against the current main sets such a
+  stamp back, lane-l3fix after the gate recheck of 1c64c77). A new part or a new code-behind therefore needs its
   stamp at the last cut's version and its row, as a new file needs its
   `ALLOWLIST` entry. **Frozen, additive only** (the lead's call L3-h under
   the owner's standing authority of 2026-11-09), because an OLDER build's
@@ -5153,8 +5158,17 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   `BUILD_STAMP_<PART>`, `BUILD_STAMP_AGGREGATOR`, `PLUGIN_VERSION`,
   `BUILD_FILES`), `buildVerdict`'s input fields and its output fields,
   `reportBuildStamp` and `serviceBuildNotice` (the last three as L3's
-  reading defines them). A field may be added; none is renamed, retyped or
-  removed.
+  reading defines them), and what a view or a service of another build
+  reads of its partner (the two rechecks of 1c64c77, 2026-11-25): the
+  service's `buildNotice`, which `serviceBuildNotice` reads, so a later
+  service that renamed it would read "cache" in every view of this build;
+  its `staleBuild`, which a 0.20.0 guide reads; its `buildCacheFolder`,
+  which the bar reads (a string or nothing, so the bar names the default
+  without it); and `Model.withReportedStamp`, which this `Service.qml`'s
+  `reportBuildStamp` calls, so a later model without it would drop every
+  view's report (the call is caught since lane-l3fix, and the verdict then
+  reads "cache" through the binding's own catch). A field may be added;
+  none is renamed, retyped or removed.
 - **The reading (D-REL-16, L3, lane-l3b, 2026-11-25; D-HOST-1's check,
   extended).** What the running code makes of the stamps, all of it in the
   model (`model/build.mjs`, rule 12) but the collection:
@@ -5192,7 +5206,11 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   - The words are the model's (`Model.footerStatus`, `barTooltip`,
     `barAccessibleName`, `serviceMissingProse`; UX.md 6.1, 6.3, 7.1); the
     folder is `Model.qmlCacheFolder(env)`, a variable's NAME and never its
-    value. No notice posts a notification (the lead's call L3-c).
+    value, over the environment the guide and the service hand it by one
+    list, `Model.QML_CACHE_ENV`; it reads the cache as off only while
+    `QML_FORCE_DISK_CACHE`, which upstream Qt asks first, holds nothing
+    (lane-l3fix, after the words recheck). No notice posts a notification
+    (the lead's call L3-c).
   - UNVERIFIED until the caged arms (rule 14): that each kind of unit's
     literal survives Qt's disk cache as the old build's (measured for QML
     and code-behind literals by the reload rig's marks; reasoned for a
@@ -5201,7 +5219,15 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
     shipping bar under a stand-in host by tests/test_bar_shown_names.py);
     that the host's hand-off raises onManifestChanged at a real update's
     rescan; that V4 fails the module link on a missing named export (the
-    first stamped cut beside a poisoned part from before the stamps).
+    first stamped cut beside a poisoned part from before the stamps); that
+    the README's and the notices' order -- the cache removed while the
+    shell runs, then a restart (`RIG_RECOVER=clear-live`) -- recovers, where
+    call (d) measured stop, remove, start; that a pre-stamp `Service.qml`
+    on root b beside stamped views reads the cache line through
+    `serviceBuildNotice` (b-01-x); and that Qt asks `QML_FORCE_DISK_CACHE`
+    before `QML_DISABLE_DISK_CACHE` (upstream's `diskCacheOptions` as the
+    words recheck cites it; the installed binary's strings list the two
+    names in that order, which is consistent with it and proves nothing).
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in

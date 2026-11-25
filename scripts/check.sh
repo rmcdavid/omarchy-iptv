@@ -836,7 +836,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-113}
 # the service's folder), red on the parent tree (20 of 20) and on 15
 # one-decision mutants; two older tooltip pins take the no-service line's
 # second line; the suite runs 4160, and 4160 without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4160}
+# 2026-11-25, lane-l3fix (D-REL-16, the three rechecks of 1c64c77): 4160 ->
+# 4171 -- one boot per code-behind whose stamp read throws (each red when its
+# catch reads Service.qml's stamp), a view's report beside a model with none
+# of L3's names (red first: both reports threw), four environments of
+# QML_FORCE_DISK_CACHE, QML_CACHE_ENV held to what the composer reads, and
+# the service's folder from a boot's environment (red first, 5 of the 6 new
+# words checks); the suite runs 4171, and 4171 without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4171}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1490,7 +1497,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4160}
 # bar and with the bar's report deleted; its fake computes the notice with
 # the real Model.buildVerdict (rule 10: the old fake read as a service from
 # before the stamps, 42 bad entries).
-PY_TESTS_MIN=${PY_TESTS_MIN:-3130}
+# 2026-11-25, lane-l3fix (D-REL-16, the gate recheck of 1c64c77): 3130 ->
+# 3135 -- tests/test_build_stamps.py's needless restamp (a cut against an
+# older main named and set back, its blob judged with the filters, none on a
+# main from before the stamps), the CLI's default ref refs/heads/main, and
+# every refusal case naming its message; red first and on four one-decision
+# mutants (QA-RESULTS "D-REL-16: the three rechecks of 1c64c77").
+PY_TESTS_MIN=${PY_TESTS_MIN:-3135}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1687,7 +1700,10 @@ MODEL_REGEX_LITERALS_MIN=${MODEL_REGEX_LITERALS_MIN:-60}
 # means the extraction stopped seeing quotes, not that the README improved.
 # 2026-11-25, lane-l3b (D-REL-16): 19 -> 32, the count the tree joins -- 31
 # on its parent, and `Loaded mid-update` (model/view.mjs) the 32nd.
-README_NOTICES_MIN=${README_NOTICES_MIN:-32}
+# 2026-11-25, lane-l3fix (D-REL-16, the words recheck): 32 -> 34, the
+# Updating sentence and the Troubleshooting bullet quoting `Loaded
+# mid-update` once more each for a disable and an enable after an update.
+README_NOTICES_MIN=${README_NOTICES_MIN:-34}
 # F-M3-20 (2026-10-24, lane-p23-docs): the SR register holds 40 rows, the
 # one count the gate reads from the checker's summary line (its citation
 # and file counts are printed, never floored, and the first version of

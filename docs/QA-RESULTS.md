@@ -29201,6 +29201,16 @@ declarations 1153 -> 1171; the gate on 0a5dbb5 green.
   `QML_DISK_CACHE` exactly, QStandardPaths with a relative
   `XDG_CACHE_HOME`, and whether `QS_APP_ID` or the pragma moves Qt's cache
   location (the host sets neither).
+  **[2026-11-25, lane-l3fix, after the words recheck of 1c64c77: the words
+  now read `QML_FORCE_DISK_CACHE` too -- upstream's `diskCacheOptions` asks
+  it before `QML_DISABLE_DISK_CACHE`, as the recheck cites the source; the
+  installed binary's strings list the two in that order, which is
+  consistent and proves nothing -- and call the cache off only while it
+  holds nothing. The installed private header `qqmlglobal_p.h` shows how Qt
+  reads a boolean option (`qmlConvertBoolConfigOption`: any value but "",
+  "0" and "false" is set); the whole-number rule for the off switch is a
+  safe subset of it, and which options Qt reads that way stays read, not
+  run.]**
 - A1, read and not run: the host's panel Loader is asynchronous and sets
   `item.service = shell.serviceFor(...)` in its onLoaded, after the
   guide's completion, and `serviceFor` answers null until the service is
@@ -29224,6 +29234,12 @@ declarations 1153 -> 1171; the gate on 0a5dbb5 green.
   mix reading "" with a stamp unequal to its mark (`stamps disagree:
   Service-player.js marked C2 (0.99.1) but stamped 0.99.0; THE NOTICE DOES
   NOT FIT THE MARKS`).
+  **[2026-11-25, lane-l3fix, after the gate recheck of 1c64c77: the
+  `agree` line skipped a marked file the reply does not stamp, so a
+  one-build C2 reply naming every file but BarWidget.qml -- an unreported
+  view, the l3-bar-no-report patch's shape -- read "agree with every
+  mark". It now reads `BarWidget.qml marked C2 (0.99.1) but not stamped`
+  and that the notice does not fit (red first, by calling stamp_lines).]**
 - run.sh: `RIG_RECOVER=clear-live`, the README's order (the folder removed
   while the shell runs, then a restart); `bash -n` clean, and a bogus value
   refused before anything starts.
@@ -29268,7 +29284,12 @@ with a relative XDG_CACHE_HOME; how Qt reads its two cache switches; a QML
 `var` property keeping a null-prototype map as one (V4 iterates them in the
 spec; the service's `reportedStamps` is untested under the engine); the
 a11y probe's L2-BAR-08 on the bus; B44 live; the rig's analyze lines over
-a real arm.
+a real arm. **[2026-11-25, lane-l3fix, after the words recheck: and the
+README's and the notices' removal order, the cache removed while the shell
+runs and then a restart (`RIG_RECOVER=clear-live`; call (d) measured stop,
+remove, start), and root b's pre-stamp Service.qml beside stamped views
+reading the cache line through `serviceBuildNotice` (b-01-x), both claimed
+in the words and shown by no arm.]**
 
 **What the caged arms must show** (the display lane's; the plan's
 cagedArms with what this lane built): a-12-r and b-12-r, `build` reading
@@ -29282,7 +29303,14 @@ with `mixed` naming C2's files, the footer and tooltip lines, still
 a-01-h4 and a-01-h0, the guide's new no-service prose and the tooltip's
 two lines; a-12-x and a-12-x-c4 at RIG_RACE_DELAY_MS 633, 639, 645 and
 650 with RIG_RECOVER=clear and RIG_QMLCACHE=home, "cache" naming each
-POISONED file after both restarts and "" after the clear, the same with
+POISONED file after both restarts and "" after the clear -- **[but for
+model/build.mjs itself, the logic recheck of 1c64c77: `mixed` lists the
+files whose stamp is not the LOADED table's row, so an old build.mjs beside
+newer files reads "cache" and names every file the newer cut changed, never
+build.mjs (tests/Model.test.js's build.mjs copy expects `["Service.qml"]`).
+Its tell is `running`, and the stamps' `model/build.mjs`, reading the old
+version; analyze.py's `agree` line judges no model part, so it would not
+flag that either]** -- the same with
 RIG_RECOVER=update and the new RIG_RECOVER=clear-live; b-12-x, "cache"
 naming Service.qml; b-01-x, C0's poisoned Service.qml beside C1, the C1
 guide's footer and the bar's tooltip reading the cache line through
@@ -29293,3 +29321,126 @@ reasoned; `key-scenario.sh live` with B44 green and, with
 l3-bar-no-report.patch through `--tree`, B44 red at `files:25`; and the
 caged a11y probe with L2-BAR-08 green. In every arm analyze.py's `agree`
 line must read that the notice fits the marks.
+
+## D-REL-16: the three rechecks of 1c64c77 (lane-l3fix, 2026-11-25)
+
+Three read-only rechecks (logic, gate, words) reviewed the l3stamp branch at
+1c64c77; logic and words read it blocked, gate pushable. This lane fixed
+every finding they marked must-fix, and every should-fix and nit it could
+make small and sure; what it left is said below with why. No display, cage,
+quickshell, player or scenario live half was run; the crash journal read 89
+at the start, after every Qt run of the gates, and at the end.
+
+**Must-fix, fixed.**
+- Logic: no test held the catch on a code-behind's stamp read
+  (`ownBuildStamps`), so its mutant O6 -- the catch reading Service.qml's
+  own stamp -- left a pre-stamp code-behind beside this Service.qml reading
+  "" with the whole suite green. One boot per code-behind the service
+  declares now makes that read throw a TypeError (the harness refuses a
+  forwarder with no function, `no-function`, so a throwing body is the
+  device, as in the TypeError-mix check) and expects "cache", `mixed` the
+  file, its stamp `"?"`. Each of the four catches mutated is red in exactly
+  its own check (69 checks, 1 failure each). 420980d.
+- Words, blocker: README's Updating sentence said `Updated` after a disable
+  and an enable, where the reading says `Loaded mid-update` (a new service of
+  the old build whose first reading is already the new version). The
+  sentence, the Troubleshooting bullet, UX.md 6.1's `cache` definition and
+  SERVICE-SPLIT's L3 bracket now name that case and say the restart alone is
+  the fix there.
+- Words, blocker: SERVICE-SPLIT's counts were lane-l3a's at 0a5dbb5 under a
+  bracket saying they were re-read. Re-read at the tip: Service.qml 238,260
+  bytes and 50 root functions (`ownBuildStamps`, `reportBuildStamp` and
+  `buildReply` added to "What stays on the root"), the guard's 2,297 sites,
+  Guide.qml 312,903 bytes the largest file.
+- Words, blocker: README Troubleshooting said the bar's tooltip names the
+  folder it found, which is false with no service (the tooltip names the
+  default, as the plan's words and UX.md 6.3 say). It now says the guide
+  names the folder Qt uses, the tooltip too while the service runs, and the
+  default with none. The tooltip's no-service line is left as the plan
+  wrote it (the lead's call L3-b).
+
+**Should-fix and nits, fixed.**
+- Logic nit: `reportBuildStamp` called `Model.withReportedStamp` with no
+  catch. Beside a model with none of L3's eight public names, a boot of the
+  shipping service showed both views' reports throwing a TypeError (red
+  first); with the catch both answer and the notice still reads "cache".
+- Words: `QML_FORCE_DISK_CACHE`, which upstream's diskCacheOptions asks
+  before `QML_DISABLE_DISK_CACHE` (as the words recheck cites the source;
+  read, not run), was never read, so a user with both set was told to
+  restart without removing a cache that is on. `qmlCacheFolder` reads the
+  cache as off only while the forced one holds nothing; the guide and the
+  service hand it their environment from one list, `Model.QML_CACHE_ENV`,
+  which a recording proxy holds to exactly the names the composer reads,
+  and the harness's `Quickshell.env` answers a boot's `env`, so the
+  service's half is a call (red first: 5 of the 6 new checks; a mutant list
+  without the forced name, 2). The guide's half is the same loop and is not
+  booted here. The installed `qqmlglobal_p.h`'s boolean reading is cited in
+  the composer and in lane-l3b's A2 bracket.
+- Gate: a `--cut` against a local main behind origin's restamped every file
+  changed since it, files the update does not change among them, and the
+  cut's check against the current main passed them all. build_stamps.py
+  names such a file `needless` -- it differs from the main the cut compares
+  with only in its stamp: set back to that main's stamp, it hashes, filters
+  applied, to that main's blob -- so release.py build refuses it, and
+  `--cut` against the current main sets the stamp back. The default ref is
+  `refs/heads/main`, the ref release.py build reads, so a tag named `main`
+  cannot split the two. tests/test_build_stamps.py: the finding's shape
+  measured (an older main's cut, then the current main: `needless` for both
+  restamped files, the cut setting both back, a second cut writing
+  nothing), the filters, none on a main from before the stamps, and the
+  CLI's default against a tag named `main` -- red first, 2 failures of 26.
+  One-decision mutants, each red: the check that never names it (5
+  failures, and --check red on the new strict case), the cut that never
+  sets back (5, --check red on the new cut case), the hash with no path and
+  so no filters (1), the default ref the bare name (1). The skip for a main
+  with no stamp line is an equivalent mutant: its hash can never match.
+  Two cases join the fixture (46 -> 48).
+- Gate nit: the step's self-test compared only each case's first refusal
+  kind, so lane-l3a's M7 (a row unequal to its file) and M8 (the table's
+  file list) were green in --check behind the block-form refusal of the
+  same kind. Every refusal case now names its message (`says`); M7 and M8
+  turn --check red (1 and 3 cases wrong), and a runner that ignores `says`
+  is red in the unit suite. M17's shape, check()'s own wiring, stays the
+  unit suite's (`test_a_tree_problem_reds_the_check`), as it was.
+- Gate nit: analyze.py's `agree` line skipped a marked file the `build`
+  reply does not stamp; called with a one-build C2 reply naming every file
+  but BarWidget.qml it read "agree with every mark", and now reads
+  `BarWidget.qml marked C2 (0.99.1) but not stamped` and that the notice
+  does not fit.
+- Gate nit: check.sh called the stamp floors exact beside a `<`; it says
+  floors, and the case floor is 48.
+- Words and logic nits: ARCHITECTURE section 9's frozen list (L3-h) gains
+  what a partner of another build reads: the service's `buildNotice`,
+  `staleBuild` and `buildCacheFolder`, and `Model.withReportedStamp`. The
+  generated table's comment said it is never edited by hand, where between
+  cuts a new file's row is the one hand edit: it says so, in four lines as
+  before, and ARCHITECTURE's "never edited on `dev`" reads "never edited by
+  hand". The D-REL-16 bracket gives the counts from the base. The new
+  release gate the board stated (the caged arms) is lane-l3b's proposal,
+  and both brackets now say so. The removal order (`RIG_RECOVER=clear-live`)
+  and b-01-x join every L3 UNVERIFIED list. UX.md 6.2's bracket names the
+  three rungs the empty-state gate does not hold back. The Troubleshooting
+  bullet joins the remedy to the notice ("still says `Loaded mid-update`").
+  The Decisions-log row keeps the calls apart from what the lanes read.
+- Logic nit: an old model/build.mjs beside newer files reads "cache" and
+  names every file the newer cut changed, never build.mjs; lane-l3b's
+  caged-arm list now says so, and that `running` and the stamps'
+  `model/build.mjs` are its tell.
+
+**Left, with why.**
+- Words nit (D-A11Y-14's name gives the state, not the step): `IPTV,
+  service not loaded` is the plan's userWords under the lead's call L3-b,
+  true as written; adding the step is a words call for the lead or the
+  owner.
+- The two draft CHANGELOG findings (logic, words) and the CLAUDE.md draft's
+  wording are about text off the tree; this lane's result redrafts them for
+  the lead.
+- 420980d's three `var`s sat inside try blocks and moved qmllint's counts
+  (Guide.qml 649 -> 651); 05a8284 declares them where qmllint does not count
+  them, and both files' findings are again exactly 1c64c77's.
+
+**Counts.** Node 4160 -> 4171 (and without the own-write echo), python by
+discovery 3130 -> 3135, the build stamp guard's cases 46 -> 48, README
+notices joined 32 -> 34; the qml spec stays 113, split-service 50 root
+functions and 162 forwarders, release.py check 47 files. The gate on a
+clone of 420980d: exit 0, all green.
