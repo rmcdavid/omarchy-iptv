@@ -1651,11 +1651,11 @@ which the guide's footer, the bar's tooltip and its accessible name say as
 disk at its first reading (a disable and an enable after an update among
 them), which they say as `Loaded mid-update` with the QML cache's removal;
 never as a notification. The IPC `build` verb reports it where `status`
-throws. The first release that ships a code-behind also waits for the
-caged arms that show the stamps surviving Qt's cache (QA-RESULTS "D-REL-16,
-L3's reading and words (lane-l3b, 2026-11-25)"; the lead's call on
-lane-l3b's proposal, 2026-11-25) and the owner's word, and its notes name
-the cache removal.
+throws. The first release that ships a code-behind waited for the caged
+arms that show the stamps surviving Qt's cache (the lead's call on
+lane-l3b's proposal, 2026-11-25); they ran and passed on 2026-11-25
+(QA-RESULTS "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)"), so it
+waits for the owner's word, and its notes name the cache removal.
 A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 

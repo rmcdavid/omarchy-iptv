@@ -28914,7 +28914,11 @@ on the l3stamp branch from 8fa4998. Node only; no display, no qml run.
   more forgiving (rule 10): it is why the root-handler mutant below is red
   in node (the hand-off check) while the same decision deleted in the
   cage still reads the update. The double's in-place half is not in
-  question.]**
+  question.]** **[2026-11-25, the lead's settle of L3's caged arms: stricter for whether the
+  update is read, the outcome the node boots check; the path git's merge
+  takes, the watcher firing at an unlink and a create, the four-worker
+  5.0-6.3 ms with no file at the path included, the double never runs,
+  so only the five caged arms of D-DOC-39 cover it]**
 - The checks, three boots of the shipping service: an update replaces the
   file (status unmoved), the rescan hands a manifest whose own version is
   `0.1.0-harness`, and status reads the file's 99.0.0 with stale true, then
@@ -29727,7 +29731,11 @@ its kept files; that is where the 329 lines are counted.
   patches, `scripts/dev-harness/spikes/codebehind-reload/mutants/no-root-manifest-handler.patch`
   (dce5268's) and `no-manifestfile-onfilechanged.patch` (80f80a0's): each,
   applied to 6fb53e4 and committed, gives candidates.py's exact exports of
-  those runs, C1 72f0daf and 4aefb3a.]**
+  those runs, C1 72f0daf and 4aefb3a.]** **[2026-11-25, the lead's settle of L3's caged arms: they fit Z8's "the removal is
+  seen", not its first half whole: no reload failed, because the create
+  had landed when it ran -- within 0.2 ms at one worker, and 5.0 to 6.3 ms
+  after the unlink at four (R1ma2's a-12-w-c4, b-12-w-c4 and a-12-w-g4),
+  which all still read 0.99.1 at the watcher's reload]**
 
 ### 2. key-scenario.sh live
 
@@ -29856,6 +29864,9 @@ clear and update 2 each. Every race:
   service runs, and it has reported no stamp; at the open 2 s later it
   reads the cache line. That window is the bar's resolve timer, as
   designed, and the rig's verdict now names it (F-HARNESS-135).
+  **[2026-11-25, the lead's settle of L3's caged arms: "as designed" was the lane's judgement, not a
+  recorded call; since D-A11Y-14 the window carries the cache step and the
+  no-service name while the service runs. Filed as D-A11Y-15, P4]**
 - **a-12-h4, b-12-h4 (no service, C2's Service.qml with no
   Service-player.js):** the footer blank; the guide's body `Service not
   loaded` / `Run omarchy restart shell · if that does not help, remove
@@ -29900,10 +29911,11 @@ clear and update 2 each. Every race:
   logged only `Cannot read property 'favorites' of undefined`, the
   service's state) **[2026-11-25, lane-l3cagefix: and the host logged
   `plugin io.github.rmcdavid.iptv open() threw: TypeError: Cannot read
-  property 'favorites' of undefined` at each guide open, two in each arm,
-  beside the guide's own line from its `favoriteSet` binding (Guide.qml
-  753). So the guide's open() stopped part way: the marks read it opened
-  (`opened`, set at Guide.qml 1099) on the first-run form's prose `Paste or
+  property 'favorites' of undefined` at the guide open of each poisoned
+  restart, two in each arm, beside the guide's own line from its
+  `favoriteSet` binding (Guide.qml 753 in the rig's marked C1 export, 752
+  on the tree). So the guide's open() stopped part way: the marks read it opened
+  (`opened`, set at Guide.qml 1099 on the tree, 1100 in the export) on the first-run form's prose `Paste or
   type your M3U URL or path, then press Enter`; which of the statements
   after that line ran, and whether the guide then held the keyboard, was
   not read]**.
@@ -30174,3 +30186,55 @@ and python only) and the gate.]**
   L2-BAR-08, seen green on the bus but never seen red (rule 11): the run
   that would show it is the caged probe over a tree whose composer has no
   no-service branch.
+
+## D-REL-16: the lead's settle of L3's caged arms (2026-11-25)
+
+The display lane's workflow wf_e8f9b8fb-ecc (lane-l3cage; two rechecks of
+1193870; lane-l3cagefix; two second-pass rechecks of 7b16d5e) ended with
+both second-pass rechecks blocked on records, none on a measurement. Both
+re-ran the rig's readouts over the kept arms and reproduced them: 329
+`agree` lines in 47 arms, all fitting; 23 clear-live steps that the
+removal left unchanged; the two mutant patches giving the runs' exact
+exports. Settled here, records only, with no runtime file moved from
+6fb53e4:
+
+- **D-DOC-39's timing** (measure, must fix). Its row said git's unlink and
+  create came within 0.2 ms. That holds at one worker; at four the unlink
+  came 5.0 to 6.3 ms before the create (R1ma2's a-12-w-c4, b-12-w-c4 and
+  a-12-w-g4), and all three read 0.99.1 at the watcher's reload. The row
+  now says both.
+- **Z8** (records). The runs fit Z8's "the removal is seen", not its first
+  half whole: no reload failed, because the create had landed when it ran.
+  Section 1's bracket and D-DOC-39's row say so. Which event raised the
+  reload stays read, not watched.
+- **SERVICE-SPLIT's L3 bracket** (records, must fix). Its list of what
+  stays UNVERIFIED left out two things the paragraph states and no arm
+  set: how Qt reads `QML_DISABLE_DISK_CACHE` and `QML_FORCE_DISK_CACHE`,
+  and the folder from a relative `$XDG_CACHE_HOME`. Both are added, and
+  b-01-x is said to be lifted in this file only.
+- **D-DOC-39's list** (records). Two more test places describe the
+  double's replacement as an update's shape: tests/service-harness.js's
+  bootService comment and a check's name in tests/Model.test.js. Both are
+  on the row now; the comments are corrected together later.
+- **The double's "stricter"** (measure). It is stricter for whether the
+  update is read; the path git's merge takes, the watcher at an unlink and
+  a create with the four-worker gap, only the caged arms cover. Said on
+  D-HOST-16's row and in lane-l3a's section.
+- **D-DOC-40's wording** (measure). The host's `open() threw` line came at
+  the guide open of each poisoned restart, two per arm, not at every open,
+  and each of its two line numbers is now given in one frame.
+- **The bar's resolve window** (both). Filed as D-A11Y-15, P4.
+- **"unmerged"** (records, from before both lanes). D-HOST-16, D-A11Y-14,
+  D-REL-16 and SERVICE-SPLIT now say merged into dev at 6fb53e4.
+
+The calls are the Decisions log's row of 2026-11-25, "L3's caged arms
+settled": the first code-behind release's wait on the caged arms is met,
+and it waits for the owner's word and the hold on #15671; D-A11Y-15 is
+filed, not accepted; the guide's body does not give way under D-DOC-40's
+state; D-DOC-39's comments go in one later commit; RESULT-2026-11-25.txt
+stays whole. Still UNVERIFIED, each where it is stated: the footer's
+elision, the bar's report under the host's own Bar.qml, a stamped model
+part's `var` surviving a poisoned unit, Qt's cache switches and a relative
+`$XDG_CACHE_HOME`, whether `reportedStamps` keeps a null prototype,
+rig.qml.in's `guideServiceIsNull` and `barServiceIsNull`, and L2-BAR-08
+seen red. The full gate ran on the merged dev tree before the push.
