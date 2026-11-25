@@ -52,6 +52,12 @@ Item {
   property var manifest: null
   property var service: null
 
+  // D-REL-16. The version of the last cut that changed this file, written by
+  // build_stamps.py (dev branch) at the cut and held to model/build.mjs's
+  // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
+  // names the code that is running, whichever file that unit was saved under.
+  readonly property string buildStamp: "0.20.0"
+
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "io.github.rmcdavid.iptv"
   property bool opened: false
 

@@ -24,6 +24,12 @@ BarWidget {
   property var service: null
   property int wheelAccumulator: 0
 
+  // D-REL-16. The version of the last cut that changed this file, written by
+  // build_stamps.py (dev branch) at the cut and held to model/build.mjs's
+  // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
+  // names the code that is running, whichever file that unit was saved under.
+  readonly property string buildStamp: "0.20.0"
+
   // ---- timing constants (UX.md 5.9)
   // D-A11Y-11: the two animation times are the host's answer for them, 0
   // while Omarchy's reduce motion is on (Model.motionMs).

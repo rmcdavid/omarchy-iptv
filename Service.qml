@@ -75,6 +75,20 @@ Item {
   // is the directory the loaded component came from -- which is exactly the
   // directory `omarchy plugin update` has just rewritten underneath it.
   readonly property string manifestPath: decodeURIComponent(Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, ""))
+  // D-REL-16. The version of the last cut that changed this file, written by
+  // build_stamps.py (dev branch) at the cut and held to model/build.mjs's
+  // BUILD_FILES row for it. A literal compiles into the unit Qt caches, so it
+  // names the code that is running, whichever file that unit was saved under.
+  readonly property string buildStamp: "0.20.0"
+  // Each code-behind's stamp, read through its forwarder: a code-behind holds
+  // nothing but functions, and its qualifier is named nowhere else (D-REL-14).
+  // A loose comment, so the inline view reads each stamp with its own.
+
+  function buildStampPip() { return ServicePip.buildStampPip() }
+  function buildStampPlayer() { return ServicePlayer.buildStampPlayer() }
+  function buildStampRewind() { return ServiceRewind.buildStampRewind() }
+  function buildStampSources() { return ServiceSources.buildStampSources() }
+
   // The version on DISK. Model.PLUGIN_VERSION is the version compiled into the
   // component that is running. They agree at release time (the gate proves it),
   // so a disagreement here means a hot reload left an older component mounted

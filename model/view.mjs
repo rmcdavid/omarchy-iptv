@@ -39,6 +39,10 @@ import {
   isFormField, formHasText
 } from "./source-records.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_VIEW = "0.20.0"
+
 // ------------------------------------------------------------ bar widget
 
 // R7: glyph per state, never color-only.
@@ -796,9 +800,9 @@ function motionMs(style, ms) {
   return Math.round(got)
 }
 export {
-  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
-  guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
-  arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
-  hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
-  keyboardMap, keyboardMapKeys, motionMs
+  BUILD_STAMP_VIEW, barGlyph, barTooltip, barAccessibleName, ipcNowPlaying,
+  ipcJson, guideSurface, firstRunAllowed, footerCounts, footerDegraded,
+  footerStatus, arrowVerb, footerHints, scopeVerb, formHints,
+  keyboardMapUntabled, hideMeaning, escapeOutcome, sameEscape, verbForKey,
+  setKeyRow, mergeKeyRows, keyboardMap, keyboardMapKeys, motionMs
 }

@@ -28,6 +28,10 @@ import {
   CONTROL_RE, HOST_WITHHELD, runHostParts
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_PRIVACY = "0.20.0"
+
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
 // into it.
 //
@@ -1607,9 +1611,9 @@ function shownText(value) {
   return sinkText(out).replace(CONTROL_RE, "")
 }
 export {
-  CONFIG_SHIELD_UNKNOWN, CONFIG_SHIELD_PRIVATE, CONFIG_SHIELD_EXPOSED,
-  CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
-  configShieldArgv, configShieldState, persistCarriesSecret,
+  BUILD_STAMP_PRIVACY, CONFIG_SHIELD_UNKNOWN, CONFIG_SHIELD_PRIVATE,
+  CONFIG_SHIELD_EXPOSED, CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE,
+  CONFIG_DEFER, configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
   playerPauseArgv, notifyNameText, notifyReasonText, notifyArgv, markupEscape,

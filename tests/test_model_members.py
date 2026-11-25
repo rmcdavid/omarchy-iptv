@@ -259,6 +259,17 @@ class TheNamesAreTheModulesNames(unittest.TestCase):
                              stdout=subprocess.PIPE, check=True).stdout.decode()
         self.assertEqual(json.loads(out), sorted(model_files.public_names(ROOT)))
 
+    def test_the_aggregators_stamp_is_a_public_name_and_a_member_the_judge_accepts(self):
+        """D-REL-16 (L3-e): Model.mjs declares one name of its own, its build
+        stamp, which the guide and the service read as Model.BUILD_STAMP_AGGREGATOR."""
+        names = model_files.public_names(ROOT)
+        self.assertEqual('BUILD_STAMP_AGGREGATOR', names[0])
+        self.assertEqual(1, names.count('BUILD_STAMP_AGGREGATOR'))
+        problems, refs, _ = cmm.judge('import "Model.mjs" as Model\nItem {\n  readonly property string s: Model.BUILD_STAMP_AGGREGATOR\n}\n',
+                                      names, 'x.qml')
+        self.assertEqual([], problems)
+        self.assertEqual(1, len(refs))
+
     def test_an_aggregator_with_no_export_block_is_a_layout_error(self):
         d = tempfile.mkdtemp(prefix='model-members-')
         self.addCleanup(shutil.rmtree, d, True)

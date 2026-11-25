@@ -15,6 +15,10 @@ import {
   sinkText
 } from "./privacy.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_EPG = "0.20.0"
+
 // ------------------------------------------------------------ formatting
 
 function pad2(n) {
@@ -534,9 +538,9 @@ function rowMeta(opts) {
   return str(o.until) === "" ? "" : "until " + str(o.until)
 }
 export {
-  pad2, formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
-  epgMapEntry, epgFields, isEpgStore, epgCoverage, epgEntry, formatEpgLine,
-  joinParts, EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText,
-  EPG_DETAIL_MAX, epgDetailText, formatTimeRange, programmeDetail,
-  failedNotice, rowFailedMeta, rowMeta
+  BUILD_STAMP_EPG, pad2, formatClock, formatCount, pluralChannels,
+  epgFraction, epgNowStale, epgMapEntry, epgFields, isEpgStore, epgCoverage,
+  epgEntry, formatEpgLine, joinParts, EPG_DETAIL_FIELDS, programmeFieldText,
+  epgEpisodeText, EPG_DETAIL_MAX, epgDetailText, formatTimeRange,
+  programmeDetail, failedNotice, rowFailedMeta, rowMeta
 }

@@ -3,6 +3,12 @@
 // one-line forwarder left at its old place; it runs in Service.qml's own
 // scope. Edit a function here, never its forwarder.
 
+  // D-REL-16. This file's build stamp: the version of the last cut that
+  // changed it, written by build_stamps.py (dev branch) at the cut. The first
+  // function here, because a move appends at the end; Service.qml reads it
+  // through its forwarder.
+  function buildStampPlayer() { return "0.20.0" }
+
   // Start (or switch to) a channel by id. `keepOpen` true = preview from the
   // guide (no focus change); false = close-and-focus semantics, the service
   // only does the focus part. `launchedFrom` is the zap ring scope

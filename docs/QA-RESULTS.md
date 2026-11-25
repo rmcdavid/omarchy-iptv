@@ -28905,3 +28905,140 @@ on the l3stamp branch from 8fa4998. Node only; no display, no qml run.
 - Not seen: that a real update's rescan emits manifestChanged on the kept
   service. The caged arms a-12-r and b-12-r (the plan's cagedArms 1) read
   `build` before any guide opens.
+
+## D-REL-16: the build stamps and their guard (lane-l3a, 2026-11-25)
+
+Commit 2 of the L3 plan (the panel wf_d3ab969d-020's judge), on the
+l3stamp branch above D-HOST-16. The stamps are carried and judged; nothing
+reads them at runtime yet (that is commit 3). No display, no qml run of my
+own; the full gate on the final tree is the lane's last step.
+
+- The value, the lead's call L3-a under the owner's standing authority of
+  2026-11-09: each runtime file carries the version of the last cut that
+  changed it, and model/build.mjs's `BUILD_FILES` names the other 25 with
+  their stamps in load order; build.mjs's own stamp is `PLUGIN_VERSION`.
+  On dev every stamp reads 0.20.0, the last cut's version. The forms: the
+  three QML files `readonly property string buildStamp`; each code-behind
+  `buildStamp<Domain>()` as its first function, with its forwarder in
+  Service.qml; each of the 17 other parts `var BUILD_STAMP_<PART>` as its
+  first declaration; Model.mjs `export var BUILD_STAMP_AGGREGATOR` under
+  the generated line (L3-e).
+- Read before writing the cut: release.py's `build_tree` takes each
+  allowlisted path's blob id from dev's commit (`ls-tree`) and puts that
+  id in a fresh index (`update-index --cacheinfo`), so every runtime file
+  reaches main byte for byte, transformed by nothing. The one place a
+  transform can enter is between the working tree and the commit, through
+  the repository's own filters, so the cut hashes each file with `git
+  hash-object` at its path, filters applied: the blob `git add` stores.
+  Held by a case and a test with an `ident` attribute, whose working copy
+  differs from REF's blob only by an expanded `$Id: ... $`: unchanged,
+  stamp kept; mutant M12 (`--no-filters`) restamps it, 4 failures.
+- Red first: `build_stamps.py --check --no-self-test` over a clone of
+  8fa4998 gives 26 refusals, 25 `missing` and 1 `table` (exit 1), as the
+  plan expected; on the stamped tree, 26 runtime files, 26 stamps, 25 rows,
+  and the self-test's 46 of 46 cases.
+- One-decision mutants of build_stamps.py, each run against
+  tests/test_build_stamps.py (23 tests) and `--check`: the shipping script
+  23 OK, check rc 0. Every mutant is red in the tests; all but four also
+  red `--check` through the self-test.
+
+  | Mutant | tests | `--check` |
+  |---|---|---|
+  | M1 `missing` never reported | 7 failures, 3 errors | rc 1 |
+  | M2 `twice` never reported | 6 failures | rc 1 |
+  | M3a the form read by search, not the whole line | 3 failures | rc 1 |
+  | M3b a code-behind's stamp need not lead | 3 failures | rc 1 |
+  | M3c a part's stamp need not lead | 3 failures | rc 1 |
+  | M4 a misnamed stamp not named (`name`) | 6 failures | rc 1 |
+  | M5 a leading zero read as a version | 3 failures | rc 1 |
+  | M6 a stamp above PLUGIN_VERSION passes | 3 failures | rc 1 |
+  | M7 a row unequal to its file passes | 1 failure | rc 0 |
+  | M8 the rows' files not compared | 3 failures | rc 0 |
+  | M9 the block's form not compared | 5 failures | rc 1 |
+  | M10 no table passes | 4 failures | rc 1 |
+  | M11 only a file new since REF counts as changed | 8 failures | rc 1 |
+  | M12 blobs hashed without the filters | 4 failures | rc 1 |
+  | M13 the cut does not judge the tree first | 1 failure, 3 errors | rc 1 |
+  | M14 the cut takes a PLUGIN_VERSION that is not the manifest's | 4 failures | rc 1 |
+  | M15 the strict check never stale | 7 failures | rc 1 |
+  | M16 a wrong case does not red `--check` | 1 failure | rc 0 |
+  | M17 a tree problem does not red `--check` | 1 failure | rc 0 |
+  | M18 the cut rewrites no table | 5 failures, 3 errors | rc 1 |
+
+  M7 and M8 leave `--check` green because the block-form comparison
+  behind them still refuses the same trees as `table`; the tests that name
+  each reason (TheTable) are what see them. M16 and M17 are `--check`'s own
+  wiring, which its self-test cannot judge. M1 and M13 red `--check` with a
+  traceback-shaped "unreadable" line (a KeyError), not a refusal.
+- The gate's step, "build stamp guard" after the service split guard,
+  extracted and run under plain bash (`env -i PATH=/usr/bin:/bin`): green
+  on the tree; with M2, two self-test cases wrong and `BAD build stamp
+  guard`, step exit 1. Floors: 26 files, 46 cases.
+- release.py: `check` calls `build_stamps.problems` over the files it
+  reached; `build` calls `cut_problems(root, old_main, version)` after its
+  guards and before `build_tree`. tests/test_release.py's stand-in trees
+  carry stamps and a table (`restamp`, rule 10), its `bump` runs the cut as
+  a real cut does, and four tests join the wiring: a file with no stamp and
+  a table row the file does not carry are refused by `check`; a cut whose
+  changed file keeps its old stamp is refused and moves nothing; after
+  `build_stamps.cut` the cut goes and main carries the new stamp beside an
+  unchanged file's old one. 120 -> 124 tests. Mutants: R1 `check` calls no
+  judge, 2 failures; R2 `build` makes no cut check, 1 failure.
+- split-model.mjs keeps the aggregator's stamp line under the generated
+  line through `--relink` and `--check`, refuses it anywhere else or in
+  another spelling, and holds the loaded namespace to the export lines plus
+  it; the aggregator's generated header names it. tests/test_split_model.py
+  gains three tests (33 -> 36): S1, the base reader that knows no stamp
+  line, 1 failure; S2, a reader taking either quote, 1 failure; S3, a
+  generator that drops the line it read, 1 failure. scripts/model_files.py
+  `public_names` reads the line, so check-model-members accepts
+  `Model.BUILD_STAMP_AGGREGATOR`: P1, a reader that skips it, 2 failures
+  (the namespace join and the new test) in tests/test_model_members.py.
+- Everything else the change moved: `split-service.py --check` 158 -> 162
+  forwarders (5 files, 4 code-behinds, 47 root functions, 34 of 34 cases);
+  `split-model.mjs --check` 1153 -> 1171 declarations in 18 parts (17
+  stamps and the table; scripts/model-parts.json relinked); node
+  tests/Model.test.js 4076 checks, 0 failures, with one tree pin moved (the
+  D-REL-14 C4 round trip reads each code-behind one function longer:
+  [24, 55, 17, 66]) and its python twin in tests/test_service_files.py the
+  same (missed by my sibling search and found by the gate's first run, rule
+  15: the search was for the node pin's text, not for the round trip's
+  shape), and the forwarders' shared comment made a loose one,
+  a blank line under it, so the inline view reads each stamp with its own
+  comment; python by discovery 3098 -> 3129. All 30 mutation patches under
+  scripts/dev-harness/spikes/ still apply (`git apply --check`): the 19
+  key-mutations serve key-scenario.sh, the 8 chno-mutations chno-scenario.sh
+  and chno-entry-scenario.sh, the 3 open-mutations open-scenario.sh; none
+  regenerated.
+- candidates.py (the reload rig): `bump()` now runs build_stamps.py's cut
+  against the build each one updates from, after its marks (which moved
+  above it, so the cut sees them), so C1 restamps all 26 files against C0
+  and C2 and C3 the files their marks change. Run with REPO this branch's
+  worktree, C0REF main (1321aff, 0.20.0) and DEVREF l3stamp at this
+  commit's runtime files (this record was added to the commit after), git
+  work only: each export read back through the judge gives 0 problems; C1
+  changes 26 runtime files against C0, all at 0.99.0; C2 changes 8 against
+  C1 (the 7 marked files and build.mjs), all at 0.99.1, and its 18
+  unchanged files keep C1's 0.99.0; C3 the same 8 at 0.99.2. A mutant
+  without the cut builds candidates the guard also passes (0 problems)
+  whose changed files are stale against their parent: 25 in C1, 7 in C2, 7
+  in C3 -- the strict check, not `--check`, is what sees it.
+- Sizes, `wc -c`, 8fa4998 -> this tree: BarWidget.qml 15413 -> 15773;
+  Guide.qml 310448 -> 310808 (still the largest, of 458752); Service.qml
+  231016 -> 233196 (with D-HOST-16's +1.3 KB); Model.mjs 16789 -> 16865;
+  the code-behinds +304 to +308 each; model/build.mjs 33725 -> 34842; the
+  other 17 parts +187 to +211 each.
+- Not seen: that each kind's literal rides a stale cached unit (the plan's
+  cagedArms; shown for QML and code-behind literals by the rig's marks,
+  reasoned for a model part's var).
+- A trap in my own mutation runs, recorded so the next runner avoids it:
+  the first full gate failed four `twice` cases in tests/test_build_stamps.py
+  and was green in the guard's own step. The step demonstration had written
+  mutant M2 (`> 1` to `> 9`, the same length), imported it once (release.py
+  imports build_stamps, so Python cached its bytecode), and put the source
+  back within the same second; a pyc is trusted when the source's size and
+  whole-second mtime match, so every later import ran M2 while the file on
+  disk was the shipping one. `__main__` is never cached, which is why the
+  step stayed green. Removing scripts/__pycache__/build_stamps.*.pyc ended
+  it. A mutant runner here should remove the module's pyc on restore, or run
+  with PYTHONDONTWRITEBYTECODE=1.

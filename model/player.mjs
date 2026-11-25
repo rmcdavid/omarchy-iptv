@@ -20,6 +20,10 @@ import {
   sourceKey
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_PLAYER = "0.20.0"
+
 // ------------------------------------------------------------ player shutdown
 
 // Next rung of the shutdown ladder (D-LIVE-17). `stage` is the rung already
@@ -1498,24 +1502,25 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
   return id === playerEntryId(currentEntryId)
 }
 export {
-  stopEscalation, healthTick, healthRelayAction, RELAY_GONE_LINE,
-  PLAYER_BOUNDS, CONTROL_WATCHDOG_MS, PLAYER_WATCHDOG_MARGIN_MS,
-  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playerVerbBoundMs,
-  playFork, playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
-  helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
-  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget, ID_WITHHELD,
-  reconcileVerdict, sessionIntentRepair, OWNER_TOKEN_RE, isOwnerToken,
-  playerOwnerToken, ownerTokenArgv, playerOrphanCheckArgv, playerStash,
-  playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
-  OLDER_RESTART_LINE, OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS,
-  probeLaunchOlder, adoptedSourceMatches, adoptedChannelReach,
-  olderRestartDisposition, olderRestartKeepsPause, olderRestartWith,
-  olderPlayerIdentity, sameOlderPlayer, olderRestartOpen, playerTlsVerdict,
-  PLAYER_LAUNCH_WORDS, playerLaunch, parsePlayerProbe, olderPlayerUnsafe,
-  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
-  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, RELAY_ASK_TIMEOUT_MS, relayHandle,
-  relayAsk, playerRefusedArgv, relayRefusedReport, channelForEnd, endedReport,
+  BUILD_STAMP_PLAYER, stopEscalation, healthTick, healthRelayAction,
+  RELAY_GONE_LINE, PLAYER_BOUNDS, CONTROL_WATCHDOG_MS,
+  PLAYER_WATCHDOG_MARGIN_MS, PLAYER_BIRTH_EDGE_MS, playerLadderMs,
+  playerWatchdogMs, playerVerbBoundMs, playFork, playForkBlind, zapArgs,
+  PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
+  playFailureVerdict, PLAYER_START_CHANNEL_REFUSALS, playerStartFailure,
+  replyTarget, ID_WITHHELD, reconcileVerdict, sessionIntentRepair,
+  OWNER_TOKEN_RE, isOwnerToken, playerOwnerToken, ownerTokenArgv,
+  playerOrphanCheckArgv, playerStash, playerOwner, tlsPropertiesSafe,
+  playerTls, wholeCount, tlsReloadDisposition, OLDER_RESTART_LINE,
+  OLDER_RESTART_AGAIN_LINE, OLDER_RESTART_HOLD_MS, probeLaunchOlder,
+  adoptedSourceMatches, adoptedChannelReach, olderRestartDisposition,
+  olderRestartKeepsPause, olderRestartWith, olderPlayerIdentity,
+  sameOlderPlayer, olderRestartOpen, playerTlsVerdict, PLAYER_LAUNCH_WORDS,
+  playerLaunch, parsePlayerProbe, olderPlayerUnsafe, parsePlayerEvent,
+  playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
+  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
+  rememberEntryOwner, RELAY_ASK_TIMEOUT_MS, relayHandle, relayAsk,
+  playerRefusedArgv, relayRefusedReport, channelForEnd, endedReport,
   PLAYER_WARNING_RE, playerLogWarning, playerTailReason, PLAYER_FORMAT_ERROR,
   PLAYER_FORMAT_SENTENCE, unopenedFormatSentence, PLAYER_OUTPUT_ERRORS,
   outputFailure, outputFailureSentence, deathReport, loadFailedForOwnEntry

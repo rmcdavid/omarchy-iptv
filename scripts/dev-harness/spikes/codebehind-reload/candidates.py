@@ -38,6 +38,15 @@ repository's path.
       that rewrites every marked file recovers a cache the race poisoned
       (run.sh's RIG_RECOVER=update; a C0 to C1 race takes C2 for it).
 
+Each build carries true build stamps (D-REL-16): after its marks, bump()
+runs scripts/build_stamps.py's own cut (imported from REPO, as release.py
+is) against the build it updates from -- C1 against C0, C2 against C1, C3
+against C2 -- so every runtime file a build changes carries that build's
+version and model/build.mjs's BUILD_FILES says so, as a real cut's would.
+C1 restamps all 26 runtime files (C0, 0.20.0, has no stamps); C2 and C3 the
+seven files their marks change and build.mjs. So DEVREF must be a dev
+commit that carries the stamps; an older one is refused, by name.
+
 The upstream is a bare repository whose `main` starts at C0 and holds C1, C2
 and C3 under refs/heads/art; publishing a build is `git update-ref refs/heads/main
 <commit>` in it (run.sh's publish), which is what a release's push does to
@@ -74,12 +83,21 @@ def replace_once(path, old, new):
         fh.write(text.replace(old, new))
 
 
-def bump(tree, version, old_version):
-    """The version in the three places release.py check holds equal."""
+def bump(tree, version, old_version, stamps, against):
+    """The version in the three places release.py check holds equal, and then
+    the stamps' own step: build_stamps.py's cut against `against`, the build
+    this one updates from (D-REL-16). Called after the build's other edits,
+    its marks, which the cut must see."""
     replace_once(os.path.join(tree, "manifest.json"), '"version": "%s",' % old_version, '"version": "%s",' % version)
     replace_once(os.path.join(tree, "model", "build.mjs"), 'var PLUGIN_VERSION = "%s"' % old_version,
                  'var PLUGIN_VERSION = "%s"' % version)
     replace_once(os.path.join(tree, "README.md"), "Status: v%s." % old_version, "Status: v%s." % version)
+    with open(os.devnull, "w") as sink:
+        try:
+            stamps.cut(tree, against, out=sink)
+        except (stamps.Refused, stamps.BuildStampsError) as error:
+            raise SystemExit("candidates.py: build_stamps.py refuses the %s tree against %s (DEVREF must carry the "
+                             "stamps): %s" % (version, against, error))
 
 
 def first_marks(tree):
@@ -141,19 +159,23 @@ def main(argv):
     spec = importlib.util.spec_from_file_location("release", os.path.join(repo, "scripts", "release.py"))
     release = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(release)
+    # And build_stamps.py's cut, which a real cut runs after the bump.
+    spec = importlib.util.spec_from_file_location("build_stamps", os.path.join(repo, "scripts", "build_stamps.py"))
+    stamps = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stamps)
     git(src, "checkout", "-q", "-b", "c1src", "dev")
     with open(os.path.join(src, "manifest.json"), encoding="utf-8") as fh:
         dev_version = json.load(fh)["version"]
-    bump(src, "0.99.0", dev_version)
     first_marks(src)
+    bump(src, "0.99.0", dev_version, stamps, c0)
     git(src, "commit", "-q", "-a", "-m", "reload-d: C1 source (version and marks)")
     git(src, "checkout", "-q", "-b", "c2src", "c1src")
-    bump(src, "0.99.1", "0.99.0")
     second_marks(src)
+    bump(src, "0.99.1", "0.99.0", stamps, "c1src")
     git(src, "commit", "-q", "-a", "-m", "reload-d: C2 source (version, marks, socketAttached renamed)")
     git(src, "checkout", "-q", "-b", "c3src", "c2src")
-    bump(src, "0.99.2", "0.99.1")
     third_marks(src)
+    bump(src, "0.99.2", "0.99.1", stamps, "c2src")
     git(src, "commit", "-q", "-a", "-m", "reload-d: C3 source (version and marks)")
     commits = {"C0": c0}
     parent = c0

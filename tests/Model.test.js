@@ -858,7 +858,8 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
 // code-behinds, Service-pip.js, Service-player.js, Service-rewind.js and
 // Service-sources.js, which hold 158 of its 204 functions (C3 moved the
 // M5-01 region's 36 into the last two on 2026-11-23, and C4 the rest of
-// pip, player and sources and rewind's togglePause): the service's files are
+// pip, player and sources and rewind's togglePause; since D-REL-16, 2026-11-25,
+// 162 of 208, each code-behind's build stamp its first): the service's files are
 // those five, and its one text, cut again by the code-behinds' own spans, is
 // Service.qml byte for byte, so every converted reader reads the one-file
 // text it read before the moves (before C3 the files were Service.qml alone
@@ -915,7 +916,8 @@ const serviceSource = serviceReader.serviceText(require("path").join(__dirname, 
              viaPath: SF.serviceText(path.join(ROOT, "Service.qml")) === serviceSource }
   }, { files: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
        names: ["Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js", "Service-sources.js"],
-       moved: [23, 54, 16, 65], own: true, anchored: true, closes: true, viaPath: true })
+       // D-REL-16 (2026-11-25): each code-behind's first function is its build stamp.
+       moved: [24, 55, 17, 66], own: true, anchored: true, closes: true, viaPath: true })
 
   checkCall("D-REL-14: the node and python readers agree on this tree, names and text", () => {
     const n = py("names", ROOT), t = py("text", ROOT)

@@ -15,6 +15,10 @@ import {
   formatCount, joinParts, failedNotice
 } from "./epg.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_CONTRAST = "0.20.0"
+
 // M2-09 GS8. The opacity rung a row's secondary text carries, lifted out of
 // the two QML bindings that render it (engineering rule 12 (dev branch)) so a test can call
 // the shipping decision instead of mirroring it.
@@ -520,12 +524,12 @@ function noMatchesTitle(query, scopeId) {
   return name === "All" ? base : base + " in " + name
 }
 export {
-  relativeLuminance, contrastRatio, colorOver, colorMix, WCAG_AA_TEXT,
-  CURSOR_INK_TARGET, mixForContrast, cursorInk, qmlRgb, hexOf, qmlFill,
-  cursorInkHex, cursorInkMix, SECTION_HEADER_SEPARATION, SECTION_HEADER_FLOOR,
-  alphaForContrast, sectionHeaderAlpha, CAPTION_BASE, CAPTION_FLOOR,
-  CAPTION_REGULAR_SHORTFALL, CAPTION_FLOOR_REGULAR, captionAlpha, TEXT_DIM,
-  TEXT_FULL, BAR_IDLE_ALPHA, rowNoticeEmphasis, rowDetail, rowsHaveDetail,
-  rowShowsGroup, rowAccessibleName, elide, emptyStateAccessibleName,
-  noMatchesTitle
+  BUILD_STAMP_CONTRAST, relativeLuminance, contrastRatio, colorOver, colorMix,
+  WCAG_AA_TEXT, CURSOR_INK_TARGET, mixForContrast, cursorInk, qmlRgb, hexOf,
+  qmlFill, cursorInkHex, cursorInkMix, SECTION_HEADER_SEPARATION,
+  SECTION_HEADER_FLOOR, alphaForContrast, sectionHeaderAlpha, CAPTION_BASE,
+  CAPTION_FLOOR, CAPTION_REGULAR_SHORTFALL, CAPTION_FLOOR_REGULAR,
+  captionAlpha, TEXT_DIM, TEXT_FULL, BAR_IDLE_ALPHA, rowNoticeEmphasis,
+  rowDetail, rowsHaveDetail, rowShowsGroup, rowAccessibleName, elide,
+  emptyStateAccessibleName, noMatchesTitle
 }

@@ -13,6 +13,10 @@ import {
   HELP_KEY, SOURCE_KEYS
 } from "./sources.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_PIP = "0.20.0"
+
 // ------------------------------------------------- picture in picture (M2-05)
 //
 // Everything below is pure: it reads numbers and strings and returns argv
@@ -788,15 +792,15 @@ function listLetterAction(text) {
   return ""
 }
 export {
-  PIP_CLASS, PIP_TAG, PIP_ADDRESS_RE, PIP_COORD_LIMIT, PIP_MIN_WIDTH,
-  PIP_CORNERS, PIP_SNAPSHOT_KEY, PIP_SNAPSHOT_VERSION, PIP_MPV_RESIZE_PROP,
-  PIP_VERBS, PIP_ENUMS, PIP_EXPR_RE, pipAllows, pipAddressSelector,
-  pipSelector, pipInt, pipExpression, pipDispatchArgv, focusPlayerArgv,
-  pipDispatchAccepted, pipCornerOf, pipOptions, pipWindowFail, pipInteger,
-  pipPair, pipTagsOf, pipHasTag, pipFindWindow, pipActive, pipResolveIntent,
-  pipDeriveState, pipDeriveGate, pipFindMonitor, pipEven, pipGeometry, pipBox,
-  pipSnapshotFor, pipSnapshotClear, pipParseSnapshot, pipPlan, pipMpvCommands,
-  pipRestoreAutoResize, parsePlayerReply, pipSamePair, pipVerify, PIP_TEXT,
-  PIP_TOOLTIP_ON, pipStatusText, pipResultCode, pipKeyRequest,
-  listLetterAction
+  BUILD_STAMP_PIP, PIP_CLASS, PIP_TAG, PIP_ADDRESS_RE, PIP_COORD_LIMIT,
+  PIP_MIN_WIDTH, PIP_CORNERS, PIP_SNAPSHOT_KEY, PIP_SNAPSHOT_VERSION,
+  PIP_MPV_RESIZE_PROP, PIP_VERBS, PIP_ENUMS, PIP_EXPR_RE, pipAllows,
+  pipAddressSelector, pipSelector, pipInt, pipExpression, pipDispatchArgv,
+  focusPlayerArgv, pipDispatchAccepted, pipCornerOf, pipOptions,
+  pipWindowFail, pipInteger, pipPair, pipTagsOf, pipHasTag, pipFindWindow,
+  pipActive, pipResolveIntent, pipDeriveState, pipDeriveGate, pipFindMonitor,
+  pipEven, pipGeometry, pipBox, pipSnapshotFor, pipSnapshotClear,
+  pipParseSnapshot, pipPlan, pipMpvCommands, pipRestoreAutoResize,
+  parsePlayerReply, pipSamePair, pipVerify, PIP_TEXT, PIP_TOOLTIP_ON,
+  pipStatusText, pipResultCode, pipKeyRequest, listLetterAction
 }

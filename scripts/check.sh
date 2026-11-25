@@ -1458,7 +1458,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4076}
 # one-decision mutants of the reader red (QA-RESULTS
 # "F-GATE-32: the rest of constraint 3 (the nightly run, 2026-11-25)"); the
 # suite counts 3098.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3098}
+# 2026-11-25, lane-l3a (D-REL-16): 3098 -> 3129 -- tests/test_build_stamps.py's
+# 23 tests (the guard over this tree, every case of its fixture, what each
+# table refusal says, and the cut over a scratch copy of the 26 runtime
+# files), 4 in tests/test_release.py (check and build call the guard), 3 in
+# tests/test_split_model.py (the aggregator's stamp line) and 1 in
+# tests/test_model_members.py; 20 one-decision mutants of build_stamps.py and
+# 6 of release.py, split-model.mjs and model_files.py red (QA-RESULTS
+# "D-REL-16: the build stamps and their guard"); the suite counts 3129.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3129}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1626,6 +1634,16 @@ RELAY_SCENARIO_MIN=${RELAY_SCENARIO_MIN:-123}
 # function and one site (2,268), so the site floor stands.
 SERVICE_SPLIT_SITES_MIN=${SERVICE_SPLIT_SITES_MIN:-2200}
 SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-34}
+# D-REL-16 (2026-11-25, lane-l3a): the build stamp guard
+# (scripts/build_stamps.py --check) reads every runtime file release.py's
+# runtime_files reaches -- 26 on this tree: the three QML entry points,
+# Model.mjs, the four code-behinds and the 18 model parts -- and a stamp from
+# each, then runs its own cases (46: every refusal kind, the cut and the
+# strict check), so the step goes red when the judge stops judging. Both
+# floors are exact: a runtime file the guard stops reading is one whose mixed
+# build nothing could see.
+BUILD_STAMPS_FILES_MIN=${BUILD_STAMPS_FILES_MIN:-26}
+BUILD_STAMPS_CASES_MIN=${BUILD_STAMPS_CASES_MIN:-46}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
@@ -2153,6 +2171,41 @@ if python3 "$ROOT/scripts/split-service.py" --check --root "$ROOT" --qml-dir "$Q
   fi
 else
   cat "$split_service_log"; bad "service split guard"
+fi
+
+step "build stamp guard (scripts/build_stamps.py --check)"
+# D-REL-16. A shell that starts while `omarchy plugin update` writes the
+# plugin can load files of two builds, and Qt's disk cache can keep the mix
+# through every restart (call (d), measured). So every runtime file carries a
+# build stamp, a literal of the version of the last cut that changed it, in
+# its kind's one form, and model/build.mjs's BUILD_FILES names each file with
+# the stamp it carries. This proves the tree as it stands: each runtime file
+# (release.py's runtime_files, in load order) carries exactly one stamp of
+# its kind, by its own name, in the exact form and place (a code-behind's is
+# its first function, a part's its first declaration), whose value is a
+# version no higher than PLUGIN_VERSION; and BUILD_FILES is the generated
+# block directly under PLUGIN_VERSION, a row for each other runtime file in
+# load order, each equal to what that file carries. Then the script's own
+# cases, the --cut and strict ones in scratch repositories, so the judge is
+# seen judging. release.py check calls the same judge; release.py build adds
+# the cut's own check, that a file the cut changes carries its version.
+build_stamps_log=$CHECK_TMP/build-stamps.log
+if python3 -I "$ROOT/scripts/build_stamps.py" --check --root "$ROOT" >"$build_stamps_log" 2>&1; then
+  stamp_files=$(sed -n 's/^build-stamps: check ok (\([0-9]*\) runtime file(s), \([0-9]*\) stamp(s) read, .*$/\1 \2/p' "$build_stamps_log" | head -1)
+  stamp_cases=$(grep -oE 'self-test [0-9]+ of [0-9]+ cases' "$build_stamps_log" | head -1)
+  stamp_ran=$(printf '%s\n' "$stamp_cases" | grep -oE 'of [0-9]+' | grep -oE '[0-9]+')
+  stamp_passed=$(printf '%s\n' "$stamp_cases" | grep -oE '^self-test [0-9]+' | grep -oE '[0-9]+')
+  if [[ -z $stamp_files || -z $stamp_ran || -z $stamp_passed ]]; then
+    cat "$build_stamps_log"; bad "build stamp guard printed no file or case count"
+  elif (( ${stamp_files% *} < BUILD_STAMPS_FILES_MIN || ${stamp_files#* } < BUILD_STAMPS_FILES_MIN )); then
+    cat "$build_stamps_log"; bad "build stamp guard read ${stamp_files#* } stamp(s) over ${stamp_files% *} runtime file(s), expected at least $BUILD_STAMPS_FILES_MIN"
+  elif (( stamp_passed != stamp_ran || stamp_ran < BUILD_STAMPS_CASES_MIN )); then
+    cat "$build_stamps_log"; bad "build stamp guard passed $stamp_passed of its own $stamp_ran cases, expected all of at least $BUILD_STAMPS_CASES_MIN"
+  else
+    ok "build stamp guard ($(sed -n 's/^build-stamps: check ok (\(.*\))$/\1/p' "$build_stamps_log" | head -1))"
+  fi
+else
+  cat "$build_stamps_log"; bad "build stamp guard"
 fi
 
 step "qmltestrunner tests/Model.spec.qml"

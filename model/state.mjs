@@ -35,6 +35,10 @@ import {
   warnState, normalizeSourceRecord, activeKeyText
 } from "./source-records.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_STATE = "0.20.0"
+
 // ------------------------------------------------------------ state
 
 // ---- saved searches (roadmap phase 4) --------------------------------------
@@ -2297,23 +2301,23 @@ function statePrivateRefusalTell(why, told) {
   return STATE_PRIVATE_TOLD.indexOf(w) !== -1 && w !== str(told)
 }
 export {
-  MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedQueryCut,
-  savedSearchTerms, savedSearchHit, savedSearchCount, savedSearchChannels,
-  savedSearchNotice, favoriteOrigin, favoriteRemovalNotice, hideNotice,
-  scopeEntryAccessibleName, savedSearchRows, savedSearchArrivals,
-  savedSearchDepartures, savedSearchFooter, withSavedSearch,
-  withoutSavedSearch, STORED_DECIMAL, STORED_TEXT_MAX, storedInt,
-  savedSearchRecord, emptyState, entryMigratedOf, withEntryMigrated,
-  migrationPendingOf, withMigrationPending, tvgIdRefused, channelIdWithheld,
-  loadedPlayedRecord, playedRecord, cloneState, withCacheLayout, parseState,
-  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
-  recordPlayed, clearSession, stateSession, deadSessionVerdict,
-  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  BUILD_STAMP_STATE, MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY,
+  savedQueryCut, savedSearchTerms, savedSearchHit, savedSearchCount,
+  savedSearchChannels, savedSearchNotice, favoriteOrigin,
+  favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
+  savedSearchRows, savedSearchArrivals, savedSearchDepartures,
+  savedSearchFooter, withSavedSearch, withoutSavedSearch, STORED_DECIMAL,
+  STORED_TEXT_MAX, storedInt, savedSearchRecord, emptyState, entryMigratedOf,
+  withEntryMigrated, migrationPendingOf, withMigrationPending, tvgIdRefused,
+  channelIdWithheld, loadedPlayedRecord, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
+  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
+  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
+  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
+  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
   MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,

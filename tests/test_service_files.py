@@ -119,7 +119,8 @@ class ThisTree(unittest.TestCase):
         self.assertEqual(cut.count(anchor), 1)
         cut = cut.replace(anchor, anchor + "".join('import "%s" as %s\n' % fq for fq in self.CODE_BEHINDS))
         self.assertEqual(cut, raw(os.path.join(ROOT, "Service.qml")))
-        self.assertEqual(counts, [23, 54, 16, 65])
+        # D-REL-16 (2026-11-25): each code-behind's first function is its build stamp.
+        self.assertEqual(counts, [24, 55, 17, 66])
 
     def test_a_service_qml_path_reads_the_same_as_its_root(self):
         self.assertEqual(service_files.service_text(os.path.join(ROOT, "Service.qml")), service_files.service_text(ROOT))

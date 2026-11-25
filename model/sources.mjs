@@ -22,6 +22,10 @@ import {
   formatClock, formatCount, pluralChannels, joinParts
 } from "./epg.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_SOURCES = "0.20.0"
+
 // ------------------------------------------------------------ sources (M2-01)
 //
 // ARCHITECTURE-SOURCES.md (dev branch) section 3 (state records, keys, validation,
@@ -3287,14 +3291,14 @@ function logoHaveLess(have, broken) {
   return out
 }
 export {
-  CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
-  MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
-  TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
-  BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, SOURCE_ORIGINS,
-  URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, capLength, sanitizeInput,
-  sanitizeUrlInput, isUrlEdgeSpace, hasControlChar, trimEdgeSpace, codePoints,
-  codePointLength, capCodePoints, sanitizeTyping, lowerFirst,
-  innerCharSentence, sourceErrorMessage, sourceReason,
+  BUILD_STAMP_SOURCES, CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL,
+  MAX_XTREAM_SERVER, MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS,
+  LIMITS, PAUSE_KEY, TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY,
+  LIVE_KEY, REWIND_STEP_S, BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS,
+  SOURCE_KEY_RE, SOURCE_ORIGINS, URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE,
+  capLength, sanitizeInput, sanitizeUrlInput, isUrlEdgeSpace, hasControlChar,
+  trimEdgeSpace, codePoints, codePointLength, capCodePoints, sanitizeTyping,
+  lowerFirst, innerCharSentence, sourceErrorMessage, sourceReason,
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, SOURCE_URL_SCHEMES, IPV6_LITERAL_RE, isIpv6Literal,
   HOST_FORMAT_RANGES, isHostFormatCode, HOST_INVISIBLE_RANGES,

@@ -63,11 +63,13 @@ was.
 
 | file | bytes | functions | what it holds |
 |---|---|---|---|
-| `Service.qml` | 230,265 | 47 of its own, 158 forwarders | every property, signal, change handler and object; the state machine; the functions listed below; one import line per code-behind |
-| `Service-pip.js` | 20,235 | 23 | picture in picture: the `p` key and its verb, the window and monitor reads, the step plan, the peek, the probe |
-| `Service-player.js` | 112,628 | 54 | the detached player: play, stop, zap, the control verbs and their results, the probe and adoption, the socket observer and its lines, the failure notices |
-| `Service-rewind.js` | 9,103 | 16 | live rewind: the seek queue and its readout, the track requests, and `togglePause` |
-| `Service-sources.js` | 90,674 | 65 | sources: switching, probing, reconcile and adoption, cache jobs, the playlist and guide runs, the bar entry writer, logos, dead-channel marks |
+| `Service.qml` | 233,196 | 47 of its own, 162 forwarders | every property, signal, change handler and object; the state machine; the functions listed below; one import line per code-behind |
+| `Service-pip.js` | 20,539 | 24 | picture in picture: the `p` key and its verb, the window and monitor reads, the step plan, the peek, the probe |
+| `Service-player.js` | 112,935 | 55 | the detached player: play, stop, zap, the control verbs and their results, the probe and adoption, the socket observer and its lines, the failure notices |
+| `Service-rewind.js` | 9,410 | 17 | live rewind: the seek queue and its readout, the track requests, and `togglePause` |
+| `Service-sources.js` | 90,982 | 66 | sources: switching, probing, reconcile and adoption, cache jobs, the playlist and guide runs, the bar entry writer, logos, dead-channel marks |
+
+**[2026-11-25, D-REL-16, lane-l3a: the bytes and counts re-read on the l3stamp branch. Each code-behind's first function is now its build stamp, and `Service.qml` carries their four forwarders beside its own `buildStamp`; see "Adding a code-behind".]**
 
 Each code-behind is mode 100644 and on `ALLOWLIST` in `scripts/release.py`
 (47 files on this tree); `release.py check` reads 47 files and 26 runtime
@@ -238,7 +240,7 @@ The gate's "service split guard" runs `scripts/split-service.py --check`
 over the tree and then over its own 34 cases
 (`tests/fixtures/service-split/check-cases.json`), so the step goes red when
 the judge stops judging. On this tree it reads 5 files, 4 code-behinds, 47
-root functions, 158 forwarders and 2,268 root member sites, 34 of 34 cases;
+root functions, 162 forwarders and 2,268 root member sites, 34 of 34 cases;
 `scripts/check.sh` floors the sites at 2,200 and the cases at 34. Every
 refusal is one line naming its kind.
 
@@ -386,9 +388,33 @@ same commit:
   file list, each seen red both ways (C4 flipped them from three files to
   five);
 - CLAUDE.md's list of code-behinds and its allowlist count (the lead's
-  file).
-The readers, the harness and the guards need nothing: they read the import
-lines.
+  file);
+- **[2026-11-25, D-REL-16, lane-l3a]** its build stamp, three things,
+  which `scripts/build_stamps.py --check` (the gate's "build stamp guard",
+  and `release.py check`) is red without:
+  - the stamp function, the FIRST function of the new file, directly after
+    its header, `  function buildStamp<Domain>() { return "N.N.N" }` with
+    the domain as its qualifier spells it (`Service-pip.js`'s is
+    `buildStampPip`) and the version of the last cut, the value every other
+    file's row in `BUILD_FILES` holds for a file that has not changed
+    since. It leads because `--cut` appends a moved function at the end; a
+    stamp anywhere but first is `form`, one named for another domain `name`;
+  - its forwarder in `Service.qml`, beside the other four under the root's
+    own `buildStamp`: `  function buildStampPip() { return
+    ServicePip.buildStampPip() }`. The readers allow nothing but functions in
+    a code-behind and refuse one no forwarder names (`unforwarded`), and the
+    qualifier may be named nowhere else (`qualifier`), so the forwarder is
+    the one way the service reads it;
+  - its row in `model/build.mjs`'s `BUILD_FILES`: a new runtime file is
+    reached by `release.py`'s runtime_files, so the table without its row
+    is `table`. The block is the one place a hand edit is the step: add the
+    row at the file's place in load order (`build_stamps.py --json` prints
+    that order) in the form of the rows around it, with the stamp's value;
+    `--cut` refuses a tree `--check` refuses, so it writes values, never a
+    missing row.
+  The stamp function makes no closure (D-REL-15): it returns a literal.
+The readers, the harness and the guards need nothing more: they read the
+import lines.
 
 ## How qmllint sees the service (F-GATE-29)
 

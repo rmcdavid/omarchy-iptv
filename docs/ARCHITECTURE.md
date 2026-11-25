@@ -5015,13 +5015,24 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   `import "Model.js" as Model` on the day both stopped being true). The code lives in the parts under `model/`,
   one per domain. QML imports `Model.mjs` (`import "Model.mjs" as Model`), so
   every `Model.X` call site and every `Model.X` citation is unchanged.
+  **[2026-11-25, D-REL-16 (the lead's call L3-e under the owner's standing
+  authority of 2026-11-09): and one line more, its own build stamp,
+  `export var BUILD_STAMP_AGGREGATOR = "N.N.N"` directly under the generated
+  line and above the first export block. split-model.mjs keeps it there,
+  value and all, through `--relink` and `--check`, and refuses it anywhere
+  else or in any other spelling; `build_stamps.py` writes its value;
+  `scripts/model_files.py`'s `public_names` reads it, so
+  check-model-members accepts `Model.BUILD_STAMP_AGGREGATOR`. See "Build
+  stamps" below.]**
 - `scripts/split-model.mjs` cut the parts out of the one-file `Model.js` and
   is the judge of them afterwards: `scripts/check.sh` runs its `--check`, and
   `--relink` rewrites a part's generated import and export lines after an
   edit adds a call across parts. A new part is a line in
   `scripts/model-parts.json`, a line in `Model.mjs` (relink writes it) and an
   entry in `ALLOWLIST` in `scripts/release.py`; the gate is red until all
-  three agree.
+  three agree. **[2026-11-25, D-REL-16: and two more, its build stamp var
+  and its row in `BUILD_FILES` (below); the build stamp guard is red until
+  both are there.]**
 - Pure functions, `var`/`function` declarations at the top level, no
   Quickshell or Qt globals (`Qt.md5` etc. are not available in node).
 - **Init locality.** A top-level initializer reads only declarations of its
@@ -5098,6 +5109,48 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
 - Anything in Python or shell that needs the model's FILES reads the part
   list from `Model.mjs`: `scripts/model_files.py` in Python, `qa_model_files`
   in `scripts/qa-lib.sh` in shell. Never a second list.
+- **Build stamps (D-REL-16, 2026-11-25).** Every runtime file -- what
+  `release.py`'s runtime_files reaches from the three QML entry points, 26
+  files on this tree -- carries a literal naming the version of the last
+  cut that CHANGED it (the lead's call L3-a under the owner's standing
+  authority of 2026-11-09), so the running code can tell a unit Qt compiled
+  from another build: a stale cached unit carries the old literal,
+  whichever file it was saved under. The forms, one per kind, each exactly
+  once, held by `scripts/build_stamps.py --check` (the gate's "build stamp
+  guard") and by `release.py check`:
+  - each model part but `build.mjs`: `var BUILD_STAMP_<PART> = "N.N.N"`,
+    the part's name upper-cased with its dashes underscores
+    (`BUILD_STAMP_SOURCE_RECORDS`), as the part's first declaration after
+    its generated import blocks. It is a part's own top-level declaration,
+    so the part's generated export block lists it, and it is not public:
+    the aggregator does not re-export it;
+  - `model/build.mjs`: its stamp is `PLUGIN_VERSION`, which every cut moves,
+    and directly under that line the generated `BUILD_FILES` block -- a
+    comment and `var BUILD_FILES = { "<file>": "<stamp>", ... }`, one row
+    for every other runtime file, in load order, each equal to the stamp
+    that file carries. A literal initializer, so init locality and declared
+    first hold; never written by hand but for a new file's row;
+  - `Model.mjs`: its one line, above;
+  - each QML entry point: `readonly property string buildStamp: "N.N.N"`
+    at the root's indent; each of the service's code-behinds: a
+    `buildStamp<Domain>()` function returning its literal, the file's first
+    function, read through its forwarder (docs/SERVICE-SPLIT.md, "Adding a
+    code-behind").
+  A stamp is never edited on `dev`: `build_stamps.py --cut`, run at the cut
+  after the version bump, gives every runtime file whose blob differs from
+  `main`'s the version being cut and rewrites `BUILD_FILES`, and
+  `release.py build` refuses a cut in which a changed file does not carry
+  it (`cut_problems`). A new part or a new code-behind therefore needs its
+  stamp at the last cut's version and its row, as a new file needs its
+  `ALLOWLIST` entry. **Frozen, additive only** (the lead's call L3-h under
+  the owner's standing authority of 2026-11-09), because an OLDER build's
+  code reads them beside a newer one in exactly the mix the stamps exist to
+  catch: the stamp names (`buildStamp`, `buildStamp<Domain>`,
+  `BUILD_STAMP_<PART>`, `BUILD_STAMP_AGGREGATOR`, `PLUGIN_VERSION`,
+  `BUILD_FILES`), `buildVerdict`'s input fields and its output fields,
+  `reportBuildStamp` and `serviceBuildNotice` (the last three as L3's
+  reading defines them). A field may be added; none is renamed, retyped or
+  removed.
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in

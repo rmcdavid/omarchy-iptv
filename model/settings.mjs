@@ -25,6 +25,10 @@ import {
   activeKeyText
 } from "./source-records.mjs"
 
+// D-REL-16. This part's build stamp: the version of the last cut that
+// changed it, written by build_stamps.py (dev branch) at the cut.
+var BUILD_STAMP_SETTINGS = "0.20.0"
+
 // ------------------------------------------------------------ caches
 
 function parseJsonObject(text) {
@@ -1269,18 +1273,18 @@ function sameOwnWrite(a, b) {
   return same(ao.base, bo.base) && same(ao.value, bo.value)
 }
 export {
-  parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
-  parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
-  parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
-  HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS, playerVerbKind,
-  playerVerbReason, statusReason, lastErrorAfterStatus, statusHost,
-  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
-  labelWarning, labelWarnings, warningLine, footerWarning, BAR_SECTIONS,
-  barSectionList, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
+  BUILD_STAMP_SETTINGS, parseJsonObject, parseChannels, preparedLruFind,
+  preparedLruNext, parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND,
+  emptyEpgStore, parseEpgNowStore, epgNowIndex, parseHelperStatus,
+  HTTP_REASONS, HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS,
+  playerVerbKind, playerVerbReason, statusReason, lastErrorAfterStatus,
+  statusHost, statusCode, statusHealthy, statusWarnings, WARNING_PREFIX,
+  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
+  BAR_SECTIONS, barSectionList, findBarEntry, settingOf, boolSetting,
+  clampInt, clampSetting, settingsFrom, entryInputText, entryInputForm,
+  sameEntryInput, ownWriteInForce, settingsWithOwnWrite, ownWriteOf,
+  OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen,
+  entryInputLast, entryInputsSeenAfter, entryInputNotice, ownedEntryPatch,
+  barEntryWritable, entryFlushDisposition, owedMirrorAction, ownedWriteMode,
   retiredInputsToKeep, sameOwnWrite
 }

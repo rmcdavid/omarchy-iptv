@@ -20,6 +20,7 @@
         "UNGROUPED",
         "STATE_VERSION",
         "PLUGIN_VERSION",
+        "BUILD_FILES",
         "manifestVersion",
         "staleBuild",
         "SCOPE_RECENT",
@@ -60,6 +61,7 @@
       "name": "text",
       "about": "text normalization, the search key and channel ids",
       "names": [
+        "BUILD_STAMP_TEXT",
         "FOLD_GROUPS",
         "FOLD",
         "PUNCT_RE",
@@ -100,6 +102,7 @@
       "name": "channels",
       "about": "channel records, channel numbers and the number-entry buffer",
       "names": [
+        "BUILD_STAMP_CHANNELS",
         "primaryGroup",
         "rowGroup",
         "groupSearchText",
@@ -154,6 +157,7 @@
       "name": "browse",
       "about": "search, groups and scopes, the guide state machine, the zap ring and keep-my-place",
       "names": [
+        "BUILD_STAMP_BROWSE",
         "containsAll",
         "containsAllWords",
         "matchRank",
@@ -213,6 +217,7 @@
       "name": "state",
       "about": "state.json: saved searches, the session record, hidden groups and dead-channel memory",
       "names": [
+        "BUILD_STAMP_STATE",
         "MAX_SAVED_SEARCHES",
         "MAX_SAVED_TERMS",
         "MAX_SAVED_QUERY",
@@ -340,6 +345,7 @@
       "name": "settings",
       "about": "caches, settings clamps and our own settings write applied locally",
       "names": [
+        "BUILD_STAMP_SETTINGS",
         "parseJsonObject",
         "parseChannels",
         "preparedLruFind",
@@ -403,6 +409,7 @@
       "name": "logos",
       "about": "logos, the channel wall and the announced logo set",
       "names": [
+        "BUILD_STAMP_LOGOS",
         "LOGO_SCHEMES",
         "optInSetting",
         "logoSurvey",
@@ -460,6 +467,7 @@
       "name": "player",
       "about": "the shutdown ladder, the play fork, the adopted-player check and the event router",
       "names": [
+        "BUILD_STAMP_PLAYER",
         "stopEscalation",
         "healthTick",
         "healthRelayAction",
@@ -547,6 +555,7 @@
       "name": "mpv",
       "about": "the mpv argv, the player verbs, and audio and subtitle tracks",
       "names": [
+        "BUILD_STAMP_MPV",
         "MPV_HANDOFF",
         "MPV_HANDOFF_SCRIPT_OPTS",
         "MPV_YTDL_OFF",
@@ -628,6 +637,7 @@
       "name": "rewind",
       "about": "live rewind and the seek queue",
       "names": [
+        "BUILD_STAMP_REWIND",
         "SEEK_FLOOR_MARGIN_S",
         "SEEK_EDGE_MARGIN_S",
         "SEEK_MOVED_THRESHOLD_S",
@@ -664,6 +674,7 @@
       "name": "pip",
       "about": "picture in picture",
       "names": [
+        "BUILD_STAMP_PIP",
         "PIP_CLASS",
         "PIP_TAG",
         "PIP_ADDRESS_RE",
@@ -721,6 +732,7 @@
       "name": "privacy",
       "about": "notifications, URL redaction and the host settings file's container",
       "names": [
+        "BUILD_STAMP_PRIVACY",
         "CONFIG_SHIELD_UNKNOWN",
         "CONFIG_SHIELD_PRIVATE",
         "CONFIG_SHIELD_EXPOSED",
@@ -807,6 +819,7 @@
       "name": "epg",
       "about": "time and count formatting, EPG lines and the programme detail",
       "names": [
+        "BUILD_STAMP_EPG",
         "pad2",
         "formatClock",
         "formatCount",
@@ -836,6 +849,7 @@
       "name": "contrast",
       "about": "contrast and the caption rungs",
       "names": [
+        "BUILD_STAMP_CONTRAST",
         "relativeLuminance",
         "contrastRatio",
         "colorOver",
@@ -875,6 +889,7 @@
       "name": "view",
       "about": "the bar widget, the guide body, the footer and the keyboard map",
       "names": [
+        "BUILD_STAMP_VIEW",
         "barGlyph",
         "barTooltip",
         "barAccessibleName",
@@ -905,6 +920,7 @@
       "name": "sources",
       "about": "sources: input hygiene, URL validation, labels, masking, Xtream and view objects",
       "names": [
+        "BUILD_STAMP_SOURCES",
         "CACHE_LAYOUT",
         "MAX_SOURCES",
         "MAX_SOURCE_URL",
@@ -1131,6 +1147,7 @@
       "name": "source-records",
       "about": "source records and reducers, form state and the Sources transitions",
       "names": [
+        "BUILD_STAMP_SOURCE_RECORDS",
         "hasControlChars",
         "warnState",
         "normalizeSourceRecord",
@@ -1211,6 +1228,7 @@
       "name": "form-edit",
       "about": "form editing over the model value (D-CLIP-1)",
       "names": [
+        "BUILD_STAMP_FORM_EDIT",
         "WORD_SEPARATOR_RE",
         "WORD_SPACE_RE",
         "clipboardArgv",
