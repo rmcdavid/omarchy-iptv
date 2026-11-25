@@ -77,9 +77,9 @@ Item {
   // asks the environment itself, because with no service nothing else can.
   // null when the model cannot say, and the words then name the default.
   readonly property var cacheFolder: {
+    var env = {}, i = 0
     try {
-      var env = {}
-      for (var i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
+      for (i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
       return Model.qmlCacheFolder(env)
     } catch (e) { return null }
   }

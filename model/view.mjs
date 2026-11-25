@@ -74,8 +74,9 @@ function envText(env, name) {
 // (qmlConvertBoolConfigOption in the installed qqmlglobal_p.h: any value but
 // "", "0" and "false") reads as set, and only while QML_FORCE_DISK_CACHE holds
 // nothing, because Qt asks that one first (upstream's
-// ExecutionEngine::diskCacheOptions, read in the source and not in the
-// installed binary, so any forced value at all keeps the folder named);
+// ExecutionEngine::diskCacheOptions as the words recheck of D-REL-16 cites
+// it, not read in the installed binary, whose strings list the two names in
+// that order; so any forced value at all keeps the folder named);
 // QML_DISK_CACHE_PATH is the folder itself; otherwise Qt puts it under its
 // cache location, `quickshell/qmlcache`, which follows XDG_CACHE_HOME only
 // when that is an absolute path (the XDG rule; QStandardPaths' handling of a

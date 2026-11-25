@@ -144,9 +144,9 @@ Item {
   // bar, which imports no Quickshell of its own; null when the model cannot
   // say, and the bar names the default.
   readonly property var buildCacheFolder: {
+    var env = {}, i = 0
     try {
-      var env = {}
-      for (var i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
+      for (i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
       return Model.qmlCacheFolder(env)
     } catch (e) { return null }
   }
@@ -2970,8 +2970,9 @@ Item {
   // own catch already reads as "cache", so the catch here only keeps each
   // view's report from logging a TypeError in that mix.
   function reportBuildStamp(file, stamp) {
+    var next = null
     try {
-      var next = Model.withReportedStamp(root.reportedStamps, file, stamp)
+      next = Model.withReportedStamp(root.reportedStamps, file, stamp)
       if (JSON.stringify(next) !== JSON.stringify(Model.withReportedStamp(root.reportedStamps, "", ""))) root.reportedStamps = next
     } catch (e) { }
   }
