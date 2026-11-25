@@ -135,9 +135,9 @@
 
   // One `status` to the player, deferred so it is issued after the reply
   // that asked for it has finished unwinding (the channel is one at a time).
-  // The `status` branch of handleControlResult, in Service.qml, is the only
-  // place that learns pause, the channel and the health verdict from the
-  // player itself.
+  // handleControlResult's `status` branch, in Service-player.js, is the
+  // one place that learns pause, the channel and the health verdict from
+  // the player itself.
   function askPlayerStatus() {
     if (root.userStopped || root.stopping || !root.playerUp) { root.statusQueued = false; return }
     // Keeps asking until the channel is free. runControl returns false while
