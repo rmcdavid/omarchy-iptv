@@ -1775,8 +1775,10 @@ Nothing inside the plugin directory is written at runtime.
   export OMARCHY_IPTV_URL`, run the command without `--url`, then
   `unset OMARCHY_IPTV_URL`. Or just use the guide, which is what it is for.
 - Shell console: `qs log -p /usr/share/omarchy/shell --tail 100`.
-- After editing `Service.qml` run `omarchy restart shell` (kept-loaded
-  services do not hot-reload).
+- After editing `Service.qml`, or one of the code-behinds beside it that
+  hold most of its functions (`Service-pip.js`, `Service-player.js`,
+  `Service-rewind.js`, `Service-sources.js`), run `omarchy restart shell`
+  (kept-loaded services do not hot-reload).
 
 ## Uninstall
 
