@@ -32,7 +32,10 @@ repository's path.
       Service-player.js, or the other way round, throws a TypeError on every
       call, and the service's `status` reply calls it. Only that pair: a C1
       Service-pip.js beside C2's other files runs, and reads as a mix only by
-      its mark.
+      its mark. With RIG_C2_PART=model/<part>.mjs in the environment (lane-l3cage,
+      2026-11-25) C2 also changes that model part's first comment after its
+      stamp, so its cut restamps the part at 0.99.1 (part_mark). Without it
+      the builds are the same commits as before.
   C3  C2 with the version 0.99.2 and the marks reading C3, and nothing else
       changed: the LATER update a race arm publishes to ask whether an update
       that rewrites every marked file recovers a cache the race poisoned
@@ -136,6 +139,28 @@ def second_marks(tree):
                  "  function socketAttached() { return ServicePlayer.socketAttachedLive() }\n")
 
 
+def part_mark(tree, part):
+    """RIG_C2_PART (lane-l3cage, 2026-11-25): C2 also changes one model part,
+    the first comment line after its build stamp, which no compiled unit
+    holds, so the cut restamps the part at C2's version and a race can leave
+    C1's stamp under C2's checksum: the one kind of literal (a part's `var`)
+    the other builds give no race to reach, since build.mjs is saved before
+    any trigger this rig has can fire."""
+    if (not part.startswith("model/") or not part.endswith(".mjs") or "/" in part[6:] or ".." in part
+            or part == "model/build.mjs" or not os.path.isfile(os.path.join(tree, part))):
+        raise SystemExit("candidates.py: RIG_C2_PART %r is not a model part other than build.mjs" % part)
+    path = os.path.join(tree, part)
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    stamp = [n for n, line in enumerate(lines) if line.startswith("var BUILD_STAMP_")]
+    after = [n for n in range(stamp[0] + 1, len(lines)) if lines[n].startswith("// ")] if stamp else []
+    if not after:
+        raise SystemExit("candidates.py: %s has no comment line after its stamp" % part)
+    lines[after[0]] += " (reload rig: C2 changes this part)"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+
+
 def third_marks(tree):
     for name in ("Service.qml",) + CODE_BEHINDS + ("Guide.qml", "BarWidget.qml"):
         replace_once(os.path.join(tree, name), '"C2 %s"' % name, '"C3 %s"' % name)
@@ -171,6 +196,8 @@ def main(argv):
     git(src, "commit", "-q", "-a", "-m", "reload-d: C1 source (version and marks)")
     git(src, "checkout", "-q", "-b", "c2src", "c1src")
     second_marks(src)
+    if os.environ.get("RIG_C2_PART"):
+        part_mark(src, os.environ["RIG_C2_PART"])
     bump(src, "0.99.1", "0.99.0", stamps, "c1src")
     git(src, "commit", "-q", "-a", "-m", "reload-d: C2 source (version, marks, socketAttached renamed)")
     git(src, "checkout", "-q", "-b", "c3src", "c2src")

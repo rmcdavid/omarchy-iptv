@@ -22,6 +22,9 @@
 #                        ~/.cache/quickshell/qmlcache && omarchy-restart-shell`
 #                        does, D-REL-16), or publish the next build, update
 #                        under the running shell and restart (default none)
+#   RIG_C2_PART=model/<part>.mjs  C2 also changes that model part (a comment
+#                        line, so the cut restamps it at 0.99.1), which gives a
+#                        race a stamped part to poison (default none)
 #   RIG_START_TENTHS=<n> tenths of a second a start waits for the shell's pid
 #                        (default 300; qa-lib-test.sh shortens it)
 #   RIG_QMLCACHE=xdg     start the shell without QML_DISK_CACHE_PATH, so Qt
