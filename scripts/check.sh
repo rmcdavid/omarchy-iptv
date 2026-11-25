@@ -1438,7 +1438,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # third-party import added to a part and the stub resealed, and one-decision
 # mutants of the reader red (QA-RESULTS "D-REL-14: call (d), the rechecks of
 # the settle (lane-fix-c5d, 2026-11-24)"); the suite counts 3055.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3055}
+# 2026-11-25, the nightly run (F-GATE-31): 3055 -> 3078 -- tests/test_argv_only.py's
+# 23 tests (CLAUDE.md's constraint 2, argv-only launching, read off every
+# helper file the stub lists and every shipped QML file, code-behind and
+# model part); the row's four mutants refused on copies of the real files and
+# 26 one-decision mutants of the readers red (QA-RESULTS "F-GATE-31: the
+# argv-only launch guard (the nightly run, 2026-11-25)"); the suite counts 3078.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3078}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

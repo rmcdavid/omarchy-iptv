@@ -28660,3 +28660,66 @@ once (qmlcache and two Qt pipeline and shader cache folders). Nothing there
 was opened, read or changed, its brief forbade touching that folder, and
 every location claim rests on the decoy-HOME measurement. The lead reported
 it to the owner.
+
+## F-GATE-31: the argv-only launch guard (the nightly run, 2026-11-25)
+
+CLAUDE.md's engineering constraint 2 (argv-only process launching, never
+`bash -c`, never string interpolation into a command, never `shell=True`)
+had no gate check; F-GATE-31's row holds the four mutants that passed every
+check the gate had. `tests/test_argv_only.py` is that check, shaped like
+F-GATE-30's `tests/test_helper_stdlib.py`.
+
+- The Python reader (`python_census`) reads the helper's files from the
+  stub's own list and walks each tree at any depth; import aliases are
+  followed across the parts, which run in one namespace. Refused: a `shell=`
+  keyword that is not the literal False; a reference to `os.system`,
+  `os.popen`, `subprocess.getoutput`, `subprocess.getstatusoutput` or
+  asyncio's `create_subprocess_shell` (an alias, a `from` import, a
+  `getattr` with a constant name; a `getattr` on `os` or `subprocess` with a
+  computed name; a star import from either); a string constant outside a
+  docstring that names a shell; a launcher handed a command built as a
+  string, or `**` keywords.
+- The script reader (`script_census`) reads the QML main ships and the
+  code-behinds it declares (release.py's `shipped_code`), `Model.mjs` and
+  the model's parts (scripts/model_files.py), through
+  check-model-members.py's tokenizer. Refused: a string or template literal
+  that names a shell; `execDetached(` handed a string or a template; a
+  `command:` binding or a `command =` assignment that opens with one. A
+  comparison (`command ==`) and an object key bound to a name
+  (`{ command: command }`, the IPC request) are read and pass.
+- On this tree: `python3 -m unittest tests.test_argv_only`, 23 tests, OK; no
+  finding in the helper or the shipped scripts. The reader counts the
+  helper's three launcher calls (`os.execvpe` for the player, `os.execve`
+  for the relay, `subprocess.Popen` for wl-paste) and the scripts' sites,
+  and two tests are red if it stops seeing them.
+- The row's mutants, each on a copy of the real file: `subprocess.run("mpv "
+  + url, shell=True)`, `os.system("mpv x")` and `subprocess.run(["bash",
+  "-c", url])` appended to the helper's last part, and
+  `Quickshell.execDetached(["sh", "-c", cmd])` appended to
+  Service-player.js, each refused with its file and line; a model part
+  returning `["bash", "-c", cmd]` the same way.
+- Proven by mutation (rule 11; the code under test is new): 26 one-decision
+  mutants of the readers, each run against the 23 tests, each red. They
+  are: the `shell` keyword's name; its literal-False test; the forbidden
+  reference; the `from` import; the star import; the shell-name constant;
+  the docstring exemption removed; `getattr` with a constant; `getattr`
+  computed; `**` keywords; the string-built command; the exec launchers'
+  argument; the `args=` keyword; `import x as y`; the shared alias table;
+  the launcher count; the script reader's string rule; its template rule;
+  `execDetached`'s string; `command`'s string; the comparison skip; the
+  shell name's word end; its path prefix; the model's parts left out; the
+  code-behinds left out; a template after `execDetached` or `command`.
+- What it does not see, by its own statement: a command string built in a
+  variable first and launched by name, a shell reached through `env` with a
+  computed name, and a Python launcher called through a variable. The node
+  checks of the named argv builders hold their content.
+- The plans' greps: PLY-SEC-15's step 9 gains `--include='*.mjs'` and
+  `--include='*.py'`; run so over the shipped tree it prints nothing.
+  SEC-01's and SRC-SEC-12's grep, which already reads `*.py`, prints one
+  line that is no finding, `subprocess.Popen(argv, ...)` in 11-cli.py (its
+  `[^\[]` reads a name as a string), and misses `*.mjs`; both rows now
+  point at the test rather than being re-cut.
+- The lead's calls under the owner's standing authority of 2026-11-09: the
+  shell rule is "no string in shipped code names a shell", wider than "no
+  argv is headed by one", with no exception comment, since the tree needs
+  none; and the python floor moves 3055 -> 3078.
