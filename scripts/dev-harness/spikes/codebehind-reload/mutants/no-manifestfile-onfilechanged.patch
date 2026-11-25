@@ -1,0 +1,32 @@
+D-DOC-39 and D-HOST-16 (lane-l3cage's scratch commit 80f80a0, kept by
+lane-l3cagefix, 2026-11-25): manifestFile's `onFileChanged: reload()`
+deleted from Service.qml, so only the root's `onManifestChanged`, the
+host's hand-off of a fresh manifest object at a rescan, re-reads the
+manifest after an update. One line, one decision.
+
+Made against 6fb53e4, whose runtime files the l3cage branch carries
+unchanged. Applied there and committed, the reload rig's candidates.py
+exports C1 4aefb3a, C2 7c7d701 and C3 01b0c2f from it, the three builds
+R1mb ran (RESULT-2026-11-25.txt; its cand.json), so this is that commit's
+tree. What that run read, in the nested cage: `build` notice `restart`,
+onDisk 0.99.1, from the update's watcher reload on with no guide open, in
+its one arm (a-12-r): the host's hand-off alone reads the new manifest.
+docs/QA-RESULTS.md "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)",
+section 1.
+
+To run it again: in a clone of this repository, check out 6fb53e4, `git
+apply` this file and commit, then run that clone's run.sh (RIG_DEV is its
+HEAD by default) with RIG_C0 naming 1321aff.
+
+diff --git a/Service.qml b/Service.qml
+index c672659..ad2853a 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2944,7 +2944,6 @@ Item {
+     // would ever reload by itself is read nowhere and not measured).
+     watchChanges: true
+     printErrors: false
+-    onFileChanged: reload()
+     // D-REL-16: the first version read is kept as loadedDisk, once.
+     onLoaded: {
+       root.onDiskVersion = Model.manifestVersion(text())

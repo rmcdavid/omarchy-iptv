@@ -1,0 +1,33 @@
+D-DOC-39 and D-HOST-16 (lane-l3cage's scratch commit dce5268, kept by
+lane-l3cagefix, 2026-11-25): Service.qml's root `onManifestChanged:
+manifestFile.reload()` deleted, so only manifestFile's own watcher
+(`onFileChanged: reload()`) re-reads the manifest after an update. One line,
+one decision.
+
+Made against 6fb53e4, whose runtime files the l3cage branch carries
+unchanged. Applied there and committed, the reload rig's candidates.py
+exports C1 72f0daf, C2 8eda590 and C3 0cb91b0 from it, the three builds
+R1ma and R1ma2 ran (RESULT-2026-11-25.txt; each run's cand.json), so this
+is that commit's tree. What those runs read, in the nested cage: `build`
+notice `restart`, onDisk 0.99.1, from the update's watcher reload on with
+no guide open, in 5 of 5 arms (a-12-r, b-12-r, a-12-w-c4, b-12-w-c4,
+a-12-w-g4): the watcher alone reads git's replacement of the file.
+docs/QA-RESULTS.md "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)",
+section 1.
+
+To run it again: in a clone of this repository, check out 6fb53e4, `git
+apply` this file and commit, then run that clone's run.sh (RIG_DEV is its
+HEAD by default) with RIG_C0 naming 1321aff.
+
+diff --git a/Service.qml b/Service.qml
+index c672659..0b9a790 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2925,7 +2925,6 @@ Item {
+   // next guide open `status` read the version from the service's creation.
+   // The object is a trigger only: its version is the host's reading, and the
+   // dev harness hands `0.1.0-harness`, so the file is what is read.
+-  onManifestChanged: manifestFile.reload()
+   FileView {
+     id: manifestFile
+     path: root.manifestPath

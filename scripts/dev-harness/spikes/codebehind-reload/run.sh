@@ -22,6 +22,9 @@
 #                        ~/.cache/quickshell/qmlcache && omarchy-restart-shell`
 #                        does, D-REL-16), or publish the next build, update
 #                        under the running shell and restart (default none)
+#   RIG_C2_PART=model/<part>.mjs  C2 also changes that model part (a comment
+#                        line, so the cut restamps it at 0.99.1), which gives a
+#                        race a stamped part to poison (default none)
 #   RIG_START_TENTHS=<n> tenths of a second a start waits for the shell's pid
 #                        (default 300; qa-lib-test.sh shortens it)
 #   RIG_QMLCACHE=xdg     start the shell without QML_DISK_CACHE_PATH, so Qt
@@ -57,7 +60,9 @@
 #   t  a disable and an enable the host's way (setPluginEnabled false,
 #      enablePlugin), twice; before the second enable the engine collects
 #      garbage and loads 8000 components it has never seen, beside a control
-#      component of the rig's own whose file is rewritten after the release
+#      component of the rig's own whose file is rewritten after the release;
+#      then a restart (since lane-l3cage, 2026-11-25: what the README says
+#      ends the misread a toggle leaves, D-REL-16)
 #   w  nothing more (the write-order arms)
 # A race arm (x) runs the update INTO a cold start: the update's own
 # `merge --ff-only` (with the arm's git workers) fires when the starting
@@ -657,7 +662,7 @@ run_arm() {
     marks guide-open
     case $mode in
       r) restart ;;
-      t) toggle first; release_toggle ;;
+      t) toggle first; release_toggle; restart ;;
     esac
   fi
   stop_qs

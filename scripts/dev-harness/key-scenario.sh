@@ -767,7 +767,8 @@
 # its own state and stands alone, `--only PRIVATE` on 2026-11-14), and
 # `BUILD` (B44: the plugin's `build` verb once the guide has opened and the
 # bar resolved, D-REL-16, counted in every full run; it seeds its own state,
-# and that it stands alone is the display lane's run to show);
+# and it stands alone: `--only BUILD` 16 passed, 0 failed, lane-l3cage,
+# 2026-11-25);
 # nothing else is accepted: a segment that leans on an earlier one's state
 # cannot be cut loose by a flag without being checked, so a new name is
 # added only with a run that shows it stands alone. A full run is untouched
