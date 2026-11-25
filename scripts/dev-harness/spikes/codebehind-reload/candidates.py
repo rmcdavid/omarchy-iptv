@@ -101,7 +101,7 @@ def bump(tree, version, old_version, stamps, against):
 
 
 def first_marks(tree):
-    anchor = "  readonly property bool staleBuild: Model.staleBuild(Model.PLUGIN_VERSION, onDiskVersion)\n"
+    anchor = "  readonly property bool staleBuild: buildNotice !== \"\"\n"
     marks = ("  // RELOAD-D MARK (a scratch build of the reload rig, never shipped)\n"
              "  function reloadMarks() {\n"
              "    var out = [\"C1 Service.qml\"]\n"

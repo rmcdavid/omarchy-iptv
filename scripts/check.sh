@@ -349,7 +349,10 @@ fail=0
 # 2026-11-22, the 0.20.0 cut (the lead): 111 -> 112 -- re-levelled to what
 # the spec runs on the tree being cut, as the release step asks; the spec
 # runs 112.
-QML_SPEC_MIN=${QML_SPEC_MIN:-112}
+# 2026-11-25, lane-l3b (D-REL-16): 112 -> 113, test_buildStampsInV4 -- the
+# aggregator's `export var` and the stamps' reading in V4, red on the parent
+# model (modelBuildStamps is not a function).
+QML_SPEC_MIN=${QML_SPEC_MIN:-113}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -818,7 +821,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # each of two one-decision mutants (2 failures each) (QA-RESULTS "D-HOST-16:
 # the manifest re-read follows the host"); the suite runs 4076, and 4076
 # without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4076}
+# 2026-11-25, lane-l3b (D-REL-16, L3's reading): 4076 -> 4140 -- 65 checks
+# of the build stamps' reading (the shared cases of
+# tests/fixtures/build-verdict.json, boots of the shipping service over its
+# own file set and over one copy per code-behind and per model part of
+# another build, the join with build_stamps.py --json, the `build` verb),
+# red on the parent tree (64 of 65) and on 21 one-decision mutants, and the
+# two D-HOST-2 text pins narrowed to the one no boot can see; the suite runs
+# 4140, and 4140 without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4140}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

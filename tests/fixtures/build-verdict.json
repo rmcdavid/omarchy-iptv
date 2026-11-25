@@ -1,0 +1,459 @@
+{
+ "about": "D-REL-16, L3's reading (the plan of the panel run wf_d3ab969d-020, 2026-11-25): Model.buildVerdict, Model.serviceBuildNotice and Model.withReportedStamp over the cases tests/Model.test.js runs. Tokens: \"@running\" is the tree's Model.PLUGIN_VERSION, \"@row\" the file's own row in the loaded table (Model.BUILD_FILES), \"@other\" 99.0.0, above every row and so no build's. The model's own stamps (Model.modelBuildStamps) join every verdict case as they load; the cases name the service's and the views'.",
+ "verdict": [
+  {
+   "why": "one build, the disk agrees: nothing to say",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  },
+  {
+   "why": "an update landed under a running shell: the disk moved after the first read (D-HOST-1)",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@other",
+   "want": {
+    "notice": "restart",
+    "mixed": []
+   }
+  },
+  {
+   "why": "a poisoned code-behind: its unit carries another build's stamp",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@other",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Service-player.js"
+    ]
+   }
+  },
+  {
+   "why": "a read that threw (a code-behind from before the stamps) reads ? and is no build's row",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "?",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Service-pip.js"
+    ]
+   }
+  },
+  {
+   "why": "an aggregator from another build, read as ?",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "?"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Model.mjs"
+    ]
+   }
+  },
+  {
+   "why": "an old guide beside this service",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@other",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Guide.qml"
+    ]
+   }
+  },
+  {
+   "why": "a guide that has not reported yet is not a stamp: \"\" is skipped, and an absent one too",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  },
+  {
+   "why": "a whole old build raced in: every stamp agrees and the disk was already ahead at the first read",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@other",
+   "onDisk": "@other",
+   "want": {
+    "notice": "cache",
+    "mixed": []
+   }
+  },
+  {
+   "why": "a whole new build whose first read caught the old manifest: the latest reading is asked first",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@other",
+   "onDisk": "@running",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  },
+  {
+   "why": "no reading yet: an unknown disk says nothing",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "",
+   "onDisk": "",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  },
+  {
+   "why": "a first read that failed: still nothing to say",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {},
+   "loadedDisk": "",
+   "onDisk": "",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  },
+  {
+   "why": "a file the table does not list is a mix",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row",
+    "Panel.qml": "@running"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Panel.qml"
+    ]
+   }
+  },
+  {
+   "why": "a __proto__ key is a file the table does not list, never the table's prototype",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row",
+    "__proto__": "@running"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "__proto__"
+    ]
+   }
+  },
+  {
+   "why": "a mix outranks the disk: cache, not restart",
+   "own": {
+    "Service.qml": "@other",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@other",
+   "want": {
+    "notice": "cache",
+    "mixed": [
+     "Service.qml"
+    ]
+   }
+  },
+  {
+   "why": "a file counted twice keeps its first stamp: the service's own, not a view's report of it",
+   "own": {
+    "Service.qml": "@row",
+    "Service-pip.js": "@row",
+    "Service-player.js": "@row",
+    "Service-rewind.js": "@row",
+    "Service-sources.js": "@row",
+    "Model.mjs": "@row"
+   },
+   "reported": {
+    "Guide.qml": "@row",
+    "BarWidget.qml": "@row",
+    "Service.qml": "@other"
+   },
+   "loadedDisk": "@running",
+   "onDisk": "@running",
+   "want": {
+    "notice": "",
+    "mixed": []
+   }
+  }
+ ],
+ "notice": [
+  {
+   "why": "no service: the no-service surfaces speak",
+   "service": null,
+   "want": ""
+  },
+  {
+   "why": "a service from before the stamps (no buildNotice) beside a stamped view: only a mix does that",
+   "service": {
+    "configured": true
+   },
+   "want": "cache"
+  },
+  {
+   "why": "a buildNotice that is not a string reads as a mix",
+   "service": {
+    "buildNotice": 1
+   },
+   "want": "cache"
+  },
+  {
+   "why": "a stamped service's own notice, empty",
+   "service": {
+    "buildNotice": ""
+   },
+   "want": ""
+  },
+  {
+   "why": "a stamped service's own notice, restart",
+   "service": {
+    "buildNotice": "restart"
+   },
+   "want": "restart"
+  },
+  {
+   "why": "a stamped service's own notice, cache",
+   "service": {
+    "buildNotice": "cache"
+   },
+   "want": "cache"
+  }
+ ],
+ "report": [
+  {
+   "why": "a view's report adds its file",
+   "map": {},
+   "file": "Guide.qml",
+   "stamp": "@running",
+   "want": {
+    "Guide.qml": "@running"
+   }
+  },
+  {
+   "why": "the same report again changes nothing",
+   "map": {
+    "Guide.qml": "@running"
+   },
+   "file": "Guide.qml",
+   "stamp": "@running",
+   "want": {
+    "Guide.qml": "@running"
+   }
+  },
+  {
+   "why": "a later report of the same file replaces it",
+   "map": {
+    "Guide.qml": "@running"
+   },
+   "file": "Guide.qml",
+   "stamp": "@other",
+   "want": {
+    "Guide.qml": "@other"
+   }
+  },
+  {
+   "why": "an empty stamp is no report",
+   "map": {
+    "BarWidget.qml": "@running"
+   },
+   "file": "Guide.qml",
+   "stamp": "",
+   "want": {
+    "BarWidget.qml": "@running"
+   }
+  },
+  {
+   "why": "a stamp that is not a string is no report",
+   "map": {},
+   "file": "Guide.qml",
+   "stamp": 7,
+   "want": {}
+  },
+  {
+   "why": "a file name past 64 characters is no report",
+   "map": {},
+   "file": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "stamp": "@running",
+   "want": {}
+  },
+  {
+   "why": "a stamp past 32 characters is no report",
+   "map": {},
+   "file": "Guide.qml",
+   "stamp": "999999999999999999999999999999999",
+   "want": {}
+  },
+  {
+   "why": "a file name of exactly 64 characters is kept",
+   "map": {},
+   "file": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "stamp": "@running",
+   "want": {
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": "@running"
+   }
+  },
+  {
+   "why": "a map that is not an object reads as empty",
+   "map": "Guide.qml",
+   "file": "BarWidget.qml",
+   "stamp": "@running",
+   "want": {
+    "BarWidget.qml": "@running"
+   }
+  }
+ ]
+}
