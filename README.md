@@ -1783,13 +1783,15 @@ Nothing inside the plugin directory is written at runtime.
   code it loaded first: the shell's own plugin reload, a rescan and a
   disable and an enable all bring back the same build, the kept-loaded
   service and the guide and the bar alike.
-- **IPTV misbehaves after an update even though you restarted the shell.**
-  A shell that was starting while `omarchy plugin update` was still writing
-  the plugin's files can load part of the old version beside part of the new
-  one, and Quickshell keeps compiled copies of what it loaded in its QML
-  cache, which can carry that mix into the next start. Restart the shell
-  once more (`omarchy-restart-shell`); if that does not help, remove
-  Quickshell's QML cache and restart:
+- **IPTV is missing from the bar, or misbehaves, after an update even though
+  you restarted the shell.** A shell that was starting while
+  `omarchy plugin update` was still writing the plugin's files can fail to
+  load the plugin at all, so the bar shows no IPTV and the guide does not
+  open, or can load part of the old version beside part of the new one; and
+  Quickshell keeps compiled copies of what it loaded in its QML cache, which
+  can carry such a mix into the next start. Restart the shell once more
+  (`omarchy-restart-shell`), which loads a plugin that did not load; if IPTV
+  still misbehaves, remove Quickshell's QML cache and restart:
   `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the folder
   is under `$XDG_CACHE_HOME/quickshell/` instead when you set that variable).
   The cache holds only compiled copies of QML and JavaScript files and is
