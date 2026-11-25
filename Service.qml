@@ -145,9 +145,9 @@ Item {
   // say, and the bar names the default.
   readonly property var buildCacheFolder: {
     try {
-      return Model.qmlCacheFolder({ QML_DISABLE_DISK_CACHE: Quickshell.env("QML_DISABLE_DISK_CACHE"),
-                                    QML_DISK_CACHE_PATH: Quickshell.env("QML_DISK_CACHE_PATH"),
-                                    XDG_CACHE_HOME: Quickshell.env("XDG_CACHE_HOME") })
+      var env = {}
+      for (var i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
+      return Model.qmlCacheFolder(env)
     } catch (e) { return null }
   }
 
@@ -2965,10 +2965,15 @@ Item {
   // D-REL-16. A view's report of its own build stamp ("Guide.qml",
   // "BarWidget.qml"), made when it is handed this service. Idempotent: the
   // same pair again changes nothing, so a view may report from both its
-  // completion and its service's change (the lead's call A1).
+  // completion and its service's change (the lead's call A1). A model
+  // without withReportedStamp beside this file is a mix that buildCheck's
+  // own catch already reads as "cache", so the catch here only keeps each
+  // view's report from logging a TypeError in that mix.
   function reportBuildStamp(file, stamp) {
-    var next = Model.withReportedStamp(root.reportedStamps, file, stamp)
-    if (JSON.stringify(next) !== JSON.stringify(Model.withReportedStamp(root.reportedStamps, "", ""))) root.reportedStamps = next
+    try {
+      var next = Model.withReportedStamp(root.reportedStamps, file, stamp)
+      if (JSON.stringify(next) !== JSON.stringify(Model.withReportedStamp(root.reportedStamps, "", ""))) root.reportedStamps = next
+    } catch (e) { }
   }
   // The `build` verb's reply: the verdict alone, file names and version
   // strings only. It reads the binding and nothing that throws in a mixed

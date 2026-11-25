@@ -78,9 +78,9 @@ Item {
   // null when the model cannot say, and the words then name the default.
   readonly property var cacheFolder: {
     try {
-      return Model.qmlCacheFolder({ QML_DISABLE_DISK_CACHE: Quickshell.env("QML_DISABLE_DISK_CACHE"),
-                                    QML_DISK_CACHE_PATH: Quickshell.env("QML_DISK_CACHE_PATH"),
-                                    XDG_CACHE_HOME: Quickshell.env("XDG_CACHE_HOME") })
+      var env = {}
+      for (var i = 0; i < Model.QML_CACHE_ENV.length; i++) env[Model.QML_CACHE_ENV[i]] = Quickshell.env(Model.QML_CACHE_ENV[i])
+      return Model.qmlCacheFolder(env)
     } catch (e) { return null }
   }
   readonly property string serviceMissingText: { try { return Model.serviceMissingProse(root.cacheFolder) } catch (e) { return "Run omarchy restart shell" } }

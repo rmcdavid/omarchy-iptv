@@ -55,6 +55,9 @@ var BUILD_STAMP_VIEW = "0.20.0"
 // call L3-c).
 
 var QML_CACHE_DEFAULT = "~/.cache/quickshell/qmlcache"
+// Every variable qmlCacheFolder reads, which the guide and the service hand
+// it from Quickshell.env by this list, so neither can leave one out.
+var QML_CACHE_ENV = ["QML_DISABLE_DISK_CACHE", "QML_FORCE_DISK_CACHE", "QML_DISK_CACHE_PATH", "XDG_CACHE_HOME"]
 
 // The value of `name` in `env` when it is a string, else "".
 function envText(env, name) {
@@ -66,16 +69,21 @@ function envText(env, name) {
 // variable's name and never its value (a path names a user, and the words
 // reach the bar and the bus). From the variables the installed Qt carries
 // (libQt6Qml 6.12.0, read with strings(1), not run): QML_DISABLE_DISK_CACHE
-// turns the cache off -- "" here, so the words drop the cache step, only for
-// a whole number other than 0, the one value Qt reads as set whether it asks
-// whether the variable is set or what number it holds --; QML_DISK_CACHE_PATH
-// is the folder itself; otherwise Qt puts it under its cache location,
-// `quickshell/qmlcache`, which follows XDG_CACHE_HOME only when that is an
-// absolute path (the XDG rule; QStandardPaths' handling of a relative one is
-// read, not measured). `env` is an object of those names, so a test hands a
-// fake one and nothing here reads the process's own.
+// turns the cache off -- "" here, so the words drop the cache step -- only for
+// a whole number other than 0, a value Qt's boolean option reading
+// (qmlConvertBoolConfigOption in the installed qqmlglobal_p.h: any value but
+// "", "0" and "false") reads as set, and only while QML_FORCE_DISK_CACHE holds
+// nothing, because Qt asks that one first (upstream's
+// ExecutionEngine::diskCacheOptions, read in the source and not in the
+// installed binary, so any forced value at all keeps the folder named);
+// QML_DISK_CACHE_PATH is the folder itself; otherwise Qt puts it under its
+// cache location, `quickshell/qmlcache`, which follows XDG_CACHE_HOME only
+// when that is an absolute path (the XDG rule; QStandardPaths' handling of a
+// relative one is read, not measured). `env` is an object of those names
+// (QML_CACHE_ENV), so a test hands a fake one and nothing here reads the
+// process's own.
 function qmlCacheFolder(env) {
-  if (/^0*[1-9][0-9]*$/.test(envText(env, "QML_DISABLE_DISK_CACHE"))) return ""
+  if (/^0*[1-9][0-9]*$/.test(envText(env, "QML_DISABLE_DISK_CACHE")) && envText(env, "QML_FORCE_DISK_CACHE") === "") return ""
   if (envText(env, "QML_DISK_CACHE_PATH") !== "") return "$QML_DISK_CACHE_PATH"
   if (envText(env, "XDG_CACHE_HOME").charAt(0) === "/") return "$XDG_CACHE_HOME/quickshell/qmlcache"
   return QML_CACHE_DEFAULT
@@ -900,12 +908,12 @@ function motionMs(style, ms) {
   return Math.round(got)
 }
 export {
-  BUILD_STAMP_VIEW, QML_CACHE_DEFAULT, envText, qmlCacheFolder, cacheFolderOr,
-  BUILD_UPDATED, BUILD_LOADED_MID, BUILD_RESTART_TAIL, buildNoticeKind,
-  serviceMissingProse, barGlyph, barTooltip, barAccessibleName, buildSpoken,
-  barAccessibleState, ipcNowPlaying, ipcJson, guideSurface, firstRunAllowed,
-  footerCounts, footerDegraded, footerStatus, arrowVerb, footerHints,
-  scopeVerb, formHints, keyboardMapUntabled, hideMeaning, escapeOutcome,
-  sameEscape, verbForKey, setKeyRow, mergeKeyRows, keyboardMap,
-  keyboardMapKeys, motionMs
+  BUILD_STAMP_VIEW, QML_CACHE_DEFAULT, QML_CACHE_ENV, envText, qmlCacheFolder,
+  cacheFolderOr, BUILD_UPDATED, BUILD_LOADED_MID, BUILD_RESTART_TAIL,
+  buildNoticeKind, serviceMissingProse, barGlyph, barTooltip,
+  barAccessibleName, buildSpoken, barAccessibleState, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
+  arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
+  hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
+  keyboardMap, keyboardMapKeys, motionMs
 }

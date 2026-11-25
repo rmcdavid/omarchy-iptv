@@ -304,7 +304,7 @@ function makeIds(h) {
     // h.detached keeps the command -- what /proc shows -- and h.detachedRuns
     // each run's command and what the helper parses (helperView, which throws
     // on a flag with no list, as the helper refuses one).
-    Quickshell: { env() { return "" }, execDetached(context) {
+    Quickshell: { env(name) { return h.env && typeof h.env[name] === "string" ? h.env[name] : "" }, execDetached(context) {
       if (!Array.isArray(context) || context.length === 0) throw new TypeError("Passing incompatible arguments to C++ functions from JavaScript is not allowed (execDetached takes a command list; a { command, environment } object is refused, measured on Quickshell 0.3.2)")
       const ctx = { command: context, environment: {} }
       const argv = ctx.command.map(String)
@@ -969,6 +969,9 @@ function bootService(svc, Model, o) {
   // D-HOST-16: manifest.json beside the tree as the view finds it --
   // `manifestText` (null for no file), or the running model's own version,
   // which is what a whole install holds (the gate proves the two agree).
+  // D-REL-16: what Quickshell.env answers, by name (`env`); "" for anything
+  // else, as before.
+  h.env = opts.env && typeof opts.env === "object" ? opts.env : {}
   h.manifestFile = new ManifestFile(opts.manifestText !== undefined ? opts.manifestText : JSON.stringify({ id: PID, version: Model.PLUGIN_VERSION }) + "\n")
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says

@@ -207,7 +207,7 @@ export {
   noMatchesTitle
 } from "./model/contrast.mjs"
 export {
-  qmlCacheFolder, serviceMissingProse, barGlyph, barTooltip,
+  QML_CACHE_ENV, qmlCacheFolder, serviceMissingProse, barGlyph, barTooltip,
   barAccessibleName, ipcNowPlaying, ipcJson, guideSurface, firstRunAllowed,
   footerStatus, footerHints, formHints, keyboardMapUntabled, hideMeaning,
   sameEscape, verbForKey, setKeyRow, keyboardMap, keyboardMapKeys, motionMs

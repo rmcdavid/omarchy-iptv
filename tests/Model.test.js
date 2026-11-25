@@ -4190,6 +4190,28 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     }, [0, "cache", [d.file], OTHER, [0, 0]])
   })
 
+  // And one per code-behind whose stamp READ throws: a code-behind from
+  // before the stamps beside this Service.qml, whose forwarder then calls a
+  // function that is not there -- a TypeError, which the harness can only
+  // boot as a body that throws one (it refuses a forwarder with no function,
+  // `no-function`), the device of the TypeError-mix check below. The
+  // service's catch reads "?", which is no build's row; the logic recheck's
+  // mutant that read Service.qml's own stamp there instead was green in every
+  // check until these.
+  serviceReader.declarations(svcSet.service).forEach(d => {
+    checkCall("D-REL-16: a " + d.file + " whose stamp read throws (one from before the stamps) beside this service reads cache, naming it at \"?\"", () => {
+      const text = svcSet.files[d.file]
+      const re = /^  function (buildStamp[A-Za-z]+)\(\) \{ return "[^"]*" \}$/m
+      if (!re.test(text)) return d.file + " has no stamp line"
+      const files = Object.assign({}, svcSet.files)
+      files[d.file] = text.replace(re, (m, n) => "  function " + n + "() { throw new TypeError(\"Property '" + n + "' is not a function\") }")
+      const h = boot({ service: svcSet.service, files })
+      h.runLater()
+      const r = h.root.buildReply()
+      return [h.compileErrors.length, h.root.buildNotice, r.mixed, r.stamps[d.file], notices(h)]
+    }, [0, "cache", [d.file], "?", [0, 0]])
+  })
+
   checkCall("D-REL-16: a Service.qml of another build reads cache, naming itself", () => {
     const re = /^  readonly property string buildStamp: "[^"]*"$/m
     if (!re.test(svcSet.service)) return "Service.qml has no stamp line"
@@ -4258,6 +4280,19 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     return [h.root.buildNotice, h.root.staleBuild, b.notice, b.running, h.root.ownBuildStamps()["Model.mjs"], JSON.parse(h.ipc.status()).build.notice]
   }, ["cache", true, "cache", V, "?", "cache"])
 
+  checkCall("D-REL-16: beside a model with none of the reading's names, a view's report throws nothing -- the one call into the reading outside a binding -- and the service still reads cache", () => {
+    // The eight public names L3 added to the model, all gone, as in 0.20.0's
+    // aggregator. A report that threw would log a TypeError at every view's
+    // completion and service hand-off in exactly the mix the notice is for.
+    const old = Object.assign({}, Model)
+    for (const k of ["BUILD_FILES", "BUILD_STAMP_AGGREGATOR", "modelBuildStamps", "withReportedStamp",
+                     "buildVerdict", "serviceBuildNotice", "qmlCacheFolder", "serviceMissingProse"]) delete old[k]
+    const h = H.bootService(svcSet, old, { entry, stateText: "", host: "lag" })
+    h.runLater()
+    const out = VIEWS.map(v => { try { h.root.reportBuildStamp(v, V); return "answered" } catch (e) { return "threw " + e.name } })
+    return [h.compileErrors.length, out, h.root.buildNotice, JSON.parse(h.ipc.build()).notice]
+  }, [0, ["answered", "answered"], "cache", "cache"])
+
   // One copy of the model per part, in which that part's stamp is another
   // build's: what a stale unit of it would hold. build.mjs's own stamp is
   // PLUGIN_VERSION, its own row, so its copy is another build's TABLE: a row
@@ -4319,12 +4354,27 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     [{ QML_DISABLE_DISK_CACHE: "yes" }, DEF, "a word is not a number: the folder is named, which costs a command if Qt read it as off"],
     [{ QML_DISABLE_DISK_CACHE: "" }, DEF, "set to nothing"],
     [{ QML_DISABLE_DISK_CACHE: 1, QML_DISK_CACHE_PATH: null, XDG_CACHE_HOME: undefined }, DEF, "values that are not strings are unset (Quickshell.env answers undefined)"],
+    // QML_FORCE_DISK_CACHE: Qt asks it before QML_DISABLE_DISK_CACHE (upstream's
+    // diskCacheOptions, read, not run), so a forced cache is on whatever the
+    // other says; any value but "" counts, because naming a folder Qt does
+    // not read costs a command and not naming one it does costs the recovery.
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }, DEF, "a forced cache beats the cache turned off"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "0" }, DEF, "any forced value but nothing keeps the folder named, 0 included"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "" }, "", "a forced value of nothing is unset"],
+    [{ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1", QML_DISK_CACHE_PATH: "/srv/u7/qc" }, "$QML_DISK_CACHE_PATH", "forced, the path still names the folder"],
   ]
   ENVS.forEach(([env, want, why]) => checkCall("D-REL-16: qmlCacheFolder -- " + why, () => Model.qmlCacheFolder(env), want))
   checkCall("D-REL-16: qmlCacheFolder never prints a value the environment holds, and reads nothing but what it is handed", () => {
     const leaked = ENVS.filter(([env]) => Object.keys(env).some(k => typeof env[k] === "string" && env[k].length > 1 && Model.qmlCacheFolder(env).indexOf(env[k]) !== -1))
     return [leaked.length, Model.qmlCacheFolder(null), Model.qmlCacheFolder("XDG_CACHE_HOME=/x"), Model.qmlCacheFolder(undefined)]
   }, [0, DEF, DEF, DEF])
+  checkCall("D-REL-16: QML_CACHE_ENV, the list the guide and the service hand their environment from, names exactly the variables qmlCacheFolder reads", () => {
+    const read = new Set()
+    for (const [env] of ENVS) Model.qmlCacheFolder(new Proxy(env, { get(t, k) { read.add(k); return t[k] } }))
+    const list = Array.isArray(Model.QML_CACHE_ENV) ? Model.QML_CACHE_ENV : []
+    return [list.slice().sort(), [...read].sort()]
+  }, [["QML_DISABLE_DISK_CACHE", "QML_DISK_CACHE_PATH", "QML_FORCE_DISK_CACHE", "XDG_CACHE_HOME"],
+      ["QML_DISABLE_DISK_CACHE", "QML_DISK_CACHE_PATH", "QML_FORCE_DISK_CACHE", "XDG_CACHE_HOME"]])
 
   const f = extra => Model.footerStatus(Object.assign({ configured: true, count: 5 }, extra))
   checkCall("D-REL-16 (L3-b): the footer's cache line sits below the number entry and the transient and above everything else, the empty-state gate included", () => [
@@ -4405,6 +4455,16 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
       { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
     return [h.compileErrors.length, h.root.buildCacheFolder]
   }, [0, DEF])
+  checkCall("D-REL-16: the service hands the composer every variable it reads -- the cache turned off drops the folder, a forced one keeps it named", () => {
+    const H = require("./service-harness.js")
+    const set = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+    const at = env => {
+      const h = H.bootService(set, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag", env })
+      return [h.compileErrors.length, h.root.buildCacheFolder]
+    }
+    return [at({ QML_DISABLE_DISK_CACHE: "1" }), at({ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }),
+            at({ XDG_CACHE_HOME: "/srv/u7/cache" }), at({ QML_DISK_CACHE_PATH: "/srv/u7/qc" })]
+  }, [[0, ""], [0, DEF], [0, "$XDG_CACHE_HOME/quickshell/qmlcache"], [0, "$QML_DISK_CACHE_PATH"]])
 })()
 // END D-REL-16 WORDS
 

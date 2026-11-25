@@ -899,6 +899,7 @@
       "names": [
         "BUILD_STAMP_VIEW",
         "QML_CACHE_DEFAULT",
+        "QML_CACHE_ENV",
         "envText",
         "qmlCacheFolder",
         "cacheFolderOr",
