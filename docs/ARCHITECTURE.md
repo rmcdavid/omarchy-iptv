@@ -5230,6 +5230,26 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
     before `QML_DISABLE_DISK_CACHE` (upstream's `diskCacheOptions` as the
     words recheck cites it; the installed binary's strings list the two
     names in that order, which is consistent with it and proves nothing).
+    **[2026-11-25, lane-l3cage, the caged arms (docs/QA-RESULTS.md "D-REL-16:
+    L3's caged arms"): OBSERVED -- the QML and code-behind literals survive a
+    poisoned unit as the old build's and are named in `mixed`
+    (`Service.qml` and `BarWidget.qml` on root b, three code-behinds on
+    root a); both views' reports reach the service, the guide's under the
+    host's own panel loader (make-root.py's byte-for-byte cut of shell.qml)
+    and the bar's under the rig's reduction of Bar.qml's widget host;
+    the hand-off at a real rescan reads the new manifest with no guide
+    open, and so, on its own, does manifestFile's watcher (D-DOC-39);
+    clear-live recovered 7 of 7 poisoned cases; b-01-x reads the cache
+    line in the C1 guide's footer and the bar's tooltip and name.
+    CONTRADICTED -- a model part from before the stamps poisoned beside
+    the first stamped build is not a link failure: build.mjs logs
+    `ReferenceError: Unable to resolve import reference BUILD_STAMP_LOGOS`,
+    the plugin's QML loads, `Model` undefined in the service and its
+    code-behinds, the service throws at every call while the views compose
+    their words, `build` reads `cache` from the binding's catch with no
+    stamps, and the footer and the tooltip say `Loaded mid-update`
+    (D-DOC-40). STILL UNVERIFIED -- a stamped part's `var` surviving as the
+    old build's (no race poisoned one), and the last item, Qt's order.]**
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in

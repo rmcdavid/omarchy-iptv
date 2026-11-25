@@ -523,7 +523,10 @@ through `rescanPlugins`.
   `Model.PLUGIN_VERSION`, read the old version.
 - The plugin says so once the guide opens (D-HOST-1): before that, `status`
   read the running and on-disk versions alike, because the replaced
-  manifest's watch never fires (D-HOST-2); at the open `recheckBuild` read
+  manifest's watch never fires (D-HOST-2) **[2026-11-25, lane-l3cage: it
+  fires; what 0.20.0 and 3200d22 lacked was a handler for it (D-DOC-39). Since
+  D-HOST-16 both the watcher and the host's hand-off read the new version
+  at the watcher's reload, with no guide open]**; at the open `recheckBuild` read
   the new manifest, `stale` became true, and the footer read "Updated ·
   restart the shell to see the new version".
 - After a restart the new build ran everywhere, clean: ready with three
@@ -711,7 +714,13 @@ reading"). For a code-behind that means three things beside what
   with them (`agree` lines; a notice that does not fit the marks is a
   finding). `RIG_RECOVER=clear-live` removes the cache folder while the
   shell runs and then restarts, the README's order. None of it has run in a
-  cage yet: the arms are the display lane's.
+  cage yet: the arms are the display lane's. **[2026-11-25, lane-l3cage: run,
+  in 44 arms (QA-RESULTS "D-REL-16: L3's caged arms"). The stamps agreed
+  with the marks in every arm once four of the rig's readouts were fixed
+  (f9ca702: cache.py's model reading, F-HARNESS-134; analyze.py's
+  no-service, pre-stamp, unattached-view and reading-threw verdicts,
+  F-HARNESS-135); a poisoned code-behind's stamp read the old build's and
+  was named in `mixed`, and clear-live recovered 7 of 7 poisoned cases.]**
 
 ## History
 
