@@ -643,6 +643,7 @@ building the rig, whose own runs use `flock -o`). D-REL-6, D-REL-9 and
 D-REL-14 carry dated brackets. The join brought two texts to the
 measurement: `Service.qml`'s header comment no longer gives keepLoaded as
 the whole reason a restart is needed, and the README's development line
+**[2026-11-24, lane-settle-c5d: a bullet of the README's Troubleshooting list, beside which this lane added one on a raced cache; the "## Development" section was not touched]**
 names the guide, the bar and the model beside the service, since none of
 them reloads either. D-REL-16's options and their costs are in
 lane-reload-d's result, for the lead. **[2026-11-24, lane-settle-c5d: the lead's calls on them, under the owner's standing authority of 2026-11-09: call (d) is met for the ordinary update path (L1); D-REL-16 is rewritten from the real races and is P2 (L2); the build stamp is the next step, a release-notes line is the cut's, and upstream reports wait on the owner (L3). No shipped code changed here either: comment lines in Service.qml and Service-rewind.js, the README and the documents]**

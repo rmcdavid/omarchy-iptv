@@ -106,9 +106,10 @@
     target: "rig"
 
     // What every running object says it is (the builds' marks, see
-    // candidates.py), with the QML type's name: a type compiled again gets a
-    // new _QMLTYPE_ number, so the name tells a cached component from a
-    // fresh one.
+    // candidates.py), with the QML type's name. The marks are the verdict:
+    // the _QMLTYPE_ number does not tell a cached component from a fresh one
+    // (across a restart a new text kept its number and a stale one got a new
+    // one; within a process no recompile was reached).
     function marks(): string {
       var out = ({})
       var s = shell.serviceFor(shell.rigPluginId)

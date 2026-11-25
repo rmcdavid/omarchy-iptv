@@ -441,7 +441,8 @@ restart_up() {
 # components it has never seen, so one nothing references any more can
 # leave the type loader's cache. The control is a component of the rig's
 # own, made and let go before, its file rewritten after: a type compiled
-# again reads the new text under a new _QMLTYPE_ number, a cached one not.
+# again reads the new text, a cached one the old (its `v`; its _QMLTYPE_
+# number is printed too, but no recompile was reached to show it moves).
 release_toggle() {
   local first loaded=0 n
   ipc shell setPluginEnabled "$PLUGIN_ID" false >/dev/null; sleep 2
