@@ -1664,10 +1664,15 @@ SERVICE_SPLIT_CASES_MIN=${SERVICE_SPLIT_CASES_MIN:-34}
 # Model.mjs, the four code-behinds and the 18 model parts -- and a stamp from
 # each, then runs its own cases (46: every refusal kind, the cut and the
 # strict check), so the step goes red when the judge stops judging. Both
-# floors are exact: a runtime file the guard stops reading is one whose mixed
-# build nothing could see.
+# floors sit at the tree's counts, and are floors, not equalities: a runtime
+# file the guard stops reading is one whose mixed build nothing could see, and
+# a new one raises the floor in the same commit (the gate recheck of 1c64c77
+# read "exact" here beside a `<` comparison).
+# D-REL-16 (2026-11-25, lane-l3fix): two cases for `needless`, a file that
+# differs from the main a cut compares with only in its stamp (a cut against
+# a local main behind origin's), one strict and one cut: 46 -> 48.
 BUILD_STAMPS_FILES_MIN=${BUILD_STAMPS_FILES_MIN:-26}
-BUILD_STAMPS_CASES_MIN=${BUILD_STAMPS_CASES_MIN:-46}
+BUILD_STAMPS_CASES_MIN=${BUILD_STAMPS_CASES_MIN:-48}
 # D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.

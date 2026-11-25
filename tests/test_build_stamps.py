@@ -98,10 +98,28 @@ class TheCases(unittest.TestCase):
             seen.add(want.get('refused'))
             if want.get('stale'):
                 seen.add('stale')
+            if want.get('needless'):
+                seen.add('needless')
         self.assertTrue(set(build_stamps.KINDS) <= seen, sorted(set(build_stamps.KINDS) - seen))
         modes = collections.Counter(case.get('mode', 'check') for case in self.data['cases'])
         self.assertGreaterEqual(modes['cut'], 3, modes)
         self.assertGreaterEqual(modes['strict'], 2, modes)
+
+    def test_every_refusal_case_names_its_message_too(self):
+        """A kind alone let a dropped decision through whenever another check
+        refused the same tree with the same kind (lane-l3a's M7 and M8, a row
+        unequal to its file and the table's file list, both green in --check
+        behind the block-form check): each refusal case says its message."""
+        lacking = [case['name'] for case in self.data['cases']
+                   if case.get('mode', 'check') == 'check' and 'refusal' in case['expect']
+                   and not isinstance(case['expect'].get('says'), str)]
+        self.assertEqual([], lacking)
+        case = next(c for c in self.data['cases'] if 'says' in c['expect'])
+        wrong = json.loads(json.dumps(case))
+        wrong['expect']['says'] = 'another message'
+        ok, got = build_stamps.run_case(wrong, self.data['base'])
+        self.assertFalse(ok)
+        self.assertIn('saying', got)
 
     def test_a_case_the_judge_gets_wrong_is_reported_and_reds_the_check(self):
         flipped = json.loads(json.dumps(self.data))
@@ -346,6 +364,95 @@ class TheCut(unittest.TestCase):
         self.assertEqual(sorted([' M Guide.qml', ' M manifest.json', ' M model/build.mjs']),
                          sorted(line for line in status.split('\n') if line))
         self.assertEqual(mode, os.stat(os.path.join(self.dir, 'Guide.qml')).st_mode)
+
+    def test_a_cut_against_an_older_main_is_named_and_a_cut_against_the_current_one_sets_it_back(self):
+        """The gate recheck of 1c64c77: --cut compares with the LOCAL main,
+        and one left behind origin's restamps every file changed since it,
+        files the update does not change among them, while the cut's check
+        against the current main passed them all (each carries the version).
+        The check names such a file `needless` -- it differs from the current
+        main only in its stamp -- and a cut against the current main sets its
+        stamp back to that main's, so fetching and cutting again heals it."""
+        self.commit_ref()
+        self.git('branch', '-f', 'older', 'HEAD')
+        base = self.stamps()
+        # The cut after `older`, 9.9.8: Guide.qml and model/text.mjs changed.
+        self.bump('9.9.8')
+        for rel in ('Guide.qml', 'model/text.mjs'):
+            with open(os.path.join(self.dir, rel), 'a', encoding='utf-8') as fh:
+                fh.write('// changed in 9.9.8\n')
+        build_stamps.cut(self.dir, 'older', runtime=self.order, out=io.StringIO())
+        self.commit_ref()                   # `ref` is now that cut: the main installs have
+        # The next cut, 9.9.9, changes Service-pip.js only, and is cut against
+        # `older`, the local main a fetch would have moved.
+        self.edit('manifest.json', '"version": "9.9.8"', '"version": "9.9.9"')
+        self.edit(build_stamps.BUILD, 'var PLUGIN_VERSION = "9.9.8"', 'var PLUGIN_VERSION = "9.9.9"')
+        with open(os.path.join(self.dir, 'Service-pip.js'), 'a', encoding='utf-8') as fh:
+            fh.write('// changed in 9.9.9\n')
+        written = build_stamps.cut(self.dir, 'older', runtime=self.order, out=io.StringIO())
+        self.assertEqual([r for r in self.order if r in ('Guide.qml', 'Service-pip.js', 'model/build.mjs', 'model/text.mjs')],
+                         written)
+        found = build_stamps.cut_problems(self.dir, 'ref', '9.9.9', runtime=self.order)
+        self.assertEqual([('Guide.qml', 'needless'), ('model/text.mjs', 'needless')],
+                         [(p.file, p.kind) for p in found])
+        self.assertIn('differs from ref only in its stamp', str(found[0]))
+        out = io.StringIO()
+        written = build_stamps.cut(self.dir, 'ref', runtime=self.order, out=out)
+        self.assertEqual([r for r in self.order if r in ('Guide.qml', 'model/build.mjs', 'model/text.mjs')], written)
+        self.assertIn("set back to ref's stamp: Guide.qml, model/text.mjs", out.getvalue())
+        stamps = self.stamps()
+        for rel in self.order:
+            want = {'Guide.qml': '9.9.8', 'model/text.mjs': '9.9.8', 'Service-pip.js': '9.9.9',
+                    build_stamps.BUILD: '9.9.9'}.get(rel, base[rel])
+            self.assertEqual(want, stamps[rel], rel)
+        self.assertEqual([], build_stamps.cut_problems(self.dir, 'ref', '9.9.9', runtime=self.order))
+        self.assertEqual([], self.cut())
+
+    def test_a_needless_restamp_is_judged_on_the_blob_git_would_store(self):
+        """The set-back text is hashed at its path, the filters applied, as
+        every other comparison of the cut is: an ident-folded file whose only
+        change is its stamp is needless too."""
+        write(os.path.join(self.dir, '.gitattributes'), 'BarWidget.qml ident\n')
+        self.edit('BarWidget.qml', '  id: root\n', '  id: root\n  // $Id$\n')
+        self.commit_ref()
+        self.bump('9.9.9')
+        self.edit('BarWidget.qml', '// $Id$', '// $Id: 0123456789abcdef0123456789abcdef01234567 $')
+        was = build_stamps.stamps(ROOT)[1]['BarWidget.qml']
+        self.edit('BarWidget.qml', 'buildStamp: "%s"' % was, 'buildStamp: "9.9.9"')
+        self.edit(build_stamps.BUILD, '  "BarWidget.qml": "%s"' % was, '  "BarWidget.qml": "9.9.9"')
+        self.assertEqual([('BarWidget.qml', 'needless')],
+                         [(p.file, p.kind) for p in build_stamps.cut_problems(self.dir, 'ref', '9.9.9', runtime=self.order)])
+        self.cut()
+        self.assertEqual(was, self.stamps()['BarWidget.qml'])
+
+    def test_a_ref_without_stamps_has_no_needless_restamp(self):
+        """The first stamped cut: main at 0.20.0 holds no stamp line, so
+        nothing can differ from it only in its stamp."""
+        self.unstamped()
+        self.commit_ref()
+        for rel in self.order + ['manifest.json']:
+            write(os.path.join(self.dir, rel), read(os.path.join(ROOT, rel)))
+        self.bump('9.9.9')
+        self.cut()
+        self.assertEqual([], build_stamps.cut_problems(self.dir, 'ref', '9.9.9', runtime=self.order))
+
+    def test_the_cli_cut_and_strict_default_to_the_main_branch_not_a_tag(self):
+        """--against defaults to refs/heads/main, the ref release.py build
+        reads, so a tag named `main` cannot split the two."""
+        self.commit_ref()
+        self.git('branch', '-f', 'main', 'HEAD')
+        self.bump('9.9.9')
+        with open(os.path.join(self.dir, 'Guide.qml'), 'a', encoding='utf-8') as fh:
+            fh.write('// changed\n')
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', 'a tag named main, at a tree where everything is changed')
+        self.git('tag', 'main', 'HEAD')
+        with mock.patch.object(build_stamps, 'runtime_order', lambda root: self.order):
+            out = io.StringIO()
+            with mock.patch('sys.stdout', out):
+                self.assertEqual(1, build_stamps.main(['--strict', '--root', self.dir]))
+        self.assertIn('Guide.qml', out.getvalue())
+        self.assertIn('[stale]', out.getvalue())
 
     def test_the_cli_cut_and_strict_say_what_they_did(self):
         self.commit_ref()

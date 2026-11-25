@@ -1105,7 +1105,9 @@ def build(root, gate_already_green=False, validate=True, tag=True,
     # cut, or the running build would read its own new file as another
     # build's (or an old one as this one's). Against the main this cut goes
     # onto, so it is what the update rewrites; `build_stamps.py --cut` after
-    # the bump is what makes it so.
+    # the bump is what makes it so. And no file differs from that main ONLY in
+    # its stamp (`needless`): a cut against a local main behind origin's
+    # restamps files the update does not change.
     reached = runtime_files(root, tracked(root), set(ALLOWLIST), [])
     try:
         stale = build_stamps.cut_problems(root, old_main, version, runtime=reached)
@@ -1113,7 +1115,8 @@ def build(root, gate_already_green=False, validate=True, tag=True,
         raise ReleaseError('the build stamps cannot be compared with %s: %s' % (RELEASE_BRANCH, error))
     if stale:
         raise ReleaseError('the build stamps do not match this cut; run `python3 -I scripts/build_stamps.py --cut` '
-                           'after the bump:\n  ' + '\n  '.join(str(p) for p in stale))
+                           'after the bump, against the main installs have (`git fetch origin main:main` first):\n  '
+                           + '\n  '.join(str(p) for p in stale))
 
     tree = build_tree(root, dev_sha)
     got = tree_paths(root, tree)

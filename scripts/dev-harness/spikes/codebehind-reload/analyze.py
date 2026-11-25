@@ -191,7 +191,12 @@ def stamp_lines(k):
         want = MARK_VERSIONS.get(build) if build else None
         if build is None and stamp not in (None, "?"):
             off.append("%s unmarked but stamped %s" % (name, stamp))
-        elif build is not None and stamp is not None and stamp != want:
+        elif build is not None and stamp is None:
+            # A marked file the reply does not stamp: a view that never
+            # reported (the l3-bar-no-report patch's shape), which a check
+            # that skipped it read as agreeing (the gate recheck of 1c64c77).
+            off.append("%s marked %s (%s) but not stamped" % (name, build, want))
+        elif build is not None and stamp != want:
             off.append("%s marked %s (%s) but stamped %s" % (name, build, want, stamp))
     builds = sorted(set(v for v in marks.values() if v)) + (["C0"] if any(v is None for v in marks.values()) else [])
     mixed_marks = len(builds) > 1
