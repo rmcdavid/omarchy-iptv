@@ -10,11 +10,25 @@
 #                        with `flock -o` so nothing it starts holds the lock.
 #   RIG_DEV=<ref>        the dev tree C1 is exported from (default HEAD)
 #   RIG_C0=<ref>         the released artifact (default main)
+#   RIG_RACE_FILE=<file> an x arm's trigger: the plugin file whose first
+#                        open by the starting shell fires the merge
+#                        (default Service.qml)
+#   RIG_RACE_DELAY_MS=<n> an x arm waits n ms after that open (default 0)
+#   RIG_RECOVER=clear|update  an x arm, after its two restarts: remove the
+#                        QML disk cache's folder and restart, or publish
+#                        the next build, update under the running shell and
+#                        restart (default neither)
+#   RIG_QMLCACHE=xdg     start the shell without QML_DISK_CACHE_PATH, so Qt
+#                        puts its disk cache where it would for a user, in
+#                        the decoy HOME (default: the arm's own qmlcache
+#                        folder through QML_DISK_CACHE_PATH)
 #
 # WHAT IT MEASURES. candidates.py builds C0 (the release, one Service.qml),
-# C1 (dev's ALLOWLIST export: Service.qml and four code-behinds) and C2 (C1
-# with one function renamed across Service.qml and Service-player.js), each
-# carrying a mark in every file that can mix (C0's mark is that it has none).
+# C1 (dev's ALLOWLIST export: Service.qml and four code-behinds), C2 (C1
+# with one function renamed across Service.qml and Service-player.js) and C3
+# (C2 with only its marks and version moved, the race arms' later update),
+# each carrying a mark in every file that can mix (C0's mark is that it has
+# none).
 # make-root.py cuts the host's shell.qml down to the code that loads,
 # reloads, disables and enables a plugin -- byte for byte, the cuts and two
 # adaptations named there -- and runs it as the quickshell root (a: with the
@@ -36,18 +50,34 @@
 #      garbage and loads 8000 components it has never seen, beside a control
 #      component of the rig's own whose file is rewritten after the release
 #   w  nothing more (the write-order arms)
+# A race arm (x) runs the update INTO a cold start: the update's own
+# `merge --ff-only` (with the arm's git workers) fires when the starting
+# shell first opens RIG_RACE_FILE, RIG_RACE_DELAY_MS after it, from a helper
+# whose pid is recorded, while both watches time the shell's reads and git's
+# writes; then it reads the marks and Qt's disk cache (cache.py), opens the
+# guide, restarts twice (reading the cache after each) and recovers as
+# RIG_RECOVER says.
 # A half-tree arm instead makes by hand a tree a shell starting inside the
 # update's write window would read, starts the shell COLD on it, completes
 # the tree (`git reset --hard FETCH_HEAD`) under the live watcher, rescans,
 # toggles once and restarts:
-#   h1 git's order at one worker, caught between the code-behinds and
-#      Service.qml: the new code-behinds beside the old Service.qml
-#   h4 the interleave at four workers: the new Service.qml while
-#      Service-player.js is not there (for 01, no code-behind is there yet)
-#   h0 git between unlinking Service.qml and writing it again (any worker
-#      count; 0.20.0's own updates have this moment)
+#   h1 git's order at one worker, caught just before it unlinks the old
+#      Service.qml: every changed file that sorts before Service.qml in byte
+#      order (the index's, which one worker writes in) taken from the new
+#      build -- the bar, the guide, the README and the four code-behinds for
+#      12 -- every file the update deletes deleted, and Service.qml and what
+#      sorts after it (manifest.json, model/, bin/) the old build's
+#   h4 a shape four workers could leave: the new Service.qml complete while
+#      Service-player.js is not there (for 01, no code-behind is there yet).
+#      No measured run has produced it: in every four-worker run Service.qml
+#      closed after every code-behind (analyze.py prints the h4 line)
+#   h0 git between unlinking Service.qml and writing it again: sub-ms at one
+#      worker, and at four the main process unlinks every changed file
+#      before the workers create any, so Service.qml is absent for some ms
+# Every arm but h keeps an open watch over the first cold start (x: through
+# the race), so analyze.py prints the shell's first read of each file.
 # ARMS: <root>-<from><to>-<mode>[-<git>], root a or b, 01 (C0 to C1) or 12
-# (C1 to C2), git c4 (`-c checkout.workers=4 -c
+# (C1 to C2), mode r, t, w, x, h1, h4 or h0, git c4 (`-c checkout.workers=4 -c
 # checkout.thresholdForParallelism=1` on the merge) or g4 (the same two
 # settings in the decoy HOME's ~/.gitconfig, which the update does not
 # override).
@@ -71,7 +101,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 HARNESS=$(cd "$HERE/../.." && pwd)
 REPO=$(git -C "$HERE" rev-parse --show-toplevel)
 . "$REPO/scripts/qa-lib.sh" || exit 2
-ARMS_ALL="a-01-r b-01-r a-12-r b-12-r a-01-t b-01-t a-12-t b-12-t a-12-w-c4 b-12-w-c4 a-12-w-g4 a-12-h1 b-12-h1 a-12-h4 b-12-h4 a-01-h4 a-01-h0"
+ARMS_ALL="a-01-r b-01-r a-12-r b-12-r a-01-t b-01-t a-12-t b-12-t a-12-w-c4 b-12-w-c4 a-12-w-g4 a-12-h1 b-12-h1 a-12-h4 b-12-h4 a-01-h4 a-01-h0 a-12-x b-12-x a-01-x b-01-x"
 PLUGIN_ID=io.github.rmcdavid.iptv
 journal() { journalctl -o json MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1 2>/dev/null | wc -l; }
 
@@ -83,8 +113,13 @@ done
 if [[ ${RIG_INNER:-} != 1 ]]; then
   # ------------------------------------------------------------ outside
   for a in "$@"; do
-    [[ $a =~ ^[ab]-(01|12)-(r|t|w|h0|h1|h4)(-(c4|g4))?$ ]] || { echo "run.sh: no arm $a (arms: $ARMS_ALL)" >&2; exit 2; }
+    [[ $a =~ ^[ab]-(01|12)-(r|t|w|x|h0|h1|h4)(-(c4|g4))?$ ]] || { echo "run.sh: no arm $a (arms: $ARMS_ALL)" >&2; exit 2; }
   done
+  [[ ${RIG_RACE_DELAY_MS:-0} =~ ^[0-9]{1,4}$ ]] || { echo "run.sh: RIG_RACE_DELAY_MS is not a number of ms below 10000" >&2; exit 2; }
+  [[ ${RIG_RECOVER:-none} =~ ^(none|clear|update)$ ]] || { echo "run.sh: RIG_RECOVER is none, clear or update" >&2; exit 2; }
+  [[ ${RIG_QMLCACHE:-arm} =~ ^(arm|xdg)$ ]] || { echo "run.sh: RIG_QMLCACHE is arm or xdg" >&2; exit 2; }
+  [[ ${RIG_RACE_FILE:-Service.qml} =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && ${RIG_RACE_FILE:-} != *..* ]] || {
+    echo "run.sh: RIG_RACE_FILE is a plugin file's relative path" >&2; exit 2; }
   base=/tmp/claude-1000
   [[ -d $base && -w $base ]] || base=${TMPDIR:-/tmp}
   top=$(mktemp -d "$base/cbr.XXXXXX") || exit 2
@@ -94,7 +129,7 @@ if [[ ${RIG_INNER:-} != 1 ]]; then
   c0=$(git -C "$REPO" rev-parse --verify "${RIG_C0:-main}^{commit}") || exit 2
   echo "codebehind-reload: work $top; C0 $c0, C1 from $dev"
   env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME \
-    -u OMARCHY_IPTV_HARNESS_DIR -u AT_SPI_BUS_ADDRESS \
+    -u OMARCHY_IPTV_HARNESS_DIR -u AT_SPI_BUS_ADDRESS -u QML_DISK_CACHE_PATH \
     RIG_INNER=1 RIG_TOP="$top" RIG_BUS="$top/bus" RIG_DEV_SHA="$dev" RIG_C0_SHA="$c0" \
     XDG_RUNTIME_DIR="$top/rt" TMPDIR="$top/tmp" \
     "$HARNESS/private-bus.sh" "$top/bus" 5400 "$0" "$@"
@@ -115,8 +150,9 @@ J0=$(journal)
 echo "crash journal before: $J0"
 python3 -I "$HERE/candidates.py" "$REPO" "$WORK/cand" "$RIG_C0_SHA" "$RIG_DEV_SHA" >"$WORK/cand.json" || exit 2
 UPSTREAM=$(jq -r .upstream "$WORK/cand.json")
-declare -A BUILD=([0]=$(jq -r .commits.C0 "$WORK/cand.json") [1]=$(jq -r .commits.C1 "$WORK/cand.json") [2]=$(jq -r .commits.C2 "$WORK/cand.json"))
-echo "builds: C0 ${BUILD[0]:0:12}  C1 ${BUILD[1]:0:12}  C2 ${BUILD[2]:0:12} (allowlist $(jq -r .allowlist "$WORK/cand.json") files)"
+declare -A BUILD=([0]=$(jq -r .commits.C0 "$WORK/cand.json") [1]=$(jq -r .commits.C1 "$WORK/cand.json")
+                 [2]=$(jq -r .commits.C2 "$WORK/cand.json") [3]=$(jq -r .commits.C3 "$WORK/cand.json"))
+echo "builds: C0 ${BUILD[0]:0:12}  C1 ${BUILD[1]:0:12}  C2 ${BUILD[2]:0:12}  C3 ${BUILD[3]:0:12} (allowlist $(jq -r .allowlist "$WORK/cand.json") files)"
 python3 -I "$HERE/make-root.py" "$WORK/roots" "$HERE/rig.qml.in" >/dev/null || exit 2
 for ((i = 0; i < 8000; i++)); do printf 'import QtQml\nQtObject { objectName: "t%d" }\n' "$i" >"$WORK/trim/T$i.qml"; done
 printf '#!/bin/bash\nprintf "%%s\\n" "$*" >>"%s/hyprctl.log"\nexit 1\n' "$WORK" >"$WORK/bin/hyprctl"
@@ -143,7 +179,7 @@ NESTED=$(cat "$WORK/display" 2>/dev/null); CAGE_CHILD=$(cat "$WORK/child.pid" 2>
 [[ -n $NESTED && -n $CAGE_CHILD && -S $RT/$NESTED ]] || { echo "run.sh: cage brought up no display" >&2; exit 2; }
 echo "nested display $NESTED (cage $CAGE_PID)"
 
-GDB_PID="" QS="" WATCH_PID="" WATCHER="" ARM="" H="" ROOTDIR="" PLUGINS="" DIR=""
+GDB_PID="" QS="" WATCH_PID="" OPEN_PID="" RACE_PID="" WATCHER="" ARM="" H="" ROOTDIR="" PLUGINS="" DIR=""
 stop_cage() {
   [[ -n $CAGE_CHILD ]] && qa_signal_named TERM sleep "$CAGE_CHILD"
   timeout 10 tail --pid="$CAGE_PID" -f /dev/null 2>/dev/null
@@ -151,7 +187,9 @@ stop_cage() {
   wait "$CAGE_PID" 2>/dev/null
 }
 cleanup() {
+  stop_race
   stop_watch
+  stop_open_watch
   stop_qs
   stop_cage
   local j; j=$(journal)
@@ -186,11 +224,15 @@ check_journal() {
 }
 start_qs() {
   local i pid
+  local -a qmlcache=(QML_DISK_CACHE_PATH="$H/qmlcache")
+  [[ ${RIG_QMLCACHE:-arm} == xdg ]] && qmlcache=()
   rm -f "$H/qs.pid"
+  note "shell starting"
   env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u QT_QPA_PLATFORMTHEME -u OMARCHY_IPTV_HARNESS_DIR \
+    -u QML_DISK_CACHE_PATH \
     HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config" XDG_CACHE_HOME="$H/home/.cache" \
     XDG_STATE_HOME="$H/home/.local/state" XDG_DATA_HOME="$H/home/.local/share" \
-    QML_DISK_CACHE_PATH="$H/qmlcache" QT_FORCE_STDERR_LOGGING=1 QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 \
+    "${qmlcache[@]}" QT_FORCE_STDERR_LOGGING=1 QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 \
     OMARCHY_PATH="$ROOTDIR" WAYLAND_DISPLAY="$NESTED" QT_QPA_PLATFORM=wayland PATH="$WORK/bin:/usr/bin:/bin" \
     RIG_PID_FILE="$H/qs.pid" RIG_TRIM_DIR="$WORK/trim" \
     nice -n 10 timeout -k 5 900 gdb -batch -nx -ex 'set debuginfod enabled off' -ex 'handle all nopass' -ex run -ex kill \
@@ -233,7 +275,7 @@ stop_qs() {
 }
 start_watch() {
   rm -f "$H/watch.ready"
-  python3 -I "$HERE/watch.py" "$PLUGINS" "$H/watch.log" "$H/watch.ready" &
+  python3 -I "$HERE/watch.py" "$PLUGINS" "$H/watch.log" "$H/watch.ready" writes &
   WATCH_PID=$!
   local i
   for ((i = 0; i < 100; i++)); do [[ -e $H/watch.ready ]] && return 0; sleep 0.1; done
@@ -244,6 +286,70 @@ stop_watch() {
   qa_stop_named "$WATCH_PID" "$HERE/watch.py" 5 watch.py >/dev/null
   wait "$WATCH_PID" 2>/dev/null
   WATCH_PID=""
+}
+# The shell's reads (watch.py's opens), over a cold start.
+start_open_watch() {
+  rm -f "$H/open.ready"
+  python3 -I "$HERE/watch.py" "$PLUGINS" "$H/open.log" "$H/open.ready" opens &
+  OPEN_PID=$!
+  local i
+  for ((i = 0; i < 100; i++)); do [[ -e $H/open.ready ]] && return 0; sleep 0.1; done
+  echo "run.sh: $ARM: the open watch was not listening within 10 s" >&2
+}
+stop_open_watch() {
+  [[ -n $OPEN_PID ]] || return 0
+  qa_stop_named "$OPEN_PID" "$HERE/watch.py" 5 watch.py >/dev/null
+  wait "$OPEN_PID" 2>/dev/null
+  OPEN_PID=""
+}
+# An x arm's helper: waits (bounded) for the starting shell's first open of
+# RIG_RACE_FILE, waits RIG_RACE_DELAY_MS, and runs the update's merge. Its
+# pid is recorded; it ends on its own, its inotifywait bounded at 120 s.
+race_start() {
+  local -a g=(git)
+  [[ $1 == c4 ]] && g=(git -c checkout.workers=4 -c checkout.thresholdForParallelism=1)
+  local file=${RIG_RACE_FILE:-Service.qml} delay=${RIG_RACE_DELAY_MS:-0} i
+  [[ -f $DIR/$file ]] || { echo "run.sh: $ARM: $file is not in the installed tree" >&2; return 1; }
+  ( export GIT_TERMINAL_PROMPT=0 HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config"
+    git -C "$DIR" fetch --quiet origin HEAD ) || return 1
+  : >"$H/race.err"
+  (
+    export GIT_TERMINAL_PROMPT=0 HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config"
+    timeout 120 inotifywait -e open "$DIR/$file" >/dev/null 2>>"$H/race.err" || exit 9
+    printf '%s race open\n' "$(date +%s%3N)" >>"$H/steps.log"
+    if (( delay > 0 )); then sleep "$(printf '%d.%03d' $((delay / 1000)) $((delay % 1000)))"; fi
+    printf '%s merge start\n' "$(date +%s%3N)" >>"$H/steps.log"
+    "${g[@]}" -C "$DIR" merge --ff-only FETCH_HEAD >/dev/null 2>&1
+    rc=$?
+    printf '%s merge end\n%s merge rc=%s\n' "$(date +%s%3N)" "$(date +%s%3N)" "$rc" >>"$H/steps.log"
+  ) &
+  RACE_PID=$!
+  for ((i = 0; i < 100; i++)); do /usr/bin/grep -q "Watches established" "$H/race.err" && break; sleep 0.1; done
+  note "race armed on $file +$delay ms, helper $RACE_PID"
+}
+stop_race() {
+  [[ -n $RACE_PID ]] || return 0
+  timeout 130 tail --pid="$RACE_PID" -f /dev/null 2>/dev/null
+  wait "$RACE_PID" 2>/dev/null
+  RACE_PID=""
+}
+# Qt's disk cache: where it is for this arm, what it holds (cache.py), and
+# its removal, the way a user would remove it.
+cache_root() { if [[ ${RIG_QMLCACHE:-arm} == xdg ]]; then printf '%s\n' "$H/home/.cache"; else printf '%s\n' "$H/qmlcache"; fi; }
+cache_read() {
+  printf '  [cache %s]\n' "$1" >>"$H/cache.txt"
+  python3 -I "$HERE/cache.py" "$(cache_root)" "$WORK/cand.json" "$DIR" >>"$H/cache.txt" 2>&1
+}
+clear_cache() {
+  local d
+  local -a dirs
+  mapfile -t dirs <<<"$(python3 -I "$HERE/cache.py" "$(cache_root)" "$WORK/cand.json" "$DIR" --dirs)"
+  for d in "${dirs[@]}"; do
+    [[ -n $d ]] || continue
+    if [[ $d != "$H/"* ]]; then note "cache folder $d is not the arm's; left"; continue; fi
+    rm -rf -- "$d"
+    note "cache folder removed: ${d#"$H/"}"
+  done
 }
 # wait_ready SECS: until the service reads three channels.
 wait_ready() {
@@ -321,6 +427,10 @@ toggle() {
 # SECS (90) for three channels.
 restart() {
   stop_qs
+  restart_up "$@"
+}
+# restart_up [SECS]: the second half, for a step between the two.
+restart_up() {
   start_qs || return 1
   wait_ready "${1:-90}" || echo "   not ready after the restart"
   marks restart
@@ -371,9 +481,22 @@ half_tree() {
   ( export GIT_TERMINAL_PROMPT=0 HOME="$H/home" XDG_CONFIG_HOME="$H/home/.config"
     git -C "$DIR" fetch --quiet origin HEAD ) || return 1
   case $1 in
-    h1) for cb in Service-pip.js Service-player.js Service-rewind.js Service-sources.js; do
-          git -C "$DIR" show "FETCH_HEAD:$cb" >"$DIR/$cb" || return 1
-        done ;;
+    h1) # Every path the update deletes, then every changed path before
+        # Service.qml in byte order (the index's order, which one worker
+        # writes in), from FETCH_HEAD.
+        local p
+        local -a gone changed took=()
+        mapfile -t gone <<<"$(git -C "$DIR" diff --name-only --no-renames --diff-filter=D HEAD FETCH_HEAD)"
+        for p in "${gone[@]}"; do [[ -n $p ]] && rm -f -- "${DIR:?}/$p" && took+=("-$p"); done
+        mapfile -t changed <<<"$( { git -C "$DIR" diff --name-only --no-renames --diff-filter=d HEAD FETCH_HEAD; echo Service.qml; } | LC_ALL=C sort -u)"
+        for p in "${changed[@]}"; do
+          [[ -n $p ]] || continue
+          [[ $p == Service.qml ]] && break
+          mkdir -p -- "$(dirname -- "$DIR/$p")"
+          git -C "$DIR" show "FETCH_HEAD:$p" >"$DIR/$p" || return 1
+          took+=("$p")
+        done
+        note "half tree h1 took ${took[*]}" ;;
     h4) git -C "$DIR" show FETCH_HEAD:Service.qml >"$DIR/Service.qml" || return 1
         rm -f "$DIR/Service-player.js" ;;
     h0) rm -f "$DIR/Service.qml" ;;
@@ -402,12 +525,56 @@ run_arm() {
     git clone -q -- "$UPSTREAM" "$PLUGINS/.add.tmp.$$" && \
     /usr/share/omarchy/bin/omarchy-plugin-validate "$PLUGINS/.add.tmp.$$" >/dev/null && \
     mv "$PLUGINS/.add.tmp.$$" "$DIR" ) || { echo "run.sh: $ARM: the install failed" >&2; return 1; }
-  echo "== $ARM: root $root ($([[ $root == a ]] && echo pragma || echo no pragma)), C$from -> C$to, mode $mode${git:+, git $git}"
+  local extra=""
+  [[ $mode == x ]] && extra=", the merge at the first open of ${RIG_RACE_FILE:-Service.qml} +${RIG_RACE_DELAY_MS:-0} ms, recover ${RIG_RECOVER:-none}"
+  [[ ${RIG_QMLCACHE:-arm} == xdg ]] && extra="$extra, Qt's own cache folder"
+  echo "== $ARM: root $root ($([[ $root == a ]] && echo pragma || echo no pragma)), C$from -> C$to, mode $mode${git:+, git $git}$extra"
   publish "$to"
-  if [[ $mode == h0 || $mode == h1 || $mode == h4 ]]; then
+  if [[ $mode == x ]]; then
+    start_open_watch
+    start_watch
+    race_start "$git" || return 1
+    start_qs || return 1
+    stop_race
+    note "race done"
+    wait_ready 40 || echo "   not ready after the race"
+    marks race-start
+    stop_watch
+    stop_open_watch
+    cache_read race
+    ipc shell summon "$PLUGIN_ID" '{}' >/dev/null; sleep 2
+    marks race-open
+    restart 60
+    cache_read restart-1
+    restart 60
+    cache_read restart-2
+    case ${RIG_RECOVER:-none} in
+      clear)
+        stop_qs
+        clear_cache
+        restart_up 60
+        cache_read cleared ;;
+      update)
+        publish $((to + 1))
+        start_watch
+        t0=$(now)
+        update_step "$git"; rc=$?
+        note "update rc=$rc"
+        wait_scan "$t0" 15
+        t0=$(now)
+        ipc shell rescanPlugins >/dev/null
+        wait_scan "$t0" 15
+        stop_watch
+        marks updated
+        restart 60
+        cache_read updated ;;
+    esac
+  elif [[ $mode == h0 || $mode == h1 || $mode == h4 ]]; then
     half_tree "$mode" || { echo "run.sh: $ARM: the half tree failed" >&2; return 1; }
+    start_open_watch
     start_qs || return 1
     wait_ready 20 || echo "   not ready on the half tree"
+    stop_open_watch
     marks half-start
     start_watch
     t0=$(now)
@@ -425,8 +592,10 @@ run_arm() {
     toggle completed
     restart 30
   else
+    start_open_watch
     start_qs || return 1
     wait_ready 90 || echo "   not ready at start"
+    stop_open_watch
     ipc rig favorite >/dev/null; sleep 1.5
     marks start
     start_watch

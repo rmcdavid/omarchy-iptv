@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""scripts/dev-harness/spikes/codebehind-reload/watch.py -- git's writes, timed.
+"""scripts/dev-harness/spikes/codebehind-reload/watch.py -- git's writes, or
+the shell's reads, timed.
 
-  watch.py DIR OUT READY
+  watch.py DIR OUT READY [writes|opens]
 
-Runs `inotifywait -m -r` over DIR (the decoy plugins folder) with the events
-the host's own watcher asks for (create, close_write, delete, move) and writes
-one line per event to OUT: the wall clock in milliseconds (the clock the rig's
-Date.now() reads), the event names and the path. READY is created once the
-watches are established. Ends its inotifywait (its own child, by the pid it
-started) on SIGTERM, and exits.
+Runs `inotifywait -m -r` over DIR (the decoy plugins folder) and writes one
+line per event to OUT: the wall clock in milliseconds (the clock the rig's
+Date.now() and run.sh's `date +%s%3N` read), the event names and the path.
+`writes` (the default) asks for the events the host's own watcher asks for
+(create, close_write, delete, move): git's writes. `opens` asks for open and
+close_nowrite: every read of a file, which is how the rig times the shell's
+own reads at a cold start (a file git creates is opened too, so an open that
+follows a CREATE of the same path is git's; analyze.py tells them apart).
+READY is created once the watches are established. Ends its inotifywait (its
+own child, by the pid it started) on SIGTERM, and exits.
 """
 import os
 import signal
@@ -16,12 +21,15 @@ import subprocess
 import sys
 import time
 
+EVENTS = {"writes": "close_write,create,delete,move", "opens": "open,close_nowrite"}
+
 
 def main(argv):
-    if len(argv) != 4:
-        raise SystemExit("usage: watch.py DIR OUT READY")
+    if len(argv) not in (4, 5) or (len(argv) == 5 and argv[4] not in EVENTS):
+        raise SystemExit("usage: watch.py DIR OUT READY [writes|opens]")
     directory, out, ready = argv[1], argv[2], argv[3]
-    child = subprocess.Popen(["inotifywait", "-m", "-r", "-e", "close_write,create,delete,move",
+    events = EVENTS[argv[4] if len(argv) == 5 else "writes"]
+    child = subprocess.Popen(["inotifywait", "-m", "-r", "-e", events,
                               "--format", "%e|%w%f", directory],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 

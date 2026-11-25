@@ -30,10 +30,16 @@ repository's path.
       socketAttachedLive and Service.qml's forwarder socketAttached() calls
       ServicePlayer.socketAttachedLive(). A C2 Service.qml over a C1
       Service-player.js, or the other way round, throws a TypeError on every
-      call, and the service's `status` reply calls it.
+      call, and the service's `status` reply calls it. Only that pair: a C1
+      Service-pip.js beside C2's other files runs, and reads as a mix only by
+      its mark.
+  C3  C2 with the version 0.99.2 and the marks reading C3, and nothing else
+      changed: the LATER update a race arm publishes to ask whether an update
+      that rewrites every marked file recovers a cache the race poisoned
+      (run.sh's RIG_RECOVER=update; a C0 to C1 race takes C2 for it).
 
-The upstream is a bare repository whose `main` starts at C0 and holds C1 and
-C2 under refs/heads/art; publishing a build is `git update-ref refs/heads/main
+The upstream is a bare repository whose `main` starts at C0 and holds C1, C2
+and C3 under refs/heads/art; publishing a build is `git update-ref refs/heads/main
 <commit>` in it (run.sh's publish), which is what a release's push does to
 origin's main. Nothing is pushed anywhere, and REPO is never written.
 Python 3 standard library only; every subprocess is an argv list.
@@ -112,6 +118,11 @@ def second_marks(tree):
                  "  function socketAttached() { return ServicePlayer.socketAttachedLive() }\n")
 
 
+def third_marks(tree):
+    for name in ("Service.qml",) + CODE_BEHINDS + ("Guide.qml", "BarWidget.qml"):
+        replace_once(os.path.join(tree, name), '"C2 %s"' % name, '"C3 %s"' % name)
+
+
 def main(argv):
     if len(argv) != 5:
         raise SystemExit("usage: candidates.py REPO WORK C0REF DEVREF")
@@ -140,9 +151,13 @@ def main(argv):
     bump(src, "0.99.1", "0.99.0")
     second_marks(src)
     git(src, "commit", "-q", "-a", "-m", "reload-d: C2 source (version, marks, socketAttached renamed)")
+    git(src, "checkout", "-q", "-b", "c3src", "c2src")
+    bump(src, "0.99.2", "0.99.1")
+    third_marks(src)
+    git(src, "commit", "-q", "-a", "-m", "reload-d: C3 source (version and marks)")
     commits = {"C0": c0}
     parent = c0
-    for build, ref in (("C1", "c1src"), ("C2", "c2src")):
+    for build, ref in (("C1", "c1src"), ("C2", "c2src"), ("C3", "c3src")):
         git(src, "checkout", "-q", ref)
         problems = release.check(src, out=open(os.devnull, "w"))
         if problems:
@@ -155,7 +170,7 @@ def main(argv):
                    "build_tree; %d allowlisted files.\n" % (build, ref, len(release.ALLOWLIST)))
         parent = git(src, "commit-tree", tree, "-p", parent, "-m", message).strip()
         commits[build] = parent
-    git(src, "update-ref", "refs/heads/art", commits["C2"])
+    git(src, "update-ref", "refs/heads/art", commits["C3"])
     upstream = os.path.join(work, "upstream.git")
     subprocess.run(["git", "clone", "-q", "--bare", "--single-branch", "--branch", "main", src, upstream],
                    check=True)

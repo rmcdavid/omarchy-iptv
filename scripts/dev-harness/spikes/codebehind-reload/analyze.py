@@ -4,10 +4,15 @@
   analyze.py ARM_DIR ARM
 
 Reads what run.sh kept for one arm (marks.jsonl, qs.log, steps.log,
-watch.log) and prints, per step, what every running object says it is and
-what the shell logged since the step before; then the update's write order
-(the working tree's creates and closes, the .git folder left out) laid beside
-the shell's own reload events on the same millisecond clock.
+watch.log, open.log, cache.txt) and prints, per step, what every running
+object says it is and what the shell logged since the step before; then the
+cold start's reads (open.log: the first time the shell opened each plugin
+file); then the update's write order (the working tree's unlinks, creates
+and closes, the .git folder left out) with the moments a cold load could
+read (h0, h1, h4), laid beside the shell's own reload events on the same
+millisecond clock; then, for a race arm, each marked file's read, git's
+write and the cache's save in one line; then what the QML disk cache held
+at each step it was read (cache.py).
 """
 import collections
 import json
@@ -17,11 +22,54 @@ import sys
 PLUGIN_FILES = ("Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js",
                 "Service-sources.js", "Guide.qml", "BarWidget.qml", "Model.mjs", "manifest.json")
 CODE_BEHINDS = PLUGIN_FILES[1:5]
+READ_FILES = PLUGIN_FILES[:8] + ("model/build.mjs",)
+PLUGIN_DIR = "/io.github.rmcdavid.iptv/"
 NOTABLE = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a function|unavailable|case mismatch|"
                      r"Error|error|WARN|warn|failed|received signal", re.I)
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def rel(path):
+    return path.split(PLUGIN_DIR, 1)[-1]
+
+
+def watch_events(path):
+    """(ms, events, path) of one watch.py log, the .git folder left out."""
+    out = []
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        t, _, rest = line.strip().partition(" ")
+        kind, _, p = rest.partition("|")
+        if "/.git/" in p or p.endswith("/.git") or PLUGIN_DIR not in p + "/":
+            continue
+        out.append((float(t), kind, p))
+    return out
+
+
+def shell_reads(d):
+    """The first time each plugin file was opened by anything but git: an open
+    within 2 ms after git created the same path is git's own write."""
+    created = collections.defaultdict(list)
+    for t, kind, path in watch_events(d + "/watch.log"):
+        if "CREATE" in kind:
+            created[rel(path)].append(t)
+    first, later = {}, collections.defaultdict(list)
+    for t, kind, path in watch_events(d + "/open.log"):
+        name = rel(path)
+        if "OPEN" not in kind or "ISDIR" in kind:
+            continue
+        if any(0 <= t - c <= 2.0 for c in created.get(name, ())):
+            continue
+        if name in first:
+            later[name].append(t)
+        else:
+            first[name] = t
+    return first, later
 
 
 def tidy(line, d):
@@ -84,6 +132,13 @@ def main(argv):
         steps.setdefault(what, float(t))
         if what.startswith(("control", "loaded", "not ready", "no scan", "update rc")):
             print("  note: %s" % what)
+    reads(d, steps)
+    write_order(d, steps, log)
+    race(d, steps)
+    cache(d)
+
+
+def write_order(d, steps, log):
     if "merge start" not in steps or "merge end" not in steps:
         print("  write order: no merge recorded")
         return
@@ -96,22 +151,44 @@ def main(argv):
             continue
         events.append((float(t), kind, path))
     tree = [e for e in events if m0 - 5 <= e[0] <= m1 + 5]
-    rel = lambda p: p.split("/io.github.rmcdavid.iptv/", 1)[-1]
     closes = {}
     creates = {}
+    deletes = {}
     for t, kind, path in tree:
         name = rel(path)
         if "CLOSE_WRITE" in kind:
             closes.setdefault(name, t)
         if "CREATE" in kind:
             creates.setdefault(name, t)
+        if "DELETE" in kind or "MOVED_FROM" in kind:
+            deletes.setdefault(name, t)
     print("  write order: %d working-tree events in %.1f ms (merge %.1f ms)" % (
         len(tree), (tree[-1][0] - tree[0][0]) if tree else 0, m1 - m0))
     order = sorted(closes, key=closes.get)
     print("    closed, in order: %s" % ", ".join(n for n in order if n in PLUGIN_FILES or n.startswith("model/build")))
-    svc = creates.get("Service.qml")
-    late = [n for n in CODE_BEHINDS if n in closes and svc is not None and closes[n] > svc]
-    print("    Service.qml created before %s closed" % (", ".join(late) if late else "no code-behind"))
+    for name in [n for n in READ_FILES if n in closes]:
+        print("      %-20s unlinked %s, created %s, closed %+.1f ms after the merge started" % (
+            name, "%+.1f" % (deletes[name] - m0) if name in deletes else "never",
+            "%+.1f" % (creates[name] - m0) if name in creates else "never", closes[name] - m0))
+    # The moments a cold load could read (docs/SERVICE-SPLIT.md's table):
+    # h0, the old Service.qml unlinked and the new one not yet created; h1,
+    # every changed code-behind complete and the old Service.qml not yet
+    # unlinked; h4, the new Service.qml complete while a changed code-behind
+    # is unlinked or still being written.
+    svc_gone, svc_new, svc_done = deletes.get("Service.qml"), creates.get("Service.qml"), closes.get("Service.qml")
+    changed_cb = [n for n in CODE_BEHINDS if n in closes]
+    if svc_gone is not None and svc_new is not None:
+        print("    h0: Service.qml absent %.1f ms (unlinked %+.1f, created %+.1f); every changed file unlinked "
+              "before the first create: %s" % (
+                  svc_new - svc_gone, svc_gone - m0, svc_new - m0,
+                  "yes" if deletes and creates and max(deletes.values()) <= min(creates.values()) else "no"))
+    if changed_cb and svc_done is not None:
+        before = svc_gone if svc_gone is not None else (svc_new if svc_new is not None else svc_done)
+        h1 = all(closes[n] <= before for n in changed_cb)
+        print("    h1: every changed code-behind closed before the old Service.qml went: %s" % ("yes" if h1 else "no"))
+        open_cb = [n for n in changed_cb if closes[n] > svc_done]
+        print("    h4: the new Service.qml complete while %s" % (
+            "%s not yet closed" % ", ".join(open_cb) if open_cb else "every changed code-behind was already closed: no"))
     gaps = [b[0] - a[0] for a, b in zip(tree, tree[1:])]
     print("    largest gap between two working-tree events: %.1f ms (the host's debounce is 150 ms)" % (max(gaps) if gaps else 0))
     last = tree[-1][0] if tree else m1
@@ -128,6 +205,70 @@ def main(argv):
         print("    %+8.1f ms after the last write: %s" % (t - last, what[:120]))
     early = [w for t, w in rig if t < last and not w.startswith("localPluginChanged")]
     print("    a reload or load before the last write: %s" % ("yes: " + "; ".join(early) if early else "no"))
+
+
+def reads(d, steps):
+    """The cold start's reads: the first time the shell opened each plugin
+    file, from the moment run.sh started it and from its first open of the
+    plugin's folder."""
+    first, later = shell_reads(d)
+    start = steps.get("shell starting")
+    folder = None
+    for t, kind, path in watch_events(d + "/open.log"):
+        if "OPEN" in kind and "ISDIR" in kind and path.rstrip("/").endswith(PLUGIN_DIR.rstrip("/")):
+            if start is None or t >= start:
+                folder = t
+                break
+    if not first:
+        print("  cold-start reads: no open watch kept")
+        return
+    base = folder if folder is not None else min(first.values())
+    print("  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder%s):" % (
+        ", which came %+.1f ms after run.sh started it" % (folder - start) if folder is not None and start else ""))
+    for name in sorted((n for n in READ_FILES if n in first), key=first.get):
+        again = later.get(name, [])
+        print("    %-20s %+9.1f ms%s" % (name, first[name] - base,
+                                     ("; opened again %d time(s), first %+.1f" % (len(again), again[0] - base)) if again else ""))
+    cbs = [first[n] for n in CODE_BEHINDS if n in first]
+    if "Service.qml" in first and cbs:
+        print("    from the first read of Service.qml to the first of a code-behind: %.1f ms, to the last: %.1f ms" % (
+            min(cbs) - first["Service.qml"], max(cbs) - first["Service.qml"]))
+
+
+def race(d, steps):
+    """A race arm: when the trigger opened, when the merge ran, and for each
+    marked file its read by the shell, git's write and its read after."""
+    if "race open" not in steps:
+        return
+    t0 = steps["race open"]
+    print("  race: the trigger's open at 0; merge %+.1f to %+.1f ms" % (
+        steps.get("merge start", t0) - t0, steps.get("merge end", t0) - t0))
+    first, later = shell_reads(d)
+    closes = {}
+    for t, kind, path in watch_events(d + "/watch.log"):
+        if "CLOSE_WRITE" in kind:
+            closes.setdefault(rel(path), t)
+    for name in READ_FILES:
+        if name not in first and name not in closes:
+            continue
+        reads_at = [first[name]] + later.get(name, []) if name in first else []
+        before = [t for t in reads_at if name not in closes or t < closes[name]]
+        after = [t for t in reads_at if name in closes and t >= closes[name]]
+        print("    %-20s read %s; git closed %s; read after it %s" % (
+            name, ("%+.1f" % (before[0] - t0)) if before else "never before the write",
+            ("%+.1f" % (closes[name] - t0)) if name in closes else "unchanged",
+            ("%+.1f" % (after[0] - t0)) if after else "never"))
+
+
+def cache(d):
+    try:
+        text = open(d + "/cache.txt", encoding="utf-8").read().rstrip("\n")
+    except OSError:
+        return
+    if text:
+        print("  the QML disk cache (cache.py):")
+        print(text)
+
 
 
 if __name__ == "__main__":
