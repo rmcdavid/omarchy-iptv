@@ -596,6 +596,7 @@ run_arm() {
     start_qs || return 1
     wait_ready 90 || echo "   not ready at start"
     stop_open_watch
+    cache_read start
     ipc rig favorite >/dev/null; sleep 1.5
     marks start
     start_watch

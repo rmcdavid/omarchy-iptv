@@ -207,6 +207,23 @@ def write_order(d, steps, log):
     print("    a reload or load before the last write: %s" % ("yes: " + "; ".join(early) if early else "no"))
 
 
+def saves(d, step):
+    """{file: ms} of the cache files cache.py read at STEP (their mtimes)."""
+    out, inside = {}, False
+    try:
+        lines = open(d + "/cache.txt", encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if line.startswith("  [cache "):
+            inside = line.strip() == "[cache %s]" % step
+            continue
+        parts = line.split()
+        if inside and len(parts) > 2 and parts[1] == "saved":
+            out[parts[0]] = float(parts[2])
+    return out
+
+
 def reads(d, steps):
     """The cold start's reads: the first time the shell opened each plugin
     file, from the moment run.sh started it and from its first open of the
@@ -225,10 +242,13 @@ def reads(d, steps):
     base = folder if folder is not None else min(first.values())
     print("  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder%s):" % (
         ", which came %+.1f ms after run.sh started it" % (folder - start) if folder is not None and start else ""))
+    saved = saves(d, "start") or saves(d, "race")
     for name in sorted((n for n in READ_FILES if n in first), key=first.get):
         again = later.get(name, [])
-        print("    %-20s %+9.1f ms%s" % (name, first[name] - base,
-                                     ("; opened again %d time(s), first %+.1f" % (len(again), again[0] - base)) if again else ""))
+        print("    %-20s %+9.1f ms%s%s" % (
+            name, first[name] - base,
+            ("; opened again %d time(s), first %+.1f" % (len(again), again[0] - base)) if again else "",
+            ("; its cache file saved %+.1f" % (saved[name] - base)) if name in saved else "; no cache file"))
     cbs = [first[n] for n in CODE_BEHINDS if n in first]
     if "Service.qml" in first and cbs:
         print("    from the first read of Service.qml to the first of a code-behind: %.1f ms, to the last: %.1f ms" % (
@@ -248,16 +268,18 @@ def race(d, steps):
     for t, kind, path in watch_events(d + "/watch.log"):
         if "CLOSE_WRITE" in kind:
             closes.setdefault(rel(path), t)
+    saved = saves(d, "race")
     for name in READ_FILES:
         if name not in first and name not in closes:
             continue
         reads_at = [first[name]] + later.get(name, []) if name in first else []
         before = [t for t in reads_at if name not in closes or t < closes[name]]
         after = [t for t in reads_at if name in closes and t >= closes[name]]
-        print("    %-20s read %s; git closed %s; read after it %s" % (
+        print("    %-20s read %s; git closed %s; read after it %s; cache saved %s" % (
             name, ("%+.1f" % (before[0] - t0)) if before else "never before the write",
             ("%+.1f" % (closes[name] - t0)) if name in closes else "unchanged",
-            ("%+.1f" % (after[0] - t0)) if after else "never"))
+            ("%+.1f" % (after[0] - t0)) if after else "never",
+            ("%+.1f" % (saved[name] - t0)) if name in saved else "no file"))
 
 
 def cache(d):
