@@ -28052,7 +28052,7 @@ through as `file://`.
 26), so a file served through the load patch is not disk-cached, and its
 text is the one the scanner read at the first load. The code-behinds
 (`.jsc`) and the model (`.mjsc`) are cached as on root b, `sourceTimeStamp`
--1, each unit saved 0.2-5 ms after the engine's read. **[2026-11-24, lane-fix-c5d: in a quiet cold start; under a concurrent merge the poisoned units' read-to-save gap was about 9-10 ms (recheck-c5ds-measure's A641-c4 `Service-player.js`: last open +668.9, unlink +669.0, save +678.0 to +678.4 ms after the trigger; S1-633's `Service-player.js` as it read this lane's record: open +672.4, unlink +677.7, save +682.0); unpoisoned races reached 6-8 ms]** So on root a the
+-1, each unit saved 0.2-5 ms after the engine's read. **[2026-11-24, lane-fix-c5d: in a quiet cold start; under a concurrent merge the poisoned units' read-to-save gap was about 9-10 ms **[2026-11-25, D-DOC-38: a lower bound, about 10 ms or more, read off the two poisoned units whose opens were logged]** (recheck-c5ds-measure's A641-c4 `Service-player.js`: last open +668.9, unlink +669.0, save +678.0 to +678.4 ms after the trigger; S1-633's `Service-player.js` as it read this lane's record: open +672.4, unlink +677.7, save +682.0); unpoisoned races reached 6-8 ms]** So on root a the
 race that matters is a write between a code-behind's read and its save.
 
 **The sweep.** The scanner reads `Service.qml` at the first load and the
@@ -28246,7 +28246,7 @@ against a scratch copy carrying one deliberate mutant:
   inside the plugin folder cannot reach them, and no race here poisoned
   one. A release that changes a model part is exposed the same way on
   either root, and has been since D-REL-5 split the model (0.13.6): not
-  raced, read from the mechanism. **[2026-11-24, lane-fix-c5d: raced since by recheck-c5ds-measure, and reached: fired at the starting shell's first open of `manifest.json` (its M1 to M5 on root a), at four workers 2 of 5 races unlinked `model/build.mjs` before the engine loaded the model, and nothing of the plugin loaded until a restart, which recovered it (no bar, no guide, no service; no unit saved, nothing poisoned); at one worker 5 of 5 ran h1's mix, and build.mjs's unit was saved 2.5-4 ms before git unlinked it, so a poisoned model unit was missed by that margin; on root b (its BM) `BarWidget.qml`'s unit was poisoned 2 of 2. And not "since D-REL-5": at v0.13.5 `Service.qml` imported `Model.js`, a script cached the same way; since at least the Qt 6.12 host update (2026-10-31), earlier not read. The section "D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)" below]** The helper is not Qt's to cache: its
+  raced, read from the mechanism. **[2026-11-24, lane-fix-c5d: raced since by recheck-c5ds-measure, and reached: fired at the starting shell's first open of `manifest.json` (its M1 to M5 on root a), at four workers 2 of 5 races unlinked `model/build.mjs` before the engine loaded the model, and nothing of the plugin loaded until a restart, which recovered it (no bar, no guide, no service; no unit saved, nothing poisoned); at one worker 5 of 5 ran h1's mix, and build.mjs's unit was saved 2.5-4 ms before git unlinked it **[2026-11-25, D-DOC-38: 2.4-16.3 ms over the 8 races that saved a unit (one worker M1 2.5, M2 16.3, M3 7.0, M4 3.6, M5 7.6; four workers M3-c4 4.4, M4-c4 5.4, M5-c4 2.4), each a difference across the rig's two clocks, so by as little as about 2.5 ms (recheck-c5dt-records)]**, so a poisoned model unit was missed by that margin; on root b (its BM) `BarWidget.qml`'s unit was poisoned 2 of 2. And not "since D-REL-5": at v0.13.5 `Service.qml` imported `Model.js`, a script cached the same way; since at least the Qt 6.12 host update (2026-10-31), earlier not read. The section "D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)" below]** The helper is not Qt's to cache: its
   stub checks every part's length and CRC-32 at each spawn
   (`helper_damaged`). manifest.json is read by the registry's scan and by
   the service's FileView, never compiled. Nothing else in the plugin
@@ -28368,7 +28368,7 @@ running/onDisk reading) is still the next step. No shipped file changed.
   poisoned. At one worker 5 of 5, and at four the other 3, h1's mix ran
   (C1's `Service.qml` with C2's code-behinds, `status` throwing) and the
   restart recovered it; build.mjs's unit was saved before git unlinked it
-  (M1: saved +31.0, unlinked +33.5), stale, not poisoned, by 2.5-4 ms. On
+  (M1: saved +31.0, unlinked +33.5), stale, not poisoned, by 2.5-4 ms **[2026-11-25, D-DOC-38: 2.4-16.3 ms over the 8 races that saved a unit (one worker M1 2.5, M2 16.3, M3 7.0, M4 3.6, M5 7.6; four workers M3-c4 4.4, M4-c4 5.4, M5-c4 2.4), each a difference across the rig's two clocks, so by as little as about 2.5 ms (recheck-c5dt-records)]**. On
   root b (BM, 2 races) `BarWidget.qml`'s unit was poisoned 2 of 2 (read
   +2.1 and +1.7, git's close +27.8 and +44.0, saved +127.0 and +129.0;
   checksum ed680d80.. = C2, code C1), C1's bar beside C2's service and
@@ -28382,7 +28382,7 @@ running/onDisk reading) is still the next step. No shipped file changed.
   already asks for the restart that recovers it).
 - **The poisoning window (measure, must-fix).** "0.2-5 ms between its read
   and its save" is a quiet cold start's (a-12-r). Under a concurrent merge
-  the poisoned units' gap was about 9-10 ms: A641-c4's `Service-player.js`
+  the poisoned units' gap was about 9-10 ms **[2026-11-25, D-DOC-38: a lower bound, about 10 ms or more, read off the two poisoned units whose opens were logged]**: A641-c4's `Service-player.js`
   (its evidence/A641-c4 open.log and watch.log, relative to its race open:
   opens at +653.5 and +668.9, git's DELETE +669.0, CREATE +675.3,
   CLOSE_WRITE +676.6, opens +676.0 (git's, after its CREATE), +677.9 and
@@ -28541,7 +28541,7 @@ bound; rig at 4500eca, `RIG_DEV=3200d22 RIG_C0=main`, builds C0
   installed 0.99.2; the restart after it: all C3, ready;
 - the cache: "23 file(s) under .../home/.cache, in
   .../home/.cache/quickshell/qmlcache" at every read, so `XDG_CACHE_HOME`
-  was unset as asked; the code-behinds' units C2 (agrees) through both
+  was unset as asked **[2026-11-25, D-DOC-38: the folder cannot show that. The rig's `xdg` knob sets `XDG_CACHE_HOME` to this same `.../home/.cache`, so the units are found there with the variable set or unset; that it was unset is read in run.sh's `home` branch, which drops the variable, not shown by this readout.]**; the code-behinds' units C2 (agrees) through both
   restarts and C3 after the update; build.mjs stale at the race (C1's
   checksum, recompiled at the next load); nothing poisoned.
 - the crash journal: 89 before and 89 after (the rig's own lines and the
@@ -28831,3 +28831,28 @@ this is that, in the same module (22 -> 42 tests).
   package, the distribution Omarchy is built on; the relay's program pinned
   by its source, `sys.executable or 'python3'`, not by a path; and the
   python floor 3078 -> 3098.
+
+## D-DOC-38: the settle's records, corrected (the nightly run, 2026-11-25)
+
+Text only. D-DOC-38's seven items, each a dated bracket beside the text it
+corrects; nothing measured anew on the rig.
+
+- (1) to (4) and (7) restate what the final rechecks of 2026-11-24 read
+  (recheck-c5dt-records, recheck-c5dt-gate), as the row lists them: the
+  one-worker model race's margin is 2.4-16.3 ms over the 8 races that saved
+  a unit; the poisoning window under a merge is a lower bound; h4's 0.1-1.1
+  ms is below the read stamps' precision; 0.20.0's four-worker no-plugin
+  outcome is inferred, not raced; R1's readout cannot show the variable was
+  unset. Places: D-REL-14's and D-REL-16's rows, SERVICE-SPLIT.md, and the
+  settle's sections above.
+- (5) run again on dev: the `^\s*(import|from)` grep over the stub and the
+  parts hands Python's list seven words that are no module, `a`, `an`,
+  `argv`, `it`, `its`, `term`, `the`, from ten docstring lines.
+- (6) measured: PLY-SVC-07's greps as the raw file spells them, with each
+  bar escaped for the table, match nothing (the service's 0 where the
+  rendered form gives 6; the helper's 0 on each of `seq += 1`, `play_seq +=
+  1`, `x = record_seq(a) + 1`, `seq_no += 1`, `seq = seq + 1`, `n =
+  record_seq(name) + 1`, where the rendered form gives 1). Written with one
+  `-e` per alternative they read the same raw and rendered: 6 on dev and 1
+  on a `playSeq++` line for the service's, 0 on dev and 1 on each of the six
+  for the helper's. PLY-SVC-07 carries those forms now.
