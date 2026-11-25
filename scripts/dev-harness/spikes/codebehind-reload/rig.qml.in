@@ -141,6 +141,11 @@
         out.guideServiceIsService = guide.service === s
         out.guideStamp = guide.buildStamp !== undefined ? guide.buildStamp : null
         out.guideNotice = guide.buildNotice !== undefined ? guide.buildNotice : null
+        // The guide's body when it draws an empty state (the no-service
+        // prose, D-REL-16), which its footer does not carry.
+        out.guideEmptyKind = guide.emptyKind !== undefined ? String(guide.emptyKind) : null
+        out.guideEmptyTitle = guide.emptyTitleText !== undefined ? String(guide.emptyTitleText) : null
+        out.guideEmptyProse = guide.emptyProseText !== undefined ? String(guide.emptyProseText) : null
       }
       var bar = rigBarLoader.item
       out.barObject = bar ? String(bar) : "none"

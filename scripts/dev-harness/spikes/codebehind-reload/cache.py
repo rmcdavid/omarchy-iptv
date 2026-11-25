@@ -24,8 +24,10 @@ plugin file is printed with:
   checksum  sourceChecksum, and the build whose text it is the MD5 of
   disk      which build's text the file on disk is now
   code      which build's mark the unit's string table holds (UTF-16 or
-            UTF-8): "C<n> <file>" for the marked files, the version for
-            model/build.mjs; C0 is the build with no mark
+            UTF-8): "C<n> <file>" for the marked files; for Model.mjs and
+            the model's parts the build whose stamp is the highest version
+            the unit holds (D-REL-16: build.mjs's table holds older cuts'
+            stamps beside its own); C0 is the build with no mark or stamp
   verdict   agrees (the checksum and the code name one build), POISONED
             (they differ and the checksum is the file on disk's, so the
             next load takes this unit: the code of one build under the
@@ -74,11 +76,22 @@ def code_build(data, rel, c0_version):
         if got:
             return "+".join(got)
         return "C0 (no mark)"
-    if rel == "model/build.mjs":
-        got = [b for b, v in VERSIONS.items() if has(data, '"%s"' % v) or has(data, v)]
+    if rel == "Model.mjs" or rel.startswith("model/"):
+        # D-REL-16: a model file's code names its build by the stamps its
+        # string table holds. build.mjs's BUILD_FILES table holds every
+        # file's stamp, an earlier cut's beside its own (C2's holds 0.99.0
+        # and 0.99.1), so the build is the one whose version is the HIGHEST
+        # found: its PLUGIN_VERSION is the table's highest. Another part
+        # holds its own stamp alone, and C0's (0.20.0's) parts hold none.
+        # Before lane-l3cage (2026-11-25) every version found was named,
+        # and a freshly compiled C2 build.mjs read "C1+C2: POISONED".
+        got = [(b, v) for b, v in VERSIONS.items() if has(data, '"%s"' % v) or has(data, v)]
         if c0_version and has(data, c0_version):
-            got.insert(0, "C0")
-        return "+".join(got) if got else "no version found"
+            got.append(("C0", c0_version))
+        if got:
+            build, version = max(got, key=lambda bv: tuple(int(p) for p in bv[1].split(".")))
+            return "%s (stamp %s)" % (build, version)
+        return "no version found" if rel == "model/build.mjs" else "C0 (no stamp)"
     return "unmarked"
 
 
