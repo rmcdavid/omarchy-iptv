@@ -28723,3 +28723,34 @@ F-GATE-30's `tests/test_helper_stdlib.py`.
   shell rule is "no string in shipped code names a shell", wider than "no
   argv is headed by one", with no exception comment, since the tree needs
   none; and the python floor moves 3055 -> 3078.
+
+## F-HARNESS-132: the reload rig ends a failed start's gdb (the nightly run, 2026-11-25)
+
+`scripts/dev-harness/spikes/codebehind-reload/run.sh`'s `start_qs` returned
+1 with GDB_PID set and QS empty when no shell wrote its pid, and every
+caller returned at once, so the gdb (and a quickshell that came up late)
+ran on until `timeout`'s 900 s and the cleanup waited on it. `stop_qs`
+could not have ended it: it asks the shell by QS.
+
+- The fix is in the one place: `start_qs` calls the new `end_gdb` before it
+  returns 1. `end_gdb` signals the pid the rig holds, `$!` of the start,
+  which is `timeout`'s (env and nice exec in place) and a child the rig has
+  not reaped, so the pid cannot have been reused: TERM, a wait of up to
+  15 s, KILL if it is still there, `wait`, a note, GDB_PID cleared.
+- Measured on a stand-in (the rig's own two functions taken out with
+  `qa_extract`; the real gdb; perl under quickshell's name in the rig's
+  `$WORK/bin`, running a file whose BEGIN block records its pid and sleeps
+  120 s; the start's wait shortened to 10 s through `RIG_START_TENTHS`):
+  with the fix `1||gdb ended|child gone|prompt|1|over`; on bcd387f's run.sh
+  `1|held|gdb left|child left|slow|0|`. TERM to `timeout` ended gdb and
+  gdb's child within the second.
+- Two checks in scripts/qa-lib-test.sh (837 -> 839). Four mutants of the
+  fix, each red: the call removed (`held|gdb left|child left`), the TERM
+  removed (`slow`: the 15 s fallback's KILL ends it, since coreutils timeout
+  sets a parent-death signal), GDB_PID not cleared (`held`), the wait
+  removed (`early`: the stand-in `note` reads the pid as the rig says it
+  ended). The first form of the check passed the last two of those: its
+  time bound was 30 s and it read the pid only after the start returned.
+- Crash journal 89 before and after every run.
+- Not done: no arm of the rig ran in its cage tonight; `leftovers` is still
+  skipped on a failed arm.

@@ -18,6 +18,8 @@
 #                        QML disk cache's folder and restart, or publish
 #                        the next build, update under the running shell and
 #                        restart (default neither)
+#   RIG_START_TENTHS=<n> tenths of a second a start waits for the shell's pid
+#                        (default 300; qa-lib-test.sh shortens it)
 #   RIG_QMLCACHE=xdg     start the shell without QML_DISK_CACHE_PATH, so Qt
 #                        puts its disk cache where it would for a user, in
 #                        the decoy HOME (default: the arm's own qmlcache
@@ -225,6 +227,22 @@ check_journal() {
     exit 3
   fi
 }
+# end_gdb: end a start that produced no shell this rig can name
+# (F-HARNESS-132). stop_qs asks the shell by its pid and has none to ask
+# here, so without this the gdb, and a quickshell that came up late, ran on
+# until timeout's 900 s, and cleanup waited on it. GDB_PID is `timeout`'s own
+# pid (env and nice exec in place), a child this shell started and has not
+# reaped, so the pid is still ours: TERM makes timeout end gdb, which ends
+# what it started, and timeout's own -k 5 KILLs what is left.
+end_gdb() {
+  [[ -n $GDB_PID ]] || return 0
+  kill -TERM "$GDB_PID" 2>/dev/null
+  timeout 15 tail --pid="$GDB_PID" -f /dev/null 2>/dev/null
+  qa_pid_live "$GDB_PID" && kill -KILL "$GDB_PID" 2>/dev/null
+  wait "$GDB_PID" 2>/dev/null
+  note "shell start abandoned, gdb $GDB_PID ended"
+  GDB_PID="" QS=""
+}
 start_qs() {
   local i pid
   local -a qmlcache=(QML_DISK_CACHE_PATH="$H/qmlcache") xdgcache=(XDG_CACHE_HOME="$H/home/.cache")
@@ -244,11 +262,12 @@ start_qs() {
     nice -n 10 timeout -k 5 900 gdb -batch -nx -ex 'set debuginfod enabled off' -ex 'handle all nopass' -ex run -ex kill \
       --args quickshell -n -p "$ROOTDIR/shell" >>"$H/qs.log" 2>&1 &
   GDB_PID=$!
-  for ((i = 0; i < 300; i++)); do [[ -s $H/qs.pid ]] && break; sleep 0.1; done
+  for ((i = 0; i < ${RIG_START_TENTHS:-300}; i++)); do [[ -s $H/qs.pid ]] && break; sleep 0.1; done
   pid=$(tr -dc 0-9 <"$H/qs.pid" 2>/dev/null)
   # The pid the process wrote itself, held to its command line and its exe.
   if [[ -z $pid ]] || ! qa_signal_named 0 "$ROOTDIR/shell" "$pid" || [[ $(readlink "/proc/$pid/exe") != */quickshell ]]; then
-    echo "run.sh: $ARM: the shell wrote no pid that runs this root within 30 s" >&2
+    echo "run.sh: $ARM: the shell wrote no pid that runs this root within $((${RIG_START_TENTHS:-300} / 10)) s" >&2
+    end_gdb
     return 1
   fi
   QS=$pid

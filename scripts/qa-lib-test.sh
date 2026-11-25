@@ -4229,6 +4229,63 @@ is "run.sh refuses a --timeout that is not a number, which read as no limit" \
 is "and what run.sh compares and hands the harness shell is what qa_decimal printed" \
    "$(qa_count '^ +ENTRY_MS=\$\(qa_decimal "\$\{2-\}" 400 5000\) \|\| die ' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ +--timeout\) TIMEOUT=\$\(qa_decimal "\$\{2-\}" 0 86400\) \|\| die ' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ +export OMARCHY_IPTV_ENTRY_MS="\$ENTRY_MS"$' "$ROOT/scripts/dev-harness/run.sh")" "1 1 1"
 
+# ============================== the reload rig's failed start (F-HARNESS-132)
+section "codebehind-reload/run.sh / F-HARNESS-132: a start that brings up no shell ends its own gdb"
+# start_qs returned 1 with GDB_PID set and QS empty, and every caller
+# returned at once (`start_qs || return 1`, `restart 60 || return 1`), so the
+# gdb and whatever it had started ran on until timeout's 900 s. The rig's own
+# start_qs and end_gdb run here, taken out whole, under the real gdb, over a
+# stand-in for quickshell that writes no pid file the rig reads: perl under
+# quickshell's name (the rig's PATH puts $WORK/bin first), running a "shell"
+# file whose BEGIN block records its own pid and sleeps. Needs gdb and perl.
+# The rig's note is where it says the gdb ended, so the stand-in note reads
+# that pid as it is called: a rig that says so without waiting is `early`.
+# The start waits 10 s here, so one that ends its gdb only by the 15 s
+# fallback is `slow`.
+# rq: "<start_qs's status>|<held if GDB_PID is still set>|<gdb>|<what gdb
+# started>|<prompt or slow>|<abandon notes>|<gdb as the note was written>".
+rq() {
+  local run="$ROOT/scripts/dev-harness/spikes/codebehind-reload/run.sh" w rc t took inf kept gdb child
+  command -v gdb >/dev/null && [[ -x /usr/bin/perl ]] || { echo "no gdb or no perl"; return; }
+  w=$(mktemp -d "$TMP/rq.XXXXXX")
+  qa_extract "$run" '^end_gdb\(\) \{$' '^\}$' >"$w/end.sh" || : >"$w/end.sh"
+  qa_extract "$run" '^start_qs\(\) \{$' '^\}$' >"$w/start.sh" || { echo "start_qs not taken out"; return; }
+  (
+    WORK=$w H=$w/h ROOTDIR=$w/root NESTED=wayland-none ARM=rq
+    mkdir -p "$H/home" "$WORK/bin" "$WORK/trim" "$ROOTDIR"
+    ln -s /usr/bin/perl "$WORK/bin/quickshell"
+    printf 'BEGIN { open(F, ">", "$ENV{RIG_TRIM_DIR}/inferior.pid"); print F $$; close(F); sleep 120 }\n' >"$ROOTDIR/shell"
+    note() {
+      printf '%s\n' "$*" >>"$w/notes"
+      [[ $* == "shell start abandoned, gdb "* ]] || return 0
+      set -- ${*//[!0-9]/ }
+      if qa_pid_live "$1"; then echo early >"$w/at-note"; else echo over >"$w/at-note"; fi
+    }
+    GDB_PID="" QS=""
+    . "$w/end.sh"; . "$w/start.sh"
+    t=$SECONDS
+    RIG_START_TENTHS=100 start_qs 2>"$w/err"; rc=$?
+    took=$((SECONDS - t))
+    inf=$(cat "$WORK/trim/inferior.pid" 2>/dev/null); kept=$GDB_PID
+    gdb="gdb ended"; [[ -n $kept ]] && qa_pid_live "$kept" && gdb="gdb left"
+    child=unread
+    [[ -n $inf ]] && { if kill -0 "$inf" 2>/dev/null; then child="child left"; else child="child gone"; fi; }
+    printf '%s|%s|%s|%s|%s|%s|%s\n' "$rc" "${kept:+held}" "$gdb" "$child" "$( ((took < 20)) && echo prompt || echo slow)" \
+      "$(qa_count '^shell start abandoned, gdb [0-9]+ ended$' "$w/notes")" "$(cat "$w/at-note" 2>/dev/null)"
+    # A tree without the fix leaves them: end what this subshell started,
+    # by the pid it holds (timeout's, its own unreaped child).
+    if [[ -n $kept ]]; then
+      kill -TERM "$kept" 2>/dev/null
+      timeout 15 tail --pid="$kept" -f /dev/null 2>/dev/null
+      wait "$kept" 2>/dev/null
+    fi
+  ) 2>/dev/null
+}
+ck "start_qs and end_gdb are taken out of the rig's run.sh whole" \
+   'qa_extract "$ROOT/scripts/dev-harness/spikes/codebehind-reload/run.sh" "^end_gdb\(\) \{\$" "^\}\$" >/dev/null && qa_extract "$ROOT/scripts/dev-harness/spikes/codebehind-reload/run.sh" "^start_qs\(\) \{\$" "^\}\$" >/dev/null'
+is "a start whose shell writes no pid fails, ends its gdb and what gdb started, at once, and says so" \
+   "$(rq)" "1||gdb ended|child gone|prompt|1|over"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -4508,7 +4565,13 @@ is "and what run.sh compares and hands the harness shell is what qa_decimal prin
 # logo-scenario's and open-scenario's refusal of the live session, two
 # branches and a control each, driven through each one's own cage_start and
 # cage_stop.
-EXPECTED=837
+# 837 -> 839 on 2026-11-25 (F-HARNESS-132, the daily run): the reload rig's
+# start_qs over a stand-in that writes no pid, under the real gdb: the start
+# fails, its gdb and the child gdb started are gone, promptly, before the
+# rig says so. Red on bcd387f's run.sh (no end_gdb to take out; "1|held|gdb
+# left|child left|slow|0|"), and on four mutants of the fix: no call, no
+# TERM (slow), GDB_PID kept (held), no wait (early).
+EXPECTED=839
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
