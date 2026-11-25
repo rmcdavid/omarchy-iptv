@@ -3059,7 +3059,11 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   as the one not to use (D-HOST-3: it resets `shell.json`). `omarchy plugin
   update` itself ends in a plugin rescan, not a restart, and the guide
   footer reads `Updated`, then `restart the shell to see the new version`,
-  until the restart happens (D-HOST-1).
+  until the restart happens (D-HOST-1). **[2026-11-25, D-REL-16 and
+  D-HOST-16, on the l3stamp branch: from the update's own rescan, not only
+  once the guide opens, and the bar's tooltip says it too; a shell that
+  loaded the plugin while the update wrote it says `Loaded mid-update`
+  instead, with the QML cache's removal. Section 9, "The reading".]**
 - The real peak of a 65500x65500 progressive JPEG is unmeasured and is not
   claimed. Under the user-session memory scope both were SIGKILLed at
   1.5 GB (lead, 2026-10-09); under the 2.5 GB address-space rlimit the
@@ -5151,6 +5155,53 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   `reportBuildStamp` and `serviceBuildNotice` (the last three as L3's
   reading defines them). A field may be added; none is renamed, retyped or
   removed.
+- **The reading (D-REL-16, L3, lane-l3b, 2026-11-25; D-HOST-1's check,
+  extended).** What the running code makes of the stamps, all of it in the
+  model (`model/build.mjs`, rule 12) but the collection:
+  - `Model.modelBuildStamps()` reads every part's stamp in a function body
+    (init locality), build.mjs's own as `PLUGIN_VERSION`; Service.qml's
+    `ownBuildStamps()` adds its own, each code-behind's through its
+    forwarder and the aggregator's, each read in try/catch, `"?"` for a read
+    that throws (no build's row); the guide and the bar report theirs with
+    `reportBuildStamp(file, stamp)` (`Model.withReportedStamp`: strings
+    only, a file of at most 64 characters, a stamp of at most 32;
+    idempotent) from their completion and from every change of `service`.
+  - `Model.buildVerdict({ own, reported, loadedDisk, onDisk })` counts
+    `own`, then the model's, then `reported` ("" is no stamp; a file counted
+    keeps its first stamp), puts on `mixed` every file whose stamp is not
+    the loaded table's row or that the table does not list, and answers
+    `notice`: "cache" for a mix; otherwise, when the manifest's LATEST
+    reading (`onDisk`) is known and is not `PLUGIN_VERSION`, "restart" if
+    the service's FIRST successful reading (`loadedDisk`, set once) was this
+    build, else "cache" (a build already behind the disk when it loaded);
+    otherwise "". The latest reading is asked first, so a whole new build
+    whose first read caught the old manifest (written last) reads "" once
+    the next read lands. `Model.serviceBuildNotice(s)` is what a view reads:
+    "" with no service, "cache" for a service with no string `buildNotice`
+    (one from before the stamps, which only a mix puts beside a stamped
+    view). `staleBuild` and `manifestVersion` stay exported, and the
+    service's `staleBuild` is `buildNotice !== ""`, because an older build's
+    guide and service read them.
+  - The service's `buildCheck` is a binding with its own catch ("cache": a
+    model without the reading beside this file is a mix); `buildReply()`
+    and the IPC `build` verb answer with `{ notice, running, onDisk,
+    loadedDisk, mixed, stamps }` through `Model.ipcJson`, file names and
+    version strings only, and call nothing that throws in the mixed load
+    where `status` does (the lead's call L3-d). Both are root functions
+    (D-REL-15). `status`'s `build` gains `loadedDisk`, `notice`, `mixed`.
+  - The words are the model's (`Model.footerStatus`, `barTooltip`,
+    `barAccessibleName`, `serviceMissingProse`; UX.md 6.1, 6.3, 7.1); the
+    folder is `Model.qmlCacheFolder(env)`, a variable's NAME and never its
+    value. No notice posts a notification (the lead's call L3-c).
+  - UNVERIFIED until the caged arms (rule 14): that each kind of unit's
+    literal survives Qt's disk cache as the old build's (measured for QML
+    and code-behind literals by the reload rig's marks; reasoned for a
+    model part's `var`); that the guide's and the bar's reports reach the
+    service under the host (read in the host; observed offscreen on the
+    shipping bar under a stand-in host by tests/test_bar_shown_names.py);
+    that the host's hand-off raises onManifestChanged at a real update's
+    rescan; that V4 fails the module link on a missing named export (the
+    first stamped cut beside a poisoned part from before the stamps).
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in

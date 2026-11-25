@@ -660,6 +660,8 @@ code-behinds ask nothing of the user that 0.20.0 did not: the same
 restart, and the same second restart after a load inside the window,
 whose shapes they widen. **[2026-11-24, lane-settle-c5d: three corrections. Not every release's notes ask: of CHANGELOG.md's 46 sections 13 do, 0.13.4 to 0.14.2 and 0.15.0 to 0.20.0 (0.14.3's do not, 0.13.3's say no restart is needed, and none from 0.1.0 to 0.13.2 asks). A second restart is not always enough: where a race poisoned Qt's disk cache ("Real races", above), every start runs the mix again, on root b for `Service.qml` and on root a, today's host, for a code-behind. What recovers is removing the cache folder, `$XDG_CACHE_HOME/quickshell/qmlcache` (`~/.cache/quickshell/qmlcache` by default), and restarting, or a later update that rewrites the poisoned file; the README's Troubleshooting says so, and its Updating paragraph says the guide and the bar stay loaded too and that a disable and an enable loads nothing new. And with a mixed pair no build reading tells the user, so the lead's call L3, a build stamp in every shipped file the service, the guide and the bar load, read with D-HOST-1's, is the next step before the first release that ships a code-behind]** **[2026-11-24, lane-fix-c5d: two more. A shell that starts while a four-worker update has the model unlinked can load nothing of the plugin: no bar entry, no guide, no service (recheck-c5ds-measure's M1 and M2, above); a restart recovers it, and the README's Troubleshooting names a plugin missing from the bar. And, the lead's call under the owner's standing authority of 2026-11-09, L3 gains two sentences: a stale reading right after a fresh start can only mean a race or a poisoned cache, so the stamp's notice names the cache removal (the README's Troubleshooting step) when it reads stale at start-up, rather than only asking for a restart, which cannot clear a poisoned unit; and the stamp cannot speak in the four-worker model outcome, where no bar, guide or service loads, so only the README reaches that user. The first release that ships a code-behind carries a release-notes line naming the cache removal, an item for that cut (D-REL-16)]**
 
+**[2026-11-25, D-REL-16's L3, on the l3stamp branch (lane-l3a, lane-l3b): the plugin now says which of these a user is in, below.]** After an update under a running shell the guide's footer and the bar's tooltip say `Updated`, `restart the shell to see the new version`, from the update's own rescan (D-HOST-16) rather than once the guide opens. A shell that loaded files of two builds, or a build already behind the disk at its first reading, says `Loaded mid-update`, with the QML cache's removal: `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the README's Troubleshooting step; the tooltip names the folder from `$QML_DISK_CACHE_PATH` or an absolute `$XDG_CACHE_HOME` when set). With no service the guide's body and the bar's tooltip add the cache step after the restart, and the bar's accessible name says `IPTV, service not loaded` (D-A11Y-14). With no plugin loaded nothing of the plugin can speak: the README and the cut's notes are all that reach that user. UNVERIFIED until the caged arms (QA-RESULTS "D-REL-16, L3's reading and words (lane-l3b, 2026-11-25)").
+
 **What it changed.** No shipped code: the ordinary update path showed no
 failure, so no fix was made; whether that meets call (d) is the lead's
 call (lane-reload-d proposed that it does). The rig and its record are the
@@ -673,6 +675,36 @@ the whole reason a restart is needed, and the README's development line
 names the guide, the bar and the model beside the service, since none of
 them reloads either. D-REL-16's options and their costs are in
 lane-reload-d's result, for the lead. **[2026-11-24, lane-settle-c5d: the lead's calls on them, under the owner's standing authority of 2026-11-09: call (d) is met for the ordinary update path (L1); D-REL-16 is rewritten from the real races and is P2 (L2); the build stamp is the next step, a release-notes line is the cut's, and upstream reports wait on the owner (L3). No shipped code changed here either: comment lines in Service.qml and Service-rewind.js, the README and the documents]**
+
+## What the build stamps tell (D-REL-16, L3)
+
+Every runtime file carries a build stamp (ARCHITECTURE.md (dev branch)
+section 9, "Build stamps"), and the service reads them (section 9, "The
+reading"). For a code-behind that means three things beside what
+"Adding a code-behind" above lists.
+
+- **What the service collects.** `ownBuildStamps()` reads Service.qml's own
+  stamp, each code-behind's `buildStamp<Domain>()` through its forwarder,
+  and `Model.BUILD_STAMP_AGGREGATOR`, each in try/catch: a code-behind from
+  before the stamps, or one whose forwarder throws, reads `"?"`, which is no
+  build's row, so the mix reads "cache". A new code-behind's stamp must be
+  added there too, or its file is never judged; the node suite boots one
+  file set per code-behind the service declares with that file's stamp of
+  another build and goes red for any it does not read (tests/Model.test.js,
+  "D-REL-16: a Service-X.js of another build ...").
+- **What answers in a mix.** `buildReply()` and the IPC `build` verb read
+  the `buildCheck` binding and nothing that throws, so they answer in the
+  measured TypeError mix (C2's Service.qml beside C1's Service-player.js),
+  where `status` throws at `socketAttached()`. Both are root functions of
+  Service.qml, as D-REL-15 asks of anything that must outlive a call.
+- **What the reload rig reads.** candidates.py's `bump()` cuts every build's
+  stamps against the build it updates from (lane-l3a), rig.qml.in's `marks`
+  carries the `build` reply and the views' notice, tooltip and name, and
+  analyze.py prints them beside the marks and says whether the stamps agree
+  with them (`agree` lines; a notice that does not fit the marks is a
+  finding). `RIG_RECOVER=clear-live` removes the cache folder while the
+  shell runs and then restarts, the README's order. None of it has run in a
+  cage yet: the arms are the display lane's.
 
 ## History
 
