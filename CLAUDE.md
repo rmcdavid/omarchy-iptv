@@ -331,6 +331,7 @@ Read these before changing anything; they outrank your instincts.
 | `docs/STATUS.md` | Living board, defects, decisions log |
 | `docs/QA.md`, `docs/QA-SOURCES.md`, `docs/QA-RESULTS.md` | Test plans and evidence |
 | `docs/OMARCHY-PLUGIN-CONTRACT.md` | Verified facts about the Omarchy plugin API on this machine |
+| `docs/SERVICE-SPLIT.md` | The service's code-behinds (D-REL-14): layout, rules, the guard's refusals, how to move a function or add a code-behind, and what an update does to a running shell |
 
 When two documents disagree: product-owner rulings win, then UX for
 interaction and visuals, then architecture for data and process. Do not
@@ -1611,6 +1612,19 @@ made it looked up first, so a function that must outlive its call is made
 in a root function of Service.qml (`persistActiveLater` is the model), and
 the service split guard refuses any other but a synchronous Array method's
 callback or one a `// CLOSURE-EXCEPTION: <reason>` comment excuses.
+`docs/SERVICE-SPLIT.md` holds the split's layout and rules, the guard's
+refusals, how to move a function or add a code-behind, and what an update
+does to a running shell (call (d), measured 2026-11-24). A shell that is
+running when an update lands keeps every component it has compiled, through
+the host's watcher reload, a rescan and a disable and enable alike, and a
+restart runs the new build. A shell that starts cold while git is still
+writing an update can load a mix of the two builds, or no plugin at all, and
+Qt's disk cache can keep a mix through every later restart, on either root,
+until `$XDG_CACHE_HOME/quickshell/qmlcache` is removed or a later update
+rewrites the file (D-REL-16, P2). The lead's call under the owner's standing
+authority of 2026-11-09: the first release that ships a code-behind waits
+for a build stamp in every shipped QML and JS file, read by D-HOST-1's
+running/onDisk check, and its notes name the cache removal.
 A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 

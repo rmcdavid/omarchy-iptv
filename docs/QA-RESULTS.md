@@ -28613,3 +28613,50 @@ below):
   569 files and control 541 before, 570 and 542 after, ok both.
 - node and the QML spec were not run: no file they read changed.
 - The crash journal: 89 at the start, after R1 and at the end.
+
+## D-REL-14: C5 and call (d), merged (the lead, 2026-11-24)
+
+C5's documents and call (d) ran as three workflows on branch c5d: wf-c5d
+(lane-reload-d, lane-c5-docs, lane-join-c5d, then three rechecks),
+wf-c5ds (lane-settle-c5d, then two rechecks), and wf-c5dt (lane-fix-c5d,
+then two rechecks). Two of the join's three rechecks blocked it, both of
+the settle's blocked it on text, and the two of the fix lane, recheck-c5dt-
+records and recheck-c5dt-gate, both read c5d pushable with no must-fix.
+The lead merged c5d into dev with a merge commit, a766100, whose tree is
+the branch tip's (f7be2dd).
+
+The lead's calls at the merge, each under the owner's standing authority of
+2026-11-09:
+- Merge on the two pushable verdicts, and file what the final rechecks
+  graded should-fix or nit rather than hold the branch for it: F-GATE-31
+  (constraint 2, argv-only launching, has no gate check; PLY-SEC-15's
+  include list skips the parts and the model), F-GATE-32 (F-GATE-30's
+  test holds constraint 3's import half only, and its reader passes
+  aliased, indirect and string-run imports and a loosely resolved preload),
+  F-GATE-33 (constraints 4, 5, 7 and 8 held only in part by the gate),
+  D-DOC-38 (seven numbers and claims in the settle's records, as
+  corrected, that the rechecks read otherwise) and F-HARNESS-132 (the rig's
+  race arm leaves a gdb running after a failed restart). Nothing the
+  helper does today escapes F-GATE-30's test, and none of the five changes
+  a conclusion: call (d) is met for the ordinary update path, D-REL-16 is
+  P2, and the build stamp (L3) is its next step.
+- The order of work after the merge: a follow-up branch for F-GATE-32,
+  D-DOC-38 and F-HARNESS-132, with F-GATE-31 if it fits; then L3, which
+  also reads the `onDisk` observation recorded on D-REL-16; F-GATE-33 stays
+  recorded, not scheduled.
+- CLAUDE.md's service paragraph gains a pointer to docs/SERVICE-SPLIT.md
+  and the update facts as measured: a running shell keeps every component it
+  compiled through the host's reload, a rescan and a disable and enable, and
+  a restart runs the new build; a cold start racing an update can mix the
+  builds or load no plugin, and Qt's disk cache can carry a mix through
+  later restarts on either root until the cache folder is removed or a later
+  update rewrites the file. "Where the truth lives" gains SERVICE-SPLIT.md's
+  row. The first release that ships a code-behind waits for the build stamp,
+  and its notes name the cache removal.
+
+One process fact for the record: lane-settle-c5d, locating Qt's cache at
+its start, listed the folder names under the owner's ~/.cache/quickshell
+once (qmlcache and two Qt pipeline and shader cache folders). Nothing there
+was opened, read or changed, its brief forbade touching that folder, and
+every location claim rests on the decoy-HOME measurement. The lead reported
+it to the owner.
