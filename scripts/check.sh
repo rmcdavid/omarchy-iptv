@@ -811,7 +811,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-112}
 # (adoptActive persisting at once, and handing Qt.callLater
 # root.persistActive) no other check saw (QA-RESULTS "D-REL-15 ... Round
 # two"); the suite runs 4073, and 4073 without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
+# 2026-11-25, lane-l3a (D-HOST-16): 4073 -> 4076 -- three boots of the
+# shipping service over the harness's new manifestFile double (the host's
+# fresh manifest at a rescan, an in-place edit through the watcher, a file
+# gone at the hand-off), red on 8fa4998's Service.qml (3 failures) and on
+# each of two one-decision mutants (2 failures each) (QA-RESULTS "D-HOST-16:
+# the manifest re-read follows the host"); the suite runs 4076, and 4076
+# without the own-write echo.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4076}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

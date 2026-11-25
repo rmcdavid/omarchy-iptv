@@ -28856,3 +28856,52 @@ corrects; nothing measured anew on the rig.
   `-e` per alternative they read the same raw and rendered: 6 on dev and 1
   on a `playSeq++` line for the service's, 0 on dev and 1 on each of the six
   for the helper's. PLY-SVC-07 carries those forms now.
+
+## D-HOST-16: the manifest re-read follows the host (lane-l3a, 2026-11-25)
+
+Commit 1 of the L3 plan (the panel wf_d3ab969d-020's judge, 2026-11-24/25),
+on the l3stamp branch from 8fa4998. Node only; no display, no qml run.
+
+- What changed in Service.qml: the root's `onManifestChanged:
+  manifestFile.reload()`, manifestFile's `onFileChanged: reload()`, and the
+  comment over the view, which said the watcher stayed "because an in-place
+  edit is free to catch" while nothing answered it.
+- Read in the host, not watched: ensureService assigns `inst.manifest =
+  shell.publicPluginManifest(manifest)` once `comp.createObject` returns,
+  and `_syncServices` assigns `kept.manifest =
+  shell.publicPluginManifest(m)` to a kept service at every rescan (its
+  `onScanFinished`); for a plugin that is not first-party that is a fresh
+  `JSON.parse(JSON.stringify(...))` copy, so a `property var` takes a new
+  value each time. Read in Quickshell 0.3.2's installed FileView.qml: the
+  wrapper declares no fileChanged handler and `preload` is true unless set.
+- The double (tests/service-harness.js, `ManifestFile`): a load queued at
+  the view's creation and at every reload, delivered later and reading the
+  file as it is then, `loaded` with the text or `loadFailed` 2 for no file;
+  a replacement (assigning `h.manifestDisk`) raises nothing and unarms the
+  watch, which a reload re-arms when there is a file; an in-place edit
+  (`h.manifestEdit`) raises fileChanged, queued, only while the block says
+  `watchChanges: true` and the watch is armed, and then runs the tree's own
+  onFileChanged and nothing else; every assignment of a new object to
+  `manifest` runs the tree's onManifestChanged, the boot's own `{ id }`
+  included. The three handlers and the root's are compiled from the tree's
+  text; a tree without one runs nothing there.
+- The checks, three boots of the shipping service: an update replaces the
+  file (status unmoved), the rescan hands a manifest whose own version is
+  `0.1.0-harness`, and status reads the file's 99.0.0 with stale true, then
+  an in-place edit after that reload is seen again; an in-place edit alone
+  is read through the watcher; a file gone at the hand-off reads "" and
+  stale false, after three loads. `recheckBuild` is counted in each and is
+  never called.
+- Red first, node tests/Model.test.js with `IPTV_SERVICE_QML` at a copy of
+  8fa4998's Service.qml and its four code-behinds: 4076 checks, 3 failures
+  (the three new checks). On the fix: 4076 checks, 0 failures (base 4073,
+  so +3). The D-HOST-2 text pin that counts `manifestFile.reload()` reads
+  2 now (it reads the tree's own file, so it stayed green on the base run).
+- Mutants, one decision each, through `IPTV_SERVICE_QML`: the root's
+  onManifestChanged dropped, 4076 checks, 2 failures (the hand-off check
+  and the gone-file check); manifestFile's onFileChanged dropped, 4076
+  checks, 2 failures (the hand-off check's last step and the in-place
+  check).
+- Not seen: that a real update's rescan emits manifestChanged on the kept
+  service. The caged arms a-12-r and b-12-r (the plan's cagedArms 1) read
+  `build` before any guide opens.

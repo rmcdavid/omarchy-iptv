@@ -2837,31 +2837,50 @@ Item {
   // The four cache views follow the active source's directory (D5). Content
   // is only ever applied from onLoaded / onLoadFailed (R1: after a path
   // change the view still reports the previous file until then).
-  // D-HOST-1. Read once at load and re-read when the directory changes, which
-  // is precisely the moment an update lands. printErrors stays off: a missing
-  // manifest is not a user-facing error, it just means we cannot tell, and
-  // staleBuild answers false for an empty version rather than guessing.
+  // D-HOST-1. Read when the view is made, and re-read three ways, because
+  // its path never changes (it is this component's own directory) and a
+  // FileView reloads only when it is told to. printErrors stays off: a
+  // missing manifest is not a user-facing error, it just means we cannot
+  // tell, and staleBuild answers false for an empty version rather than
+  // guessing.
+  // D-HOST-16. The first way is the host's hand-off. The host hands a kept
+  // service a FRESH manifest object at every rescan, and an update's own
+  // rescan is one (shell.qml's _syncServices, `kept.manifest =
+  // shell.publicPluginManifest(m)`, a JSON copy for a plugin that is not
+  // first-party; read in the host, not yet watched under a real update). The
+  // service used that object only for its id, so between an update and the
+  // next guide open `status` read the version from the service's creation.
+  // The object is a trigger only: its version is the host's reading, and the
+  // dev harness hands `0.1.0-harness`, so the file is what is read.
+  onManifestChanged: manifestFile.reload()
   FileView {
     id: manifestFile
     path: root.manifestPath
-    // watchChanges is kept, and it is NOT what makes this work. D-HOST-2: an
-    // update REPLACES the file rather than editing it -- measured, a git
-    // fast-forward took manifest.json from inode 495084 to 495097 -- so a
-    // watcher bound to the old inode never fires, and the notice this exists
-    // for stayed silent through the exact update it was built to catch. The
-    // watcher stays because an in-place edit is free to catch; the reload
-    // below is what actually catches an update.
+    // The second way is the watcher, for an in-place edit. It is NOT what
+    // catches an update. D-HOST-2: an update REPLACES the file rather than
+    // editing it -- measured, a git fast-forward took manifest.json from
+    // inode 495084 to 495097 -- so a watcher bound to the old inode never
+    // fires, and the notice this exists for stayed silent through the exact
+    // update it was built to catch. A replacement raises nothing and leaves
+    // the view watching nothing until a reload re-arms it (the contract's
+    // FileView facts, measured on stateFile). Until D-HOST-16 this said an
+    // in-place edit was "free to catch" while nothing answered the watcher:
+    // Quickshell's FileView.qml declares no fileChanged handler, and every
+    // view measured here reloads from its own onFileChanged, so the handler
+    // below is what makes the watch read anything (whether the C++ view
+    // would ever reload by itself is read nowhere and not measured).
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: root.onDiskVersion = Model.manifestVersion(text())
     onLoadFailed: root.onDiskVersion = ""
   }
 
-  // Re-read the manifest from its PATH, which is the only way to see a file
-  // that was replaced underneath us. Called when the guide opens: that is the
-  // moment the notice would be shown, so it is the moment the answer has to be
-  // current, and it costs one small read against a 150 ms budget whose open
-  // work measures about 20 ms.
+  // The third way: re-read the manifest from its PATH, which is the only way
+  // to see a file that was replaced underneath us. Called when the guide
+  // opens: that is the moment the notice would be shown, so it is the moment
+  // the answer has to be current, and it costs one small read against a
+  // 150 ms budget whose open work measures about 20 ms.
   function recheckBuild() {
     manifestFile.reload()
   }

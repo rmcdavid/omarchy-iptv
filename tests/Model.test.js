@@ -4002,13 +4002,68 @@ checkCall("D-HOST-2: the manifest is re-read from its PATH when the guide opens"
   // from inode 495084 to 495097 -- so a FileView bound to the old inode never
   // fires. 0.7.5 carried the check, had the right ladder order, and stayed
   // silent through the 0.7.5 -> 0.7.7 update it was built to catch.
+  // D-HOST-16 adds the second reload, the root's onManifestChanged; what the
+  // two do is held by the boots below, not by this count.
   return [qmlSites(/function recheckBuild\(\)/).length,
           qmlSites(/manifestFile\.reload\(\)/).length,
           // D-A11Y-8: the call is GUARDED ON THE FUNCTION, and this pins that
           // spelling rather than the bare one it shipped with. `serviceReady`
           // says a service object is attached, not that it has this method.
           qmlSites(/typeof root\.service\.recheckBuild === "function"\) root\.service\.recheckBuild\(\)/).length]
-}, [1, 1, 1])
+}, [1, 2, 1])
+// ---- D-HOST-16: the manifest re-read follows the host and the watcher -----
+// Until D-HOST-16 the service re-read manifest.json only through
+// recheckBuild, which only the guide's open() calls, so between an update and
+// the next guide open `status` read the version from the service's creation
+// (the reload rig's R1 readout, `stale False`). These boot the SHIPPING
+// service (tests/service-harness.js, its manifestFile double) and drive the
+// update the way the host and git make it.
+;(function () {
+  const H = require("./service-harness.js")
+  const svcSet = serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml"))
+  const V = Model.PLUGIN_VERSION
+  const OTHER = "99.0.0"   // never this tree's version
+  const manifestOf = v => JSON.stringify({ id: H.PID, version: v }) + "\n"
+  const boot = () => {
+    const h = H.bootService(svcSet, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    let rechecks = 0
+    const recheck = h.root.recheckBuild
+    h.root.recheckBuild = function () { rechecks++; return recheck.apply(this, arguments) }
+    h.rechecks = () => rechecks
+    return h
+  }
+  const build = h => { const b = h.root.statusSummary().build; return [b.running, b.onDisk, b.stale] }
+  checkCall("D-HOST-16: an update's rescan hands the kept service a fresh manifest, and status reads the new version on disk with no guide open", () => {
+    const h = boot()
+    const started = build(h)
+    // The update REPLACES manifest.json (D-HOST-2): the view raises nothing.
+    h.manifestDisk = manifestOf(OTHER)
+    h.runLater()
+    const replaced = build(h)
+    // The rescan's copy (shell.qml _syncServices). Its own version is the
+    // host's reading and is NOT what is read: the dev harness hands this one.
+    h.root.manifest = { id: H.PID, version: "0.1.0-harness" }
+    h.runLater()
+    const handed = build(h)
+    // And the reload re-armed the watch: an in-place edit after it is seen.
+    h.manifestEdit(manifestOf(V))
+    h.runLater()
+    return [h.compileErrors.length, started, replaced, handed, build(h), h.rechecks()]
+  }, [0, [V, V, false], [V, V, false], [V, OTHER, true], [V, V, false], 0])
+  checkCall("D-HOST-16: an in-place edit of manifest.json is read through the watcher, with no hand-off and no guide open", () => {
+    const h = boot()
+    h.manifestEdit(manifestOf(OTHER))
+    h.runLater()
+    return [h.compileErrors.length, build(h), h.rechecks()]
+  }, [0, [V, OTHER, true], 0])
+  checkCall("D-HOST-16: a manifest that is gone when the hand-off re-reads it reads as unknown, never as stale", () => {
+    const h = boot()
+    h.manifestDisk = null
+    h.root.manifest = { id: H.PID }
+    h.runLater()
+    return [h.compileErrors.length, build(h), h.manifestFile.loads, h.rechecks()]
+  }, [0, [V, "", false], 3, 0])
+})()
 
 checkCall("D-A11Y-8: every service call inside open() is guarded on the FUNCTION", function () {
   // Not a blanket rule: the guide calls the service unguarded in seven places
