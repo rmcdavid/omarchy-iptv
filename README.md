@@ -116,7 +116,7 @@ new version either. The guide's footer and the bar's tooltip say `Updated`,
 then `restart the shell to see the new version`, while that is the case;
 after a disable and an enable they say `Loaded mid-update` instead, with the
 QML cache's removal before the restart, and the restart alone is enough
-there (the removal does no harm). This matters for the logo update described under Settings: until
+there. This matters for the logo update described under Settings: until
 the shell restarts, the old service is the one talking to the new helper, so
 the cache sweep runs but the guide-side guard that keeps one source's logo
 list from being drawn against another source's files is not in place yet.
@@ -1805,9 +1805,10 @@ Nothing inside the plugin directory is written at runtime.
   is under `$XDG_CACHE_HOME/quickshell/` instead when you set that variable).
   The cache holds only compiled copies of QML and JavaScript files and is
   rebuilt at the next start. Updating to the next version also clears it for
-  the files that version changes. The guide names the folder Qt uses, and
-  so does the bar's tooltip while the service runs; with no service the
-  tooltip names the default one above. With no notice and no IPTV in the
+  the files that version changes. While the service runs, the bar's
+  tooltip names the folder it reads from the shell's environment; when the
+  service is not loaded the guide does, and the tooltip names the default
+  one above. With no notice and no IPTV in the
   bar, this paragraph is the only place that can say so.
 
 ## Uninstall

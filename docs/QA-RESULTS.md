@@ -29356,12 +29356,17 @@ at the start, after every Qt run of the gates, and at the end.
   folder it found, which is false with no service (the tooltip names the
   default, as the plan's words and UX.md 6.3 say). It now says the guide
   names the folder Qt uses, the tooltip too while the service runs, and the
-  default with none. The tooltip's no-service line is left as the plan
+  default with none. [The lead's settle, 2026-11-25: the second words
+  recheck found that over-reaching too -- with a service the guide names no
+  folder, and "the folder Qt uses" is read, not measured -- so the README
+  now says the tooltip names the folder it reads from the shell's
+  environment while the service runs, and the guide does when the service
+  is not loaded.] The tooltip's no-service line is left as the plan
   wrote it (the lead's call L3-b).
 
 **Should-fix and nits, fixed.**
 - Logic nit: `reportBuildStamp` called `Model.withReportedStamp` with no
-  catch. Beside a model with none of L3's eight public names, a boot of the
+  catch. Beside a model with none of L3's nine public names, a boot of the
   shipping service showed both views' reports throwing a TypeError (red
   first); with the catch both answer and the notice still reads "cache".
 - Words: `QML_FORCE_DISK_CACHE`, which upstream's diskCacheOptions asks
@@ -29443,4 +29448,63 @@ at the start, after every Qt run of the gates, and at the end.
 discovery 3130 -> 3135, the build stamp guard's cases 46 -> 48, README
 notices joined 32 -> 34; the qml spec stays 113, split-service 50 root
 functions and 162 forwarders, release.py check 47 files. The gate on a
-clone of 420980d: exit 0, all green.
+clone of 420980d: exit 0, all green, at that commit's own counts; the
+counts above are the final tree's, printed by lane-l3fix's last gate on
+b2bff65 (exit 0, all green) [the lead's settle, 2026-11-25, after the
+second words recheck].
+
+## D-REL-16: the lead's settle of L3 (2026-11-25)
+
+The build workflow wf_82ab6bdf-78c ran lane-l3a (D-HOST-16 and the stamps,
+f6c3bce and 0a5dbb5), lane-l3b (the reading, the words, the rig scripts and
+the records, be88316 to 1c64c77), three read-only rechecks of 1c64c77
+(logic blocked, gate pushable, words blocked), lane-l3fix (420980d to
+b2bff65) and a second pass of the two blocked lenses at b2bff65: logic
+pushable, words blocked on two must-fix findings, both wording. Crash
+journal 89 at the launch and 89 at the settle. The settle, on the branch:
+
+- **Who names the cache folder (second words recheck, blocker).** The
+  README's Troubleshooting bullet said the guide names "the folder Qt uses";
+  with a service the guide names no folder (its footer's line says "remove
+  the QML cache"), and the folder is the one the composer reads from the
+  shell's environment, which is read in strings(1) and not run. It now says
+  the tooltip names that folder while the service runs and the guide does
+  when the service is not loaded. The lane-l3fix line above carries a
+  bracket.
+- **Two UX.md claims without their mark (second words recheck, blocker).**
+  6.1's "the cache's removal does no harm" (the order the words give, the
+  cache removed while the shell runs, is the `clear-live` arm, which has not
+  run) and 6.3's "which Qt asks first" (upstream's source, not the installed
+  binary) now carry UNVERIFIED. Its sibling in the README's Updating
+  paragraph, "(the removal does no harm)", is dropped: the README says the
+  restart alone is enough there, which is the claim the words make.
+- **The old-model test (second logic recheck, nit).** It now deletes
+  `QML_CACHE_ENV` too, the ninth public name, as 0.20.0's aggregator lacks
+  it; node 4171 checks, 0 failures, the same answer.
+- **ARCHITECTURE section 9 (second logic recheck, nit).** A later model
+  without `withReportedStamp` drops every view's report silently, and
+  beside one that still has `buildVerdict` reads "" with views of another
+  build loaded; the record said "cache".
+- **The counts paragraph above (second words recheck, nit)** says which
+  tree its counts are.
+- **The Decisions-log row's A2 and A3 (second words recheck, nit)** carry
+  the clauses the brief gave them.
+- **Filed open:** F-GATE-34 (no test reaches the guide's own read of the
+  environment: a mutant that ignores it passes 4171 node checks), and
+  F-HARNESS-133 (the harness's `Quickshell.env` answers "" for an unset
+  name; the installed Quickshell's `env` is a QVariant, which upstream's
+  source answers null; Service-pip.js compares with "").
+- **The lead's calls** (STATUS Decisions log, 2026-11-25, "L3's settle"):
+  the first release that ships a code-behind also waits for the caged arms;
+  the no-service accessible name keeps the plan's words; the CHANGELOG
+  lines wait for the cut and say "from the next update on" where the update
+  into the first stamped release cannot show the new words.
+- **CLAUDE.md** takes the lanes' drafts as lane-l3fix corrected them: the
+  release step's `git fetch origin main:main` and `build_stamps.py --cut`
+  (with `stale` and `needless`), the build stamp beside the allowlist rule,
+  and the D-REL-14 paragraph's L3 sentence.
+
+Left as the rechecks graded them: the second logic recheck's should-fix is
+F-GATE-34 above; the gate recheck's findings were fixed by lane-l3fix
+(c2c04dc); the words rechecks' CHANGELOG findings are about text off the
+tree, and the cut writes the notes.

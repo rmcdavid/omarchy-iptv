@@ -143,6 +143,12 @@ Consequences you must respect:
   `scripts/split-helper.py --seal` fills in its length and CRC-32:
   `release.py check` refuses a part the stub loads that does not ship, and
   one that ships that the stub does not load (D-REL-7).
+  A file Qt loads -- a QML file, a code-behind, a model part -- also
+  carries its build stamp in its kind's form, at the last cut's version,
+  and a row in model/build.mjs's `BUILD_FILES` (docs/ARCHITECTURE.md
+  section 9, "Build stamps"); the gate's build stamp guard is red without
+  both, and a new code-behind's stamp is read by Service.qml's
+  `ownBuildStamps()` (docs/SERVICE-SPLIT.md, "What the build stamps tell").
 - `main` must stay linear: `omarchy-plugin-update` is `git merge --ff-only`,
   so a force-push to `main` strands every install. Never rewrite it. A GitHub
   ruleset (`main-is-the-artifact`, #23743896) enforces this on the remote --
@@ -150,7 +156,16 @@ Consequences you must respect:
   by-hand `git push origin X:main` that is not a fast-forward is refused
   there, not only by convention here.
 - A release is: bump `manifest.json` (and `Model.PLUGIN_VERSION` with it,
-  D-HOST-1), date the top `CHANGELOG.md` heading for the day of the cut,
+  D-HOST-1), then `git fetch origin main:main` and
+  `python3 -I scripts/build_stamps.py --cut` (against `refs/heads/main` by
+  default), which gives every runtime file whose blob differs from main's
+  the version being cut, sets back any file that differs from main only in
+  its stamp, and rewrites model/build.mjs's `BUILD_FILES` (D-REL-16:
+  `release.py build` refuses a changed file that does not carry the version,
+  `stale`, and one that differs from main only in its stamp, `needless`;
+  `build_stamps.py --strict` shows both by hand; the first stamped cut
+  restamps all 26 runtime files, because `main` at 0.20.0 has none), date
+  the top `CHANGELOG.md` heading for the day of the cut,
   re-level the test floors in `scripts/check.sh` to the counts on the tree,
   green gate, run `scripts/dev-harness/key-scenario.sh live` (on the tree
   since D-SINK-19 landed, `efde249`, 2026-10-14) under the
@@ -1622,9 +1637,25 @@ writing an update can load a mix of the two builds, or no plugin at all, and
 Qt's disk cache can keep a mix through every later restart, on either root,
 until `$XDG_CACHE_HOME/quickshell/qmlcache` is removed or a later update
 rewrites the file (D-REL-16, P2). The lead's call under the owner's standing
-authority of 2026-11-09: the first release that ships a code-behind waits
-for a build stamp in every shipped QML and JS file, read by D-HOST-1's
-running/onDisk check, and its notes name the cache removal.
+authority of 2026-11-09 (L3, built on the l3stamp branch and merged into
+`dev` on 2026-11-25): every runtime file carries the version of the last
+cut that changed it -- each code-behind's first function is its
+`buildStamp<Domain>()`, read through its forwarder by `ownBuildStamps()`;
+each model part's first declaration is its `var BUILD_STAMP_<PART>`;
+Model.mjs carries one line of its own, `export var BUILD_STAMP_AGGREGATOR`,
+which split-model keeps; model/build.mjs carries `BUILD_FILES`, the row
+each file should hold -- and the service reads them with D-HOST-1's check
+(`Model.buildVerdict`): "restart" after an update under a running shell,
+which the guide's footer, the bar's tooltip and its accessible name say as
+`Updated`; "cache" for files of two builds, or a build already behind the
+disk at its first reading (a disable and an enable after an update among
+them), which they say as `Loaded mid-update` with the QML cache's removal;
+never as a notification. The IPC `build` verb reports it where `status`
+throws. The first release that ships a code-behind also waits for the
+caged arms that show the stamps surviving Qt's cache (QA-RESULTS "D-REL-16,
+L3's reading and words (lane-l3b, 2026-11-25)"; the lead's call on
+lane-l3b's proposal, 2026-11-25) and the owner's word, and its notes name
+the cache removal.
 A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 

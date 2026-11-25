@@ -4281,12 +4281,13 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
   }, ["cache", true, "cache", V, "?", "cache"])
 
   checkCall("D-REL-16: beside a model with none of the reading's names, a view's report throws nothing -- the one call into the reading outside a binding -- and the service still reads cache", () => {
-    // The eight public names L3 added to the model, all gone, as in 0.20.0's
+    // The nine public names L3 added to the model, all gone, as in 0.20.0's
     // aggregator. A report that threw would log a TypeError at every view's
     // completion and service hand-off in exactly the mix the notice is for.
     const old = Object.assign({}, Model)
     for (const k of ["BUILD_FILES", "BUILD_STAMP_AGGREGATOR", "modelBuildStamps", "withReportedStamp",
-                     "buildVerdict", "serviceBuildNotice", "qmlCacheFolder", "serviceMissingProse"]) delete old[k]
+                     "buildVerdict", "serviceBuildNotice", "qmlCacheFolder", "serviceMissingProse",
+                     "QML_CACHE_ENV"]) delete old[k]
     const h = H.bootService(svcSet, old, { entry, stateText: "", host: "lag" })
     h.runLater()
     const out = VIEWS.map(v => { try { h.root.reportBuildStamp(v, V); return "answered" } catch (e) { return "threw " + e.name } })

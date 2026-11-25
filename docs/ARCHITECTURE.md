@@ -5166,8 +5166,10 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   which the bar reads (a string or nothing, so the bar names the default
   without it); and `Model.withReportedStamp`, which this `Service.qml`'s
   `reportBuildStamp` calls, so a later model without it would drop every
-  view's report (the call is caught since lane-l3fix, and the verdict then
-  reads "cache" through the binding's own catch). A field may be added;
+  view's report SILENTLY (the call is caught since lane-l3fix), and beside
+  a model that still has `buildVerdict` the notice would read "" with views
+  of another build loaded (the second logic recheck, through the service
+  harness, 2026-11-25), which is why the name is frozen. A field may be added;
   none is renamed, retyped or removed.
 - **The reading (D-REL-16, L3, lane-l3b, 2026-11-25; D-HOST-1's check,
   extended).** What the running code makes of the stamps, all of it in the
