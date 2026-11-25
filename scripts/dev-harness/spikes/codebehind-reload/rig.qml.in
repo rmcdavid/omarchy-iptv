@@ -123,6 +123,11 @@
           out.status = { status: st.status, channels: st.channels, configured: st.configured,
                          build: st.build, attached: st.player ? st.player.attached : null }
         } catch (e2) { out.status = "threw: " + e2 }
+        // D-REL-16: the stamps' verdict, the `build` verb's own reply, which
+        // answers in the mix where statusSummary throws.
+        try {
+          out.build = typeof s.buildReply === "function" ? s.buildReply() : "no buildReply (a Service.qml from before the stamps)"
+        } catch (e3) { out.build = "threw: " + e3 }
         out.favorites = s.userState && s.userState.favorites ? s.userState.favorites.length : null
         out.refreshMinutes = s.refreshMinutes
       }
@@ -134,12 +139,18 @@
         out.guideOpened = guide.opened === true
         out.guideFooter = String(guide.footerStatusText)
         out.guideServiceIsService = guide.service === s
+        out.guideStamp = guide.buildStamp !== undefined ? guide.buildStamp : null
+        out.guideNotice = guide.buildNotice !== undefined ? guide.buildNotice : null
       }
       var bar = rigBarLoader.item
       out.barObject = bar ? String(bar) : "none"
       if (bar) {
         out.bar = bar.reloadMark !== undefined ? bar.reloadMark : "no reloadMark (C0's BarWidget.qml)"
         out.barServiceIsService = bar.service === s
+        out.barStamp = bar.buildStamp !== undefined ? bar.buildStamp : null
+        out.barNotice = bar.buildNotice !== undefined ? bar.buildNotice : null
+        out.barTooltip = bar.tooltip !== undefined ? String(bar.tooltip) : null
+        out.barName = String(bar.Accessible.name)
       }
       out.installed = shell.pluginRegistry.installedPlugins[shell.rigPluginId] ? shell.pluginRegistry.installedPlugins[shell.rigPluginId].version : "none"
       out.enabled = shell.pluginRegistry.isEnabled(shell.rigPluginId)

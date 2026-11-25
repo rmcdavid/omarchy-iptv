@@ -764,7 +764,10 @@
 # an add, D-SRC-69; a rig with no check until D-SRC-69 was fixed, a counted
 # check in every full run since), and `PRIVATE` (B42, B43: the mode a save
 # gives a new credential, D-SINK-103, counted in every full run; it seeds
-# its own state and stands alone, `--only PRIVATE` on 2026-11-14);
+# its own state and stands alone, `--only PRIVATE` on 2026-11-14), and
+# `BUILD` (B44: the plugin's `build` verb once the guide has opened and the
+# bar resolved, D-REL-16, counted in every full run; it seeds its own state,
+# and that it stands alone is the display lane's run to show);
 # nothing else is accepted: a segment that leans on an earlier one's state
 # cannot be cut loose by a flag without being checked, so a new name is
 # added only with a run that shows it stands alone. A full run is untouched
@@ -889,12 +892,12 @@ TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ||
 # F-HARNESS-49: --only, refused above the transcript like the other levers.
 # How many lettered checks each selectable block holds (its ck lines, which
 # tests/test_key_scenario_only.py counts between the block's markers).
-declare -A ONLY_CHECKS=([A]=2 [B19]=1 [PRUNE]=1 [PRIVATE]=2)
+declare -A ONLY_CHECKS=([A]=2 [B19]=1 [PRUNE]=1 [PRIVATE]=2 [BUILD]=1)
 if [[ -n $ONLY ]]; then
   [[ $MODE == check-tree ]] && { echo "--only selects shell-arm segments; check-tree runs the instrument arm alone" >&2; exit 2; }
   IFS=, read -r -a only_names <<<"$ONLY"
   for seg in "${only_names[@]}"; do
-    [[ -n $seg && -n ${ONLY_CHECKS[$seg]:-} ]] || { echo "--only: '$seg' is not a selectable segment (A, B19, PRUNE, PRIVATE)" >&2; exit 2; }
+    [[ -n $seg && -n ${ONLY_CHECKS[$seg]:-} ]] || { echo "--only: '$seg' is not a selectable segment (A, B19, PRUNE, PRIVATE, BUILD)" >&2; exit 2; }
   done
   unset seg only_names
 fi
@@ -2327,6 +2330,46 @@ shell_arm() {
      "$P_GOT" "edit:true restored:644 observed:yes exposed:0 final:600 at-path:file folder:700"
   fi   # --only PRIVATE ends
 
+  if seg_on BUILD; then   # --only BUILD begins
+  echo "== BUILD (B44): the plugin's \`build\` verb once the guide has opened and the bar resolved (D-REL-16) ($(elapsed) s)"
+  # The rows the reply must name: the tree's own loaded table, build.mjs at
+  # PLUGIN_VERSION and every other runtime file at its BUILD_FILES row (the
+  # build stamp guard holds the table to the files). Asked of the model by
+  # node, so a --tree export with no .git reads the same; a tree from before
+  # the stamps has no table and reads `rows:none`.
+  BUILD_ROWS=$(node -e 'const M = require(process.argv[1]); if (!M.BUILD_FILES) { process.stdout.write("{}"); process.exit(0) } process.stdout.write(JSON.stringify(Object.assign({ "model/build.mjs": M.PLUGIN_VERSION }, M.BUILD_FILES)))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" 2>/dev/null)
+  [[ -n $BUILD_ROWS ]] || BUILD_ROWS='{}'
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  ipc open '{}' >/dev/null; sleep 0.8
+  # The guide reports at its service's hand-off and the bar once it resolves
+  # the service (the harness hands it \`bar\`): bounded, until the reply
+  # names as many files as the table, 10 s at most.
+  BUILD_REPLY=""
+  for ((i = 0; i < 50; i++)); do
+    BUILD_REPLY=$(h plugin-ipc build 2>/dev/null)
+    [[ $(qa_json_field "len(d.get('stamps') or {})" "$BUILD_REPLY") == "$(qa_json_field 'len(d)' "$BUILD_ROWS")" ]] && break
+    sleep 0.2
+  done
+  ipc close >/dev/null
+  b44=$(python3 -I -c 'import json, sys
+try:
+    b = json.loads(sys.argv[1])
+    rows = json.loads(sys.argv[2])
+except ValueError:
+    print("reply:unreadable"); sys.exit(0)
+s = b.get("stamps") or {}
+off = sorted(f for f in rows if s.get(f) != rows[f]) + sorted(f for f in s if f not in rows)
+print("notice:%s mixed:%s files:%d off:%s" % (b.get("notice") or "none", ",".join(b.get("mixed") or []) or "none",
+                                              len(s), ",".join(off) or "none"))' "$BUILD_REPLY" "$BUILD_ROWS")
+  echo "   BUILD: the reply named $(qa_json_field "len(d.get('stamps') or {})" "$BUILD_REPLY") file(s) against $(qa_json_field 'len(d)' "$BUILD_ROWS") row(s)"
+  ck "B44 D-REL-16: once the guide has opened and the bar resolved, the plugin's own \`build\` verb names every runtime file at its row in the loaded table -- the service's own stamps, the model's, and the guide's and the bar's reports -- with notice \"\" and nothing mixed; red when the bar does not report (spikes/key-mutations/l3-bar-no-report.patch)" \
+     "$b44" "notice:none mixed:none files:$(qa_json_field 'len(d)' "$BUILD_ROWS") off:none"
+  stop_shell
+  rm -f "$STATE"
+  fi   # --only BUILD ends
+
   if seg_on A; then   # --only A begins
   echo "== A: the in-app add after a CLI epgUrl was refused, through the harness addSource verb (R21b; R17b's and R18d's rig) ($(elapsed) s)"
   # The probe commit of an in-app add (Service's sourceProbeProc exit),
@@ -3680,7 +3723,8 @@ instrument
 # unusable playlist is never adopted onto the active source) and S4 (R29e,
 # init_pids scoped to this run), which also takes check-tree 10 -> 11;
 # 138 on 2026-10-27, D-SRC-69: B41, the PRUNE rig turned into a check;
-# 140 on 2026-11-14, D-SINK-103: B42 and B43, the PRIVATE segment.)
+# 140 on 2026-11-14, D-SINK-103: B42 and B43, the PRIVATE segment;
+# 141 on 2026-11-25, D-REL-16: B44, the BUILD segment.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -3690,7 +3734,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=11
 else
-  EXPECTED_CHECKS=140
+  EXPECTED_CHECKS=141
 fi
 # F-HARNESS-49: a PARTIAL run's floor is the instrument arm, the selected
 # blocks and P1, P2, T1 -- its own, never the full one, and never lowered
