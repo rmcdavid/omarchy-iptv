@@ -22,7 +22,7 @@ import sys
 PLUGIN_FILES = ("Service.qml", "Service-pip.js", "Service-player.js", "Service-rewind.js",
                 "Service-sources.js", "Guide.qml", "BarWidget.qml", "Model.mjs", "manifest.json")
 CODE_BEHINDS = PLUGIN_FILES[1:5]
-READ_FILES = PLUGIN_FILES[:8] + ("model/build.mjs",)
+READ_FILES = PLUGIN_FILES + ("model/build.mjs",)
 PLUGIN_DIR = "/io.github.rmcdavid.iptv/"
 NOTABLE = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a function|unavailable|case mismatch|"
                      r"Error|error|WARN|warn|failed|received signal", re.I)
@@ -130,7 +130,8 @@ def main(argv):
     for line in open(d + "/steps.log", encoding="utf-8"):
         t, _, what = line.strip().partition(" ")
         steps.setdefault(what, float(t))
-        if what.startswith(("control", "loaded", "not ready", "no scan", "update rc")):
+        if what.startswith(("control", "loaded", "not ready", "no scan", "update rc", "half tree", "race armed",
+                            "cache folder", "merge rc")):
             print("  note: %s" % what)
     reads(d, steps)
     write_order(d, steps, log)
