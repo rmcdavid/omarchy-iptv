@@ -110,9 +110,10 @@ all three are one plugin.
 **Updating.** `omarchy plugin update io.github.rmcdavid.iptv` fetches the new
 version, and then **restart the shell with `omarchy-restart-shell`**. The
 update rewrites the plugin's files on disk, but the running shell keeps the
-background service it already loaded until it is restarted, and the guide's
-footer says `Updated`, then `restart the shell to see the new version`, while
-that is the case. This matters for the logo update described under Settings: until
+plugin it already loaded — the background service, the guide and the bar —
+until it is restarted, and disabling and enabling the plugin does not load the
+new version either. The guide's footer says `Updated`, then `restart the
+shell to see the new version`, while that is the case. This matters for the logo update described under Settings: until
 the shell restarts, the old service is the one talking to the new helper, so
 the cache sweep runs but the guide-side guard that keeps one source's logo
 list from being drawn against another source's files is not in place yet.
@@ -1782,6 +1783,18 @@ Nothing inside the plugin directory is written at runtime.
   code it loaded first: the shell's own plugin reload, a rescan and a
   disable and an enable all bring back the same build, the kept-loaded
   service and the guide and the bar alike.
+- **IPTV misbehaves after an update even though you restarted the shell.**
+  A shell that was starting while `omarchy plugin update` was still writing
+  the plugin's files can load part of the old version beside part of the new
+  one, and Quickshell keeps compiled copies of what it loaded in its QML
+  cache, which can carry that mix into the next start. Restart the shell
+  once more (`omarchy-restart-shell`); if that does not help, remove
+  Quickshell's QML cache and restart:
+  `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the folder
+  is under `$XDG_CACHE_HOME/quickshell/` instead when you set that variable).
+  The cache holds only compiled copies of QML and JavaScript files and is
+  rebuilt at the next start. Updating to the next version also clears it for
+  the files that version changes.
 
 ## Uninstall
 
