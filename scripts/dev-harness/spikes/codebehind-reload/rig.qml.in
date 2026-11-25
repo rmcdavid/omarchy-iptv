@@ -1,0 +1,202 @@
+
+  // ===================================================================
+  // RIG (codebehind-reload), not the host's: inserted by make-root.py
+  // before the host shell.qml's closing brace (its line 1939).
+  //
+  // The bar's widget host, reduced. The host's Bar.qml (plugins/bar) shows a
+  // registered widget through WidgetHost's registryLoader (Bar.qml
+  // 2709-2850): a Loader on barWidgetRegistry.widgets[id].component, which
+  // follows the registry, and injectProps (2832-2843) hands the item `bar`,
+  // `moduleName` and `settings`. The bar is not run here (it is the
+  // session's), so this Loader does that much: the `bar` is the host's own
+  // Ui/PluginBarApi.qml, made as pluginBarApiFor (349-397) makes it for a
+  // registered widget, with the shell from pluginShellForId and no-op
+  // tooltips; `settings` is the layout entry without its id
+  // (BarModel.entrySettings).
+  readonly property string rigPluginId: "io.github.rmcdavid.iptv"
+  readonly property var rigBarEntry: {
+    var widgets = shell.barWidgetRegistry.widgets
+    return widgets[shell.rigPluginId] || null
+  }
+  property var rigBarApi: null
+
+  function rigNote(what) {
+    console.log("RIG-EVENT " + Date.now() + " " + what)
+  }
+
+  function rigEntrySettings() {
+    var location = shell.pluginRegistry.findBarLocation(shell.shellConfig, shell.rigPluginId, "")
+    if (!location.found) return ({})
+    var entry = shell.shellConfig.bar.layout[location.section][location.index]
+    var copy = ({})
+    for (var key in entry) if (key !== "id") copy[key] = entry[key]
+    return copy
+  }
+
+  function rigInjectBar() {
+    var target = rigBarLoader.item
+    if (!target) return
+    var pluginShell = shell.pluginShellForId(shell.rigPluginId)
+    if (!shell.rigBarApi) {
+      var comp = Qt.createComponent(Qt.resolvedUrl("Ui/PluginBarApi.qml"), Component.PreferSynchronous)
+      shell.rigBarApi = comp.createObject(null, {
+        pluginId: shell.rigPluginId,
+        moduleName: shell.rigPluginId,
+        shell: pluginShell,
+        _showTooltip: function(t, text) {},
+        _hideTooltip: function(t) {}
+      })
+      if (!shell.rigBarApi) console.warn("RIG: PluginBarApi did not load: " + comp.errorString())
+    } else {
+      shell.rigBarApi.shell = pluginShell
+    }
+    if ("bar" in target) target.bar = shell.rigBarApi
+    if ("moduleName" in target) target.moduleName = shell.rigPluginId
+    if ("settings" in target) target.settings = shell.rigEntrySettings()
+  }
+
+  Loader {
+    id: rigBarLoader
+    active: shell.rigBarEntry !== null && shell.barEntryConfigured(shell.rigPluginId)
+    sourceComponent: shell.rigBarEntry ? shell.rigBarEntry.component : null
+    onLoaded: {
+      shell.rigNote("bar loaded " + String(item))
+      shell.rigInjectBar()
+      Qt.callLater(shell.rigInjectBar)
+    }
+  }
+
+  // Where the host's own state moves, logged with a millisecond clock so
+  // run.sh can lay the host's reloads beside git's writes.
+  Connections {
+    target: shell.pluginRegistry
+    function onLocalPluginChanged(pluginId) { shell.rigNote("localPluginChanged " + pluginId) }
+    function onScanFinished() {
+      shell.rigNote("scanFinished installed=" + (shell.pluginRegistry.installedPlugins[shell.rigPluginId] ? "yes" : "no"))
+    }
+  }
+  Connections {
+    target: shell
+    function onPluginReloadingChanged() { shell.rigNote("pluginReloading " + shell.pluginReloading) }
+    function on_ServicesChanged() {
+      var s = shell._services[shell.rigPluginId]
+      shell.rigNote("services " + (s ? String(s) : "none"))
+    }
+    function onPanelLoadersChanged() {
+      var l = shell.panelLoaders[shell.rigPluginId]
+      shell.rigNote("panelLoader " + (l ? "registered item=" + String(l.item) : "none"))
+    }
+  }
+
+  // The rig's pid, written by the process itself (run.sh signals only this
+  // pid, through a pidfd, after checking its command line).
+  FileView {
+    id: rigPidFile
+    path: Quickshell.env("RIG_PID_FILE") || ""
+    printErrors: false
+  }
+  Item {
+    Component.onCompleted: {
+      if (rigPidFile.path !== "") rigPidFile.setText(String(Quickshell.processId) + "\n")
+      shell.rigNote("rig up pid=" + Quickshell.processId)
+    }
+  }
+
+  IpcHandler {
+    target: "rig"
+
+    // What every running object says it is (the builds' marks, see
+    // candidates.py), with the QML type's name: a type compiled again gets a
+    // new _QMLTYPE_ number, so the name tells a cached component from a
+    // fresh one.
+    function marks(): string {
+      var out = ({})
+      var s = shell.serviceFor(shell.rigPluginId)
+      out.serviceObject = s ? String(s) : "none"
+      if (s) {
+        try {
+          out.service = typeof s.reloadMarks === "function" ? s.reloadMarks() : "no reloadMarks (C0's Service.qml)"
+        } catch (e) { out.service = "threw: " + e }
+        try {
+          var st = s.statusSummary()
+          out.status = { status: st.status, channels: st.channels, configured: st.configured,
+                         build: st.build, attached: st.player ? st.player.attached : null }
+        } catch (e2) { out.status = "threw: " + e2 }
+        out.favorites = s.userState && s.userState.favorites ? s.userState.favorites.length : null
+        out.refreshMinutes = s.refreshMinutes
+      }
+      var loader = shell.panelLoaders[shell.rigPluginId]
+      var guide = loader && loader.item ? loader.item : null
+      out.guideObject = guide ? String(guide) : "none"
+      if (guide) {
+        out.guide = guide.reloadMark !== undefined ? guide.reloadMark : "no reloadMark (C0's Guide.qml)"
+        out.guideOpened = guide.opened === true
+        out.guideFooter = String(guide.footerStatusText)
+        out.guideServiceIsService = guide.service === s
+      }
+      var bar = rigBarLoader.item
+      out.barObject = bar ? String(bar) : "none"
+      if (bar) {
+        out.bar = bar.reloadMark !== undefined ? bar.reloadMark : "no reloadMark (C0's BarWidget.qml)"
+        out.barServiceIsService = bar.service === s
+      }
+      out.installed = shell.pluginRegistry.installedPlugins[shell.rigPluginId] ? shell.pluginRegistry.installedPlugins[shell.rigPluginId].version : "none"
+      out.enabled = shell.pluginRegistry.isEnabled(shell.rigPluginId)
+      out.reloading = shell.pluginReloading
+      return JSON.stringify(out)
+    }
+
+    // Star the first channel, so a restart can show the state kept.
+    function favorite(): string {
+      var s = shell.serviceFor(shell.rigPluginId)
+      if (!s || !s.channels || s.channels.length === 0) return "no channels"
+      s.toggleFavorite(s.channels[0].id)
+      return "ok"
+    }
+
+    // The engine's garbage collector, so a QQmlComponent nothing holds any
+    // more (ensureService's `comp`) is released.
+    function collect(): string {
+      gc()
+      return "ok"
+    }
+
+    // Load N components the type loader has never seen (FIRST..FIRST+N-1 of
+    // the files run.sh wrote under RIG_TRIM_DIR) and keep none: the type
+    // loader trims its cache of components nothing references when it adds
+    // a new type past its threshold, which is the release a long-running
+    // shell reaches by loading what it has not loaded before.
+    function load(first: string, count: string): string {
+      var dir = Quickshell.env("RIG_TRIM_DIR") || ""
+      var ok = 0
+      for (var i = Number(first); i < Number(first) + Number(count); i++) {
+        var c = Qt.createComponent("file://" + dir + "/T" + i + ".qml", Component.PreferSynchronous)
+        if (c.status === Component.Ready) ok++
+        c.destroy()
+      }
+      gc()
+      return String(ok)
+    }
+
+    // The release, controlled: make one object from FILE (a QtObject whose
+    // `v` names the text it was compiled from), report its type and `v`,
+    // and keep neither the object nor the component.
+    function control(file: string): string {
+      var c = Qt.createComponent("file://" + file, Component.PreferSynchronous)
+      if (c.status !== Component.Ready) {
+        var e = c.errorString()
+        c.destroy()
+        return "error " + e
+      }
+      var o = c.createObject(null)
+      var out = String(o).replace(/\(0x[0-9a-f]+\)/, "") + " v=" + o.v
+      o.destroy()
+      c.destroy()
+      return out
+    }
+
+    function watcherPid(): string {
+      return String(shell.pluginRegistry.localPluginWatcher.processId || "")
+    }
+  }
+  // ================================ end RIG ===========================

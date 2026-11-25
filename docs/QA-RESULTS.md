@@ -27292,3 +27292,359 @@ The lead's calls at the merge, each under the owner's standing authority of
   across a version change in a cage (D-REL-6), and D-REL-9's write order.
 - The settle lane could not run tests/test_host_load_patch.py, because its
   gdb driver went with /tmp. It runs in the gate on the merged tree.
+
+## D-REL-14: call (d), a version change with code-behinds (lane-reload-d, 2026-11-24)
+
+Call (d), the lead's call under the owner's standing authority of
+2026-11-09: before the first release that ships a code-behind, two things
+are measured or answered, never assumed. (1) A hot reload across a version
+change with code-behinds, in a nested cage. (2) D-REL-9's write order, which
+Part A measured holds only at git's default `checkout.workers=1`. Both are
+measured here, on branch reload-d from 3200d22, with no shipped file
+changed. The rig is scripts/dev-harness/spikes/codebehind-reload/ (9d40778,
+0dbc3d0). Its record, RESULT-2026-11-24.txt (2f62745), holds every arm as
+the five runs printed it, at 0dbc3d0 with C1 exported from 3200d22.
+
+**The answer.**
+- On the ordinary update path the reload holds. After an update the old
+  build keeps running everywhere, unmixed, and the guide says "Updated".
+  That stays true through the host's watcher reload, rescanPlugins, and two
+  disables and enables, and a restart then runs the new build clean.
+- D-REL-9's order holds at one checkout worker only. At four, which a
+  user's own git configuration reaches, Service.qml can be written before a
+  code-behind closes.
+- No reload the host makes reads the tree while git writes it. A shell that
+  loads the plugin cold inside that window does read it, and keeps what it
+  read until a restart. That is filed as D-REL-16 below.
+
+### The rig
+
+**The root.** make-root.py cuts the host's own shell.qml (omarchy 4.5.0-3,
+sha256 d6d99af1..., pinned) by line range, byte for byte:
+- Kept: lines 1-23, 27-241, 279-1093, 1102-1591 and 1747-1939. They hold
+  the config FileViews and Component.onCompleted, the plugin API factories,
+  ensureService (930), _syncServices (982), unloadPluginServices (1062),
+  summon (1181), the panel Instantiator with the keepLoaded overlay's
+  asynchronous Loader (1387), syncPluginWidgets (1446), reloadPlugins
+  (1517), finishPluginReload (1529), the localPluginChanged and
+  scanFinished Connections (1539), loadPluginWidget (1566), and the `shell`
+  IPC target: rescanPlugins (1796), setPluginEnabled (1815, what
+  omarchy-plugin-disable calls) and enablePlugin (1819).
+- Left out: 24-26 (AppLibrary, BrightnessKeys, BackgroundIntro), 242-278
+  (the session's bar), 1094-1101 (the AppLibrary Connections) and 1592-1746
+  (global shortcuts, the omarchy-shell socket, the image-selector IPC).
+- Adapted, two lines, each marked `RIG ADAPTATION` in the output:
+  - shell.qml 165 points `firstPartyDir` at an empty folder, so no
+    first-party plugin or service starts.
+  - PluginRegistry.qml 708-715, the orphan reaper (a `pgrep -f` over every
+    inotifywait on the machine), becomes `["true"]`.
+- Unchanged: the folder watcher (PluginRegistry.qml 726-745, `inotifywait
+  -m -r` on the plugins folder) and its 150 ms debounce (shell.qml 69-73).
+- Root a carries the host's `//@ pragma OmarchyLoadPatch` and root b does
+  not.
+- The rig's own block, rig.qml.in, does three things. It hosts the bar
+  widget the way Bar.qml's WidgetHost does: a Loader on
+  `barWidgetRegistry.widgets[id].component`, with the host's
+  Ui/PluginBarApi.qml as `bar`. It logs the host's events on a millisecond
+  clock. It answers `rig marks` over IPC.
+
+**The launch.** The live launcher's way (omarchy-launch-shell):
+`QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p
+<root>/shell`, with OMARCHY_PATH at the rig's root.
+- It runs in one nested headless cage (cage 0.3.1, pixman, no input
+  devices) on private-bus.sh.
+- Every quickshell runs under gdb with `handle all nopass`.
+- HOME, the XDG folders and the QML cache are decoys.
+- hyprctl and omarchy-notification-send are logging stand-ins.
+- IPC is addressed by `--pid` only.
+- No player was started: the service's start-up probes found none on the
+  private runtime.
+
+**The install.** The plugin goes in the way omarchy-plugin-add installs it
+(11-12, 119-147): `git clone` into `plugins/.add.tmp.$$`, then
+omarchy-plugin-validate, then `mv` into place. The clone is made from a
+scratch bare upstream whose `main` a publish moves with update-ref. The bar
+entry names a three-channel playlist file and sets `refreshMinutes: 120`.
+
+**The update.** omarchy-plugin-update's update_one runs by argv with its
+two exports (9-10, 43-75): `fetch --quiet origin HEAD`, the HEAD and
+FETCH_HEAD comparison, `merge --ff-only FETCH_HEAD`, then validate. The
+host's watcher then reloads on its own. Then comes rescanPlugins (the
+update's 131) over `quickshell ipc --pid`, and then the guide is summoned.
+
+**The builds** (candidates.py). Each is committed onto the last with
+`commit-tree -p`, as release.py does.
+
+| build | commit | what it is | version |
+|---|---|---|---|
+| C0 | 1321aff | local `main`, 0.20.0, one Service.qml | 0.20.0 |
+| C1 | 79594ed | 3200d22's ALLOWLIST export by release.py's own build_tree, plus the marks | 0.99.0 |
+| C2 | 34230d8 | C1 with Service-player.js's socketAttached renamed socketAttachedLive, and Service.qml's forwarder calling the new name | 0.99.1 |
+
+- C1 sets the version in manifest.json, model/build.mjs and README's status
+  line, the three places release.py check holds equal. Its X.Y.Z reading
+  refuses the brief's suggested `0.21.0-reloadtest`.
+- The marks, in C1 and C2: Service.qml's `reloadMarks()` returns its own
+  mark and each code-behind's `reloadMark()`, and Guide.qml and
+  BarWidget.qml each carry a `reloadMark` property. C0 has none, and that
+  absence is its mark.
+- C2's rename means a C2 Service.qml over a C1 Service-player.js, or the
+  other way round, throws on every call, and the `status` reply makes that
+  call.
+- release.py check is green on both sources, 47 files.
+
+The rig also reads each running object's QML type name. A component
+compiled again gets a new `_QMLTYPE_` number within a process.
+
+### The arms
+
+Every arm ran on 2026-11-24. The crash journal read 89 before and after
+every shell, and gdb reported no signal in any run. "Plugin log" counts the
+lines from the plugin's files after start-up, which logs the config shield,
+the bar-entry migration and the scanner's module-path line (root a only).
+
+| arm | root | update, mode | after the watcher's reload and rescanPlugins | after the guide opens | then | plugin log |
+|---|---|---|---|---|---|---|
+| a-01-r, b-01-r | a, b | C0 to C1, restart | service, guide, bar all C0 (no marks), the same `_QMLTYPE_` 142, 121 and 78 as before the update | running 0.20.0, onDisk 0.99.0, stale true; footer "Updated · restart the shell to see the new version" | restart: all five service marks C1, Guide and Bar C1, ready, 3 channels, favorites ['t:one'], bar entry refreshMinutes 120 | none |
+| a-12-r, b-12-r | a, b | C1 to C2, restart | all five service marks C1, Guide and Bar C1, types unchanged (146, 121, 78) | running 0.99.0, onDisk 0.99.1, stale true, the footer | restart: all C2, ready, 3 channels, favorites and refreshMinutes kept | none |
+| a-01-t, b-01-t | a, b | C0 to C1, two toggles | as a-01-r | as a-01-r | each enable: C0's Service_QMLTYPE_142 again, ready, 3 channels, the footer; the second after gc and 8000 never-seen loads the same | none |
+| a-12-t, b-12-t | a, b | C1 to C2, two toggles | as a-12-r | as a-12-r | each enable: Service_QMLTYPE_146, all five marks C1, ready; the second after the release the same | none |
+| a-12-w-c4, b-12-w-c4, a-12-w-g4 | a, b, a | C1 to C2 at four workers | as a-12-r | as a-12-r | (write order, below) | none |
+
+### Q1 and Q2: an update, kept running
+
+What runs after the update, for C0 to C1 and C1 to C2 alike, in both
+roots, after the watcher's reload and again after rescanPlugins: the old
+build everywhere.
+- The service is the same object. It is keepLoaded, so
+  unloadPluginServices carried it over and `_syncServices` handed it the
+  new manifest.
+- The guide is a new item made from the cached component: the same
+  `_QMLTYPE_`, the old mark.
+- The bar is a new item made from the re-registered cached component, with
+  the old mark.
+- For C1 to C2 the service ran "C1 Service.qml, C1 Service-pip.js, C1
+  Service-player.js, C1 Service-rewind.js, C1 Service-sources.js", so no
+  file mixed. No TypeError appeared although C2's forwarder renames the call
+  on disk.
+
+What was logged: nothing from the plugin's files at either reload, in
+either root. There was no warning, no JS error, no `Script ...
+unavailable` and no `File name case mismatch`.
+
+What the plugin showed (D-HOST-1):
+- Before the guide opened, `status` read build running and onDisk alike
+  (0.20.0, or 0.99.0). The replaced manifest's watch never fires (D-HOST-2).
+- When the guide opened, recheckBuild re-read the manifest: onDisk became
+  the new version, stale true, and the footer read "Updated · restart the
+  shell to see the new version".
+
+After a restart everything ran the new build and was clean:
+- all five service marks new, and Guide and Bar new;
+- `status` ready with three channels;
+- the starred channel kept (state.json favorites ['t:one'], sources
+  ['play.m3u']);
+- the bar entry's refreshMinutes 120 kept;
+- only the usual start-up lines in the log.
+
+### Q3: a disable and an enable, without a restart
+
+After each update the rig disabled and enabled the plugin the host's way:
+setPluginEnabled false, then enablePlugin with `{}`. It did this twice.
+Each new service instance ran the OLD build's text in Service.qml and in
+every code-behind:
+- C0 to C1: Service_QMLTYPE_142 with no marks, C0's Service.qml.
+- C1 to C2: Service_QMLTYPE_146, all five marks C1.
+
+Nothing mixed. Each instance ran: ready, three channels, the footer. It
+logged no error and did not crash. C1's Service, destroyed with its
+code-behinds alive (D-REL-15's case), was destroyed by each disable in
+a-12-t and b-12-t (four times) and at every C1 or C2 shell's exit, with no
+fault and the journal unchanged.
+
+The second disable and enable came after the old instance could have been
+released. Before the second enable the rig did three things:
+- It collected garbage.
+- It loaded 8000 components the type loader had never seen, 500 per call.
+- It made and let go a control, a component of the rig's own, then
+  rewrote the control's file.
+
+The enable still made `_QMLTYPE_` 142 or 146 with the old marks. The control
+came back as its first type with its first text (`Probe_QMLTYPE_171 v=one`
+or `_175 v=one`, before and after, in all four arms). So no path this rig
+drove released a component once it was loaded. D-REL-6's mixed shape, a
+cached file beside a fresh one, was not reached by an update, a reload or a
+toggle. Why the engine keeps the component was not read in the Qt sources
+here.
+
+Two side observations from the toggle arms:
+- The host's disable removes the bar entry. The enable then puts back
+  `{id}`, so refreshMinutes went from 120 to 360 (the default). That is
+  D-QA-17's known behaviour. The playlist survives because start-up had
+  already moved it into state.json.
+- After an enable the bar widget loaded before the service existed. Its
+  resolve timer found the service within the next two seconds
+  (`bar.service` false at the enable, true at the open), as designed.
+
+### Q4: D-REL-9's window
+
+The update's git step was run under the host's live folder watcher. A
+watch on the plugins folder timed every create and close on the clock the
+rig's events use.
+
+**At one checkout worker (git's default).** There were 14 writes: 8
+updates and 6 half-tree completions. Every working-tree close came in index
+order:
+BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js,
+Service-rewind.js, Service-sources.js, Service.qml, manifest.json,
+model/build.mjs, among the files named. Each code-behind closed before
+Service.qml was created. The writes spanned 5.3-5.8 ms of a 38-47 ms merge,
+with no gap between two writes above 1.4 ms.
+
+**At four workers.**
+- With `-c checkout.workers=4 -c checkout.thresholdForParallelism=1` on the
+  merge (2 runs) the closes interleaved. Service.qml was created before
+  Service-rewind.js closed in a-12-w-c4, and before Service-player.js and
+  Service-rewind.js closed in b-12-w-c4. The writes took 7.4-8.4 ms, with
+  gaps up to 3.9 ms.
+- With the same two settings in the decoy HOME's `~/.gitconfig` (a-12-w-g4,
+  1 run) the order left index order: manifest.json and model/build.mjs
+  closed before Service-player.js. So the user's setting reached the
+  update's git. In that run Service.qml happened to close last, and the
+  writes took 10.7 ms with a gap of 5.4 ms.
+
+**What the host's scripts pass to git.** Read in omarchy-plugin-update
+9-10, 43-75 and 131, and omarchy-plugin-add 11-12, 119-147.
+- No `-c` option, and only two exports: `GIT_TERMINAL_PROMPT=0` and
+  `GIT_SSH_COMMAND` (default `ssh -oBatchMode=yes`).
+- HOME, XDG_CONFIG_HOME and every `GIT_CONFIG_*` are left alone. So
+  `~/.gitconfig`, `$XDG_CONFIG_HOME/git/config` and `/etc/gitconfig` all
+  apply. The user file was measured; the system file was read, not run.
+- The update writes in place twice: the merge, and on a failed validation
+  its rollback `git reset --hard ORIG_HEAD` (73).
+- The add has no window. It clones into a hidden staging folder, which the
+  watcher ignores (PluginRegistry.qml 798), and moves it into place.
+
+**Does any load or reload the host would make read a half-written tree?**
+No.
+- In all 17 writes (14 at one worker, 3 at four) the watcher's
+  localPluginChanged events arrived during the writes, and each one
+  restarted the 150 ms debounce.
+- reloadPlugins began 150.6-154.5 ms after git's last write, and its scan
+  about 10 ms later (46 ms once).
+- Every reload served cached components. The only plugin file a reload
+  reads is manifest.json, which the scan's bash reads, after the last
+  write.
+
+So the window is git's 5-11 ms of writes, and nothing the host does on its
+own reaches it. A load that is not served from the cache does reach it: a
+shell starting (or relaunched by omarchy-launch-shell) or a plugin loaded
+for the first time while git writes. How often that happens was not
+measured.
+
+**What the half state does.** These trees were made by hand, each a shape
+the measured order passes through. The shell was started cold on it. The
+tree was then completed with `git reset --hard FETCH_HEAD`, the update's
+own rollback verb run forward, under the live watcher. Then came
+rescanPlugins, a disable and an enable, and a restart.
+
+| arm | half tree (the window it stands for) | cold start | the watcher's reload, rescanPlugins, disable and enable on the completed tree | restart |
+|---|---|---|---|---|
+| a-12-h1, b-12-h1 | C2's code-behinds beside C1's Service.qml (one worker: the code-behinds written, Service.qml not yet) | a MIX: "C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js"; `status` throws "TypeError: Property 'socketAttached' of object [object Object] is not a function" | the same mixed type (146) every time; after the completion the guide's footer reads "Updated" (manifest 0.99.1, model 0.99.0) | all C2, ready, 3 channels |
+| a-12-h4, b-12-h4 | C2's Service.qml with Service-player.js not there (four workers) | no service: "service plugin load failed ... Service.qml:16:1: Script file://.../Service-player.js unavailable" (root a: `qs://.../Service.qml`); guide and bar load without it, footer empty | the host retried at every scan and at the enable (1, 1 and 3 warnings), and each retry failed with the same line | the service loads, C2 |
+| a-01-h4 | C1's Service.qml with no code-behind yet (the first release at four workers) | no service: "Script file://.../Service-pip.js unavailable", and on root a the scanner's "Ignoring unresolvable import" once for each of the four | as h4 | the service loads, C1 |
+| a-01-h0 | C0's tree with Service.qml unlinked (git between unlink and write, any worker count; 0.20.0's own updates have it) | no service: "Service.qml: No such file or directory" | as h4 | the service loads, C1 |
+
+Three things the half-tree arms show:
+- The host does retry. ensureService runs from `_syncServices` at every
+  scan and at the enable, but each retry gets the component the engine kept
+  from the first load, failed or mixed. No reload recovers, and only a
+  restart did.
+- The restart after h4 and h0 read 0 channels. The service had never run,
+  so the bar entry's playlist was never migrated, and the toggle's disable
+  then dropped it (D-QA-17). That is an artifact of the arm's fresh install,
+  not of the reload.
+- In h1 nothing tells the user before the tree completes, because the model
+  and the manifest on disk agree.
+
+### Q5: what code-behinds change, found along the way
+
+- **The shapes a cold load can hit.** 0.20.0's one-file service could meet
+  only h0's moment, plus the model's mismatch D-REL-9 already records. With
+  code-behinds, one checkout worker's index order (code-behinds before
+  Service.qml) is exactly what makes h1's mix possible whenever a release
+  changes a function across Service.qml and a code-behind. At four workers
+  h4 becomes possible too. The first release adds four files, so at four
+  workers its Service.qml can exist with no code-behind at all.
+- **The load patch follows the imports.** Under the pragma Service.qml
+  compiles as `qs://` and its code-behinds as `file://`. The error line
+  shows both: "qs://.../Service.qml:16:1: Script file://.../Service-player.js
+  unavailable". The patch's scanner still reads Service.qml's script imports
+  and logs a missing one as "Ignoring unresolvable import", so on root a a
+  missing code-behind is reported twice.
+- **The rig's own hazard (F-HARNESS-131, filed below).** During
+  development one arm's shell was ended by gdb (below), and the host's
+  watcher, a child of that shell, survived it. The host's own comment,
+  PluginRegistry.qml 694-699, says it would. Because the run was started
+  as `flock -w 3600 <heavy.lock> ...`, the watcher had inherited the lock's
+  descriptor. It held the heavy lock for about twenty minutes, keeping
+  another lane's node run and this lane's next run waiting, until this lane
+  found it through /proc and ended it by its pid and command line. The rig
+  now records the watcher's pid as soon as the service is up and stops it
+  with the shell, and it is run under `flock -o`.
+- **Also seen, no id.** Under `handle all nopass` a SIGPIPE stops the shell
+  and gdb's `kill` ends it. It happened once, when a `quickshell ipc`
+  client was timed out after 15 s while the shell was still writing its
+  reply to a 4000-component call. It is not a crash, and the journal did not
+  move. The rig batches those calls and gives them a minute. A rig that
+  times out an IPC client under this gdb line should expect the same.
+
+### Not measured
+
+- **The host's whole shell.** That means the bar, the other plugins and the
+  first-party services, which `firstPartyDir` kept out. A real shell loads
+  hundreds more types, and whether its engine ever releases a plugin's
+  component over a long session was not reached.
+- **Any player.** Nothing played, attached or zapped, so the old and new
+  player code-behinds' socket paths ran only their start-up probes.
+- **A cold start racing a real update.** The half trees were made by hand.
+  Their shapes are the ones the measured order passes through, and their
+  timing is not git's.
+- **How often a cold start falls inside the window.**
+- **root b's h0 and first-release h4.**
+- **`/etc/gitconfig`**, which was read, not run.
+- **Why no component is released**, which was not read in the Qt 6.12
+  sources.
+
+### Filed
+
+- **D-REL-16** (P3, release) is a shell that loads the plugin while an
+  update is writing it. It keeps what it read until it restarts: a mixed
+  pair (h1) or a failed load (h4, h0). The host's retries get the same
+  component back. Code-behinds widen what it can read (h1 at one worker
+  for a change across the pair, h4 at more). Sibling search, by shape:
+  every place the plugin's files are read while an update could be writing
+  them.
+  - The three entry points and their imports. These are read only at a
+    component's first compile: this finding.
+  - manifest.json, read by the registry's scan. The scan comes after the
+    debounce, measured above.
+  - manifest.json, read by the service's FileView through recheckBuild. A
+    half-written file reads as `""`, and staleBuild answers false then
+    (D-HOST-1's "cannot tell").
+  - The helper's parts, read at each spawn. The stub's part table refuses
+    a mismatched part as `helper_damaged`, and D-REL-7's robustness lens
+    raced 6,851 spawns against updates.
+  - Nothing else in the plugin folder is loaded.
+
+  The ordinary update path does not reach it, so no shipped file changes
+  here. The options and their costs are in the lane's result for the lead.
+- **F-HARNESS-131** (P3, harness) is `flock -w N <lock> <cmd>`, the heavy
+  lock's idiom in the lane briefs. It hands the lock's descriptor to every
+  process `<cmd>` starts, so a descendant that outlives the run (a shell's
+  watcher, a detached helper, a player) holds the lock and every other lane
+  waits on it. It was seen for about twenty minutes. This rig is run with
+  `flock -o` and records the watcher early, and the briefs' idiom is the
+  lead's to change. Sibling search: no committed script runs `flock` itself
+  (a grep of scripts/, tests/ and the docs). The idiom lives in the
+  workflow briefs.
